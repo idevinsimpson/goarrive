@@ -16,6 +16,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   ScrollView,
+  Image,
 } from 'react-native';
 import { router } from 'expo-router';
 import {
@@ -127,8 +128,13 @@ export default function LoginScreen() {
         >
           {/* Brand */}
           <View style={s.brandWrap}>
-            <Text style={s.brandLogo}>G➲A</Text>
-            <Text style={s.brandName}>GoArrive</Text>
+            <Image
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              source={require('../../assets/logo.png')}
+              style={s.logo}
+              resizeMode="contain"
+              accessibilityLabel="GoArrive"
+            />
             <Text style={s.brandTag}>Reset your password</Text>
           </View>
 
@@ -192,8 +198,13 @@ export default function LoginScreen() {
       >
         {/* Brand */}
         <View style={s.brandWrap}>
-          <Text style={s.brandLogo}>G➲A</Text>
-          <Text style={s.brandName}>GoArrive</Text>
+          <Image
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            source={require('../../assets/logo.png')}
+            style={s.logo}
+            resizeMode="contain"
+            accessibilityLabel="GoArrive"
+          />
           <Text style={s.brandTag}>Fitness coaching, simplified.</Text>
         </View>
 
@@ -260,20 +271,11 @@ const s = StyleSheet.create({
   },
   brandWrap: {
     alignItems: 'center',
-    gap: 8,
+    gap: 12,
   },
-  brandLogo: {
-    fontSize: 48,
-    fontWeight: '800',
-    color: '#F5A623',
-    fontFamily: FONT_HEADING,
-    letterSpacing: 2,
-  },
-  brandName: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#F0F4F8',
-    fontFamily: FONT_HEADING,
+  logo: {
+    width: 200,
+    height: 60,
   },
   brandTag: {
     fontSize: 14,

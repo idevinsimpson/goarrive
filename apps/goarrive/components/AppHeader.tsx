@@ -1,13 +1,11 @@
 /**
  * AppHeader — Fixed top header for the GoArrive app
  *
- * Displays the G➲A logo/brand and an account avatar button.
- * Stays fixed at the top of the screen and never moves during swipe.
+ * Displays the real GoArrive logo image on the left and a user avatar on the right.
  * Uses env(safe-area-inset-top) for PWA standalone mode on iOS.
  */
 import React from 'react';
-import { View, Text, Pressable, StyleSheet, Platform } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { View, Text, Pressable, StyleSheet, Platform, Image } from 'react-native';
 import { useAuth } from '../lib/AuthContext';
 import { router } from 'expo-router';
 
@@ -40,11 +38,14 @@ export function AppHeader({ onNavigateAccount }: Props) {
 
   return (
     <View style={s.root}>
-      {/* Brand */}
-      <View style={s.brandRow}>
-        <Text style={s.brandText}>G➲A</Text>
-        <Text style={s.brandSub}>GoArrive</Text>
-      </View>
+      {/* GoArrive Logo */}
+      <Image
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        source={require('../assets/logo.png')}
+        style={s.logo}
+        resizeMode="contain"
+        accessibilityLabel="GoArrive"
+      />
 
       {/* Account avatar */}
       <Pressable
@@ -67,10 +68,10 @@ const s = StyleSheet.create({
     justifyContent: 'space-between',
     backgroundColor: '#0E1117',
     paddingHorizontal: 16,
-    paddingTop: Platform.select({ ios: 56, web: 12, default: 16 }),
+    paddingTop: Platform.select({ ios: 52, android: 16, web: 12, default: 16 }),
     paddingBottom: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#2A3347',
+    borderBottomColor: '#1E2A3A',
     ...(Platform.OS === 'web'
       ? ({
           position: 'sticky' as any,
@@ -78,26 +79,14 @@ const s = StyleSheet.create({
           left: 0,
           right: 0,
           zIndex: 1000,
+          // Dynamically respect iPhone notch/Dynamic Island in PWA mode
           paddingTop: 'max(12px, env(safe-area-inset-top, 12px))' as any,
         } as any)
       : {}),
   },
-  brandRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 8,
-  },
-  brandText: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#F5A623',
-    fontFamily: FONT_HEADING,
-    letterSpacing: 1,
-  },
-  brandSub: {
-    fontSize: 14,
-    color: '#8A95A3',
-    fontFamily: FONT_HEADING,
+  logo: {
+    width: 130,
+    height: 38,
   },
   avatar: {
     width: 36,
@@ -106,8 +95,8 @@ const s = StyleSheet.create({
     backgroundColor: '#1A2035',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#2A3347',
+    borderWidth: 1.5,
+    borderColor: '#F5A623',
   },
   avatarText: {
     fontSize: 13,

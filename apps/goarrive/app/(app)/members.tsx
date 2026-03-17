@@ -670,7 +670,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'web' ? 20 : 60,
+    paddingTop: 16,
     paddingBottom: 12,
   },
   title: {
