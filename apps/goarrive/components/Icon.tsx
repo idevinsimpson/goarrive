@@ -271,6 +271,22 @@ const ICONS: Record<string, IconDef> = {
   'x-circle': {
     paths: ['M22 12a10 10 0 11-20 0 10 10 0 0120 0z', 'M15 9l-6 6', 'M9 9l6 6'],
   },
+  'archive': {
+    paths: [
+      'M21 8v13H3V8',
+      'M1 3h22v5H1z',
+      'M10 12h4',
+    ],
+  },
+  'document': {
+    paths: [
+      'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z',
+      'M14 2v6h6',
+      'M16 13H8',
+      'M16 17H8',
+      'M10 9H8',
+    ],
+  },
   'refresh': {
     paths: [
       'M23 4v6h-6',

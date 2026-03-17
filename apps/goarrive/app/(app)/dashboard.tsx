@@ -29,6 +29,7 @@ import { AppHeader } from '../../components/AppHeader';
 import CheckInCard from '../../components/CheckInCard';
 import ListSkeleton from '../../components/ListSkeleton';
 import { Icon } from '../../components/Icon';
+import OnboardingChecklist from '../../components/OnboardingChecklist';
 import { router } from 'expo-router';
 
 const FONT_HEADING =
@@ -215,6 +216,9 @@ export default function DashboardScreen() {
             <Text style={s.statLabel}>Movements</Text>
           </Pressable>
         </View>
+
+        {/* Onboarding checklist — only shows for new coaches until all 4 steps done */}
+        <OnboardingChecklist />
 
         {/* Recent activity */}
         <View style={s.sectionHeader}>

@@ -47,7 +47,10 @@ interface Props {
   memberName: string;
   coachId: string;
   onClose: () => void;
-  onAssign: (workoutId: string, workoutName: string, scheduledFor: Date) => void;
+  onAssign: (workoutId: string, workoutName: string, scheduledFor: Date, memberId?: string) => void;
+  /** When provided, skip the workout-picker step and go straight to member-picker */
+  preselectedWorkoutId?: string;
+  preselectedWorkoutName?: string;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -102,8 +105,11 @@ export default function AssignWorkoutModal({
   coachId,
   onClose,
   onAssign,
+  preselectedWorkoutId,
+  preselectedWorkoutName,
 }: Props) {
   // Step: 'pick' = choose workout, 'schedule' = choose date + confirm, 'success' = done
+  // When preselectedWorkoutId is set, we start at 'schedule' (workout already known)
   const [step, setStep] = useState<'pick' | 'schedule' | 'success'>('pick');
   const [workouts, setWorkouts] = useState<WorkoutPickerItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -150,18 +156,29 @@ export default function AssignWorkoutModal({
   // Reset state when modal opens/closes
   useEffect(() => {
     if (visible) {
-      setStep('pick');
-      setSelectedWorkout(null);
-      setSearch('');
-      setLastAssignedName('');
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       setSelectedDate(today);
       setDateInput(toDateString(today));
       setAssigning(false);
-      loadWorkouts();
+      setLastAssignedName('');
+      setSearch('');
+      if (preselectedWorkoutId && preselectedWorkoutName) {
+        // Workout-first flow: skip picker, go straight to schedule
+        setSelectedWorkout({
+          id: preselectedWorkoutId,
+          name: preselectedWorkoutName,
+          exerciseCount: 0,
+          category: '',
+        });
+        setStep('schedule');
+      } else {
+        setStep('pick');
+        setSelectedWorkout(null);
+        loadWorkouts();
+      }
     }
-  }, [visible, loadWorkouts]);
+  }, [visible, loadWorkouts, preselectedWorkoutId, preselectedWorkoutName]);
 
   // ── Handlers ──────────────────────────────────────────────────────────
 

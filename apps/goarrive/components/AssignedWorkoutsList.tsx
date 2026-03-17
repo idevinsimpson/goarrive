@@ -18,9 +18,9 @@ import {
   StyleSheet,
   Platform,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { Icon } from './Icon';
+import ConfirmDialog from './ConfirmDialog';
 import {
   collection,
   getDocs,
@@ -135,42 +135,18 @@ export default function AssignedWorkoutsList({
   }, [loadAssignments, refreshTrigger]);
 
   function requestUnassign(a: AssignmentItem) {
-    if (Platform.OS === 'web') {
-      // Web: use window.confirm for confirmation
-      const ok = window.confirm(
-        `Remove "${a.workoutName}" from this member's schedule?`,
-      );
-      if (ok) executeUnassign(a);
-    } else {
-      // Native: use Alert.alert
-      Alert.alert(
-        'Unassign Workout',
-        `Remove "${a.workoutName}" from this member's schedule?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Remove',
-            style: 'destructive',
-            onPress: () => executeUnassign(a),
-          },
-        ],
-      );
-    }
+    setConfirmTarget(a);
   }
 
   async function executeUnassign(a: AssignmentItem) {
     setDeleting(true);
+    setConfirmTarget(null);
     try {
       await deleteDoc(doc(db, 'workout_assignments', a.id));
       setAssignments((prev) => prev.filter((x) => x.id !== a.id));
       if (onUnassign) onUnassign(a);
     } catch (err) {
       console.error('Failed to unassign workout:', err);
-      if (Platform.OS === 'web') {
-        window.alert('Failed to unassign workout. Please try again.');
-      } else {
-        Alert.alert('Error', 'Failed to unassign workout. Please try again.');
-      }
     } finally {
       setDeleting(false);
     }
@@ -352,6 +328,17 @@ export default function AssignedWorkoutsList({
           )}
         </>
       )}
+
+      {/* Confirm unassign dialog */}
+      <ConfirmDialog
+        visible={confirmTarget !== null}
+        title="Unassign Workout"
+        message={`Remove "${confirmTarget?.workoutName ?? ''}" from this member's schedule?`}
+        confirmLabel="Remove"
+        variant="destructive"
+        onConfirm={() => confirmTarget && executeUnassign(confirmTarget)}
+        onCancel={() => setConfirmTarget(null)}
+      />
     </View>
   );
 }
