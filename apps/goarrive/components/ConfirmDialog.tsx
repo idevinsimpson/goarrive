@@ -15,7 +15,7 @@ import {
   Platform,
   Modal,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from './Icon';
 
 const FONT_HEADING =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -29,7 +29,7 @@ interface Props {
   confirmLabel?: string;
   cancelLabel?: string;
   confirmColor?: string;
-  icon?: React.ComponentProps<typeof Ionicons>['name'];
+  icon?: string;
   iconColor?: string;
   /** Visual variant — 'danger'/'destructive' uses red styling (default) */
   variant?: 'danger' | 'warning' | 'info' | 'default' | 'destructive';
@@ -44,7 +44,7 @@ export default function ConfirmDialog({
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
   confirmColor = '#E05252',
-  icon = 'alert-circle-outline',
+  icon = 'warning',
   iconColor = '#E05252',
   variant: _variant,
   onConfirm,
@@ -60,7 +60,7 @@ export default function ConfirmDialog({
       <Pressable style={s.backdrop} onPress={onCancel}>
         <Pressable style={s.dialog} onPress={(e) => e.stopPropagation()}>
           <View style={s.iconWrap}>
-            <Ionicons name={icon} size={32} color={iconColor} />
+            <Icon name={icon as any} size={32} color={iconColor} />
           </View>
           <Text style={s.title}>{title}</Text>
           <Text style={s.message}>{message}</Text>

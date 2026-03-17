@@ -17,7 +17,7 @@ import {
   Platform,
   Modal,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from './Icon';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -87,7 +87,7 @@ export default function MovementDetail({
         {/* Header */}
         <View style={s.header}>
           <Pressable onPress={onClose} hitSlop={8}>
-            <Ionicons name="close" size={24} color="#8A95A3" />
+            <Icon name="close" size={24} color="#8A95A3" />
           </Pressable>
           <Text style={s.headerTitle}>Movement Details</Text>
           <View style={{ width: 24 }} />
@@ -173,15 +173,15 @@ export default function MovementDetail({
             style={s.editBtn}
             onPress={() => onEdit(movement)}
           >
-            <Ionicons name="create-outline" size={18} color="#F5A623" />
+            <Icon name="edit" size={18} color="#F5A623" />
             <Text style={s.editText}>Edit</Text>
           </Pressable>
           <Pressable
             style={s.archiveBtn}
             onPress={() => onArchive(movement)}
           >
-            <Ionicons
-              name={movement.isArchived ? 'arrow-undo-outline' : 'archive-outline'}
+            <Icon
+              name={movement.isArchived ? 'refresh' : 'trash'}
               size={18}
               color="#E05252"
             />

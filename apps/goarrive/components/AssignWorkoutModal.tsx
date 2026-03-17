@@ -23,7 +23,7 @@ import {
   Modal,
   ActivityIndicator,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from './Icon';
 import {
   collection,
   getDocs,
@@ -244,13 +244,13 @@ export default function AssignWorkoutModal({
           <View style={s.header}>
             {step === 'schedule' ? (
               <Pressable onPress={handleBack} hitSlop={12}>
-                <Ionicons name="arrow-back" size={24} color="#8A95A3" />
+                <Icon name="arrow-left" size={24} color="#8A95A3" />
               </Pressable>
             ) : step === 'success' ? (
               <View style={{ width: 24 }} />
             ) : (
               <Pressable onPress={onClose} hitSlop={12}>
-                <Ionicons name="close" size={24} color="#8A95A3" />
+                <Icon name="close" size={24} color="#8A95A3" />
               </Pressable>
             )}
             <Text style={s.headerTitle}>
@@ -261,7 +261,7 @@ export default function AssignWorkoutModal({
 
           {/* Member badge */}
           <View style={s.memberBadge}>
-            <Ionicons name="person-outline" size={14} color="#F5A623" />
+            <Icon name="person" size={14} color="#F5A623" />
             <Text style={s.memberBadgeText}>{memberName}</Text>
           </View>
 
@@ -269,7 +269,7 @@ export default function AssignWorkoutModal({
             /* NEXT-B: Success step with Assign Another */
             <View style={s.successWrap}>
               <View style={s.successIconWrap}>
-                <Ionicons name="checkmark-circle" size={56} color="#6EBB7A" />
+                <Icon name="check-circle" size={56} color="#6EBB7A" />
               </View>
               <Text style={s.successTitle}>Workout Assigned!</Text>
               <Text style={s.successSub}>
@@ -277,7 +277,7 @@ export default function AssignWorkoutModal({
               </Text>
 
               <Pressable style={s.assignAnotherBtn} onPress={handleAssignAnother}>
-                <Ionicons name="add-circle-outline" size={20} color="#F5A623" />
+                <Icon name="add" size={20} color="#F5A623" />
                 <Text style={s.assignAnotherText}>Assign Another</Text>
               </Pressable>
 
@@ -290,7 +290,7 @@ export default function AssignWorkoutModal({
               {/* Search */}
               <View style={s.searchRow}>
                 <View style={s.searchWrap}>
-                  <Ionicons name="search-outline" size={16} color="#4A5568" />
+                  <Icon name="search" size={16} color="#4A5568" />
                   <TextInput
                     style={s.searchInput}
                     value={search}
@@ -302,7 +302,7 @@ export default function AssignWorkoutModal({
                   />
                   {search.length > 0 && (
                     <Pressable onPress={() => setSearch('')} hitSlop={8}>
-                      <Ionicons name="close-circle" size={16} color="#4A5568" />
+                      <Icon name="x-circle" size={16} color="#4A5568" />
                     </Pressable>
                   )}
                 </View>
@@ -315,7 +315,7 @@ export default function AssignWorkoutModal({
                 </View>
               ) : filtered.length === 0 ? (
                 <View style={s.emptyWrap}>
-                  <Ionicons name="barbell-outline" size={40} color="#2A3040" />
+                  <Icon name="workouts" size={40} color="#2A3040" />
                   <Text style={s.emptyText}>
                     {search
                       ? 'No workouts match your search.'
@@ -335,7 +335,7 @@ export default function AssignWorkoutModal({
                       onPress={() => handleSelectWorkout(w)}
                     >
                       <View style={s.workoutIcon}>
-                        <Ionicons name="barbell-outline" size={20} color="#F5A623" />
+                        <Icon name="workouts" size={20} color="#F5A623" />
                       </View>
                       <View style={s.workoutInfo}>
                         <Text style={s.workoutName} numberOfLines={1}>
@@ -346,7 +346,7 @@ export default function AssignWorkoutModal({
                           {w.category ? ` · ${w.category}` : ''}
                         </Text>
                       </View>
-                      <Ionicons name="chevron-forward" size={18} color="#4A5568" />
+                      <Icon name="chevron-right" size={18} color="#4A5568" />
                     </Pressable>
                   ))}
                   <View style={{ height: 40 }} />
@@ -362,7 +362,7 @@ export default function AssignWorkoutModal({
             >
               {/* Selected workout summary */}
               <View style={s.selectedSummary}>
-                <Ionicons name="barbell-outline" size={18} color="#F5A623" />
+                <Icon name="workouts" size={18} color="#F5A623" />
                 <Text style={s.selectedName} numberOfLines={1}>
                   {selectedWorkout?.name}
                 </Text>
@@ -417,7 +417,7 @@ export default function AssignWorkoutModal({
                   <ActivityIndicator size="small" color="#0E1117" />
                 ) : (
                   <>
-                    <Ionicons name="checkmark-circle-outline" size={20} color="#0E1117" />
+                    <Icon name="check" size={20} color="#0E1117" />
                     <Text style={s.confirmBtnText}>
                       Assign to {memberName}
                     </Text>

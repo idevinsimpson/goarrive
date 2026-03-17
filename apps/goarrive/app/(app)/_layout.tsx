@@ -8,7 +8,7 @@ import React from 'react';
 import { Tabs, Redirect } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from '../../components/Icon';
 
 const TAB_BG = '#0E1117';
 const TAB_BORDER = '#1E2A3A';
@@ -76,11 +76,7 @@ export default function AppLayout() {
         options={{
           title: 'Dashboard',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? 'grid' : 'grid-outline'}
-              size={22}
-              color={color}
-            />
+            <Icon name={focused ? 'dashboard-filled' : 'dashboard'} size={22} color={color} />
           ),
         }}
       />
@@ -88,12 +84,8 @@ export default function AppLayout() {
         name="members"
         options={{
           title: 'Members',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? 'people' : 'people-outline'}
-              size={22}
-              color={color}
-            />
+          tabBarIcon: ({ color }) => (
+            <Icon name="members" size={22} color={color} />
           ),
         }}
       />
@@ -101,12 +93,8 @@ export default function AppLayout() {
         name="workouts"
         options={{
           title: 'Workouts',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? 'barbell' : 'barbell-outline'}
-              size={22}
-              color={color}
-            />
+          tabBarIcon: ({ color }) => (
+            <Icon name="workouts" size={22} color={color} />
           ),
         }}
       />
@@ -114,12 +102,8 @@ export default function AppLayout() {
         name="movements"
         options={{
           title: 'Movements',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? 'body' : 'body-outline'}
-              size={22}
-              color={color}
-            />
+          tabBarIcon: ({ color }) => (
+            <Icon name="movements" size={22} color={color} />
           ),
         }}
       />

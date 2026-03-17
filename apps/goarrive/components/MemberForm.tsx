@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Modal, TextInput, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { db } from '../lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from './Icon';
 
 export interface MemberFormData {
   name: string;
@@ -80,7 +80,7 @@ export default function MemberForm({ visible, onClose, onSave, initialData, mode
           <View style={styles.header}>
             <Text style={styles.title}>{mode === 'add' ? 'Add New Member' : 'Edit Member'}</Text>
             <TouchableOpacity onPress={onClose}>
-              <Ionicons name="close" size={24} color="#FFFFFF" />
+              <Icon name="close" size={24} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
 

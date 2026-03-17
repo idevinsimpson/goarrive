@@ -13,7 +13,7 @@ import {
   StyleSheet,
   Platform,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from '../../components/Icon';
 import { useAuth } from '../../lib/AuthContext';
 
 const FONT_HEADING =
@@ -45,7 +45,7 @@ export default function AccountScreen({ onClose }: Props) {
       {/* Header */}
       <View style={s.header}>
         <Pressable onPress={onClose} hitSlop={8}>
-          <Ionicons name="arrow-back" size={24} color="#8A95A3" />
+          <Icon name="arrow-left" size={24} color="#8A95A3" />
         </Pressable>
         <Text style={s.headerTitle}>Account</Text>
         <View style={{ width: 24 }} />
@@ -77,7 +77,7 @@ export default function AccountScreen({ onClose }: Props) {
 
         {/* Sign out */}
         <Pressable style={s.signOutBtn} onPress={handleSignOut}>
-          <Ionicons name="log-out-outline" size={18} color="#E05252" />
+          <Icon name="logout" size={18} color="#E05252" />
           <Text style={s.signOutText}>Sign Out</Text>
         </Pressable>
       </ScrollView>

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { db } from '../lib/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from './Icon';
 
 interface MemberDetailProps {
   member: any;
@@ -30,18 +30,18 @@ export default function MemberDetail({ member, onClose, onEdit, onArchive }: Mem
           <View style={styles.header}>
             <Text style={styles.title}>{currentMember.name}</Text>
             <TouchableOpacity onPress={onClose}>
-              <Ionicons name="close" size={24} color="#FFFFFF" />
+              <Icon name="close" size={24} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
 
           <ScrollView style={styles.details}>
             <View style={styles.infoRow}>
-              <Ionicons name="mail-outline" size={20} color="#888" />
+              <Icon name="mail" size={20} color="#888" />
               <Text style={styles.infoText}>{currentMember.email}</Text>
             </View>
             {currentMember.phone && (
               <View style={styles.infoRow}>
-                <Ionicons name="call-outline" size={20} color="#888" />
+                <Icon name="phone" size={20} color="#888" />
                 <Text style={styles.infoText}>{currentMember.phone}</Text>
               </View>
             )}
@@ -59,11 +59,11 @@ export default function MemberDetail({ member, onClose, onEdit, onArchive }: Mem
 
           <View style={styles.footer}>
             <TouchableOpacity style={styles.editButton} onPress={() => onEdit(currentMember)}>
-              <Ionicons name="create-outline" size={20} color="#0E1117" />
+              <Icon name="edit" size={20} color="#0E1117" />
               <Text style={styles.editButtonText}>Edit Profile</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.archiveButton} onPress={() => onArchive(currentMember.id)}>
-              <Ionicons name="archive-outline" size={20} color="#FF4D4D" />
+              <Icon name="trash" size={20} color="#FF4D4D" />
             </TouchableOpacity>
           </View>
         </View>

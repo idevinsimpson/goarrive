@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { db } from '../lib/firebase';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from './Icon';
 
 interface WorkoutDetailProps {
   workout: any;
@@ -28,7 +28,7 @@ export default function WorkoutDetail({ workout, onClose }: WorkoutDetailProps) 
           <View style={styles.header}>
             <Text style={styles.title}>{currentWorkout.name}</Text>
             <TouchableOpacity onPress={onClose}>
-              <Ionicons name="close" size={24} color="#FFFFFF" />
+              <Icon name="close" size={24} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
 
@@ -39,7 +39,7 @@ export default function WorkoutDetail({ workout, onClose }: WorkoutDetailProps) 
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Workout Blocks ({currentWorkout.blocks?.length || 0})</Text>
               <TouchableOpacity style={styles.editButton}>
-                <Ionicons name="create-outline" size={20} color="#FFB347" />
+                <Icon name="edit" size={20} color="#FFB347" />
                 <Text style={styles.editButtonText}>Edit Blocks</Text>
               </TouchableOpacity>
             </View>
@@ -60,7 +60,7 @@ export default function WorkoutDetail({ workout, onClose }: WorkoutDetailProps) 
 
           <View style={styles.footer}>
             <TouchableOpacity style={styles.actionButton} onPress={() => Alert.alert("Coming Soon", "Assignment feature coming soon.")}>
-              <Ionicons name="person-add-outline" size={20} color="#0E1117" />
+              <Icon name="person" size={20} color="#0E1117" />
               <Text style={styles.actionButtonText}>Assign to Member</Text>
             </TouchableOpacity>
           </View>

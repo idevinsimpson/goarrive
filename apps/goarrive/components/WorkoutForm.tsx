@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, Modal, TextInput, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { db } from '../lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from './Icon';
 
 interface WorkoutFormProps {
   visible: boolean;
@@ -45,7 +45,7 @@ export default function WorkoutForm({ visible, onClose }: WorkoutFormProps) {
           <View style={styles.header}>
             <Text style={styles.title}>New Workout</Text>
             <TouchableOpacity onPress={onClose}>
-              <Ionicons name="close" size={24} color="#FFFFFF" />
+              <Icon name="close" size={24} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
 

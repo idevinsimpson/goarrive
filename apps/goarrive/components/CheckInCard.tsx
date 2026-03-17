@@ -13,7 +13,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from './Icon';
 import {
   collection,
   getDocs,
@@ -108,8 +108,8 @@ export default function CheckInCard() {
           {saving ? (
             <ActivityIndicator color="#0E1117" size="small" />
           ) : (
-            <Ionicons
-              name={checked ? 'checkmark-circle' : 'checkmark-circle-outline'}
+            <Icon
+              name={checked ? 'check-circle' : 'check-circle'}
               size={28}
               color={checked ? '#0E1117' : '#F5A623'}
             />

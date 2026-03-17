@@ -28,7 +28,7 @@ import {
 import { AppHeader } from '../../components/AppHeader';
 import CheckInCard from '../../components/CheckInCard';
 import ListSkeleton from '../../components/ListSkeleton';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from '../../components/Icon';
 import { router } from 'expo-router';
 
 const FONT_HEADING =
@@ -172,7 +172,7 @@ export default function DashboardScreen() {
         {/* Today's highlight banner */}
         {stats.todayAssignments > 0 && (
           <View style={s.todayBanner}>
-            <Ionicons name="calendar" size={18} color="#F5A623" />
+            <Icon name="calendar" size={18} color="#F5A623" />
             <Text style={s.todayBannerText}>
               {stats.todayAssignments} workout
               {stats.todayAssignments !== 1 ? 's' : ''} scheduled for today
@@ -187,7 +187,7 @@ export default function DashboardScreen() {
             onPress={() => router.push('/(app)/members')}
           >
             <View style={[s.statIcon, { backgroundColor: 'rgba(245,166,35,0.1)' }]}>
-              <Ionicons name="people" size={20} color="#F5A623" />
+              <Icon name="members" size={20} color="#F5A623" />
             </View>
             <Text style={s.statNumber}>{stats.members}</Text>
             <Text style={s.statLabel}>Members</Text>
@@ -198,7 +198,7 @@ export default function DashboardScreen() {
             onPress={() => router.push('/(app)/workouts')}
           >
             <View style={[s.statIcon, { backgroundColor: 'rgba(125,211,252,0.1)' }]}>
-              <Ionicons name="barbell" size={20} color="#7DD3FC" />
+              <Icon name="workouts" size={20} color="#7DD3FC" />
             </View>
             <Text style={s.statNumber}>{stats.activeWorkouts}</Text>
             <Text style={s.statLabel}>Workouts</Text>
@@ -209,7 +209,7 @@ export default function DashboardScreen() {
             onPress={() => router.push('/(app)/movements')}
           >
             <View style={[s.statIcon, { backgroundColor: 'rgba(134,239,172,0.1)' }]}>
-              <Ionicons name="body" size={20} color="#86EFAC" />
+              <Icon name="movements" size={20} color="#86EFAC" />
             </View>
             <Text style={s.statNumber}>{stats.movements}</Text>
             <Text style={s.statLabel}>Movements</Text>
@@ -229,7 +229,7 @@ export default function DashboardScreen() {
           ))
         ) : (
           <View style={s.emptyState}>
-            <Ionicons name="time-outline" size={40} color="#2A3347" />
+            <Icon name="clock" size={40} color="#2A3347" />
             <Text style={s.emptyTitle}>No recent activity</Text>
             <Text style={s.emptyBody}>
               Check-ins and activity will appear here.

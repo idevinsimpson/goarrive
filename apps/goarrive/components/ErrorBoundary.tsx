@@ -1,6 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from './Icon';
 
 interface Props {
   children: ReactNode;
@@ -27,7 +27,7 @@ class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         <View style={styles.container}>
-          <Ionicons name="alert-circle-outline" size={64} color="#FF4D4D" />
+          <Icon name="warning" size={64} color="#FF4D4D" />
           <Text style={styles.title}>Oops! Something went wrong.</Text>
           <Text style={styles.message}>We've encountered an unexpected error. Please try restarting the app.</Text>
           <TouchableOpacity 

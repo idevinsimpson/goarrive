@@ -12,7 +12,7 @@ import {
   StyleSheet,
   Platform,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from '../../components/Icon';
 import { useAuth } from '../../lib/AuthContext';
 
 const FONT_HEADING =
@@ -29,7 +29,7 @@ export default function AdminScreen() {
       <Text style={s.subtitle}>Platform administration tools</Text>
 
       <View style={s.card}>
-        <Ionicons name="person-outline" size={20} color="#F5A623" />
+        <Icon name="person" size={20} color="#F5A623" />
         <View style={s.cardContent}>
           <Text style={s.cardTitle}>Current User</Text>
           <Text style={s.cardValue}>{user?.email ?? '—'}</Text>
@@ -40,7 +40,7 @@ export default function AdminScreen() {
       </View>
 
       <View style={s.card}>
-        <Ionicons name="shield-checkmark-outline" size={20} color="#6EBB7A" />
+        <Icon name="check-circle" size={20} color="#6EBB7A" />
         <View style={s.cardContent}>
           <Text style={s.cardTitle}>Security Rules</Text>
           <Text style={s.cardValue}>Deployed</Text>
@@ -51,7 +51,7 @@ export default function AdminScreen() {
       </View>
 
       <View style={s.card}>
-        <Ionicons name="code-outline" size={20} color="#5B9BD5" />
+        <Icon name="activity" size={20} color="#5B9BD5" />
         <View style={s.cardContent}>
           <Text style={s.cardTitle}>App Version</Text>
           <Text style={s.cardValue}>Slice 1 · Week 5</Text>

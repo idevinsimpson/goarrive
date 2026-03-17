@@ -27,7 +27,7 @@ import {
   RefreshControl,
   Alert,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from '../../components/Icon';
 import {
   collection,
   getDocs,
@@ -376,9 +376,9 @@ export default function MembersScreen() {
     });
 
   const SORT_OPTIONS: Array<{ key: typeof sortBy; label: string; icon: string }> = [
-    { key: 'newest', label: 'Newest', icon: 'arrow-down' },
-    { key: 'oldest', label: 'Oldest', icon: 'arrow-up' },
-    { key: 'name', label: 'Name A–Z', icon: 'text' },
+    { key: 'newest', label: 'Newest', icon: 'chevron-down' },
+    { key: 'oldest', label: 'Oldest', icon: 'chevron-down' },
+    { key: 'name', label: 'Name A–Z', icon: 'sort' },
   ];
 
   // ── Helpers ──────────────────────────────────────────────────────────
@@ -406,7 +406,7 @@ export default function MembersScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Members</Text>
         <Pressable style={styles.addBtn} onPress={openAddForm}>
-          <Ionicons name="add" size={20} color="#0E1117" />
+          <Icon name="add" size={20} color="#0E1117" />
           <Text style={styles.addBtnText}>Add</Text>
         </Pressable>
       </View>
@@ -414,7 +414,7 @@ export default function MembersScreen() {
       {/* Search bar */}
       <View style={styles.searchRow}>
         <View style={styles.searchWrap}>
-          <Ionicons name="search-outline" size={16} color="#4A5568" />
+          <Icon name="search" size={16} color="#4A5568" />
           <TextInput
             style={styles.searchInput}
             value={search}
@@ -426,7 +426,7 @@ export default function MembersScreen() {
           />
           {search.length > 0 && (
             <Pressable onPress={() => setSearch('')} hitSlop={8}>
-              <Ionicons name="close-circle" size={16} color="#4A5568" />
+              <Icon name="x-circle" size={16} color="#4A5568" />
             </Pressable>
           )}
         </View>
@@ -440,7 +440,7 @@ export default function MembersScreen() {
             style={[styles.sortChip, sortBy === opt.key && styles.sortChipActive]}
             onPress={() => setSortBy(opt.key)}
           >
-            <Ionicons
+            <Icon
               name={opt.icon as any}
               size={12}
               color={sortBy === opt.key ? '#F5A623' : '#4A5568'}
@@ -507,8 +507,8 @@ export default function MembersScreen() {
           {filtered.length === 0 && (
             <View style={styles.emptyWrap}>
               <View style={styles.emptyIconWrap}>
-                <Ionicons
-                  name={showArchived ? 'archive-outline' : 'people-outline'}
+                <Icon
+                  name="members"
                   size={48}
                   color="#2A3040"
                 />
@@ -525,7 +525,7 @@ export default function MembersScreen() {
               </Text>
               {!showArchived && !search && (
                 <Pressable style={styles.emptyCta} onPress={openAddForm}>
-                  <Ionicons name="person-add-outline" size={18} color="#F5A623" />
+                  <Icon name="person" size={18} color="#F5A623" />
                   <Text style={styles.emptyCtaText}>Add Member</Text>
                 </Pressable>
               )}
@@ -564,7 +564,7 @@ export default function MembersScreen() {
                       {/* NEXT-A: Assignment count badge */}
                       {assignCount > 0 && !m.isArchived && (
                         <View style={styles.assignBadge}>
-                          <Ionicons name="barbell-outline" size={10} color="#F5A623" />
+                          <Icon name="workouts" size={10} color="#F5A623" />
                           <Text style={styles.assignBadgeText}>{assignCount}</Text>
                         </View>
                       )}
@@ -575,7 +575,7 @@ export default function MembersScreen() {
                     {/* NEXT-D: Today indicator */}
                     {hasToday && !m.isArchived ? (
                       <View style={styles.todayRow}>
-                        <Ionicons name="today-outline" size={12} color="#6EBB7A" />
+                        <Icon name="calendar" size={12} color="#6EBB7A" />
                         <Text style={styles.todayText}>Workout today</Text>
                       </View>
                     ) : m.phone ? (

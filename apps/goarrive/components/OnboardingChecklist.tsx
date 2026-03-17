@@ -18,7 +18,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from './Icon';
 import { collection, getDocs, query, where, limit } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
@@ -90,7 +90,7 @@ export default function OnboardingChecklist() {
       <View style={s.headerRow}>
         <Text style={s.title}>Getting Started</Text>
         <Pressable onPress={() => setDismissed(true)} hitSlop={8}>
-          <Ionicons name="close" size={18} color="#8A95A3" />
+          <Icon name="close" size={18} color="#8A95A3" />
         </Pressable>
       </View>
       <Text style={s.progress}>
@@ -107,8 +107,8 @@ export default function OnboardingChecklist() {
       <View style={s.stepList}>
         {steps.map((step, i) => (
           <View key={i} style={s.stepRow}>
-            <Ionicons
-              name={step.done ? 'checkmark-circle' : 'ellipse-outline'}
+            <Icon
+              name={step.done ? 'check-circle' : 'circle'}
               size={18}
               color={step.done ? '#6EBB7A' : '#4A5568'}
             />

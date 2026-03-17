@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, Animated, Platform } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from './Icon';
 import { playBeep } from '../lib/audioBeep';
 import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess } from '../lib/haptics';
 import { useWakeLock } from '../lib/useWakeLock';
@@ -82,7 +82,7 @@ export default function WorkoutPlayer({ visible, workout, onClose, onComplete }:
       <View style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity onPress={onClose}>
-            <Ionicons name="close" size={32} color="#FFFFFF" />
+            <Icon name="close" size={32} color="#FFFFFF" />
           </TouchableOpacity>
           <Text style={styles.workoutName}>{workout.name}</Text>
           <View style={{ width: 32 }} />
@@ -101,16 +101,16 @@ export default function WorkoutPlayer({ visible, workout, onClose, onComplete }:
         <View style={styles.controls}>
           {active ? (
             <TouchableOpacity style={styles.pauseButton} onPress={handlePause}>
-              <Ionicons name="pause" size={48} color="#0E1117" />
+              <Icon name="pause" size={48} color="#0E1117" />
             </TouchableOpacity>
           ) : (
             <TouchableOpacity style={styles.startButton} onPress={handleStart}>
-              <Ionicons name="play" size={48} color="#0E1117" />
+              <Icon name="play" size={48} color="#0E1117" />
             </TouchableOpacity>
           )}
           
           <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
-            <Ionicons name="play-skip-forward" size={32} color="#FFFFFF" />
+            <Icon name="skip-forward" size={32} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
       </View>

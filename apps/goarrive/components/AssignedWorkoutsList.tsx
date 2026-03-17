@@ -20,7 +20,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from './Icon';
 import {
   collection,
   getDocs,
@@ -201,7 +201,7 @@ export default function AssignedWorkoutsList({
       <View style={s.section}>
         <Text style={s.sectionTitle}>Assigned Workouts</Text>
         <View style={s.errorWrap}>
-          <Ionicons name="alert-circle-outline" size={24} color="#E05252" />
+          <Icon name="warning" size={24} color="#E05252" />
           <Text style={s.errorText}>Failed to load assignments.</Text>
           <Pressable
             onPress={() => {
@@ -240,9 +240,9 @@ export default function AssignedWorkoutsList({
   );
 
   const SORT_OPTS: Array<{ key: SortKey; label: string; icon: string }> = [
-    { key: 'newest', label: 'Newest', icon: 'arrow-down' },
-    { key: 'oldest', label: 'Oldest', icon: 'arrow-up' },
-    { key: 'name', label: 'Name', icon: 'text' },
+    { key: 'newest', label: 'Newest', icon: 'chevron-down' },
+    { key: 'oldest', label: 'Oldest', icon: 'chevron-down' },
+    { key: 'name', label: 'Name', icon: 'sort' },
   ];
 
   return (
@@ -260,7 +260,7 @@ export default function AssignedWorkoutsList({
               style={[s.sortChip, sortBy === opt.key && s.sortChipActive]}
               onPress={() => setSortBy(opt.key)}
             >
-              <Ionicons
+              <Icon
                 name={opt.icon as any}
                 size={11}
                 color={sortBy === opt.key ? '#F5A623' : '#4A5568'}
@@ -280,7 +280,7 @@ export default function AssignedWorkoutsList({
 
       {assignments.length === 0 ? (
         <View style={s.emptyWrap}>
-          <Ionicons name="calendar-outline" size={24} color="#2A3040" />
+          <Icon name="calendar" size={24} color="#2A3040" />
           <Text style={s.emptyText}>No workouts assigned yet.</Text>
         </View>
       ) : (
@@ -292,7 +292,7 @@ export default function AssignedWorkoutsList({
               {upcoming.map((a) => (
                 <View key={a.id} style={s.assignmentCard}>
                   <View style={s.assignmentIcon}>
-                    <Ionicons name="barbell-outline" size={16} color="#F5A623" />
+                    <Icon name="workouts" size={16} color="#F5A623" />
                   </View>
                   <View style={s.assignmentInfo}>
                     <Text style={s.assignmentName} numberOfLines={1}>
@@ -310,7 +310,7 @@ export default function AssignedWorkoutsList({
                     hitSlop={8}
                     style={s.unassignBtn}
                   >
-                    <Ionicons name="close-circle-outline" size={18} color="#E05252" />
+                    <Icon name="x-circle" size={18} color="#E05252" />
                   </Pressable>
                 </View>
               ))}
@@ -324,7 +324,7 @@ export default function AssignedWorkoutsList({
               {past.map((a) => (
                 <View key={a.id} style={[s.assignmentCard, s.pastCard]}>
                   <View style={[s.assignmentIcon, s.pastIcon]}>
-                    <Ionicons name="barbell-outline" size={16} color="#4A5568" />
+                    <Icon name="workouts" size={16} color="#4A5568" />
                   </View>
                   <View style={s.assignmentInfo}>
                     <Text style={[s.assignmentName, s.pastName]} numberOfLines={1}>
@@ -344,7 +344,7 @@ export default function AssignedWorkoutsList({
                     hitSlop={8}
                     style={s.unassignBtn}
                   >
-                    <Ionicons name="trash-outline" size={16} color="#4A5568" />
+                    <Icon name="trash" size={16} color="#4A5568" />
                   </Pressable>
                 </View>
               ))}

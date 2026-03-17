@@ -31,7 +31,7 @@ import ListSkeleton from '../../components/ListSkeleton';
 import MovementForm from '../../components/MovementForm';
 import MovementDetail from '../../components/MovementDetail';
 import ConfirmDialog from '../../components/ConfirmDialog';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from '../../components/Icon';
 
 const FONT_HEADING =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -119,7 +119,7 @@ export default function MovementsScreen() {
       <View style={s.header}>
         <Text style={s.title}>Movements</Text>
         <Pressable style={s.addBtn} onPress={() => setShowForm(true)}>
-          <Ionicons name="add" size={20} color="#0E1117" />
+          <Icon name="add" size={20} color="#0E1117" />
           <Text style={s.addBtnText}>New</Text>
         </Pressable>
       </View>
@@ -127,7 +127,7 @@ export default function MovementsScreen() {
       {/* Search */}
       <View style={s.searchRow}>
         <View style={s.searchWrap}>
-          <Ionicons name="search-outline" size={16} color="#4A5568" />
+          <Icon name="search" size={16} color="#4A5568" />
           <TextInput
             style={s.searchInput}
             value={search}
@@ -139,7 +139,7 @@ export default function MovementsScreen() {
           />
           {search.length > 0 && (
             <Pressable onPress={() => setSearch('')} hitSlop={8}>
-              <Ionicons name="close-circle" size={16} color="#4A5568" />
+              <Icon name="x-circle" size={16} color="#4A5568" />
             </Pressable>
           )}
         </View>
@@ -169,7 +169,7 @@ export default function MovementsScreen() {
         >
           {filtered.length === 0 ? (
             <View style={s.emptyState}>
-              <Ionicons name="fitness-outline" size={40} color="#2A3347" />
+              <Icon name="movements" size={40} color="#2A3347" />
               <Text style={s.emptyTitle}>
                 {search ? 'No movements match your search' : 'No movements yet'}
               </Text>
@@ -195,8 +195,8 @@ export default function MovementsScreen() {
                       },
                     ]}
                   >
-                    <Ionicons
-                      name="fitness"
+                    <Icon
+                      name="movements"
                       size={18}
                       color={categoryColor(item.category)}
                     />
@@ -233,7 +233,7 @@ export default function MovementsScreen() {
                   onPress={() => requestDelete(item)}
                   hitSlop={8}
                 >
-                  <Ionicons name="trash-outline" size={18} color="#4A5568" />
+                  <Icon name="trash" size={18} color="#4A5568" />
                 </Pressable>
               </Pressable>
             ))
