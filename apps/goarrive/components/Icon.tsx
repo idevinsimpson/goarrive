@@ -105,6 +105,10 @@ const ICONS: Record<string, IconDef> = {
   close: {
     paths: ['M18 6L6 18', 'M6 6l12 12'],
   },
+  x: {
+    paths: ['M18 6L6 18', 'M6 6l12 12'],
+    sw: 2.5,
+  },
   search: {
     paths: ['M21 21l-4.35-4.35'],
     fill: ['M11 19a8 8 0 100-16 8 8 0 000 16z'],

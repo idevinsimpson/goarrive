@@ -2,22 +2,20 @@
  * AppHeader — Fixed top header for the GoArrive app
  *
  * Displays the real GoArrive logo image on the left and a user avatar on the right.
+ * Tapping the avatar opens AccountPanel as a slide-over modal (not a page navigation).
  * Uses env(safe-area-inset-top) for PWA standalone mode on iOS.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Platform, Image } from 'react-native';
 import { useAuth } from '../lib/AuthContext';
-import { router } from 'expo-router';
+import AccountPanel from './AccountPanel';
 
 const FONT_HEADING =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 
-interface Props {
-  onNavigateAccount?: () => void;
-}
-
-export function AppHeader({ onNavigateAccount }: Props) {
+export function AppHeader() {
   const { user } = useAuth();
+  const [showPanel, setShowPanel] = useState(false);
 
   const initials = user?.displayName
     ? user.displayName
@@ -28,36 +26,36 @@ export function AppHeader({ onNavigateAccount }: Props) {
         .slice(0, 2)
     : user?.email?.[0]?.toUpperCase() ?? '?';
 
-  const handleAccountPress = () => {
-    if (onNavigateAccount) {
-      onNavigateAccount();
-    } else {
-      router.push('/(app)/account');
-    }
-  };
-
   return (
-    <View style={s.root}>
-      {/* GoArrive Logo */}
-      <Image
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        source={require('../assets/logo.png')}
-        style={s.logo}
-        resizeMode="contain"
-        accessibilityLabel="GoArrive"
-      />
+    <>
+      <View style={s.root}>
+        {/* GoArrive Logo */}
+        <Image
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          source={require('../assets/logo.png')}
+          style={s.logo}
+          resizeMode="contain"
+          accessibilityLabel="GoArrive"
+        />
 
-      {/* Account avatar */}
-      <Pressable
-        style={s.avatar}
-        onPress={handleAccountPress}
-        accessibilityRole="button"
-        accessibilityLabel="Account"
-        hitSlop={8}
-      >
-        <Text style={s.avatarText}>{initials}</Text>
-      </Pressable>
-    </View>
+        {/* Account avatar — opens slide-over panel */}
+        <Pressable
+          style={s.avatar}
+          onPress={() => setShowPanel(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Account"
+          hitSlop={8}
+        >
+          <Text style={s.avatarText}>{initials}</Text>
+        </Pressable>
+      </View>
+
+      {/* Account slide-over panel */}
+      <AccountPanel
+        visible={showPanel}
+        onClose={() => setShowPanel(false)}
+      />
+    </>
   );
 }
 

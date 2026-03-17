@@ -28,6 +28,7 @@ import {
   Alert,
 } from 'react-native';
 import { Icon } from '../../components/Icon';
+import { AppHeader } from '../../components/AppHeader';
 import {
   collection,
   getDocs,
@@ -402,8 +403,11 @@ export default function MembersScreen() {
 
   return (
     <View style={styles.root}>
-      {/* Header */}
-      <View style={styles.header}>
+      {/* Header — uses AppHeader for logo + avatar + safe-area */}
+      <AppHeader />
+
+      {/* Screen title row */}
+      <View style={styles.titleRow}>
         <Text style={styles.title}>Members</Text>
         <Pressable style={styles.addBtn} onPress={openAddForm}>
           <Icon name="add" size={20} color="#0E1117" />
@@ -665,13 +669,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0E1117',
   },
-  header: {
+  titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 12,
+    paddingTop: 14,
+    paddingBottom: 10,
   },
   title: {
     fontSize: 26,
