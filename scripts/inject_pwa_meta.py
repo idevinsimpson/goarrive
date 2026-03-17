@@ -53,6 +53,12 @@ HEAD_INJECT = """
       body { margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
       /* Prevent pull-to-refresh on mobile Chrome */
       body { overscroll-behavior-y: contain; }
+      /* Safe area padding for PWA standalone mode on notched devices */
+      @supports (padding-top: env(safe-area-inset-top)) {
+        #root {
+          padding-bottom: env(safe-area-inset-bottom, 0px);
+        }
+      }
     </style>
 """
 

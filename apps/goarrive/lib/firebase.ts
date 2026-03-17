@@ -25,7 +25,8 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 
 // Connect to emulators in development
-if (__DEV__ && typeof window !== 'undefined') {
+const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
+if (isDev && typeof window !== 'undefined') {
   const useEmulator = false; // Set to true when running local emulators
   if (useEmulator) {
     connectAuthEmulator(auth, 'http://localhost:9099');
