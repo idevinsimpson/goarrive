@@ -1,0 +1,349 @@
+/**
+ * MovementDetail — View movement details in a modal
+ *
+ * Shows full movement info: name, category, muscle groups, equipment,
+ * difficulty, description, timer defaults, swap sides config.
+ * Provides Edit and Archive action buttons.
+ *
+ * Slice 1, Week 2 — Movement Library
+ */
+import React from 'react';
+import {
+  View,
+  Text,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Platform,
+  Modal,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+
+// ── Types ──────────────────────────────────────────────────────────────────
+
+export interface MovementDetailData {
+  id: string;
+  name: string;
+  category: string;
+  muscleGroups: string[];
+  equipment: string;
+  difficulty: string;
+  description: string;
+  workSec: number;
+  restSec: number;
+  countdownSec: number;
+  swapSides: boolean;
+  swapMode: 'split' | 'duplicate';
+  swapWindowSec: number;
+  isGlobal: boolean;
+  isArchived: boolean;
+  coachId?: string;
+  tenantId?: string;
+  createdAt?: any;
+  mediaUrl?: string | null;
+  mediaFormat?: 'webp' | null;
+  clipDurationSec?: number | null;
+  fps?: number | null;
+  canvaDesignId?: string | null;
+  mirrorSide2?: boolean;
+  createdBy?: string | null;
+  [key: string]: any;
+}
+
+interface Props {
+  visible: boolean;
+  movement: MovementDetailData | null;
+  onClose: () => void;
+  onEdit: (m: MovementDetailData) => void;
+  onArchive: (m: MovementDetailData) => void;
+}
+
+// ── Constants ──────────────────────────────────────────────────────────────
+
+const FONT_HEADING =
+  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
+const FONT_BODY =
+  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+
+// ── Component ──────────────────────────────────────────────────────────────
+
+export default function MovementDetail({
+  visible,
+  movement,
+  onClose,
+  onEdit,
+  onArchive,
+}: Props) {
+  if (!movement) return null;
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
+      <View style={s.root}>
+        {/* Header */}
+        <View style={s.header}>
+          <Pressable onPress={onClose} hitSlop={8}>
+            <Ionicons name="close" size={24} color="#8A95A3" />
+          </Pressable>
+          <Text style={s.headerTitle}>Movement Details</Text>
+          <View style={{ width: 24 }} />
+        </View>
+
+        <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent}>
+          {/* Name */}
+          <Text style={s.name}>{movement.name}</Text>
+
+          {/* Badges */}
+          <View style={s.badgeRow}>
+            <View style={s.badge}>
+              <Text style={s.badgeText}>{movement.category}</Text>
+            </View>
+            <View style={s.badge}>
+              <Text style={s.badgeText}>{movement.equipment}</Text>
+            </View>
+            <View style={s.badge}>
+              <Text style={s.badgeText}>{movement.difficulty}</Text>
+            </View>
+            {movement.isArchived && (
+              <View style={[s.badge, s.archivedBadge]}>
+                <Text style={[s.badgeText, { color: '#E05252' }]}>Archived</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Muscle Groups */}
+          {movement.muscleGroups.length > 0 && (
+            <View style={s.section}>
+              <Text style={s.sectionLabel}>Muscle Groups</Text>
+              <View style={s.chipRow}>
+                {movement.muscleGroups.map((mg) => (
+                  <View key={mg} style={s.chip}>
+                    <Text style={s.chipText}>{mg}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {/* Description */}
+          {movement.description ? (
+            <View style={s.section}>
+              <Text style={s.sectionLabel}>Description</Text>
+              <Text style={s.bodyText}>{movement.description}</Text>
+            </View>
+          ) : null}
+
+          {/* Timer Defaults */}
+          <View style={s.section}>
+            <Text style={s.sectionLabel}>Timer Defaults</Text>
+            <View style={s.timerRow}>
+              <View style={s.timerItem}>
+                <Text style={s.timerValue}>{movement.workSec}s</Text>
+                <Text style={s.timerLabel}>Work</Text>
+              </View>
+              <View style={s.timerItem}>
+                <Text style={s.timerValue}>{movement.restSec}s</Text>
+                <Text style={s.timerLabel}>Rest</Text>
+              </View>
+              <View style={s.timerItem}>
+                <Text style={s.timerValue}>{movement.countdownSec}s</Text>
+                <Text style={s.timerLabel}>Countdown</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Swap Sides */}
+          {movement.swapSides && (
+            <View style={s.section}>
+              <Text style={s.sectionLabel}>Swap Sides</Text>
+              <Text style={s.bodyText}>
+                Mode: {movement.swapMode} · Window: {movement.swapWindowSec}s
+              </Text>
+            </View>
+          )}
+        </ScrollView>
+
+        {/* Action buttons */}
+        <View style={s.actions}>
+          <Pressable
+            style={s.editBtn}
+            onPress={() => onEdit(movement)}
+          >
+            <Ionicons name="create-outline" size={18} color="#F5A623" />
+            <Text style={s.editText}>Edit</Text>
+          </Pressable>
+          <Pressable
+            style={s.archiveBtn}
+            onPress={() => onArchive(movement)}
+          >
+            <Ionicons
+              name={movement.isArchived ? 'arrow-undo-outline' : 'archive-outline'}
+              size={18}
+              color="#E05252"
+            />
+            <Text style={s.archiveText}>
+              {movement.isArchived ? 'Restore' : 'Archive'}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const s = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: '#0E1117',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: Platform.select({ ios: 56, web: 16, default: 16 }),
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3347',
+  },
+  headerTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#F0F4F8',
+    fontFamily: FONT_HEADING,
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 16,
+    gap: 16,
+  },
+  name: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FONT_HEADING,
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  badge: {
+    backgroundColor: '#1A2035',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2A3347',
+  },
+  archivedBadge: {
+    borderColor: 'rgba(224,82,82,0.3)',
+    backgroundColor: 'rgba(224,82,82,0.08)',
+  },
+  badgeText: {
+    fontSize: 12,
+    color: '#8A95A3',
+    fontFamily: FONT_BODY,
+  },
+  section: {
+    gap: 8,
+  },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8A95A3',
+    fontFamily: FONT_HEADING,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  chip: {
+    backgroundColor: 'rgba(245,166,35,0.1)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  chipText: {
+    fontSize: 12,
+    color: '#F5A623',
+    fontFamily: FONT_BODY,
+  },
+  bodyText: {
+    fontSize: 14,
+    color: '#C0C8D4',
+    fontFamily: FONT_BODY,
+    lineHeight: 20,
+  },
+  timerRow: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  timerItem: {
+    alignItems: 'center',
+    gap: 2,
+  },
+  timerValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FONT_HEADING,
+  },
+  timerLabel: {
+    fontSize: 11,
+    color: '#8A95A3',
+    fontFamily: FONT_BODY,
+  },
+  actions: {
+    flexDirection: 'row',
+    gap: 12,
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#2A3347',
+  },
+  editBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(245,166,35,0.1)',
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.2)',
+  },
+  editText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#F5A623',
+    fontFamily: FONT_BODY,
+  },
+  archiveBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(224,82,82,0.08)',
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(224,82,82,0.2)',
+  },
+  archiveText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#E05252',
+    fontFamily: FONT_BODY,
+  },
+});

@@ -1,0 +1,726 @@
+/**
+ * AssignWorkoutModal — Assign a workout to a member
+ *
+ * Two-step flow:
+ *   1. Pick a workout from the coach's active workouts
+ *   2. Pick a date and confirm the assignment
+ *
+ * Follows the simple Everfit-style model from KB-U:
+ *   - One workout → one member → one date
+ *   - No batch assignment, no recurring, no sync toggles
+ *
+ * Slice 1, Week 5 — Workout Assignment
+ */
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  Pressable,
+  ScrollView,
+  TextInput,
+  StyleSheet,
+  Platform,
+  Modal,
+  ActivityIndicator,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  orderBy,
+} from 'firebase/firestore';
+import { db } from '../lib/firebase';
+
+// ── Types ──────────────────────────────────────────────────────────────────
+
+export interface WorkoutPickerItem {
+  id: string;
+  name: string;
+  exerciseCount: number;
+  category: string;
+}
+
+interface Props {
+  visible: boolean;
+  memberName: string;
+  coachId: string;
+  onClose: () => void;
+  onAssign: (workoutId: string, workoutName: string, scheduledFor: Date) => void;
+}
+
+// ── Constants ──────────────────────────────────────────────────────────────
+
+const FONT_HEADING =
+  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
+const FONT_BODY =
+  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function formatDateDisplay(d: Date): string {
+  return d.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function toDateString(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function getQuickDates(): Array<{ label: string; date: Date }> {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const nextMonday = new Date(today);
+  const dayOfWeek = nextMonday.getDay();
+  const daysUntilMonday = dayOfWeek === 0 ? 1 : 8 - dayOfWeek;
+  nextMonday.setDate(nextMonday.getDate() + daysUntilMonday);
+
+  return [
+    { label: 'Today', date: today },
+    { label: 'Tomorrow', date: tomorrow },
+    { label: 'Next Monday', date: nextMonday },
+  ];
+}
+
+// ── Component ──────────────────────────────────────────────────────────────
+
+export default function AssignWorkoutModal({
+  visible,
+  memberName,
+  coachId,
+  onClose,
+  onAssign,
+}: Props) {
+  // Step: 'pick' = choose workout, 'schedule' = choose date + confirm, 'success' = done
+  const [step, setStep] = useState<'pick' | 'schedule' | 'success'>('pick');
+  const [workouts, setWorkouts] = useState<WorkoutPickerItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [selectedWorkout, setSelectedWorkout] = useState<WorkoutPickerItem | null>(null);
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [dateInput, setDateInput] = useState(toDateString(new Date()));
+  const [assigning, setAssigning] = useState(false);
+
+  // ── Load workouts ─────────────────────────────────────────────────────
+
+  const loadWorkouts = useCallback(async () => {
+    if (!coachId) return;
+    setLoading(true);
+    try {
+      const q = query(
+        collection(db, 'workouts'),
+        where('coachId', '==', coachId),
+        where('isArchived', '==', false),
+        orderBy('createdAt', 'desc'),
+      );
+      const snap = await getDocs(q);
+      setWorkouts(
+        snap.docs.map((d) => {
+          const data = d.data();
+          return {
+            id: d.id,
+            name: data.name ?? 'Untitled',
+            exerciseCount: Array.isArray(data.exercises) ? data.exercises.length : 0,
+            category: data.category ?? '',
+          };
+        }),
+      );
+    } catch (err) {
+      console.error('Failed to load workouts for assignment:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [coachId]);
+
+  // Track last-assigned name for success screen (NEXT-B)
+  const [lastAssignedName, setLastAssignedName] = useState('');
+
+  // Reset state when modal opens/closes
+  useEffect(() => {
+    if (visible) {
+      setStep('pick');
+      setSelectedWorkout(null);
+      setSearch('');
+      setLastAssignedName('');
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      setSelectedDate(today);
+      setDateInput(toDateString(today));
+      setAssigning(false);
+      loadWorkouts();
+    }
+  }, [visible, loadWorkouts]);
+
+  // ── Handlers ──────────────────────────────────────────────────────────
+
+  function handleSelectWorkout(w: WorkoutPickerItem) {
+    setSelectedWorkout(w);
+    setStep('schedule');
+  }
+
+  function handleBack() {
+    setStep('pick');
+    setSelectedWorkout(null);
+  }
+
+  function handleDateInputChange(text: string) {
+    setDateInput(text);
+    // Parse YYYY-MM-DD
+    const parts = text.split('-');
+    if (parts.length === 3) {
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      const d = parseInt(parts[2], 10);
+      if (!isNaN(y) && !isNaN(m) && !isNaN(d) && y > 2000) {
+        const parsed = new Date(y, m, d);
+        if (!isNaN(parsed.getTime())) {
+          setSelectedDate(parsed);
+        }
+      }
+    }
+  }
+
+  function handleQuickDate(date: Date) {
+    setSelectedDate(date);
+    setDateInput(toDateString(date));
+  }
+
+  async function handleConfirm() {
+    if (!selectedWorkout || assigning) return;
+    setAssigning(true);
+    try {
+      await onAssign(selectedWorkout.id, selectedWorkout.name, selectedDate);
+      // NEXT-B: Show success step instead of closing
+      setLastAssignedName(selectedWorkout.name);
+      setStep('success');
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  /** NEXT-B: Reset to pick step for another assignment */
+  function handleAssignAnother() {
+    setSelectedWorkout(null);
+    setSearch('');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    setSelectedDate(today);
+    setDateInput(toDateString(today));
+    setStep('pick');
+  }
+
+  // ── Filtered workouts ─────────────────────────────────────────────────
+
+  const filtered = workouts.filter((w) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      w.name.toLowerCase().includes(q) ||
+      w.category.toLowerCase().includes(q)
+    );
+  });
+
+  const quickDates = getQuickDates();
+
+  // ── Render ────────────────────────────────────────────────────────────
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={s.overlay}>
+        <View style={s.sheet}>
+          {/* Header */}
+          <View style={s.header}>
+            {step === 'schedule' ? (
+              <Pressable onPress={handleBack} hitSlop={12}>
+                <Ionicons name="arrow-back" size={24} color="#8A95A3" />
+              </Pressable>
+            ) : step === 'success' ? (
+              <View style={{ width: 24 }} />
+            ) : (
+              <Pressable onPress={onClose} hitSlop={12}>
+                <Ionicons name="close" size={24} color="#8A95A3" />
+              </Pressable>
+            )}
+            <Text style={s.headerTitle}>
+              {step === 'pick' ? 'Assign Workout' : step === 'schedule' ? 'Schedule' : 'Assigned!'}
+            </Text>
+            <View style={{ width: 24 }} />
+          </View>
+
+          {/* Member badge */}
+          <View style={s.memberBadge}>
+            <Ionicons name="person-outline" size={14} color="#F5A623" />
+            <Text style={s.memberBadgeText}>{memberName}</Text>
+          </View>
+
+          {step === 'success' ? (
+            /* NEXT-B: Success step with Assign Another */
+            <View style={s.successWrap}>
+              <View style={s.successIconWrap}>
+                <Ionicons name="checkmark-circle" size={56} color="#6EBB7A" />
+              </View>
+              <Text style={s.successTitle}>Workout Assigned!</Text>
+              <Text style={s.successSub}>
+                "{lastAssignedName}" has been assigned to {memberName}.
+              </Text>
+
+              <Pressable style={s.assignAnotherBtn} onPress={handleAssignAnother}>
+                <Ionicons name="add-circle-outline" size={20} color="#F5A623" />
+                <Text style={s.assignAnotherText}>Assign Another</Text>
+              </Pressable>
+
+              <Pressable style={s.doneBtn} onPress={onClose}>
+                <Text style={s.doneBtnText}>Done</Text>
+              </Pressable>
+            </View>
+          ) : step === 'pick' ? (
+            <>
+              {/* Search */}
+              <View style={s.searchRow}>
+                <View style={s.searchWrap}>
+                  <Ionicons name="search-outline" size={16} color="#4A5568" />
+                  <TextInput
+                    style={s.searchInput}
+                    value={search}
+                    onChangeText={setSearch}
+                    placeholder="Search workouts…"
+                    placeholderTextColor="#4A5568"
+                    autoCorrect={false}
+                    autoCapitalize="none"
+                  />
+                  {search.length > 0 && (
+                    <Pressable onPress={() => setSearch('')} hitSlop={8}>
+                      <Ionicons name="close-circle" size={16} color="#4A5568" />
+                    </Pressable>
+                  )}
+                </View>
+              </View>
+
+              {/* Workout list */}
+              {loading ? (
+                <View style={s.loadingWrap}>
+                  <ActivityIndicator size="small" color="#F5A623" />
+                </View>
+              ) : filtered.length === 0 ? (
+                <View style={s.emptyWrap}>
+                  <Ionicons name="barbell-outline" size={40} color="#2A3040" />
+                  <Text style={s.emptyText}>
+                    {search
+                      ? 'No workouts match your search.'
+                      : 'No active workouts to assign. Create a workout first.'}
+                  </Text>
+                </View>
+              ) : (
+                <ScrollView
+                  style={s.list}
+                  contentContainerStyle={s.listContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {filtered.map((w) => (
+                    <Pressable
+                      key={w.id}
+                      style={s.workoutCard}
+                      onPress={() => handleSelectWorkout(w)}
+                    >
+                      <View style={s.workoutIcon}>
+                        <Ionicons name="barbell-outline" size={20} color="#F5A623" />
+                      </View>
+                      <View style={s.workoutInfo}>
+                        <Text style={s.workoutName} numberOfLines={1}>
+                          {w.name}
+                        </Text>
+                        <Text style={s.workoutMeta}>
+                          {w.exerciseCount} exercise{w.exerciseCount !== 1 ? 's' : ''}
+                          {w.category ? ` · ${w.category}` : ''}
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color="#4A5568" />
+                    </Pressable>
+                  ))}
+                  <View style={{ height: 40 }} />
+                </ScrollView>
+              )}
+            </>
+          ) : (
+            /* Schedule step */
+            <ScrollView
+              style={s.list}
+              contentContainerStyle={s.scheduleContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {/* Selected workout summary */}
+              <View style={s.selectedSummary}>
+                <Ionicons name="barbell-outline" size={18} color="#F5A623" />
+                <Text style={s.selectedName} numberOfLines={1}>
+                  {selectedWorkout?.name}
+                </Text>
+              </View>
+
+              {/* Quick date buttons */}
+              <Text style={s.sectionLabel}>Quick Select</Text>
+              <View style={s.quickDateRow}>
+                {quickDates.map((qd) => {
+                  const isActive = toDateString(selectedDate) === toDateString(qd.date);
+                  return (
+                    <Pressable
+                      key={qd.label}
+                      style={[s.quickDateBtn, isActive && s.quickDateBtnActive]}
+                      onPress={() => handleQuickDate(qd.date)}
+                    >
+                      <Text
+                        style={[
+                          s.quickDateBtnText,
+                          isActive && s.quickDateBtnTextActive,
+                        ]}
+                      >
+                        {qd.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              {/* Manual date input */}
+              <Text style={s.sectionLabel}>Or Enter Date</Text>
+              <TextInput
+                style={s.dateInput}
+                value={dateInput}
+                onChangeText={handleDateInputChange}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor="#4A5568"
+                keyboardType="default"
+                autoCorrect={false}
+              />
+              <Text style={s.datePreview}>
+                {formatDateDisplay(selectedDate)}
+              </Text>
+
+              {/* Confirm button */}
+              <Pressable
+                style={[s.confirmBtn, assigning && s.confirmBtnDisabled]}
+                onPress={handleConfirm}
+                disabled={assigning}
+              >
+                {assigning ? (
+                  <ActivityIndicator size="small" color="#0E1117" />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark-circle-outline" size={20} color="#0E1117" />
+                    <Text style={s.confirmBtnText}>
+                      Assign to {memberName}
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+
+              <View style={{ height: 40 }} />
+            </ScrollView>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ── Styles ──────────────────────────────────────────────────────────────────
+
+const s = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: '#0E1117',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '90%',
+    minHeight: '60%',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    borderBottomWidth: 0,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  headerTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FONT_HEADING,
+  },
+  memberBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    marginLeft: 20,
+    marginTop: 12,
+    backgroundColor: 'rgba(245,166,35,0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.2)',
+  },
+  memberBadgeText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#F5A623',
+    fontFamily: FONT_HEADING,
+  },
+  searchRow: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
+  searchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    gap: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#F0F4F8',
+    fontFamily: FONT_BODY,
+  },
+  loadingWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  emptyWrap: {
+    alignItems: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 40,
+    gap: 12,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: '#8A95A3',
+    fontFamily: FONT_BODY,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  list: {
+    flex: 1,
+  },
+  listContent: {
+    padding: 20,
+    paddingTop: 12,
+  },
+  workoutCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    gap: 12,
+  },
+  workoutIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: 'rgba(245,166,35,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  workoutInfo: {
+    flex: 1,
+  },
+  workoutName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#F0F4F8',
+    fontFamily: FONT_HEADING,
+  },
+  workoutMeta: {
+    fontSize: 12,
+    color: '#8A95A3',
+    fontFamily: FONT_BODY,
+    marginTop: 2,
+  },
+  scheduleContent: {
+    padding: 20,
+  },
+  selectedSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  selectedName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#F0F4F8',
+    fontFamily: FONT_HEADING,
+    flex: 1,
+  },
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8A95A3',
+    fontFamily: FONT_HEADING,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 10,
+  },
+  quickDateRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 24,
+  },
+  quickDateBtn: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  quickDateBtnActive: {
+    backgroundColor: 'rgba(245,166,35,0.15)',
+    borderColor: 'rgba(245,166,35,0.3)',
+  },
+  quickDateBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8A95A3',
+    fontFamily: FONT_HEADING,
+  },
+  quickDateBtnTextActive: {
+    color: '#F5A623',
+  },
+  dateInput: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: '#F0F4F8',
+    fontFamily: FONT_BODY,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    marginBottom: 8,
+  },
+  datePreview: {
+    fontSize: 14,
+    color: '#8A95A3',
+    fontFamily: FONT_BODY,
+    marginBottom: 32,
+    paddingLeft: 4,
+  },
+  confirmBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#F5A623',
+    paddingVertical: 16,
+    borderRadius: 14,
+  },
+  confirmBtnDisabled: {
+    opacity: 0.6,
+  },
+  confirmBtnText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0E1117',
+    fontFamily: FONT_HEADING,
+  },
+  // NEXT-B: Success step styles
+  successWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    paddingVertical: 40,
+    gap: 12,
+  },
+  successIconWrap: {
+    marginBottom: 8,
+  },
+  successTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FONT_HEADING,
+  },
+  successSub: {
+    fontSize: 14,
+    color: '#8A95A3',
+    fontFamily: FONT_BODY,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 16,
+  },
+  assignAnotherBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(245,166,35,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.25)',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 14,
+    width: '100%',
+  },
+  assignAnotherText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#F5A623',
+    fontFamily: FONT_HEADING,
+  },
+  doneBtn: {
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 14,
+    width: '100%',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  doneBtnText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#8A95A3',
+    fontFamily: FONT_HEADING,
+  },
+});
