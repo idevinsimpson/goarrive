@@ -46,9 +46,8 @@ import MemberForm, {
   MemberFormData,
   EMPTY_MEMBER,
 } from '../../components/MemberForm';
-import MemberDetail, {
-  MemberDetailData,
-} from '../../components/MemberDetail';
+import MemberDetail from '../../components/MemberDetail';
+type MemberDetailData = any;
 import ConfirmDialog from '../../components/ConfirmDialog';
 import UndoToast from '../../components/UndoToast';
 import ListSkeleton from '../../components/ListSkeleton';
@@ -606,19 +605,17 @@ export default function MembersScreen() {
         mode={formMode}
       />
 
-      <MemberDetail
-        visible={showDetail}
-        member={selectedMember}
-        onClose={() => {
-          setShowDetail(false);
-          setSelectedMember(null);
-        }}
-        onEdit={openEditForm}
-        onArchive={handleArchiveRequest}
-        onDuplicate={handleDuplicate}
-        onAssignWorkout={handleAssignWorkout}
-        assignmentRefresh={assignmentRefresh}
-      />
+      {showDetail && (
+        <MemberDetail
+          member={selectedMember}
+          onClose={() => {
+            setShowDetail(false);
+            setSelectedMember(null);
+          }}
+          onEdit={openEditForm}
+          onArchive={handleArchiveRequest}
+        />
+      )}
 
       <ConfirmDialog
         visible={confirmVisible}
