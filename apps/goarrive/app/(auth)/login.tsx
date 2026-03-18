@@ -165,18 +165,21 @@ export default function LoginScreen() {
 
             <View style={s.fieldWrap}>
               <Text style={s.fieldLabel}>Email</Text>
-              <TextInput
-                style={s.input}
-                placeholder="coach@example.com"
-                placeholderTextColor="#4A5568"
-                value={forgotEmail}
-                onChangeText={setForgotEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!forgotLoading}
-                onSubmitEditing={handleForgotPassword}
-              />
+            <TextInput
+              style={s.input}
+              placeholder="coach@example.com"
+              placeholderTextColor="#4A5568"
+              value={forgotEmail}
+              onChangeText={setForgotEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="email"
+              textContentType="emailAddress"
+              importantForAutofill="yes"
+              editable={!forgotLoading}
+              onSubmitEditing={handleForgotPassword}
+            />
             </View>
 
             {forgotError ? (
@@ -239,6 +242,9 @@ export default function LoginScreen() {
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
+              autoComplete="email"
+              textContentType="emailAddress"
+              importantForAutofill="yes"
               editable={!loading}
             />
           </View>
@@ -253,6 +259,9 @@ export default function LoginScreen() {
               value={password}
               onChangeText={setPassword}
               secureTextEntry
+              autoComplete="current-password"
+              textContentType="password"
+              importantForAutofill="yes"
               editable={!loading}
               onSubmitEditing={handleLogin}
             />
