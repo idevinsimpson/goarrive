@@ -98,7 +98,8 @@ export default function DashboardScreen() {
           query(
             collection(db, 'members'),
             where('coachId', '==', coachId),
-            where('isArchived', '==', false),
+            // Note: no isArchived filter here — no composite index exists for coachId+isArchived.
+            // We filter client-side below.
           ),
         ),
         getDocs(
@@ -145,8 +146,11 @@ export default function DashboardScreen() {
         ...d.data(),
       }));
 
+      // Filter archived members client-side (no composite index for coachId+isArchived)
+      const activeMembers = membersSnap.docs.filter((d) => !d.data().isArchived);
+
       setStats({
-        members: membersSnap.size,
+        members: activeMembers.length,
         activeWorkouts: workoutsSnap.size,
         movements: movementsSnap.size,
         recentCheckins,

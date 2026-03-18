@@ -38,10 +38,10 @@ export default function AppLayout() {
           backgroundColor: TAB_BG,
           borderTopColor: TAB_BORDER,
           borderTopWidth: 1,
-          // Native: give enough room for icon + label
-          height: Platform.select({ ios: 68, android: 62, web: 62, default: 62 }),
+          // Native: give enough room for icon + label + home indicator
+          height: Platform.select({ ios: 84, android: 68, web: 68, default: 68 }),
           paddingTop: 8,
-          paddingBottom: Platform.select({ ios: 10, android: 6, web: 6, default: 6 }),
+          paddingBottom: Platform.select({ ios: 24, android: 10, web: 10, default: 10 }),
           ...(Platform.OS === 'web'
             ? ({
                 position: 'fixed' as any,
@@ -49,18 +49,18 @@ export default function AppLayout() {
                 left: 0,
                 right: 0,
                 zIndex: 1000,
-                // Fixed small bottom padding — iOS home indicator is handled by the OS
-                paddingBottom: '8px' as any,
-                height: '64px' as any,
+                // Full safe-area-inset-bottom so labels clear the home indicator zone
+                paddingBottom: 'max(10px, env(safe-area-inset-bottom, 0px))' as any,
+                height: 'calc(62px + max(10px, env(safe-area-inset-bottom, 0px)))' as any,
               } as any)
             : {}),
         },
         tabBarActiveTintColor: ACTIVE_COLOR,
         tabBarInactiveTintColor: INACTIVE_COLOR,
         tabBarLabelStyle: {
-          fontSize: 13,
+          fontSize: 12,
           fontWeight: '600',
-          marginTop: 2,
+          marginTop: 1,
           fontFamily:
             Platform.OS === 'web'
               ? "'DM Sans', sans-serif"

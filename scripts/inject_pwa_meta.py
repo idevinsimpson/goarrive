@@ -53,11 +53,25 @@ HEAD_INJECT = """
       body { margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
       /* Prevent pull-to-refresh on mobile Chrome */
       body { overscroll-behavior-y: contain; }
-      /* Safe area padding for PWA standalone mode on notched devices */
-      @supports (padding-top: env(safe-area-inset-top)) {
-        #root {
-          padding-bottom: env(safe-area-inset-bottom, 0px);
-        }
+      /* Fix tab bar label clipping: Expo renders label containers with overflow:hidden
+         and a fixed height that doesn't account for the full tab item height.
+         Force the label containers to be visible. */
+      /* The tab bar outer container (position:fixed, bottom:0) */
+      /* Force all children of the tab bar to not clip labels */
+      [role="tablist"] > div > a > div:last-child,
+      [role="tablist"] > div > div > a > div:last-child {
+        overflow: visible !important;
+        height: auto !important;
+        min-height: 16px !important;
+      }
+      /* Ensure tab items have enough height for icon + label */
+      [role="tablist"] > div > a,
+      [role="tablist"] > div > div > a {
+        height: 52px !important;
+        min-height: 52px !important;
+        padding-bottom: 6px !important;
+        padding-top: 6px !important;
+        overflow: visible !important;
       }
     </style>
 """

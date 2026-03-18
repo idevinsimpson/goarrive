@@ -214,7 +214,19 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
-    // WORKOUT TEMPLATES (Week 3 — coachId-scoped CRUD)
+    // WORKOUTS (Week 3 — coachId-scoped CRUD)
+    // App uses 'workouts' collection (not 'workout_templates')
+    // ─────────────────────────────────────────────
+
+    match /workouts/{workoutId} {
+      allow read: if isAuthenticated() && isCoachOrBootstrap(resource.data.coachId);
+      allow create: if isCoachOrBootstrap(request.resource.data.coachId);
+      allow update: if isCoachOrBootstrap(resource.data.coachId);
+      allow delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
+    // WORKOUT TEMPLATES (legacy alias — kept for backwards compat)
     // ─────────────────────────────────────────────
 
     match /workout_templates/{templateId} {
