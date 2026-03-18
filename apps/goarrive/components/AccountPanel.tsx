@@ -10,7 +10,7 @@
  * Usage:
  *   <AccountPanel visible={showAccount} onClose={() => setShowAccount(false)} />
  */
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -20,7 +20,6 @@ import {
   Modal,
   Animated,
   Dimensions,
-  Alert,
 } from 'react-native';
 import { Icon } from './Icon';
 import { useAuth } from '../lib/AuthContext';
@@ -49,6 +48,14 @@ interface MenuItem {
 export default function AccountPanel({ visible, onClose }: Props) {
   const { user, claims, signOut } = useAuth();
   const slideAnim = useRef(new Animated.Value(PANEL_WIDTH)).current;
+  const [toastMsg, setToastMsg] = useState('');
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function showToast(msg: string) {
+    setToastMsg(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToastMsg(''), 2800);
+  }
 
   useEffect(() => {
     if (visible) {
@@ -84,18 +91,11 @@ export default function AccountPanel({ visible, onClose }: Props) {
   }
 
   function handleSettings() {
-    onClose();
-    // Settings screen — coming in a future week
-    setTimeout(() => {
-      Alert.alert('Settings', 'Settings screen coming soon.');
-    }, 300);
+    showToast('Settings coming soon — stay tuned!');
   }
 
   function handleHelp() {
-    onClose();
-    setTimeout(() => {
-      Alert.alert('Help & Feedback', 'Reach us at support@goarrive.com');
-    }, 300);
+    showToast('Need help? Email us at support@goarrive.com');
   }
 
   const menuItems: MenuItem[] = [
@@ -185,6 +185,13 @@ export default function AccountPanel({ visible, onClose }: Props) {
           </View>
           <Text style={s.signOutText}>Sign Out</Text>
         </Pressable>
+
+        {/* In-panel toast */}
+        {!!toastMsg && (
+          <View style={s.toast}>
+            <Text style={s.toastText}>{toastMsg}</Text>
+          </View>
+        )}
 
         {/* Bottom safe area spacer */}
         <View style={s.bottomSpacer} />
@@ -328,6 +335,23 @@ const s = StyleSheet.create({
     fontWeight: '500',
     color: '#E05252',
     fontFamily: FONT_BODY,
+  },
+  toast: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: 'rgba(245,166,35,0.12)',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.2)',
+  },
+  toastText: {
+    fontSize: 13,
+    color: '#F5A623',
+    fontFamily: FONT_BODY,
+    textAlign: 'center',
+    lineHeight: 18,
   },
   bottomSpacer: {
     height: Platform.select({ ios: 32, default: 16 }),

@@ -1,9 +1,9 @@
 /**
  * Dashboard screen — GoArrive Coach Dashboard
  *
- * Shows today's date, key stats (members, workouts, movements), today's
- * assignments highlight, and recent check-ins.
- * Uses the GoArrive design system: dark bg, gold accents, Space Grotesk + DM Sans.
+ * Shows COACH DASHBOARD label, full name greeting, COACH role badge,
+ * stats grid, onboarding checklist, coaching tools feature cards,
+ * and recent activity.
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -36,6 +36,45 @@ const FONT_HEADING =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FONT_BODY =
   Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+
+interface FeatureCard {
+  title: string;
+  description: string;
+  week: string;
+  color: string;
+  route: '/(app)/movements' | '/(app)/workouts' | '/(app)/members' | '/(app)/admin';
+}
+
+const FEATURE_CARDS: FeatureCard[] = [
+  {
+    title: 'Movement Library',
+    description: 'Browse and manage exercises with video demos and muscle-group tags.',
+    week: 'WEEK 2',
+    color: '#7DD3FC',
+    route: '/(app)/movements',
+  },
+  {
+    title: 'Workout Builder',
+    description: 'Compose structured workouts and assign them to members.',
+    week: 'WEEK 3',
+    color: '#86EFAC',
+    route: '/(app)/workouts',
+  },
+  {
+    title: 'Member List',
+    description: 'View and manage your roster, progress, and program assignments.',
+    week: 'WEEK 4',
+    color: '#F5A623',
+    route: '/(app)/members',
+  },
+  {
+    title: 'Admin Config',
+    description: 'Configure rule_versions, fee tiers, and platform settings.',
+    week: 'SLICE 2',
+    color: '#8A95A3',
+    route: '/(app)/admin',
+  },
+];
 
 export default function DashboardScreen() {
   const { user, claims } = useAuth();
@@ -130,21 +169,14 @@ export default function DashboardScreen() {
     fetchData();
   }, [fetchData]);
 
-  const greeting = () => {
-    const h = new Date().getHours();
-    if (h < 12) return 'Good morning';
-    if (h < 17) return 'Good afternoon';
-    return 'Good evening';
-  };
-
-  const coachName =
-    user?.displayName?.split(' ')[0] ?? user?.email?.split('@')[0] ?? 'Coach';
-
-  const todayStr = new Date().toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-  });
+  const coachName = user?.displayName ?? user?.email?.split('@')[0] ?? 'Coach';
+  const role = claims?.role ?? 'coach';
+  const roleLabel =
+    role === 'platformAdmin'
+      ? 'Platform Admin'
+      : role === 'coachAssistant'
+      ? 'Coach Assistant'
+      : 'Coach';
 
   return (
     <View style={s.root}>
@@ -162,13 +194,17 @@ export default function DashboardScreen() {
           />
         }
       >
-        {/* Greeting */}
-        <View style={s.greetingWrap}>
-          <Text style={s.greeting}>
-            {greeting()}, {coachName} 👋
-          </Text>
-          <Text style={s.date}>{todayStr}</Text>
+        {/* Hero greeting */}
+        <View style={s.heroSection}>
+          <Text style={s.heroLabel}>COACH DASHBOARD</Text>
+          <Text style={s.heroName}>Welcome back,{'\n'}{coachName}</Text>
+          <View style={s.roleBadge}>
+            <Text style={s.roleText}>{roleLabel.toUpperCase()}</Text>
+          </View>
         </View>
+
+        {/* Divider */}
+        <View style={s.divider} />
 
         {/* Today's highlight banner */}
         {stats.todayAssignments > 0 && (
@@ -217,8 +253,41 @@ export default function DashboardScreen() {
           </Pressable>
         </View>
 
-        {/* Onboarding checklist — only shows for new coaches until all 4 steps done */}
+        {/* Onboarding checklist */}
         <OnboardingChecklist />
+
+        {/* Divider */}
+        <View style={s.divider} />
+
+        {/* Feature cards */}
+        <View style={s.sectionHeader}>
+          <Text style={s.sectionSuper}>PLATFORM FEATURES</Text>
+          <Text style={s.sectionTitle}>Your Coaching Tools</Text>
+        </View>
+
+        <View style={s.featureList}>
+          {FEATURE_CARDS.map((card) => (
+            <Pressable
+              key={card.title}
+              style={({ pressed }) => [s.featureCard, pressed && s.featureCardPressed]}
+              onPress={() => router.push(card.route)}
+            >
+              <View style={s.featureCardInner}>
+                <View style={s.featureCardLeft}>
+                  <Text style={[s.featureTitle, { color: card.color }]}>{card.title}</Text>
+                  <Text style={s.featureDesc}>{card.description}</Text>
+                </View>
+                <View style={s.featureCardRight}>
+                  <Text style={s.featureWeek}>{card.week}</Text>
+                  <Icon name="chevron-right" size={16} color="#4A5568" />
+                </View>
+              </View>
+            </Pressable>
+          ))}
+        </View>
+
+        {/* Divider */}
+        <View style={s.divider} />
 
         {/* Recent activity */}
         <View style={s.sectionHeader}>
@@ -259,20 +328,45 @@ const s = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 20,
   },
-  greetingWrap: {
+  heroSection: {
     marginBottom: 20,
   },
-  greeting: {
-    fontSize: 22,
+  heroLabel: {
+    fontSize: 11,
     fontWeight: '700',
+    color: '#7DD3FC',
+    fontFamily: FONT_BODY,
+    letterSpacing: 2,
+    marginBottom: 8,
+  },
+  heroName: {
+    fontSize: 28,
+    fontWeight: '800',
     color: '#F0F4F8',
     fontFamily: FONT_HEADING,
+    lineHeight: 34,
+    marginBottom: 12,
   },
-  date: {
-    fontSize: 13,
-    color: '#4A5568',
+  roleBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(245,166,35,0.08)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.2)',
+  },
+  roleText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#F5A623',
     fontFamily: FONT_BODY,
-    marginTop: 4,
+    letterSpacing: 1.5,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#1E2A3A',
+    marginVertical: 20,
   },
   todayBanner: {
     flexDirection: 'row',
@@ -295,7 +389,7 @@ const s = StyleSheet.create({
   statsGrid: {
     flexDirection: 'row',
     gap: 10,
-    marginBottom: 28,
+    marginBottom: 20,
   },
   statCard: {
     flex: 1,
@@ -328,13 +422,68 @@ const s = StyleSheet.create({
     fontWeight: '500',
   },
   sectionHeader: {
-    marginBottom: 12,
+    marginBottom: 14,
+    gap: 4,
+  },
+  sectionSuper: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#7DD3FC',
+    fontFamily: FONT_BODY,
+    letterSpacing: 2,
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '700',
     color: '#F0F4F8',
     fontFamily: FONT_HEADING,
+  },
+  featureList: {
+    gap: 10,
+    marginBottom: 4,
+  },
+  featureCard: {
+    backgroundColor: '#111827',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#1E2A3A',
+    overflow: 'hidden',
+  },
+  featureCardPressed: {
+    backgroundColor: '#1A2035',
+  },
+  featureCardInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 12,
+  },
+  featureCardLeft: {
+    flex: 1,
+    gap: 4,
+  },
+  featureTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    fontFamily: FONT_HEADING,
+  },
+  featureDesc: {
+    fontSize: 13,
+    color: '#8A95A3',
+    fontFamily: FONT_BODY,
+    lineHeight: 18,
+  },
+  featureCardRight: {
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  featureWeek: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#4A5568',
+    fontFamily: FONT_BODY,
+    letterSpacing: 1,
   },
   emptyState: {
     alignItems: 'center',
