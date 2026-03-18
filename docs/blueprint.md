@@ -4,7 +4,7 @@
 **Stack:** React Native / Expo SDK 52, Expo Router, Firebase Auth + Firestore
 **Deploy URL:** https://goarrive.web.app
 **GitHub Backup:** https://github.com/idevinsimpson/goarrive
-**Last Updated:** March 17, 2026
+**Last Updated:** March 17, 2026 (Week 1 Hardening Loop — Loop 4)
 
 ---
 
@@ -88,7 +88,11 @@ apps/goarrive/
 | Assignment count badges | ✅ Complete | Per-member barbell icon + count |
 | "Workout today" indicator | ✅ Complete | Green border + calendar label |
 | Sort chips on assignment list | ✅ Complete | Newest / Oldest / Name |
-| Onboarding checklist | ✅ Complete | 4-step getting started card |
+| Onboarding checklist | ✅ Complete | Renders on dashboard — 4-step getting started card |
+| MemberDetail assigned workouts | ✅ Complete | Wired to AssignedWorkoutsList (was hardcoded stub) |
+| WorkoutDetail assign button | ✅ Complete | Opens AssignWorkoutModal (was Coming Soon alert) |
+| Unassign confirmation | ✅ Complete | Uses ConfirmDialog (was window.confirm) |
+| onArchive signature | ✅ Complete | Passes full member object (was passing just ID) |
 | WorkoutPlayer (timer) | ✅ Complete | Play/pause/skip with haptics + beep |
 | Dashboard stats | ✅ Complete | Members, Workouts, Movements counts |
 | Error boundary | ✅ Complete | Catches React render errors |
@@ -101,6 +105,8 @@ apps/goarrive/
 | Icons empty squares (Ionicons font) | ✅ Fixed | Replaced with inline SVG Icon component |
 | Safe area bottom padding | ✅ Fixed | CSS `env(safe-area-inset-bottom)` on tab bar |
 | Safe area top padding | ✅ Fixed | AppHeader reads `window.screen` for PWA |
+| Members screen header position | ✅ Fixed | Now uses AppHeader (was custom header, too high) |
+| Profile avatar tap | ✅ Fixed | Opens AccountPanel slide-over (was full-page navigation) |
 | Tab bar labels cut off | ✅ Fixed | Proper height + paddingBottom on tab bar |
 
 ---

@@ -1,9 +1,11 @@
 /**
- * AccountPanel — Slide-over profile panel for GoArrive
+ * AccountPanel — Right-side slide-in drawer for GoArrive
  *
- * Renders as a Modal overlay that slides up from the bottom.
- * Replaces the full-page account navigation so the user stays
- * in context on whatever screen they were on.
+ * Slides in from the right edge when the DS avatar is tapped.
+ * Shows user profile info at the top, then a menu of options:
+ *   - Settings (stub for now)
+ *   - Help & Feedback (stub)
+ *   - Sign Out
  *
  * Usage:
  *   <AccountPanel visible={showAccount} onClose={() => setShowAccount(false)} />
@@ -13,12 +15,12 @@ import {
   View,
   Text,
   Pressable,
-  ScrollView,
   StyleSheet,
   Platform,
   Modal,
   Animated,
   Dimensions,
+  Alert,
 } from 'react-native';
 import { Icon } from './Icon';
 import { useAuth } from '../lib/AuthContext';
@@ -28,35 +30,44 @@ const FONT_HEADING =
 const FONT_BODY =
   Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
-const SCREEN_HEIGHT = Dimensions.get('window').height;
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const PANEL_WIDTH = Math.min(SCREEN_WIDTH * 0.82, 320);
 
 interface Props {
   visible: boolean;
   onClose: () => void;
 }
 
+interface MenuItem {
+  icon: string;
+  label: string;
+  sublabel?: string;
+  onPress: () => void;
+  danger?: boolean;
+}
+
 export default function AccountPanel({ visible, onClose }: Props) {
   const { user, claims, signOut } = useAuth();
-  const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const slideAnim = useRef(new Animated.Value(PANEL_WIDTH)).current;
 
   useEffect(() => {
     if (visible) {
       Animated.spring(slideAnim, {
         toValue: 0,
         useNativeDriver: true,
-        tension: 65,
-        friction: 11,
+        tension: 70,
+        friction: 12,
       }).start();
     } else {
       Animated.timing(slideAnim, {
-        toValue: SCREEN_HEIGHT,
-        duration: 280,
+        toValue: PANEL_WIDTH,
+        duration: 240,
         useNativeDriver: true,
       }).start();
     }
   }, [visible]);
 
-  const displayName = user?.displayName ?? user?.email ?? 'User';
+  const displayName = user?.displayName ?? user?.email?.split('@')[0] ?? 'User';
   const initials = displayName
     .split(' ')
     .map((n: string) => n[0])
@@ -64,11 +75,43 @@ export default function AccountPanel({ visible, onClose }: Props) {
     .toUpperCase()
     .slice(0, 2);
 
+  const role = claims?.role ?? 'coach';
+  const roleLabel = role === 'platformAdmin' ? 'Platform Admin' : role === 'coachAssistant' ? 'Coach Assistant' : 'Coach';
+
   async function handleSignOut() {
     onClose();
-    // Small delay so panel closes before auth state changes
-    setTimeout(() => signOut(), 200);
+    setTimeout(() => signOut(), 240);
   }
+
+  function handleSettings() {
+    onClose();
+    // Settings screen — coming in a future week
+    setTimeout(() => {
+      Alert.alert('Settings', 'Settings screen coming soon.');
+    }, 300);
+  }
+
+  function handleHelp() {
+    onClose();
+    setTimeout(() => {
+      Alert.alert('Help & Feedback', 'Reach us at support@goarrive.com');
+    }, 300);
+  }
+
+  const menuItems: MenuItem[] = [
+    {
+      icon: 'settings',
+      label: 'Settings',
+      sublabel: 'App preferences & notifications',
+      onPress: handleSettings,
+    },
+    {
+      icon: 'help-circle',
+      label: 'Help & Feedback',
+      sublabel: 'Get support or send feedback',
+      onPress: handleHelp,
+    },
+  ];
 
   return (
     <Modal
@@ -78,67 +121,73 @@ export default function AccountPanel({ visible, onClose }: Props) {
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      {/* Backdrop */}
+      {/* Backdrop — tap to close */}
       <Pressable style={s.backdrop} onPress={onClose} />
 
-      {/* Panel */}
+      {/* Right-side panel */}
       <Animated.View
-        style={[s.panel, { transform: [{ translateY: slideAnim }] }]}
+        style={[s.panel, { transform: [{ translateX: slideAnim }] }]}
       >
-        {/* Handle bar */}
-        <View style={s.handleWrap}>
-          <View style={s.handle} />
-        </View>
-
-        {/* Header row */}
-        <View style={s.header}>
-          <Text style={s.headerTitle}>Account</Text>
-          <Pressable onPress={onClose} hitSlop={12} style={s.closeBtn}>
-            <Icon name="x" size={20} color="#8A95A3" />
-          </Pressable>
-        </View>
-
-        <ScrollView
-          style={s.scroll}
-          contentContainerStyle={s.content}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Avatar */}
-          <View style={s.avatarWrap}>
+        {/* Profile section */}
+        <View style={s.profileSection}>
+          <View style={s.avatarRow}>
             <View style={s.avatar}>
               <Text style={s.avatarText}>{initials}</Text>
             </View>
-            <Text style={s.name}>{displayName}</Text>
-            <Text style={s.email}>{user?.email ?? '—'}</Text>
+            <Pressable onPress={onClose} hitSlop={12} style={s.closeBtn}>
+              <Icon name="x" size={20} color="#8A95A3" />
+            </Pressable>
           </View>
-
-          {/* Info cards */}
-          <View style={s.card}>
-            <Text style={s.cardLabel}>Role</Text>
-            <Text style={s.cardValue}>{claims?.role ?? 'coach'}</Text>
+          <Text style={s.name} numberOfLines={1}>{displayName}</Text>
+          <Text style={s.email} numberOfLines={1}>{user?.email ?? '—'}</Text>
+          <View style={s.roleBadge}>
+            <Text style={s.roleText}>{roleLabel}</Text>
           </View>
-          {claims?.coachId && (
-            <View style={s.card}>
-              <Text style={s.cardLabel}>Coach ID</Text>
-              <Text style={s.cardValue} numberOfLines={1}>{claims.coachId}</Text>
-            </View>
-          )}
-          {claims?.tenantId && (
-            <View style={s.card}>
-              <Text style={s.cardLabel}>Tenant ID</Text>
-              <Text style={s.cardValue} numberOfLines={1}>{claims.tenantId}</Text>
-            </View>
-          )}
+        </View>
 
-          {/* Sign out */}
-          <Pressable style={s.signOutBtn} onPress={handleSignOut}>
-            <Icon name="logout" size={18} color="#E05252" />
-            <Text style={s.signOutText}>Sign Out</Text>
-          </Pressable>
+        {/* Divider */}
+        <View style={s.divider} />
 
-          {/* Bottom safe area spacer */}
-          <View style={s.bottomSpacer} />
-        </ScrollView>
+        {/* Menu items */}
+        <View style={s.menu}>
+          {menuItems.map((item) => (
+            <Pressable
+              key={item.label}
+              style={({ pressed }) => [s.menuItem, pressed && s.menuItemPressed]}
+              onPress={item.onPress}
+            >
+              <View style={s.menuIconWrap}>
+                <Icon name={item.icon} size={20} color="#8A95A3" />
+              </View>
+              <View style={s.menuTextWrap}>
+                <Text style={[s.menuLabel, item.danger && s.menuLabelDanger]}>
+                  {item.label}
+                </Text>
+                {item.sublabel && (
+                  <Text style={s.menuSublabel}>{item.sublabel}</Text>
+                )}
+              </View>
+              <Icon name="chevron-right" size={16} color="#4A5568" />
+            </Pressable>
+          ))}
+        </View>
+
+        {/* Divider */}
+        <View style={s.divider} />
+
+        {/* Sign out */}
+        <Pressable
+          style={({ pressed }) => [s.signOutBtn, pressed && s.signOutBtnPressed]}
+          onPress={handleSignOut}
+        >
+          <View style={s.menuIconWrap}>
+            <Icon name="logout" size={20} color="#E05252" />
+          </View>
+          <Text style={s.signOutText}>Sign Out</Text>
+        </Pressable>
+
+        {/* Bottom safe area spacer */}
+        <View style={s.bottomSpacer} />
       </Animated.View>
     </Modal>
   );
@@ -147,70 +196,37 @@ export default function AccountPanel({ visible, onClose }: Props) {
 const s = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(0,0,0,0.50)',
   },
   panel: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
+    top: 0,
     right: 0,
-    backgroundColor: '#131A27',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '85%',
-    // iOS shadow
+    bottom: 0,
+    width: PANEL_WIDTH,
+    backgroundColor: '#0F1623',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 20,
+    shadowOffset: { width: -4, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 24,
   },
-  handleWrap: {
-    alignItems: 'center',
-    paddingTop: 10,
-    paddingBottom: 4,
-  },
-  handle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#2A3347',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  profileSection: {
+    paddingTop: Platform.OS === 'web' ? ('max(48px, env(safe-area-inset-top, 48px))' as any) : Platform.OS === 'ios' ? 60 : 48,
     paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1E2A3A',
+    paddingBottom: 20,
+    backgroundColor: '#131A27',
   },
-  headerTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#F0F4F8',
-    fontFamily: FONT_HEADING,
-  },
-  closeBtn: {
-    padding: 4,
-  },
-  scroll: {
-    flex: 1,
-  },
-  content: {
-    padding: 20,
-    gap: 12,
-    alignItems: 'center',
-  },
-  avatarWrap: {
-    alignItems: 'center',
-    gap: 8,
-    marginVertical: 12,
+  avatarRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 14,
   },
   avatar: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: '#1A2035',
     alignItems: 'center',
     justifyContent: 'center',
@@ -218,65 +234,98 @@ const s = StyleSheet.create({
     borderColor: '#F5A623',
   },
   avatarText: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '700',
     color: '#F5A623',
     fontFamily: FONT_HEADING,
   },
+  closeBtn: {
+    padding: 6,
+    marginTop: 4,
+  },
   name: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: '#F0F4F8',
     fontFamily: FONT_HEADING,
+    marginBottom: 3,
   },
   email: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#8A95A3',
     fontFamily: FONT_BODY,
+    marginBottom: 10,
   },
-  card: {
-    width: '100%',
-    maxWidth: 400,
-    backgroundColor: '#1A2035',
-    borderRadius: 12,
-    padding: 14,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  roleBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(245,166,35,0.12)',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderWidth: 1,
-    borderColor: '#2A3347',
+    borderColor: 'rgba(245,166,35,0.25)',
   },
-  cardLabel: {
-    fontSize: 14,
-    color: '#8A95A3',
+  roleText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#F5A623',
+    fontFamily: FONT_BODY,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#1E2A3A',
+    marginHorizontal: 0,
+  },
+  menu: {
+    paddingVertical: 8,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    gap: 12,
+  },
+  menuItemPressed: {
+    backgroundColor: '#1A2035',
+  },
+  menuIconWrap: {
+    width: 32,
+    alignItems: 'center',
+  },
+  menuTextWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  menuLabel: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#D0D8E4',
     fontFamily: FONT_BODY,
   },
-  cardValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#F0F4F8',
-    fontFamily: FONT_HEADING,
-    maxWidth: '60%',
-    textAlign: 'right',
+  menuLabelDanger: {
+    color: '#E05252',
+  },
+  menuSublabel: {
+    fontSize: 12,
+    color: '#5A6478',
+    fontFamily: FONT_BODY,
   },
   signOutBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(224,82,82,0.08)',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(224,82,82,0.2)',
-    marginTop: 8,
-    width: '100%',
-    maxWidth: 400,
-    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    gap: 12,
+  },
+  signOutBtnPressed: {
+    backgroundColor: 'rgba(224,82,82,0.06)',
   },
   signOutText: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '500',
     color: '#E05252',
     fontFamily: FONT_BODY,
   },

@@ -1,0 +1,305 @@
+rules_version = '2';
+
+// GoArrive Firestore Security Rules
+// Blueprint v1.5 (approved March 11, 2026)
+// Patched March 17, 2026 — added isCoachByUid() bootstrap fallback
+// for accounts where custom claims (role, coachId, tenantId) have not yet
+// been set by Cloud Functions. This allows the app to function fully
+// before the Cloud Functions claim-assignment flow is deployed.
+//
+// CONSTRAINT: No app-layer-only masking for sensitive data.
+// All privacy enforcement is at the rules layer.
+// Encourager access to journals is blocked here — not in the app.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─────────────────────────────────────────────
+    // HELPER FUNCTIONS
+    // ─────────────────────────────────────────────
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getRole() {
+      return request.auth.token.role;
+    }
+
+    function getCoachId() {
+      return request.auth.token.coachId;
+    }
+
+    function getTenantId() {
+      return request.auth.token.tenantId;
+    }
+
+    function isPlatformAdmin() {
+      return isAuthenticated() && getRole() == 'platformAdmin';
+    }
+
+    function isCoach() {
+      return isAuthenticated() && getRole() == 'coach';
+    }
+
+    function isCoachAssistant() {
+      return isAuthenticated() && getRole() == 'coachAssistant';
+    }
+
+    function isOwnDoc(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    function isOwnTenant(coachId) {
+      return isAuthenticated() && getTenantId() == coachId;
+    }
+
+    function isCoachOfTenant(coachId) {
+      return isAuthenticated() && getRole() == 'coach' && getCoachId() == coachId;
+    }
+
+    // Bootstrap fallback: allows a user whose UID matches the coachId field
+    // to act as coach even before custom claims are set by Cloud Functions.
+    // This is safe because it only grants access to documents the user owns.
+    function isCoachByUid(coachId) {
+      return isAuthenticated() && request.auth.uid == coachId;
+    }
+
+    // Combined coach check: custom claims OR uid-based bootstrap
+    function isCoachOrBootstrap(coachId) {
+      return isCoachOfTenant(coachId) || isCoachByUid(coachId);
+    }
+
+    // ─────────────────────────────────────────────
+    // USERS
+    // ─────────────────────────────────────────────
+
+    match /users/{uid} {
+      allow read: if isOwnDoc(uid) || isPlatformAdmin() || isCoachOfTenant(resource.data.coachId) || isCoachByUid(resource.data.coachId);
+      allow create: if isPlatformAdmin(); // Cloud Functions create via Admin SDK
+      // Users can update their own safe profile fields (displayName, phone, photoURL).
+      // Role, coachId, tenantId, and other system fields are only writable by Cloud Functions
+      // via the Admin SDK (which bypasses these rules entirely).
+      allow update: if isPlatformAdmin()
+                    || (isOwnDoc(uid)
+                        && request.resource.data.diff(resource.data).affectedKeys()
+                            .hasOnly(['displayName', 'phone', 'photoURL', 'updatedAt']));
+      allow delete: if false; // never delete users
+
+      // FCM push tokens — users can manage their own device tokens
+      match /fcmTokens/{tokenId} {
+        allow read, write: if isOwnDoc(uid);
+      }
+    }
+
+    // ─────────────────────────────────────────────
+    // COACH BRANDS
+    // ─────────────────────────────────────────────
+
+    match /coach_brands/{coachId} {
+      allow read: if isOwnDoc(coachId) || isPlatformAdmin() || isOwnTenant(coachId) || isCoachByUid(coachId);
+      allow create: if isOwnDoc(coachId) || isPlatformAdmin();
+      allow update: if isOwnDoc(coachId) || isPlatformAdmin();
+      // Computed fields (activeMemberCount, currentTier, etc.) are written by Cloud Functions only
+      allow delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
+    // MEMBER PLANS
+    // ─────────────────────────────────────────────
+
+    match /member_plans/{planId} {
+      allow read: if isOwnDoc(resource.data.memberId)
+                  || isCoachOrBootstrap(resource.data.coachId)
+                  || isPlatformAdmin();
+      allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
+      allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+      allow delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
+    // RULE VERSIONS (read: all authenticated; write: Cloud Functions only via Admin SDK)
+    // ─────────────────────────────────────────────
+
+    match /rule_versions/{ruleId} {
+      allow read: if isAuthenticated();
+      allow write: if false; // Cloud Functions use Admin SDK (bypasses rules)
+    }
+
+    // ─────────────────────────────────────────────
+    // LEDGER ENTRIES (append-only; Cloud Functions write via Admin SDK)
+    // ─────────────────────────────────────────────
+
+    match /ledger_entries/{entryId} {
+      allow read: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+      allow create: if false; // Cloud Functions only
+      allow update: if false; // append-only — never update
+      allow delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
+    // EARNINGS CAPS (Cloud Functions write via Admin SDK)
+    // ─────────────────────────────────────────────
+
+    match /earnings_caps/{capId} {
+      allow read: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+      allow write: if false; // Cloud Functions only
+    }
+
+    // ─────────────────────────────────────────────
+    // STRIPE ACCOUNTS (Cloud Functions write via Admin SDK)
+    // ─────────────────────────────────────────────
+
+    match /stripe_accounts/{coachId} {
+      allow read: if isOwnDoc(coachId) || isPlatformAdmin();
+      allow write: if false; // Cloud Functions only
+    }
+
+    // ─────────────────────────────────────────────
+    // CONSENTS (member reads/writes own; Cloud Functions write on behalf)
+    // ─────────────────────────────────────────────
+
+    match /consents/{consentId} {
+      allow read: if isOwnDoc(resource.data.userId)
+                  || isCoachOrBootstrap(resource.data.coachId)
+                  || isPlatformAdmin();
+      allow create: if isOwnDoc(request.resource.data.userId);
+      allow update: if isOwnDoc(resource.data.userId); // for revocation
+      allow delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
+    // VOICE PROVIDER SETTINGS (read: all authenticated; write: platformAdmin + Cloud Functions)
+    // ─────────────────────────────────────────────
+
+    match /voice_provider_settings/{profileId} {
+      allow read: if isAuthenticated();
+      allow create: if isPlatformAdmin();
+      allow update: if isPlatformAdmin()
+                    || (isCoach() && resource.data.ownerType == 'coach' && isOwnDoc(resource.data.ownerId));
+      allow delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
+    // CHECK-INS (daily habit check-ins — member writes own; coach reads tenant's)
+    // ─────────────────────────────────────────────
+
+    match /check_ins/{checkInId} {
+      // Members can create their own check-ins
+      allow create: if isAuthenticated()
+                    && request.auth.uid == request.resource.data.uid
+                    && request.resource.data.keys().hasOnly(['uid', 'date', 'completed', 'createdAt']);
+      // Members read their own; coaches read their tenant's members'
+      allow read: if isAuthenticated()
+                  && (isOwnDoc(resource.data.uid)
+                      || isCoachOrBootstrap(resource.data.coachId)
+                      || isPlatformAdmin());
+      // No updates or deletes — check-ins are append-only
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
+    // MOVEMENTS (Week 2 — coachId-scoped CRUD)
+    // ─────────────────────────────────────────────
+
+    match /movements/{movementId} {
+      allow read: if isAuthenticated() && (
+        resource.data.isGlobal == true ||
+        isCoachOrBootstrap(resource.data.coachId)
+      );
+      allow create: if isCoachOrBootstrap(request.resource.data.coachId);
+      allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+      allow delete: if false; // archive only
+    }
+
+    // ─────────────────────────────────────────────
+    // WORKOUT TEMPLATES (Week 3 — coachId-scoped CRUD)
+    // ─────────────────────────────────────────────
+
+    match /workout_templates/{templateId} {
+      allow read: if isAuthenticated() && isCoachOrBootstrap(resource.data.coachId);
+      allow create: if isCoachOrBootstrap(request.resource.data.coachId);
+      allow update: if isCoachOrBootstrap(resource.data.coachId);
+      allow delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
+    // MEMBERS (Week 4 — coachId-scoped CRUD)
+    // ─────────────────────────────────────────────
+
+    match /members/{memberId} {
+      allow read: if isAuthenticated() && (
+        isCoachOrBootstrap(resource.data.coachId) ||
+        isOwnDoc(resource.data.memberId) ||
+        isPlatformAdmin()
+      );
+      allow create: if isCoachOrBootstrap(request.resource.data.coachId);
+      allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+      allow delete: if false; // archive only
+    }
+
+    // ─────────────────────────────────────────────
+    // WORKOUT ASSIGNMENTS (Week 5 — coachId-scoped CRUD)
+    // Coach can CRUD assignments scoped to their own coachId.
+    // Member can read their own assignments and update status.
+    // Delete is allowed for coach (unassign workflow).
+    // ─────────────────────────────────────────────
+
+    match /workout_assignments/{assignmentId} {
+      allow read: if isAuthenticated() && (
+        isCoachOrBootstrap(resource.data.coachId) ||
+        isOwnDoc(resource.data.memberId) ||
+        isPlatformAdmin()
+      );
+      allow create: if isCoachOrBootstrap(request.resource.data.coachId);
+      allow update: if isCoachOrBootstrap(resource.data.coachId)
+                    || (isAuthenticated() && isOwnDoc(resource.data.memberId)
+                        && request.resource.data.diff(resource.data).affectedKeys()
+                            .hasOnly(['status', 'completedAt', 'updatedAt']))
+                    || isPlatformAdmin();
+      allow delete: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+    }
+
+    // ─────────────────────────────────────────────
+    // REFERRALS (Cloud Functions write via Admin SDK)
+    // ─────────────────────────────────────────────
+
+    match /referrals/{referralId} {
+      allow read: if isOwnDoc(resource.data.referrerId)
+                  || isOwnDoc(resource.data.referredId)
+                  || isPlatformAdmin();
+      allow write: if false; // Cloud Functions only
+    }
+
+    match /inter_coach_referrals/{referralId} {
+      allow read: if isOwnDoc(resource.data.referringCoachId)
+                  || isOwnDoc(resource.data.receivingCoachId)
+                  || isPlatformAdmin();
+      allow write: if false; // Cloud Functions only
+    }
+
+    match /profit_share/{recordId} {
+      allow read: if isOwnDoc(resource.data.coachId) || isPlatformAdmin();
+      allow write: if false; // Cloud Functions only
+    }
+
+    // ─────────────────────────────────────────────
+    // SPONSOR DISCLOSURES
+    // ─────────────────────────────────────────────
+
+    match /sponsor_disclosures/{disclosureId} {
+      allow read: if isAuthenticated();
+      allow write: if isPlatformAdmin();
+    }
+
+    // ─────────────────────────────────────────────
+    // CATCH-ALL: deny everything else
+    // ─────────────────────────────────────────────
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+  }
+}
