@@ -39,9 +39,9 @@ export default function AppLayout() {
           borderTopColor: TAB_BORDER,
           borderTopWidth: 1,
           // Native: give enough room for icon + label + home indicator
-          height: Platform.select({ ios: 84, android: 64, web: 60, default: 60 }),
+          height: Platform.select({ ios: 72, android: 62, web: 62, default: 62 }),
           paddingTop: 8,
-          paddingBottom: Platform.select({ ios: 28, android: 6, web: 8, default: 8 }),
+          paddingBottom: Platform.select({ ios: 14, android: 6, web: 8, default: 8 }),
           ...(Platform.OS === 'web'
             ? ({
                 position: 'fixed' as any,
@@ -50,17 +50,17 @@ export default function AppLayout() {
                 right: 0,
                 zIndex: 1000,
                 // Dynamically expand for iPhone home indicator in PWA mode
-                paddingBottom: 'max(8px, env(safe-area-inset-bottom, 8px))' as any,
-                height: 'calc(60px + env(safe-area-inset-bottom, 0px))' as any,
+                paddingBottom: 'max(4px, calc(env(safe-area-inset-bottom, 0px) / 2))' as any,
+                height: 'calc(62px + calc(env(safe-area-inset-bottom, 0px) / 2))' as any,
               } as any)
             : {}),
         },
         tabBarActiveTintColor: ACTIVE_COLOR,
         tabBarInactiveTintColor: INACTIVE_COLOR,
         tabBarLabelStyle: {
-          fontSize: 10,
+          fontSize: 12,
           fontWeight: '600',
-          marginTop: 1,
+          marginTop: 2,
           fontFamily:
             Platform.OS === 'web'
               ? "'DM Sans', sans-serif"
@@ -76,7 +76,7 @@ export default function AppLayout() {
         options={{
           title: 'Dashboard',
           tabBarIcon: ({ color, focused }) => (
-            <Icon name={focused ? 'dashboard-filled' : 'dashboard'} size={22} color={color} />
+            <Icon name={focused ? 'dashboard-filled' : 'dashboard'} size={26} color={color} />
           ),
         }}
       />
@@ -85,7 +85,7 @@ export default function AppLayout() {
         options={{
           title: 'Members',
           tabBarIcon: ({ color }) => (
-            <Icon name="members" size={22} color={color} />
+            <Icon name="members" size={26} color={color} />
           ),
         }}
       />
@@ -94,7 +94,7 @@ export default function AppLayout() {
         options={{
           title: 'Workouts',
           tabBarIcon: ({ color }) => (
-            <Icon name="workouts" size={22} color={color} />
+            <Icon name="workouts" size={26} color={color} />
           ),
         }}
       />
@@ -103,7 +103,7 @@ export default function AppLayout() {
         options={{
           title: 'Movements',
           tabBarIcon: ({ color }) => (
-            <Icon name="movements" size={22} color={color} />
+            <Icon name="movements" size={26} color={color} />
           ),
         }}
       />
