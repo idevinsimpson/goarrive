@@ -38,10 +38,10 @@ export default function AppLayout() {
           backgroundColor: TAB_BG,
           borderTopColor: TAB_BORDER,
           borderTopWidth: 1,
-          // Native: give enough room for icon + label + home indicator
-          height: Platform.select({ ios: 72, android: 62, web: 62, default: 62 }),
+          // Native: give enough room for icon + label
+          height: Platform.select({ ios: 68, android: 62, web: 62, default: 62 }),
           paddingTop: 8,
-          paddingBottom: Platform.select({ ios: 14, android: 6, web: 8, default: 8 }),
+          paddingBottom: Platform.select({ ios: 10, android: 6, web: 6, default: 6 }),
           ...(Platform.OS === 'web'
             ? ({
                 position: 'fixed' as any,
@@ -49,16 +49,16 @@ export default function AppLayout() {
                 left: 0,
                 right: 0,
                 zIndex: 1000,
-                // Dynamically expand for iPhone home indicator in PWA mode
-                paddingBottom: 'max(4px, calc(env(safe-area-inset-bottom, 0px) / 2))' as any,
-                height: 'calc(62px + calc(env(safe-area-inset-bottom, 0px) / 2))' as any,
+                // Fixed small bottom padding — iOS home indicator is handled by the OS
+                paddingBottom: '8px' as any,
+                height: '64px' as any,
               } as any)
             : {}),
         },
         tabBarActiveTintColor: ACTIVE_COLOR,
         tabBarInactiveTintColor: INACTIVE_COLOR,
         tabBarLabelStyle: {
-          fontSize: 12,
+          fontSize: 13,
           fontWeight: '600',
           marginTop: 2,
           fontFamily:
@@ -67,7 +67,7 @@ export default function AppLayout() {
               : undefined,
         },
         tabBarIconStyle: {
-          marginTop: 2,
+          marginTop: 0,
         },
       }}
     >

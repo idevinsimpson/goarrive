@@ -715,7 +715,7 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    fontSize: 14,
+    fontSize: 15,
     color: '#F0F4F8',
     fontFamily: FONT_BODY,
     ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}),
@@ -742,7 +742,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(245,166,35,0.2)',
   },
   sortChipText: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#4A5568',
     fontFamily: FONT_BODY,
   },
@@ -769,7 +769,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(245,166,35,0.3)',
   },
   toggleBtnText: {
-    fontSize: 13,
+    fontSize: 14,
     color: '#8A95A3',
     fontFamily: FONT_BODY,
   },
@@ -811,13 +811,13 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   emptyTitle: {
-    fontSize: 18,
+    fontSize: 19,
     fontWeight: '700',
     color: '#8A95A3',
     fontFamily: FONT_HEADING,
   },
   emptySubtitle: {
-    fontSize: 14,
+    fontSize: 15,
     color: '#4A5568',
     fontFamily: FONT_BODY,
     textAlign: 'center',
@@ -837,7 +837,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(245,166,35,0.3)',
   },
   emptyCtaText: {
-    fontSize: 14,
+    fontSize: 15,
     color: '#F5A623',
     fontFamily: FONT_HEADING,
     fontWeight: '700',
@@ -878,7 +878,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   cardName: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '700',
     color: '#F0F4F8',
     fontFamily: FONT_HEADING,
@@ -898,19 +898,19 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   cardEmail: {
-    fontSize: 13,
+    fontSize: 14,
     color: '#8A95A3',
     fontFamily: FONT_BODY,
     marginTop: 2,
   },
   cardPhone: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#4A5568',
     fontFamily: FONT_BODY,
     marginTop: 1,
   },
   cardDate: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#4A5568',
     fontFamily: FONT_BODY,
     marginLeft: 8,
@@ -946,7 +946,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   todayText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     color: '#6EBB7A',
     fontFamily: FONT_BODY,

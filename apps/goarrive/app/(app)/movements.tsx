@@ -332,13 +332,13 @@ const s = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    fontSize: 14,
+    fontSize: 15,
     color: '#F0F4F8',
     fontFamily: FONT_BODY,
     ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}),
   },
   countText: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#4A5568',
     fontFamily: FONT_BODY,
     paddingHorizontal: 20,
@@ -379,13 +379,13 @@ const s = StyleSheet.create({
     gap: 3,
   },
   cardTitle: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '600',
     color: '#F0F4F8',
     fontFamily: FONT_HEADING,
   },
   cardSub: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#4A5568',
     fontFamily: FONT_BODY,
   },
@@ -397,7 +397,7 @@ const s = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   catBadgeText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600',
     fontFamily: FONT_BODY,
   },
@@ -412,14 +412,14 @@ const s = StyleSheet.create({
     gap: 8,
   },
   emptyTitle: {
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '600',
     color: '#4A5568',
     fontFamily: FONT_HEADING,
     marginTop: 8,
   },
   emptyBody: {
-    fontSize: 13,
+    fontSize: 14,
     color: '#2A3347',
     fontFamily: FONT_BODY,
     textAlign: 'center',

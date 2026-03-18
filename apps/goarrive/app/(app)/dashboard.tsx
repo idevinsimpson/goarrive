@@ -332,7 +332,7 @@ const s = StyleSheet.create({
     marginBottom: 20,
   },
   heroLabel: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
     color: '#7DD3FC',
     fontFamily: FONT_BODY,
@@ -340,7 +340,7 @@ const s = StyleSheet.create({
     marginBottom: 8,
   },
   heroName: {
-    fontSize: 28,
+    fontSize: 30,
     fontWeight: '800',
     color: '#F0F4F8',
     fontFamily: FONT_HEADING,
@@ -357,7 +357,7 @@ const s = StyleSheet.create({
     borderColor: 'rgba(245,166,35,0.2)',
   },
   roleText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
     color: '#F5A623',
     fontFamily: FONT_BODY,
@@ -381,7 +381,7 @@ const s = StyleSheet.create({
     marginBottom: 20,
   },
   todayBannerText: {
-    fontSize: 14,
+    fontSize: 15,
     color: '#F5A623',
     fontFamily: FONT_BODY,
     fontWeight: '600',
@@ -410,13 +410,13 @@ const s = StyleSheet.create({
     marginBottom: 2,
   },
   statNumber: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: '800',
     color: '#F0F4F8',
     fontFamily: FONT_HEADING,
   },
   statLabel: {
-    fontSize: 11,
+    fontSize: 13,
     color: '#4A5568',
     fontFamily: FONT_BODY,
     fontWeight: '500',
@@ -426,14 +426,14 @@ const s = StyleSheet.create({
     gap: 4,
   },
   sectionSuper: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '700',
     color: '#7DD3FC',
     fontFamily: FONT_BODY,
     letterSpacing: 2,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
     color: '#F0F4F8',
     fontFamily: FONT_HEADING,
@@ -464,12 +464,12 @@ const s = StyleSheet.create({
     gap: 4,
   },
   featureTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '700',
     fontFamily: FONT_HEADING,
   },
   featureDesc: {
-    fontSize: 13,
+    fontSize: 14,
     color: '#8A95A3',
     fontFamily: FONT_BODY,
     lineHeight: 18,
@@ -479,7 +479,7 @@ const s = StyleSheet.create({
     gap: 6,
   },
   featureWeek: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '700',
     color: '#4A5568',
     fontFamily: FONT_BODY,
