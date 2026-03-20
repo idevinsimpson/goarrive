@@ -2,7 +2,11 @@
  * Root layout — GoArrive app
  *
  * Wraps the entire app in AuthProvider and sets up the navigation stack.
- * Uses Expo Router's Stack navigator.
+ * Uses Expo Router's Stack navigator with three route groups:
+ *   - (auth): Login/signup screens (unauthenticated)
+ *   - (app): Coach/admin dashboard (authenticated, coach/admin role)
+ *   - (member): Member dashboard (authenticated, member role)
+ *   - intake: Public intake form (no auth required)
  */
 import React from 'react';
 import { Stack } from 'expo-router';
@@ -21,6 +25,8 @@ export default function RootLayout() {
       >
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(app)" />
+        <Stack.Screen name="(member)" />
+        <Stack.Screen name="intake" />
       </Stack>
     </AuthProvider>
   );

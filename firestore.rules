@@ -244,10 +244,18 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (
         isCoachOrBootstrap(resource.data.coachId) ||
         isOwnDoc(resource.data.memberId) ||
+        isOwnDoc(resource.data.uid) ||
         isPlatformAdmin()
       );
-      allow create: if isCoachOrBootstrap(request.resource.data.coachId);
-      allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+      // Coach can create members, OR a new user can create their own member doc during intake
+      allow create: if isCoachOrBootstrap(request.resource.data.coachId)
+                    || (isAuthenticated() && request.auth.uid == request.resource.data.uid);
+      // Members can update their own safe profile fields
+      allow update: if isCoachOrBootstrap(resource.data.coachId)
+                    || isPlatformAdmin()
+                    || (isAuthenticated() && isOwnDoc(resource.data.uid)
+                        && request.resource.data.diff(resource.data).affectedKeys()
+                            .hasOnly(['displayName', 'phone', 'photoURL', 'updatedAt']));
       allow delete: if false; // archive only
     }
 

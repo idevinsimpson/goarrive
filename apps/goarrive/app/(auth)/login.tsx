@@ -24,6 +24,7 @@ import {
   sendPasswordResetEmail,
 } from 'firebase/auth';
 import { auth } from '../../lib/firebase';
+import { useAuth } from '../../lib/AuthContext';
 
 const FONT_HEADING =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -31,6 +32,7 @@ const FONT_BODY =
   Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
 export default function LoginScreen() {
+  const { claims } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -51,8 +53,15 @@ export default function LoginScreen() {
     setError('');
     setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email.trim(), password);
-      router.replace('/(app)/dashboard');
+      const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+      // Check role from token claims for routing
+      const tokenResult = await cred.user.getIdTokenResult();
+      const role = tokenResult.claims?.role as string | undefined;
+      if (role === 'member') {
+        router.replace('/(member)/home');
+      } else {
+        router.replace('/(app)/dashboard');
+      }
     } catch (err: any) {
       const code = err?.code ?? '';
       if (
@@ -227,7 +236,7 @@ export default function LoginScreen() {
           />
 
           {/* Labels */}
-          <Text style={s.portalLabel}>COACH PORTAL</Text>
+          <Text style={s.portalLabel}>GOARRIVE</Text>
           <Text style={s.heading}>Welcome back</Text>
 
           {/* Email field */}
@@ -288,7 +297,8 @@ export default function LoginScreen() {
 
           {/* Admin note */}
           <Text style={s.adminNote}>
-            New coaches: contact your GoArrive administrator to receive an invitation.
+            Coaches: contact your GoArrive administrator for an invitation.{"\n"}
+            Members: use the intake link from your coach to get started.
           </Text>
         </View>
       </ScrollView>
