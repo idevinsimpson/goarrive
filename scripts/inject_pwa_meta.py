@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 inject_pwa_meta.py — Post-build PWA enhancements for GoArrive
 
@@ -7,7 +6,7 @@ Injects into dist/index.html:
   2. Web app manifest link
   3. Google Fonts preconnect + stylesheet links (Space Grotesk, DM Sans)
   4. CSS overrides for fixed header/tab-bar positioning on web
-  5. Service worker registration script
+  5. Safari-specific fixes and error handling
 
 Run after `expo export --platform web` and before `firebase deploy`.
 """
@@ -41,7 +40,8 @@ HEAD_INJECT = """
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="GoArrive" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <!-- Safari-specific viewport: ensure proper scaling and safe area handling -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, shrink-to-fit=no" />
     <link rel="manifest" href="/manifest.json" />
     <link rel="icon" type="image/png" href="/icon-192.png" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
@@ -53,21 +53,56 @@ HEAD_INJECT = """
 
     <!-- PWA CSS overrides -->
     <style>
-      html, body, #root { height: 100%; overflow: hidden; background: #0E1117; }
-      body { margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-      /* Prevent pull-to-refresh on mobile Chrome */
-      body { overscroll-behavior-y: contain; }
+      /* Safari fix: ensure body and html take full viewport */
+      html, body { 
+        width: 100%; 
+        height: 100%; 
+        margin: 0; 
+        padding: 0; 
+        overflow: hidden; 
+        background: #0E1117;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      
+      #root { 
+        width: 100%; 
+        height: 100%; 
+        display: flex;
+        flex-direction: column;
+        min-height: 100% !important;
+        min-width: 100% !important;
+      }
+      
+      /* Safari fix: override Expo's problematic min-height: 0px on flex containers */
+      #root > div {
+        min-height: auto !important;
+        min-width: auto !important;
+      }
+      
+      .css-175oi2r {
+        min-height: auto !important;
+        min-width: auto !important;
+      }
+      
+      body { 
+        -webkit-tap-highlight-color: transparent; 
+        /* Prevent pull-to-refresh on mobile Chrome */
+        overscroll-behavior-y: contain;
+        /* Safari: prevent zooming on input focus */
+        font-size: 16px;
+      }
+      
       /* Fix tab bar label clipping: Expo renders label containers with overflow:hidden
          and a fixed height that doesn't account for the full tab item height.
          Force the label containers to be visible. */
-      /* The tab bar outer container (position:fixed, bottom:0) */
-      /* Force all children of the tab bar to not clip labels */
       [role="tablist"] > div > a > div:last-child,
       [role="tablist"] > div > div > a > div:last-child {
         overflow: visible !important;
         height: auto !important;
         min-height: 16px !important;
       }
+      
       /* Ensure tab items have enough height for icon + label */
       [role="tablist"] > div > a,
       [role="tablist"] > div > div > a {
@@ -77,19 +112,91 @@ HEAD_INJECT = """
         padding-top: 6px !important;
         overflow: visible !important;
       }
+      
+      /* Safari: fix for position:fixed elements with safe-area-inset */
+      @supports (padding: max(0px)) {
+        body {
+          padding-left: max(0px, env(safe-area-inset-left));
+          padding-right: max(0px, env(safe-area-inset-right));
+          padding-top: max(0px, env(safe-area-inset-top));
+          padding-bottom: max(0px, env(safe-area-inset-bottom));
+        }
+      }
+      
+      /* Fallback message for when JS fails to load */
+      #app-error {
+        display: none;
+        width: 100%;
+        height: 100%;
+        background: #0E1117;
+        color: #FFFFFF;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 16px;
+        padding: 20px;
+        box-sizing: border-box;
+        overflow: auto;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        text-align: center;
+      }
+      
+      #app-error.visible {
+        display: flex;
+      }
     </style>
 """
 
-# ── Body injection (service worker registration) ────────────────────────────
+# ── Body injection (error handlers, fallback message) ────────────────────────
 BODY_INJECT = """
+    <!-- Fallback error message if JS fails to load -->
+    <div id="app-error">
+      <div style="max-width: 300px;">
+        <h2>Unable to Load App</h2>
+        <p>The app failed to load. Please try:</p>
+        <ul style="text-align: left;">
+          <li>Refreshing the page</li>
+          <li>Clearing Safari cache (Settings > Safari > Clear History and Website Data)</li>
+          <li>Checking your internet connection</li>
+        </ul>
+        <button onclick="location.reload()" style="margin-top: 20px; padding: 10px 20px; background: #F5A623; color: #000; border: none; border-radius: 4px; cursor: pointer; font-size: 16px;">
+          Try Again
+        </button>
+      </div>
+    </div>
+
     <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', function() {
-          navigator.serviceWorker.register('/service-worker.js')
-            .then(function(reg) { console.log('[SW] registered', reg.scope); })
-            .catch(function(err) { console.warn('[SW] registration failed', err); });
-        });
-      }
+      // Set a timeout to show error message if app doesn't load
+      var appLoadTimeout = setTimeout(function() {
+        var errorDiv = document.getElementById('app-error');
+        if (errorDiv && !document.querySelector('[role="application"]')) {
+          errorDiv.classList.add('visible');
+          console.error('[App] Failed to load within 10 seconds');
+        }
+      }, 10000);
+      
+      // Global error handlers to catch any JS errors
+      window.addEventListener('error', function(event) {
+        console.error('[Global Error]', event.error);
+        clearTimeout(appLoadTimeout);
+        var errorDiv = document.getElementById('app-error');
+        if (errorDiv) {
+          errorDiv.classList.add('visible');
+          errorDiv.innerHTML = '<div style="max-width: 300px;"><h2>App Error</h2><p>' + (event.error?.message || 'An error occurred') + '</p><button onclick="location.reload()" style="margin-top: 20px; padding: 10px 20px; background: #F5A623; color: #000; border: none; border-radius: 4px; cursor: pointer; font-size: 16px;">Reload</button></div>';
+        }
+      });
+      
+      window.addEventListener('unhandledrejection', function(event) {
+        console.error('[Unhandled Promise Rejection]', event.reason);
+      });
+      
+      // Clear error timeout when app successfully loads
+      document.addEventListener('DOMContentLoaded', function() {
+        clearTimeout(appLoadTimeout);
+      });
+      
+      // Service Worker registration - DISABLED for Safari compatibility
+      console.log('[SW] Service Worker registration disabled for Safari compatibility');
     </script>
 """
 
@@ -116,7 +223,7 @@ def main():
     with open(manifest_path, 'w') as f:
         f.write(MANIFEST)
 
-    print('[inject_pwa_meta] Done — injected PWA meta, fonts, and SW registration.')
+    print('[inject_pwa_meta] Done — injected PWA meta, fonts, Safari fixes, and error handling.')
 
 
 if __name__ == '__main__':
