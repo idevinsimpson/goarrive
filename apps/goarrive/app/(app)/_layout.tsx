@@ -16,7 +16,7 @@ const ACTIVE_COLOR = '#F5A623';
 const INACTIVE_COLOR = '#4A5568';
 
 export default function AppLayout() {
-  const { user, loading } = useAuth();
+  const { user, claims, loading } = useAuth();
 
   if (loading) {
     return (
@@ -28,6 +28,11 @@ export default function AppLayout() {
 
   if (!user) {
     return <Redirect href="/(auth)/login" />;
+  }
+
+  // Role-based route guard: If user is a member, they should NOT be in the (app) section
+  if (claims?.role === 'member') {
+    return <Redirect href="/(member)/home" />;
   }
 
   return (
@@ -110,6 +115,14 @@ export default function AppLayout() {
       {/* Hidden screens — accessible via navigation but not shown in tab bar */}
       <Tabs.Screen name="admin" options={{ href: null }} />
       <Tabs.Screen name="account" options={{ href: null }} />
+      {/* member-plan: full-screen immersive, no tab bar */}
+      <Tabs.Screen
+        name="member-plan/[memberId]"
+        options={{
+          href: null,
+          tabBarStyle: { display: 'none' },
+        }}
+      />
     </Tabs>
   );
 }

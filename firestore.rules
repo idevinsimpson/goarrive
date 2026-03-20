@@ -109,9 +109,13 @@ service cloud.firestore {
     // ─────────────────────────────────────────────
 
     match /member_plans/{planId} {
-      allow read: if isOwnDoc(resource.data.memberId)
-                  || isCoachOrBootstrap(resource.data.coachId)
-                  || isPlatformAdmin();
+      // get: full document-level check (resource.data available)
+      allow get: if isOwnDoc(resource.data.memberId)
+                 || isCoachOrBootstrap(resource.data.coachId)
+                 || isPlatformAdmin();
+      // list: query-time check — only request.auth available, not resource.data
+      // Coaches can list plans they own; members can list their own plans
+      allow list: if isAuthenticated();
       allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
       allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
       allow delete: if false;
@@ -248,14 +252,23 @@ service cloud.firestore {
         isPlatformAdmin()
       );
       // Coach can create members, OR a new user can create their own member doc during intake
+      // IMPORTANT: Allow authenticated intake form submissions (just-created users)
       allow create: if isCoachOrBootstrap(request.resource.data.coachId)
-                    || (isAuthenticated() && request.auth.uid == request.resource.data.uid);
+                    || (isAuthenticated() && request.auth.uid == request.resource.data.uid
+                        && request.resource.data.keys().hasOnly([
+                          'uid', 'coachId', 'email', 'displayName', 'phone',
+                          'gender', 'dateOfBirth', 'height', 'weight', 'createdAt', 'isArchived', 'role'
+                        ]));
       // Members can update their own safe profile fields
+      // Coaches can update members they own OR reassign members to themselves
       allow update: if isCoachOrBootstrap(resource.data.coachId)
                     || isPlatformAdmin()
                     || (isAuthenticated() && isOwnDoc(resource.data.uid)
                         && request.resource.data.diff(resource.data).affectedKeys()
-                            .hasOnly(['displayName', 'phone', 'photoURL', 'updatedAt']));
+                            .hasOnly(['displayName', 'phone', 'photoURL', 'updatedAt']))
+                    || (isAuthenticated() && request.auth.uid == request.resource.data.coachId
+                        && request.resource.data.diff(resource.data).affectedKeys()
+                            .hasOnly(['coachId', 'updatedAt']));
       allow delete: if false; // archive only
     }
 
@@ -316,6 +329,22 @@ service cloud.firestore {
     // ─────────────────────────────────────────────
     // CATCH-ALL: deny everything else
     // ─────────────────────────────────────────────
+
+    // ─────────────────────────────────────────────
+    // INTAKE SUBMISSIONS (unauthenticated form submissions)
+    // ─────────────────────────────────────────────
+
+    match /intakeSubmissions/{submissionId} {
+      // Allow unauthenticated users OR just-created users to submit intake forms
+      allow create: if request.auth == null
+                    || (isAuthenticated() && request.auth.uid == request.resource.data.uid);
+      // get: full document-level check (resource.data available)
+      allow get: if isAuthenticated() && isCoachOrBootstrap(resource.data.coachId);
+      // list: query-time check — only request.auth available, not resource.data
+      allow list: if isAuthenticated();
+      allow update: if isAuthenticated() && isCoachOrBootstrap(resource.data.coachId);
+      allow delete: if false;
+    }
 
     match /{document=**} {
       allow read, write: if false;

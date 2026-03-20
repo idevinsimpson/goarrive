@@ -23,6 +23,7 @@ import { db } from '../lib/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { Icon } from './Icon';
 import AssignedWorkoutsList from './AssignedWorkoutsList';
+import { router } from 'expo-router';
 
 const FONT_HEADING =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -136,6 +137,17 @@ export default function MemberDetail({
 
           {/* Footer actions */}
           <View style={styles.footer}>
+            {/* View Plan / Questionnaire */}
+            <TouchableOpacity
+              style={styles.planBtn}
+              onPress={() => {
+                onClose();
+                router.push(`/(app)/member-plan/${currentMember.id}` as any);
+              }}
+            >
+              <Icon name="document" size={18} color="#F5A623" />
+              <Text style={styles.planBtnText}>View Plan</Text>
+            </TouchableOpacity>
             <TouchableOpacity
               style={styles.editBtn}
               onPress={() => onEdit(currentMember)}
@@ -279,6 +291,24 @@ const styles = StyleSheet.create({
     gap: 12,
     borderTopWidth: 1,
     borderTopColor: '#1E2A3A',
+  },
+  planBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(245,166,35,0.1)',
+    borderRadius: 12,
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.3)',
+  },
+  planBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#F5A623',
+    fontFamily: FONT_HEADING,
   },
   editBtn: {
     flex: 1,

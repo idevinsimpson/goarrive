@@ -198,10 +198,10 @@ const initialFormData: FormData = {
   whyStatement: '',
   readinessForChange: 7,
   motivation: 8,
-  gymConfidence: 5,
+  gymConfidence: 7,
   preferredDays: [],
   preferredTime: '',
-  sessionsPerWeek: '4',
+  sessionsPerWeek: '',
   gym: '',
   password: '',
   confirmPassword: '',
@@ -215,12 +215,13 @@ export default function IntakeForm() {
   const [submitting, setSubmitting] = useState(false);
 
   const updateField = useCallback(
-    <K extends keyof FormData>(field: K, value: FormData[K]) => {
+    (field: keyof FormData, value: any) => {
       setFormData((prev) => ({ ...prev, [field]: value }));
       if (errors[field]) {
         setErrors((prev) => {
-          const { [field]: _, ...rest } = prev;
-          return rest;
+          const newErrors = { ...prev };
+          delete newErrors[field];
+          return newErrors;
         });
       }
     },
@@ -229,49 +230,32 @@ export default function IntakeForm() {
 
   const toggleArrayItem = useCallback(
     (field: keyof FormData, item: string) => {
-      setFormData((prev) => {
-        const arr = prev[field] as string[];
-        return {
-          ...prev,
-          [field]: arr.includes(item)
-            ? arr.filter((i) => i !== item)
-            : [...arr, item],
-        };
-      });
+      const arr = formData[field] as string[];
+      if (arr.includes(item)) {
+        updateField(field, arr.filter((x) => x !== item));
+      } else {
+        updateField(field, [...arr, item]);
+      }
     },
-    []
+    [formData, updateField]
   );
 
   function validateStep(): boolean {
     const newErrors: Record<string, string> = {};
 
-    switch (step) {
-      case 0: // About You
-        if (!formData.firstName.trim()) newErrors.firstName = 'First name is required';
-        if (!formData.lastName.trim()) newErrors.lastName = 'Last name is required';
-        if (!formData.email.trim()) newErrors.email = 'Email is required';
-        else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email))
-          newErrors.email = 'Please enter a valid email';
-        if (!formData.phone.trim()) newErrors.phone = 'Phone number is required';
-        break;
-      case 1: // Work & Lifestyle
-        if (!formData.occupation.trim()) newErrors.occupation = 'Please enter your occupation';
-        break;
-      case 4: // Fitness Goals
-        if (formData.primaryGoals.length === 0)
-          newErrors.primaryGoals = 'Select at least one goal';
-        break;
-      case 5: // Motivation
-        if (!formData.whyStatement.trim())
-          newErrors.whyStatement = 'Please share why this is important to you';
-        break;
-      case 7: // Account
-        if (!formData.password) newErrors.password = 'Password is required';
-        else if (formData.password.length < 6)
-          newErrors.password = 'Password must be at least 6 characters';
-        if (formData.password !== formData.confirmPassword)
-          newErrors.confirmPassword = 'Passwords do not match';
-        break;
+    if (step === 0) {
+      if (!formData.firstName.trim())
+        newErrors.firstName = 'First name required';
+      if (!formData.lastName.trim())
+        newErrors.lastName = 'Last name required';
+      if (!formData.email.trim()) newErrors.email = 'Email required';
+      if (!formData.phone.trim()) newErrors.phone = 'Phone required';
+      if (!formData.gender) newErrors.gender = 'Gender required';
+      if (!formData.dateOfBirth.trim())
+        newErrors.dateOfBirth = 'Date of birth required';
+      if (!formData.heightFeet.trim())
+        newErrors.heightFeet = 'Height required';
+      if (!formData.weight.trim()) newErrors.weight = 'Weight required';
     }
 
     setErrors(newErrors);
@@ -280,125 +264,69 @@ export default function IntakeForm() {
 
   function handleNext() {
     if (validateStep()) {
-      setStep((s) => Math.min(s + 1, STEPS.length - 1));
+      setStep((s) => s + 1);
     }
   }
 
   function handleBack() {
-    setStep((s) => Math.max(s - 1, 0));
+    setStep((s) => Math.max(0, s - 1));
   }
 
   async function handleSubmit() {
     if (!validateStep()) return;
-    setSubmitting(true);
 
+    setSubmitting(true);
     try {
-      // 1. Create Firebase Auth account
-      const cred = await createUserWithEmailAndPassword(
+      if (!formData.password || formData.password !== formData.confirmPassword) {
+        setErrors({ submit: 'Passwords do not match' });
+        return;
+      }
+
+      const userCred = await createUserWithEmailAndPassword(
         auth,
-        formData.email.trim().toLowerCase(),
+        formData.email,
         formData.password
       );
-      const uid = cred.user.uid;
 
-      // Update display name
-      await updateProfile(cred.user, {
-        displayName: `${formData.firstName.trim()} ${formData.lastName.trim()}`,
+      await updateProfile(userCred.user, {
+        displayName: `${formData.firstName} ${formData.lastName}`,
       });
 
-      // 2. Create intake submission document
-      const submissionRef = doc(collection(db, 'intakeSubmissions'));
-      await setDoc(submissionRef, {
-        memberId: uid,
-        coachId: coachId,
-        personalInfo: {
-          firstName: formData.firstName.trim(),
-          lastName: formData.lastName.trim(),
-          email: formData.email.trim().toLowerCase(),
-          phone: formData.phone.trim(),
-          gender: formData.gender,
-          dateOfBirth: formData.dateOfBirth,
-          heightFeet: parseInt(formData.heightFeet) || 0,
-          heightInches: parseInt(formData.heightInches) || 0,
-          weight: parseInt(formData.weight) || 0,
-        },
-        workLifestyle: {
-          occupation: formData.occupation.trim(),
-          activityLevel: formData.activityLevel,
-          workSchedule: formData.workSchedule.trim(),
-          physicalActivities: formData.physicalActivities.trim(),
-        },
-        healthHistory: {
-          healthProblems: formData.healthProblems.trim(),
-          medications: formData.medications.trim(),
-          therapies: formData.therapies.trim(),
-          currentInjuries: formData.currentInjuries.trim(),
-          injuries: formData.injuries,
-          stressMotivation: formData.stressMotivation,
-          familyHeartDisease: formData.familyHeartDisease,
-          familyDiseases: formData.familyDiseases,
-          familyDiseasesDetail: formData.familyDiseasesDetail.trim(),
-          diabetes: formData.diabetes,
-          asthma: formData.asthma,
-          cardiovascular: formData.cardiovascular,
-          medicalExplanation: formData.medicalExplanation.trim(),
-          smoker: formData.smoker,
-          emergencyContactName: formData.emergencyContactName.trim(),
-          emergencyContactPhone: formData.emergencyContactPhone.trim(),
-        },
-        dietRoutine: {
-          currentDiet: formData.currentDiet,
-          currentRoutine: formData.currentRoutine.trim(),
-          energyLevel: formData.energyLevel,
-          stressLevel: formData.stressLevel,
-        },
-        fitnessGoals: {
-          goals: formData.primaryGoals,
-          goalWeight: formData.goalWeight.trim(),
-          specificGoals: formData.specificGoals.trim(),
-        },
-        motivation: {
-          whyStatement: formData.whyStatement.trim(),
-          readinessForChange: formData.readinessForChange,
-          motivation: formData.motivation,
-          gymConfidence: formData.gymConfidence,
-        },
-        scheduling: {
-          preferredDays: formData.preferredDays,
-          preferredTime: formData.preferredTime.trim(),
-          sessionsPerWeek: parseInt(formData.sessionsPerWeek) || 4,
-          gym: formData.gym.trim(),
-        },
-        status: 'submitted',
+      const memberRef = doc(
+        collection(db, 'members'),
+        userCred.user.uid
+      );
+      await setDoc(memberRef, {
+        uid: userCred.user.uid,
+        coachId: coachId || 'unassigned',
+        email: formData.email,
+        displayName: `${formData.firstName} ${formData.lastName}`,
+        phone: formData.phone,
+        gender: formData.gender,
+        dateOfBirth: formData.dateOfBirth,
+        height: `${formData.heightFeet}'${formData.heightInches}"`,
+        weight: formData.weight,
+        role: 'member',
         createdAt: Timestamp.now(),
+        isArchived: false,
       });
 
-      // 3. Create member document
-      await setDoc(doc(db, 'members', uid), {
-        uid: uid,
-        email: formData.email.trim().toLowerCase(),
-        displayName: `${formData.firstName.trim()} ${formData.lastName.trim()}`,
-        phone: formData.phone.trim(),
-        coachId: coachId,
-        status: 'pending',
-        intakeSubmissionId: submissionRef.id,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
+      const intakeRef = doc(
+        collection(db, 'intakeSubmissions'),
+        userCred.user.uid
+      );
+      await setDoc(intakeRef, {
+        uid: userCred.user.uid,
+        coachId: coachId || 'unassigned',
+        ...formData,
+        submittedAt: Timestamp.now(),
       });
 
-      // 4. Redirect to member dashboard
       router.replace('/(member)/home');
-    } catch (err: any) {
-      console.error('[IntakeForm] Submission error:', err);
-      const code = err?.code ?? '';
-      if (code === 'auth/email-already-in-use') {
-        setErrors({ email: 'This email is already registered. Please sign in instead.' });
-        setStep(0); // Go back to step 1 to show the email error
-      } else if (code === 'auth/weak-password') {
-        setErrors({ password: 'Password is too weak. Please use at least 6 characters.' });
-      } else {
-        setErrors({ submit: 'Something went wrong. Please try again.' });
-      }
+    } catch (error: any) {
+      setErrors({
+        submit: error.message || 'Failed to create account',
+      });
     } finally {
       setSubmitting(false);
     }
@@ -414,6 +342,7 @@ export default function IntakeForm() {
       multiline?: boolean;
       keyboardType?: 'default' | 'email-address' | 'phone-pad' | 'numeric';
       required?: boolean;
+      secureTextEntry?: boolean;
     }
   ) {
     return (
@@ -431,6 +360,7 @@ export default function IntakeForm() {
           keyboardType={options?.keyboardType || 'default'}
           multiline={options?.multiline}
           numberOfLines={options?.multiline ? 4 : 1}
+          secureTextEntry={options?.secureTextEntry}
           autoCapitalize={
             options?.keyboardType === 'email-address' ? 'none' : 'sentences'
           }
@@ -500,8 +430,8 @@ export default function IntakeForm() {
             >
               <Text
                 style={[
-                  s.yesNoText,
-                  value === opt && s.yesNoTextSelected,
+                  s.yesNoBtnText,
+                  value === opt && s.yesNoBtnTextSelected,
                 ]}
               >
                 {opt}
@@ -519,102 +449,125 @@ export default function IntakeForm() {
     min: number,
     max: number
   ) {
-    const value = formData[field] as number;
+    const value = (formData[field] as number) || min;
     return (
       <View style={s.fieldWrap}>
-        <Text style={s.fieldLabel}>
-          {label}: <Text style={s.sliderValue}>{value}/{max}</Text>
-        </Text>
+        <Text style={s.fieldLabel}>{label}</Text>
         <View style={s.sliderRow}>
-          {Array.from({ length: max - min + 1 }, (_, i) => i + min).map(
-            (n) => (
-              <Pressable
-                key={n}
-                style={[
-                  s.sliderDot,
-                  n <= value && s.sliderDotActive,
-                ]}
-                onPress={() => updateField(field, n as any)}
-              >
-                <Text
-                  style={[
-                    s.sliderDotText,
-                    n <= value && s.sliderDotTextActive,
-                  ]}
-                >
-                  {n}
-                </Text>
-              </Pressable>
-            )
-          )}
+          <Text style={s.sliderValue}>{value}</Text>
+          <input
+            type="range"
+            min={min}
+            max={max}
+            value={value}
+            onChange={(e) =>
+              updateField(field, parseInt(e.currentTarget.value))
+            }
+            style={{
+              flex: 1,
+              marginHorizontal: 12,
+              height: 6,
+              cursor: 'pointer',
+            } as any}
+          />
+          <Text style={s.sliderMax}>{max}</Text>
         </View>
       </View>
     );
   }
 
-  // ── Step renderers ────────────────────────────────────────────────────────
-
+  // Step renderers
   function renderStep0() {
     return (
       <View>
         <Text style={s.stepTitle}>Let's Get to Know You</Text>
-        <Text style={s.stepSubtitle}>
-          Tell us about yourself so your coach can personalize your experience.
+        <Text style={s.stepDescription}>
+          Tell us about yourself so your coach can personalize your
+          experience.
         </Text>
-        {renderTextField('First Name', 'firstName', 'Enter your first name', {
-          required: true,
-        })}
-        {renderTextField('Last Name', 'lastName', 'Enter your last name', {
-          required: true,
-        })}
-        {renderTextField('Email', 'email', 'you@example.com', {
-          required: true,
-          keyboardType: 'email-address',
-        })}
-        {renderTextField('Phone Number', 'phone', '(555) 123-4567', {
-          required: true,
-          keyboardType: 'phone-pad',
-        })}
+        {renderTextField(
+          'First Name',
+          'firstName',
+          'Enter your first name',
+          { required: true }
+        )}
+        {renderTextField(
+          'Last Name',
+          'lastName',
+          'Enter your last name',
+          { required: true }
+        )}
+        {renderTextField(
+          'Email',
+          'email',
+          'you@example.com',
+          { required: true, keyboardType: 'email-address' }
+        )}
+        {renderTextField(
+          'Phone Number',
+          'phone',
+          '(555) 123-4567',
+          { required: true, keyboardType: 'phone-pad' }
+        )}
         <View style={s.fieldWrap}>
           <Text style={s.fieldLabel}>Gender</Text>
-          <View style={s.yesNoRow}>
-            {['Male', 'Female', 'Other'].map((opt) => (
+          <View style={s.buttonRow}>
+            {['Male', 'Female', 'Other'].map((g) => (
               <Pressable
-                key={opt}
+                key={g}
                 style={[
-                  s.yesNoBtn,
-                  formData.gender === opt && s.yesNoBtnSelected,
+                  s.genderBtn,
+                  formData.gender === g && s.genderBtnSelected,
                 ]}
-                onPress={() => updateField('gender', opt)}
+                onPress={() => updateField('gender', g)}
               >
                 <Text
                   style={[
-                    s.yesNoText,
-                    formData.gender === opt && s.yesNoTextSelected,
+                    s.genderBtnText,
+                    formData.gender === g && s.genderBtnTextSelected,
                   ]}
                 >
-                  {opt}
+                  {g}
                 </Text>
               </Pressable>
             ))}
           </View>
         </View>
-        {renderTextField('Date of Birth', 'dateOfBirth', 'MM/DD/YYYY')}
-        <View style={s.rowFields}>
-          <View style={s.halfField}>
-            {renderTextField('Height (ft)', 'heightFeet', "5", {
-              keyboardType: 'numeric',
-            })}
-          </View>
-          <View style={s.halfField}>
-            {renderTextField('Height (in)', 'heightInches', "10", {
-              keyboardType: 'numeric',
-            })}
+        {renderTextField(
+          'Date of Birth',
+          'dateOfBirth',
+          'MM/DD/YYYY',
+          { required: true }
+        )}
+        <View style={s.fieldWrap}>
+          <Text style={s.fieldLabel}>Height</Text>
+          <View style={s.heightRow}>
+            <TextInput
+              style={s.heightInput}
+              placeholder="5"
+              placeholderTextColor="#4A5568"
+              value={formData.heightFeet}
+              onChangeText={(v) => updateField('heightFeet', v)}
+              keyboardType="numeric"
+            />
+            <Text style={s.heightLabel}>ft</Text>
+            <TextInput
+              style={s.heightInput}
+              placeholder="10"
+              placeholderTextColor="#4A5568"
+              value={formData.heightInches}
+              onChangeText={(v) => updateField('heightInches', v)}
+              keyboardType="numeric"
+            />
+            <Text style={s.heightLabel}>in</Text>
           </View>
         </View>
-        {renderTextField('Weight (lbs)', 'weight', '180', {
-          keyboardType: 'numeric',
-        })}
+        {renderTextField(
+          'Weight (lbs)',
+          'weight',
+          '180',
+          { required: true, keyboardType: 'numeric' }
+        )}
       </View>
     );
   }
@@ -623,46 +576,41 @@ export default function IntakeForm() {
     return (
       <View>
         <Text style={s.stepTitle}>Work & Lifestyle</Text>
-        <Text style={s.stepSubtitle}>
-          Understanding your daily routine helps us design a plan that fits your life.
-        </Text>
-        {renderTextField('What do you do for a living?', 'occupation', 'e.g., Software Engineer', {
-          required: true,
-        })}
+        {renderTextField('Occupation', 'occupation', 'e.g., Software Engineer')}
         <View style={s.fieldWrap}>
-          <Text style={s.fieldLabel}>Activity level at your job</Text>
-          <View style={s.yesNoRow}>
-            {ACTIVITY_LEVELS.map((opt) => (
+          <Text style={s.fieldLabel}>Activity Level</Text>
+          <View style={s.buttonRow}>
+            {ACTIVITY_LEVELS.map((level) => (
               <Pressable
-                key={opt}
+                key={level}
                 style={[
-                  s.yesNoBtn,
-                  formData.activityLevel === opt && s.yesNoBtnSelected,
+                  s.activityBtn,
+                  formData.activityLevel === level && s.activityBtnSelected,
                 ]}
-                onPress={() => updateField('activityLevel', opt)}
+                onPress={() => updateField('activityLevel', level)}
               >
                 <Text
                   style={[
-                    s.yesNoText,
-                    formData.activityLevel === opt && s.yesNoTextSelected,
+                    s.activityBtnText,
+                    formData.activityLevel === level &&
+                      s.activityBtnTextSelected,
                   ]}
                 >
-                  {opt}
+                  {level}
                 </Text>
               </Pressable>
             ))}
           </View>
         </View>
         {renderTextField(
-          'Typical work schedule',
+          'Work Schedule',
           'workSchedule',
-          'e.g., Mon-Fri 8am-5pm'
+          'e.g., 9-5 office'
         )}
         {renderTextField(
-          'Physical activities outside gym/work',
+          'Physical Activities',
           'physicalActivities',
-          'e.g., Walking, hiking, sports...',
-          { multiline: true }
+          'e.g., Running, swimming'
         )}
       </View>
     );
@@ -672,43 +620,28 @@ export default function IntakeForm() {
     return (
       <View>
         <Text style={s.stepTitle}>Health & Medical History</Text>
-        <Text style={s.stepSubtitle}>
-          This information helps your coach keep you safe and design around any limitations.
-        </Text>
+        {renderYesNo('Any health problems?', 'healthProblems')}
         {renderTextField(
-          'Diagnosed health problems',
-          'healthProblems',
-          'List any diagnosed conditions...',
-          { multiline: true }
-        )}
-        {renderTextField(
-          'Current medications',
+          'Medications',
           'medications',
-          'List any medications...',
+          'List any medications',
           { multiline: true }
         )}
         {renderTextField(
-          'Current injuries',
-          'currentInjuries',
-          'Describe any current injuries...',
+          'Current Therapies',
+          'therapies',
+          'e.g., Physical therapy',
           { multiline: true }
         )}
-        {renderChipSelect('Injury areas', 'injuries', INJURY_OPTIONS)}
-        {renderYesNo('Stresses or motivational problems?', 'stressMotivation')}
-        {renderYesNo('Family heart disease before 60?', 'familyHeartDisease')}
-        {renderYesNo('Diabetes?', 'diabetes')}
-        {renderYesNo('Asthma/respiratory disorders?', 'asthma')}
-        {renderYesNo('Cardiovascular issues?', 'cardiovascular')}
-        {(formData.diabetes === 'Yes' ||
-          formData.asthma === 'Yes' ||
-          formData.cardiovascular === 'Yes') &&
-          renderTextField(
-            'Please explain',
-            'medicalExplanation',
-            'Provide details...',
-            { multiline: true }
-          )}
-        {renderYesNo('Current cigarette smoker?', 'smoker')}
+        {renderChipSelect('Past Injuries', 'injuries', INJURY_OPTIONS)}
+        {renderYesNo('Family history of heart disease?', 'familyHeartDisease')}
+        {renderYesNo('Family history of diabetes?', 'diabetes')}
+        {renderYesNo('Family history of asthma?', 'asthma')}
+        {renderYesNo(
+          'Family history of cardiovascular disease?',
+          'cardiovascular'
+        )}
+        {renderYesNo('Current smoker?', 'smoker')}
         {renderTextField(
           'Emergency Contact Name',
           'emergencyContactName',
@@ -717,8 +650,7 @@ export default function IntakeForm() {
         {renderTextField(
           'Emergency Contact Phone',
           'emergencyContactPhone',
-          '(555) 123-4567',
-          { keyboardType: 'phone-pad' }
+          'Phone number'
         )}
       </View>
     );
@@ -728,18 +660,15 @@ export default function IntakeForm() {
     return (
       <View>
         <Text style={s.stepTitle}>Diet & Current Routine</Text>
-        <Text style={s.stepSubtitle}>
-          Tell us about your current eating habits and exercise routine.
-        </Text>
-        {renderChipSelect('Current diet', 'currentDiet', DIET_OPTIONS)}
+        {renderChipSelect('Diet Type', 'currentDiet', DIET_OPTIONS)}
         {renderTextField(
-          'Describe your current routine',
+          'Current Routine',
           'currentRoutine',
-          'What does your typical week of exercise look like?',
+          'Describe your typical day',
           { multiline: true }
         )}
-        {renderChipSelect('Energy levels', 'energyLevel', ENERGY_OPTIONS)}
-        {renderChipSelect('Stress levels', 'stressLevel', STRESS_OPTIONS)}
+        {renderChipSelect('Energy Level', 'energyLevel', ENERGY_OPTIONS)}
+        {renderChipSelect('Stress Level', 'stressLevel', STRESS_OPTIONS)}
       </View>
     );
   }
@@ -748,22 +677,17 @@ export default function IntakeForm() {
     return (
       <View>
         <Text style={s.stepTitle}>Fitness Goals</Text>
-        <Text style={s.stepSubtitle}>
-          What do you want to achieve? Select all that apply.
-        </Text>
-        {renderChipSelect(
-          'Primary goals',
-          'primaryGoals',
-          GOAL_OPTIONS,
-          true
-        )}
-        {renderTextField('Goal weight', 'goalWeight', 'e.g., 175 lbs', {
-          keyboardType: 'default',
-        })}
+        {renderChipSelect('Primary Goals', 'primaryGoals', GOAL_OPTIONS, true)}
         {renderTextField(
-          'Any specific goals?',
+          'Goal Weight (lbs)',
+          'goalWeight',
+          '180',
+          { keyboardType: 'numeric' }
+        )}
+        {renderTextField(
+          'Specific Goals',
           'specificGoals',
-          'e.g., Run a 5K, deadlift 300 lbs...',
+          'Any other goals?',
           { multiline: true }
         )}
       </View>
@@ -774,18 +698,20 @@ export default function IntakeForm() {
     return (
       <View>
         <Text style={s.stepTitle}>Motivation & Readiness</Text>
-        <Text style={s.stepSubtitle}>
-          Help your coach understand what drives you.
-        </Text>
         {renderTextField(
-          'Why is this important to you?',
+          'Why do you want to get fit?',
           'whyStatement',
-          'What is driving you to make this change?',
-          { multiline: true, required: true }
+          'Tell us your story',
+          { multiline: true }
         )}
-        {renderSlider('Readiness for change', 'readinessForChange', 1, 10)}
-        {renderSlider('Motivation level', 'motivation', 1, 10)}
-        {renderSlider('Gym confidence', 'gymConfidence', 1, 10)}
+        {renderSlider(
+          'Readiness for Change (1-10)',
+          'readinessForChange',
+          1,
+          10
+        )}
+        {renderSlider('Motivation Level (1-10)', 'motivation', 1, 10)}
+        {renderSlider('Gym Confidence (1-10)', 'gymConfidence', 1, 10)}
       </View>
     );
   }
@@ -794,30 +720,43 @@ export default function IntakeForm() {
     return (
       <View>
         <Text style={s.stepTitle}>Scheduling & Availability</Text>
-        <Text style={s.stepSubtitle}>
-          When can you train? This helps your coach build your weekly plan.
-        </Text>
-        {renderChipSelect('Preferred training days', 'preferredDays', [
-          'Monday',
-          'Tuesday',
-          'Wednesday',
-          'Thursday',
-          'Friday',
-          'Saturday',
-          'Sunday',
-        ])}
+        <View style={s.fieldWrap}>
+          <Text style={s.fieldLabel}>Preferred Days</Text>
+          <View style={s.chipContainer}>
+            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
+              <Pressable
+                key={day}
+                style={[
+                  s.chip,
+                  formData.preferredDays.includes(day) && s.chipSelected,
+                ]}
+                onPress={() => toggleArrayItem('preferredDays', day)}
+              >
+                <Text
+                  style={[
+                    s.chipText,
+                    formData.preferredDays.includes(day) &&
+                      s.chipTextSelected,
+                  ]}
+                >
+                  {day}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
         {renderTextField(
-          'Preferred training time',
+          'Preferred Time',
           'preferredTime',
-          'e.g., 6:00 AM, After work'
+          'e.g., Morning, Evening'
         )}
         {renderTextField(
-          'Sessions per week',
+          'Sessions Per Week',
           'sessionsPerWeek',
-          '4',
+          'e.g., 3',
           { keyboardType: 'numeric' }
         )}
-        {renderTextField('Gym / Training location', 'gym', 'e.g., Lifetime Fitness')}
+        {renderTextField('Gym / Location', 'gym', 'Where do you train?')}
       </View>
     );
   }
@@ -826,38 +765,18 @@ export default function IntakeForm() {
     return (
       <View>
         <Text style={s.stepTitle}>Create Your Account</Text>
-        <Text style={s.stepSubtitle}>
-          Set a password to create your GoArrive account. You'll use your email
-          ({formData.email || 'entered in Step 1'}) to sign in.
-        </Text>
-        <View style={s.fieldWrap}>
-          <Text style={s.fieldLabel}>Password *</Text>
-          <TextInput
-            style={s.input}
-            placeholder="At least 6 characters"
-            placeholderTextColor="#4A5568"
-            value={formData.password}
-            onChangeText={(v) => updateField('password', v)}
-            secureTextEntry
-          />
-          {errors.password ? (
-            <Text style={s.errorText}>{errors.password}</Text>
-          ) : null}
-        </View>
-        <View style={s.fieldWrap}>
-          <Text style={s.fieldLabel}>Confirm Password *</Text>
-          <TextInput
-            style={s.input}
-            placeholder="Type your password again"
-            placeholderTextColor="#4A5568"
-            value={formData.confirmPassword}
-            onChangeText={(v) => updateField('confirmPassword', v)}
-            secureTextEntry
-          />
-          {errors.confirmPassword ? (
-            <Text style={s.errorText}>{errors.confirmPassword}</Text>
-          ) : null}
-        </View>
+        {renderTextField(
+          'Password',
+          'password',
+          'Create a password',
+          { required: true, secureTextEntry: true }
+        )}
+        {renderTextField(
+          'Confirm Password',
+          'confirmPassword',
+          'Confirm password',
+          { required: true, secureTextEntry: true }
+        )}
         {errors.submit ? (
           <Text style={[s.errorText, { textAlign: 'center', marginTop: 8 }]}>
             {errors.submit}
@@ -887,6 +806,17 @@ export default function IntakeForm() {
     >
       {/* Progress Bar */}
       <View style={s.progressBar}>
+        {Platform.OS === 'web' && (
+          <img
+            src="/goarrive-logo.png"
+            alt="GoArrive"
+            style={{
+              height: 40,
+              marginBottom: 12,
+              objectFit: 'contain',
+            } as any}
+          />
+        )}
         <View style={s.progressHeader}>
           <Text style={s.progressLabel}>{STEPS[step]}</Text>
           <Text style={s.progressCount}>
@@ -903,16 +833,18 @@ export default function IntakeForm() {
         </View>
       </View>
 
-      {/* Form Content */}
-      <ScrollView
-        style={s.scroll}
-        contentContainerStyle={s.scrollContent}
-        keyboardShouldPersistTaps="handled"
-      >
-        {stepRenderers[step]()}
-      </ScrollView>
+      {/* Form Content — Scrollable container */}
+      <View style={s.scrollContainer}>
+        <ScrollView
+          style={s.scroll}
+          contentContainerStyle={s.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          {stepRenderers[step]()}
+        </ScrollView>
+      </View>
 
-      {/* Navigation Buttons */}
+      {/* Navigation Buttons — Fixed at bottom */}
       <View style={s.navBar}>
         {step > 0 ? (
           <Pressable style={s.backBtn} onPress={handleBack}>
@@ -943,6 +875,10 @@ const s = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#0E1117',
+    display: 'flex',
+    flexDirection: 'column',
+    minHeight: '100vh',
+    height: '100vh',
   },
   progressBar: {
     paddingHorizontal: 16,
@@ -980,13 +916,18 @@ const s = StyleSheet.create({
     backgroundColor: '#F5A623',
     borderRadius: 2,
   },
+  scrollContainer: {
+    flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+  },
   scroll: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     paddingTop: 20,
-    paddingBottom: 24,
+    paddingBottom: 100,
     maxWidth: 520,
     alignSelf: 'center',
     width: '100%',
@@ -999,44 +940,42 @@ const s = StyleSheet.create({
     fontFamily:
       Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : undefined,
   },
-  stepSubtitle: {
+  stepDescription: {
     fontSize: 14,
     color: '#A0AEC0',
-    lineHeight: 22,
-    marginBottom: 24,
+    marginBottom: 20,
+    lineHeight: 20,
     fontFamily:
       Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined,
   },
   fieldWrap: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   fieldLabel: {
     fontSize: 13,
-    fontWeight: '500',
-    color: '#8A95A3',
-    marginBottom: 6,
+    fontWeight: '600',
+    color: '#CBD5E0',
+    marginBottom: 8,
     fontFamily:
       Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined,
   },
   input: {
-    backgroundColor: '#1A2035',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: '#F0F4F8',
-    borderWidth: 1,
-    borderColor: '#2A3347',
+    backgroundColor: '#FFFACD',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#0E1117',
     fontFamily:
       Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined,
   },
   inputMultiline: {
-    minHeight: 100,
+    minHeight: 80,
     textAlignVertical: 'top',
   },
   errorText: {
     fontSize: 12,
-    color: '#E05252',
+    color: '#FC8181',
     marginTop: 4,
     fontFamily:
       Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined,
@@ -1047,16 +986,16 @@ const s = StyleSheet.create({
     gap: 8,
   },
   chip: {
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: '#1A2035',
     borderWidth: 1,
-    borderColor: '#2A3347',
+    borderColor: '#2D3748',
+    backgroundColor: 'transparent',
   },
   chipSelected: {
-    backgroundColor: 'rgba(245, 166, 35, 0.15)',
     borderColor: '#F5A623',
+    backgroundColor: '#F5A623',
   },
   chipText: {
     fontSize: 13,
@@ -1065,116 +1004,171 @@ const s = StyleSheet.create({
       Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined,
   },
   chipTextSelected: {
-    color: '#F5A623',
+    color: '#0E1117',
     fontWeight: '600',
   },
   yesNoRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 12,
   },
   yesNoBtn: {
-    paddingHorizontal: 20,
+    flex: 1,
     paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: '#1A2035',
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2A3347',
+    borderColor: '#2D3748',
+    backgroundColor: 'transparent',
+    alignItems: 'center',
   },
   yesNoBtnSelected: {
-    backgroundColor: 'rgba(245, 166, 35, 0.15)',
     borderColor: '#F5A623',
+    backgroundColor: '#F5A623',
   },
-  yesNoText: {
-    fontSize: 14,
+  yesNoBtnText: {
+    fontSize: 13,
     color: '#A0AEC0',
+    fontWeight: '600',
     fontFamily:
       Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined,
   },
-  yesNoTextSelected: {
-    color: '#F5A623',
-    fontWeight: '600',
+  yesNoBtnTextSelected: {
+    color: '#0E1117',
   },
-  sliderValue: {
-    color: '#F5A623',
-    fontWeight: '700',
-  },
-  sliderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 8,
-  },
-  sliderDot: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#1A2035',
-    borderWidth: 1,
-    borderColor: '#2A3347',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  sliderDotActive: {
-    backgroundColor: 'rgba(245, 166, 35, 0.2)',
-    borderColor: '#F5A623',
-  },
-  sliderDotText: {
-    fontSize: 12,
-    color: '#718096',
-    fontWeight: '600',
-  },
-  sliderDotTextActive: {
-    color: '#F5A623',
-  },
-  rowFields: {
+  buttonRow: {
     flexDirection: 'row',
     gap: 12,
   },
-  halfField: {
+  genderBtn: {
     flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2D3748',
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+  },
+  genderBtnSelected: {
+    borderColor: '#F5A623',
+    backgroundColor: '#F5A623',
+  },
+  genderBtnText: {
+    fontSize: 13,
+    color: '#A0AEC0',
+    fontWeight: '600',
+    fontFamily:
+      Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined,
+  },
+  genderBtnTextSelected: {
+    color: '#0E1117',
+  },
+  activityBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2D3748',
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+  },
+  activityBtnSelected: {
+    borderColor: '#F5A623',
+    backgroundColor: '#F5A623',
+  },
+  activityBtnText: {
+    fontSize: 13,
+    color: '#A0AEC0',
+    fontWeight: '600',
+    fontFamily:
+      Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined,
+  },
+  activityBtnTextSelected: {
+    color: '#0E1117',
+  },
+  heightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  heightInput: {
+    flex: 1,
+    backgroundColor: '#FFFACD',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#0E1117',
+    fontFamily:
+      Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined,
+  },
+  heightLabel: {
+    fontSize: 13,
+    color: '#A0AEC0',
+    fontWeight: '600',
+    fontFamily:
+      Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined,
+  },
+  sliderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  sliderValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#F5A623',
+    minWidth: 30,
+    fontFamily:
+      Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined,
+  },
+  sliderMax: {
+    fontSize: 13,
+    color: '#718096',
+    minWidth: 20,
+    fontFamily:
+      Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined,
   },
   navBar: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    paddingBottom: Platform.OS === 'ios' ? 'max(12px, env(safe-area-inset-bottom))' : 12,
+    backgroundColor: '#0E1117',
     borderTopWidth: 1,
     borderTopColor: '#1E2A3A',
-    backgroundColor: '#0E1117',
-    ...(Platform.OS === 'web'
-      ? {
-          paddingBottom: 'max(12px, env(safe-area-inset-bottom, 0px))' as any,
-        }
-      : {}),
-  },
+    gap: 12,
+    flexShrink: 0,
+  } as any,
   backBtn: {
-    paddingHorizontal: 20,
+    flex: 1,
     paddingVertical: 12,
-    borderRadius: 10,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2A3347',
+    borderColor: '#2D3748',
+    backgroundColor: 'transparent',
+    alignItems: 'center',
   },
   backBtnText: {
     fontSize: 14,
-    color: '#A0AEC0',
     fontWeight: '600',
+    color: '#A0AEC0',
     fontFamily:
       Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined,
   },
   nextBtn: {
-    paddingHorizontal: 24,
+    flex: 1,
     paddingVertical: 12,
-    borderRadius: 10,
+    borderRadius: 8,
     backgroundColor: '#F5A623',
+    alignItems: 'center',
   },
   nextBtnDisabled: {
     opacity: 0.6,
   },
   nextBtnText: {
     fontSize: 14,
+    fontWeight: '600',
     color: '#0E1117',
-    fontWeight: '700',
     fontFamily:
-      Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : undefined,
+      Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined,
   },
 });

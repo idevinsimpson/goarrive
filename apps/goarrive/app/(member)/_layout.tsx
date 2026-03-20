@@ -88,6 +88,7 @@ export default function MemberLayout() {
         name="my-plan"
         options={{
           title: 'My Plan',
+          tabBarStyle: { display: 'none' },
           tabBarIcon: ({ color }) => (
             <Icon name="document" size={26} color={color} />
           ),

@@ -3,6 +3,7 @@
  *
  * Shows the member's current status (pending/active),
  * their coach info, and plan status.
+ * Enhanced with coach communication and actionable dashboard.
  */
 import React, { useEffect, useState } from 'react';
 import {
@@ -12,6 +13,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Platform,
+  Pressable,
 } from 'react-native';
 import { useAuth } from '../../lib/AuthContext';
 import { AppHeader } from '../../components/AppHeader';
@@ -31,6 +33,14 @@ interface MemberData {
   coachId?: string;
   intakeSubmissionId?: string;
   createdAt?: any;
+  role?: string;
+}
+
+interface CoachData {
+  displayName?: string;
+  email?: string;
+  phone?: string;
+  bio?: string;
 }
 
 interface PlanData {
@@ -45,8 +55,11 @@ interface PlanData {
 export default function MemberHome() {
   const { user, claims } = useAuth();
   const [memberData, setMemberData] = useState<MemberData | null>(null);
+  const [coachData, setCoachData] = useState<CoachData | null>(null);
   const [plan, setPlan] = useState<PlanData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [firstName, setFirstName] = useState('');
+  const [isPending, setIsPending] = useState(true);
 
   useEffect(() => {
     if (!user) return;
@@ -55,13 +68,38 @@ export default function MemberHome() {
 
   async function fetchMemberData() {
     try {
-      // Try to get member document by UID
+      // Get member document by UID
       const memberRef = doc(db, 'members', user!.uid);
       const memberSnap = await getDoc(memberRef);
 
       if (memberSnap.exists()) {
         const data = memberSnap.data() as MemberData;
         setMemberData(data);
+        setFirstName(data.displayName?.split(' ')[0] || 'Member');
+
+        // Fetch coach data if coachId is available
+        if (data.coachId && data.coachId !== 'unassigned') {
+          try {
+            const coachRef = doc(db, 'coaches', data.coachId);
+            const coachSnap = await getDoc(coachRef);
+            if (coachSnap.exists()) {
+              setCoachData(coachSnap.data() as CoachData);
+            } else {
+              // Try to get from members collection (for backward compatibility)
+              const memberCoachRef = doc(db, 'members', data.coachId);
+              const memberCoachSnap = await getDoc(memberCoachRef);
+              if (memberCoachSnap.exists()) {
+                const coachInfo = memberCoachSnap.data();
+                setCoachData({
+                  displayName: coachInfo.displayName,
+                  email: coachInfo.email,
+                });
+              }
+            }
+          } catch (err) {
+            console.error('[MemberHome] Error fetching coach data:', err);
+          }
+        }
 
         // Fetch the member's plan
         const plansQuery = query(
@@ -71,7 +109,11 @@ export default function MemberHome() {
         const plansSnap = await getDocs(plansQuery);
         if (!plansSnap.empty) {
           const planDoc = plansSnap.docs[0];
-          setPlan({ id: planDoc.id, ...planDoc.data() } as PlanData);
+          const planData = { id: planDoc.id, ...planDoc.data() } as PlanData;
+          setPlan(planData);
+          setIsPending(planData.status === 'draft' || planData.status === 'pending');
+        } else {
+          setIsPending(true);
         }
       }
     } catch (err) {
@@ -81,90 +123,199 @@ export default function MemberHome() {
     }
   }
 
-  const firstName = user?.displayName?.split(' ')[0] || 'there';
-  const status = memberData?.status || 'pending';
-  const isPending = status === 'pending';
+  const handleEditInfo = () => {
+    // Navigate to profile page
+    // router.push('/(member)/profile');
+  };
+
+  const handleUploadPhoto = () => {
+    // Navigate to profile page for photo upload
+    // router.push('/(member)/profile');
+  };
+
+  const handleViewPlan = () => {
+    if (plan) {
+      // router.push(`/(member)/my-plan?planId=${plan.id}`);
+    }
+  };
+
+  const handleContactCoach = () => {
+    if (coachData?.email) {
+      // Open email client
+      // Linking.openURL(`mailto:${coachData.email}`);
+    }
+  };
 
   return (
-    <View style={styles.root}>
-      <AppHeader />
+    <View style={s.root}>
+      <AppHeader title="Member Dashboard" />
       <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
+        style={s.scroll}
+        contentContainerStyle={s.scrollContent}
       >
-        {/* Welcome Section */}
-        <View style={styles.welcomeSection}>
-          <Text style={styles.greeting}>
-            Welcome, {firstName}
-          </Text>
-          <View style={[styles.statusBadge, isPending ? styles.statusPending : styles.statusActive]}>
-            <Text style={[styles.statusText, isPending ? styles.statusTextPending : styles.statusTextActive]}>
-              {isPending ? 'Plan Build: Pending' : 'Active'}
+        {/* Welcome Section with Member Badge */}
+        <View style={s.welcomeSection}>
+          <View style={s.welcomeLeft}>
+            <Text style={s.greeting}>
+              Welcome, {firstName}
+            </Text>
+            <View style={s.memberBadge}>
+              <Text style={s.memberBadgeText}>MEMBER</Text>
+            </View>
+          </View>
+          <View style={[s.statusBadge, isPending ? s.statusPending : s.statusActive]}>
+            <Text style={[s.statusText, isPending ? s.statusTextPending : s.statusTextActive]}>
+              {isPending ? 'Pending' : 'Active'}
             </Text>
           </View>
         </View>
 
         {loading ? (
-          <View style={styles.loadingContainer}>
+          <View style={s.loadingContainer}>
             <ActivityIndicator size="large" color="#F5A623" />
           </View>
         ) : (
           <>
-            {/* Status Card */}
-            <View style={styles.card}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle}>
+            {/* Plan Status Card */}
+            <View style={s.card}>
+              <View style={s.cardHeader}>
+                <Text style={s.cardTitle}>
                   {isPending ? 'Your Plan is Being Built' : 'Your Plan'}
                 </Text>
               </View>
-              <View style={styles.cardBody}>
+              <View style={s.cardBody}>
                 {isPending ? (
                   <>
-                    <Text style={styles.cardText}>
+                    <Text style={s.cardText}>
                       Thank you for completing your intake form! Your coach is now
                       building a personalized plan tailored to your goals.
                     </Text>
-                    <Text style={styles.cardSubtext}>
+                    <Text style={s.cardSubtext}>
                       You'll be notified when your plan is ready to review.
                     </Text>
                   </>
                 ) : plan ? (
                   <>
-                    <Text style={styles.cardText}>
+                    <Text style={s.cardText}>
                       {plan.hero?.planTitle || 'Your Tailored Plan'}
                     </Text>
-                    <Text style={styles.cardSubtext}>
+                    <Text style={s.cardSubtext}>
                       {plan.hero?.statusText || 'Your plan is ready'}
                     </Text>
                   </>
                 ) : (
-                  <Text style={styles.cardText}>
+                  <Text style={s.cardText}>
                     No plan has been created yet. Please check back soon.
                   </Text>
                 )}
               </View>
             </View>
 
-            {/* Quick Actions */}
-            <View style={styles.card}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle}>Quick Actions</Text>
+            {/* Coach Info Card */}
+            {coachData && (
+              <View style={s.card}>
+                <View style={s.cardHeader}>
+                  <Text style={s.cardTitle}>Your Coach</Text>
+                </View>
+                <View style={s.cardBody}>
+                  <Text style={s.coachName}>{coachData.displayName || 'Your Coach'}</Text>
+                  {coachData.email && (
+                    <View style={s.coachInfoRow}>
+                      <Text style={s.coachInfoLabel}>Email:</Text>
+                      <Text style={s.coachInfoValue}>{coachData.email}</Text>
+                    </View>
+                  )}
+                  {coachData.phone && (
+                    <View style={s.coachInfoRow}>
+                      <Text style={s.coachInfoLabel}>Phone:</Text>
+                      <Text style={s.coachInfoValue}>{coachData.phone}</Text>
+                    </View>
+                  )}
+                  {coachData.bio && (
+                    <Text style={[s.cardText, { marginTop: 12 }]}>
+                      {coachData.bio}
+                    </Text>
+                  )}
+                  <Pressable
+                    style={s.contactButton}
+                    onPress={handleContactCoach}
+                  >
+                    <Text style={s.contactButtonText}>Contact Coach</Text>
+                  </Pressable>
+                </View>
               </View>
-              <View style={styles.cardBody}>
-                <View style={styles.actionRow}>
-                  <View style={styles.actionDot} />
-                  <Text style={styles.actionText}>Update your profile photo</Text>
-                </View>
-                <View style={styles.actionRow}>
-                  <View style={styles.actionDot} />
-                  <Text style={styles.actionText}>Review your submitted information</Text>
-                </View>
-                {!isPending && (
-                  <View style={styles.actionRow}>
-                    <View style={styles.actionDot} />
-                    <Text style={styles.actionText}>View your training plan</Text>
+            )}
+
+            {/* Quick Actions Card */}
+            <View style={s.card}>
+              <View style={s.cardHeader}>
+                <Text style={s.cardTitle}>Quick Actions</Text>
+              </View>
+              <View style={s.cardBody}>
+                <Pressable
+                  style={s.actionButton}
+                  onPress={handleUploadPhoto}
+                >
+                  <View style={s.actionButtonContent}>
+                    <View style={s.actionIcon}>
+                      <Text style={s.actionIconText}>📷</Text>
+                    </View>
+                    <View style={s.actionButtonText}>
+                      <Text style={s.actionButtonTitle}>Upload Profile Photo</Text>
+                      <Text style={s.actionButtonSubtitle}>Add a profile picture</Text>
+                    </View>
                   </View>
+                </Pressable>
+
+                <Pressable
+                  style={s.actionButton}
+                  onPress={handleEditInfo}
+                >
+                  <View style={s.actionButtonContent}>
+                    <View style={s.actionIcon}>
+                      <Text style={s.actionIconText}>✏️</Text>
+                    </View>
+                    <View style={s.actionButtonText}>
+                      <Text style={s.actionButtonTitle}>Edit My Information</Text>
+                      <Text style={s.actionButtonSubtitle}>Update your details</Text>
+                    </View>
+                  </View>
+                </Pressable>
+
+                {!isPending && (
+                  <Pressable
+                    style={s.actionButton}
+                    onPress={handleViewPlan}
+                  >
+                    <View style={s.actionButtonContent}>
+                      <View style={s.actionIcon}>
+                        <Text style={s.actionIconText}>📋</Text>
+                      </View>
+                      <View style={s.actionButtonText}>
+                        <Text style={s.actionButtonTitle}>View Your Fitness Plan</Text>
+                        <Text style={s.actionButtonSubtitle}>See your personalized plan</Text>
+                      </View>
+                    </View>
+                  </Pressable>
                 )}
+              </View>
+            </View>
+
+            {/* Tips Card */}
+            <View style={s.card}>
+              <View style={s.cardHeader}>
+                <Text style={s.cardTitle}>💡 Tips</Text>
+              </View>
+              <View style={s.cardBody}>
+                <Text style={s.tipText}>
+                  • Check back regularly for plan updates
+                </Text>
+                <Text style={s.tipText}>
+                  • Keep your profile photo and information up to date
+                </Text>
+                <Text style={s.tipText}>
+                  • Reach out to your coach with any questions
+                </Text>
               </View>
             </View>
           </>
@@ -174,7 +325,7 @@ export default function MemberHome() {
   );
 }
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#0E1117',
@@ -189,14 +340,31 @@ const styles = StyleSheet.create({
   },
   welcomeSection: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     marginBottom: 24,
+  },
+  welcomeLeft: {
+    flex: 1,
   },
   greeting: {
     fontSize: 24,
     fontWeight: '700',
     color: '#F0F4F8',
+    marginBottom: 8,
+  },
+  memberBadge: {
+    backgroundColor: 'rgba(245, 166, 35, 0.2)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+  },
+  memberBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#F5A623',
+    letterSpacing: 0.5,
   },
   statusBadge: {
     paddingHorizontal: 12,
@@ -229,6 +397,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderWidth: 1,
     borderColor: '#1E2A3A',
+    overflow: 'hidden',
   },
   cardHeader: {
     paddingHorizontal: 16,
@@ -255,20 +424,83 @@ const styles = StyleSheet.create({
     color: '#718096',
     lineHeight: 20,
   },
-  actionRow: {
+  coachName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#F0F4F8',
+    marginBottom: 12,
+  },
+  coachInfoRow: {
+    flexDirection: 'row',
+    marginBottom: 8,
+  },
+  coachInfoLabel: {
+    fontSize: 13,
+    color: '#718096',
+    fontWeight: '600',
+    marginRight: 8,
+    minWidth: 50,
+  },
+  coachInfoValue: {
+    fontSize: 13,
+    color: '#A0AEC0',
+    flex: 1,
+  },
+  contactButton: {
+    backgroundColor: '#F5A623',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  contactButtonText: {
+    color: '#000',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  actionButton: {
+    backgroundColor: '#1E2A3A',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#2D3A4A',
+  },
+  actionButtonContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
   },
-  actionDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#F5A623',
+  actionIcon: {
     marginRight: 12,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(245, 166, 35, 0.1)',
+    borderRadius: 8,
   },
-  actionText: {
+  actionIconText: {
+    fontSize: 20,
+  },
+  actionButtonText: {
+    flex: 1,
+  },
+  actionButtonTitle: {
     fontSize: 14,
+    fontWeight: '600',
+    color: '#F0F4F8',
+    marginBottom: 2,
+  },
+  actionButtonSubtitle: {
+    fontSize: 12,
+    color: '#718096',
+  },
+  tipText: {
+    fontSize: 13,
     color: '#A0AEC0',
+    lineHeight: 20,
+    marginBottom: 6,
   },
 });

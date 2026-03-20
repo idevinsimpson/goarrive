@@ -83,7 +83,11 @@ export default function AccountPanel({ visible, onClose }: Props) {
     .slice(0, 2);
 
   const role = claims?.role ?? 'coach';
-  const roleLabel = role === 'platformAdmin' ? 'Platform Admin' : role === 'coachAssistant' ? 'Coach Assistant' : 'Coach';
+  const roleLabel = 
+    role === 'platformAdmin' ? 'Platform Admin' : 
+    role === 'coachAssistant' ? 'Coach Assistant' : 
+    role === 'member' ? 'Member' : 
+    'Coach';
 
   async function handleSignOut() {
     onClose();
