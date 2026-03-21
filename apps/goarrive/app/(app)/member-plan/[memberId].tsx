@@ -482,13 +482,14 @@ function GuidanceDropdown({ value, onChange, isOpen, onOpen }: {
 // Coach mode adds pencil icons, tappable day tiles, sliders, etc.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function PlanView({ plan, isCoach, onChange }: {
+export function PlanView({ plan, isCoach, onChange }: {
   plan: MemberPlanData; isCoach: boolean;
   onChange: (updates: Partial<MemberPlanData>) => void;
 }) {
   const [editField, setEditField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [openDayIndex, setOpenDayIndex] = useState<number | null>(null);
+  const [goalEditOpen, setGoalEditOpen] = useState(false);
 
   // Pricing calculation
   const pricing = useMemo(() => {
@@ -659,26 +660,42 @@ function PlanView({ plan, isCoach, onChange }: {
 
       {/* ─── YOUR HEALTH GOALS ───────────────────────────────────────────── */}
       <View style={pv.section}>
-        <Text style={pv.sectionLabel}>YOUR HEALTH GOALS</Text>
-        <Text style={pv.sectionTitle}>What we're building toward</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <View>
+            <Text style={pv.sectionLabel}>YOUR HEALTH GOALS</Text>
+            <Text style={pv.sectionTitle}>What we're building toward</Text>
+          </View>
+          {isCoach && (
+            <Pressable onPress={() => setGoalEditOpen(true)} hitSlop={10} style={{ padding: 4 }}>
+              <Text style={{ fontSize: 14, color: MUTED }}>✏️</Text>
+            </Pressable>
+          )}
+        </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
-          {(isCoach ? availableGoals : (plan.goals || [])).map(goal => {
+          {(plan.goals || []).map(goal => {
             const cfg = goalConfig[goal] || { emoji: '🎯', color: ACCENT };
-            const isSelected = (plan.goals || []).includes(goal);
-            if (!isCoach && !isSelected) return null;
             return (
-              <Pressable key={goal} onPress={() => isCoach && handleGoalToggle(goal)}
+              <View key={goal}
                 style={[pv.goalCard, {
-                  backgroundColor: isSelected ? cfg.color + '15' : '#161B25',
-                  borderColor: isSelected ? cfg.color + '40' : BORDER,
-                  opacity: isCoach && !isSelected ? 0.5 : 1,
+                  backgroundColor: cfg.color + '15',
+                  borderColor: cfg.color + '40',
                 }]}>
                 <Text style={{ fontSize: 24, marginBottom: 4 }}>{cfg.emoji}</Text>
-                <Text style={{ color: isSelected ? cfg.color : MUTED, fontSize: 13, fontWeight: '600', textAlign: 'center' }}>{goal}</Text>
-              </Pressable>
+                <Text style={{ color: cfg.color, fontSize: 13, fontWeight: '600', textAlign: 'center' }}>{goal}</Text>
+              </View>
             );
           })}
         </View>
+
+        {/* Goal selection modal (coach only) */}
+        {isCoach && (
+          <GoalEditModal
+            visible={goalEditOpen}
+            onClose={() => setGoalEditOpen(false)}
+            selectedGoals={plan.goals || []}
+            onToggle={handleGoalToggle}
+          />
+        )}
 
         {/* Weight row */}
         {(plan.currentWeight || plan.goalWeight) ? (
@@ -896,6 +913,40 @@ function PlanView({ plan, isCoach, onChange }: {
         <CoachingInvestmentSection plan={plan} pricing={pricing} isCoach={isCoach} onChange={onChange} />
       )}
 
+      {/* ─── PLAN ACCEPTANCE (visible to both coach and member) ──────── */}
+      {(plan.status === 'presented' || plan.status === 'pending' || plan.status === 'draft') && (
+        <View style={{ marginTop: 20, marginBottom: 20, paddingHorizontal: 16 }}>
+          <Text style={{ fontSize: 11, fontWeight: '700', color: '#5B9BD5', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8 }}>PLAN ACCEPTANCE</Text>
+          <View style={{ backgroundColor: '#161B25', borderWidth: 1, borderColor: '#2A3347', borderRadius: 12, padding: 14 }}>
+            <Text style={{ color: '#C5CDD8', fontSize: 14, lineHeight: 22 }}>
+              Your coach has prepared this personalized fitness plan for you. Please review all the details. If you're ready to commit, accept the plan below.
+            </Text>
+            <Pressable
+              onPress={() => {
+                if (!isCoach) {
+                  // Member accepting: update status
+                  onChange({ status: 'accepted' } as any);
+                }
+              }}
+              style={{ backgroundColor: '#6EBB7A', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginTop: 20 }}
+            >
+              <Text style={{ color: '#000', fontSize: 16, fontWeight: '700' }}>Accept Plan</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+
+      {plan.status === 'accepted' && (
+        <View style={{ marginTop: 20, marginBottom: 20, paddingHorizontal: 16 }}>
+          <Text style={{ fontSize: 11, fontWeight: '700', color: '#5B9BD5', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8 }}>PLAN STATUS</Text>
+          <View style={{ backgroundColor: '#161B25', borderWidth: 1, borderColor: '#2A3347', borderRadius: 12, padding: 14 }}>
+            <Text style={{ color: '#C5CDD8', fontSize: 14, lineHeight: 22 }}>
+              Congratulations! You have accepted your fitness plan. Let's get to work!
+            </Text>
+          </View>
+        </View>
+      )}
+
       {/* Edit Modal */}
       <EditModal
         visible={editField !== null}
@@ -1002,6 +1053,61 @@ function AddItemButton({ onAdd, placeholder }: { onAdd: (text: string) => void; 
     </View>
   );
 }
+
+// ─── GoalEditModal (coach picks which goals are selected) ───────────────────
+function GoalEditModal({ visible, onClose, selectedGoals, onToggle }: {
+  visible: boolean; onClose: () => void;
+  selectedGoals: string[]; onToggle: (goal: string) => void;
+}) {
+  if (!visible) return null;
+  return (
+    <Modal transparent animationType="slide" visible={visible} onRequestClose={onClose}>
+      <Pressable style={gem.overlay} onPress={onClose}>
+        <Pressable style={gem.sheet} onPress={e => e.stopPropagation()}>
+          <View style={gem.header}>
+            <Text style={gem.title}>Edit Health Goals</Text>
+            <Pressable onPress={onClose} hitSlop={8}>
+              <Text style={{ color: MUTED, fontSize: 18 }}>✕</Text>
+            </Pressable>
+          </View>
+          <Text style={{ color: MUTED, fontSize: 13, marginBottom: 16 }}>Tap to select or deselect goals</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+            {availableGoals.map(goal => {
+              const cfg = goalConfig[goal] || { emoji: '🎯', color: ACCENT };
+              const isSelected = selectedGoals.includes(goal);
+              return (
+                <Pressable key={goal} onPress={() => onToggle(goal)}
+                  style={[gem.goalCard, {
+                    backgroundColor: isSelected ? cfg.color + '15' : '#161B25',
+                    borderColor: isSelected ? cfg.color + '40' : BORDER,
+                    opacity: !isSelected ? 0.5 : 1,
+                  }]}>
+                  <Text style={{ fontSize: 22, marginBottom: 2 }}>{cfg.emoji}</Text>
+                  <Text style={{ color: isSelected ? cfg.color : MUTED, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{goal}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Pressable style={gem.doneBtn} onPress={onClose}>
+            <Text style={gem.doneBtnText}>Done</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+const gem = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: CARD, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 36 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  title: { fontSize: 17, fontWeight: '700', color: '#FFF', fontFamily: Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold' },
+  goalCard: {
+    width: (Dimensions.get('window').width - 80) / 2 - 5, paddingVertical: 12, paddingHorizontal: 10,
+    borderRadius: 12, borderWidth: 1, alignItems: 'center' as const,
+  },
+  doneBtn: { backgroundColor: ACCENT, paddingVertical: 14, borderRadius: 12, alignItems: 'center' as const, marginTop: 20 },
+  doneBtnText: { color: '#000', fontSize: 16, fontWeight: '700' },
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // COACHING INVESTMENT SECTION (unified: pricing cards + add-ons + breakdown)
@@ -1136,7 +1242,7 @@ function CoachingInvestmentSection({ plan, pricing, isCoach, onChange }: {
         />
       )}
 
-      {/* ── How we got these numbers ── */}
+      {/* ── How we got these numbers (coach only) ── */}
       <HowWeGotTheseNumbers plan={plan} pricing={pricing} isCoach={isCoach} />
 
       {/* ── Referral Rewards ── */}
@@ -1285,6 +1391,8 @@ function NutritionAddOnCard({ plan, isCoach, isActive, onToggle, monthlyPrice, n
 
 // ── How we got these numbers (expandable breakdown) ─────────────────────────
 function HowWeGotTheseNumbers({ plan, pricing, isCoach }: { plan: MemberPlanData; pricing: PricingResult; isCoach: boolean }) {
+  // Members should not see the price breakdown
+  if (!isCoach) return null;
   const [isOpen, setIsOpen] = useState(false);
   const months = plan.contractMonths;
   const sessionLength = pricing.sessionLengthMinutes || plan.sessionLengthMinutes || 60;
@@ -1931,8 +2039,11 @@ export default function MemberPlanScreen() {
       finalPlan = defaultPlan;
       // Try to persist — but NEVER let a save failure block showing the plan
       try {
+        let initPricing: PricingResult | undefined;
+        try { initPricing = calculatePricing(finalPlan as MemberPlanData); } catch { /* ignore */ }
         await setDoc(doc(db, 'member_plans', planKey), {
           ...finalPlan,
+          ...(initPricing ? { pricingResult: initPricing } : {}),
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
@@ -1960,7 +2071,13 @@ export default function MemberPlanScreen() {
       saveTimer.current = setTimeout(async () => {
         const key = planKeyRef.current || memberId!;
         try {
-          await setDoc(doc(db, 'member_plans', key), { ...updated, updatedAt: serverTimestamp() }, { merge: true });
+          // Also persist computed pricingResult so the member's page always has correct pricing
+          let pricingResult: PricingResult | undefined;
+          try { pricingResult = calculatePricing(updated as MemberPlanData); } catch { /* ignore */ }
+          const toSave = pricingResult
+            ? { ...updated, pricingResult, updatedAt: serverTimestamp() }
+            : { ...updated, updatedAt: serverTimestamp() };
+          await setDoc(doc(db, 'member_plans', key), toSave, { merge: true });
         } catch (err) {
           console.error('Error saving plan:', err);
         }
