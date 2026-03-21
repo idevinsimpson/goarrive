@@ -26,6 +26,8 @@ import {
   ActivityIndicator,
   RefreshControl,
   Alert,
+  Modal,
+  Linking,
 } from 'react-native';
 import { Icon } from '../../components/Icon';
 import { AppHeader } from '../../components/AppHeader';
@@ -115,6 +117,10 @@ export default function MembersScreen() {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [assignTarget, setAssignTarget] = useState<MemberDetailData | null>(null);
   const [assignmentRefresh, setAssignmentRefresh] = useState(0);
+
+  // Share intake form state
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   // NEXT-A / NEXT-D: assignment counts + today flag per member
   const [assignMeta, setAssignMeta] = useState<Record<string, MemberAssignmentMeta>>({});
@@ -409,10 +415,16 @@ export default function MembersScreen() {
       {/* Screen title row */}
       <View style={styles.titleRow}>
         <Text style={styles.title}>Members</Text>
-        <Pressable style={styles.addBtn} onPress={openAddForm}>
-          <Icon name="add" size={20} color="#0E1117" />
-          <Text style={styles.addBtnText}>Add</Text>
-        </Pressable>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Pressable style={styles.shareIntakeBtn} onPress={() => setShowShareModal(true)}>
+            <Icon name="share" size={16} color="#6EBB7A" />
+            <Text style={styles.shareIntakeBtnText}>Intake Form</Text>
+          </Pressable>
+          <Pressable style={styles.addBtn} onPress={openAddForm}>
+            <Icon name="add" size={20} color="#0E1117" />
+            <Text style={styles.addBtnText}>Add</Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* Search bar */}
@@ -653,6 +665,73 @@ export default function MembersScreen() {
         }}
         onAssign={handleAssignComplete}
       />
+
+      {/* Share Intake Form modal */}
+      <Modal transparent animationType="fade" visible={showShareModal} onRequestClose={() => setShowShareModal(false)}>
+        <Pressable style={shareStyles.overlay} onPress={() => { setShowShareModal(false); setLinkCopied(false); }}>
+          <Pressable style={shareStyles.sheet} onPress={e => e.stopPropagation()}>
+            <View style={shareStyles.header}>
+              <Text style={shareStyles.title}>Share Intake Form</Text>
+              <Pressable onPress={() => { setShowShareModal(false); setLinkCopied(false); }} hitSlop={8}>
+                <Text style={{ color: '#8A95A3', fontSize: 18 }}>{"\u2715"}</Text>
+              </Pressable>
+            </View>
+            <Text style={shareStyles.subtitle}>Send this link to potential members to fill out their intake questionnaire. They'll automatically be added to your member list.</Text>
+
+            {/* Link display */}
+            <View style={shareStyles.linkBox}>
+              <Text style={shareStyles.linkText} numberOfLines={1}>goarrive.web.app/intake/{coachId}</Text>
+            </View>
+
+            {/* Copy Link button */}
+            <Pressable
+              style={[shareStyles.actionBtn, shareStyles.copyBtn, linkCopied && shareStyles.copiedBtn]}
+              onPress={() => {
+                const url = `https://goarrive.web.app/intake/${coachId}`;
+                if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+                  navigator.clipboard.writeText(url);
+                }
+                setLinkCopied(true);
+                setTimeout(() => setLinkCopied(false), 3000);
+              }}
+            >
+              <Icon name="link" size={18} color={linkCopied ? '#0E1117' : '#F0F4F8'} />
+              <Text style={[shareStyles.actionBtnText, linkCopied && { color: '#0E1117' }]}>{linkCopied ? 'Copied!' : 'Copy Link'}</Text>
+            </Pressable>
+
+            {/* Send via Text */}
+            <Pressable
+              style={[shareStyles.actionBtn, shareStyles.textBtn]}
+              onPress={() => {
+                const url = `https://goarrive.web.app/intake/${coachId}`;
+                const body = `Hey! I'd love to start working with you on your fitness journey. Please fill out this quick intake form so I can build your personalized plan:\n\n${url}`;
+                const smsUrl = Platform.OS === 'web'
+                  ? `sms:?body=${encodeURIComponent(body)}`
+                  : `sms:&body=${encodeURIComponent(body)}`;
+                Linking.openURL(smsUrl).catch(() => {});
+              }}
+            >
+              <Text style={{ fontSize: 18 }}>{"\uD83D\uDCF1"}</Text>
+              <Text style={shareStyles.actionBtnText}>Send via Text</Text>
+            </Pressable>
+
+            {/* Send via Email */}
+            <Pressable
+              style={[shareStyles.actionBtn, shareStyles.emailBtn]}
+              onPress={() => {
+                const url = `https://goarrive.web.app/intake/${coachId}`;
+                const subject = 'Your Personalized Fitness Plan Intake Form';
+                const body = `Hey!\n\nI'd love to start working with you on your fitness journey. Please fill out this quick intake form so I can build your personalized plan:\n\n${url}\n\nLooking forward to getting started!`;
+                const mailUrl = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                Linking.openURL(mailUrl).catch(() => {});
+              }}
+            >
+              <Icon name="mail" size={18} color="#F0F4F8" />
+              <Text style={shareStyles.actionBtnText}>Send via Email</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -950,5 +1029,105 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#6EBB7A',
     fontFamily: FONT_BODY,
+  },
+  shareIntakeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(110,187,122,0.12)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(110,187,122,0.3)',
+  },
+  shareIntakeBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#6EBB7A',
+    fontFamily: FONT_HEADING,
+  },
+});
+
+const shareStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  sheet: {
+    backgroundColor: '#151B28',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FONT_HEADING,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#8A95A3',
+    fontFamily: FONT_BODY,
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  linkBox: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 10,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    marginBottom: 16,
+  },
+  linkText: {
+    fontSize: 14,
+    color: '#6EBB7A',
+    fontFamily: FONT_BODY,
+    fontWeight: '600',
+  },
+  actionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+    gap: 8,
+    marginBottom: 10,
+  },
+  actionBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FONT_HEADING,
+  },
+  copyBtn: {
+    backgroundColor: 'rgba(110,187,122,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(110,187,122,0.4)',
+  },
+  copiedBtn: {
+    backgroundColor: '#6EBB7A',
+  },
+  textBtn: {
+    backgroundColor: 'rgba(91,155,213,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(91,155,213,0.4)',
+  },
+  emailBtn: {
+    backgroundColor: 'rgba(245,166,35,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.4)',
   },
 });

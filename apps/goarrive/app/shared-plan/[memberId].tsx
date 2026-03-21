@@ -15,6 +15,7 @@ import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firesto
 import {
   MemberPlanData, DayPlan, goalConfig, typeColors, phaseColorList,
   formatCurrency, calculatePricing, monthsToWeeks, PricingResult,
+  getGoalEmoji, getGoalColor,
 } from '../../lib/planTypes';
 
 // ─── Helpers to normalize old/new field names ───────────────────────────────
@@ -231,11 +232,12 @@ export default function SharedPlanScreen() {
             <Text style={st.sectionSubtitle}>What we're building toward</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
               {goals.map((goal: string, i: number) => {
-                const cfg = (goalConfig as any)[goal] || { emoji: '\uD83C\uDFAF', color: '#8A95A3' };
+                const emoji = getGoalEmoji(goal, plan.goalEmojis);
+                const color = getGoalColor(goal);
                 return (
-                  <View key={i} style={{ flex: 1, minWidth: '45%', backgroundColor: cfg.color + '15', borderColor: cfg.color + '40', borderWidth: 1, borderRadius: 12, padding: 14 }}>
-                    <Text style={{ fontSize: 24, marginBottom: 6 }}>{cfg.emoji}</Text>
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: cfg.color }}>{goal}</Text>
+                  <View key={i} style={{ flex: 1, minWidth: '45%', backgroundColor: color + '15', borderColor: color + '40', borderWidth: 1, borderRadius: 12, padding: 14 }}>
+                    <Text style={{ fontSize: 24, marginBottom: 6 }}>{emoji}</Text>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: color }}>{goal}</Text>
                   </View>
                 );
               })}

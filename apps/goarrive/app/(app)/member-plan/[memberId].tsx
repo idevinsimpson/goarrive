@@ -46,7 +46,8 @@ import {
   calculatePricing, formatCurrency, monthsToWeeks,
   createDefaultPlan, createDefaultSchedule, createDefaultPhases,
   countSessionsByType, getGuidanceProfile,
-  typeColors, phaseColors, resolvePhaseColor, goalConfig, availableGoals,
+  typeColors, phaseColors, resolvePhaseColor, goalConfig, availableGoals, allKnownGoals,
+  getGoalEmoji, getGoalColor,
   dayTypeOptions, guidanceLevels, SESSION_TYPES,
   GUIDANCE_FACTORS, GUIDANCE_SHORT,
   SessionsPerWeek, ContractLength,
@@ -577,6 +578,18 @@ export function PlanView({ plan, isCoach, onChange }: {
     onChange({ goals: newGoals });
   };
 
+  const handleAddCustomGoal = (name: string, emoji: string) => {
+    const goals = plan.goals || [];
+    if (goals.includes(name)) return; // already exists
+    const newEmojis = { ...(plan.goalEmojis || {}), [name]: emoji };
+    onChange({ goals: [...goals, name], goalEmojis: newEmojis });
+  };
+
+  const handleChangeEmoji = (goalName: string, newEmoji: string) => {
+    const newEmojis = { ...(plan.goalEmojis || {}), [goalName]: newEmoji };
+    onChange({ goalEmojis: newEmojis });
+  };
+
   // Handle starting point changes
   const handleStartingPointRemove = (index: number) => {
     const newPoints = [...(plan.startingPoints || [])];
@@ -673,15 +686,16 @@ export function PlanView({ plan, isCoach, onChange }: {
         </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
           {(plan.goals || []).map(goal => {
-            const cfg = goalConfig[goal] || { emoji: '🎯', color: ACCENT };
+            const emoji = getGoalEmoji(goal, plan.goalEmojis);
+            const color = getGoalColor(goal);
             return (
               <View key={goal}
                 style={[pv.goalCard, {
-                  backgroundColor: cfg.color + '15',
-                  borderColor: cfg.color + '40',
+                  backgroundColor: color + '15',
+                  borderColor: color + '40',
                 }]}>
-                <Text style={{ fontSize: 24, marginBottom: 4 }}>{cfg.emoji}</Text>
-                <Text style={{ color: cfg.color, fontSize: 13, fontWeight: '600', textAlign: 'center' }}>{goal}</Text>
+                <Text style={{ fontSize: 24, marginBottom: 4 }}>{emoji}</Text>
+                <Text style={{ color: color, fontSize: 13, fontWeight: '600', textAlign: 'center' }}>{goal}</Text>
               </View>
             );
           })}
@@ -693,7 +707,10 @@ export function PlanView({ plan, isCoach, onChange }: {
             visible={goalEditOpen}
             onClose={() => setGoalEditOpen(false)}
             selectedGoals={plan.goals || []}
+            goalEmojis={plan.goalEmojis || {}}
             onToggle={handleGoalToggle}
+            onAddCustomGoal={handleAddCustomGoal}
+            onChangeEmoji={handleChangeEmoji}
           />
         )}
 
@@ -1054,40 +1071,123 @@ function AddItemButton({ onAdd, placeholder }: { onAdd: (text: string) => void; 
   );
 }
 
-// ─── GoalEditModal (coach picks which goals are selected) ───────────────────
-function GoalEditModal({ visible, onClose, selectedGoals, onToggle }: {
+// ─── GoalEditModal (coach picks which goals are selected + custom goals + emoji editing) ───
+const COMMON_EMOJIS = ['😊','🔥','💪','🏃','🧘','😴','⚡','🤸','🚀','❤️‍🩹','💚','🏋️','⚖️','📈','🏆','🎯','🌟','🧠','💎','🌈','🎯','🏅','💥','🦾','🫀','🩺','🥗','🧬','🌱','🏔️'];
+
+function GoalEditModal({ visible, onClose, selectedGoals, goalEmojis, onToggle, onAddCustomGoal, onChangeEmoji }: {
   visible: boolean; onClose: () => void;
-  selectedGoals: string[]; onToggle: (goal: string) => void;
+  selectedGoals: string[]; goalEmojis: Record<string, string>;
+  onToggle: (goal: string) => void;
+  onAddCustomGoal: (name: string, emoji: string) => void;
+  onChangeEmoji: (goalName: string, newEmoji: string) => void;
 }) {
+  const [customName, setCustomName] = useState('');
+  const [customEmoji, setCustomEmoji] = useState('🎯');
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [emojiPickerGoal, setEmojiPickerGoal] = useState<string | null>(null);
+
   if (!visible) return null;
+
+  // Build the full list: allKnownGoals + any custom goals already in selectedGoals
+  const allGoals = [...allKnownGoals];
+  selectedGoals.forEach(g => { if (!allGoals.includes(g)) allGoals.push(g); });
+
+  const handleAddCustom = () => {
+    const name = customName.trim();
+    if (!name) return;
+    onAddCustomGoal(name, customEmoji);
+    setCustomName('');
+    setCustomEmoji('🎯');
+    setShowAddForm(false);
+  };
+
   return (
     <Modal transparent animationType="slide" visible={visible} onRequestClose={onClose}>
       <Pressable style={gem.overlay} onPress={onClose}>
         <Pressable style={gem.sheet} onPress={e => e.stopPropagation()}>
-          <View style={gem.header}>
-            <Text style={gem.title}>Edit Health Goals</Text>
-            <Pressable onPress={onClose} hitSlop={8}>
-              <Text style={{ color: MUTED, fontSize: 18 }}>✕</Text>
-            </Pressable>
-          </View>
-          <Text style={{ color: MUTED, fontSize: 13, marginBottom: 16 }}>Tap to select or deselect goals</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-            {availableGoals.map(goal => {
-              const cfg = goalConfig[goal] || { emoji: '🎯', color: ACCENT };
-              const isSelected = selectedGoals.includes(goal);
-              return (
-                <Pressable key={goal} onPress={() => onToggle(goal)}
-                  style={[gem.goalCard, {
-                    backgroundColor: isSelected ? cfg.color + '15' : '#161B25',
-                    borderColor: isSelected ? cfg.color + '40' : BORDER,
-                    opacity: !isSelected ? 0.5 : 1,
-                  }]}>
-                  <Text style={{ fontSize: 22, marginBottom: 2 }}>{cfg.emoji}</Text>
-                  <Text style={{ color: isSelected ? cfg.color : MUTED, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{goal}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <ScrollView style={{ maxHeight: Dimensions.get('window').height * 0.7 }} showsVerticalScrollIndicator={false}>
+            <View style={gem.header}>
+              <Text style={gem.title}>Edit Health Goals</Text>
+              <Pressable onPress={onClose} hitSlop={8}>
+                <Text style={{ color: MUTED, fontSize: 18 }}>✕</Text>
+              </Pressable>
+            </View>
+            <Text style={{ color: MUTED, fontSize: 13, marginBottom: 16 }}>Tap card to select/deselect · Tap ✎ to change emoji</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+              {allGoals.map(goal => {
+                const emoji = getGoalEmoji(goal, goalEmojis);
+                const color = getGoalColor(goal);
+                const isSelected = selectedGoals.includes(goal);
+                const pickerOpen = emojiPickerGoal === goal;
+                return (
+                  <View key={goal} style={{ position: 'relative' as const }}>
+                    <Pressable onPress={() => onToggle(goal)}
+                      style={[gem.goalCard, {
+                        backgroundColor: isSelected ? color + '15' : '#161B25',
+                        borderColor: isSelected ? color + '40' : BORDER,
+                        opacity: !isSelected ? 0.5 : 1,
+                      }]}>
+                      <Text style={{ fontSize: 22, marginBottom: 2 }}>{emoji}</Text>
+                      <Text style={{ color: isSelected ? color : MUTED, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{goal}</Text>
+                    </Pressable>
+                    {/* Small edit-emoji button in top-right corner */}
+                    <Pressable
+                      onPress={() => setEmojiPickerGoal(pickerOpen ? null : goal)}
+                      style={{ position: 'absolute', top: 2, right: 2, width: 20, height: 20, borderRadius: 10, backgroundColor: '#1E2535', alignItems: 'center', justifyContent: 'center', zIndex: 10 }}>
+                      <Text style={{ fontSize: 9, color: MUTED }}>✎</Text>
+                    </Pressable>
+                    {pickerOpen && (
+                      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: CARD, borderRadius: 10, borderWidth: 1, borderColor: BORDER, padding: 8, zIndex: 100 }}>
+                        <Text style={{ color: '#FFF', fontSize: 11, fontWeight: '600', marginBottom: 6 }}>Pick emoji:</Text>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                          {COMMON_EMOJIS.map((e, idx) => (
+                            <Pressable key={idx} onPress={() => { onChangeEmoji(goal, e); setEmojiPickerGoal(null); }}
+                              style={{ width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 6, backgroundColor: emoji === e ? ACCENT + '30' : 'transparent' }}>
+                              <Text style={{ fontSize: 16 }}>{e}</Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+
+            {/* Add Custom Goal */}
+            {!showAddForm ? (
+              <Pressable onPress={() => setShowAddForm(true)} style={{ marginTop: 16, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: ACCENT + '40', borderStyle: 'dashed', alignItems: 'center' }}>
+                <Text style={{ color: ACCENT, fontSize: 13, fontWeight: '600' }}>+ Add Custom Goal</Text>
+              </Pressable>
+            ) : (
+              <View style={{ marginTop: 16, backgroundColor: '#161B25', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: BORDER }}>
+                <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '600', marginBottom: 8 }}>New Custom Goal</Text>
+                <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+                  <Pressable onPress={() => {
+                    const idx = COMMON_EMOJIS.indexOf(customEmoji);
+                    setCustomEmoji(COMMON_EMOJIS[(idx + 1) % COMMON_EMOJIS.length]);
+                  }} style={{ width: 40, height: 40, borderRadius: 10, backgroundColor: CARD, borderWidth: 1, borderColor: BORDER, alignItems: 'center', justifyContent: 'center' }}>
+                    <Text style={{ fontSize: 22 }}>{customEmoji}</Text>
+                  </Pressable>
+                  <TextInput
+                    value={customName}
+                    onChangeText={setCustomName}
+                    placeholder="Goal name..."
+                    placeholderTextColor={MUTED}
+                    style={{ flex: 1, color: '#FFF', fontSize: 14, backgroundColor: CARD, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: BORDER }}
+                  />
+                </View>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <Pressable onPress={() => setShowAddForm(false)} style={{ flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: '#1E2433', alignItems: 'center' }}>
+                    <Text style={{ color: MUTED, fontSize: 13, fontWeight: '600' }}>Cancel</Text>
+                  </Pressable>
+                  <Pressable onPress={handleAddCustom} style={{ flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: ACCENT, alignItems: 'center' }}>
+                    <Text style={{ color: '#000', fontSize: 13, fontWeight: '700' }}>Add</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
+          </ScrollView>
           <Pressable style={gem.doneBtn} onPress={onClose}>
             <Text style={gem.doneBtnText}>Done</Text>
           </Pressable>
@@ -2011,6 +2111,22 @@ export default function MemberPlanScreen() {
       }
     } catch (err) {
       console.warn('[loadData] Error reading plan from Firestore:', err);
+    }
+
+    // ── Step 3b: Merge intake data into existing plan if fields are empty ──
+    if (finalPlan && qData) {
+      // Populate goals from intake if plan has no goals yet
+      if (!finalPlan.goals || finalPlan.goals.length === 0) {
+        if (qData.primaryGoals && qData.primaryGoals.length > 0) finalPlan.goals = qData.primaryGoals;
+        else if (qData.goals && qData.goals.length > 0) finalPlan.goals = qData.goals;
+      }
+      // Populate other empty fields from intake
+      if (!finalPlan.whyStatement && qData.whyStatement) finalPlan.whyStatement = qData.whyStatement;
+      if (!finalPlan.currentWeight && qData.weight) finalPlan.currentWeight = String(qData.weight) + ' lbs';
+      if (!finalPlan.goalWeight && qData.goalWeight) finalPlan.goalWeight = String(qData.goalWeight) + ' lbs';
+      if (finalPlan.readiness === 7 && qData.readinessForChange) finalPlan.readiness = qData.readinessForChange;
+      if (finalPlan.motivation === 8 && qData.motivation) finalPlan.motivation = qData.motivation;
+      if (finalPlan.gymConfidence === 5 && qData.gymConfidence) finalPlan.gymConfidence = qData.gymConfidence;
     }
 
     // ── Step 4: Create plan from scratch if none found ───────────────────
