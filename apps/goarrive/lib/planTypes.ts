@@ -1,20 +1,28 @@
 /**
- * GoArrive Plan Data Types — Comprehensive plan model
- * Ported from legacy Plan-Building repo with full pricing engine
+ * GoArrive Plan Data Types — Aligned with Forge UX patterns
+ * Session types: Strength, Cardio + Mobility, Mix, Rest
+ * Pricing engine with per-type guidance profiles
  */
 
 // ─── Session schedule ─────────────────────────────────────────────────────────
 
+export type SessionType = 'Strength' | 'Cardio + Mobility' | 'Mix' | 'Rest';
+
 export interface DayPlan {
   day: string;
   shortDay: string;
-  type: 'strength' | 'cardio' | 'rest' | 'optional';
+  type: SessionType;
+  isSession: boolean;
   label: string;
-  duration?: string;
+  duration: number; // minutes, 0 for rest
   breakdown?: string[];
 }
 
 export type SessionsPerWeek = 2 | 3 | 4 | 5 | 6;
+
+export const DAYS_OF_WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+export const FULL_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+export const SESSION_TYPES: SessionType[] = ['Strength', 'Cardio + Mobility', 'Mix', 'Rest'];
 
 // ─── Guidance system ──────────────────────────────────────────────────────────
 
@@ -26,10 +34,16 @@ export const GUIDANCE_FACTORS: Record<GuidanceLevel, number> = {
   'Self-reliant': 0,
 };
 
-export type SessionType = 'Strength' | 'Endurance' | 'Optional';
+export const GUIDANCE_SHORT: Record<GuidanceLevel, string> = {
+  'Fully guided': 'Full',
+  'Blended': 'Blend',
+  'Self-reliant': 'Self',
+};
+
+export const guidanceLevels: GuidanceLevel[] = ['Fully guided', 'Blended', 'Self-reliant'];
 
 export interface SessionTypeGuidance {
-  sessionType: SessionType;
+  sessionType: 'Strength' | 'Cardio + Mobility' | 'Mix';
   phase1: GuidanceLevel;
   phase2: GuidanceLevel;
   phase3: GuidanceLevel;
@@ -44,6 +58,18 @@ export interface PricingInputs {
   sessionLengthMinutes: number;
   checkInCallLengthMinutes: number;
   programBuildTimeHours: number;
+}
+
+export interface PhaseHoursDetail {
+  sessionType: string;
+  sessionsPerWeek: number;
+  phase1Hours: number;
+  phase2Hours: number;
+  phase3Hours: number;
+  totalHours: number;
+  phase1Guidance: GuidanceLevel;
+  phase2Guidance: GuidanceLevel;
+  phase3Guidance: GuidanceLevel;
 }
 
 export interface PricingResult {
@@ -62,6 +88,7 @@ export interface PricingResult {
   buildHours: number;
   totalHours: number;
   totalProgramPrice: number;
+  totalSessions: number;
   commitToSaveActive: boolean;
   commitToSaveSavings: number;
   noShowFee: number;
@@ -70,25 +97,38 @@ export interface PricingResult {
   phaseBreakdown: PhaseHoursDetail[];
 }
 
-export interface PhaseHoursDetail {
-  sessionType: string;
-  sessionsPerWeek: number;
-  phase1Hours: number;
-  phase2Hours: number;
-  phase3Hours: number;
-  totalHours: number;
-  phase1Guidance: GuidanceLevel;
-  phase2Guidance: GuidanceLevel;
-  phase3Guidance: GuidanceLevel;
-}
-
 // ─── Support phases ───────────────────────────────────────────────────────────
 
 export interface Phase {
   id: number;
   name: string;
   weeks: number;
+  intensity: 'Fully Guided' | 'Shared Guidance' | 'Self-Reliant';
   description: string;
+}
+
+// ─── Nutrition add-on ─────────────────────────────────────────────────────────
+
+export interface NutritionAddOn {
+  enabled: boolean;
+  type: 'in-house' | 'outsourced';
+  providerName: string;
+  monthlyCost: number;
+  description: string;
+}
+
+// ─── Commit to Save add-on ──────────────────────────────────────────────────
+
+export interface CommitToSave {
+  enabled: boolean;
+  active: boolean;
+  monthlySavings: number;
+  missedSessionFee: number;
+  nextMonthPercentOff: number;
+  summary: string;
+  makeUpWindowHours: number;
+  reentryRule: string;
+  emergencyWaiverEnabled: boolean;
 }
 
 // ─── Full plan data ───────────────────────────────────────────────────────────
@@ -102,21 +142,22 @@ export interface MemberPlanData {
   // Hero
   memberName: string;
   memberAge?: number;
-  age?: number;
-  subtitle: string;
+  subtitle?: string;
   planSubtitle?: string;
-  identityTag: string;
+  identityTag?: string;
   referredBy?: string;
 
+  // Starting Points
+  startingPoints: string[];
+  startingPointIntro?: string;
+
   // Goals
-  currentWeight?: number;
+  goals: string[];
+  currentWeight?: string | number;
   goalWeight?: string;
   gymConfidence?: number;
   gym?: string;
-  startingPoints: string[];
-  goals: string[];
-  healthGoals?: string[];
-  goalSummary: string;
+  goalSummary?: string;
 
   // Why
   whyStatement: string;
@@ -126,12 +167,8 @@ export interface MemberPlanData {
 
   // Weekly Plan
   sessionsPerWeek: SessionsPerWeek;
-  contractLengthMonths: ContractLength;
-  contractMonths?: number;
-  weekPlan4: DayPlan[];
-  weekPlan3: DayPlan[];
-  weekPlan2: DayPlan[];
-  weeklyPlan?: DayPlan[];
+  contractMonths: ContractLength;
+  weeklySchedule: DayPlan[];
 
   // Phases
   phases: Phase[];
@@ -139,41 +176,30 @@ export interface MemberPlanData {
   // What's Included
   whatsIncluded: string[];
 
-  // Pricing system
-  pricingInputs: PricingInputs;
+  // Pricing — top-level for easy access
+  hourlyRate: number;
+  sessionLengthMinutes: number;
+  checkInCallMinutes: number;
+  programBuildTimeHours: number;
   sessionGuidanceProfiles: SessionTypeGuidance[];
-  pricingResult?: PricingResult;
   showInvestment: boolean;
-
-  // Legacy simple pricing fields (fallback)
-  monthlyPrice?: number;
-  perSessionPrice?: number;
-  payInFullPrice?: number;
-  payInFullDiscount?: number;
-  hourlyRate?: number;
+  payInFullDiscountPercent: number;
 
   // Manual override
-  manualMonthlyOverride?: number;
+  isManualOverride?: boolean;
+  monthlyPriceOverride?: number;
+
+  // Cached pricing result
+  pricingResult?: PricingResult;
 
   // Commit to Save
-  commitToSaveEnabled: boolean;
-  commitToSaveAddOnActive: boolean;
-  commitToSaveMonthlySavings: number;
-  commitToSaveMissedSessionFee: number;
-  commitToSaveNextMonthPercentOff: number;
-  commitToSaveSummary: string;
-  commitToSaveDetailsExpandedByDefault: boolean;
-  commitToSaveMakeUpWindowHours: number;
-  commitToSaveReentryRule: string;
-  commitToSaveEmergencyWaiverEnabled: boolean;
+  commitToSave?: CommitToSave;
 
   // Nutrition add-on
-  nutritionEnabled: boolean;
-  nutritionAddOnActive: boolean;
-  nutritionMonthlyCost: number;
-  nutritionInHouse: boolean;
-  nutritionProviderName: string;
-  nutritionDescription: string;
+  nutrition?: NutritionAddOn;
+
+  // Injury notes
+  injuryNotes?: string;
 
   // Timestamps
   createdAt?: any;
@@ -181,6 +207,35 @@ export interface MemberPlanData {
 
   // Shareable link
   shareToken?: string;
+
+  // ── Legacy / backward-compat aliases ──
+  contractLengthMonths?: number;
+  pricingInputs?: PricingInputs;
+  monthlyPrice?: number;
+  perSessionPrice?: number;
+  payInFullPrice?: number;
+  payInFullDiscount?: number;
+  commitToSaveEnabled?: boolean;
+  commitToSaveAddOnActive?: boolean;
+  commitToSaveMonthlySavings?: number;
+  commitToSaveMissedSessionFee?: number;
+  commitToSaveNextMonthPercentOff?: number;
+  commitToSaveSummary?: string;
+  commitToSaveMakeUpWindowHours?: number;
+  commitToSaveReentryRule?: string;
+  commitToSaveEmergencyWaiverEnabled?: boolean;
+  nutritionEnabled?: boolean;
+  nutritionAddOnActive?: boolean;
+  nutritionMonthlyCost?: number;
+  nutritionInHouse?: boolean;
+  nutritionProviderName?: string;
+  nutritionDescription?: string;
+  age?: number;
+  healthGoals?: string[];
+  weekPlan4?: DayPlan[];
+  weekPlan3?: DayPlan[];
+  weekPlan2?: DayPlan[];
+  weeklyPlan?: DayPlan[];
 }
 
 // ─── Pricing engine ───────────────────────────────────────────────────────────
@@ -192,29 +247,37 @@ export function monthsToWeeks(months: number): number {
   return Math.round(months * (52 / 12));
 }
 
-export function getDefaultGuidance(sessionType: SessionType): SessionTypeGuidance {
+export function getDefaultGuidance(sessionType: 'Strength' | 'Cardio + Mobility' | 'Mix'): SessionTypeGuidance {
   return { sessionType, phase1: 'Fully guided', phase2: 'Blended', phase3: 'Self-reliant' };
 }
 
 export function getGuidanceProfile(
-  sessionType: SessionType,
+  sessionType: 'Strength' | 'Cardio + Mobility' | 'Mix',
   profiles: SessionTypeGuidance[]
 ): SessionTypeGuidance {
   return profiles.find(p => p.sessionType === sessionType) || getDefaultGuidance(sessionType);
 }
 
-export function countSessionsByType(weekPlan: DayPlan[]): Record<SessionType, number> {
-  const counts: Record<SessionType, number> = { Strength: 0, Endurance: 0, Optional: 0 };
-  weekPlan.forEach(day => {
-    if (day.type === 'strength') counts.Strength++;
-    else if (day.type === 'cardio') counts.Endurance++;
-    else if (day.type === 'optional') counts.Optional++;
+export function countSessionsByType(schedule: DayPlan[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  schedule.forEach(day => {
+    if (day.isSession && day.type !== 'Rest') {
+      counts[day.type] = (counts[day.type] || 0) + 1;
+    }
   });
   return counts;
 }
 
+/**
+ * Calculate pricing from a plan object (convenience overload).
+ * Reads all fields directly from the plan.
+ */
+export function calculatePricing(plan: MemberPlanData): PricingResult;
+/**
+ * Calculate pricing from individual arguments (legacy overload).
+ */
 export function calculatePricing(
-  weekPlan: DayPlan[],
+  schedule: DayPlan[],
   sessionsPerWeek: SessionsPerWeek,
   contractLengthMonths: ContractLength,
   phases: Phase[],
@@ -222,6 +285,65 @@ export function calculatePricing(
   guidanceProfiles: SessionTypeGuidance[],
   commitToSaveActive: boolean,
   manualMonthlyOverride?: number
+): PricingResult;
+export function calculatePricing(
+  planOrSchedule: MemberPlanData | DayPlan[],
+  sessionsPerWeek?: SessionsPerWeek,
+  contractLengthMonths?: ContractLength,
+  phases?: Phase[],
+  inputs?: PricingInputs,
+  guidanceProfiles?: SessionTypeGuidance[],
+  commitToSaveActive?: boolean,
+  manualMonthlyOverride?: number
+): PricingResult {
+  // Detect which overload
+  if (!Array.isArray(planOrSchedule) && 'memberId' in planOrSchedule) {
+    // Plan object overload
+    const p = planOrSchedule as MemberPlanData;
+    return _calculatePricing(
+      p.weeklySchedule,
+      p.sessionsPerWeek,
+      p.contractMonths || (p.contractLengthMonths as ContractLength) || 12,
+      p.phases,
+      {
+        hourlyRate: p.hourlyRate || p.pricingInputs?.hourlyRate || 100,
+        sessionLengthMinutes: p.sessionLengthMinutes || p.pricingInputs?.sessionLengthMinutes || 60,
+        checkInCallLengthMinutes: p.checkInCallMinutes || p.pricingInputs?.checkInCallLengthMinutes || 30,
+        programBuildTimeHours: p.programBuildTimeHours || p.pricingInputs?.programBuildTimeHours || 5,
+      },
+      p.sessionGuidanceProfiles || [],
+      p.commitToSave?.active ?? p.commitToSaveAddOnActive ?? true,
+      p.isManualOverride ? p.monthlyPriceOverride : undefined,
+      p.commitToSave?.monthlySavings ?? p.commitToSaveMonthlySavings ?? 100,
+      p.commitToSave?.missedSessionFee ?? p.commitToSaveMissedSessionFee ?? 50,
+      p.payInFullDiscountPercent ?? 10,
+    );
+  }
+  // Legacy overload
+  return _calculatePricing(
+    planOrSchedule as DayPlan[],
+    sessionsPerWeek!,
+    contractLengthMonths!,
+    phases!,
+    inputs!,
+    guidanceProfiles!,
+    commitToSaveActive!,
+    manualMonthlyOverride,
+  );
+}
+
+function _calculatePricing(
+  schedule: DayPlan[],
+  sessionsPerWeek: SessionsPerWeek,
+  contractLengthMonths: ContractLength,
+  phases: Phase[],
+  inputs: PricingInputs,
+  guidanceProfiles: SessionTypeGuidance[],
+  commitToSaveActive: boolean,
+  manualMonthlyOverride?: number,
+  commitToSaveMonthlySavings: number = 100,
+  commitToSaveMissedSessionFee: number = 50,
+  payInFullDiscountPercent: number = 10,
 ): PricingResult {
   const hourlyRate = Math.max(1, inputs.hourlyRate);
   const sessionLengthMinutes = Math.max(1, inputs.sessionLengthMinutes);
@@ -231,12 +353,11 @@ export function calculatePricing(
   const months = contractLengthMonths;
   const weeks = monthsToWeeks(months);
   const P1 = phases[0]?.weeks ?? 6;
-  const P2 = phases[1]?.weeks ?? 12;
+  const P2 = phases[1]?.weeks ?? 16;
   const P3 = Math.max(0, weeks - P1 - P2);
 
-  const sessionCounts = countSessionsByType(weekPlan);
-  const sessionTypes: SessionType[] = ['Strength', 'Endurance', 'Optional'];
-  const activeTypes = sessionTypes.filter(t => sessionCounts[t] > 0);
+  const sessionCounts = countSessionsByType(schedule);
+  const activeTypes = Object.keys(sessionCounts) as ('Strength' | 'Cardio + Mobility' | 'Mix')[];
 
   let totalCoachingHours = 0;
   const phaseBreakdown: PhaseHoursDetail[] = [];
@@ -256,9 +377,7 @@ export function calculatePricing(
       phaseBreakdown.push({
         sessionType: type,
         sessionsPerWeek: count,
-        phase1Hours,
-        phase2Hours,
-        phase3Hours,
+        phase1Hours, phase2Hours, phase3Hours,
         totalHours: total,
         phase1Guidance: guidance.phase1,
         phase2Guidance: guidance.phase2,
@@ -280,81 +399,136 @@ export function calculatePricing(
   const isManualOverride = manualMonthlyOverride !== undefined && manualMonthlyOverride > 0;
   const baseMonthlyPrice = isManualOverride ? manualMonthlyOverride! : calculatedMonthlyPrice;
 
-  const commitToSaveSavings = 100;
   const displayMonthlyPrice = commitToSaveActive
-    ? baseMonthlyPrice - commitToSaveSavings
+    ? Math.max(0, baseMonthlyPrice - commitToSaveMonthlySavings)
     : baseMonthlyPrice;
 
-  const totalScheduledSessions = weeks * sessionsPerWeek;
+  const totalSessions = weeks * sessionsPerWeek;
   const effectiveTotalPrice = displayMonthlyPrice * months;
-  const perSessionPrice = totalScheduledSessions > 0
-    ? Math.round(effectiveTotalPrice / totalScheduledSessions)
+  const perSessionPrice = totalSessions > 0
+    ? Math.round(effectiveTotalPrice / totalSessions)
     : 0;
-  const payInFullPrice = Math.round(effectiveTotalPrice * 0.90);
+  const payInFullPrice = Math.round(effectiveTotalPrice * (1 - payInFullDiscountPercent / 100));
 
   return {
-    hourlyRate,
-    sessionLengthMinutes,
-    checkInCallLengthMinutes,
-    programBuildTimeHours,
-    calculatedMonthlyPrice,
-    baseMonthlyPrice,
-    displayMonthlyPrice,
-    perSessionPrice,
-    payInFullPrice,
-    payInFullDiscount: 10,
-    totalCoachingHours,
-    checkInHours,
-    buildHours,
-    totalHours,
-    totalProgramPrice,
-    commitToSaveActive,
-    commitToSaveSavings,
-    noShowFee: 50,
-    isManualOverride,
-    manualMonthlyOverride,
-    phaseBreakdown,
+    hourlyRate, sessionLengthMinutes, checkInCallLengthMinutes, programBuildTimeHours,
+    calculatedMonthlyPrice, baseMonthlyPrice, displayMonthlyPrice,
+    perSessionPrice, payInFullPrice, payInFullDiscount: payInFullDiscountPercent,
+    totalCoachingHours, checkInHours, buildHours, totalHours, totalProgramPrice,
+    totalSessions,
+    commitToSaveActive, commitToSaveSavings: commitToSaveMonthlySavings,
+    noShowFee: commitToSaveMissedSessionFee,
+    isManualOverride, manualMonthlyOverride, phaseBreakdown,
   };
 }
 
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
+    style: 'currency', currency: 'USD',
+    minimumFractionDigits: 0, maximumFractionDigits: 0,
   }).format(amount);
+}
+
+// ─── Schedule generation ─────────────────────────────────────────────────────
+
+function getDistributedDays(count: number): number[] {
+  if (count >= 7) return [0, 1, 2, 3, 4, 5, 6];
+  if (count === 6) return [0, 1, 2, 3, 4, 5];
+  if (count === 5) return [0, 1, 2, 3, 4];
+  if (count === 4) return [0, 1, 3, 4];
+  if (count === 3) return [0, 2, 4];
+  if (count === 2) return [1, 4];
+  if (count === 1) return [2];
+  return [];
+}
+
+export function createDefaultSchedule(sessionsPerWeek: number): DayPlan[] {
+  const schedule: DayPlan[] = FULL_DAYS.map((day, i) => ({
+    day,
+    shortDay: DAYS_OF_WEEK[i],
+    type: 'Rest' as SessionType,
+    isSession: false,
+    label: 'Rest',
+    duration: 0,
+  }));
+
+  const sessionDays = getDistributedDays(sessionsPerWeek);
+  const typePattern: ('Strength' | 'Cardio + Mobility' | 'Mix')[] = [
+    'Strength', 'Cardio + Mobility', 'Strength', 'Mix', 'Strength', 'Cardio + Mobility', 'Mix',
+  ];
+
+  sessionDays.forEach((dayIndex, i) => {
+    const type = typePattern[i % typePattern.length];
+    schedule[dayIndex] = {
+      day: FULL_DAYS[dayIndex],
+      shortDay: DAYS_OF_WEEK[dayIndex],
+      type,
+      isSession: true,
+      label: type,
+      duration: 60,
+    };
+  });
+
+  return schedule;
+}
+
+// ─── Phase generation ────────────────────────────────────────────────────────
+
+export function createDefaultPhases(contractLengthMonths: number = 12): Phase[] {
+  const totalWeeks = monthsToWeeks(contractLengthMonths);
+  const phase1Weeks = Math.round(totalWeeks * 0.12);
+  const phase2Weeks = Math.round(totalWeeks * 0.30);
+  const phase3Weeks = totalWeeks - phase1Weeks - phase2Weeks;
+
+  return [
+    {
+      id: 1, name: 'Phase 1', weeks: phase1Weeks, intensity: 'Fully Guided',
+      description: "We're live together for the full session while you learn the movements and routines.",
+    },
+    {
+      id: 2, name: 'Phase 2', weeks: phase2Weeks, intensity: 'Shared Guidance',
+      description: "Some sessions or parts of sessions you'll tackle on your own, while I'm right there coaching you through others. Workouts are captured automatically so I can review everything and keep your program dialed in.",
+    },
+    {
+      id: 3, name: 'Phase 3', weeks: phase3Weeks, intensity: 'Self-Reliant',
+      description: "You're confidently following your tailored plan with me still in your corner. Workouts are captured automatically so I can check in and keep your program on track — no guessing.",
+    },
+  ];
+}
+
+// ─── Default Commit to Save ─────────────────────────────────────────────────
+
+export function createDefaultCommitToSave(): CommitToSave {
+  return {
+    enabled: true,
+    active: true,
+    monthlySavings: 100,
+    missedSessionFee: 50,
+    nextMonthPercentOff: 5,
+    summary: 'Save $100 per month on your membership when you commit to showing up consistently. Small $50 fee only if you no-show a scheduled session without notice.',
+    makeUpWindowHours: 48,
+    reentryRule: 'If you opt out, you can re-enter at the start of the next billing cycle.',
+    emergencyWaiverEnabled: true,
+  };
+}
+
+// ─── Default Nutrition ──────────────────────────────────────────────────────
+
+export function createDefaultNutrition(): NutritionAddOn {
+  return {
+    enabled: false,
+    type: 'in-house',
+    providerName: '',
+    monthlyCost: 100,
+    description: 'Add personalized nutrition coaching to your plan. Includes a custom nutrition strategy, macro targets, and monthly check-ins with a dedicated nutrition coach.',
+  };
 }
 
 // ─── Default plan data ────────────────────────────────────────────────────────
 
-const defaultPricingInputs: PricingInputs = {
-  hourlyRate: 75,
-  sessionLengthMinutes: 60,
-  checkInCallLengthMinutes: 30,
-  programBuildTimeHours: 5,
-};
-
-const defaultPhases: Phase[] = [
-  { id: 1, name: 'Fully Guided', weeks: 6, description: 'We start with strong support so you can learn the plan, build consistency, and train with confidence from day one.' },
-  { id: 2, name: 'Shared Guidance', weeks: 12, description: "You'll begin owning more of each workout while support and accountability stay high." },
-  { id: 3, name: 'Self-Reliant', weeks: 34, description: "You're training with confidence and more independence, with your plan still being refined." },
-];
-
-const defaultGuidanceProfiles: SessionTypeGuidance[] = [
-  { sessionType: 'Strength', phase1: 'Fully guided', phase2: 'Blended', phase3: 'Self-reliant' },
-  { sessionType: 'Endurance', phase1: 'Fully guided', phase2: 'Blended', phase3: 'Self-reliant' },
-  { sessionType: 'Optional', phase1: 'Blended', phase2: 'Self-reliant', phase3: 'Self-reliant' },
-];
-
-export function createDefaultPlan(memberId: string, coachId: string, memberName: string): MemberPlanData {
-  const wp4 = defaultWeekPlan(4);
-  const wp3 = defaultWeekPlan(3);
-  const wp2 = defaultWeekPlan(2);
-
-  const pricingResult = calculatePricing(
-    wp4, 4, 12, defaultPhases, defaultPricingInputs, defaultGuidanceProfiles, true
-  );
+export function createDefaultPlan(memberName: string, memberId: string, coachId: string): MemberPlanData {
+  const schedule = createDefaultSchedule(4);
+  const phases = createDefaultPhases(12);
 
   return {
     memberId,
@@ -365,150 +539,100 @@ export function createDefaultPlan(memberId: string, coachId: string, memberName:
     subtitle: 'Built to help you train with purpose, build strength, and create real discipline.',
     identityTag: 'Ready to train',
     referredBy: '',
-    currentWeight: 0,
+    startingPoints: [],
+    startingPointIntro: "You're not starting from zero. You're starting with solid habits and real readiness — just without a structured coaching system behind it.",
+    goals: [],
+    currentWeight: '',
     goalWeight: '',
     gymConfidence: 5,
     gym: '',
-    startingPoints: [],
-    goals: [],
     goalSummary: '',
     whyStatement: '',
     whyTranslation: '',
-    readiness: 5,
-    motivation: 5,
+    readiness: 7,
+    motivation: 8,
     sessionsPerWeek: 4,
-    contractLengthMonths: 12,
-    weekPlan4: wp4,
-    weekPlan3: wp3,
-    weekPlan2: wp2,
-    phases: defaultPhases,
+    contractMonths: 12,
+    weeklySchedule: schedule,
+    phases,
     whatsIncluded: [
       '4 coaching sessions per week',
       '12-month commitment',
       'Tailored fitness plan updated as you progress',
-      'Accountability and coaching support',
-      'Monthly progress check-ins',
-      'Nutrition support available as an add-on',
-      'Clear structure so your training feels purposeful, not random',
+      'Injury-aware programming adapted to your needs',
+      'Monthly progress check-in calls',
     ],
-    pricingInputs: defaultPricingInputs,
-    sessionGuidanceProfiles: defaultGuidanceProfiles,
-    pricingResult,
-    showInvestment: true,
+    // Pricing — top-level
+    hourlyRate: 100,
+    sessionLengthMinutes: 60,
+    checkInCallMinutes: 30,
+    programBuildTimeHours: 5,
+    sessionGuidanceProfiles: [
+      { sessionType: 'Strength', phase1: 'Fully guided', phase2: 'Blended', phase3: 'Self-reliant' },
+      { sessionType: 'Cardio + Mobility', phase1: 'Fully guided', phase2: 'Blended', phase3: 'Self-reliant' },
+      { sessionType: 'Mix', phase1: 'Fully guided', phase2: 'Blended', phase3: 'Self-reliant' },
+    ],
+    showInvestment: false,
+    payInFullDiscountPercent: 10,
+    isManualOverride: false,
     // Commit to Save
-    commitToSaveEnabled: true,
-    commitToSaveAddOnActive: true,
-    commitToSaveMonthlySavings: 100,
-    commitToSaveMissedSessionFee: 50,
-    commitToSaveNextMonthPercentOff: 5,
-    commitToSaveSummary: 'Save $100 per month when you commit to showing up consistently.',
-    commitToSaveDetailsExpandedByDefault: false,
-    commitToSaveMakeUpWindowHours: 48,
-    commitToSaveReentryRule: 'If you opt out, you can re-enter at the start of the next year.',
-    commitToSaveEmergencyWaiverEnabled: true,
-    // Nutrition add-on
-    nutritionEnabled: true,
-    nutritionAddOnActive: false,
-    nutritionMonthlyCost: 100,
-    nutritionInHouse: false,
-    nutritionProviderName: '',
-    nutritionDescription: 'Add personalized nutrition coaching to your plan. Includes a custom nutrition strategy, macro targets, and monthly check-ins.',
+    commitToSave: createDefaultCommitToSave(),
+    // Nutrition
+    nutrition: createDefaultNutrition(),
   };
-}
-
-function defaultWeekPlan(sessions: number): DayPlan[] {
-  if (sessions === 4) {
-    return [
-      { day: 'Monday', shortDay: 'Mon', type: 'rest', label: 'No-Go Day', breakdown: ['Not available', 'Rest and recovery'] },
-      { day: 'Tuesday', shortDay: 'Tue', type: 'strength', label: 'Strength — 7:30am', duration: '60 min', breakdown: ['7:30am session start', 'Warm-up / mobility', 'Main strength work', 'Accessory work', 'Core or finisher'] },
-      { day: 'Wednesday', shortDay: 'Wed', type: 'cardio', label: 'Endurance — 7:30am', duration: '45–60 min', breakdown: ['7:30am session start', 'Warm-up', 'Engine / endurance work', 'Conditioning or intervals', 'Cool down'] },
-      { day: 'Thursday', shortDay: 'Thu', type: 'strength', label: 'Strength — 7:30am', duration: '60 min', breakdown: ['7:30am session start', 'Warm-up / mobility', 'Main strength work', 'Accessory work', 'Core or finisher'] },
-      { day: 'Friday', shortDay: 'Fri', type: 'rest', label: 'No-Go Day', breakdown: ['Not available', 'Rest and recovery'] },
-      { day: 'Saturday', shortDay: 'Sat', type: 'optional', label: 'Optional / Mobility', breakdown: ['Optional mobility work', 'Light walk', 'Full rest'] },
-      { day: 'Sunday', shortDay: 'Sun', type: 'strength', label: 'Strength — 7–9am', duration: '60–90 min', breakdown: ['Morning window: 7:00–9:00am', 'Warm-up / mobility', 'Main strength or conditioning work', 'Accessory work', 'Core or finisher'] },
-    ];
-  }
-  if (sessions === 3) {
-    return [
-      { day: 'Monday', shortDay: 'Mon', type: 'rest', label: 'No-Go Day', breakdown: ['Not available', 'Rest and recovery'] },
-      { day: 'Tuesday', shortDay: 'Tue', type: 'strength', label: 'Strength — 7:30am', duration: '60 min', breakdown: ['7:30am session start', 'Warm-up / mobility', 'Main strength work', 'Accessory work', 'Core or finisher'] },
-      { day: 'Wednesday', shortDay: 'Wed', type: 'cardio', label: 'Endurance — 7:30am', duration: '45–60 min', breakdown: ['7:30am session start', 'Warm-up', 'Engine / endurance work', 'Conditioning or intervals', 'Cool down'] },
-      { day: 'Thursday', shortDay: 'Thu', type: 'rest', label: 'Rest / Walk', breakdown: ['Light walking or full rest'] },
-      { day: 'Friday', shortDay: 'Fri', type: 'rest', label: 'No-Go Day', breakdown: ['Not available', 'Rest and recovery'] },
-      { day: 'Saturday', shortDay: 'Sat', type: 'optional', label: 'Optional / Walk', breakdown: ['Optional walking or recovery'] },
-      { day: 'Sunday', shortDay: 'Sun', type: 'strength', label: 'Strength — 7–9am', duration: '60–90 min', breakdown: ['Morning window: 7:00–9:00am', 'Warm-up / mobility', 'Main strength or conditioning work', 'Accessory work'] },
-    ];
-  }
-  // 2 sessions
-  return [
-    { day: 'Monday', shortDay: 'Mon', type: 'rest', label: 'No-Go Day', breakdown: ['Not available', 'Rest and recovery'] },
-    { day: 'Tuesday', shortDay: 'Tue', type: 'strength', label: 'Strength — 7:30am', duration: '60 min', breakdown: ['7:30am session start', 'Warm-up / mobility', 'Full-body strength work', 'Accessory work', 'Core or finisher'] },
-    { day: 'Wednesday', shortDay: 'Wed', type: 'rest', label: 'Rest / Walk', breakdown: ['Light walking or full rest'] },
-    { day: 'Thursday', shortDay: 'Thu', type: 'rest', label: 'Rest / Walk', breakdown: ['Light walking or full rest'] },
-    { day: 'Friday', shortDay: 'Fri', type: 'rest', label: 'No-Go Day', breakdown: ['Not available', 'Rest and recovery'] },
-    { day: 'Saturday', shortDay: 'Sat', type: 'optional', label: 'Optional / Walk', breakdown: ['Optional walking or recovery'] },
-    { day: 'Sunday', shortDay: 'Sun', type: 'strength', label: 'Strength — 7–9am', duration: '60–90 min', breakdown: ['Morning window: 7:00–9:00am', 'Warm-up / mobility', 'Full-body strength work', 'Accessory work'] },
-  ];
 }
 
 // ─── Goal display config ─────────────────────────────────────────────────────
 
-export const goalConfig: Record<string, { emoji: string; color: string }> & Array<{
-  label: string;
-  icon: string;
-  bgColor: string;
-  borderColor: string;
-  textColor: string;
-}> = Object.assign(
-  [
-    { label: 'Improved Health', icon: '\u2764\uFE0F', bgColor: 'rgba(110,187,122,0.1)', borderColor: 'rgba(110,187,122,0.3)', textColor: '#6EBB7A' },
-    { label: 'Improved Endurance', icon: '\u26A1', bgColor: 'rgba(91,155,213,0.1)', borderColor: 'rgba(91,155,213,0.3)', textColor: '#5B9BD5' },
-    { label: 'Increased Strength', icon: '\uD83D\uDCAA', bgColor: 'rgba(245,166,35,0.1)', borderColor: 'rgba(245,166,35,0.3)', textColor: '#F5A623' },
-    { label: 'Increased Muscle Mass', icon: '\uD83C\uDFCB\uFE0F', bgColor: 'rgba(126,184,232,0.1)', borderColor: 'rgba(126,184,232,0.25)', textColor: '#7EB8E8' },
-  ] as any,
-  {
-    'Improved Health': { emoji: '\u2764\uFE0F', color: '#6EBB7A' },
-    'Improved Endurance': { emoji: '\u26A1', color: '#5B9BD5' },
-    'Increased Strength': { emoji: '\uD83D\uDCAA', color: '#F5A623' },
-    'Increased Muscle Mass': { emoji: '\uD83C\uDFCB\uFE0F', color: '#7EB8E8' },
-    'Weight Loss': { emoji: '\uD83C\uDFAF', color: '#E06B6B' },
-    'Flexibility': { emoji: '\uD83E\uDDD8', color: '#9B8FD5' },
-    'Mental Health': { emoji: '\uD83E\uDDE0', color: '#5B9BD5' },
-    'Better Sleep': { emoji: '\uD83D\uDE34', color: '#7EB8E8' },
-  }
-);
+export const HEALTH_GOALS = [
+  'Feel healthier', 'Fat loss', 'Build muscle', 'Improve endurance',
+  'Lower stress', 'Better sleep', 'More energy', 'Increase flexibility',
+  'Build confidence', 'Manage pain',
+];
+
+export const goalConfig: Record<string, { emoji: string; color: string }> = {
+  'Improved Health': { emoji: '\u2764\uFE0F', color: '#6EBB7A' },
+  'Improved Endurance': { emoji: '\u26A1', color: '#5B9BD5' },
+  'Increased Strength': { emoji: '\uD83D\uDCAA', color: '#F5A623' },
+  'Increased Muscle Mass': { emoji: '\uD83C\uDFCB\uFE0F', color: '#7EB8E8' },
+  'Weight Loss': { emoji: '\uD83C\uDFAF', color: '#E06B6B' },
+  'Flexibility': { emoji: '\uD83E\uDDD8', color: '#9B8FD5' },
+  'Mental Health': { emoji: '\uD83E\uDDE0', color: '#5B9BD5' },
+  'Better Sleep': { emoji: '\uD83D\uDE34', color: '#7EB8E8' },
+  'Feel healthier': { emoji: '\u2764\uFE0F', color: '#6EBB7A' },
+  'Fat loss': { emoji: '\uD83D\uDD25', color: '#E06B6B' },
+  'Build muscle': { emoji: '\uD83D\uDCAA', color: '#F5A623' },
+  'Improve endurance': { emoji: '\uD83C\uDFC3', color: '#5B9BD5' },
+  'Lower stress': { emoji: '\uD83C\uDF19', color: '#9B8FD5' },
+  'More energy': { emoji: '\u26A1', color: '#F5A623' },
+  'Increase flexibility': { emoji: '\uD83E\uDDD8', color: '#9B8FD5' },
+  'Build confidence': { emoji: '\uD83D\uDE0A', color: '#6EBB7A' },
+  'Manage pain': { emoji: '\uD83C\uDFAF', color: '#E06B6B' },
+};
 
 export const availableGoals = [
-  'Improved Health',
-  'Improved Endurance',
-  'Increased Strength',
-  'Increased Muscle Mass',
-  'Weight Loss',
-  'Flexibility',
-  'Mental Health',
-  'Better Sleep',
+  'Improved Health', 'Improved Endurance', 'Increased Strength', 'Increased Muscle Mass',
+  'Weight Loss', 'Flexibility', 'Mental Health', 'Better Sleep',
 ];
 
 // ─── Day type colors ─────────────────────────────────────────────────────────
 
 export const typeColors: Record<string, { bg: string; border: string; text: string; dot: string }> = {
-  strength: { bg: 'rgba(91,155,213,0.14)', border: 'rgba(91,155,213,0.35)', text: '#5B9BD5', dot: '#5B9BD5' },
-  cardio: { bg: 'rgba(245,166,35,0.14)', border: 'rgba(245,166,35,0.35)', text: '#F5A623', dot: '#F5A623' },
-  rest: { bg: 'rgba(42,51,71,0.3)', border: '#1E2535', text: '#4A5568', dot: '#2A3347' },
-  optional: { bg: 'rgba(110,187,122,0.08)', border: 'rgba(110,187,122,0.2)', text: '#6EBB7A', dot: '#6EBB7A' },
-  Strength: { bg: 'rgba(91,155,213,0.14)', border: 'rgba(91,155,213,0.35)', text: '#5B9BD5', dot: '#5B9BD5' },
-  Endurance: { bg: 'rgba(245,166,35,0.14)', border: 'rgba(245,166,35,0.35)', text: '#F5A623', dot: '#F5A623' },
-  Rest: { bg: 'rgba(42,51,71,0.3)', border: '#1E2535', text: '#4A5568', dot: '#2A3347' },
-  Optional: { bg: 'rgba(110,187,122,0.08)', border: 'rgba(110,187,122,0.2)', text: '#6EBB7A', dot: '#6EBB7A' },
+  'Strength': { bg: 'rgba(91,155,213,0.14)', border: 'rgba(91,155,213,0.35)', text: '#5B9BD5', dot: '#5B9BD5' },
+  'Cardio + Mobility': { bg: 'rgba(245,166,35,0.14)', border: 'rgba(245,166,35,0.35)', text: '#F5A623', dot: '#F5A623' },
+  'Mix': { bg: 'rgba(110,187,122,0.14)', border: 'rgba(110,187,122,0.35)', text: '#6EBB7A', dot: '#6EBB7A' },
+  'Rest': { bg: 'rgba(42,51,71,0.3)', border: '#1E2535', text: '#4A5568', dot: '#2A3347' },
+  'strength': { bg: 'rgba(91,155,213,0.14)', border: 'rgba(91,155,213,0.35)', text: '#5B9BD5', dot: '#5B9BD5' },
+  'cardio': { bg: 'rgba(245,166,35,0.14)', border: 'rgba(245,166,35,0.35)', text: '#F5A623', dot: '#F5A623' },
+  'rest': { bg: 'rgba(42,51,71,0.3)', border: '#1E2535', text: '#4A5568', dot: '#2A3347' },
+  'optional': { bg: 'rgba(110,187,122,0.08)', border: 'rgba(110,187,122,0.2)', text: '#6EBB7A', dot: '#6EBB7A' },
 };
 
 export const phaseColors = ['#5B9BD5', '#F5A623', '#6EBB7A'];
 
-export const dayTypeOptions: { value: DayPlan['type']; label: string }[] = [
-  { value: 'strength', label: 'Strength' },
-  { value: 'cardio', label: 'Endurance' },
-  { value: 'rest', label: 'Rest' },
-  { value: 'optional', label: 'Optional' },
+export const dayTypeOptions: { value: SessionType; label: string }[] = [
+  { value: 'Strength', label: 'Strength' },
+  { value: 'Cardio + Mobility', label: 'Cardio + Mobility' },
+  { value: 'Mix', label: 'Mix' },
+  { value: 'Rest', label: 'Rest' },
 ];
-
-export const guidanceLevels: GuidanceLevel[] = ['Fully guided', 'Blended', 'Self-reliant'];
