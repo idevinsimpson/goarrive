@@ -561,6 +561,19 @@ export default function MyPlan() {
     fetchPlan();
   }, [user]);
 
+  async function handleAcceptPlan() {
+    if (!user || !plan) return;
+    try {
+      await updateDoc(doc(db, 'member_plans', plan.id), {
+        status: 'accepted',
+        updatedAt: new Date(),
+      });
+      setPlan(prev => prev ? { ...prev, status: 'accepted' } : null);
+    } catch (err) {
+      console.error('Error accepting plan:', err);
+    }
+  }
+
   async function fetchPlan() {
     try {
       const planDocSnap = await getDoc(doc(db, 'member_plans', `plan_${user!.uid}`));
@@ -637,6 +650,28 @@ export default function MyPlan() {
         <CommitToSaveSection plan={plan} />
         <NutritionSection plan={plan} />
         <InvestmentSection plan={plan} />
+
+        {/* ─── PLAN ACCEPTANCE ──────────────────────────────────────────────── */}
+        {plan.status === 'pending' && (
+          <View style={st.section}>
+            <Text style={st.sectionLabel}>PLAN ACCEPTANCE</Text>
+            <View style={st.darkCard}>
+              <Text style={st.subtitleText}>Your coach has prepared this personalized fitness plan for you. Please review all the details. If you're ready to commit, accept the plan below.</Text>
+              <Pressable style={st.acceptBtn} onPress={handleAcceptPlan}>
+                <Text style={st.acceptBtnText}>Accept Plan</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+
+        {plan.status === 'accepted' && (
+          <View style={st.section}>
+            <Text style={st.sectionLabel}>PLAN STATUS</Text>
+            <View style={st.darkCard}>
+              <Text style={st.subtitleText}>Congratulations! You have accepted your fitness plan. Let's get to work!</Text>
+            </View>
+          </View>
+        )}
       </ScrollView>
     </View>
   );
@@ -677,4 +712,16 @@ const st = StyleSheet.create({
   statValueLarge: { fontSize: 17, fontWeight: '700', color: '#F0F4F8' },
   statLabel: { fontSize: 13, fontWeight: '600', color: '#8A95A3', letterSpacing: 0.4 },
   statValue: { fontSize: 14, fontWeight: '700' },
+  acceptBtn: {
+    backgroundColor: '#6EBB7A',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  acceptBtnText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: '700',
+  },
 });

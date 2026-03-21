@@ -139,7 +139,7 @@ export default function MembersScreen() {
         const data = d.data();
         return {
           id: d.id,
-          name: data.name ?? '',
+          name: data.name || data.displayName || (data.firstName ? `${data.firstName} ${data.lastName || ''}`.trim() : '') || '',
           email: data.email ?? '',
           phone: data.phone ?? '',
           notes: data.notes ?? '',

@@ -302,7 +302,14 @@ function PlanView({ plan, isCoach, onChange }: {
   const [editValue, setEditValue] = useState('');
 
   // Pricing calculation
-  const pricing = useMemo(() => calculatePricing(plan), [plan]);
+  const pricing = useMemo(() => {
+    try {
+      return calculatePricing(plan);
+    } catch (err) {
+      console.error('PlanView pricing error:', err);
+      return null;
+    }
+  }, [plan]);
 
   // Helper to open edit modal
   const openEdit = (field: string, val: string) => { setEditField(field); setEditValue(val); };
@@ -391,8 +398,8 @@ function PlanView({ plan, isCoach, onChange }: {
   };
 
   // Total weeks from phases
-  const totalWeeks = plan.phases.reduce((s, p) => s + p.weeks, 0);
-  const totalWeeksTarget = monthsToWeeks(plan.contractMonths);
+  const totalWeeks = (plan.phases || []).reduce((s, p) => s + (p?.weeks || 0), 0);
+  const totalWeeksTarget = monthsToWeeks(plan.contractMonths || 12);
 
   // ─── RENDER ────────────────────────────────────────────────────────────────
 
@@ -521,9 +528,9 @@ function PlanView({ plan, isCoach, onChange }: {
         ) : null}
       </View>
 
-      {/* ─── YOUR WHY ────────────────────────────────────────────────────── */}
+      {/* ─── YOUR GUIDANCE ────────────────────────────────────────────────── */}
       <View style={pv.section}>
-        <Text style={pv.sectionLabel}>YOUR WHY</Text>
+        <Text style={pv.sectionLabel}>YOUR GUIDANCE</Text>
         <View style={pv.card}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
             <View style={{ flex: 1 }}>
@@ -593,7 +600,7 @@ function PlanView({ plan, isCoach, onChange }: {
 
           {/* Day tiles */}
           <View style={{ flexDirection: 'row', gap: 4, justifyContent: 'space-between' }}>
-            {plan.weeklySchedule.map((day, i) => (
+            {(plan.weeklySchedule || []).map((day, i) => (
               <DayTile key={day.shortDay || i} day={day} isCoach={isCoach}
                 onTypeChange={(type) => handleDayTypeChange(i, type)} />
             ))}
@@ -607,14 +614,14 @@ function PlanView({ plan, isCoach, onChange }: {
         <View style={pv.card}>
           {/* Phase progress bar */}
           <View style={{ flexDirection: 'row', height: 12, borderRadius: 6, overflow: 'hidden', marginBottom: 4 }}>
-            {plan.phases.map((phase, i) => {
+            {(plan.phases || []).map((phase, i) => {
               const pct = totalWeeksTarget > 0 ? (phase.weeks / totalWeeksTarget) * 100 : 0;
               const pc = phaseColors[i] || phaseColors[0];
               return <View key={i} style={{ width: `${pct}%` as any, backgroundColor: pc.bar, height: 12 }} />;
             })}
           </View>
           <View style={{ flexDirection: 'row', marginBottom: 8 }}>
-            {plan.phases.map((phase, i) => {
+            {(plan.phases || []).map((phase, i) => {
               const pct = totalWeeksTarget > 0 ? (phase.weeks / totalWeeksTarget) * 100 : 0;
               return (
                 <View key={i} style={{ width: `${pct}%` as any, alignItems: 'center' }}>
@@ -628,9 +635,9 @@ function PlanView({ plan, isCoach, onChange }: {
           </Text>
 
           {/* Phase cards */}
-          {plan.phases.map((phase, i) => {
+          {(plan.phases || []).map((phase, i) => {
             const pc = phaseColors[i] || phaseColors[0];
-            const isLast = i === plan.phases.length - 1;
+            const isLast = i === (plan.phases || []).length - 1;
             return (
               <View key={i} style={[pv.phaseCard, { borderColor: pc.border, backgroundColor: pc.bg }]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -722,7 +729,7 @@ function PlanView({ plan, isCoach, onChange }: {
       {(plan.showInvestment !== false || isCoach) && (
         <View style={pv.section}>
           <Text style={pv.sectionLabel}>YOUR INVESTMENT</Text>
-          <InvestmentView plan={plan} pricing={pricing} isCoach={isCoach} />
+          {pricing && <InvestmentView plan={plan} pricing={pricing} isCoach={isCoach} />}
         </View>
       )}
 
@@ -842,12 +849,12 @@ function CommitToSaveView({ plan, isCoach }: { plan: MemberPlanData; isCoach: bo
     <View style={pv.card}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <Text style={{ color: ACCENT, fontSize: 16, fontWeight: '700', fontFamily: FH }}>
-          Save {formatCurrency(cts.savingsPerMonth)}/mo
+          Save {formatCurrency(cts.monthlySavings ?? 0)}/mo
         </Text>
         <Text style={{ color: MUTED, fontSize: 12 }}>Accountability discount</Text>
       </View>
       <Text style={{ color: MUTED, fontSize: 13, lineHeight: 19, marginBottom: 8 }}>
-        {cts.summaryText || 'Stay consistent and save. Miss a session without making it up, and the discount pauses until you rebuild your streak.'}
+        {cts.summary || 'Stay consistent and save. Miss a session without making it up, and the discount pauses until you rebuild your streak.'}
       </Text>
       <Pressable onPress={() => setExpanded(!expanded)}>
         <Text style={{ color: PRIMARY, fontSize: 13, fontWeight: '600' }}>
@@ -860,12 +867,12 @@ function CommitToSaveView({ plan, isCoach }: { plan: MemberPlanData; isCoach: bo
             • Complete all sessions each week (make-ups allowed within {cts.makeUpWindowHours || 48}hrs)
           </Text>
           <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18, marginBottom: 4 }}>
-            • 30-day streak bonus: {cts.streakBonusPercent || 5}% off next month
+            • 30-day streak bonus: {cts.nextMonthPercentOff || 5}% off next month
           </Text>
           <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18, marginBottom: 4 }}>
             • Missed session fee: {formatCurrency(cts.missedSessionFee || 25)} (waived if made up)
           </Text>
-          {cts.emergencyWaiver && (
+          {cts.emergencyWaiverEnabled && (
             <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18, marginBottom: 4 }}>
               • Emergency waiver available (1 per quarter)
             </Text>
@@ -961,9 +968,9 @@ function PricingBreakdown({ plan, pricing }: { plan: MemberPlanData; pricing: Pr
   const typeHours = sessionTypes.filter(t => t !== 'Rest').map(type => {
     const count = sessionCounts[type] || 0;
     const profile = getGuidanceProfile(type, plan.sessionGuidanceProfiles || []);
-    const P1 = plan.phases[0]?.weeks || 0;
-    const P2 = plan.phases[1]?.weeks || 0;
-    const P3 = plan.phases[2]?.weeks || 0;
+    const P1 = (plan.phases && plan.phases[0]?.weeks) || 0;
+    const P2 = (plan.phases && plan.phases[1]?.weeks) || 0;
+    const P3 = (plan.phases && plan.phases[2]?.weeks) || 0;
     return {
       type, count, profile,
       p1Hrs: P1 * count * (sessionLength / 60) * GUIDANCE_FACTORS[profile.phase1],
@@ -975,9 +982,9 @@ function PricingBreakdown({ plan, pricing }: { plan: MemberPlanData; pricing: Pr
   const totalCoachingHrs = typeHours.reduce((s, t) => s + t.p1Hrs + t.p2Hrs + t.p3Hrs, 0);
   const checkInHrs = months * checkInMin / 60;
   const totalHrs = totalCoachingHrs + checkInHrs + buildHrs;
-  const P1 = plan.phases[0]?.weeks || 0;
-  const P2 = plan.phases[1]?.weeks || 0;
-  const P3 = plan.phases[2]?.weeks || 0;
+  const P1 = (plan.phases && plan.phases[0]?.weeks) || 0;
+  const P2 = (plan.phases && plan.phases[1]?.weeks) || 0;
+  const P3 = (plan.phases && plan.phases[2]?.weeks) || 0;
 
   return (
     <View style={{ marginTop: 8, padding: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, borderWidth: 1, borderColor: BORDER }}>
@@ -1175,6 +1182,30 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
               </View>
             )}
 
+            {/* Present Plan */}
+            {plan.status === 'draft' && (
+              <Pressable
+                onPress={() => onChange({ status: 'pending' })}
+                style={{ backgroundColor: PRIMARY, paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginTop: 20 }}
+              >
+                <Text style={{ color: '#FFF', fontSize: 16, fontWeight: '700' }}>Present Plan to Member</Text>
+              </Pressable>
+            )}
+
+            {plan.status === 'pending' && (
+              <View style={{ marginTop: 20, padding: 12, backgroundColor: 'rgba(91,155,213,0.08)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(91,155,213,0.25)' }}>
+                <Text style={{ color: PRIMARY, fontSize: 14, fontWeight: '600', marginBottom: 4 }}>Plan Presented</Text>
+                <Text style={{ color: MUTED, fontSize: 13 }}>The plan has been presented to the member. They will see an option to accept it on their end.</Text>
+              </View>
+            )}
+
+            {plan.status === 'accepted' && (
+              <View style={{ marginTop: 20, padding: 12, backgroundColor: 'rgba(110,187,122,0.08)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(110,187,122,0.25)' }}>
+                <Text style={{ color: ACCENT, fontSize: 14, fontWeight: '600', marginBottom: 4 }}>Plan Accepted!</Text>
+                <Text style={{ color: MUTED, fontSize: 13 }}>The member has accepted this plan. It is now active.</Text>
+              </View>
+            )}
+
             {/* Monthly price override */}
             <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: BORDER, paddingTop: 12 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
@@ -1229,7 +1260,7 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
             <Pressable
               onPress={() => onChange({
                 commitToSave: {
-                  ...(plan.commitToSave || { savingsPerMonth: 100, streakBonusPercent: 5, missedSessionFee: 25, makeUpWindowHours: 48, emergencyWaiver: true, reEntryRules: 'Resume full rate for 30 days, then re-qualify.', summaryText: 'Stay consistent and save. Miss a session without making it up, and the discount pauses until you rebuild your streak.', enabled: false, defaultActive: false }),
+                  ...(plan.commitToSave || { monthlySavings: 100, nextMonthPercentOff: 5, missedSessionFee: 25, makeUpWindowHours: 48, emergencyWaiverEnabled: true, reentryRule: 'Resume full rate for 30 days, then re-qualify.', summary: 'Stay consistent and save. Miss a session without making it up, and the discount pauses until you rebuild your streak.', enabled: false, active: false }),
                   enabled: !(plan.commitToSave?.enabled),
                 },
               })}
@@ -1264,13 +1295,70 @@ const dc = StyleSheet.create({
 
 function QuestionnaireViewer({ data }: { data: any }) {
   if (!data) return <View style={{ padding: 20 }}><Text style={{ color: MUTED }}>No questionnaire data available.</Text></View>;
+  
+  // Map fields from intakeSubmissions if needed
+  const name = `${data.firstName || ''} ${data.lastName || ''}`.trim();
+  const goals = data.primaryGoals || data.goals;
+  const weight = data.weight || data.currentWeight;
+  const readiness = data.readinessForChange || data.readiness;
+  const activity = data.activityLevel || data.occupation;
+  const diet = data.currentDiet || data.diet;
+  
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
-      {data.firstName && <QSection label="About"><QRow label="Name" value={`${data.firstName || ''} ${data.lastName || ''}`} /><QRow label="Age" value={data.age} /><QRow label="Preferred time" value={data.preferredTime} /></QSection>}
-      {data.goals && <QSection label="Goals"><QRow label="Goals" value={data.goals} /><QRow label="Current weight" value={data.currentWeight} /><QRow label="Goal weight" value={data.goalWeight} /></QSection>}
-      {data.whyStatement && <QSection label="Why"><QRow label="Statement" value={data.whyStatement} /><QRow label="Readiness" value={data.readiness} /><QRow label="Motivation" value={data.motivation} /></QSection>}
-      {data.activityLevel && <QSection label="Lifestyle"><QRow label="Activity" value={data.activityLevel} /><QRow label="Diet" value={data.diet} /><QRow label="Sleep" value={data.sleepHours} /><QRow label="Stress" value={data.stressLevel} /></QSection>}
-      {data.injuries && <QSection label="Health"><QRow label="Injuries" value={data.injuries} /><QRow label="Medications" value={data.medications} /></QSection>}
+      <QSection label="About">
+        <QRow label="Name" value={name} />
+        <QRow label="Email" value={data.email} />
+        <QRow label="Phone" value={data.phone} />
+        <QRow label="Gender" value={data.gender} />
+        <QRow label="DOB" value={data.dateOfBirth} />
+        <QRow label="Height" value={data.height} />
+      </QSection>
+
+      {(goals || weight || data.goalWeight) && (
+        <QSection label="Goals">
+          <QRow label="Primary Goals" value={goals} />
+          <QRow label="Specific Goals" value={data.specificGoals} />
+          <QRow label="Current Weight" value={weight} />
+          <QRow label="Goal Weight" value={data.goalWeight} />
+        </QSection>
+      )}
+
+      {(data.whyStatement || readiness || data.motivation) && (
+        <QSection label="Motivation">
+          <QRow label="Why Statement" value={data.whyStatement} />
+          <QRow label="Readiness" value={readiness} />
+          <QRow label="Motivation" value={data.motivation} />
+          <QRow label="Gym Confidence" value={data.gymConfidence} />
+        </QSection>
+      )}
+
+      {(activity || diet || data.currentRoutine) && (
+        <QSection label="Lifestyle">
+          <QRow label="Activity/Occupation" value={activity} />
+          <QRow label="Current Routine" value={data.currentRoutine} />
+          <QRow label="Diet" value={diet} />
+          <QRow label="Work Schedule" value={data.workSchedule} />
+        </QSection>
+      )}
+
+      {(data.healthProblems || data.medications || data.injuries || data.currentInjuries) && (
+        <QSection label="Health">
+          <QRow label="Health Problems" value={data.healthProblems} />
+          <QRow label="Medications" value={data.medications} />
+          <QRow label="Injuries" value={data.injuries || data.currentInjuries} />
+          <QRow label="Therapies" value={data.therapies} />
+        </QSection>
+      )}
+
+      {(data.preferredDays || data.preferredTime || data.gym) && (
+        <QSection label="Scheduling">
+          <QRow label="Preferred Days" value={data.preferredDays} />
+          <QRow label="Preferred Time" value={data.preferredTime} />
+          <QRow label="Gym" value={data.gym} />
+          <QRow label="Sessions/Week" value={data.sessionsPerWeek} />
+        </QSection>
+      )}
     </ScrollView>
   );
 }
@@ -1323,50 +1411,132 @@ export default function MemberPlanScreen() {
 
   const loadData = async () => {
     if (!memberId || !user) return;
+    setLoading(true);
+
+    // ── Step 1: Load member profile ──────────────────────────────────────
+    let name = 'Member';
+    let memberUid: string = memberId; // default: assume memberId IS the uid
     try {
-      setLoading(true);
-
-      // Load member profile
-      const memberDoc = await getDoc(doc(db, 'users', memberId));
-      const memberData = memberDoc.data();
-      const name = memberData?.firstName || memberData?.displayName || 'Member';
-      setMemberName(name);
-
-      // Load questionnaire
-      const qDoc = await getDoc(doc(db, 'questionnaires', memberId));
-      if (qDoc.exists()) setQuestionnaire(qDoc.data());
-
-      // Load or create plan
-      const planDoc = await getDoc(doc(db, 'member_plans', memberId));
-      if (planDoc.exists()) {
-        const existingPlan = planDoc.data() as MemberPlanData;
-        // Ensure all new fields have defaults
-        setPlan({
-          ...createDefaultPlan(name, memberId, user.uid),
-          ...existingPlan,
-          memberName: existingPlan.memberName || name,
-        });
-      } else {
-        // Create from questionnaire data
-        const defaultPlan = createDefaultPlan(name, memberId, user.uid);
-        if (questionnaire) {
-          defaultPlan.memberAge = questionnaire.age;
-          defaultPlan.whyStatement = questionnaire.whyStatement || '';
-          defaultPlan.readiness = questionnaire.readiness || 7;
-          defaultPlan.motivation = questionnaire.motivation || 7;
-          defaultPlan.gymConfidence = questionnaire.gymConfidence || 5;
-          if (questionnaire.goals) defaultPlan.goals = questionnaire.goals;
-          if (questionnaire.currentWeight) defaultPlan.currentWeight = String(questionnaire.currentWeight) + ' lbs';
-          if (questionnaire.goalWeight) defaultPlan.goalWeight = String(questionnaire.goalWeight) + ' lbs';
-        }
-        setPlan(defaultPlan);
-        await setDoc(doc(db, 'member_plans', memberId), { ...defaultPlan, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      const memberDoc = await getDoc(doc(db, 'members', memberId));
+      if (memberDoc.exists()) {
+        const d = memberDoc.data();
+        // Support all possible name fields: name, displayName, firstName+lastName
+        name = d.firstName
+          ? `${d.firstName} ${d.lastName || ''}`.trim()
+          : d.displayName || d.name || 'Member';
+        // If the member doc has a uid field (intake-created), use it for plan lookup
+        if (d.uid) memberUid = d.uid;
       }
     } catch (err) {
-      console.error('Error loading plan:', err);
-    } finally {
-      setLoading(false);
+      console.warn('[loadData] Could not load member profile:', err);
     }
+    setMemberName(name);
+
+    // ── Step 2: Load questionnaire ───────────────────────────────────────
+    let qData: any = null;
+    try {
+      // Try both the Firestore doc ID and the uid
+      const qDoc = await getDoc(doc(db, 'intakeSubmissions', memberId));
+      if (qDoc.exists()) {
+        qData = qDoc.data();
+      } else if (memberUid !== memberId) {
+        const qDoc2 = await getDoc(doc(db, 'intakeSubmissions', memberUid));
+        if (qDoc2.exists()) qData = qDoc2.data();
+      }
+      if (qData) setQuestionnaire(qData);
+    } catch (err) {
+      console.warn('[loadData] Could not load questionnaire:', err);
+    }
+
+    // ── Step 3: Load or create plan ──────────────────────────────────────
+    // Try both the Firestore doc ID and the uid as plan keys
+    let finalPlan: MemberPlanData | null = null;
+    let planKey = memberId; // the key we'll use to save/update the plan
+
+    try {
+      // Try primary key first
+      const planDoc = await getDoc(doc(db, 'member_plans', memberId));
+      if (planDoc.exists()) {
+        console.log('[loadData] Found plan at key:', memberId);
+        const existingPlan = planDoc.data() as MemberPlanData;
+        const defaultPlan = createDefaultPlan(name, memberId, user.uid);
+        finalPlan = {
+          ...defaultPlan,
+          ...existingPlan,
+          nutrition: { ...defaultPlan.nutrition, ...(existingPlan.nutrition || {}) },
+          commitToSave: { ...defaultPlan.commitToSave, ...(existingPlan.commitToSave || {}) },
+          phases: (existingPlan.phases && existingPlan.phases.length > 0) ? existingPlan.phases : defaultPlan.phases,
+          weeklySchedule: (existingPlan.weeklySchedule && existingPlan.weeklySchedule.length > 0) ? existingPlan.weeklySchedule : defaultPlan.weeklySchedule,
+          sessionGuidanceProfiles: (existingPlan.sessionGuidanceProfiles && existingPlan.sessionGuidanceProfiles.length > 0) ? existingPlan.sessionGuidanceProfiles : defaultPlan.sessionGuidanceProfiles,
+          memberName: existingPlan.memberName || name,
+        };
+        planKey = memberId;
+      } else if (memberUid !== memberId) {
+        // Try uid-based key (for intake-created members)
+        const planDoc2 = await getDoc(doc(db, 'member_plans', memberUid));
+        if (planDoc2.exists()) {
+          console.log('[loadData] Found plan at uid key:', memberUid);
+          const existingPlan = planDoc2.data() as MemberPlanData;
+          const defaultPlan = createDefaultPlan(name, memberUid, user.uid);
+          finalPlan = {
+            ...defaultPlan,
+            ...existingPlan,
+            nutrition: { ...defaultPlan.nutrition, ...(existingPlan.nutrition || {}) },
+            commitToSave: { ...defaultPlan.commitToSave, ...(existingPlan.commitToSave || {}) },
+            phases: (existingPlan.phases && existingPlan.phases.length > 0) ? existingPlan.phases : defaultPlan.phases,
+            weeklySchedule: (existingPlan.weeklySchedule && existingPlan.weeklySchedule.length > 0) ? existingPlan.weeklySchedule : defaultPlan.weeklySchedule,
+            sessionGuidanceProfiles: (existingPlan.sessionGuidanceProfiles && existingPlan.sessionGuidanceProfiles.length > 0) ? existingPlan.sessionGuidanceProfiles : defaultPlan.sessionGuidanceProfiles,
+            memberName: existingPlan.memberName || name,
+          };
+          planKey = memberUid;
+        }
+      }
+    } catch (err) {
+      console.warn('[loadData] Error reading plan from Firestore:', err);
+    }
+
+    // ── Step 4: Create plan from scratch if none found ───────────────────
+    if (!finalPlan) {
+      console.log('[loadData] No plan found, creating default plan for:', name);
+      const defaultPlan = createDefaultPlan(name, planKey, user.uid);
+      // Populate from questionnaire if available
+      if (qData) {
+        if (qData.dateOfBirth) {
+          try {
+            const birthDate = new Date(qData.dateOfBirth);
+            const age = new Date().getFullYear() - birthDate.getFullYear();
+            defaultPlan.memberAge = age;
+          } catch (e) { /* ignore */ }
+        }
+        defaultPlan.whyStatement = qData.whyStatement || '';
+        defaultPlan.readiness = qData.readinessForChange || qData.readiness || 7;
+        defaultPlan.motivation = qData.motivation || 8;
+        defaultPlan.gymConfidence = qData.gymConfidence || 5;
+        if (qData.primaryGoals) defaultPlan.goals = qData.primaryGoals;
+        else if (qData.goals) defaultPlan.goals = qData.goals;
+        if (qData.weight) defaultPlan.currentWeight = String(qData.weight) + ' lbs';
+        if (qData.goalWeight) defaultPlan.goalWeight = String(qData.goalWeight) + ' lbs';
+        if (qData.gym) defaultPlan.gym = qData.gym;
+      }
+      finalPlan = defaultPlan;
+      // Try to persist — but NEVER let a save failure block showing the plan
+      try {
+        await setDoc(doc(db, 'member_plans', planKey), {
+          ...finalPlan,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        console.log('[loadData] New plan saved to Firestore at key:', planKey);
+      } catch (saveErr) {
+        console.warn('[loadData] Could not save plan to Firestore (will show in-memory):', saveErr);
+        // Plan still shows in UI — coach can edit and it will retry on next change
+      }
+    }
+
+    // ── Step 5: Always set plan state ────────────────────────────────────
+    console.log('[loadData] Setting plan for:', finalPlan.memberName);
+    setPlan(finalPlan);
+    setLoading(false);
   };
 
   // Auto-save with debounce
@@ -1388,7 +1558,15 @@ export default function MemberPlanScreen() {
   }, [memberId]);
 
   // Pricing (memoized)
-  const pricing = useMemo(() => plan ? calculatePricing(plan) : null, [plan]);
+  const pricing = useMemo(() => {
+    if (!plan) return null;
+    try {
+      return calculatePricing(plan);
+    } catch (err) {
+      console.error('Pricing calculation error:', err);
+      return null;
+    }
+  }, [plan]);
 
   // Share link
   const handleShare = async () => {
@@ -1467,8 +1645,11 @@ export default function MemberPlanScreen() {
           <PlanView plan={plan} isCoach={isCoachMode} onChange={handlePlanChange} />
         </ScrollView>
       ) : (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: MUTED }}>No plan data</Text>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
+          <Text style={{ color: MUTED, fontSize: 16, marginBottom: 16, textAlign: 'center' }}>Could not load plan data.</Text>
+          <Pressable onPress={loadData} style={{ backgroundColor: PRIMARY, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 10 }}>
+            <Text style={{ color: '#FFF', fontWeight: '700' }}>Retry</Text>
+          </Pressable>
         </View>
       )}
 

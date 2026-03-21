@@ -137,7 +137,7 @@ export interface MemberPlanData {
   id?: string;
   memberId: string;
   coachId: string;
-  status: 'draft' | 'presented' | 'accepted' | 'active';
+  status: 'draft' | 'pending' | 'presented' | 'accepted' | 'active';
 
   // Hero
   memberName: string;
@@ -297,14 +297,14 @@ export function calculatePricing(
   manualMonthlyOverride?: number
 ): PricingResult {
   // Detect which overload
-  if (!Array.isArray(planOrSchedule) && 'memberId' in planOrSchedule) {
+  if (planOrSchedule && !Array.isArray(planOrSchedule) && 'memberId' in planOrSchedule) {
     // Plan object overload
     const p = planOrSchedule as MemberPlanData;
     return _calculatePricing(
-      p.weeklySchedule,
-      p.sessionsPerWeek,
+      p.weeklySchedule || [],
+      p.sessionsPerWeek || 3,
       p.contractMonths || (p.contractLengthMonths as ContractLength) || 12,
-      p.phases,
+      p.phases || [],
       {
         hourlyRate: p.hourlyRate || p.pricingInputs?.hourlyRate || 100,
         sessionLengthMinutes: p.sessionLengthMinutes || p.pricingInputs?.sessionLengthMinutes || 60,
@@ -345,18 +345,19 @@ function _calculatePricing(
   commitToSaveMissedSessionFee: number = 50,
   payInFullDiscountPercent: number = 10,
 ): PricingResult {
-  const hourlyRate = Math.max(1, inputs.hourlyRate);
-  const sessionLengthMinutes = Math.max(1, inputs.sessionLengthMinutes);
-  const checkInCallLengthMinutes = Math.max(0, inputs.checkInCallLengthMinutes);
-  const programBuildTimeHours = Math.max(0, inputs.programBuildTimeHours);
+  const safeInputs = inputs || { hourlyRate: 100, sessionLengthMinutes: 60, checkInCallLengthMinutes: 30, programBuildTimeHours: 5 };
+  const hourlyRate = Math.max(1, safeInputs.hourlyRate || 100);
+  const sessionLengthMinutes = Math.max(1, safeInputs.sessionLengthMinutes || 60);
+  const checkInCallLengthMinutes = Math.max(0, safeInputs.checkInCallLengthMinutes || 0);
+  const programBuildTimeHours = Math.max(0, safeInputs.programBuildTimeHours || 0);
 
-  const months = contractLengthMonths;
-  const weeks = monthsToWeeks(months);
-  const P1 = phases[0]?.weeks ?? 6;
-  const P2 = phases[1]?.weeks ?? 16;
+  const months = contractLengthMonths || 6;
+  const weeks = monthsToWeeks(months) || 26;
+  const P1 = (phases && phases[0] && typeof phases[0].weeks === 'number') ? phases[0].weeks : 6;
+  const P2 = (phases && phases[1] && typeof phases[1].weeks === 'number') ? phases[1].weeks : 16;
   const P3 = Math.max(0, weeks - P1 - P2);
 
-  const sessionCounts = countSessionsByType(schedule);
+  const sessionCounts = countSessionsByType(schedule || []);
   const activeTypes = Object.keys(sessionCounts) as ('Strength' | 'Cardio + Mobility' | 'Mix')[];
 
   let totalCoachingHours = 0;
