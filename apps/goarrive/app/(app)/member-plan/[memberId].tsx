@@ -169,7 +169,7 @@ function DayTile({ day, isCoach, onTypeChange, onOpen, isOpen }: {
     if (!isCoach) return;
     if (!isOpen && triggerRef.current && Platform.OS === 'web') {
       const rect = (triggerRef.current as any).getBoundingClientRect?.();
-      if (rect) setDropPos({ top: rect.bottom + window.scrollY + 4, left: rect.left + window.scrollX - 10 });
+      if (rect) setDropPos({ top: rect.bottom + 4, left: rect.left });
     }
     onOpen?.();
   };
@@ -190,7 +190,7 @@ function DayTile({ day, isCoach, onTypeChange, onOpen, isOpen }: {
         <>
           <div onClick={() => onOpen?.()} style={{ position: 'fixed', inset: 0, zIndex: 99998 }} />
           <div style={{
-            position: 'absolute', top: dropPos.top, left: dropPos.left,
+            position: 'fixed', top: dropPos.top, left: dropPos.left,
             zIndex: 99999, minWidth: 180,
             backgroundColor: '#1A2035', borderRadius: 10,
             border: '1px solid #1E2A3A',
@@ -317,7 +317,7 @@ function GuidanceDropdown({ value, onChange, isOpen, onOpen }: {
   const handlePress = () => {
     if (!isOpen && triggerRef.current && Platform.OS === 'web') {
       const rect = (triggerRef.current as any).getBoundingClientRect?.();
-      if (rect) setDropPos({ top: rect.bottom + window.scrollY + 4, left: rect.left + window.scrollX });
+      if (rect) setDropPos({ top: rect.bottom + 4, left: rect.left });
     }
     onOpen?.();
   };
@@ -334,7 +334,7 @@ function GuidanceDropdown({ value, onChange, isOpen, onOpen }: {
         <>
           <div onClick={() => onOpen?.()} style={{ position: 'fixed', inset: 0, zIndex: 99998 }} />
           <div style={{
-            position: 'absolute', top: dropPos.top, left: dropPos.left,
+            position: 'fixed', top: dropPos.top, left: dropPos.left,
             zIndex: 99999, minWidth: 100,
             backgroundColor: '#1A2035', borderRadius: 8,
             border: '1px solid #1E2A3A',
