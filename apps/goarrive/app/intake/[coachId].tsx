@@ -15,7 +15,7 @@
  *   7. Scheduling & Availability
  *   8. Create Account (email + password)
  */
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -58,15 +58,16 @@ const STEPS = [
 
 // Goal options
 const GOAL_OPTIONS = [
-  'Improved health',
-  'Improved endurance',
-  'Increased strength',
-  'Increased muscle mass',
-  'Weight loss',
-  'Weight gain',
-  'Flexibility',
-  'Stress reduction',
+  'Feel healthier',
+  'Fat loss',
+  'Build muscle',
+  'Improve endurance',
+  'Lower stress',
   'Better sleep',
+  'More energy',
+  'Increase flexibility',
+  'Build confidence',
+  'Manage pain',
   'Sport-specific training',
 ];
 
@@ -209,10 +210,40 @@ const initialFormData: FormData = {
 
 export default function IntakeForm() {
   const { coachId } = useLocalSearchParams<{ coachId: string }>();
-  const [step, setStep] = useState(0);
+
+  // SSR-safe localStorage: always start with default state, restore after mount
+  const storageKey = `intake_draft_${coachId || 'unknown'}`;
+  const [step, setStep] = useState<number>(0);
   const [formData, setFormData] = useState<FormData>(initialFormData);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+  const scrollRef = React.useRef<ScrollView>(null);
+
+  // Restore saved draft from localStorage after hydration (client-side only)
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof localStorage === 'undefined') {
+      setHydrated(true);
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) {
+        const draft = JSON.parse(raw);
+        if (draft?.formData) setFormData(draft.formData);
+        if (typeof draft?.step === 'number') setStep(draft.step);
+      }
+    } catch { /* ignore */ }
+    setHydrated(true);
+  }, [storageKey]);
+
+  // Persist form state to localStorage on every change (web only, after hydration)
+  useEffect(() => {
+    if (!hydrated || Platform.OS !== 'web' || typeof localStorage === 'undefined') return;
+    // Don't persist password fields
+    const toSave = { step, formData: { ...formData, password: '', confirmPassword: '' } };
+    try { localStorage.setItem(storageKey, JSON.stringify(toSave)); } catch { /* ignore */ }
+  }, [step, formData, storageKey, hydrated]);
 
   const updateField = useCallback(
     (field: keyof FormData, value: any) => {
@@ -256,9 +287,27 @@ export default function IntakeForm() {
       if (!formData.heightFeet.trim())
         newErrors.heightFeet = 'Height required';
       if (!formData.weight.trim()) newErrors.weight = 'Weight required';
+    } else if (step === 4) {
+      if (formData.primaryGoals.length === 0) {
+        newErrors.primaryGoals = 'Please select at least one goal';
+      }
+    } else if (step === 7) {
+      if (!formData.password) newErrors.password = 'Password required';
+      if (!formData.confirmPassword)
+        newErrors.confirmPassword = 'Confirm password required';
+      if (
+        formData.password &&
+        formData.confirmPassword &&
+        formData.password !== formData.confirmPassword
+      ) {
+        newErrors.confirmPassword = 'Passwords do not match';
+      }
     }
 
     setErrors(newErrors);
+    if (Object.keys(newErrors).length > 0) {
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+    }
     return Object.keys(newErrors).length === 0;
   }
 
@@ -322,6 +371,10 @@ export default function IntakeForm() {
         submittedAt: Timestamp.now(),
       });
 
+      // Clear saved draft after successful submission
+      if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+        try { localStorage.removeItem(storageKey); } catch { /* ignore */ }
+      }
       router.replace('/(member)/home');
     } catch (error: any) {
       setErrors({
@@ -345,18 +398,37 @@ export default function IntakeForm() {
       secureTextEntry?: boolean;
     }
   ) {
+    const hasError = !!errors[field];
+
+    const handleBlur = () => {
+      if (!options?.required) return;
+      const val = formData[field];
+      const isEmpty = typeof val === 'string' ? val.trim() === '' : !val;
+      if (isEmpty) {
+        setErrors(prev => ({ ...prev, [field]: `${label} is required` }));
+      } else {
+        // Clear error if field is now valid
+        setErrors(prev => { const e = { ...prev }; delete e[field]; return e; });
+      }
+    };
+
     return (
       <View style={s.fieldWrap}>
-        <Text style={s.fieldLabel}>
+        <Text style={[s.fieldLabel, hasError && s.fieldLabelError]}>
           {label}
           {options?.required ? ' *' : ''}
         </Text>
         <TextInput
-          style={[s.input, options?.multiline && s.inputMultiline]}
+          style={[
+            s.input,
+            options?.multiline && s.inputMultiline,
+            hasError && s.inputError,
+          ]}
           placeholder={placeholder}
           placeholderTextColor="#4A5568"
           value={formData[field] as string}
           onChangeText={(v) => updateField(field, v as any)}
+          onBlur={handleBlur}
           keyboardType={options?.keyboardType || 'default'}
           multiline={options?.multiline}
           numberOfLines={options?.multiline ? 4 : 1}
@@ -365,9 +437,7 @@ export default function IntakeForm() {
             options?.keyboardType === 'email-address' ? 'none' : 'sentences'
           }
         />
-        {errors[field] ? (
-          <Text style={s.errorText}>{errors[field]}</Text>
-        ) : null}
+        {hasError ? <Text style={s.errorText}>{errors[field]}</Text> : null}
       </View>
     );
   }
@@ -379,13 +449,16 @@ export default function IntakeForm() {
     required?: boolean
   ) {
     const selected = formData[field] as string[];
+    const hasError = !!errors[field];
     return (
       <View style={s.fieldWrap}>
-        <Text style={s.fieldLabel}>
+        <Text style={[s.fieldLabel, hasError && s.fieldLabelError]}>
           {label}
           {required ? ' *' : ''}
         </Text>
-        <View style={s.chipContainer}>
+        <View
+          style={[s.chipContainer, hasError && s.chipContainerError]}
+        >
           {options.map((opt) => (
             <Pressable
               key={opt}
@@ -406,9 +479,7 @@ export default function IntakeForm() {
             </Pressable>
           ))}
         </View>
-        {errors[field] ? (
-          <Text style={s.errorText}>{errors[field]}</Text>
-        ) : null}
+        {hasError ? <Text style={s.errorText}>{errors[field]}</Text> : null}
       </View>
     );
   }
@@ -510,8 +581,17 @@ export default function IntakeForm() {
           { required: true, keyboardType: 'phone-pad' }
         )}
         <View style={s.fieldWrap}>
-          <Text style={s.fieldLabel}>Gender</Text>
-          <View style={s.buttonRow}>
+          <Text
+            style={[s.fieldLabel, !!errors.gender && s.fieldLabelError]}
+          >
+            Gender *
+          </Text>
+          <View
+            style={[
+              s.buttonRow,
+              !!errors.gender && s.buttonRowError,
+            ]}
+          >
             {['Male', 'Female', 'Other'].map((g) => (
               <Pressable
                 key={g}
@@ -532,6 +612,9 @@ export default function IntakeForm() {
               </Pressable>
             ))}
           </View>
+          {errors.gender ? (
+            <Text style={s.errorText}>{errors.gender}</Text>
+          ) : null}
         </View>
         {renderTextField(
           'Date of Birth',
@@ -540,10 +623,20 @@ export default function IntakeForm() {
           { required: true }
         )}
         <View style={s.fieldWrap}>
-          <Text style={s.fieldLabel}>Height</Text>
+          <Text
+            style={[
+              s.fieldLabel,
+              !!errors.heightFeet && s.fieldLabelError,
+            ]}
+          >
+            Height *
+          </Text>
           <View style={s.heightRow}>
             <TextInput
-              style={s.heightInput}
+              style={[
+                s.heightInput,
+                !!errors.heightFeet && s.inputError,
+              ]}
               placeholder="5"
               placeholderTextColor="#4A5568"
               value={formData.heightFeet}
@@ -561,6 +654,9 @@ export default function IntakeForm() {
             />
             <Text style={s.heightLabel}>in</Text>
           </View>
+          {errors.heightFeet ? (
+            <Text style={s.errorText}>{errors.heightFeet}</Text>
+          ) : null}
         </View>
         {renderTextField(
           'Weight (lbs)',
@@ -799,6 +895,15 @@ export default function IntakeForm() {
 
   const isLastStep = step === STEPS.length - 1;
 
+  // Prevent React hydration mismatch: don't render dynamic content until client has hydrated
+  if (!hydrated && Platform.OS === 'web') {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0a0a0f', justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#F5A623" />
+      </View>
+    );
+  }
+
   return (
     <KeyboardAvoidingView
       style={s.root}
@@ -836,6 +941,7 @@ export default function IntakeForm() {
       {/* Form Content — Scrollable container */}
       <View style={s.scrollContainer}>
         <ScrollView
+          ref={scrollRef}
           style={s.scroll}
           contentContainerStyle={s.scrollContent}
           keyboardShouldPersistTaps="handled"
@@ -966,19 +1072,43 @@ const s = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 14,
     color: '#0E1117',
+    borderWidth: 1,
+    borderColor: 'transparent',
     fontFamily:
       Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined,
+  },
+  inputError: {
+    borderColor: '#FC8181',
+    backgroundColor: '#FFF5F5',
   },
   inputMultiline: {
     minHeight: 80,
     textAlignVertical: 'top',
   },
+  fieldLabelError: {
+    color: '#FC8181',
+  },
   errorText: {
     fontSize: 12,
     color: '#FC8181',
     marginTop: 4,
+    fontWeight: '500',
     fontFamily:
       Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined,
+  },
+  chipContainerError: {
+    borderWidth: 1,
+    borderColor: '#FC8181',
+    borderRadius: 12,
+    padding: 8,
+    backgroundColor: 'rgba(252, 129, 129, 0.05)',
+  },
+  buttonRowError: {
+    borderWidth: 1,
+    borderColor: '#FC8181',
+    borderRadius: 12,
+    padding: 8,
+    backgroundColor: 'rgba(252, 129, 129, 0.05)',
   },
   chipContainer: {
     flexDirection: 'row',

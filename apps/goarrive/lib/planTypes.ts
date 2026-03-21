@@ -665,15 +665,7 @@ export const goalConfig: Record<string, { emoji: string; color: string }> = {
   'Increase flexibility': { emoji: '🤸', color: '#6EBB7A' },
   'Build confidence': { emoji: '🚀', color: '#5B9BD5' },
   'Manage pain': { emoji: '❤️‍🩹', color: '#FFC000' },
-  // Intake questionnaire goals
-  'Improved health': { emoji: '💚', color: '#6EBB7A' },
-  'Improved endurance': { emoji: '🏃', color: '#FFC000' },
-  'Increased strength': { emoji: '🏋️', color: '#5B9BD5' },
-  'Increased muscle mass': { emoji: '💪', color: '#5B9BD5' },
-  'Weight loss': { emoji: '⚖️', color: '#FFC000' },
-  'Weight gain': { emoji: '📈', color: '#6EBB7A' },
-  'Flexibility': { emoji: '🤸', color: '#6EBB7A' },
-  'Stress reduction': { emoji: '🧘', color: '#6EBB7A' },
+  // Additional goals
   'Sport-specific training': { emoji: '🏆', color: '#FFC000' },
 };
 
@@ -687,9 +679,8 @@ export function getGoalColor(goalName: string): string {
   return (goalConfig[goalName] || { color: '#6EBB7A' }).color;
 }
 
-// All known goals: preset + intake (used in GoalEditModal)
+// All known goals: preset + sport-specific (used in GoalEditModal)
 export const allKnownGoals: string[] = [
   ...availableGoals,
-  'Improved health', 'Improved endurance', 'Increased strength', 'Increased muscle mass',
-  'Weight loss', 'Weight gain', 'Flexibility', 'Stress reduction', 'Sport-specific training',
+  'Sport-specific training',
 ];

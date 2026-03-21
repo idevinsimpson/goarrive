@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { useAuth } from '../../lib/AuthContext';
 import { AppHeader } from '../../components/AppHeader';
-import { collection, query, where, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, updateDoc, orderBy, limit, writeBatch } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { MemberPlanData, createDefaultPlan } from '../../lib/planTypes';
 
@@ -25,11 +25,49 @@ import { PlanView } from '../(app)/member-plan/[memberId]';
 // ─── Design tokens ──────────────────────────────────────────────────────────
 const ACCENT = '#6EBB7A';
 
+interface Notification {
+  id: string;
+  title: string;
+  body: string;
+  read: boolean;
+}
+
 export default function MyPlan() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [plan, setPlan] = useState<MemberPlanData | null>(null);
   const planDocIdRef = useRef<string>('');
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+
+  useEffect(() => {
+    if (user) fetchNotifications();
+  }, [user]);
+
+  async function fetchNotifications() {
+    if (!user) return;
+    try {
+      const q = query(
+        collection(db, 'notifications'),
+        where('recipientId', '==', user.uid),
+        where('read', '==', false),
+        orderBy('createdAt', 'desc'),
+        limit(5)
+      );
+      const snap = await getDocs(q);
+      setNotifications(snap.docs.map(d => ({ id: d.id, ...d.data() } as Notification)));
+    } catch (err) {
+      console.warn('[MyPlan] Could not load notifications:', err);
+    }
+  }
+
+  async function dismissNotification(notifId: string) {
+    setNotifications(prev => prev.filter(n => n.id !== notifId));
+    try {
+      await updateDoc(doc(db, 'notifications', notifId), { read: true });
+    } catch (err) {
+      console.warn('[MyPlan] Could not mark notification as read:', err);
+    }
+  }
 
   useEffect(() => {
     if (user) fetchPlan();
@@ -193,6 +231,18 @@ export default function MyPlan() {
           </View>
         </View>
       </View>
+      {/* ── In-app notifications banner ── */}
+      {notifications.map(notif => (
+        <View key={notif.id} style={st.notifBanner}>
+          <View style={{ flex: 1 }}>
+            <Text style={st.notifTitle}>{notif.title}</Text>
+            <Text style={st.notifBody}>{notif.body}</Text>
+          </View>
+          <Pressable onPress={() => dismissNotification(notif.id)} style={st.notifDismiss}>
+            <Text style={{ color: '#A0AEC0', fontSize: 16 }}>✕</Text>
+          </Pressable>
+        </View>
+      ))}
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: Platform.OS === 'web' ? 100 : 24 }}
@@ -244,6 +294,16 @@ const st = StyleSheet.create({
     alignItems: 'center',
     marginTop: 20,
   },
+  notifBanner: {
+    flexDirection: 'row', alignItems: 'flex-start',
+    backgroundColor: 'rgba(110,187,122,0.12)',
+    borderLeftWidth: 3, borderLeftColor: '#6EBB7A',
+    marginHorizontal: 16, marginTop: 8,
+    borderRadius: 8, padding: 12, gap: 8,
+  },
+  notifTitle: { color: '#F0F4F8', fontSize: 13, fontWeight: '700', marginBottom: 2 },
+  notifBody: { color: '#A0AEC0', fontSize: 12, lineHeight: 18 },
+  notifDismiss: { padding: 4, marginTop: 2 },
   acceptBtnText: {
     color: '#000',
     fontSize: 16,
