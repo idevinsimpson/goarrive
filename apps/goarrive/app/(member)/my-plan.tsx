@@ -574,52 +574,58 @@ export default function MyPlan() {
   }
 
   async function fetchPlan() {
+    // Helper: pick the best plan from a list — prefer presented/accepted over pending/draft
+    function pickBestPlan(docs: Array<{ id: string; data: () => any }>): MemberPlanData | null {
+      if (docs.length === 0) return null;
+      const priority = ['accepted', 'presented', 'pending', 'draft'];
+      const sorted = [...docs].sort((a, b) => {
+        const ai = priority.indexOf(a.data().status ?? 'draft');
+        const bi = priority.indexOf(b.data().status ?? 'draft');
+        return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+      });
+      const best = sorted[0];
+      return { id: best.id, ...best.data() } as MemberPlanData;
+    }
+
     try {
-      // Strategy: try multiple keys in order of likelihood
-      // 1. Direct doc by uid (coach saves plan at member's uid for intake-created members)
+      // Collect all candidate plan docs, then pick the best one
+      const candidates: Array<{ id: string; data: () => any }> = [];
+
+      // 1. Direct doc by uid
       const planByUid = await getDoc(doc(db, 'member_plans', user!.uid));
-      if (planByUid.exists()) {
-        console.log('[MyPlan] Found plan at uid key:', user!.uid);
-        setPlan({ id: planByUid.id, ...planByUid.data() } as MemberPlanData);
-        return;
-      }
+      if (planByUid.exists()) candidates.push(planByUid);
 
       // 2. Legacy key format: plan_{uid}
       const planByLegacy = await getDoc(doc(db, 'member_plans', `plan_${user!.uid}`));
-      if (planByLegacy.exists()) {
-        console.log('[MyPlan] Found plan at legacy key: plan_' + user!.uid);
-        setPlan({ id: planByLegacy.id, ...planByLegacy.data() } as MemberPlanData);
-        return;
-      }
+      if (planByLegacy.exists()) candidates.push(planByLegacy);
 
-      // 3. Query by memberId field (covers all other cases)
+      // 3. Query by memberId field
       const plansQuery = query(collection(db, 'member_plans'), where('memberId', '==', user!.uid));
       const snap = await getDocs(plansQuery);
-      if (!snap.empty) {
-        const planDoc = snap.docs[0];
-        console.log('[MyPlan] Found plan via query, doc id:', planDoc.id);
-        setPlan({ id: planDoc.id, ...planDoc.data() } as MemberPlanData);
-        return;
-      }
+      snap.docs.forEach(d => {
+        if (!candidates.find(c => c.id === d.id)) candidates.push(d);
+      });
 
       // 4. Check if the member doc in Firestore has a different doc ID
-      // (e.g., member was added manually by coach, doc ID != uid)
-      // Look up member doc to find the Firestore doc ID used by the coach
       const membersQuery = query(collection(db, 'members'), where('uid', '==', user!.uid));
       const membersSnap = await getDocs(membersQuery);
       if (!membersSnap.empty) {
         const memberDocId = membersSnap.docs[0].id;
         if (memberDocId !== user!.uid) {
           const planByDocId = await getDoc(doc(db, 'member_plans', memberDocId));
-          if (planByDocId.exists()) {
-            console.log('[MyPlan] Found plan at member doc id:', memberDocId);
-            setPlan({ id: planByDocId.id, ...planByDocId.data() } as MemberPlanData);
-            return;
+          if (planByDocId.exists() && !candidates.find(c => c.id === planByDocId.id)) {
+            candidates.push(planByDocId);
           }
         }
       }
 
-      console.log('[MyPlan] No plan found for uid:', user!.uid);
+      if (candidates.length > 0) {
+        const best = pickBestPlan(candidates);
+        console.log('[MyPlan] Best plan:', best?.id, 'status:', best?.status, 'from', candidates.length, 'candidates');
+        setPlan(best);
+      } else {
+        console.log('[MyPlan] No plan found for uid:', user!.uid);
+      }
     } catch (err) {
       console.error('[MyPlan] Error fetching plan:', err);
     } finally {
@@ -685,7 +691,7 @@ export default function MyPlan() {
         <InvestmentSection plan={plan} />
 
         {/* ─── PLAN ACCEPTANCE ──────────────────────────────────────────────── */}
-        {plan.status === 'pending' && (
+        {(plan.status === 'presented' || plan.status === 'pending') && (
           <View style={st.section}>
             <Text style={st.sectionLabel}>PLAN ACCEPTANCE</Text>
             <View style={st.darkCard}>

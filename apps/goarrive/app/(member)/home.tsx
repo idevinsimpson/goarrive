@@ -103,17 +103,33 @@ export default function MemberHome() {
           }
         }
 
-        // Fetch the member's plan
-        const plansQuery = query(
-          collection(db, 'member_plans'),
-          where('memberId', '==', user!.uid)
-        );
+        // Fetch the member's plan — collect all candidates, prefer presented/accepted
+        const candidates: Array<{ id: string; [key: string]: any }> = [];
+
+        const planByUid = await getDoc(doc(db, 'member_plans', user!.uid));
+        if (planByUid.exists()) candidates.push({ id: planByUid.id, ...planByUid.data() });
+
+        const planByLegacy = await getDoc(doc(db, 'member_plans', `plan_${user!.uid}`));
+        if (planByLegacy.exists() && !candidates.find(c => c.id === planByLegacy.id))
+          candidates.push({ id: planByLegacy.id, ...planByLegacy.data() });
+
+        const plansQuery = query(collection(db, 'member_plans'), where('memberId', '==', user!.uid));
         const plansSnap = await getDocs(plansQuery);
-        if (!plansSnap.empty) {
-          const planDoc = plansSnap.docs[0];
-          const planData = { id: planDoc.id, ...planDoc.data() } as PlanData;
-          setPlan(planData);
-          setIsPending(planData.status === 'draft' || planData.status === 'pending');
+        plansSnap.docs.forEach(d => {
+          if (!candidates.find(c => c.id === d.id)) candidates.push({ id: d.id, ...d.data() });
+        });
+
+        if (candidates.length > 0) {
+          const priority = ['accepted', 'presented', 'pending', 'draft'];
+          const sorted = [...candidates].sort((a, b) => {
+            const ai = priority.indexOf(a.status ?? 'draft');
+            const bi = priority.indexOf(b.status ?? 'draft');
+            return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+          });
+          const best = sorted[0] as PlanData;
+          setPlan(best);
+          // Only hide plan if it's a draft (not yet shared with member)
+          setIsPending(best.status === 'draft');
         } else {
           setIsPending(true);
         }
