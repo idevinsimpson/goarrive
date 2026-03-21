@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useAuth } from '../../lib/AuthContext';
 import { AppHeader } from '../../components/AppHeader';
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import {
   MemberPlanData, DayPlan, goalConfig, typeColors, phaseColors,
@@ -166,7 +166,7 @@ function GoalsSection({ plan }: { plan: MemberPlanData }) {
             <Text style={st.miniLabel}>CURRENT</Text>
             <Text style={st.statValueLarge}>{plan.currentWeight} lbs</Text>
           </View>
-          <Text style={{ color: '#5B9BD5', fontSize: 18 }}>\u2192</Text>
+          <Text style={{ color: '#5B9BD5', fontSize: 18 }}>{"\u2192"}</Text>
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={[st.miniLabel, { color: '#5B9BD5' }]}>GOAL</Text>
             <Text style={[st.statValueLarge, { color: '#5B9BD5' }]}>{plan.goalWeight}</Text>
@@ -246,7 +246,7 @@ function WeeklyPlanSection({ plan }: { plan: MemberPlanData }) {
       <Text style={st.sectionLabel}>Your Weekly Plan</Text>
       <View style={{ flexDirection: 'row', alignItems: 'baseline', marginBottom: 10 }}>
         <Text style={{ color: '#6EBB7A', fontSize: 20, fontWeight: '700' }}>{plan.sessionsPerWeek} Sessions</Text>
-        <Text style={{ color: '#8A95A3', fontSize: 14, marginLeft: 6 }}>per week \u00B7 {contractMonths} months</Text>
+        <Text style={{ color: '#8A95A3', fontSize: 14, marginLeft: 6 }}>per week {"\u00B7"} {contractMonths} months</Text>
       </View>
 
       {/* Day tiles — Forge style */}
@@ -293,7 +293,7 @@ function WeeklyPlanSection({ plan }: { plan: MemberPlanData }) {
                 {schedule[expandedDay].day}
               </Text>
               <Text style={{ fontSize: 13, color: '#8A95A3' }}>
-                \u2014 {schedule[expandedDay].label || schedule[expandedDay].type}
+                {"\u2014"} {schedule[expandedDay].label || schedule[expandedDay].type}
               </Text>
             </View>
             {schedule[expandedDay].duration ? (
@@ -576,17 +576,51 @@ export default function MyPlan() {
 
   async function fetchPlan() {
     try {
-      const planDocSnap = await getDoc(doc(db, 'member_plans', `plan_${user!.uid}`));
-      if (planDocSnap.exists()) {
-        setPlan({ id: planDocSnap.id, ...planDocSnap.data() } as MemberPlanData);
-      } else {
-        const plansQuery = query(collection(db, 'member_plans'), where('memberId', '==', user!.uid));
-        const snap = await getDocs(plansQuery);
-        if (!snap.empty) {
-          const planDoc = snap.docs[0];
-          setPlan({ id: planDoc.id, ...planDoc.data() } as MemberPlanData);
+      // Strategy: try multiple keys in order of likelihood
+      // 1. Direct doc by uid (coach saves plan at member's uid for intake-created members)
+      const planByUid = await getDoc(doc(db, 'member_plans', user!.uid));
+      if (planByUid.exists()) {
+        console.log('[MyPlan] Found plan at uid key:', user!.uid);
+        setPlan({ id: planByUid.id, ...planByUid.data() } as MemberPlanData);
+        return;
+      }
+
+      // 2. Legacy key format: plan_{uid}
+      const planByLegacy = await getDoc(doc(db, 'member_plans', `plan_${user!.uid}`));
+      if (planByLegacy.exists()) {
+        console.log('[MyPlan] Found plan at legacy key: plan_' + user!.uid);
+        setPlan({ id: planByLegacy.id, ...planByLegacy.data() } as MemberPlanData);
+        return;
+      }
+
+      // 3. Query by memberId field (covers all other cases)
+      const plansQuery = query(collection(db, 'member_plans'), where('memberId', '==', user!.uid));
+      const snap = await getDocs(plansQuery);
+      if (!snap.empty) {
+        const planDoc = snap.docs[0];
+        console.log('[MyPlan] Found plan via query, doc id:', planDoc.id);
+        setPlan({ id: planDoc.id, ...planDoc.data() } as MemberPlanData);
+        return;
+      }
+
+      // 4. Check if the member doc in Firestore has a different doc ID
+      // (e.g., member was added manually by coach, doc ID != uid)
+      // Look up member doc to find the Firestore doc ID used by the coach
+      const membersQuery = query(collection(db, 'members'), where('uid', '==', user!.uid));
+      const membersSnap = await getDocs(membersQuery);
+      if (!membersSnap.empty) {
+        const memberDocId = membersSnap.docs[0].id;
+        if (memberDocId !== user!.uid) {
+          const planByDocId = await getDoc(doc(db, 'member_plans', memberDocId));
+          if (planByDocId.exists()) {
+            console.log('[MyPlan] Found plan at member doc id:', memberDocId);
+            setPlan({ id: planByDocId.id, ...planByDocId.data() } as MemberPlanData);
+            return;
+          }
         }
       }
+
+      console.log('[MyPlan] No plan found for uid:', user!.uid);
     } catch (err) {
       console.error('[MyPlan] Error fetching plan:', err);
     } finally {

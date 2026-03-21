@@ -1402,6 +1402,7 @@ export default function MemberPlanScreen() {
   const [showControls, setShowControls] = useState(false);
   const [copied, setCopied] = useState(false);
   const saveTimer = useRef<any>(null);
+  const planKeyRef = useRef<string>(memberId || '');
 
   // Load data
   useEffect(() => {
@@ -1534,7 +1535,8 @@ export default function MemberPlanScreen() {
     }
 
     // ── Step 5: Always set plan state ────────────────────────────────────
-    console.log('[loadData] Setting plan for:', finalPlan.memberName);
+    planKeyRef.current = planKey; // Store the resolved key for auto-save
+    console.log('[loadData] Setting plan for:', finalPlan.memberName, 'planKey:', planKey);
     setPlan(finalPlan);
     setLoading(false);
   };
@@ -1544,11 +1546,12 @@ export default function MemberPlanScreen() {
     setPlan(prev => {
       if (!prev) return prev;
       const updated = { ...prev, ...updates };
-      // Debounced save to Firestore
+      // Debounced save to Firestore using the resolved planKey
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(async () => {
+        const key = planKeyRef.current || memberId!;
         try {
-          await setDoc(doc(db, 'member_plans', memberId!), { ...updated, updatedAt: serverTimestamp() }, { merge: true });
+          await setDoc(doc(db, 'member_plans', key), { ...updated, updatedAt: serverTimestamp() }, { merge: true });
         } catch (err) {
           console.error('Error saving plan:', err);
         }

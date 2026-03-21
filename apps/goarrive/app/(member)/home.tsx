@@ -26,6 +26,7 @@ import {
   getDoc,
 } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
+import { useRouter } from 'expo-router';
 
 interface MemberData {
   displayName?: string;
@@ -54,6 +55,7 @@ interface PlanData {
 
 export default function MemberHome() {
   const { user, claims } = useAuth();
+  const router = useRouter();
   const [memberData, setMemberData] = useState<MemberData | null>(null);
   const [coachData, setCoachData] = useState<CoachData | null>(null);
   const [plan, setPlan] = useState<PlanData | null>(null);
@@ -134,15 +136,14 @@ export default function MemberHome() {
   };
 
   const handleViewPlan = () => {
-    if (plan) {
-      // router.push(`/(member)/my-plan?planId=${plan.id}`);
-    }
+    router.push('/(member)/my-plan');
   };
 
   const handleContactCoach = () => {
     if (coachData?.email) {
-      // Open email client
-      // Linking.openURL(`mailto:${coachData.email}`);
+      if (Platform.OS === 'web') {
+        window.open(`mailto:${coachData.email}`, '_blank');
+      }
     }
   };
 
