@@ -34,6 +34,8 @@ import {
   goalConfig,
   typeColors,
   phaseColors,
+  formatCurrency,
+  calculatePricing,
 } from '../../lib/planTypes';
 
 const FONT_HEADING =
@@ -393,33 +395,139 @@ export default function SharedPlanScreen() {
           </View>
         )}
 
-        {/* Investment */}
-        {plan.showInvestment && plan.monthlyPrice ? (
-          <View style={{ marginBottom: 20 }}>
-            <Text style={s.sectionLabel}>Your Investment</Text>
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <View style={[s.darkCard, { flex: 1, borderColor: 'rgba(91,155,213,0.35)' }]}>
-                <Text style={{ fontSize: 10, fontWeight: '700', color: '#8A95A3', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>Monthly</Text>
-                <Text style={{ fontSize: 30, fontWeight: '800', color: '#F0F4F8', lineHeight: 34 }}>${plan.monthlyPrice}</Text>
-                <Text style={{ fontSize: 12, color: '#8A95A3', marginTop: 2 }}>/mo</Text>
-                {plan.perSessionPrice ? <Text style={{ fontSize: 12, color: '#5B9BD5', marginTop: 8 }}>${plan.perSessionPrice} per session</Text> : null}
-              </View>
-              {plan.payInFullPrice ? (
-                <View style={[s.darkCard, { flex: 1, backgroundColor: 'rgba(245,166,35,0.08)', borderColor: 'rgba(245,166,35,0.35)' }]}>
-                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#F5A623', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>Pay in Full</Text>
-                  <Text style={{ fontSize: 30, fontWeight: '800', color: '#F5A623', lineHeight: 34 }}>${Math.round(plan.payInFullPrice / contractMonths)}</Text>
-                  <Text style={{ fontSize: 12, color: '#8A95A3', marginTop: 2 }}>/mo equivalent</Text>
-                  <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(245,166,35,0.15)' }}>
-                    <Text style={{ fontSize: 12, color: '#8A95A3' }}>${plan.payInFullPrice} total</Text>
-                    <Text style={{ fontSize: 12, color: '#6EBB7A', marginTop: 2, fontWeight: '600' }}>
-                      Save ${Math.round(plan.monthlyPrice * contractMonths - plan.payInFullPrice)} ({plan.payInFullDiscount || 10}% off)
-                    </Text>
+        {/* Commit to Save */}
+        {plan.commitToSaveEnabled && (() => {
+          const ctsActive = plan.commitToSaveAddOnActive;
+          const ctsSavings = plan.commitToSaveMonthlySavings || 100;
+          return (
+            <View style={{ marginBottom: 20 }}>
+              <Text style={s.sectionLabel}>Commit to Save</Text>
+              <View style={[s.darkCard, { borderColor: 'rgba(245,166,35,0.25)' }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(245,166,35,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+                    <Text style={{ fontSize: 16 }}>🔒</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8' }}>Commit to Save</Text>
+                    <Text style={{ fontSize: 12, color: '#F5A623' }}>Save {formatCurrency(ctsSavings)}/mo</Text>
+                  </View>
+                  <View style={{ backgroundColor: ctsActive ? 'rgba(110,187,122,0.15)' : 'rgba(138,149,163,0.1)', borderWidth: 1, borderColor: ctsActive ? 'rgba(110,187,122,0.3)' : '#2A3347', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 4 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: ctsActive ? '#6EBB7A' : '#8A95A3' }}>{ctsActive ? 'Active' : 'Inactive'}</Text>
                   </View>
                 </View>
-              ) : null}
+                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                  <View style={{ flex: 1, backgroundColor: 'rgba(245,166,35,0.06)', borderWidth: 1, borderColor: 'rgba(245,166,35,0.15)', borderRadius: 10, padding: 10 }}>
+                    <Text style={{ fontSize: 10, fontWeight: '600', color: '#F5A623', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 2 }}>Monthly Savings</Text>
+                    <Text style={{ fontSize: 18, fontWeight: '700', color: '#F5A623' }}>{formatCurrency(ctsSavings)}</Text>
+                  </View>
+                  <View style={{ flex: 1, backgroundColor: 'rgba(91,155,213,0.06)', borderWidth: 1, borderColor: 'rgba(91,155,213,0.15)', borderRadius: 10, padding: 10 }}>
+                    <Text style={{ fontSize: 10, fontWeight: '600', color: '#5B9BD5', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 2 }}>Streak Bonus</Text>
+                    <Text style={{ fontSize: 18, fontWeight: '700', color: '#5B9BD5' }}>{plan.commitToSaveNextMonthPercentOff || 5}% off</Text>
+                  </View>
+                  <View style={{ flex: 1, backgroundColor: 'rgba(138,149,163,0.06)', borderWidth: 1, borderColor: 'rgba(138,149,163,0.15)', borderRadius: 10, padding: 10 }}>
+                    <Text style={{ fontSize: 10, fontWeight: '600', color: '#8A95A3', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 2 }}>Missed Session</Text>
+                    <Text style={{ fontSize: 18, fontWeight: '700', color: '#C5CDD8' }}>${plan.commitToSaveMissedSessionFee || 50}</Text>
+                  </View>
+                </View>
+                <Text style={{ fontSize: 13, color: '#C5CDD8', lineHeight: 20 }}>{plan.commitToSaveSummary}</Text>
+              </View>
             </View>
-          </View>
-        ) : null}
+          );
+        })()}
+
+        {/* Nutrition */}
+        {plan.nutritionEnabled && (() => {
+          const nutritionActive = plan.nutritionAddOnActive;
+          const nutritionCost = plan.nutritionMonthlyCost || 100;
+          return (
+            <View style={{ marginBottom: 20 }}>
+              <Text style={s.sectionLabel}>Nutrition Coaching</Text>
+              <View style={[s.darkCard, { borderColor: 'rgba(110,187,122,0.25)' }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                  <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(110,187,122,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+                    <Text style={{ fontSize: 16 }}>🥗</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8' }}>Nutrition Add-On</Text>
+                    <Text style={{ fontSize: 12, color: '#6EBB7A' }}>+{formatCurrency(nutritionCost)}/mo</Text>
+                  </View>
+                  <View style={{ backgroundColor: nutritionActive ? 'rgba(110,187,122,0.15)' : 'rgba(138,149,163,0.1)', borderWidth: 1, borderColor: nutritionActive ? 'rgba(110,187,122,0.3)' : '#2A3347', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 4 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: nutritionActive ? '#6EBB7A' : '#8A95A3' }}>{nutritionActive ? 'Added' : 'Available'}</Text>
+                  </View>
+                </View>
+                <Text style={{ fontSize: 13, color: '#C5CDD8', lineHeight: 20 }}>{plan.nutritionDescription}</Text>
+                {!plan.nutritionInHouse && plan.nutritionProviderName ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
+                    <Text style={{ fontSize: 12, color: '#8A95A3' }}>Provided by</Text>
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#6EBB7A' }}>{plan.nutritionProviderName}</Text>
+                  </View>
+                ) : null}
+              </View>
+            </View>
+          );
+        })()}
+
+        {/* Investment */}
+        {plan.showInvestment && (() => {
+          const p = plan.pricingResult || (plan.pricingInputs && plan.pricingInputs.hourlyRate > 0
+            ? calculatePricing(currentPlan, plan.sessionsPerWeek, plan.contractLengthMonths, plan.phases, plan.pricingInputs, plan.sessionGuidanceProfiles || [], plan.commitToSaveAddOnActive)
+            : null);
+          const displayMonthly = p ? p.displayMonthlyPrice : (plan.monthlyPrice || 0);
+          if (displayMonthly <= 0) return null;
+          const ctsActive = plan.commitToSaveAddOnActive;
+          const ctsSavings = plan.commitToSaveMonthlySavings || 100;
+          const nutritionActive = plan.nutritionAddOnActive;
+          const nutritionCost = plan.nutritionMonthlyCost || 100;
+          const totalMonthly = displayMonthly + (nutritionActive ? nutritionCost : 0);
+          const totalPayInFull = p ? Math.round(totalMonthly * contractMonths * 0.9) : (plan.payInFullPrice || 0);
+          const totalSavings = totalMonthly * contractMonths - totalPayInFull;
+          return (
+            <View style={{ marginBottom: 20 }}>
+              <Text style={s.sectionLabel}>Your Coaching Investment</Text>
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+                <View style={[s.darkCard, { flex: 1, borderColor: 'rgba(91,155,213,0.35)' }]}>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#8A95A3', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>Monthly</Text>
+                  <Text style={{ fontSize: 30, fontWeight: '800', color: '#F0F4F8', lineHeight: 34 }}>{formatCurrency(displayMonthly)}</Text>
+                  <Text style={{ fontSize: 12, color: '#8A95A3', marginTop: 2 }}>/mo</Text>
+                  {p && p.perSessionPrice > 0 ? <Text style={{ fontSize: 12, color: '#5B9BD5', marginTop: 8 }}>{formatCurrency(p.perSessionPrice)} per session</Text> : null}
+                </View>
+                <View style={[s.darkCard, { flex: 1, backgroundColor: 'rgba(245,166,35,0.08)', borderColor: 'rgba(245,166,35,0.35)' }]}>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#F5A623', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>Pay in Full</Text>
+                  <Text style={{ fontSize: 30, fontWeight: '800', color: '#F5A623', lineHeight: 34 }}>{formatCurrency(Math.round(totalPayInFull / contractMonths))}</Text>
+                  <Text style={{ fontSize: 12, color: '#8A95A3', marginTop: 2 }}>/mo equivalent</Text>
+                  <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(245,166,35,0.15)' }}>
+                    <Text style={{ fontSize: 12, color: '#8A95A3' }}>{formatCurrency(totalPayInFull)} total</Text>
+                    <Text style={{ fontSize: 12, color: '#6EBB7A', marginTop: 2, fontWeight: '600' }}>Save {formatCurrency(totalSavings)} (10% off)</Text>
+                  </View>
+                </View>
+              </View>
+              <View style={s.darkCard}>
+                <View style={{ gap: 6 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={{ fontSize: 12, color: '#8A95A3' }}>Base monthly rate</Text>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#F0F4F8' }}>{formatCurrency(p ? p.baseMonthlyPrice : displayMonthly)}/mo</Text>
+                  </View>
+                  {ctsActive && (
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={{ fontSize: 12, color: '#F5A623' }}>Commit to Save</Text>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#F5A623' }}>−{formatCurrency(ctsSavings)}/mo</Text>
+                    </View>
+                  )}
+                  {nutritionActive && (
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={{ fontSize: 12, color: '#6EBB7A' }}>Nutrition add-on</Text>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#6EBB7A' }}>+{formatCurrency(nutritionCost)}/mo</Text>
+                    </View>
+                  )}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(91,155,213,0.15)' }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#F0F4F8' }}>Your total</Text>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#F5A623' }}>{formatCurrency(totalMonthly)}/mo</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+          );
+        })()}
 
         {/* Footer */}
         <View style={{ alignItems: 'center', paddingVertical: 20 }}>
