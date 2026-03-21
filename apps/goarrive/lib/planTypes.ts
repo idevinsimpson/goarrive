@@ -40,7 +40,16 @@ export const GUIDANCE_SHORT: Record<GuidanceLevel, string> = {
   'Self-reliant': 'Self',
 };
 
+export const phaseColors: Record<GuidanceLevel, { text: string; bg: string; bar: string; border: string }> = {
+  'Fully guided': { text: '#E0FFE0', bg: 'rgba(110,187,122,0.15)', bar: '#6EBB7A', border: 'rgba(110,187,122,0.5)' },
+  'Blended': { text: '#E0F0FF', bg: 'rgba(91,155,213,0.15)', bar: '#5B9BD5', border: 'rgba(91,155,213,0.5)' },
+  'Self-reliant': { text: '#FFF8E0', bg: 'rgba(255,192,0,0.15)', bar: '#FFC000', border: 'rgba(255,192,0,0.5)' },
+};
+
 export const guidanceLevels: GuidanceLevel[] = ['Fully guided', 'Blended', 'Self-reliant'];
+
+// Array-indexed phase colors for member/shared plan views (index 0=Phase1, 1=Phase2, 2=Phase3)
+export const phaseColorList: string[] = ['#6EBB7A', '#5B9BD5', '#F5A623'];
 
 export interface SessionTypeGuidance {
   sessionType: 'Strength' | 'Cardio + Mobility' | 'Mix';
@@ -98,6 +107,8 @@ export interface PricingResult {
 }
 
 // ─── Support phases ───────────────────────────────────────────────────────────
+
+export type PhaseType = 'Fully Guided' | 'Shared Guidance' | 'Self-Reliant';
 
 export interface Phase {
   id: number;
@@ -346,149 +357,142 @@ function _calculatePricing(
   payInFullDiscountPercent: number = 10,
 ): PricingResult {
   const safeInputs = inputs || { hourlyRate: 100, sessionLengthMinutes: 60, checkInCallLengthMinutes: 30, programBuildTimeHours: 5 };
-  const hourlyRate = Math.max(1, safeInputs.hourlyRate || 100);
-  const sessionLengthMinutes = Math.max(1, safeInputs.sessionLengthMinutes || 60);
-  const checkInCallLengthMinutes = Math.max(0, safeInputs.checkInCallLengthMinutes || 0);
-  const programBuildTimeHours = Math.max(0, safeInputs.programBuildTimeHours || 0);
+  const { hourlyRate, sessionLengthMinutes, checkInCallLengthMinutes, programBuildTimeHours } = safeInputs;
 
-  const months = contractLengthMonths || 6;
-  const weeks = monthsToWeeks(months) || 26;
-  const P1 = (phases && phases[0] && typeof phases[0].weeks === 'number') ? phases[0].weeks : 6;
-  const P2 = (phases && phases[1] && typeof phases[1].weeks === 'number') ? phases[1].weeks : 16;
-  const P3 = Math.max(0, weeks - P1 - P2);
+  const totalWeeks = monthsToWeeks(contractLengthMonths);
+  const phase1Weeks = Math.round(totalWeeks * 0.25);
+  const phase3Weeks = Math.round(totalWeeks * 0.25);
+  const phase2Weeks = totalWeeks - phase1Weeks - phase3Weeks;
 
-  const sessionCounts = countSessionsByType(schedule || []);
-  const activeTypes = Object.keys(sessionCounts) as ('Strength' | 'Cardio + Mobility' | 'Mix')[];
+  const sessionCounts = countSessionsByType(schedule);
+  const totalSessionsPerWeek = Object.values(sessionCounts).reduce((sum, count) => sum + count, 0);
 
-  let totalCoachingHours = 0;
-  const phaseBreakdown: PhaseHoursDetail[] = [];
+  const phaseBreakdown: PhaseHoursDetail[] = Object.keys(sessionCounts).map(type => {
+    const sessionType = type as 'Strength' | 'Cardio + Mobility' | 'Mix';
+    const sessions = sessionCounts[sessionType];
+    const guidance = getGuidanceProfile(sessionType, guidanceProfiles);
 
-  if (activeTypes.length > 0) {
-    activeTypes.forEach(type => {
-      const count = sessionCounts[type];
-      const guidance = getGuidanceProfile(type, guidanceProfiles);
-      const f1 = GUIDANCE_FACTORS[guidance.phase1];
-      const f2 = GUIDANCE_FACTORS[guidance.phase2];
-      const f3 = GUIDANCE_FACTORS[guidance.phase3];
-      const phase1Hours = (P1 * count * sessionLengthMinutes * f1) / 60;
-      const phase2Hours = (P2 * count * sessionLengthMinutes * f2) / 60;
-      const phase3Hours = (P3 * count * sessionLengthMinutes * f3) / 60;
-      const total = phase1Hours + phase2Hours + phase3Hours;
-      totalCoachingHours += total;
-      phaseBreakdown.push({
-        sessionType: type,
-        sessionsPerWeek: count,
-        phase1Hours, phase2Hours, phase3Hours,
-        totalHours: total,
-        phase1Guidance: guidance.phase1,
-        phase2Guidance: guidance.phase2,
-        phase3Guidance: guidance.phase3,
-      });
-    });
-  } else {
-    const Phase1Hours = (P1 * sessionsPerWeek * sessionLengthMinutes) / 60;
-    const Phase2Hours = (P2 * sessionsPerWeek * 0.625 * sessionLengthMinutes) / 60;
-    totalCoachingHours = Phase1Hours + Phase2Hours;
-  }
+    const phase1Hours = (sessions * phase1Weeks * (sessionLengthMinutes / 60)) * GUIDANCE_FACTORS[guidance.phase1];
+    const phase2Hours = (sessions * phase2Weeks * (sessionLengthMinutes / 60)) * GUIDANCE_FACTORS[guidance.phase2];
+    const phase3Hours = (sessions * phase3Weeks * (sessionLengthMinutes / 60)) * GUIDANCE_FACTORS[guidance.phase3];
 
-  const checkInHours = (months * checkInCallLengthMinutes) / 60;
-  const buildHours = programBuildTimeHours;
-  const totalHours = totalCoachingHours + checkInHours + buildHours;
-  const totalProgramPrice = totalHours * hourlyRate;
-
-  const calculatedMonthlyPrice = Math.round(totalProgramPrice / months);
-  const isManualOverride = manualMonthlyOverride !== undefined && manualMonthlyOverride > 0;
-  const baseMonthlyPrice = isManualOverride ? manualMonthlyOverride! : calculatedMonthlyPrice;
-
-  const displayMonthlyPrice = commitToSaveActive
-    ? Math.max(0, baseMonthlyPrice - commitToSaveMonthlySavings)
-    : baseMonthlyPrice;
-
-  const totalSessions = weeks * sessionsPerWeek;
-  const effectiveTotalPrice = displayMonthlyPrice * months;
-  const perSessionPrice = totalSessions > 0
-    ? Math.round(effectiveTotalPrice / totalSessions)
-    : 0;
-  const payInFullPrice = Math.round(effectiveTotalPrice * (1 - payInFullDiscountPercent / 100));
-
-  return {
-    hourlyRate, sessionLengthMinutes, checkInCallLengthMinutes, programBuildTimeHours,
-    calculatedMonthlyPrice, baseMonthlyPrice, displayMonthlyPrice,
-    perSessionPrice, payInFullPrice, payInFullDiscount: payInFullDiscountPercent,
-    totalCoachingHours, checkInHours, buildHours, totalHours, totalProgramPrice,
-    totalSessions,
-    commitToSaveActive, commitToSaveSavings: commitToSaveMonthlySavings,
-    noShowFee: commitToSaveMissedSessionFee,
-    isManualOverride, manualMonthlyOverride, phaseBreakdown,
-  };
-}
-
-export function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency', currency: 'USD',
-    minimumFractionDigits: 0, maximumFractionDigits: 0,
-  }).format(amount);
-}
-
-// ─── Schedule generation ─────────────────────────────────────────────────────
-
-function getDistributedDays(count: number): number[] {
-  if (count >= 7) return [0, 1, 2, 3, 4, 5, 6];
-  if (count === 6) return [0, 1, 2, 3, 4, 5];
-  if (count === 5) return [0, 1, 2, 3, 4];
-  if (count === 4) return [0, 1, 3, 4];
-  if (count === 3) return [0, 2, 4];
-  if (count === 2) return [1, 4];
-  if (count === 1) return [2];
-  return [];
-}
-
-export function createDefaultSchedule(sessionsPerWeek: number): DayPlan[] {
-  const schedule: DayPlan[] = FULL_DAYS.map((day, i) => ({
-    day,
-    shortDay: DAYS_OF_WEEK[i],
-    type: 'Rest' as SessionType,
-    isSession: false,
-    label: 'Rest',
-    duration: 0,
-  }));
-
-  const sessionDays = getDistributedDays(sessionsPerWeek);
-  const typePattern: ('Strength' | 'Cardio + Mobility' | 'Mix')[] = [
-    'Strength', 'Cardio + Mobility', 'Strength', 'Mix', 'Strength', 'Cardio + Mobility', 'Mix',
-  ];
-
-  sessionDays.forEach((dayIndex, i) => {
-    const type = typePattern[i % typePattern.length];
-    schedule[dayIndex] = {
-      day: FULL_DAYS[dayIndex],
-      shortDay: DAYS_OF_WEEK[dayIndex],
-      type,
-      isSession: true,
-      label: type,
-      duration: 60,
+    return {
+      sessionType,
+      sessionsPerWeek: sessions,
+      phase1Hours,
+      phase2Hours,
+      phase3Hours,
+      totalHours: phase1Hours + phase2Hours + phase3Hours,
+      phase1Guidance: guidance.phase1,
+      phase2Guidance: guidance.phase2,
+      phase3Guidance: guidance.phase3,
     };
   });
 
-  return schedule;
+  const totalCoachingHours = phaseBreakdown.reduce((sum, item) => sum + item.totalHours, 0);
+  const checkInHours = (contractLengthMonths * 2 * (checkInCallLengthMinutes / 60)); // 2 calls/mo
+  const buildHours = programBuildTimeHours;
+  const totalHours = totalCoachingHours + checkInHours + buildHours;
+  const totalProgramPrice = totalHours * hourlyRate;
+  const baseMonthlyPrice = totalProgramPrice / contractLengthMonths;
+
+  let displayMonthlyPrice = baseMonthlyPrice;
+  if (commitToSaveActive) {
+    displayMonthlyPrice -= commitToSaveMonthlySavings;
+  }
+
+  const isManualOverride = typeof manualMonthlyOverride === 'number' && manualMonthlyOverride > 0;
+  if (isManualOverride) {
+    displayMonthlyPrice = manualMonthlyOverride;
+  }
+
+  const totalSessions = totalSessionsPerWeek * totalWeeks;
+  const perSessionPrice = displayMonthlyPrice > 0 && totalSessions > 0 ? (displayMonthlyPrice * contractLengthMonths) / totalSessions : 0;
+
+  const payInFullPrice = displayMonthlyPrice * contractLengthMonths * (1 - (payInFullDiscountPercent / 100));
+
+  return {
+    hourlyRate,
+    sessionLengthMinutes,
+    checkInCallLengthMinutes,
+    programBuildTimeHours,
+    calculatedMonthlyPrice: baseMonthlyPrice,
+    baseMonthlyPrice,
+    displayMonthlyPrice,
+    perSessionPrice,
+    payInFullPrice,
+    payInFullDiscount: (displayMonthlyPrice * contractLengthMonths) - payInFullPrice,
+    totalCoachingHours,
+    checkInHours,
+    buildHours,
+    totalHours,
+    totalProgramPrice,
+    totalSessions,
+    commitToSaveActive,
+    commitToSaveSavings: commitToSaveActive ? commitToSaveMonthlySavings : 0,
+    noShowFee: commitToSaveMissedSessionFee,
+    isManualOverride,
+    manualMonthlyOverride,
+    phaseBreakdown,
+  };
 }
 
-// ─── Phase generation ────────────────────────────────────────────────────────
+// ─── Default schedule ───────────────────────────────────────────────────────────
 
-export function createDefaultPhases(contractLengthMonths: number = 12): Phase[] {
-  const totalWeeks = monthsToWeeks(contractLengthMonths);
-  const phase1Weeks = Math.round(totalWeeks * 0.12);
-  const phase2Weeks = Math.round(totalWeeks * 0.30);
-  const phase3Weeks = totalWeeks - phase1Weeks - phase2Weeks;
+export function createDefaultSchedule(sessionsPerWeek: SessionsPerWeek): DayPlan[] {
+  const basePlan: SessionType[] = ['Strength', 'Cardio + Mobility', 'Rest', 'Strength', 'Cardio + Mobility', 'Rest', 'Rest'];
+  if (sessionsPerWeek === 2) {
+    basePlan[1] = 'Rest';
+    basePlan[4] = 'Rest';
+  }
+  if (sessionsPerWeek === 3) {
+    basePlan[1] = 'Rest';
+    basePlan[4] = 'Mix';
+    basePlan[5] = 'Rest';
+  }
+  if (sessionsPerWeek === 4) {
+    basePlan[5] = 'Strength';
+  }
+  if (sessionsPerWeek === 5) {
+    basePlan[5] = 'Strength';
+    basePlan[6] = 'Cardio + Mobility';
+  }
+  if (sessionsPerWeek === 6) {
+    basePlan[2] = 'Strength';
+    basePlan[5] = 'Strength';
+    basePlan[6] = 'Cardio + Mobility';
+  }
+
+  return DAYS_OF_WEEK.map((day, i) => {
+    const type = basePlan[i];
+    const isSession = type !== 'Rest';
+    return {
+      day: FULL_DAYS[i],
+      shortDay: day,
+      type,
+      isSession,
+      label: isSession ? `${type} Session` : 'Rest Day',
+      duration: isSession ? 60 : 0,
+    };
+  });
+}
+
+// ─── Default phases ─────────────────────────────────────────────────────────────
+
+export function createDefaultPhases(contractMonths: number): Phase[] {
+  const totalWeeks = monthsToWeeks(contractMonths);
+  const phase1Weeks = Math.round(totalWeeks * 0.25);
+  const phase3Weeks = Math.round(totalWeeks * 0.25);
+  const phase2Weeks = totalWeeks - phase1Weeks - phase3Weeks;
 
   return [
     {
       id: 1, name: 'Phase 1', weeks: phase1Weeks, intensity: 'Fully Guided',
-      description: "We're live together for the full session while you learn the movements and routines.",
+      description: "We start with hands-on coaching to build a strong foundation. I'll be there every step, ensuring your form is solid and you feel confident in every movement.",
     },
     {
       id: 2, name: 'Phase 2', weeks: phase2Weeks, intensity: 'Shared Guidance',
-      description: "Some sessions or parts of sessions you'll tackle on your own, while I'm right there coaching you through others. Workouts are captured automatically so I can review everything and keep your program dialed in.",
+      description: "We shift to a blended model where you take more ownership. I'll provide the structure and support while you begin to drive your progress independently.",
     },
     {
       id: 3, name: 'Phase 3', weeks: phase3Weeks, intensity: 'Self-Reliant',
@@ -583,6 +587,32 @@ export function createDefaultPlan(memberName: string, memberId: string, coachId:
   };
 }
 
+// ─── Type colors (used by day tiles in coach and member views) ──────────────────
+
+export const typeColors: Record<SessionType, { text: string; bg: string; border: string; dot: string }> = {
+  'Strength':         { text: '#6EBB7A', bg: 'rgba(110,187,122,0.12)', border: 'rgba(110,187,122,0.35)', dot: '#6EBB7A' },
+  'Cardio + Mobility':{ text: '#5B9BD5', bg: 'rgba(91,155,213,0.12)',  border: 'rgba(91,155,213,0.35)',  dot: '#5B9BD5' },
+  'Mix':              { text: '#F5A623', bg: 'rgba(245,166,35,0.12)',  border: 'rgba(245,166,35,0.35)',  dot: '#F5A623' },
+  'Rest':             { text: '#4A5568', bg: 'rgba(42,51,71,0.2)',     border: 'transparent',            dot: '#4A5568' },
+};
+
+// ─── Available goals (alias for HEALTH_GOALS) ────────────────────────────────
+
+export const availableGoals = [
+  'Feel healthier', 'Fat loss', 'Build muscle', 'Improve endurance',
+  'Lower stress', 'Better sleep', 'More energy', 'Increase flexibility',
+  'Build confidence', 'Manage pain',
+];
+
+// ─── Day type options (for coach dropdown picker) ────────────────────────────
+
+export const dayTypeOptions: { label: string; value: SessionType }[] = [
+  { label: 'Strength',  value: 'Strength' },
+  { label: 'Cardio',    value: 'Cardio + Mobility' },
+  { label: 'Mix',       value: 'Mix' },
+  { label: 'Rest',      value: 'Rest' },
+];
+
 // ─── Goal display config ─────────────────────────────────────────────────────
 
 export const HEALTH_GOALS = [
@@ -592,48 +622,14 @@ export const HEALTH_GOALS = [
 ];
 
 export const goalConfig: Record<string, { emoji: string; color: string }> = {
-  'Improved Health': { emoji: '\u2764\uFE0F', color: '#6EBB7A' },
-  'Improved Endurance': { emoji: '\u26A1', color: '#5B9BD5' },
-  'Increased Strength': { emoji: '\uD83D\uDCAA', color: '#F5A623' },
-  'Increased Muscle Mass': { emoji: '\uD83C\uDFCB\uFE0F', color: '#7EB8E8' },
-  'Weight Loss': { emoji: '\uD83C\uDFAF', color: '#E06B6B' },
-  'Flexibility': { emoji: '\uD83E\uDDD8', color: '#9B8FD5' },
-  'Mental Health': { emoji: '\uD83E\uDDE0', color: '#5B9BD5' },
-  'Better Sleep': { emoji: '\uD83D\uDE34', color: '#7EB8E8' },
-  'Feel healthier': { emoji: '\u2764\uFE0F', color: '#6EBB7A' },
-  'Fat loss': { emoji: '\uD83D\uDD25', color: '#E06B6B' },
-  'Build muscle': { emoji: '\uD83D\uDCAA', color: '#F5A623' },
-  'Improve endurance': { emoji: '\uD83C\uDFC3', color: '#5B9BD5' },
-  'Lower stress': { emoji: '\uD83C\uDF19', color: '#9B8FD5' },
-  'More energy': { emoji: '\u26A1', color: '#F5A623' },
-  'Increase flexibility': { emoji: '\uD83E\uDDD8', color: '#9B8FD5' },
-  'Build confidence': { emoji: '\uD83D\uDE0A', color: '#6EBB7A' },
-  'Manage pain': { emoji: '\uD83C\uDFAF', color: '#E06B6B' },
+  'Feel healthier': { emoji: '😊', color: '#6EBB7A' },
+  'Fat loss': { emoji: '🔥', color: '#FFC000' },
+  'Build muscle': { emoji: '💪', color: '#5B9BD5' },
+  'Improve endurance': { emoji: '🏃', color: '#FFC000' },
+  'Lower stress': { emoji: '🧘', color: '#6EBB7A' },
+  'Better sleep': { emoji: '😴', color: '#5B9BD5' },
+  'More energy': { emoji: '⚡', color: '#FFC000' },
+  'Increase flexibility': { emoji: '🤸', color: '#6EBB7A' },
+  'Build confidence': { emoji: '🚀', color: '#5B9BD5' },
+  'Manage pain': { emoji: '❤️‍🩹', color: '#FFC000' },
 };
-
-export const availableGoals = [
-  'Improved Health', 'Improved Endurance', 'Increased Strength', 'Increased Muscle Mass',
-  'Weight Loss', 'Flexibility', 'Mental Health', 'Better Sleep',
-];
-
-// ─── Day type colors ─────────────────────────────────────────────────────────
-
-export const typeColors: Record<string, { bg: string; border: string; text: string; dot: string }> = {
-  'Strength': { bg: 'rgba(91,155,213,0.14)', border: 'rgba(91,155,213,0.35)', text: '#5B9BD5', dot: '#5B9BD5' },
-  'Cardio + Mobility': { bg: 'rgba(245,166,35,0.14)', border: 'rgba(245,166,35,0.35)', text: '#F5A623', dot: '#F5A623' },
-  'Mix': { bg: 'rgba(110,187,122,0.14)', border: 'rgba(110,187,122,0.35)', text: '#6EBB7A', dot: '#6EBB7A' },
-  'Rest': { bg: 'rgba(42,51,71,0.3)', border: '#1E2535', text: '#4A5568', dot: '#2A3347' },
-  'strength': { bg: 'rgba(91,155,213,0.14)', border: 'rgba(91,155,213,0.35)', text: '#5B9BD5', dot: '#5B9BD5' },
-  'cardio': { bg: 'rgba(245,166,35,0.14)', border: 'rgba(245,166,35,0.35)', text: '#F5A623', dot: '#F5A623' },
-  'rest': { bg: 'rgba(42,51,71,0.3)', border: '#1E2535', text: '#4A5568', dot: '#2A3347' },
-  'optional': { bg: 'rgba(110,187,122,0.08)', border: 'rgba(110,187,122,0.2)', text: '#6EBB7A', dot: '#6EBB7A' },
-};
-
-export const phaseColors = ['#5B9BD5', '#F5A623', '#6EBB7A'];
-
-export const dayTypeOptions: { value: SessionType; label: string }[] = [
-  { value: 'Strength', label: 'Strength' },
-  { value: 'Cardio + Mobility', label: 'Cardio + Mobility' },
-  { value: 'Mix', label: 'Mix' },
-  { value: 'Rest', label: 'Rest' },
-];

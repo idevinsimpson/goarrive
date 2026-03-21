@@ -13,7 +13,7 @@ import { AppHeader } from '../../components/AppHeader';
 import { collection, query, where, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import {
-  MemberPlanData, DayPlan, goalConfig, typeColors, phaseColors,
+  MemberPlanData, DayPlan, goalConfig, typeColors, phaseColorList,
   formatCurrency, calculatePricing, monthsToWeeks,
 } from '../../lib/planTypes';
 
@@ -147,7 +147,7 @@ function GoalsSection({ plan }: { plan: MemberPlanData }) {
       <Text style={st.sectionSubtitle}>What we're building toward</Text>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
         {goals.map((goal: string, i: number) => {
-          const cfg = (goalConfig as any)[goal] || { emoji: '\uD83C\uDFAF', color: '#8A95A3' };
+          const cfg = goalConfig[goal] || { emoji: '🎯', color: '#8A95A3' };
           return (
             <View key={i} style={{
               flex: 1, minWidth: '45%',
@@ -251,35 +251,32 @@ function WeeklyPlanSection({ plan }: { plan: MemberPlanData }) {
         <Text style={{ color: '#8A95A3', fontSize: 14, marginLeft: 6 }}>per week {"\u00B7"} {contractMonths} months</Text>
       </View>
 
-      {/* Day tiles — Forge style */}
+      {/* Day tiles — clean minimal style */}
       <View style={{ flexDirection: 'row', gap: 4, marginBottom: 10 }}>
         {schedule.map((day, i) => {
           const colors = typeColors[day.type] || typeColors['Rest'];
           const isRest = day.type === 'Rest';
           const isExpanded = expandedDay === i;
+          const abbr = isRest ? 'OFF' : day.type === 'Strength' ? 'STR' : day.type === 'Cardio + Mobility' ? 'CARD' : 'MIX';
           return (
             <Pressable
               key={i}
               onPress={() => !isRest && setExpandedDay(isExpanded ? null : i)}
               style={{
-                flex: 1, alignItems: 'center', gap: 4,
-                borderRadius: 12, paddingVertical: 10,
-                backgroundColor: isRest ? 'rgba(14,17,23,0.5)' : colors.bg,
+                flex: 1, alignItems: 'center', paddingVertical: 10, paddingHorizontal: 2,
+                borderRadius: 10,
+                backgroundColor: isRest ? 'rgba(14,17,23,0.4)' : colors.bg,
                 borderWidth: 1,
-                borderColor: isExpanded ? colors.text : (isRest ? '#1A1F2B' : colors.border),
-                opacity: isRest ? 0.5 : 1,
+                borderColor: isExpanded ? colors.text : (isRest ? '#1A2030' : colors.border),
+                opacity: isRest ? 0.45 : 1,
               }}
             >
-              <Text style={{ fontSize: 10, fontWeight: '600', color: isRest ? '#3A4255' : '#8A95A3', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              <Text style={{ fontSize: 9, fontWeight: '600', color: isRest ? '#3A4255' : '#8A95A3', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 5 }}>
                 {day.shortDay}
               </Text>
-              {isRest ? (
-                <Text style={{ fontSize: 14, color: '#3A4255' }}>{'\u2715'}</Text>
-              ) : (
-                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.dot }} />
-              )}
-              <Text style={{ fontSize: 9, fontWeight: '700', color: isRest ? '#3A4255' : colors.text, textAlign: 'center' }}>
-                {isRest ? 'OFF' : day.type === 'Strength' ? 'STR' : day.type === 'Cardio + Mobility' ? 'CARD' : day.type === 'Mix' ? 'MIX' : day.label?.substring(0, 4).toUpperCase()}
+              <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: isRest ? '#2A3040' : colors.dot, marginBottom: 5 }} />
+              <Text style={{ fontSize: 8, fontWeight: '700', color: isRest ? '#3A4255' : colors.text, textAlign: 'center', letterSpacing: 0.2 }} numberOfLines={1}>
+                {abbr}
               </Text>
             </Pressable>
           );
@@ -328,13 +325,13 @@ function CoachingEvolutionSection({ plan }: { plan: MemberPlanData }) {
       {/* Phase bar */}
       <View style={{ flexDirection: 'row', borderRadius: 12, overflow: 'hidden', height: 8, marginBottom: 6 }}>
         {plan.phases.map((phase, i) => (
-          <View key={phase.id} style={{ flex: phase.weeks, backgroundColor: phaseColors[i], opacity: 0.85 }} />
+          <View key={phase.id} style={{ flex: phase.weeks, backgroundColor: phaseColorList[i], opacity: 0.85 }} />
         ))}
       </View>
       <View style={{ flexDirection: 'row', gap: 4, marginBottom: 4 }}>
         {plan.phases.map((phase, i) => (
           <View key={phase.id} style={{ flex: 1, alignItems: 'center' }}>
-            <Text style={{ fontSize: 10, fontWeight: '600', color: phaseColors[i] }}>{phase.weeks}w</Text>
+            <Text style={{ fontSize: 10, fontWeight: '600', color: phaseColorList[i] }}>{phase.weeks}w</Text>
           </View>
         ))}
       </View>
@@ -343,9 +340,9 @@ function CoachingEvolutionSection({ plan }: { plan: MemberPlanData }) {
       </Text>
       {/* Phase cards */}
       {plan.phases.map((phase, i) => (
-        <View key={phase.id} style={[st.darkCard, { borderLeftWidth: 3, borderLeftColor: phaseColors[i], marginBottom: 10 }]}>
+        <View key={phase.id} style={[st.darkCard, { borderLeftWidth: 3, borderLeftColor: phaseColorList[i], marginBottom: 10 }]}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <Text style={{ fontSize: 14, fontWeight: '700', color: phaseColors[i] }}>{phase.name}: {phase.intensity}</Text>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: phaseColorList[i] }}>{phase.name}: {phase.intensity}</Text>
             <Text style={{ fontSize: 12, color: '#8A95A3', marginLeft: 'auto' }}>{phase.weeks} weeks</Text>
           </View>
           <Text style={{ fontSize: 13, color: '#C5CDD8', lineHeight: 21 }}>{phase.description}</Text>

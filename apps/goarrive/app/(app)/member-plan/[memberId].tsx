@@ -150,41 +150,36 @@ const ss = StyleSheet.create({
 });
 
 // ─── DayTile (tappable with dropdown session type picker) ────────────────────
-function DayTile({ day, isCoach, onTypeChange }: {
+function DayTile({ day, isCoach, onTypeChange, onOpen, isOpen }: {
   day: DayPlan; isCoach: boolean; onTypeChange: (t: SessionType) => void;
+  onOpen?: () => void; isOpen?: boolean;
 }) {
-  const [showPicker, setShowPicker] = useState(false);
   const tc = typeColors[day.type] || typeColors['Rest'];
   const isSession = day.isSession && day.type !== 'Rest';
-  const shortLabel = day.type === 'Cardio + Mobility' ? 'Cardio' : day.type;
-  const iconMap: Record<string, string> = { 'Strength': '🏋️', 'Cardio + Mobility': '🌊', 'Mix': '✨', 'Rest': '🌙' };
+  const abbr = day.type === 'Strength' ? 'STR' : day.type === 'Cardio + Mobility' ? 'CARD' : day.type === 'Mix' ? 'MIX' : 'OFF';
 
   return (
-    <View style={{ width: (SCREEN_W - 48) / 7, alignItems: 'center', zIndex: showPicker ? 100 : 1 }}>
+    <View style={{ width: (SCREEN_W - 88) / 7, alignItems: 'center', zIndex: isOpen ? 9999 : 1, elevation: isOpen ? 20 : 1 }}>
       <Pressable
-        onPress={() => isCoach && setShowPicker(!showPicker)}
-        style={[dt.tile, { backgroundColor: isSession ? tc.bg : 'rgba(42,51,71,0.2)', borderColor: isSession ? tc.border : 'transparent', borderWidth: 1 }]}
+        onPress={() => { if (isCoach) { onOpen?.(); } }}
+        style={[dt.tile, { backgroundColor: isSession ? tc.bg : 'rgba(42,51,71,0.2)', borderColor: isOpen ? tc.text : (isSession ? tc.border : 'transparent'), borderWidth: 1 }]}
       >
-        <Text style={{ fontSize: 10, fontWeight: '600', color: MUTED, marginBottom: 2 }}>{day.shortDay}</Text>
-        <Text style={{ fontSize: 16, marginVertical: 2 }}>{iconMap[day.type] || '🌙'}</Text>
-        <Text style={{ fontSize: 9, fontWeight: '600', color: isSession ? tc.text : '#4A5568' }} numberOfLines={1}>{shortLabel}</Text>
+        <Text style={{ fontSize: 9, fontWeight: '600', color: MUTED, marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.3 }}>{day.shortDay}</Text>
+        <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: isSession ? tc.dot : '#2A3040', marginBottom: 5 }} />
+        <Text style={{ fontSize: 8, fontWeight: '700', color: isSession ? tc.text : '#4A5568', letterSpacing: 0.2 }} numberOfLines={1}>{abbr}</Text>
       </Pressable>
-      {showPicker && isCoach && (
+      {isOpen && isCoach && (
         <View style={dt.dropdown}>
           {SESSION_TYPES.map(type => {
             const selected = type === day.type;
             const tcc = typeColors[type] || typeColors['Rest'];
             return (
-              <Pressable key={type} onPress={() => { onTypeChange(type); setShowPicker(false); }}
+              <Pressable key={type} onPress={() => { onTypeChange(type); onOpen?.(); }}
                 style={[dt.dropItem, selected && { backgroundColor: 'rgba(110,187,122,0.15)' }]}>
-                <Text style={{ fontSize: 14, marginRight: 8 }}>{iconMap[type]}</Text>
                 <Text style={{ fontSize: 14, fontWeight: '500', color: selected ? ACCENT : tcc.text }}>{type}</Text>
               </Pressable>
             );
           })}
-          <Text style={{ fontSize: 10, color: '#4A5568', paddingHorizontal: 14, paddingBottom: 8, paddingTop: 4 }}>
-            Tap any day to change its type
-          </Text>
         </View>
       )}
     </View>
@@ -260,24 +255,26 @@ function ButtonGroup<T extends string | number>({ options, value, onChange }: {
 }
 
 // ─── GuidanceDropdown ────────────────────────────────────────────────────────
-function GuidanceDropdown({ value, onChange }: { value: GuidanceLevel; onChange: (v: GuidanceLevel) => void }) {
-  const [open, setOpen] = useState(false);
+function GuidanceDropdown({ value, onChange, isOpen, onOpen }: {
+  value: GuidanceLevel; onChange: (v: GuidanceLevel) => void;
+  isOpen?: boolean; onOpen?: () => void;
+}) {
   return (
-    <View style={{ position: 'relative', zIndex: open ? 200 : 1 }}>
-      <Pressable onPress={() => setOpen(!open)}
-        style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: BG, borderWidth: 1, borderColor: BORDER, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7 }}>
-        <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '600' }}>{GUIDANCE_SHORT[value]}</Text>
-        <Icon name="chevron-down" size={12} color={MUTED} />
+    <View style={{ position: 'relative', zIndex: isOpen ? 9999 : 1, elevation: isOpen ? 20 : 1 }}>
+      <Pressable onPress={() => onOpen?.()}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: BG, borderWidth: 1, borderColor: isOpen ? ACCENT : BORDER, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7 }}>
+        <Text style={{ color: isOpen ? ACCENT : '#FFF', fontSize: 12, fontWeight: '600' }}>{GUIDANCE_SHORT[value]}</Text>
+        <Icon name="chevron-down" size={12} color={isOpen ? ACCENT : MUTED} />
       </Pressable>
-      {open && (
+      {isOpen && (
         <View style={{
-          position: 'absolute', top: 36, left: 0, zIndex: 300,
+          position: 'absolute', top: 36, left: 0, zIndex: 9999,
           backgroundColor: '#1A2035', borderRadius: 8, borderWidth: 1, borderColor: BORDER,
           minWidth: 90, paddingVertical: 2,
-          ...(Platform.OS === 'web' ? { boxShadow: '0 4px 16px rgba(0,0,0,0.5)' } as any : { elevation: 8 }),
+          ...(Platform.OS === 'web' ? { boxShadow: '0 4px 16px rgba(0,0,0,0.5)' } as any : { elevation: 20 }),
         }}>
           {guidanceLevels.map(level => (
-            <Pressable key={level} onPress={() => { onChange(level); setOpen(false); }}
+            <Pressable key={level} onPress={() => { onChange(level); onOpen?.(); }}
               style={[{ paddingVertical: 8, paddingHorizontal: 12 }, level === value && { backgroundColor: 'rgba(110,187,122,0.15)' }]}>
               <Text style={{ color: level === value ? ACCENT : '#FFF', fontSize: 12, fontWeight: '500' }}>{GUIDANCE_SHORT[level]}</Text>
             </Pressable>
@@ -300,6 +297,7 @@ function PlanView({ plan, isCoach, onChange }: {
 }) {
   const [editField, setEditField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [openDayIndex, setOpenDayIndex] = useState<number | null>(null);
 
   // Pricing calculation
   const pricing = useMemo(() => {
@@ -599,10 +597,13 @@ function PlanView({ plan, isCoach, onChange }: {
           )}
 
           {/* Day tiles */}
-          <View style={{ flexDirection: 'row', gap: 4, justifyContent: 'space-between' }}>
+          <View style={{ flexDirection: 'row', gap: 4, justifyContent: 'space-between', zIndex: openDayIndex !== null ? 9999 : 1 }}>
             {(plan.weeklySchedule || []).map((day, i) => (
               <DayTile key={day.shortDay || i} day={day} isCoach={isCoach}
-                onTypeChange={(type) => handleDayTypeChange(i, type)} />
+                onTypeChange={(type) => { handleDayTypeChange(i, type); setOpenDayIndex(null); }}
+                isOpen={openDayIndex === i}
+                onOpen={() => setOpenDayIndex(openDayIndex === i ? null : i)}
+              />
             ))}
           </View>
         </View>
@@ -610,13 +611,13 @@ function PlanView({ plan, isCoach, onChange }: {
 
       {/* ─── HOW YOUR COACHING SUPPORT EVOLVES ───────────────────────────── */}
       <View style={pv.section}>
-        <Text style={pv.sectionLabel}>HOW YOUR COACHING SUPPORT EVOLVES</Text>
+        <Text style={[pv.sectionLabel, { color: phaseColors[plan.phases[0].intensity].text }]}>HOW YOUR COACHING SUPPORT EVOLVES</Text>
         <View style={pv.card}>
           {/* Phase progress bar */}
           <View style={{ flexDirection: 'row', height: 12, borderRadius: 6, overflow: 'hidden', marginBottom: 4 }}>
             {(plan.phases || []).map((phase, i) => {
               const pct = totalWeeksTarget > 0 ? (phase.weeks / totalWeeksTarget) * 100 : 0;
-              const pc = phaseColors[i] || phaseColors[0];
+              const pc = phaseColors[phase.intensity];
               return <View key={i} style={{ width: `${pct}%` as any, backgroundColor: pc.bar, height: 12 }} />;
             })}
           </View>
@@ -636,7 +637,7 @@ function PlanView({ plan, isCoach, onChange }: {
 
           {/* Phase cards */}
           {(plan.phases || []).map((phase, i) => {
-            const pc = phaseColors[i] || phaseColors[0];
+            const pc = phaseColors[phase.intensity];
             const isLast = i === (plan.phases || []).length - 1;
             return (
               <View key={i} style={[pv.phaseCard, { borderColor: pc.border, backgroundColor: pc.bg }]}>
@@ -1040,6 +1041,7 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
   const [showGuidance, setShowGuidance] = useState(false);
   const [showPricing, setShowPricing] = useState(false);
   const [showBreakdown, setShowBreakdown] = useState(false);
+  const [openGuidanceKey, setOpenGuidanceKey] = useState<string | null>(null);
 
   if (!visible) return null;
 
@@ -1148,15 +1150,20 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                             <Text style={{ color: MUTED, fontSize: 12 }}>{count}× per week</Text>
                           </View>
                           <View style={{ flexDirection: 'row', gap: 8 }}>
-                            {(['phase1', 'phase2', 'phase3'] as const).map((phase, idx) => (
-                              <View key={phase} style={{ flex: 1 }}>
-                                <Text style={{ color: MUTED, fontSize: 10, marginBottom: 4 }}>Phase {idx + 1}</Text>
-                                <GuidanceDropdown
-                                  value={profile[phase]}
-                                  onChange={(val) => handleGuidanceChange(type, phase, val)}
-                                />
-                              </View>
-                            ))}
+                            {(['phase1', 'phase2', 'phase3'] as const).map((phase, idx) => {
+                              const gKey = `${type}-${phase}`;
+                              return (
+                                <View key={phase} style={{ flex: 1 }}>
+                                  <Text style={{ color: MUTED, fontSize: 10, marginBottom: 4 }}>Phase {idx + 1}</Text>
+                                  <GuidanceDropdown
+                                    value={profile[phase]}
+                                    onChange={(val) => { handleGuidanceChange(type, phase, val); setOpenGuidanceKey(null); }}
+                                    isOpen={openGuidanceKey === gKey}
+                                    onOpen={() => setOpenGuidanceKey(openGuidanceKey === gKey ? null : gKey)}
+                                  />
+                                </View>
+                              );
+                            })}
                           </View>
                         </View>
                       );
