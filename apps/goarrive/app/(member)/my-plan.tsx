@@ -164,7 +164,7 @@ function GoalsSection({ plan }: { plan: MemberPlanData }) {
         <View style={[st.darkCard, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }]}>
           <View>
             <Text style={st.miniLabel}>CURRENT</Text>
-            <Text style={st.statValueLarge}>{plan.currentWeight} lbs</Text>
+            <Text style={st.statValueLarge}>{String(plan.currentWeight || '').replace(/ lbs$/i, '')} lbs</Text>
           </View>
           <Text style={{ color: '#5B9BD5', fontSize: 18 }}>{"\u2192"}</Text>
           <View style={{ alignItems: 'flex-end' }}>
@@ -191,14 +191,16 @@ function WhySection({ plan }: { plan: MemberPlanData }) {
   return (
     <View style={{ marginBottom: 20 }}>
       <Text style={st.sectionLabel}>Your Why</Text>
-      <View style={[st.darkCard, { borderLeftWidth: 3, borderLeftColor: '#F5A623', marginBottom: 10 }]}>
-        <Text style={[st.miniLabel, { color: '#F5A623', marginBottom: 8 }]}>
-          IN {plan.memberName.split(' ')[0].toUpperCase()}'S WORDS
-        </Text>
-        <Text style={{ color: '#F0F4F8', fontSize: 16, fontWeight: '600', lineHeight: 24, fontStyle: 'italic' }}>
-          "{plan.whyStatement}"
-        </Text>
-      </View>
+      {plan.whyStatement ? (
+        <View style={[st.darkCard, { borderLeftWidth: 3, borderLeftColor: '#F5A623', marginBottom: 10 }]}>
+          <Text style={[st.miniLabel, { color: '#F5A623', marginBottom: 8 }]}>
+            IN {plan.memberName.split(' ')[0].toUpperCase()}'S WORDS
+          </Text>
+          <Text style={{ color: '#F0F4F8', fontSize: 16, fontWeight: '600', lineHeight: 24, fontStyle: 'italic' }}>
+            "{plan.whyStatement}"
+          </Text>
+        </View>
+      ) : null}
       {plan.whyTranslation ? (
         <View style={[st.darkCard, { borderLeftWidth: 3, borderLeftColor: '#5B9BD5', marginBottom: 12 }]}>
           <Text style={{ color: '#C5CDD8', fontSize: 14, lineHeight: 22 }}>{plan.whyTranslation}</Text>
@@ -639,16 +641,16 @@ export default function MyPlan() {
     );
   }
 
-  if (!plan || plan.status === 'draft') {
+  if (!plan) {
     return (
       <View style={st.root}>
         <AppHeader />
         <View style={st.emptyContainer}>
           <Text style={{ fontSize: 48, marginBottom: 16 }}>{'\uD83D\uDCCB'}</Text>
-          <Text style={st.emptyTitle}>Plan In Progress</Text>
+          <Text style={st.emptyTitle}>No Plan Yet</Text>
           <Text style={st.emptyText}>
-            Your coach is building your personalized fitness plan.{'\n'}
-            You'll see it here once it's ready.
+            Your coach hasn't created your fitness plan yet.{'\n'}
+            Complete your intake to get started.
           </Text>
         </View>
       </View>
