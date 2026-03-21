@@ -212,7 +212,7 @@ export default function MyPlan() {
 
 // ─── Styles ─────────────────────────────────────────────────────────────────
 const st = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0E1117' },
+  root: { flex: 1, backgroundColor: '#0E1117', ...(Platform.OS === 'web' ? { height: '100vh' as any, maxHeight: '100vh' as any, overflow: 'hidden' as any } : {}) },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 },
   emptyTitle: { fontSize: 20, fontWeight: '700', color: '#F0F4F8', marginBottom: 8 },

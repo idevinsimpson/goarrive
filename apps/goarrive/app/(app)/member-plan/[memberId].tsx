@@ -2121,7 +2121,7 @@ export default function MemberPlanScreen() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: BG }}>
+    <View style={{ flex: 1, backgroundColor: BG, ...(Platform.OS === 'web' ? { height: '100vh', maxHeight: '100vh', overflow: 'hidden' } as any : {}) }}>
       {/* ─── TOP BAR ──────────────────────────────────────────────────────── */}
       <View style={tb.bar}>
         <Pressable onPress={() => router.back()} style={tb.backBtn}>
