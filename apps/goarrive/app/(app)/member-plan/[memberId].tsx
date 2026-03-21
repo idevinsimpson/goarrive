@@ -171,9 +171,17 @@ function DayTile({ day, isCoach, onTypeChange, onOpen, isOpen }: {
       const rect = domRef.current.getBoundingClientRect();
       // 4 session types * ~40px each = ~170px dropdown height
       const dropHeight = 180;
-      const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+      const vh = Math.min(
+        window.innerHeight,
+        document.documentElement.clientHeight,
+        window.visualViewport ? window.visualViewport.height : Infinity
+      );
       const spaceBelow = vh - rect.bottom;
-      const top = spaceBelow >= dropHeight ? rect.bottom + 4 : rect.top - dropHeight - 4;
+      let top = spaceBelow >= dropHeight + 20
+        ? rect.bottom + 4
+        : rect.top - dropHeight - 4;
+      // Hard clamp: never let dropdown go below viewport or above 0
+      top = Math.max(8, Math.min(top, vh - dropHeight - 8));
       setDropPos({ top, left: rect.left });
     }
     onOpen?.();
@@ -335,9 +343,20 @@ function GuidanceDropdown({ value, onChange, isOpen, onOpen }: {
       const rect = domRef.current.getBoundingClientRect();
       // Dropdown height estimate: 3 options * 33px each = ~100px
       const dropHeight = 110;
-      const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+      // Use the smaller of window.innerHeight and document.documentElement.clientHeight
+      // to handle mobile browsers where the address bar reduces visible area.
+      // Also clamp so the dropdown never goes below the visible viewport.
+      const vh = Math.min(
+        window.innerHeight,
+        document.documentElement.clientHeight,
+        window.visualViewport ? window.visualViewport.height : Infinity
+      );
       const spaceBelow = vh - rect.bottom;
-      const top = spaceBelow >= dropHeight ? rect.bottom + 4 : rect.top - dropHeight - 4;
+      let top = spaceBelow >= dropHeight + 20
+        ? rect.bottom + 4
+        : rect.top - dropHeight - 4;
+      // Hard clamp: never let dropdown go below viewport or above 0
+      top = Math.max(8, Math.min(top, vh - dropHeight - 8));
       setDropPos({ top, left: rect.left });
     }
     onOpen?.();
