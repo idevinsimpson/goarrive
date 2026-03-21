@@ -5,6 +5,29 @@
  * affordances layered on top: pencil icons, tappable day tiles with dropdown
  * session-type picker, sliders for readiness/motivation/sessions, and a
  * Plan Controls drawer for pricing settings.
+ *
+ * ─── DROPDOWN RULE (DO NOT VIOLATE) ─────────────────────────────────────────
+ * ALL floating dropdown menus in this file MUST use ReactDOM.createPortal to
+ * render directly into document.body with position:fixed and zIndex:99999.
+ *
+ * WHY: React Native Web wraps the app in a scrollable div with overflow:auto.
+ * Any dropdown using position:absolute will be clipped by that container and
+ * disappear behind sibling sections. The same applies inside React Native
+ * Modal components (PlanControlsDrawer) which create their own stacking context.
+ *
+ * REQUIRED PATTERN for every floating dropdown:
+ *   1. Wrap the trigger in a <div ref={domRef}> to get reliable getBoundingClientRect()
+ *   2. On open, call getBoundingClientRect() and compute top/left for position:fixed
+ *   3. Flip the dropdown upward if there is insufficient space below (spaceBelow < dropHeight+20)
+ *   4. Hard-clamp top so the dropdown never escapes the viewport
+ *   5. Render via ReactDOM.createPortal(<>, document.body) with zIndex:99999
+ *   6. Include a full-screen transparent backdrop div (zIndex:99998) to close on outside click
+ *   7. Add a scroll event listener (window, capture phase) that closes the dropdown on scroll
+ *      — use a 100ms delay so the dropdown doesn't close the instant it opens
+ *
+ * NEVER use position:absolute for dropdowns. NEVER render dropdowns inline
+ * inside a ScrollView or Modal without portal rendering.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import ReactDOM from 'react-dom';
@@ -164,6 +187,21 @@ function DayTile({ day, isCoach, onTypeChange, onOpen, isOpen }: {
   const abbr = day.type === 'Strength' ? 'STR' : day.type === 'Cardio + Mobility' ? 'CARD' : day.type === 'Mix' ? 'MIX' : 'OFF';
   const domRef = useRef<HTMLDivElement | null>(null);
   const [dropPos, setDropPos] = useState<{ top: number; left: number } | null>(null);
+
+  // Close dropdown on scroll (prevents dropdown from floating over other content)
+  // We use a small delay to avoid closing immediately when the dropdown opens
+  // (which can trigger a micro-scroll in some browsers)
+  useEffect(() => {
+    if (!isOpen || Platform.OS !== 'web') return;
+    let active = false;
+    const timer = setTimeout(() => { active = true; }, 100);
+    const handleScroll = () => { if (active) onOpen?.(); }; // toggle closes it
+    window.addEventListener('scroll', handleScroll, true);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, [isOpen]);
 
   const handlePress = () => {
     if (!isCoach) return;
@@ -337,6 +375,20 @@ function GuidanceDropdown({ value, onChange, isOpen, onOpen }: {
 }) {
   const domRef = useRef<HTMLDivElement | null>(null);
   const [dropPos, setDropPos] = useState<{ top: number; left: number } | null>(null);
+
+  // Close dropdown on scroll (prevents dropdown from floating over other content)
+  // We use a small delay to avoid closing immediately when the dropdown opens
+  useEffect(() => {
+    if (!isOpen || Platform.OS !== 'web') return;
+    let active = false;
+    const timer = setTimeout(() => { active = true; }, 100);
+    const handleScroll = () => { if (active) onOpen?.(); }; // toggle closes it
+    window.addEventListener('scroll', handleScroll, true);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, [isOpen]);
 
   const handlePress = () => {
     if (!isOpen && domRef.current && Platform.OS === 'web') {
@@ -839,38 +891,9 @@ function PlanView({ plan, isCoach, onChange }: {
         </View>
       ) : null}
 
-      {/* ─── COMMIT TO SAVE ──────────────────────────────────────────────── */}
-      {(plan.commitToSave?.enabled) ? (
-        <View style={pv.section}>
-          <Text style={pv.sectionLabel}>COMMIT TO SAVE</Text>
-          <CommitToSaveView plan={plan} isCoach={isCoach} />
-        </View>
-      ) : null}
-
-      {/* ─── NUTRITION ───────────────────────────────────────────────────── */}
-      {(plan.nutrition?.enabled) ? (
-        <View style={pv.section}>
-          <Text style={pv.sectionLabel}>NUTRITION COACHING</Text>
-          <View style={pv.card}>
-            <Text style={{ color: '#FFF', fontSize: 15, fontWeight: '600', marginBottom: 6, fontFamily: FH }}>
-              {plan.nutrition.type === 'in-house' ? 'In-House Nutrition Coaching' : `Nutrition by ${plan.nutrition.providerName || 'Partner'}`}
-            </Text>
-            <Text style={{ color: MUTED, fontSize: 13, lineHeight: 19 }}>{plan.nutrition.description}</Text>
-            {plan.nutrition.monthlyCost > 0 && (
-              <Text style={{ color: ACCENT, fontSize: 14, fontWeight: '600', marginTop: 8 }}>
-                +{formatCurrency(plan.nutrition.monthlyCost)}/mo
-              </Text>
-            )}
-          </View>
-        </View>
-      ) : null}
-
-      {/* ─── YOUR INVESTMENT ─────────────────────────────────────────────── */}
-      {(plan.showInvestment !== false || isCoach) && (
-        <View style={pv.section}>
-          <Text style={pv.sectionLabel}>YOUR INVESTMENT</Text>
-          {pricing && <InvestmentView plan={plan} pricing={pricing} isCoach={isCoach} />}
-        </View>
+      {/* ─── COACHING INVESTMENT (unified section) ──────────────────────── */}
+      {(plan.showInvestment !== false || isCoach) && pricing && (
+        <CoachingInvestmentSection plan={plan} pricing={pricing} isCoach={isCoach} onChange={onChange} />
       )}
 
       {/* Edit Modal */}
@@ -980,189 +1003,440 @@ function AddItemButton({ onAdd, placeholder }: { onAdd: (text: string) => void; 
   );
 }
 
-// ─── CommitToSaveView ────────────────────────────────────────────────────────
-function CommitToSaveView({ plan, isCoach }: { plan: MemberPlanData; isCoach: boolean }) {
-  const [expanded, setExpanded] = useState(false);
-  const cts = plan.commitToSave;
-  if (!cts?.enabled) return null;
-  return (
-    <View style={pv.card}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-        <Text style={{ color: ACCENT, fontSize: 16, fontWeight: '700', fontFamily: FH }}>
-          Save {formatCurrency(cts.monthlySavings ?? 0)}/mo
-        </Text>
-        <Text style={{ color: MUTED, fontSize: 12 }}>Accountability discount</Text>
-      </View>
-      <Text style={{ color: MUTED, fontSize: 13, lineHeight: 19, marginBottom: 8 }}>
-        {cts.summary || 'Stay consistent and save. Miss a session without making it up, and the discount pauses until you rebuild your streak.'}
-      </Text>
-      <Pressable onPress={() => setExpanded(!expanded)}>
-        <Text style={{ color: PRIMARY, fontSize: 13, fontWeight: '600' }}>
-          {expanded ? 'Hide details ▴' : 'How it works ▾'}
-        </Text>
-      </Pressable>
-      {expanded && (
-        <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: BORDER }}>
-          <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18, marginBottom: 4 }}>
-            • Complete all sessions each week (make-ups allowed within {cts.makeUpWindowHours || 48}hrs)
-          </Text>
-          <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18, marginBottom: 4 }}>
-            • 30-day streak bonus: {cts.nextMonthPercentOff || 5}% off next month
-          </Text>
-          <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18, marginBottom: 4 }}>
-            • Missed session fee: {formatCurrency(cts.missedSessionFee || 25)} (waived if made up)
-          </Text>
-          {cts.emergencyWaiverEnabled && (
-            <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18, marginBottom: 4 }}>
-              • Emergency waiver available (1 per quarter)
-            </Text>
-          )}
-        </View>
-      )}
-    </View>
-  );
-}
+// ═══════════════════════════════════════════════════════════════════════════════
+// COACHING INVESTMENT SECTION (unified: pricing cards + add-ons + breakdown)
+// Matches the Hunter reference design: two pricing cards, stats row,
+// interactive Commit to Save and Nutrition Add-On cards, breakdown accordion.
+// ═══════════════════════════════════════════════════════════════════════════════
 
-// ─── InvestmentView ──────────────────────────────────────────────────────────
-function InvestmentView({ plan, pricing, isCoach }: { plan: MemberPlanData; pricing: PricingResult; isCoach: boolean }) {
-  const [showBreakdown, setShowBreakdown] = useState(false);
+const GOLD = '#F5A623';
+const GOLD_BG = 'rgba(245,166,35,0.12)';
+const GOLD_BORDER = 'rgba(245,166,35,0.5)';
+const GREEN_BORDER = 'rgba(110,187,122,0.5)';
+
+function CoachingInvestmentSection({ plan, pricing, isCoach, onChange }: {
+  plan: MemberPlanData; pricing: PricingResult; isCoach: boolean;
+  onChange: (updates: Partial<MemberPlanData>) => void;
+}) {
   const hidden = plan.showInvestment === false;
-
   if (hidden && !isCoach) return null;
 
+  const cts = plan.commitToSave;
+  const nut = plan.nutrition;
+  const ctsEnabled = cts?.enabled ?? false; // coach enabled it as an option
+  const ctsActive = cts?.active ?? false;    // member (or coach) toggled it on
+  const nutEnabled = nut?.enabled ?? false;  // coach enabled it as an option
+  const nutActive = nut?.active ?? false;     // member (or coach) toggled it on
+
+  // Compute prices with and without add-ons for display
+  const baseMonthly = pricing.baseMonthlyPrice; // before commit-to-save
+  const ctsSavings = cts?.monthlySavings ?? 100;
+  const nutCost = nut?.monthlyCost ?? 100;
+
+  // The displayMonthlyPrice already includes commit-to-save if active
+  const monthlyPrice = pricing.displayMonthlyPrice;
+  const payInFullTotal = pricing.payInFullPrice;
+  const payInFullMonthly = Math.round(payInFullTotal / (plan.contractMonths || 12));
+  const payInFullSavings = Math.round(monthlyPrice * (plan.contractMonths || 12) - payInFullTotal);
+  const payInFullPct = plan.payInFullDiscountPercent || 10;
+
+  const totalSessions = pricing.totalSessions;
+  const perSession = pricing.perSessionPrice;
+  const programTotal = Math.round(monthlyPrice * (plan.contractMonths || 12));
+
+  // Toggle commit to save active state
+  const toggleCommitToSave = () => {
+    onChange({
+      commitToSave: {
+        ...(cts || { monthlySavings: 100, nextMonthPercentOff: 5, missedSessionFee: 50, makeUpWindowHours: 48, emergencyWaiverEnabled: true, reentryRule: '', summary: '', enabled: true }),
+        active: !ctsActive,
+      },
+    });
+  };
+
+  // Toggle nutrition active state (member adds/removes)
+  const toggleNutrition = () => {
+    if (!nut) return;
+    onChange({
+      nutrition: {
+        ...nut,
+        active: !nutActive,
+      },
+    });
+  };
+
   return (
-    <View style={pv.card}>
+    <View style={pv.section}>
+      <Text style={pv.sectionLabel}>COACHING INVESTMENT</Text>
+
       {hidden && isCoach && (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10, padding: 8, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
-          <Text style={{ fontSize: 14 }}>👁️‍🗨️</Text>
           <Text style={{ color: MUTED, fontSize: 12, fontStyle: 'italic' }}>Investment hidden from member</Text>
         </View>
       )}
 
-      {/* Pricing summary card */}
-      <View style={{ backgroundColor: 'rgba(110,187,122,0.08)', borderRadius: 10, padding: 14 }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-          <Text style={{ color: ACCENT, fontSize: 14 }}>Monthly</Text>
-          <Text style={{ color: '#FFF', fontSize: 16, fontWeight: '700' }}>{formatCurrency(pricing.displayMonthlyPrice)}</Text>
+      {/* ── Two pricing cards side by side ── */}
+      <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+        {/* Monthly card */}
+        <View style={[inv.priceCard, { flex: 1 }]}>
+          <Text style={inv.priceLabel}>MONTHLY</Text>
+          <Text style={inv.priceAmount}>{formatCurrency(monthlyPrice)}<Text style={inv.priceSuffix}> /mo</Text></Text>
+          <Text style={inv.priceDetail}>{formatCurrency(perSession)} per session</Text>
         </View>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-          <Text style={{ color: MUTED, fontSize: 14 }}>Per session</Text>
-          <Text style={{ color: '#FFF', fontSize: 14 }}>{formatCurrency(pricing.perSessionPrice)}</Text>
-        </View>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-          <Text style={{ color: MUTED, fontSize: 14 }}>Pay in full</Text>
-          <Text style={{ color: '#FFF', fontSize: 14 }}>{formatCurrency(pricing.payInFullPrice)}</Text>
+        {/* Pay in Full card */}
+        <View style={[inv.priceCard, { flex: 1, borderColor: GOLD_BORDER }]}>
+          <Text style={[inv.priceLabel, { color: GOLD }]}>PAY IN FULL</Text>
+          <Text style={inv.priceAmount}>{formatCurrency(payInFullMonthly)}<Text style={inv.priceSuffix}> /mo</Text></Text>
+          <Text style={{ color: MUTED, fontSize: 11, marginTop: 2 }}>{formatCurrency(payInFullTotal)} total</Text>
+          <Text style={{ color: ACCENT, fontSize: 12, fontWeight: '600', marginTop: 2 }}>Save {formatCurrency(payInFullSavings)} ({payInFullPct}% off)</Text>
         </View>
       </View>
 
-      {/* Breakdown toggle */}
-      {isCoach && (
-        <View style={{ marginTop: 10 }}>
-          <Pressable onPress={() => setShowBreakdown(!showBreakdown)}>
-            <Text style={{ color: PRIMARY, fontSize: 13, fontWeight: '600' }}>
-              {showBreakdown ? 'Hide breakdown ▴' : 'Show breakdown ▾'}
-            </Text>
-          </Pressable>
-          {showBreakdown && <PricingBreakdown plan={plan} pricing={pricing} />}
+      {/* ── Stats row ── */}
+      <View style={[inv.statsRow]}>
+        <View style={{ flex: 1, alignItems: 'center' }}>
+          <Text style={inv.statsLabel}>SESSIONS</Text>
+          <Text style={inv.statsValue}>{totalSessions}</Text>
+          <Text style={inv.statsDetail}>over {plan.contractMonths} months</Text>
         </View>
+        <View style={{ flex: 1, alignItems: 'center' }}>
+          <Text style={inv.statsLabel}>PER SESSION</Text>
+          <Text style={[inv.statsValue, { color: GOLD }]}>{formatCurrency(perSession)}</Text>
+          <Text style={inv.statsDetail}>effective rate</Text>
+        </View>
+        <View style={{ flex: 1, alignItems: 'center' }}>
+          <Text style={inv.statsLabel}>PROGRAM</Text>
+          <Text style={[inv.statsValue, { color: ACCENT }]}>{formatCurrency(programTotal)}</Text>
+          <Text style={inv.statsDetail}>total value</Text>
+        </View>
+      </View>
+
+      {/* ── Commit to Save card ── */}
+      {(ctsEnabled || isCoach) && (
+        <CommitToSaveCard
+          plan={plan}
+          isCoach={isCoach}
+          isActive={ctsActive}
+          onToggle={toggleCommitToSave}
+          monthlyPrice={monthlyPrice}
+          ctsSavings={ctsSavings}
+        />
       )}
 
-      {/* Member-facing explanation */}
-      {!isCoach && (
-        <View style={{ marginTop: 10 }}>
-          <Pressable onPress={() => setShowBreakdown(!showBreakdown)}>
-            <Text style={{ color: MUTED, fontSize: 12 }}>
-              {showBreakdown ? 'Hide breakdown ▴' : 'How we got these numbers ▾'}
+      {/* ── Nutrition Add-On card ── */}
+      {(nutEnabled || (isCoach && nut)) && (
+        <NutritionAddOnCard
+          plan={plan}
+          isCoach={isCoach}
+          isActive={nutActive}
+          onToggle={toggleNutrition}
+          monthlyPrice={monthlyPrice}
+          nutCost={nutCost}
+          payInFullMonthly={payInFullMonthly}
+        />
+      )}
+
+      {/* ── How we got these numbers ── */}
+      <HowWeGotTheseNumbers plan={plan} pricing={pricing} isCoach={isCoach} />
+
+      {/* ── Referral Rewards ── */}
+      <View style={[inv.statsRow, { marginTop: 12, paddingVertical: 14, paddingHorizontal: 16 }]}>
+        <Text style={{ color: MUTED, fontSize: 13, lineHeight: 19, textAlign: 'center' }}>
+          <Text style={{ color: GOLD, fontWeight: '700' }}>Referral Rewards: </Text>
+          Invite 3 friends into a yearly plan and your base membership is refunded.
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+// ── Commit to Save interactive card ─────────────────────────────────────────
+function CommitToSaveCard({ plan, isCoach, isActive, onToggle, monthlyPrice, ctsSavings }: {
+  plan: MemberPlanData; isCoach: boolean; isActive: boolean;
+  onToggle: () => void; monthlyPrice: number; ctsSavings: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const cts = plan.commitToSave;
+  const rateAfter = monthlyPrice; // displayMonthlyPrice already includes CTS if active
+  // If active, the rate shown is the current displayMonthlyPrice
+  // If not active, the rate after adding would be monthlyPrice - ctsSavings
+  const rateWithCts = isActive ? monthlyPrice : monthlyPrice - ctsSavings;
+
+  return (
+    <View style={[inv.addonCard, isActive && { borderColor: GOLD_BORDER, backgroundColor: GOLD_BG }]}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
+        {/* Icon */}
+        <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: isActive ? GOLD : 'rgba(245,166,35,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ fontSize: 16 }}>💡</Text>
+        </View>
+        {/* Content */}
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={{ color: '#FFF', fontSize: 15, fontWeight: '700', fontFamily: FH }}>Commit to Save</Text>
+            <Pressable onPress={onToggle} style={[inv.addBtn, isActive && inv.addBtnActive]}>
+              {isActive ? (
+                <Text style={{ color: ACCENT, fontSize: 13, fontWeight: '600' }}>✓ Added</Text>
+              ) : (
+                <Text style={{ color: MUTED, fontSize: 13, fontWeight: '600' }}>Add</Text>
+              )}
+            </Pressable>
+          </View>
+          <Text style={{ color: GOLD, fontSize: 12, marginTop: 2 }}>
+            Consistency reward · −{formatCurrency(ctsSavings)}/mo
+          </Text>
+          <Text style={{ color: MUTED, fontSize: 13, lineHeight: 19, marginTop: 6 }}>
+            Save {formatCurrency(ctsSavings)} per month when you commit to showing up consistently.
+          </Text>
+          <Pressable onPress={() => setExpanded(!expanded)} style={{ marginTop: 6 }}>
+            <Text style={{ color: PRIMARY, fontSize: 13, fontWeight: '600' }}>
+              {expanded ? 'Hide details ▴' : 'How it works ▾'}
             </Text>
           </Pressable>
-          {showBreakdown && (
-            <View style={{ marginTop: 8, padding: 10, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
-              <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
-                Monthly price is based on your coaching rate, session length ({plan.sessionLengthMinutes || 30} min), {plan.sessionsPerWeek} sessions/week, monthly check-in calls, and initial program build time.
-              </Text>
-              <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18, marginTop: 6 }}>
-                Per session: {formatCurrency(pricing.displayMonthlyPrice)} × {plan.contractMonths} months ÷ {pricing.totalSessions} total sessions = {formatCurrency(pricing.perSessionPrice)}
-              </Text>
-              <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18, marginTop: 6 }}>
-                Pay in full: {formatCurrency(pricing.displayMonthlyPrice)} × {plan.contractMonths} months, minus {plan.payInFullDiscountPercent || 10}% discount = {formatCurrency(pricing.payInFullPrice)}
-              </Text>
+          {expanded && (
+            <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: BORDER }}>
+              <Text style={inv.detailLine}>→  Commit to Save lowers your monthly rate by {formatCurrency(ctsSavings)} while it's active.</Text>
+              <Text style={inv.detailLine}>→  Complete a 30-day streak and unlock an additional {cts?.nextMonthPercentOff || 5}% discount on the following month.</Text>
+              <Text style={inv.detailLine}>→  If you miss a session without making it up within {cts?.makeUpWindowHours || 48} hours, a {formatCurrency(cts?.missedSessionFee || 50)} accountability fee applies.</Text>
+              <Text style={inv.detailLine}>→  Fees are waived for family emergencies or illness.</Text>
+              <Text style={inv.detailLine}>→  You can opt out at any time.</Text>
+              <Text style={inv.detailLine}>→  If you opt out, you can re-enter at the start of the next year.</Text>
+              <View style={{ marginTop: 10, padding: 12, backgroundColor: 'rgba(245,166,35,0.08)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(245,166,35,0.2)' }}>
+                <Text style={{ color: GOLD, fontSize: 12, lineHeight: 18, fontStyle: 'italic' }}>
+                  This is a commitment reward system built to help you follow through on what you already said you want to do. Best for highly committed members who want to save.
+                </Text>
+              </View>
             </View>
           )}
+        </View>
+      </View>
+      {/* Summary row when active */}
+      {isActive && (
+        <View style={{ flexDirection: 'row', marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(245,166,35,0.2)' }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: GOLD, fontSize: 11, fontWeight: '700', letterSpacing: 1 }}>YOU SAVE</Text>
+            <Text style={{ color: '#FFF', fontSize: 22, fontWeight: '700', fontFamily: FH }}>{formatCurrency(ctsSavings)}<Text style={{ fontSize: 13, color: MUTED }}>/mo</Text></Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: GOLD, fontSize: 11, fontWeight: '700', letterSpacing: 1 }}>YOUR RATE</Text>
+            <Text style={{ color: '#FFF', fontSize: 22, fontWeight: '700', fontFamily: FH }}>{formatCurrency(rateAfter)}<Text style={{ fontSize: 13, color: MUTED }}>/mo</Text></Text>
+          </View>
         </View>
       )}
     </View>
   );
 }
 
-// ─── PricingBreakdown (coach-only detailed calculation) ──────────────────────
-function PricingBreakdown({ plan, pricing }: { plan: MemberPlanData; pricing: PricingResult }) {
-  const sessionCounts = countSessionsByType(plan.weeklySchedule);
-  const sessionTypes = Object.keys(sessionCounts) as SessionType[];
+// ── Nutrition Add-On interactive card ───────────────────────────────────────
+function NutritionAddOnCard({ plan, isCoach, isActive, onToggle, monthlyPrice, nutCost, payInFullMonthly }: {
+  plan: MemberPlanData; isCoach: boolean; isActive: boolean;
+  onToggle: () => void; monthlyPrice: number; nutCost: number; payInFullMonthly: number;
+}) {
+  const nut = plan.nutrition;
+  const providerName = nut?.providerName || 'Partner';
+  const description = nut?.description || 'Add personalized nutrition coaching to your plan. Includes a custom nutrition strategy, macro targets, and monthly check-ins to keep your eating aligned with your training goals.';
+  // When nutrition is active, the price already includes it
+  // When toggled on, new monthly = current + nutCost
+  const newMonthly = isActive ? monthlyPrice : monthlyPrice + nutCost;
+  const newPayInFull = Math.round(newMonthly * (plan.contractMonths || 12) * (1 - (plan.payInFullDiscountPercent || 10) / 100) / (plan.contractMonths || 12));
+
+  return (
+    <View style={[inv.addonCard, isActive && { borderColor: GREEN_BORDER, backgroundColor: 'rgba(110,187,122,0.08)' }]}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
+        {/* Icon */}
+        <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: isActive ? ACCENT : 'rgba(110,187,122,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ fontSize: 16 }}>🥗</Text>
+        </View>
+        {/* Content */}
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={{ color: '#FFF', fontSize: 15, fontWeight: '700', fontFamily: FH }}>Nutrition Add-On</Text>
+            <Pressable onPress={onToggle} style={[inv.addBtn, isActive && { borderColor: GREEN_BORDER, backgroundColor: 'rgba(110,187,122,0.1)' }]}>
+              {isActive ? (
+                <Text style={{ color: ACCENT, fontSize: 13, fontWeight: '600' }}>✓ Added</Text>
+              ) : (
+                <Text style={{ color: MUTED, fontSize: 13, fontWeight: '600' }}>Add</Text>
+              )}
+            </Pressable>
+          </View>
+          <Text style={{ color: ACCENT, fontSize: 12, marginTop: 2 }}>
+            With {providerName} · +{formatCurrency(nutCost)}/mo
+          </Text>
+          <Text style={{ color: MUTED, fontSize: 13, lineHeight: 19, marginTop: 6 }}>
+            {description}
+          </Text>
+        </View>
+      </View>
+      {/* Summary row when active */}
+      {isActive && (
+        <View style={{ flexDirection: 'row', marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(110,187,122,0.2)' }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: ACCENT, fontSize: 11, fontWeight: '700', letterSpacing: 1 }}>NEW MONTHLY</Text>
+            <Text style={{ color: '#FFF', fontSize: 22, fontWeight: '700', fontFamily: FH }}>{formatCurrency(newMonthly)}<Text style={{ fontSize: 13, color: MUTED }}>/mo</Text></Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: ACCENT, fontSize: 11, fontWeight: '700', letterSpacing: 1 }}>PAY IN FULL</Text>
+            <Text style={{ color: '#FFF', fontSize: 22, fontWeight: '700', fontFamily: FH }}>{formatCurrency(newPayInFull)}<Text style={{ fontSize: 13, color: MUTED }}>/mo</Text></Text>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ── How we got these numbers (expandable breakdown) ─────────────────────────
+function HowWeGotTheseNumbers({ plan, pricing, isCoach }: { plan: MemberPlanData; pricing: PricingResult; isCoach: boolean }) {
+  const [isOpen, setIsOpen] = useState(false);
   const months = plan.contractMonths;
-  const sessionLength = plan.sessionLengthMinutes || 30;
-  const hourlyRate = plan.hourlyRate || 20;
-  const checkInMin = plan.checkInCallMinutes || 20;
-  const buildHrs = plan.programBuildTimeHours || 5;
-
-  // Calculate per-type, per-phase hours
-  const typeHours = sessionTypes.filter(t => t !== 'Rest').map(type => {
-    const count = sessionCounts[type] || 0;
-    const profile = getGuidanceProfile(type, plan.sessionGuidanceProfiles || []);
-    const P1 = (plan.phases && plan.phases[0]?.weeks) || 0;
-    const P2 = (plan.phases && plan.phases[1]?.weeks) || 0;
-    const P3 = (plan.phases && plan.phases[2]?.weeks) || 0;
-    return {
-      type, count, profile,
-      p1Hrs: P1 * count * (sessionLength / 60) * GUIDANCE_FACTORS[profile.phase1],
-      p2Hrs: P2 * count * (sessionLength / 60) * GUIDANCE_FACTORS[profile.phase2],
-      p3Hrs: P3 * count * (sessionLength / 60) * GUIDANCE_FACTORS[profile.phase3],
-    };
-  });
-
-  const totalCoachingHrs = typeHours.reduce((s, t) => s + t.p1Hrs + t.p2Hrs + t.p3Hrs, 0);
-  const checkInHrs = months * checkInMin / 60;
-  const totalHrs = totalCoachingHrs + checkInHrs + buildHrs;
+  const sessionLength = pricing.sessionLengthMinutes || plan.sessionLengthMinutes || 60;
+  const hourlyRate = pricing.hourlyRate || plan.hourlyRate || 100;
+  const checkInMin = pricing.checkInCallLengthMinutes || plan.checkInCallMinutes || 30;
+  const buildHrs = pricing.buildHours ?? plan.programBuildTimeHours ?? 5;
+  const checkInHrs = pricing.checkInHours;
+  const totalCoachingHrs = pricing.totalCoachingHours;
+  const totalHrs = pricing.totalHours;
+  const phaseBreakdown = pricing.phaseBreakdown || [];
   const P1 = (plan.phases && plan.phases[0]?.weeks) || 0;
   const P2 = (plan.phases && plan.phases[1]?.weeks) || 0;
   const P3 = (plan.phases && plan.phases[2]?.weeks) || 0;
 
   return (
-    <View style={{ marginTop: 8, padding: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, borderWidth: 1, borderColor: BORDER }}>
-      <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700', marginBottom: 8 }}>How monthly price is calculated:</Text>
-
-      {typeHours.map(({ type, count, profile, p1Hrs, p2Hrs, p3Hrs }) => (
-        <View key={type} style={{ marginBottom: 6 }}>
-          {P1 > 0 && (
-            <Text style={bd.line}>
-              {type === 'Cardio + Mobility' ? 'Cardio' : type}: {P1} × {count} × {sessionLength} min × {GUIDANCE_FACTORS[profile.phase1]} = {p1Hrs.toFixed(1)} hrs (P1)
-            </Text>
-          )}
-          {P2 > 0 && (
-            <Text style={bd.line}>
-              {type === 'Cardio + Mobility' ? 'Cardio' : type}: {P2} × {count} × {sessionLength} min × {GUIDANCE_FACTORS[profile.phase2]} = {p2Hrs.toFixed(1)} hrs (P2)
-            </Text>
-          )}
-          {P3 > 0 && (
-            <Text style={bd.line}>
-              {type === 'Cardio + Mobility' ? 'Cardio' : type}: {P3} × {count} × {sessionLength} min × {GUIDANCE_FACTORS[profile.phase3]} = {p3Hrs.toFixed(1)} hrs (P3)
-            </Text>
-          )}
-        </View>
-      ))}
-
-      <Text style={bd.line}>Check-in calls ({months} months): {months} × {checkInMin} min ÷ 60 = {checkInHrs.toFixed(1)} hrs</Text>
-      <Text style={bd.line}>Program build: {buildHrs} hrs</Text>
-
-      <View style={{ borderTopWidth: 1, borderTopColor: BORDER, marginTop: 8, paddingTop: 8 }}>
-        <Text style={bd.line}>Total hours: {totalCoachingHrs.toFixed(1)} + {checkInHrs.toFixed(1)} + {buildHrs} = {totalHrs.toFixed(1)} hrs</Text>
-        <Text style={bd.line}>Total program: {totalHrs.toFixed(1)} hrs × {formatCurrency(hourlyRate)}/hr = {formatCurrency(Math.round(totalHrs * hourlyRate))}</Text>
-        <Text style={[bd.line, { color: '#FFF', fontWeight: '700' }]}>
-          Monthly: {formatCurrency(Math.round(totalHrs * hourlyRate))} ÷ {months} months = {formatCurrency(pricing.calculatedMonthlyPrice)}
+    <View style={{ marginTop: 12 }}>
+      <Pressable
+        onPress={() => setIsOpen(!isOpen)}
+        style={[inv.statsRow, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 16 }]}
+      >
+        <Text style={{ color: PRIMARY, fontSize: 14, fontWeight: '600' }}>
+          {isOpen ? 'Hide breakdown' : 'How we got these numbers'}
         </Text>
-      </View>
+        <Text style={{ color: PRIMARY, fontSize: 14 }}>{isOpen ? '▴' : '▾'}</Text>
+      </Pressable>
+
+      {isOpen && isCoach && (
+        <View style={{ marginTop: 8, padding: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, borderWidth: 1, borderColor: BORDER }}>
+          <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700', marginBottom: 8 }}>How monthly price is calculated:</Text>
+          {phaseBreakdown.map(({ sessionType, sessionsPerWeek: count, phase1Hours: p1Hrs, phase2Hours: p2Hrs, phase3Hours: p3Hrs, phase1Guidance, phase2Guidance, phase3Guidance }) => (
+            <View key={sessionType} style={{ marginBottom: 6 }}>
+              {P1 > 0 && <Text style={bd.line}>{sessionType === 'Cardio + Mobility' ? 'Cardio' : sessionType}: {P1} × {count} × {sessionLength} min × {GUIDANCE_FACTORS[phase1Guidance]} = {Math.round(p1Hrs)} hrs (P1)</Text>}
+              {P2 > 0 && <Text style={bd.line}>{sessionType === 'Cardio + Mobility' ? 'Cardio' : sessionType}: {P2} × {count} × {sessionLength} min × {GUIDANCE_FACTORS[phase2Guidance]} = {Math.round(p2Hrs)} hrs (P2)</Text>}
+              {P3 > 0 && <Text style={bd.line}>{sessionType === 'Cardio + Mobility' ? 'Cardio' : sessionType}: {P3} × {count} × {sessionLength} min × {GUIDANCE_FACTORS[phase3Guidance]} = {Math.round(p3Hrs)} hrs (P3)</Text>}
+            </View>
+          ))}
+          <Text style={bd.line}>Check-in calls ({months} months): {months} × {checkInMin} min ÷ 60 = {Math.round(checkInHrs)} hrs</Text>
+          <Text style={bd.line}>Program build: {buildHrs} hrs</Text>
+          <View style={{ borderTopWidth: 1, borderTopColor: BORDER, marginTop: 8, paddingTop: 8 }}>
+            <Text style={bd.line}>Total hours: {Math.round(totalCoachingHrs)} + {Math.round(checkInHrs)} + {buildHrs} = {Math.round(totalHrs)} hrs</Text>
+            <Text style={bd.line}>Total program: {Math.round(totalHrs)} hrs × {formatCurrency(hourlyRate)}/hr = {formatCurrency(Math.round(totalHrs * hourlyRate))}</Text>
+            <Text style={[bd.line, { color: '#FFF', fontWeight: '700' }]}>Monthly: {formatCurrency(Math.round(totalHrs * hourlyRate))} ÷ {months} months = {formatCurrency(pricing.calculatedMonthlyPrice)}</Text>
+          </View>
+        </View>
+      )}
+
+      {isOpen && !isCoach && (
+        <View style={{ marginTop: 8, padding: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
+          <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
+            <Text style={{ color: '#FFF', fontWeight: '600' }}>Monthly price: </Text>
+            Based on your hourly coaching rate, session length ({sessionLength} min), {plan.sessionsPerWeek} sessions/week, monthly check-in calls, and initial program build time.
+          </Text>
+          <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18, marginTop: 6 }}>
+            <Text style={{ color: '#FFF', fontWeight: '600' }}>Per session: </Text>
+            {formatCurrency(pricing.displayMonthlyPrice)} × {months} months ÷ {pricing.totalSessions} total sessions = {formatCurrency(pricing.perSessionPrice)}
+          </Text>
+          <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18, marginTop: 6 }}>
+            <Text style={{ color: '#FFF', fontWeight: '600' }}>Pay in full: </Text>
+            {formatCurrency(pricing.displayMonthlyPrice)} × {months} months, minus {plan.payInFullDiscountPercent || 10}% discount = {formatCurrency(pricing.payInFullPrice)}
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
+
+const inv = StyleSheet.create({
+  priceCard: {
+    backgroundColor: CARD,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  priceLabel: {
+    color: MUTED,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    marginBottom: 6,
+  },
+  priceAmount: {
+    color: '#FFF',
+    fontSize: 28,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold',
+  },
+  priceSuffix: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: MUTED,
+  },
+  priceDetail: {
+    color: MUTED,
+    fontSize: 12,
+    marginTop: 4,
+  },
+  statsRow: {
+    backgroundColor: CARD,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  statsLabel: {
+    color: MUTED,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    marginBottom: 4,
+  },
+  statsValue: {
+    color: '#FFF',
+    fontSize: 22,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold',
+  },
+  statsDetail: {
+    color: MUTED,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  addonCard: {
+    backgroundColor: CARD,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+    marginBottom: 12,
+  },
+  addBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  addBtnActive: {
+    borderColor: GOLD_BORDER,
+    backgroundColor: 'rgba(245,166,35,0.08)',
+  },
+  detailLine: {
+    color: MUTED,
+    fontSize: 13,
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+});
+
 const bd = StyleSheet.create({
   line: { color: MUTED, fontSize: 11, lineHeight: 17, fontFamily: Platform.OS === 'web' ? 'monospace' : undefined },
 });
@@ -1238,17 +1512,6 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
               }} />
             </View>
 
-            {/* Include nutrition coaching */}
-            <Pressable
-              onPress={() => onChange({ nutrition: { ...(plan.nutrition || { type: 'in-house', providerName: '', monthlyCost: 0, description: 'Personalized nutrition guidance to complement your training.', enabled: false }), enabled: !(plan.nutrition?.enabled) } })}
-              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, marginBottom: 12 }}
-            >
-              <Text style={{ color: '#FFF', fontSize: 14 }}>Include nutrition coaching</Text>
-              <View style={{ width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: plan.nutrition?.enabled ? ACCENT : BORDER, backgroundColor: plan.nutrition?.enabled ? ACCENT : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
-                {plan.nutrition?.enabled && <Text style={{ color: '#000', fontSize: 14, fontWeight: '700' }}>✓</Text>}
-              </View>
-            </Pressable>
-
             {/* Pricing Settings (collapsible) */}
             <Pressable onPress={() => setShowPricing(!showPricing)}
               style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, borderTopWidth: 1, borderTopColor: BORDER }}>
@@ -1323,7 +1586,7 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                       {showBreakdown ? 'Hide breakdown ▴' : 'Show breakdown ▾'}
                     </Text>
                   </Pressable>
-                  {showBreakdown && <PricingBreakdown plan={plan} pricing={pricing} />}
+                  {showBreakdown && <HowWeGotTheseNumbers plan={plan} pricing={pricing} isCoach={true} />}
                 </View>
               </View>
             )}
@@ -1375,48 +1638,48 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
               </View>
             </View>
 
-            {/* Pricing summary */}
-            <View style={{ marginTop: 12, backgroundColor: 'rgba(110,187,122,0.08)', borderRadius: 10, padding: 14 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-                <Text style={{ color: ACCENT, fontSize: 14 }}>Monthly</Text>
-                <Text style={{ color: '#FFF', fontSize: 16, fontWeight: '700' }}>{formatCurrency(pricing.displayMonthlyPrice)}</Text>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-                <Text style={{ color: MUTED, fontSize: 14 }}>Per session</Text>
-                <Text style={{ color: '#FFF', fontSize: 14 }}>{formatCurrency(pricing.perSessionPrice)}</Text>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ color: MUTED, fontSize: 14 }}>Pay in full</Text>
-                <Text style={{ color: '#FFF', fontSize: 14 }}>{formatCurrency(pricing.payInFullPrice)}</Text>
-              </View>
+            {/* ── Member Visibility Controls ── */}
+            <View style={{ marginTop: 16, borderTopWidth: 1, borderTopColor: BORDER, paddingTop: 12 }}>
+              <Text style={{ color: MUTED, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 10 }}>MEMBER VISIBILITY</Text>
+
+              {/* Investment visibility */}
+              <Pressable
+                onPress={() => onChange({ showInvestment: !(plan.showInvestment !== false) })}
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 }}
+              >
+                <Text style={{ color: '#FFF', fontSize: 14 }}>Show investment to member</Text>
+                <View style={{ width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: plan.showInvestment !== false ? ACCENT : BORDER, backgroundColor: plan.showInvestment !== false ? ACCENT : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                  {plan.showInvestment !== false && <Text style={{ color: '#000', fontSize: 14, fontWeight: '700' }}>✓</Text>}
+                </View>
+              </Pressable>
+
+              {/* Commit to Save visibility */}
+              <Pressable
+                onPress={() => onChange({
+                  commitToSave: {
+                    ...(plan.commitToSave || { monthlySavings: 100, nextMonthPercentOff: 5, missedSessionFee: 50, makeUpWindowHours: 48, emergencyWaiverEnabled: true, reentryRule: '', summary: '', enabled: false, active: false }),
+                    enabled: !(plan.commitToSave?.enabled),
+                  },
+                })}
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 }}
+              >
+                <Text style={{ color: '#FFF', fontSize: 14 }}>Show Commit to Save to member</Text>
+                <View style={{ width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: plan.commitToSave?.enabled ? ACCENT : BORDER, backgroundColor: plan.commitToSave?.enabled ? ACCENT : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                  {plan.commitToSave?.enabled && <Text style={{ color: '#000', fontSize: 14, fontWeight: '700' }}>✓</Text>}
+                </View>
+              </Pressable>
+
+              {/* Nutrition visibility */}
+              <Pressable
+                onPress={() => onChange({ nutrition: { ...(plan.nutrition || { type: 'in-house', providerName: '', monthlyCost: 100, description: 'Add personalized nutrition coaching to your plan. Includes a custom nutrition strategy, macro targets, and monthly check-ins to keep your eating aligned with your training goals.', enabled: false, active: false }), enabled: !(plan.nutrition?.enabled) } })}
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 }}
+              >
+                <Text style={{ color: '#FFF', fontSize: 14 }}>Show Nutrition Add-On to member</Text>
+                <View style={{ width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: plan.nutrition?.enabled ? ACCENT : BORDER, backgroundColor: plan.nutrition?.enabled ? ACCENT : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                  {plan.nutrition?.enabled && <Text style={{ color: '#000', fontSize: 14, fontWeight: '700' }}>✓</Text>}
+                </View>
+              </Pressable>
             </View>
-
-            {/* Investment visibility toggle */}
-            <Pressable
-              onPress={() => onChange({ showInvestment: !(plan.showInvestment !== false) })}
-              style={[dc.visToggle, { backgroundColor: plan.showInvestment !== false ? ACCENT : '#1A2035', borderColor: plan.showInvestment !== false ? ACCENT : BORDER }]}
-            >
-              <Text style={{ fontSize: 14 }}>{plan.showInvestment !== false ? '👁️' : '👁️‍🗨️'}</Text>
-              <Text style={{ color: plan.showInvestment !== false ? '#000' : MUTED, fontSize: 13, fontWeight: '600' }}>
-                {plan.showInvestment !== false ? 'Investment visible to member' : 'Investment hidden from member'}
-              </Text>
-            </Pressable>
-
-            {/* Commit to Save toggle */}
-            <Pressable
-              onPress={() => onChange({
-                commitToSave: {
-                  ...(plan.commitToSave || { monthlySavings: 100, nextMonthPercentOff: 5, missedSessionFee: 25, makeUpWindowHours: 48, emergencyWaiverEnabled: true, reentryRule: 'Resume full rate for 30 days, then re-qualify.', summary: 'Stay consistent and save. Miss a session without making it up, and the discount pauses until you rebuild your streak.', enabled: false, active: false }),
-                  enabled: !(plan.commitToSave?.enabled),
-                },
-              })}
-              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, marginTop: 8 }}
-            >
-              <Text style={{ color: '#FFF', fontSize: 14 }}>Include Commit to Save</Text>
-              <View style={{ width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: plan.commitToSave?.enabled ? ACCENT : BORDER, backgroundColor: plan.commitToSave?.enabled ? ACCENT : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
-                {plan.commitToSave?.enabled && <Text style={{ color: '#000', fontSize: 14, fontWeight: '700' }}>✓</Text>}
-              </View>
-            </Pressable>
 
             <View style={{ height: 20 }} />
           </ScrollView>

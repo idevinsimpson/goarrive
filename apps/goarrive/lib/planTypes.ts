@@ -113,6 +113,8 @@ export interface PricingResult {
   commitToSaveActive: boolean;
   commitToSaveSavings: number;
   noShowFee: number;
+  nutritionActive: boolean;
+  nutritionMonthlyCost: number;
   isManualOverride: boolean;
   manualMonthlyOverride?: number;
   phaseBreakdown: PhaseHoursDetail[];
@@ -133,7 +135,8 @@ export interface Phase {
 // ─── Nutrition add-on ─────────────────────────────────────────────────────────
 
 export interface NutritionAddOn {
-  enabled: boolean;
+  enabled: boolean;  // coach controls: show/hide this option for the member
+  active: boolean;   // member controls: add/remove this from the plan
   type: 'in-house' | 'outsourced';
   providerName: string;
   monthlyCost: number;
@@ -345,6 +348,8 @@ export function calculatePricing(
       p.commitToSave?.monthlySavings ?? p.commitToSaveMonthlySavings ?? 100,
       p.commitToSave?.missedSessionFee ?? p.commitToSaveMissedSessionFee ?? 50,
       p.payInFullDiscountPercent ?? 10,
+      p.nutrition?.active ?? false,
+      p.nutrition?.monthlyCost ?? 0,
     );
   }
   // Legacy overload
@@ -372,14 +377,17 @@ function _calculatePricing(
   commitToSaveMonthlySavings: number = 100,
   commitToSaveMissedSessionFee: number = 50,
   payInFullDiscountPercent: number = 10,
+  nutritionActive: boolean = false,
+  nutritionMonthlyCost: number = 0,
 ): PricingResult {
   const safeInputs = inputs || { hourlyRate: 100, sessionLengthMinutes: 60, checkInCallLengthMinutes: 30, programBuildTimeHours: 5 };
   const { hourlyRate, sessionLengthMinutes, checkInCallLengthMinutes, programBuildTimeHours } = safeInputs;
 
   const totalWeeks = monthsToWeeks(contractLengthMonths);
-  const phase1Weeks = Math.round(totalWeeks * 0.25);
-  const phase3Weeks = Math.round(totalWeeks * 0.25);
-  const phase2Weeks = totalWeeks - phase1Weeks - phase3Weeks;
+  // Use actual phase weeks from the plan if available; fall back to 25/50/25 split
+  const phase1Weeks = (phases && phases[0]?.weeks) ? phases[0].weeks : Math.round(totalWeeks * 0.25);
+  const phase2Weeks = (phases && phases[1]?.weeks) ? phases[1].weeks : Math.round(totalWeeks * 0.50);
+  const phase3Weeks = (phases && phases[2]?.weeks) ? phases[2].weeks : (totalWeeks - Math.round(totalWeeks * 0.25) - Math.round(totalWeeks * 0.50));
 
   const sessionCounts = countSessionsByType(schedule);
   const totalSessionsPerWeek = Object.values(sessionCounts).reduce((sum, count) => sum + count, 0);
@@ -407,7 +415,7 @@ function _calculatePricing(
   });
 
   const totalCoachingHours = phaseBreakdown.reduce((sum, item) => sum + item.totalHours, 0);
-  const checkInHours = (contractLengthMonths * 2 * (checkInCallLengthMinutes / 60)); // 2 calls/mo
+  const checkInHours = (contractLengthMonths * 1 * (checkInCallLengthMinutes / 60)); // 1 call/mo (monthly check-in)
   const buildHours = programBuildTimeHours;
   const totalHours = totalCoachingHours + checkInHours + buildHours;
   const totalProgramPrice = totalHours * hourlyRate;
@@ -416,6 +424,9 @@ function _calculatePricing(
   let displayMonthlyPrice = baseMonthlyPrice;
   if (commitToSaveActive) {
     displayMonthlyPrice -= commitToSaveMonthlySavings;
+  }
+  if (nutritionActive) {
+    displayMonthlyPrice += nutritionMonthlyCost;
   }
 
   const isManualOverride = typeof manualMonthlyOverride === 'number' && manualMonthlyOverride > 0;
@@ -448,6 +459,8 @@ function _calculatePricing(
     commitToSaveActive,
     commitToSaveSavings: commitToSaveActive ? commitToSaveMonthlySavings : 0,
     noShowFee: commitToSaveMissedSessionFee,
+    nutritionActive,
+    nutritionMonthlyCost: nutritionActive ? nutritionMonthlyCost : 0,
     isManualOverride,
     manualMonthlyOverride,
     phaseBreakdown,
@@ -539,6 +552,7 @@ export function createDefaultCommitToSave(): CommitToSave {
 export function createDefaultNutrition(): NutritionAddOn {
   return {
     enabled: false,
+    active: false,
     type: 'in-house',
     providerName: '',
     monthlyCost: 100,

@@ -2,8 +2,12 @@
  * My Plan — Premium read-only plan viewer for members
  * Design: Dark premium, GoArrive brand colors
  * Uses new field names with backward-compat fallbacks for legacy Firestore data
+ *
+ * IMPORTANT: The COACHING INVESTMENT section (pricing cards, Commit to Save,
+ * Nutrition Add-On, breakdown, referral rewards) is identical to the coach's
+ * "Member View" preview. Members can toggle CTS and Nutrition on/off.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, ActivityIndicator,
   Platform, Pressable, Image,
@@ -14,8 +18,21 @@ import { collection, query, where, getDocs, doc, getDoc, updateDoc } from 'fireb
 import { db } from '../../lib/firebase';
 import {
   MemberPlanData, DayPlan, goalConfig, typeColors, phaseColorList,
-  formatCurrency, calculatePricing, monthsToWeeks,
+  formatCurrency, calculatePricing, monthsToWeeks, PricingResult,
 } from '../../lib/planTypes';
+
+// ─── Design tokens (match [memberId].tsx exactly) ──────────────────────────
+const ACCENT = '#6EBB7A';
+const PRIMARY = '#5B9BD5';
+const GOLD = '#F5A623';
+const BG = '#0E1117';
+const CARD = '#151B28';
+const BORDER = '#1E2A3A';
+const MUTED = '#8899AA';
+const GOLD_BG = 'rgba(245,166,35,0.12)';
+const GOLD_BORDER = 'rgba(245,166,35,0.5)';
+const GREEN_BORDER = 'rgba(110,187,122,0.5)';
+const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 
 // ─── Helpers to normalize old/new field names ───────────────────────────────
 
@@ -52,6 +69,7 @@ function getNutrition(plan: MemberPlanData) {
   if (plan.nutrition) return plan.nutrition;
   return {
     enabled: plan.nutritionEnabled ?? false,
+    active: plan.nutritionAddOnActive ?? false,
     type: (plan.nutritionInHouse ? 'in-house' : 'outsourced') as 'in-house' | 'outsourced',
     providerName: plan.nutritionProviderName ?? '',
     monthlyCost: plan.nutritionMonthlyCost ?? 100,
@@ -377,176 +395,399 @@ function WhatsIncludedSection({ plan }: { plan: MemberPlanData }) {
   );
 }
 
-// ─── Commit to Save Section ─────────────────────────────────────────────────
 
-function CommitToSaveSection({ plan }: { plan: MemberPlanData }) {
-  const [expanded, setExpanded] = useState(false);
-  const cts = getCts(plan);
-  if (!cts.enabled) return null;
-  return (
-    <View style={{ marginBottom: 20 }}>
-      <Text style={st.sectionLabel}>Commit to Save</Text>
-      <View style={[st.darkCard, { borderColor: 'rgba(245,166,35,0.25)' }]}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(245,166,35,0.15)', alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ fontSize: 16 }}>{'\uD83D\uDD12'}</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8' }}>Commit to Save</Text>
-            <Text style={{ fontSize: 12, color: '#F5A623' }}>Save {formatCurrency(cts.monthlySavings)}/mo</Text>
-          </View>
-          <View style={{ backgroundColor: cts.active ? 'rgba(110,187,122,0.15)' : 'rgba(138,149,163,0.1)', borderWidth: 1, borderColor: cts.active ? 'rgba(110,187,122,0.3)' : '#2A3347', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 4 }}>
-            <Text style={{ fontSize: 11, fontWeight: '600', color: cts.active ? '#6EBB7A' : '#8A95A3' }}>{cts.active ? 'Active' : 'Inactive'}</Text>
-          </View>
-        </View>
-        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
-          <View style={{ flex: 1, backgroundColor: 'rgba(245,166,35,0.06)', borderWidth: 1, borderColor: 'rgba(245,166,35,0.15)', borderRadius: 10, padding: 10 }}>
-            <Text style={{ fontSize: 10, fontWeight: '600', color: '#F5A623', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 2 }}>Monthly Savings</Text>
-            <Text style={{ fontSize: 18, fontWeight: '700', color: '#F5A623' }}>{formatCurrency(cts.monthlySavings)}</Text>
-          </View>
-          <View style={{ flex: 1, backgroundColor: 'rgba(91,155,213,0.06)', borderWidth: 1, borderColor: 'rgba(91,155,213,0.15)', borderRadius: 10, padding: 10 }}>
-            <Text style={{ fontSize: 10, fontWeight: '600', color: '#5B9BD5', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 2 }}>Streak Bonus</Text>
-            <Text style={{ fontSize: 18, fontWeight: '700', color: '#5B9BD5' }}>{cts.nextMonthPercentOff}% off</Text>
-            <Text style={{ fontSize: 10, color: '#8A95A3' }}>next month</Text>
-          </View>
-          <View style={{ flex: 1, backgroundColor: 'rgba(138,149,163,0.06)', borderWidth: 1, borderColor: 'rgba(138,149,163,0.15)', borderRadius: 10, padding: 10 }}>
-            <Text style={{ fontSize: 10, fontWeight: '600', color: '#8A95A3', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 2 }}>Missed Session</Text>
-            <Text style={{ fontSize: 18, fontWeight: '700', color: '#C5CDD8' }}>{formatCurrency(cts.missedSessionFee)}</Text>
-            <Text style={{ fontSize: 10, color: '#8A95A3' }}>if not made up</Text>
-          </View>
-        </View>
-        {cts.summary ? <Text style={{ fontSize: 13, color: '#C5CDD8', lineHeight: 20, marginBottom: 10 }}>{cts.summary}</Text> : null}
-        <Pressable onPress={() => setExpanded(!expanded)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <Text style={{ fontSize: 13, fontWeight: '600', color: '#F5A623' }}>{expanded ? 'Hide details' : 'How it works'}</Text>
-          <Text style={{ fontSize: 12, color: '#F5A623' }}>{expanded ? '\u25B4' : '\u25BE'}</Text>
-        </Pressable>
-        {expanded && (
-          <View style={{ marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(245,166,35,0.1)' }}>
-            {[
-              { color: '#F5A623', text: `Commit to Save lowers your monthly rate by ${formatCurrency(cts.monthlySavings)} while it's active.` },
-              { color: '#5B9BD5', text: `Complete a 30-day streak and unlock an additional ${cts.nextMonthPercentOff}% discount on the following month.` },
-              { color: '#C5CDD8', text: `If you miss a session without making it up within ${cts.makeUpWindowHours} hours, a ${formatCurrency(cts.missedSessionFee)} accountability fee applies.` },
-              ...(cts.emergencyWaiverEnabled ? [{ color: '#6EBB7A', text: 'Fees are waived for family emergencies or illness.' }] : []),
-              { color: '#C5CDD8', text: 'You can opt out at any time.' },
-              { color: '#C5CDD8', text: cts.reentryRule },
-            ].map((item, i) => (
-              <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: item.color, marginTop: 2, width: 12 }}>{'\u2192'}</Text>
-                <Text style={{ fontSize: 13, color: '#C5CDD8', lineHeight: 20, flex: 1 }}>{item.text}</Text>
-              </View>
-            ))}
-          </View>
-        )}
-      </View>
-    </View>
-  );
-}
+// ═══════════════════════════════════════════════════════════════════════════════
+// COACHING INVESTMENT SECTION (unified: pricing cards + add-ons + breakdown)
+// Matches the coach's "Member View" preview exactly.
+// Members can toggle Commit to Save and Nutrition Add-On on/off.
+// ═══════════════════════════════════════════════════════════════════════════════
 
-// ─── Nutrition Section ──────────────────────────────────────────────────────
+function CoachingInvestmentSection({ plan, pricing, onChange }: {
+  plan: MemberPlanData; pricing: PricingResult;
+  onChange: (updates: Partial<MemberPlanData>) => void;
+}) {
+  // If coach hid the investment section, don't show it
+  if (plan.showInvestment === false) return null;
 
-function NutritionSection({ plan }: { plan: MemberPlanData }) {
-  const nut = getNutrition(plan);
-  if (!nut.enabled) return null;
-  return (
-    <View style={{ marginBottom: 20 }}>
-      <Text style={st.sectionLabel}>Nutrition Coaching</Text>
-      <View style={[st.darkCard, { borderColor: 'rgba(110,187,122,0.25)' }]}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-          <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(110,187,122,0.15)', alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ fontSize: 16 }}>{'\uD83E\uDD57'}</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8' }}>
-              {nut.type === 'in-house' ? 'In-House Nutrition Coaching' : `Nutrition by ${nut.providerName || 'Partner'}`}
-            </Text>
-            {nut.monthlyCost > 0 && <Text style={{ fontSize: 12, color: '#6EBB7A' }}>+{formatCurrency(nut.monthlyCost)}/mo</Text>}
-          </View>
-        </View>
-        {nut.description ? <Text style={{ fontSize: 13, color: '#C5CDD8', lineHeight: 20 }}>{nut.description}</Text> : null}
-      </View>
-    </View>
-  );
-}
+  const cts = plan.commitToSave || getCts(plan);
+  const nut = plan.nutrition || getNutrition(plan);
+  const ctsEnabled = cts?.enabled ?? false; // coach enabled it as an option
+  const ctsActive = cts?.active ?? false;    // member (or coach) toggled it on
+  const nutEnabled = nut?.enabled ?? false;  // coach enabled it as an option
+  const nutActive = (nut as any)?.active ?? false;     // member (or coach) toggled it on
 
-// ─── Investment Section ─────────────────────────────────────────────────────
+  // Compute prices with and without add-ons for display
+  const ctsSavings = cts?.monthlySavings ?? 100;
+  const nutCost = nut?.monthlyCost ?? 100;
 
-function InvestmentSection({ plan }: { plan: MemberPlanData }) {
-  if (!plan.showInvestment) return null;
-  const contractMonths = getContractMonths(plan);
-  const cts = getCts(plan);
-  const nut = getNutrition(plan);
+  // The displayMonthlyPrice already includes commit-to-save if active
+  const monthlyPrice = pricing.displayMonthlyPrice;
+  const payInFullTotal = pricing.payInFullPrice;
+  const payInFullMonthly = Math.round(payInFullTotal / (plan.contractMonths || 12));
+  const payInFullSavings = Math.round(monthlyPrice * (plan.contractMonths || 12) - payInFullTotal);
+  const payInFullPct = plan.payInFullDiscountPercent || 10;
 
-  // Try to calculate pricing
-  let pricing = plan.pricingResult;
-  if (!pricing) {
-    try { pricing = calculatePricing(plan); } catch { /* ignore */ }
-  }
+  const totalSessions = pricing.totalSessions;
+  const perSession = pricing.perSessionPrice;
+  const programTotal = Math.round(monthlyPrice * (plan.contractMonths || 12));
 
-  const displayMonthly = pricing ? pricing.displayMonthlyPrice : ((plan as any).monthlyPrice || 0);
-  if (displayMonthly <= 0) return null;
+  // Toggle commit to save active state
+  const toggleCommitToSave = () => {
+    onChange({
+      commitToSave: {
+        ...(cts || { monthlySavings: 100, nextMonthPercentOff: 5, missedSessionFee: 50, makeUpWindowHours: 48, emergencyWaiverEnabled: true, reentryRule: '', summary: '', enabled: true }),
+        active: !ctsActive,
+      },
+    });
+  };
 
-  const nutritionCost = nut.enabled ? nut.monthlyCost : 0;
-  const totalMonthly = displayMonthly + nutritionCost;
-  const payInFullDiscount = plan.payInFullDiscountPercent || (pricing?.payInFullDiscount) || 10;
-  const totalPayInFull = Math.round(totalMonthly * contractMonths * (1 - payInFullDiscount / 100));
-  const totalSavings = totalMonthly * contractMonths - totalPayInFull;
+  // Toggle nutrition active state (member adds/removes)
+  const toggleNutrition = () => {
+    if (!nut) return;
+    onChange({
+      nutrition: {
+        ...nut,
+        active: !nutActive,
+      },
+    });
+  };
 
   return (
     <View style={{ marginBottom: 20 }}>
-      <Text style={st.sectionLabel}>Your Coaching Investment</Text>
+      <Text style={st.sectionLabel}>COACHING INVESTMENT</Text>
+
+      {/* ── Two pricing cards side by side ── */}
       <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
-        <View style={[st.darkCard, { flex: 1, borderColor: 'rgba(91,155,213,0.35)' }]}>
-          <Text style={{ fontSize: 10, fontWeight: '700', color: '#8A95A3', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>Monthly</Text>
-          <Text style={{ fontSize: 30, fontWeight: '800', color: '#F0F4F8', lineHeight: 34 }}>{formatCurrency(displayMonthly)}</Text>
-          <Text style={{ fontSize: 12, color: '#8A95A3', marginTop: 2 }}>/mo</Text>
-          {pricing && pricing.perSessionPrice > 0 ? (
-            <Text style={{ fontSize: 12, color: '#5B9BD5', marginTop: 8 }}>{formatCurrency(pricing.perSessionPrice)} per session</Text>
-          ) : null}
+        {/* Monthly card */}
+        <View style={[inv.priceCard, { flex: 1 }]}>
+          <Text style={inv.priceLabel}>MONTHLY</Text>
+          <Text style={inv.priceAmount}>{formatCurrency(monthlyPrice)}<Text style={inv.priceSuffix}> /mo</Text></Text>
+          <Text style={inv.priceDetail}>{formatCurrency(perSession)} per session</Text>
         </View>
-        <View style={[st.darkCard, { flex: 1, backgroundColor: 'rgba(245,166,35,0.08)', borderColor: 'rgba(245,166,35,0.35)' }]}>
-          <Text style={{ fontSize: 10, fontWeight: '700', color: '#F5A623', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>Pay in Full</Text>
-          <Text style={{ fontSize: 30, fontWeight: '800', color: '#F5A623', lineHeight: 34 }}>{formatCurrency(Math.round(totalPayInFull / contractMonths))}</Text>
-          <Text style={{ fontSize: 12, color: '#8A95A3', marginTop: 2 }}>/mo equivalent</Text>
-          <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(245,166,35,0.15)' }}>
-            <Text style={{ fontSize: 12, color: '#8A95A3' }}>{formatCurrency(totalPayInFull)} total</Text>
-            <Text style={{ fontSize: 12, color: '#6EBB7A', marginTop: 2, fontWeight: '600' }}>Save {formatCurrency(totalSavings)} ({payInFullDiscount}% off)</Text>
-          </View>
+        {/* Pay in Full card */}
+        <View style={[inv.priceCard, { flex: 1, borderColor: GOLD_BORDER }]}>
+          <Text style={[inv.priceLabel, { color: GOLD }]}>PAY IN FULL</Text>
+          <Text style={inv.priceAmount}>{formatCurrency(payInFullMonthly)}<Text style={inv.priceSuffix}> /mo</Text></Text>
+          <Text style={{ color: MUTED, fontSize: 11, marginTop: 2 }}>{formatCurrency(payInFullTotal)} total</Text>
+          <Text style={{ color: ACCENT, fontSize: 12, fontWeight: '600', marginTop: 2 }}>Save {formatCurrency(payInFullSavings)} ({payInFullPct}% off)</Text>
         </View>
       </View>
-      <View style={st.darkCard}>
-        <Text style={{ fontSize: 13, color: '#C5CDD8', lineHeight: 20, marginBottom: 10 }}>
-          Your monthly rate is calculated from your coach's hourly rate, the length of each session, how many sessions you have per week, monthly check-in calls, and the time your coach spends building your program.
-        </Text>
-        <View style={{ gap: 6 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-            <Text style={{ fontSize: 12, color: '#8A95A3' }}>Base monthly rate</Text>
-            <Text style={{ fontSize: 12, fontWeight: '700', color: '#F0F4F8' }}>{formatCurrency(pricing ? pricing.baseMonthlyPrice : displayMonthly)}/mo</Text>
-          </View>
-          {cts.active && (
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <Text style={{ fontSize: 12, color: '#F5A623' }}>Commit to Save</Text>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#F5A623' }}>{'\u2212'}{formatCurrency(cts.monthlySavings)}/mo</Text>
-            </View>
-          )}
-          {nut.enabled && nutritionCost > 0 && (
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <Text style={{ fontSize: 12, color: '#6EBB7A' }}>Nutrition add-on</Text>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#6EBB7A' }}>+{formatCurrency(nutritionCost)}/mo</Text>
-            </View>
-          )}
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(91,155,213,0.15)' }}>
-            <Text style={{ fontSize: 13, fontWeight: '700', color: '#F0F4F8' }}>Your total</Text>
-            <Text style={{ fontSize: 13, fontWeight: '700', color: '#F5A623' }}>{formatCurrency(totalMonthly)}/mo</Text>
-          </View>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-            <Text style={{ fontSize: 12, color: '#8A95A3' }}>Pay in full ({contractMonths} months)</Text>
-            <Text style={{ fontSize: 12, fontWeight: '700', color: '#F5A623' }}>{formatCurrency(totalPayInFull)} (save {formatCurrency(totalSavings)})</Text>
-          </View>
+
+      {/* ── Stats row ── */}
+      <View style={[inv.statsRow]}>
+        <View style={{ flex: 1, alignItems: 'center' }}>
+          <Text style={inv.statsLabel}>SESSIONS</Text>
+          <Text style={inv.statsValue}>{totalSessions}</Text>
+          <Text style={inv.statsDetail}>over {plan.contractMonths} months</Text>
         </View>
+        <View style={{ flex: 1, alignItems: 'center' }}>
+          <Text style={inv.statsLabel}>PER SESSION</Text>
+          <Text style={[inv.statsValue, { color: GOLD }]}>{formatCurrency(perSession)}</Text>
+          <Text style={inv.statsDetail}>effective rate</Text>
+        </View>
+        <View style={{ flex: 1, alignItems: 'center' }}>
+          <Text style={inv.statsLabel}>PROGRAM</Text>
+          <Text style={[inv.statsValue, { color: ACCENT }]}>{formatCurrency(programTotal)}</Text>
+          <Text style={inv.statsDetail}>total value</Text>
+        </View>
+      </View>
+
+      {/* ── Commit to Save card ── */}
+      {ctsEnabled && (
+        <CommitToSaveCard
+          plan={plan}
+          isActive={ctsActive}
+          onToggle={toggleCommitToSave}
+          monthlyPrice={monthlyPrice}
+          ctsSavings={ctsSavings}
+        />
+      )}
+
+      {/* ── Nutrition Add-On card ── */}
+      {nutEnabled && (
+        <NutritionAddOnCard
+          plan={plan}
+          isActive={nutActive}
+          onToggle={toggleNutrition}
+          monthlyPrice={monthlyPrice}
+          nutCost={nutCost}
+          payInFullMonthly={payInFullMonthly}
+        />
+      )}
+
+      {/* ── How we got these numbers ── */}
+      <HowWeGotTheseNumbers plan={plan} pricing={pricing} />
+
+      {/* ── Referral Rewards ── */}
+      <View style={[inv.statsRow, { marginTop: 12, paddingVertical: 14, paddingHorizontal: 16 }]}>
+        <Text style={{ color: MUTED, fontSize: 13, lineHeight: 19, textAlign: 'center' }}>
+          <Text style={{ color: GOLD, fontWeight: '700' }}>Referral Rewards: </Text>
+          Invite 3 friends into a yearly plan and your base membership is refunded.
+        </Text>
       </View>
     </View>
   );
 }
+
+// ── Commit to Save interactive card ─────────────────────────────────────────
+function CommitToSaveCard({ plan, isActive, onToggle, monthlyPrice, ctsSavings }: {
+  plan: MemberPlanData; isActive: boolean;
+  onToggle: () => void; monthlyPrice: number; ctsSavings: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const cts = plan.commitToSave || getCts(plan);
+  const rateAfter = monthlyPrice; // displayMonthlyPrice already includes CTS if active
+
+  return (
+    <View style={[inv.addonCard, isActive && { borderColor: GOLD_BORDER, backgroundColor: GOLD_BG }]}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
+        {/* Icon */}
+        <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: isActive ? GOLD : 'rgba(245,166,35,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ fontSize: 16 }}>💡</Text>
+        </View>
+        {/* Content */}
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={{ color: '#FFF', fontSize: 15, fontWeight: '700', fontFamily: FH }}>Commit to Save</Text>
+            <Pressable onPress={onToggle} style={[inv.addBtn, isActive && inv.addBtnActive]}>
+              {isActive ? (
+                <Text style={{ color: ACCENT, fontSize: 13, fontWeight: '600' }}>✓ Added</Text>
+              ) : (
+                <Text style={{ color: MUTED, fontSize: 13, fontWeight: '600' }}>Add</Text>
+              )}
+            </Pressable>
+          </View>
+          <Text style={{ color: GOLD, fontSize: 12, marginTop: 2 }}>
+            Consistency reward · −{formatCurrency(ctsSavings)}/mo
+          </Text>
+          <Text style={{ color: MUTED, fontSize: 13, lineHeight: 19, marginTop: 6 }}>
+            Save {formatCurrency(ctsSavings)} per month when you commit to showing up consistently.
+          </Text>
+          <Pressable onPress={() => setExpanded(!expanded)} style={{ marginTop: 6 }}>
+            <Text style={{ color: PRIMARY, fontSize: 13, fontWeight: '600' }}>
+              {expanded ? 'Hide details ▴' : 'How it works ▾'}
+            </Text>
+          </Pressable>
+          {expanded && (
+            <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: BORDER }}>
+              <Text style={inv.detailLine}>→  Commit to Save lowers your monthly rate by {formatCurrency(ctsSavings)} while it's active.</Text>
+              <Text style={inv.detailLine}>→  Complete a 30-day streak and unlock an additional {cts?.nextMonthPercentOff || 5}% discount on the following month.</Text>
+              <Text style={inv.detailLine}>→  If you miss a session without making it up within {cts?.makeUpWindowHours || 48} hours, a {formatCurrency(cts?.missedSessionFee || 50)} accountability fee applies.</Text>
+              <Text style={inv.detailLine}>→  Fees are waived for family emergencies or illness.</Text>
+              <Text style={inv.detailLine}>→  You can opt out at any time.</Text>
+              <Text style={inv.detailLine}>→  If you opt out, you can re-enter at the start of the next year.</Text>
+              <View style={{ marginTop: 10, padding: 12, backgroundColor: 'rgba(245,166,35,0.08)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(245,166,35,0.2)' }}>
+                <Text style={{ color: GOLD, fontSize: 12, lineHeight: 18, fontStyle: 'italic' }}>
+                  This is a commitment reward system built to help you follow through on what you already said you want to do. Best for highly committed members who want to save.
+                </Text>
+              </View>
+            </View>
+          )}
+        </View>
+      </View>
+      {/* Summary row when active */}
+      {isActive && (
+        <View style={{ flexDirection: 'row', marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(245,166,35,0.2)' }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: GOLD, fontSize: 11, fontWeight: '700', letterSpacing: 1 }}>YOU SAVE</Text>
+            <Text style={{ color: '#FFF', fontSize: 22, fontWeight: '700', fontFamily: FH }}>{formatCurrency(ctsSavings)}<Text style={{ fontSize: 13, color: MUTED }}>/mo</Text></Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: GOLD, fontSize: 11, fontWeight: '700', letterSpacing: 1 }}>YOUR RATE</Text>
+            <Text style={{ color: '#FFF', fontSize: 22, fontWeight: '700', fontFamily: FH }}>{formatCurrency(rateAfter)}<Text style={{ fontSize: 13, color: MUTED }}>/mo</Text></Text>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ── Nutrition Add-On interactive card ───────────────────────────────────────
+function NutritionAddOnCard({ plan, isActive, onToggle, monthlyPrice, nutCost, payInFullMonthly }: {
+  plan: MemberPlanData; isActive: boolean;
+  onToggle: () => void; monthlyPrice: number; nutCost: number; payInFullMonthly: number;
+}) {
+  const nut = plan.nutrition || getNutrition(plan);
+  const providerName = nut?.providerName || 'Partner';
+  const description = nut?.description || 'Add personalized nutrition coaching to your plan. Includes a custom nutrition strategy, macro targets, and monthly check-ins with a dedicated nutrition coach.';
+  // When nutrition is active, the price already includes it
+  // When toggled on, new monthly = current + nutCost
+  const newMonthly = isActive ? monthlyPrice : monthlyPrice + nutCost;
+  const newPayInFull = Math.round(newMonthly * (plan.contractMonths || 12) * (1 - (plan.payInFullDiscountPercent || 10) / 100) / (plan.contractMonths || 12));
+
+  return (
+    <View style={[inv.addonCard, isActive && { borderColor: GREEN_BORDER, backgroundColor: 'rgba(110,187,122,0.08)' }]}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
+        {/* Icon */}
+        <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: isActive ? ACCENT : 'rgba(110,187,122,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ fontSize: 16 }}>🥗</Text>
+        </View>
+        {/* Content */}
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={{ color: '#FFF', fontSize: 15, fontWeight: '700', fontFamily: FH }}>Nutrition Add-On</Text>
+            <Pressable onPress={onToggle} style={[inv.addBtn, isActive && { borderColor: GREEN_BORDER, backgroundColor: 'rgba(110,187,122,0.1)' }]}>
+              {isActive ? (
+                <Text style={{ color: ACCENT, fontSize: 13, fontWeight: '600' }}>✓ Added</Text>
+              ) : (
+                <Text style={{ color: MUTED, fontSize: 13, fontWeight: '600' }}>Add</Text>
+              )}
+            </Pressable>
+          </View>
+          <Text style={{ color: ACCENT, fontSize: 12, marginTop: 2 }}>
+            With {providerName} · +{formatCurrency(nutCost)}/mo
+          </Text>
+          <Text style={{ color: MUTED, fontSize: 13, lineHeight: 19, marginTop: 6 }}>
+            {description}
+          </Text>
+        </View>
+      </View>
+      {/* Summary row when active */}
+      {isActive && (
+        <View style={{ flexDirection: 'row', marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(110,187,122,0.2)' }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: ACCENT, fontSize: 11, fontWeight: '700', letterSpacing: 1 }}>NEW MONTHLY</Text>
+            <Text style={{ color: '#FFF', fontSize: 22, fontWeight: '700', fontFamily: FH }}>{formatCurrency(newMonthly)}<Text style={{ fontSize: 13, color: MUTED }}>/mo</Text></Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: ACCENT, fontSize: 11, fontWeight: '700', letterSpacing: 1 }}>PAY IN FULL</Text>
+            <Text style={{ color: '#FFF', fontSize: 22, fontWeight: '700', fontFamily: FH }}>{formatCurrency(newPayInFull)}<Text style={{ fontSize: 13, color: MUTED }}>/mo</Text></Text>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ── How we got these numbers (expandable breakdown — member version) ────────
+function HowWeGotTheseNumbers({ plan, pricing }: { plan: MemberPlanData; pricing: PricingResult }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const months = plan.contractMonths;
+  const sessionLength = pricing.sessionLengthMinutes || plan.sessionLengthMinutes || 60;
+
+  return (
+    <View style={{ marginTop: 12 }}>
+      <Pressable
+        onPress={() => setIsOpen(!isOpen)}
+        style={[inv.statsRow, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 16 }]}
+      >
+        <Text style={{ color: PRIMARY, fontSize: 14, fontWeight: '600' }}>
+          {isOpen ? 'Hide breakdown' : 'How we got these numbers'}
+        </Text>
+        <Text style={{ color: PRIMARY, fontSize: 14 }}>{isOpen ? '▴' : '▾'}</Text>
+      </Pressable>
+
+      {isOpen && (
+        <View style={{ marginTop: 8, padding: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
+          <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
+            <Text style={{ color: '#FFF', fontWeight: '600' }}>Monthly price: </Text>
+            Based on your hourly coaching rate, session length ({sessionLength} min), {plan.sessionsPerWeek} sessions/week, monthly check-in calls, and initial program build time.
+          </Text>
+          <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18, marginTop: 6 }}>
+            <Text style={{ color: '#FFF', fontWeight: '600' }}>Per session: </Text>
+            {formatCurrency(pricing.displayMonthlyPrice)} × {months} months ÷ {pricing.totalSessions} total sessions = {formatCurrency(pricing.perSessionPrice)}
+          </Text>
+          <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18, marginTop: 6 }}>
+            <Text style={{ color: '#FFF', fontWeight: '600' }}>Pay in full: </Text>
+            {formatCurrency(pricing.displayMonthlyPrice)} × {months} months, minus {plan.payInFullDiscountPercent || 10}% discount = {formatCurrency(pricing.payInFullPrice)}
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INVESTMENT SECTION STYLES (match [memberId].tsx exactly)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const inv = StyleSheet.create({
+  priceCard: {
+    backgroundColor: CARD,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  priceLabel: {
+    color: MUTED,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    marginBottom: 6,
+  },
+  priceAmount: {
+    color: '#FFF',
+    fontSize: 28,
+    fontWeight: '700',
+    fontFamily: FH,
+  },
+  priceSuffix: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: MUTED,
+  },
+  priceDetail: {
+    color: MUTED,
+    fontSize: 12,
+    marginTop: 4,
+  },
+  statsRow: {
+    backgroundColor: CARD,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  statsLabel: {
+    color: MUTED,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    marginBottom: 4,
+  },
+  statsValue: {
+    color: '#FFF',
+    fontSize: 22,
+    fontWeight: '700',
+    fontFamily: FH,
+  },
+  statsDetail: {
+    color: MUTED,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  addonCard: {
+    backgroundColor: CARD,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+    marginBottom: 12,
+  },
+  addBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  addBtnActive: {
+    borderColor: GOLD_BORDER,
+    backgroundColor: 'rgba(245,166,35,0.08)',
+  },
+  detailLine: {
+    color: MUTED,
+    fontSize: 13,
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+});
+
 
 // ─── Main My Plan Screen ────────────────────────────────────────────────────
 
@@ -559,6 +800,21 @@ export default function MyPlan() {
     if (!user) return;
     fetchPlan();
   }, [user]);
+
+  // Save plan updates to Firestore and update local state
+  const handlePlanChange = useCallback(async (updates: Partial<MemberPlanData>) => {
+    if (!plan?.id) return;
+    try {
+      const newPlan = { ...plan, ...updates };
+      setPlan(newPlan as MemberPlanData);
+      await updateDoc(doc(db, 'member_plans', plan.id), {
+        ...updates,
+        updatedAt: new Date(),
+      });
+    } catch (err) {
+      console.error('[MyPlan] Error saving plan update:', err);
+    }
+  }, [plan]);
 
   async function handleAcceptPlan() {
     if (!user || !plan) return;
@@ -660,6 +916,12 @@ export default function MyPlan() {
     );
   }
 
+  // Compute pricing for the investment section
+  let pricing: PricingResult | null = plan.pricingResult || null;
+  if (!pricing) {
+    try { pricing = calculatePricing(plan); } catch { /* ignore */ }
+  }
+
   return (
     <View style={st.root}>
       <AppHeader />
@@ -686,13 +948,19 @@ export default function MyPlan() {
         <WeeklyPlanSection plan={plan} />
         <CoachingEvolutionSection plan={plan} />
         <WhatsIncludedSection plan={plan} />
-        <CommitToSaveSection plan={plan} />
-        <NutritionSection plan={plan} />
-        <InvestmentSection plan={plan} />
+
+        {/* ── UNIFIED COACHING INVESTMENT (matches coach's Member View) ── */}
+        {plan.showInvestment !== false && pricing && (
+          <CoachingInvestmentSection
+            plan={plan}
+            pricing={pricing}
+            onChange={handlePlanChange}
+          />
+        )}
 
         {/* ─── PLAN ACCEPTANCE ──────────────────────────────────────────────── */}
         {(plan.status === 'presented' || plan.status === 'pending') && (
-          <View style={st.section}>
+          <View style={{ marginBottom: 20 }}>
             <Text style={st.sectionLabel}>PLAN ACCEPTANCE</Text>
             <View style={st.darkCard}>
               <Text style={st.subtitleText}>Your coach has prepared this personalized fitness plan for you. Please review all the details. If you're ready to commit, accept the plan below.</Text>
@@ -704,7 +972,7 @@ export default function MyPlan() {
         )}
 
         {plan.status === 'accepted' && (
-          <View style={st.section}>
+          <View style={{ marginBottom: 20 }}>
             <Text style={st.sectionLabel}>PLAN STATUS</Text>
             <View style={st.darkCard}>
               <Text style={st.subtitleText}>Congratulations! You have accepted your fitness plan. Let's get to work!</Text>
@@ -763,4 +1031,5 @@ const st = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
+  section: { marginBottom: 20 },
 });
