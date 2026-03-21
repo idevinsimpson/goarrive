@@ -263,6 +263,11 @@ export interface MemberPlanData {
 
 // ─── Pricing engine ───────────────────────────────────────────────────────────
 
+export function formatCurrency(amount: number): string {
+  if (amount == null || isNaN(amount)) return '$0';
+  return '$' + Math.round(amount).toLocaleString('en-US');
+}
+
 export function monthsToWeeks(months: number): number {
   if (months === 6) return 26;
   if (months === 9) return 39;
