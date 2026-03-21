@@ -22,7 +22,7 @@ import {
   calculatePricing, formatCurrency, monthsToWeeks,
   createDefaultPlan, createDefaultSchedule, createDefaultPhases,
   countSessionsByType, getGuidanceProfile,
-  typeColors, phaseColors, goalConfig, availableGoals,
+  typeColors, phaseColors, resolvePhaseColor, goalConfig, availableGoals,
   dayTypeOptions, guidanceLevels, SESSION_TYPES,
   GUIDANCE_FACTORS, GUIDANCE_SHORT,
   SessionsPerWeek, ContractLength,
@@ -611,13 +611,13 @@ function PlanView({ plan, isCoach, onChange }: {
 
       {/* ─── HOW YOUR COACHING SUPPORT EVOLVES ───────────────────────────── */}
       <View style={pv.section}>
-        <Text style={[pv.sectionLabel, { color: phaseColors[plan.phases[0].intensity].text }]}>HOW YOUR COACHING SUPPORT EVOLVES</Text>
+        <Text style={[pv.sectionLabel, { color: resolvePhaseColor(plan.phases[0]?.intensity ?? '').text }]}>HOW YOUR COACHING SUPPORT EVOLVES</Text>
         <View style={pv.card}>
           {/* Phase progress bar */}
           <View style={{ flexDirection: 'row', height: 12, borderRadius: 6, overflow: 'hidden', marginBottom: 4 }}>
             {(plan.phases || []).map((phase, i) => {
               const pct = totalWeeksTarget > 0 ? (phase.weeks / totalWeeksTarget) * 100 : 0;
-              const pc = phaseColors[phase.intensity];
+              const pc = resolvePhaseColor(phase.intensity ?? '');
               return <View key={i} style={{ width: `${pct}%` as any, backgroundColor: pc.bar, height: 12 }} />;
             })}
           </View>
@@ -637,7 +637,7 @@ function PlanView({ plan, isCoach, onChange }: {
 
           {/* Phase cards */}
           {(plan.phases || []).map((phase, i) => {
-            const pc = phaseColors[phase.intensity];
+            const pc = resolvePhaseColor(phase.intensity ?? '');
             const isLast = i === (plan.phases || []).length - 1;
             return (
               <View key={i} style={[pv.phaseCard, { borderColor: pc.border, backgroundColor: pc.bg }]}>

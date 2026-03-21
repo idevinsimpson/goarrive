@@ -48,6 +48,18 @@ export const phaseColors: Record<GuidanceLevel, { text: string; bg: string; bar:
 
 export const guidanceLevels: GuidanceLevel[] = ['Fully guided', 'Blended', 'Self-reliant'];
 
+// Normalize any intensity string (from Firestore data) to a phaseColors key.
+// Handles legacy names like 'Fully Guided', 'Shared Guidance', 'Self-Reliant'.
+const _FALLBACK_PC = { text: '#E0E0E0', bg: 'rgba(255,255,255,0.08)', bar: '#888', border: 'rgba(255,255,255,0.2)' };
+export function resolvePhaseColor(intensity: string): { text: string; bg: string; bar: string; border: string } {
+  if (!intensity) return _FALLBACK_PC;
+  const lower = intensity.toLowerCase().trim();
+  if (lower.includes('full')) return phaseColors['Fully guided'];
+  if (lower.includes('blend') || lower.includes('shared') || lower.includes('mix')) return phaseColors['Blended'];
+  if (lower.includes('self') || lower.includes('reliant')) return phaseColors['Self-reliant'];
+  return phaseColors[intensity as GuidanceLevel] ?? _FALLBACK_PC;
+}
+
 // Array-indexed phase colors for member/shared plan views (index 0=Phase1, 1=Phase2, 2=Phase3)
 export const phaseColorList: string[] = ['#6EBB7A', '#5B9BD5', '#F5A623'];
 
