@@ -162,69 +162,77 @@ function DayTile({ day, isCoach, onTypeChange, onOpen, isOpen }: {
   const tc = typeColors[day.type] || typeColors['Rest'];
   const isSession = day.isSession && day.type !== 'Rest';
   const abbr = day.type === 'Strength' ? 'STR' : day.type === 'Cardio + Mobility' ? 'CARD' : day.type === 'Mix' ? 'MIX' : 'OFF';
-  const triggerRef = useRef<any>(null);
+  const domRef = useRef<HTMLDivElement | null>(null);
   const [dropPos, setDropPos] = useState<{ top: number; left: number } | null>(null);
 
   const handlePress = () => {
     if (!isCoach) return;
-    if (!isOpen && triggerRef.current && Platform.OS === 'web') {
-      const rect = (triggerRef.current as any).getBoundingClientRect?.();
-      if (rect) {
-        // 4 session types * ~40px each = ~170px dropdown height
-        const dropHeight = 180;
-        const spaceBelow = window.innerHeight - rect.bottom;
-        const top = spaceBelow >= dropHeight ? rect.bottom + 4 : rect.top - dropHeight - 4;
-        setDropPos({ top, left: rect.left });
-      }
+    if (!isOpen && domRef.current && Platform.OS === 'web') {
+      const rect = domRef.current.getBoundingClientRect();
+      // 4 session types * ~40px each = ~170px dropdown height
+      const dropHeight = 180;
+      const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+      const spaceBelow = vh - rect.bottom;
+      const top = spaceBelow >= dropHeight ? rect.bottom + 4 : rect.top - dropHeight - 4;
+      setDropPos({ top, left: rect.left });
     }
     onOpen?.();
   };
 
+  const tileContent = (
+    <Pressable
+      onPress={handlePress}
+      style={[dt.tile, { backgroundColor: isSession ? tc.bg : 'rgba(42,51,71,0.2)', borderColor: isOpen ? tc.text : (isSession ? tc.border : 'transparent'), borderWidth: 1 }]}
+    >
+      <Text style={{ fontSize: 9, fontWeight: '600', color: MUTED, marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.3 }}>{day.shortDay}</Text>
+      <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: isSession ? tc.dot : '#2A3040', marginBottom: 5 }} />
+      <Text style={{ fontSize: 8, fontWeight: '700', color: isSession ? tc.text : '#4A5568', letterSpacing: 0.2 }} numberOfLines={1}>{abbr}</Text>
+    </Pressable>
+  );
+
+  const portalDropdown = isOpen && isCoach && Platform.OS === 'web' && dropPos ? ReactDOM.createPortal(
+    <>
+      <div onClick={() => onOpen?.()} style={{ position: 'fixed', inset: 0, zIndex: 99998 }} />
+      <div style={{
+        position: 'fixed', top: dropPos.top, left: dropPos.left,
+        zIndex: 99999, minWidth: 180,
+        backgroundColor: '#1A2035', borderRadius: 10,
+        border: '1px solid #1E2A3A',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.8)',
+        overflow: 'hidden',
+      }}>
+        {SESSION_TYPES.map(type => {
+          const selected = type === day.type;
+          const tcc = typeColors[type] || typeColors['Rest'];
+          return (
+            <div key={type}
+              onClick={(e) => { e.stopPropagation(); onTypeChange(type); onOpen?.(); }}
+              style={{
+                display: 'flex', alignItems: 'center',
+                padding: '10px 14px', cursor: 'pointer',
+                backgroundColor: selected ? 'rgba(110,187,122,0.15)' : 'transparent',
+              }}
+              onMouseEnter={e => { if (!selected) (e.currentTarget as HTMLDivElement).style.backgroundColor = 'rgba(255,255,255,0.05)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.backgroundColor = selected ? 'rgba(110,187,122,0.15)' : 'transparent'; }}
+            >
+              <span style={{ fontSize: 14, fontWeight: '500', color: selected ? '#6EBB7A' : tcc.text, fontFamily: "'DM Sans', sans-serif" }}>{type}</span>
+            </div>
+          );
+        })}
+      </div>
+    </>,
+    document.body
+  ) : null;
+
   return (
     <View style={{ width: (SCREEN_W - 88) / 7, alignItems: 'center' }}>
-      <Pressable
-        ref={triggerRef}
-        onPress={handlePress}
-        style={[dt.tile, { backgroundColor: isSession ? tc.bg : 'rgba(42,51,71,0.2)', borderColor: isOpen ? tc.text : (isSession ? tc.border : 'transparent'), borderWidth: 1 }]}
-      >
-        <Text style={{ fontSize: 9, fontWeight: '600', color: MUTED, marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.3 }}>{day.shortDay}</Text>
-        <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: isSession ? tc.dot : '#2A3040', marginBottom: 5 }} />
-        <Text style={{ fontSize: 8, fontWeight: '700', color: isSession ? tc.text : '#4A5568', letterSpacing: 0.2 }} numberOfLines={1}>{abbr}</Text>
-      </Pressable>
-      {/* Portal dropdown — renders at document.body to escape all overflow/stacking contexts */}
-      {isOpen && isCoach && Platform.OS === 'web' && dropPos && ReactDOM.createPortal(
-        <>
-          <div onClick={() => onOpen?.()} style={{ position: 'fixed', inset: 0, zIndex: 99998 }} />
-          <div style={{
-            position: 'fixed', top: dropPos.top, left: dropPos.left,
-            zIndex: 99999, minWidth: 180,
-            backgroundColor: '#1A2035', borderRadius: 10,
-            border: '1px solid #1E2A3A',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.8)',
-            overflow: 'hidden',
-          }}>
-            {SESSION_TYPES.map(type => {
-              const selected = type === day.type;
-              const tcc = typeColors[type] || typeColors['Rest'];
-              return (
-                <div key={type}
-                  onClick={(e) => { e.stopPropagation(); onTypeChange(type); onOpen?.(); }}
-                  style={{
-                    display: 'flex', alignItems: 'center',
-                    padding: '10px 14px', cursor: 'pointer',
-                    backgroundColor: selected ? 'rgba(110,187,122,0.15)' : 'transparent',
-                  }}
-                  onMouseEnter={e => { if (!selected) (e.currentTarget as HTMLDivElement).style.backgroundColor = 'rgba(255,255,255,0.05)'; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.backgroundColor = selected ? 'rgba(110,187,122,0.15)' : 'transparent'; }}
-                >
-                  <span style={{ fontSize: 14, fontWeight: '500', color: selected ? '#6EBB7A' : tcc.text, fontFamily: "'DM Sans', sans-serif" }}>{type}</span>
-                </div>
-              );
-            })}
-          </div>
-        </>,
-        document.body
-      )}
+      {/* Native DOM wrapper so getBoundingClientRect() is always available on web */}
+      {Platform.OS === 'web' ? (
+        <div ref={domRef} style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+          {tileContent}
+        </div>
+      ) : tileContent}
+      {portalDropdown}
       {/* Native fallback (non-web) */}
       {isOpen && isCoach && Platform.OS !== 'web' && (
         <View style={dt.dropdown}>
@@ -313,34 +321,42 @@ function ButtonGroup<T extends string | number>({ options, value, onChange }: {
 
 // ─── GuidanceDropdown ────────────────────────────────────────────────────────
 // Uses portal rendering to escape Modal ScrollView overflow clipping.
+// IMPORTANT: Uses a native DOM div ref wrapper to reliably get getBoundingClientRect()
+// on React Native Web — Pressable refs return RN component instances, not DOM nodes.
 function GuidanceDropdown({ value, onChange, isOpen, onOpen }: {
   value: GuidanceLevel; onChange: (v: GuidanceLevel) => void;
   isOpen?: boolean; onOpen?: () => void;
 }) {
-  const triggerRef = useRef<any>(null);
+  const domRef = useRef<HTMLDivElement | null>(null);
   const [dropPos, setDropPos] = useState<{ top: number; left: number } | null>(null);
 
   const handlePress = () => {
-    if (!isOpen && triggerRef.current && Platform.OS === 'web') {
-      const rect = (triggerRef.current as any).getBoundingClientRect?.();
-      if (rect) {
-        // Dropdown height estimate: 3 options * 33px each = ~100px
-        const dropHeight = 110;
-        const spaceBelow = window.innerHeight - rect.bottom;
-        const top = spaceBelow >= dropHeight ? rect.bottom + 4 : rect.top - dropHeight - 4;
-        setDropPos({ top, left: rect.left });
-      }
+    if (!isOpen && domRef.current && Platform.OS === 'web') {
+      const rect = domRef.current.getBoundingClientRect();
+      // Dropdown height estimate: 3 options * 33px each = ~100px
+      const dropHeight = 110;
+      const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+      const spaceBelow = vh - rect.bottom;
+      const top = spaceBelow >= dropHeight ? rect.bottom + 4 : rect.top - dropHeight - 4;
+      setDropPos({ top, left: rect.left });
     }
     onOpen?.();
   };
 
+  const triggerEl = (
+    <Pressable onPress={handlePress}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: BG, borderWidth: 1, borderColor: isOpen ? ACCENT : BORDER, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7 }}>
+      <Text style={{ color: isOpen ? ACCENT : '#FFF', fontSize: 12, fontWeight: '600' }}>{GUIDANCE_SHORT[value]}</Text>
+      <Icon name="chevron-down" size={12} color={isOpen ? ACCENT : MUTED} />
+    </Pressable>
+  );
+
   return (
     <View>
-      <Pressable ref={triggerRef} onPress={handlePress}
-        style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: BG, borderWidth: 1, borderColor: isOpen ? ACCENT : BORDER, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7 }}>
-        <Text style={{ color: isOpen ? ACCENT : '#FFF', fontSize: 12, fontWeight: '600' }}>{GUIDANCE_SHORT[value]}</Text>
-        <Icon name="chevron-down" size={12} color={isOpen ? ACCENT : MUTED} />
-      </Pressable>
+      {/* DOM wrapper for reliable getBoundingClientRect on React Native Web */}
+      {Platform.OS === 'web' ? (
+        <div ref={domRef}>{triggerEl}</div>
+      ) : triggerEl}
       {/* Portal dropdown — renders at document.body to escape Modal ScrollView clipping */}
       {isOpen && Platform.OS === 'web' && dropPos && ReactDOM.createPortal(
         <>
