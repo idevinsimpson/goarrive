@@ -36,7 +36,7 @@ import {
   Platform, Modal, Animated, Dimensions, Image, ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
 import { useAuth } from '../../../lib/AuthContext';
 import { Icon } from '../../../components/Icon';
@@ -63,6 +63,22 @@ const BORDER = '#1E2A3A';
 const MUTED = '#8899AA';
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+
+// Remove undefined values from an object before saving to Firestore
+// (Firestore rejects undefined field values)
+function sanitizeForFirestore(obj: any): any {
+  if (obj === null || obj === undefined) return null;
+  if (Array.isArray(obj)) return obj.map(sanitizeForFirestore);
+  if (typeof obj === 'object' && typeof obj.toDate !== 'function') {
+    const result: any = {};
+    for (const key of Object.keys(obj)) {
+      const val = obj[key];
+      if (val !== undefined) result[key] = sanitizeForFirestore(val);
+    }
+    return result;
+  }
+  return obj;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // REUSABLE COMPONENTS
@@ -2018,7 +2034,9 @@ export default function MemberPlanScreen() {
   const [isCoachMode, setIsCoachMode] = useState(true);
   const [showControls, setShowControls] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const saveTimer = useRef<any>(null);
+  const saveStatusTimer = useRef<any>(null);
   const planKeyRef = useRef<string>(memberId || '');
 
   // Load data
@@ -2123,7 +2141,20 @@ export default function MemberPlanScreen() {
       // Populate other empty fields from intake
       if (!finalPlan.whyStatement && qData.whyStatement) finalPlan.whyStatement = qData.whyStatement;
       if (!finalPlan.currentWeight && qData.weight) finalPlan.currentWeight = String(qData.weight) + ' lbs';
-      if (!finalPlan.goalWeight && qData.goalWeight) finalPlan.goalWeight = String(qData.goalWeight) + ' lbs';
+      if (!finalPlan.goalWeight && qData.goalWeight) {
+        finalPlan.goalWeight = String(qData.goalWeight) + ' lbs';
+      } else if (!finalPlan.goalWeight && qData.weight) {
+        // Auto-suggest goal weight based on selected goals
+        const currentLbs = parseFloat(String(qData.weight));
+        if (!isNaN(currentLbs)) {
+          const goals: string[] = finalPlan.goals || [];
+          if (goals.includes('Fat loss')) {
+            finalPlan.goalWeight = Math.round(currentLbs * 0.90) + ' lbs'; // -10%
+          } else if (goals.includes('Build muscle')) {
+            finalPlan.goalWeight = Math.round(currentLbs * 1.05) + ' lbs'; // +5%
+          }
+        }
+      }
       if (finalPlan.readiness === 7 && qData.readinessForChange) finalPlan.readiness = qData.readinessForChange;
       if (finalPlan.motivation === 8 && qData.motivation) finalPlan.motivation = qData.motivation;
       if (finalPlan.gymConfidence === 5 && qData.gymConfidence) finalPlan.gymConfidence = qData.gymConfidence;
@@ -2149,7 +2180,20 @@ export default function MemberPlanScreen() {
         if (qData.primaryGoals) defaultPlan.goals = qData.primaryGoals;
         else if (qData.goals) defaultPlan.goals = qData.goals;
         if (qData.weight) defaultPlan.currentWeight = String(qData.weight) + ' lbs';
-        if (qData.goalWeight) defaultPlan.goalWeight = String(qData.goalWeight) + ' lbs';
+        if (qData.goalWeight) {
+          defaultPlan.goalWeight = String(qData.goalWeight) + ' lbs';
+        } else if (qData.weight) {
+          // Auto-suggest goal weight based on selected goals
+          const currentLbs = parseFloat(String(qData.weight));
+          if (!isNaN(currentLbs)) {
+            const goals: string[] = defaultPlan.goals || [];
+            if (goals.includes('Fat loss')) {
+              defaultPlan.goalWeight = Math.round(currentLbs * 0.90) + ' lbs';
+            } else if (goals.includes('Build muscle')) {
+              defaultPlan.goalWeight = Math.round(currentLbs * 1.05) + ' lbs';
+            }
+          }
+        }
         if (qData.gym) defaultPlan.gym = qData.gym;
       }
       finalPlan = defaultPlan;
@@ -2157,12 +2201,12 @@ export default function MemberPlanScreen() {
       try {
         let initPricing: PricingResult | undefined;
         try { initPricing = calculatePricing(finalPlan as MemberPlanData); } catch { /* ignore */ }
-        await setDoc(doc(db, 'member_plans', planKey), {
+        await setDoc(doc(db, 'member_plans', planKey), sanitizeForFirestore({
           ...finalPlan,
           ...(initPricing ? { pricingResult: initPricing } : {}),
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
-        });
+        }));
         console.log('[loadData] New plan saved to Firestore at key:', planKey);
       } catch (saveErr) {
         console.warn('[loadData] Could not save plan to Firestore (will show in-memory):', saveErr);
@@ -2179,6 +2223,7 @@ export default function MemberPlanScreen() {
 
   // Auto-save with debounce
   const handlePlanChange = useCallback((updates: Partial<MemberPlanData>) => {
+    setSaveStatus('saving');
     setPlan(prev => {
       if (!prev) return prev;
       const updated = { ...prev, ...updates };
@@ -2190,12 +2235,16 @@ export default function MemberPlanScreen() {
           // Also persist computed pricingResult so the member's page always has correct pricing
           let pricingResult: PricingResult | undefined;
           try { pricingResult = calculatePricing(updated as MemberPlanData); } catch { /* ignore */ }
-          const toSave = pricingResult
+          const toSave = sanitizeForFirestore(pricingResult
             ? { ...updated, pricingResult, updatedAt: serverTimestamp() }
-            : { ...updated, updatedAt: serverTimestamp() };
+            : { ...updated, updatedAt: serverTimestamp() });
           await setDoc(doc(db, 'member_plans', key), toSave, { merge: true });
+          setSaveStatus('saved');
+          if (saveStatusTimer.current) clearTimeout(saveStatusTimer.current);
+          saveStatusTimer.current = setTimeout(() => setSaveStatus('idle'), 2000);
         } catch (err) {
           console.error('Error saving plan:', err);
+          setSaveStatus('idle');
         }
       }, 800);
       return updated;
@@ -2222,6 +2271,23 @@ export default function MemberPlanScreen() {
       }
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+
+      // Write in-app notification so member sees a badge/alert on their My Plan page
+      try {
+        const memberUid = planKeyRef.current || memberId!;
+        await addDoc(collection(db, 'notifications'), {
+          recipientId: memberUid,
+          type: 'plan_shared',
+          title: 'Your plan has been updated',
+          body: `${user?.displayName || 'Your coach'} has shared your fitness plan with you.`,
+          coachId: user?.uid || '',
+          planId: memberUid,
+          read: false,
+          createdAt: serverTimestamp(),
+        });
+      } catch (notifErr) {
+        console.warn('[handleShare] Could not write notification:', notifErr);
+      }
     } catch (err) {
       console.error('Error copying:', err);
     }
@@ -2279,6 +2345,12 @@ export default function MemberPlanScreen() {
               <Text style={[mt.btnText, !isCoachMode && mt.btnTextActive]}>Member View</Text>
             </Pressable>
           </View>
+          {/* Save status indicator — only visible to coach while in Coach mode */}
+          {isCoachMode && saveStatus !== 'idle' && (
+            <Text style={{ color: saveStatus === 'saved' ? '#6EBB7A' : MUTED, fontSize: 11, textAlign: 'right', marginTop: 4 }}>
+              {saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}
+            </Text>
+          )}
         </View>
       )}
 

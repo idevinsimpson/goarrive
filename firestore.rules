@@ -110,14 +110,16 @@ service cloud.firestore {
 
     match /member_plans/{planId} {
       // get: full document-level check (resource.data available)
-      allow get: if isOwnDoc(resource.data.memberId)
-                 || isCoachOrBootstrap(resource.data.coachId)
-                 || isPlatformAdmin();
+      // Also allow authenticated coaches to read — handles non-existent docs where resource.data is null
+      allow get: if (resource != null && (isOwnDoc(resource.data.memberId)
+                 || isCoachOrBootstrap(resource.data.coachId)))
+                 || isCoach() || isPlatformAdmin();
       // list: query-time check — only request.auth available, not resource.data
       // Coaches can list plans they own; members can list their own plans
       allow list: if isAuthenticated();
       allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
-      allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+      allow update: if (resource != null && isCoachOrBootstrap(resource.data.coachId))
+                   || isCoach() || isPlatformAdmin();
       allow delete: if false;
     }
 
@@ -346,9 +348,19 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+     // ─────────────────────────────────────────────
+    // NOTIFICATIONS
+    // ─────────────────────────────────────────────
+    match /notifications/{notifId} {
+      // Coaches can create notifications for their members
+      allow create: if isAuthenticated();
+      // Members can read and mark their own notifications as read
+      allow read, update: if isAuthenticated() && request.auth.uid == resource.data.recipientId;
+      allow delete: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
-
   }
 }
