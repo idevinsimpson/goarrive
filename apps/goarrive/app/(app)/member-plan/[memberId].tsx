@@ -169,7 +169,13 @@ function DayTile({ day, isCoach, onTypeChange, onOpen, isOpen }: {
     if (!isCoach) return;
     if (!isOpen && triggerRef.current && Platform.OS === 'web') {
       const rect = (triggerRef.current as any).getBoundingClientRect?.();
-      if (rect) setDropPos({ top: rect.bottom + 4, left: rect.left });
+      if (rect) {
+        // 4 session types * ~40px each = ~170px dropdown height
+        const dropHeight = 180;
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const top = spaceBelow >= dropHeight ? rect.bottom + 4 : rect.top - dropHeight - 4;
+        setDropPos({ top, left: rect.left });
+      }
     }
     onOpen?.();
   };
@@ -317,7 +323,13 @@ function GuidanceDropdown({ value, onChange, isOpen, onOpen }: {
   const handlePress = () => {
     if (!isOpen && triggerRef.current && Platform.OS === 'web') {
       const rect = (triggerRef.current as any).getBoundingClientRect?.();
-      if (rect) setDropPos({ top: rect.bottom + 4, left: rect.left });
+      if (rect) {
+        // Dropdown height estimate: 3 options * 33px each = ~100px
+        const dropHeight = 110;
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const top = spaceBelow >= dropHeight ? rect.bottom + 4 : rect.top - dropHeight - 4;
+        setDropPos({ top, left: rect.left });
+      }
     }
     onOpen?.();
   };
