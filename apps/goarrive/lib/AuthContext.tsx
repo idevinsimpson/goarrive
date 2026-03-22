@@ -67,6 +67,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           let userClaims = (tokenResult.claims as CustomClaims) ?? {};
           console.log('[AuthContext] Custom claims from token:', userClaims);
 
+          // If role is 'coach' but coachId is missing, set it to the user's UID.
+          // This handles the case where custom claims include role but not coachId.
+          if (userClaims.role === 'coach' && !userClaims.coachId) {
+            userClaims.coachId = firebaseUser.uid;
+          }
+
           // If no role in custom claims, try to read from Firestore
           if (!userClaims.role) {
             try {
