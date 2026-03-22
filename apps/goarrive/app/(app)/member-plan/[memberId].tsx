@@ -1797,6 +1797,8 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
   const [openGuidanceKey, setOpenGuidanceKey] = useState<string | null>(null);
   // Post-contract unsaved-changes indicator
   const [pcSaved, setPcSaved] = useState<'idle' | 'saved'>('idle');
+  // Local string state for session-minutes so backspace-to-empty and decimals work
+  const [sessionMinText, setSessionMinText] = useState<string>(String(plan.postContract?.sessionMinutes ?? 3.5));
   const pcSavedTimer = useRef<any>(null);
   const onPcChange = (updates: Partial<MemberPlanData>) => {
     onChange(updates);
@@ -1980,7 +1982,7 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                 <Text style={{ color: MUTED, fontSize: 16 }}>$</Text>
                 <TextInput
                   style={{ flex: 1, backgroundColor: BG, borderWidth: 1, borderColor: BORDER, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, color: '#FFF', fontSize: 18, fontWeight: '700' }}
-                  value={String(pricing.displayMonthlyPrice)}
+                  value={String(Math.round(pricing.displayMonthlyPrice))}
                   onChangeText={t => { const n = parseInt(t); if (!isNaN(n)) handleBasePriceOverride(n); }}
                   keyboardType="number-pad" selectTextOnFocus
                 />
@@ -2044,17 +2046,16 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                   {plan.postContract?.enabled && <Text style={{ color: '#000', fontSize: 14, fontWeight: '700' }}>✓</Text>}
                 </View>
               </Pressable>
-            </View>
 
-            {/* ── Post-Contract Settings ── */}
-            {plan.postContract?.enabled && (
-              <View style={{ marginTop: 16, borderTopWidth: 1, borderTopColor: BORDER, paddingTop: 12 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <Text style={{ color: MUTED, fontSize: 11, fontWeight: '700', letterSpacing: 1.2 }}>ONGOING SUPPORT PRICING</Text>
-                  {pcSaved === 'saved' && (
-                    <Text style={{ color: '#6EBB7A', fontSize: 11, fontWeight: '600' }}>✓ Saved</Text>
-                  )}
-                </View>
+              {/* ── Ongoing Support Pricing (inline, shown when enabled) ── */}
+              {plan.postContract?.enabled && (
+                <View style={{ marginLeft: 0, marginTop: 4, marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: BORDER }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <Text style={{ color: MUTED, fontSize: 11, fontWeight: '700', letterSpacing: 1.2 }}>ONGOING SUPPORT PRICING</Text>
+                    {pcSaved === 'saved' && (
+                      <Text style={{ color: '#6EBB7A', fontSize: 11, fontWeight: '600' }}>✓ Saved</Text>
+                    )}
+                  </View>
 
                 {/* Hourly rate */}
                 <Text style={dc.label}>Post-contract hourly rate</Text>
@@ -2078,11 +2079,24 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
                   <TextInput
                     style={{ flex: 1, backgroundColor: BG, borderWidth: 1, borderColor: BORDER, borderRadius: 8, padding: 10, color: '#FFF', fontSize: 15 }}
-                    value={String(plan.postContract?.sessionMinutes ?? 3.5)}
+                    value={sessionMinText}
                     keyboardType="decimal-pad" selectTextOnFocus
                     onChangeText={t => {
+                      setSessionMinText(t);
                       const n = parseFloat(t);
-                      if (!isNaN(n)) onPcChange({ postContract: { ...(plan.postContract || { hourlyRate: plan.hourlyRate ?? 100, sessionMinutes: 3.5, nutritionMonthlyCost: 25, enabled: true }), sessionMinutes: n } });
+                      if (!isNaN(n) && t !== '' && !t.endsWith('.')) {
+                        onPcChange({ postContract: { ...(plan.postContract || { hourlyRate: plan.hourlyRate ?? 100, sessionMinutes: 3.5, nutritionMonthlyCost: 25, enabled: true }), sessionMinutes: n } });
+                      }
+                    }}
+                    onBlur={() => {
+                      const n = parseFloat(sessionMinText);
+                      const fallback = plan.postContract?.sessionMinutes ?? 3.5;
+                      if (isNaN(n) || sessionMinText === '') {
+                        setSessionMinText(String(fallback));
+                      } else {
+                        setSessionMinText(String(n));
+                        onPcChange({ postContract: { ...(plan.postContract || { hourlyRate: plan.hourlyRate ?? 100, sessionMinutes: 3.5, nutritionMonthlyCost: 25, enabled: true }), sessionMinutes: n } });
+                      }
                     }}
                   />
                   <Text style={{ color: MUTED, fontSize: 13 }}>min</Text>
@@ -2146,8 +2160,9 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                     </View>
                   );
                 })()}
-              </View>
-            )}
+                </View>
+              )}
+            </View>
 
             <View style={{ height: 20 }} />
           </ScrollView>
