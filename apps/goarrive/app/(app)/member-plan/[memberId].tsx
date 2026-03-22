@@ -949,8 +949,18 @@ export function PlanView({ plan, isCoach, onChange }: {
       ) : null}
 
       {/* ─── COACHING INVESTMENT (unified section) ──────────────────────── */}
-      {(plan.showInvestment !== false || isCoach) && pricing && (
-        <CoachingInvestmentSection plan={plan} pricing={pricing} isCoach={isCoach} onChange={onChange} />
+      {/* Show the section if:
+           - pricing is visible (showInvestment !== false), OR
+           - the viewer is a coach (always show), OR
+           - there are enabled add-on cards (CTS / Nutrition) to show even when
+             the main pricing numbers are hidden from the member */}
+      {pricing && (
+        (plan.showInvestment !== false || isCoach ||
+          (plan.commitToSave?.enabled ?? false) ||
+          (plan.nutrition?.enabled ?? false)
+        ) && (
+          <CoachingInvestmentSection plan={plan} pricing={pricing} isCoach={isCoach} onChange={onChange} />
+        )
       )}
 
       {/* ─── PLAN ACCEPTANCE (visible to both coach and member) ──────── */}
@@ -1248,14 +1258,17 @@ function CoachingInvestmentSection({ plan, pricing, isCoach, onChange }: {
   onChange: (updates: Partial<MemberPlanData>) => void;
 }) {
   const hidden = plan.showInvestment === false;
-  if (hidden && !isCoach) return null;
-
   const cts = plan.commitToSave;
   const nut = plan.nutrition;
   const ctsEnabled = cts?.enabled ?? false; // coach enabled it as an option
   const ctsActive = cts?.active ?? false;    // member (or coach) toggled it on
   const nutEnabled = nut?.enabled ?? false;  // coach enabled it as an option
   const nutActive = nut?.active ?? false;     // member (or coach) toggled it on
+  // When investment is hidden, only the pricing numbers are suppressed.
+  // Commit to Save and Nutrition add-on cards have their own separate `enabled`
+  // flags and must still render for members when the coach has enabled them.
+  const hasVisibleAddOns = ctsEnabled || nutEnabled;
+  if (hidden && !isCoach && !hasVisibleAddOns) return null;
 
   // Compute prices with and without add-ons for display
   const baseMonthly = pricing.baseMonthlyPrice; // before commit-to-save
@@ -1305,7 +1318,7 @@ function CoachingInvestmentSection({ plan, pricing, isCoach, onChange }: {
       )}
 
       {/* ── Two pricing cards side by side ── */}
-      <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+      {(!hidden || isCoach) && <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
         {/* Monthly card */}
         <View style={[inv.priceCard, { flex: 1 }]}>
           <Text style={inv.priceLabel}>MONTHLY</Text>
@@ -1319,10 +1332,9 @@ function CoachingInvestmentSection({ plan, pricing, isCoach, onChange }: {
           <Text style={{ color: MUTED, fontSize: 11, marginTop: 2 }}>{formatCurrency(payInFullTotal)} total</Text>
           <Text style={{ color: ACCENT, fontSize: 12, fontWeight: '600', marginTop: 2 }}>Save {formatCurrency(payInFullSavings)} ({payInFullPct}% off)</Text>
         </View>
-      </View>
-
+      </View>}
       {/* ── Stats row ── */}
-      <View style={[inv.statsRow]}>
+      {(!hidden || isCoach) && <View style={[inv.statsRow]}>
         <View style={{ flex: 1, alignItems: 'center' }}>
           <Text style={inv.statsLabel}>SESSIONS</Text>
           <Text style={inv.statsValue}>{totalSessions}</Text>
@@ -1338,7 +1350,7 @@ function CoachingInvestmentSection({ plan, pricing, isCoach, onChange }: {
           <Text style={[inv.statsValue, { color: ACCENT }]}>{formatCurrency(programTotal)}</Text>
           <Text style={inv.statsDetail}>total value</Text>
         </View>
-      </View>
+      </View>}
 
       {/* ── Commit to Save card ── */}
       {(ctsEnabled || isCoach) && (
@@ -1366,15 +1378,15 @@ function CoachingInvestmentSection({ plan, pricing, isCoach, onChange }: {
       )}
 
       {/* ── How we got these numbers (coach only) ── */}
-      <HowWeGotTheseNumbers plan={plan} pricing={pricing} isCoach={isCoach} />
+      {(!hidden || isCoach) && <HowWeGotTheseNumbers plan={plan} pricing={pricing} isCoach={isCoach} />}
 
       {/* ── Referral Rewards ── */}
-      <View style={[inv.statsRow, { marginTop: 12, paddingVertical: 14, paddingHorizontal: 16 }]}>
+      {(!hidden || isCoach) && <View style={[inv.statsRow, { marginTop: 12, paddingVertical: 14, paddingHorizontal: 16 }]}>
         <Text style={{ color: MUTED, fontSize: 13, lineHeight: 19, textAlign: 'center' }}>
           <Text style={{ color: GOLD, fontWeight: '700' }}>Referral Rewards: </Text>
           Invite 3 friends into a yearly plan and your base membership is refunded.
         </Text>
-      </View>
+      </View>}
     </View>
   );
 }
