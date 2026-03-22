@@ -17,7 +17,7 @@
  * ME-002: STRIPE_WEBHOOK_SECRET must be set for webhook signature verification.
  *         firebase functions:secrets:set STRIPE_WEBHOOK_SECRET
  * ME-003: APP_BASE_URL must be set to the deployed app URL for checkout redirects.
- *         firebase functions:config:set app.base_url="https://goarrive.web.app"
+ *         firebase functions:config:set app.base_url="https://goarrive.fit"
  *
  * RISK-001: CTS + pay-in-full discount stacking order is unresolved.
  *           Do not hardcode stacking. Both amounts are stored in the snapshot;
@@ -235,7 +235,7 @@ exports.createStripeConnectLink = (0, https_1.onCall)({ secrets: [stripeSecretKe
         });
     }
     // Generate onboarding link
-    const appBaseUrl = process.env.APP_BASE_URL || 'https://goarrive.web.app';
+    const appBaseUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
     const accountLink = await stripe.accountLinks.create({
         account: stripeAccountId,
         refresh_url: `${appBaseUrl}/account?stripe_refresh=1`,
@@ -414,7 +414,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
         updatedAt: firestore_2.FieldValue.serverTimestamp(),
     });
     const stripe = getStripe(stripeSecretKey.value());
-    const appBaseUrl = process.env.APP_BASE_URL || 'https://goarrive.web.app';
+    const appBaseUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
     // ── Get or create Stripe customer on connected account (or platform account) ──
     let stripeCustomerId = plan.stripeCustomerId;
     if (!stripeCustomerId) {
@@ -1154,6 +1154,15 @@ exports.addCoach = (0, https_1.onCall)({ region: 'us-central1' }, async (request
     const callerAdmin = ((_c = (_b = request.auth) === null || _b === void 0 ? void 0 : _b.token) === null || _c === void 0 ? void 0 : _c.admin) === true;
     if (!callerAdmin)
         throw new https_1.HttpsError('permission-denied', 'Admin access required');
+    // 1b. Rate limit: max 10 coaches per hour per admin
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    const recentCoaches = await db.collection('coaches')
+        .where('createdBy', '==', callerUid)
+        .where('createdAt', '>', oneHourAgo)
+        .count().get();
+    if (recentCoaches.data().count >= 10) {
+        throw new https_1.HttpsError('resource-exhausted', 'Rate limit: max 10 coaches per hour');
+    }
     // 2. Validate input
     const { email, displayName } = request.data;
     if (!email || !displayName) {
@@ -1191,8 +1200,13 @@ exports.addCoach = (0, https_1.onCall)({ region: 'us-central1' }, async (request
         createdAt: Date.now(),
         createdBy: callerUid,
     });
-    // 6. Send password reset email so the new coach can set their own password
-    const resetLink = await admin.auth().generatePasswordResetLink(email);
+    // 6. Generate password reset link and send via Firebase's built-in email
+    const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
+    const actionCodeSettings = {
+        url: appUrl,
+        handleCodeInApp: false,
+    };
+    const resetLink = await admin.auth().generatePasswordResetLink(email, actionCodeSettings);
     console.log('[addCoach] Created coach', newCoachId, email, 'by', callerUid);
     return {
         success: true,
@@ -1200,7 +1214,6 @@ exports.addCoach = (0, https_1.onCall)({ region: 'us-central1' }, async (request
         email,
         displayName,
         resetLink,
-        tempPassword,
     };
 });
 //# sourceMappingURL=index.js.map

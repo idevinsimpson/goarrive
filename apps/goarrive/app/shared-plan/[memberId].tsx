@@ -10,7 +10,8 @@ import {
   Platform, Pressable, Image,
 } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import { db } from '../../lib/firebase';
+import { db, auth } from '../../lib/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import {
   MemberPlanData, DayPlan, goalConfig, typeColors, phaseColorList,
@@ -79,7 +80,12 @@ export default function SharedPlanScreen() {
 
   useEffect(() => {
     if (!memberId) return;
-    fetchPlan();
+    // Wait for Firebase Auth to initialize before querying Firestore
+    const unsubscribe = onAuthStateChanged(auth, () => {
+      fetchPlan();
+      unsubscribe(); // only need to wait for first auth state
+    });
+    return () => unsubscribe();
   }, [memberId]);
 
   async function fetchPlan() {
