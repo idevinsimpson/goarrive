@@ -3,17 +3,39 @@
   "scripts": {
     "build": "tsc",
     "serve": "npm run build && firebase emulators:start --only functions",
-    "deploy": "firebase deploy --only functions"
+    "deploy": "firebase deploy --only functions",
+    "test:rules": "jest --rootDir=.. --testPathPattern='firestore\\.rules\\.test'"
   },
-  "engines": { "node": "20" },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": [
+      "<rootDir>/../firestore.rules.test.ts"
+    ],
+    "globals": {
+      "ts-jest": {
+        "tsconfig": {
+          "module": "commonjs",
+          "esModuleInterop": true
+        }
+      }
+    }
+  },
+  "engines": {
+    "node": "20"
+  },
   "main": "lib/index.js",
   "dependencies": {
     "firebase-admin": "^12.0.0",
     "firebase-functions": "^4.9.0"
   },
   "devDependencies": {
-    "typescript": "^5.3.3",
-    "@types/node": "^20.0.0"
+    "@firebase/rules-unit-testing": "^5.0.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.0.0",
+    "jest": "^30.3.0",
+    "ts-jest": "^29.4.6",
+    "typescript": "^5.3.3"
   },
   "private": true
 }

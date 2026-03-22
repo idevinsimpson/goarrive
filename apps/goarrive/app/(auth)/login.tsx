@@ -23,7 +23,8 @@ import {
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
 } from 'firebase/auth';
-import { auth } from '../../lib/firebase';
+import { auth, db } from '../../lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
 import { useAuth } from '../../lib/AuthContext';
 
 const FONT_HEADING =
@@ -54,9 +55,24 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
-      // Check role from token claims for routing
+      // Check role from token claims for routing.
+      // If claims are not yet set (bootstrap phase), fall back to Firestore
+      // to determine whether this user is a member or a coach.
       const tokenResult = await cred.user.getIdTokenResult();
-      const role = tokenResult.claims?.role as string | undefined;
+      let role = tokenResult.claims?.role as string | undefined;
+
+      if (!role) {
+        // No custom claims yet — check Firestore docs to determine role
+        const uid = cred.user.uid;
+        const memberSnap = await getDoc(doc(db, 'members', uid));
+        if (memberSnap.exists()) {
+          role = 'member';
+        } else {
+          const coachSnap = await getDoc(doc(db, 'coaches', uid));
+          role = coachSnap.exists() ? 'coach' : 'member'; // default to member if unknown
+        }
+      }
+
       if (role === 'member') {
         router.replace('/(member)/home');
       } else {

@@ -229,6 +229,8 @@ export default function IntakeForm() {
   const storageKey = `intake_draft_${coachId || 'unknown'}_${emailSlug}`;
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [submittingMsg, setSubmittingMsg] = useState('');
+  const [submitErrorCode, setSubmitErrorCode] = useState('');
   const [hydrated, setHydrated] = useState(false);
   const scrollRef = React.useRef<ScrollView>(null);
 
@@ -337,6 +339,7 @@ export default function IntakeForm() {
     if (!validateStep()) return;
 
     setSubmitting(true);
+    setSubmittingMsg('Creating your account…');
     try {
       if (!formData.password || formData.password !== formData.confirmPassword) {
         setErrors({ submit: 'Passwords do not match' });
@@ -353,6 +356,7 @@ export default function IntakeForm() {
         displayName: `${formData.firstName} ${formData.lastName}`,
       });
 
+      setSubmittingMsg('Saving your information…');
       const memberRef = doc(
         collection(db, 'members'),
         userCred.user.uid
@@ -383,6 +387,7 @@ export default function IntakeForm() {
         submittedAt: Timestamp.now(),
       });
 
+      setSubmittingMsg('Setting up your account…');
       // Force a token refresh so AuthContext re-reads the now-existing members doc
       // and resolves the correct 'member' role before navigation. Without this,
       // onAuthStateChanged fires before setDoc completes, AuthContext finds no
@@ -402,7 +407,8 @@ export default function IntakeForm() {
       let friendlyMessage: string;
       if (code === 'auth/email-already-in-use') {
         friendlyMessage =
-          'An account with this email already exists. Please sign in instead, or use a different email address.';
+          'An account with this email already exists.';
+        setSubmitErrorCode('auth/email-already-in-use');
       } else if (code === 'auth/weak-password') {
         friendlyMessage =
           'Your password is too weak. Please choose a password that is at least 6 characters long.';
@@ -415,6 +421,7 @@ export default function IntakeForm() {
       } else {
         friendlyMessage = 'Something went wrong creating your account. Please try again.';
       }
+      if (code !== 'auth/email-already-in-use') setSubmitErrorCode('');
       setErrors({ submit: friendlyMessage });
     } finally {
       setSubmitting(false);
@@ -910,9 +917,19 @@ export default function IntakeForm() {
           { required: true, secureTextEntry: true }
         )}
         {errors.submit ? (
-          <Text style={[s.errorText, { textAlign: 'center', marginTop: 8 }]}>
-            {errors.submit}
-          </Text>
+          <View style={{ alignItems: 'center', marginTop: 8 }}>
+            <Text style={[s.errorText, { textAlign: 'center' }]}>
+              {errors.submit}
+              {submitErrorCode === 'auth/email-already-in-use' ? (
+                <Text
+                  style={{ color: '#F5A623', textDecorationLine: 'underline' }}
+                  onPress={() => router.replace('/(auth)/login')}
+                >
+                  {' Sign in instead →'}
+                </Text>
+              ) : null}
+            </Text>
+          </View>
         ) : null}
       </View>
     );
@@ -1001,7 +1018,12 @@ export default function IntakeForm() {
           disabled={submitting}
         >
           {submitting ? (
-            <ActivityIndicator color="#0E1117" size="small" />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <ActivityIndicator color="#0E1117" size="small" />
+              {submittingMsg ? (
+                <Text style={[s.nextBtnText, { fontSize: 13 }]}>{submittingMsg}</Text>
+              ) : null}
+            </View>
           ) : (
             <Text style={s.nextBtnText}>
               {isLastStep ? 'Submit & Create Account' : 'Continue'}

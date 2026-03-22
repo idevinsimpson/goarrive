@@ -111,12 +111,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
           }
 
-          // FORCE OVERRIDE for Jane Smith (testing purposes)
-          if (firebaseUser.email === 'jane.smith.2026@example.com') {
-            console.log('[AuthContext] Overriding role to member for Jane Smith');
-            userClaims.role = 'member';
-          }
-
           console.log('[AuthContext] Final claims:', userClaims);
           setClaims(userClaims);
         } catch (err) {
