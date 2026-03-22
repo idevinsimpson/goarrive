@@ -182,6 +182,10 @@ export interface MemberPlanData {
   goalEmojis?: Record<string, string>; // custom emoji overrides per goal name
   currentWeight?: string | number;
   goalWeight?: string;
+  /** True when goalWeight was auto-calculated from intake data rather than manually entered by the coach.
+   *  The plan builder displays an "Auto-suggested" badge next to the goal weight value when this is true.
+   *  The flag is cleared (set to false) when the coach manually edits the goal weight field. */
+  goalWeightAutoSuggested?: boolean;
   gymConfidence?: number;
   gym?: string;
   goalSummary?: string;

@@ -9,6 +9,7 @@ import { Tabs, Redirect } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { Icon } from '../../components/Icon';
+import { useFcmToken } from '../../lib/useFcmToken';
 
 const TAB_BG = '#0E1117';
 const TAB_BORDER = '#1E2A3A';
@@ -17,6 +18,9 @@ const INACTIVE_COLOR = '#4A5568';
 
 export default function MemberLayout() {
   const { user, claims, loading } = useAuth();
+  // Register FCM push token for this member so the coach's "Share" action
+  // can trigger a native push notification even when the app is not open.
+  useFcmToken(user?.uid);
 
   if (loading) {
     return (

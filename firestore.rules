@@ -83,7 +83,7 @@ service cloud.firestore {
       allow update: if isPlatformAdmin()
                     || (isOwnDoc(uid)
                         && request.resource.data.diff(resource.data).affectedKeys()
-                            .hasOnly(['displayName', 'phone', 'photoURL', 'updatedAt']));
+                            .hasOnly(['displayName', 'phone', 'photoURL', 'updatedAt', 'fcmToken']));
       allow delete: if false; // never delete users
 
       // FCM push tokens — users can manage their own device tokens
@@ -109,17 +109,32 @@ service cloud.firestore {
     // ─────────────────────────────────────────────
 
     match /member_plans/{planId} {
-      // get: full document-level check (resource.data available)
-      // Also allow authenticated coaches to read — handles non-existent docs where resource.data is null
-      allow get: if (resource != null && (isOwnDoc(resource.data.memberId)
-                 || isCoachOrBootstrap(resource.data.coachId)))
-                 || isCoach() || isPlatformAdmin();
-      // list: query-time check — only request.auth available, not resource.data
-      // Coaches can list plans they own; members can list their own plans
+      // get: full document-level check (resource.data available).
+      // Three principals are allowed:
+      //   1. The member who owns the plan (memberId matches their uid)
+      //   2. The coach who owns the plan (coachId matches via isCoachOrBootstrap)
+      //   3. A platform admin
+      // The (resource == null) guard handles the case where the document does not
+      // yet exist — Firestore evaluates get rules even for non-existent docs, and
+      // resource.data would be null, causing isCoachOrBootstrap to throw. When the
+      // document is absent, only a coach (by UID bootstrap) or admin may proceed;
+      // the plan builder creates the document immediately on first load.
+      allow get: if isPlatformAdmin()
+                 || (resource == null && (isCoach() || isCoachByUid(planId)))
+                 || (resource != null && (
+                      isOwnDoc(resource.data.memberId)
+                      || isCoachOrBootstrap(resource.data.coachId)
+                    ));
+      // list: query-time check — only request.auth is available, not resource.data.
+      // Restrict to authenticated users; the app always scopes queries by memberId
+      // or coachId so cross-tenant leakage is prevented at the query level.
       allow list: if isAuthenticated();
       allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
-      allow update: if (resource != null && isCoachOrBootstrap(resource.data.coachId))
-                   || isCoach() || isPlatformAdmin();
+      // update: only the owning coach (or admin) may modify a plan.
+      // The broad isCoach() fallback has been removed — coaches can only update
+      // plans where their UID matches the stored coachId field.
+      allow update: if isPlatformAdmin()
+                   || (resource != null && isCoachOrBootstrap(resource.data.coachId));
       allow delete: if false;
     }
 

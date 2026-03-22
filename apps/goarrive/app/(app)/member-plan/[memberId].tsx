@@ -535,7 +535,7 @@ export function PlanView({ plan, isCoach, onChange }: {
       case 'whyTranslation': updates.whyTranslation = val; break;
       case 'goalSummary': updates.goalSummary = val; break;
       case 'currentWeight': updates.currentWeight = val; break;
-      case 'goalWeight': updates.goalWeight = val; break;
+      case 'goalWeight': updates.goalWeight = val; updates.goalWeightAutoSuggested = false; break;
       case 'startingPointIntro': updates.startingPointIntro = val; break;
     }
     onChange(updates);
@@ -747,6 +747,13 @@ export function PlanView({ plan, isCoach, onChange }: {
                 <Text style={{ color: ACCENT, fontSize: 22, fontWeight: '700', fontFamily: FH }}>{plan.goalWeight || '—'}</Text>
                 {isCoach && <PencilBtn onPress={() => openEdit('goalWeight', plan.goalWeight || '')} />}
               </View>
+              {/* Auto-suggested badge: shown only to coaches when the value was
+                  calculated from intake data rather than entered by the member */}
+              {isCoach && plan.goalWeightAutoSuggested && (
+                <Text style={{ color: '#F5A623', fontSize: 10, fontStyle: 'italic', marginTop: 2 }}>
+                  Auto-suggested — please review
+                </Text>
+              )}
             </View>
           </View>
         ) : isCoach ? (
@@ -2181,16 +2188,22 @@ export default function MemberPlanScreen() {
         else if (qData.goals) defaultPlan.goals = qData.goals;
         if (qData.weight) defaultPlan.currentWeight = String(qData.weight) + ' lbs';
         if (qData.goalWeight) {
+          // Member explicitly stated a goal weight — not auto-suggested
           defaultPlan.goalWeight = String(qData.goalWeight) + ' lbs';
+          defaultPlan.goalWeightAutoSuggested = false;
         } else if (qData.weight) {
-          // Auto-suggest goal weight based on selected goals
+          // Auto-suggest goal weight based on selected goals.
+          // goalWeightAutoSuggested=true causes the plan builder to show an
+          // "Auto-suggested" badge so the coach knows to review the value.
           const currentLbs = parseFloat(String(qData.weight));
           if (!isNaN(currentLbs)) {
             const goals: string[] = defaultPlan.goals || [];
             if (goals.includes('Fat loss')) {
               defaultPlan.goalWeight = Math.round(currentLbs * 0.90) + ' lbs';
+              defaultPlan.goalWeightAutoSuggested = true;
             } else if (goals.includes('Build muscle')) {
               defaultPlan.goalWeight = Math.round(currentLbs * 1.05) + ' lbs';
+              defaultPlan.goalWeightAutoSuggested = true;
             }
           }
         }

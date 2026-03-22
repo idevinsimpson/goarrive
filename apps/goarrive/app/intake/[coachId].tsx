@@ -211,10 +211,22 @@ const initialFormData: FormData = {
 export default function IntakeForm() {
   const { coachId } = useLocalSearchParams<{ coachId: string }>();
 
-  // SSR-safe localStorage: always start with default state, restore after mount
-  const storageKey = `intake_draft_${coachId || 'unknown'}`;
   const [step, setStep] = useState<number>(0);
   const [formData, setFormData] = useState<FormData>(initialFormData);
+
+  // SSR-safe localStorage: always start with default state, restore after mount
+  //
+  // Draft key isolation: two different members filling out the form for the same
+  // coach on the same device would previously share a single draft key, causing
+  // Member B to see Member A's partially completed form. To prevent this, once
+  // the user has typed an email address (Step 0) we append a sanitized version
+  // of it to the key. Until an email is entered the key falls back to
+  // `intake_draft_{coachId}_no-email`, which is safe because Step 0 is short
+  // and always completed before any sensitive data is entered.
+  const emailSlug = formData.email
+    ? formData.email.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 40)
+    : 'no-email';
+  const storageKey = `intake_draft_${coachId || 'unknown'}_${emailSlug}`;
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [hydrated, setHydrated] = useState(false);

@@ -1,8 +1,12 @@
 /**
  * GoArrive Service Worker
- * 
+ *
  * Provides offline support and asset caching for the PWA.
  * Compatible with Safari, Chrome, Firefox, and Edge.
+ *
+ * Also handles FCM background push notifications so members receive
+ * native browser notifications when their coach shares or updates their plan,
+ * even when the app tab is not open.
  */
 
 const CACHE_NAME = 'goarrive-v1';
@@ -122,6 +126,51 @@ self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
+});
+
+// ─── FCM Push Notification Handling ─────────────────────────────────────────
+// Receives background push messages sent by Firebase Cloud Messaging and
+// displays them as native browser notifications when the app tab is not active.
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+  let payload;
+  try {
+    payload = event.data.json();
+  } catch {
+    payload = { notification: { title: 'GoArrive', body: event.data.text() } };
+  }
+  const notif = payload.notification || {};
+  const notificationTitle = notif.title || 'GoArrive';
+  const notificationOptions = {
+    body: notif.body || '',
+    icon: notif.icon || '/icons/icon-192.png',
+    badge: notif.badge || '/icons/icon-192.png',
+    // Store the deep-link URL in notification data for the click handler
+    data: { link: (payload.webpush && payload.webpush.fcmOptions && payload.webpush.fcmOptions.link) || '/my-plan' },
+  };
+  event.waitUntil(
+    self.registration.showNotification(notificationTitle, notificationOptions)
+  );
+});
+
+// When a notification is clicked, open the app at the target URL
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = (event.notification.data && event.notification.data.link) || '/my-plan';
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      // If a tab is already open at the target URL, focus it
+      for (const client of clientList) {
+        if (client.url.includes(targetUrl) && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      // Otherwise open a new tab
+      if (clients.openWindow) {
+        return clients.openWindow(targetUrl);
+      }
+    })
+  );
 });
 
 console.log('[SW] Service worker loaded');
