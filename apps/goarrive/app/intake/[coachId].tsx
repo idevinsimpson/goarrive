@@ -26,6 +26,8 @@ import {
   Platform,
   ActivityIndicator,
   KeyboardAvoidingView,
+  type ViewStyle,
+  type TextStyle,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import {
@@ -1040,14 +1042,15 @@ export default function IntakeForm() {
   );
 }
 
-const s = StyleSheet.create({
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const s: any = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#0E1117',
     display: 'flex',
     flexDirection: 'column',
-    minHeight: '100vh',
-    height: '100vh',
+    minHeight: '100vh' as any,
+    height: '100vh' as any,
   },
   progressBar: {
     paddingHorizontal: 16,

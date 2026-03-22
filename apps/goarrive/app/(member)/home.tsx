@@ -166,7 +166,7 @@ export default function MemberHome() {
 
   return (
     <View style={s.root}>
-      <AppHeader title="Member Dashboard" />
+      <AppHeader />
       {/* In-app push notification permission prompt — only shown once per session
            when the user has not yet granted or denied notification permission */}
       <FcmPermissionPrompt uid={user?.uid} />

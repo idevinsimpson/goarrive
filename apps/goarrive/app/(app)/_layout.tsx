@@ -115,6 +115,7 @@ export default function AppLayout() {
       {/* Hidden screens — accessible via navigation but not shown in tab bar */}
       <Tabs.Screen name="admin" options={{ href: null }} />
       <Tabs.Screen name="account" options={{ href: null }} />
+      <Tabs.Screen name="billing" options={{ href: null }} />
       {/* member-plan: full-screen immersive, no tab bar */}
       <Tabs.Screen
         name="member-plan/[memberId]"

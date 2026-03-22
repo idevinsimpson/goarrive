@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { Icon } from '../../components/Icon';
 import { useAuth } from '../../lib/AuthContext';
+import StripeConnectPanel from '../../components/StripeConnectPanel';
 
 const FONT_HEADING =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -74,6 +75,11 @@ export default function AccountScreen({ onClose }: Props) {
           <Text style={s.cardLabel}>Tenant ID</Text>
           <Text style={s.cardValue}>{claims?.tenantId ?? '—'}</Text>
         </View>
+
+        {/* Stripe Connect — coaches only */}
+        {(claims?.role === 'coach' || claims?.role === 'admin') && claims?.coachId && (
+          <StripeConnectPanel coachId={claims.coachId} />
+        )}
 
         {/* Sign out */}
         <Pressable style={s.signOutBtn} onPress={handleSignOut}>

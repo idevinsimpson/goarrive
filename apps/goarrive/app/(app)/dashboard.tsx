@@ -42,7 +42,7 @@ interface FeatureCard {
   description: string;
   week: string;
   color: string;
-  route: '/(app)/movements' | '/(app)/workouts' | '/(app)/members' | '/(app)/admin';
+  route: '/(app)/movements' | '/(app)/workouts' | '/(app)/members' | '/(app)/admin' | '/(app)/billing';
 }
 
 const FEATURE_CARDS: FeatureCard[] = [
@@ -73,6 +73,13 @@ const FEATURE_CARDS: FeatureCard[] = [
     week: 'SLICE 2',
     color: '#8A95A3',
     route: '/(app)/admin',
+  },
+  {
+    title: 'Billing',
+    description: 'Stripe Connect status, payment tasks, tier split, and policy reference.',
+    week: 'SLICE 3',
+    color: '#F5A623',
+    route: '/(app)/billing',
   },
 ];
 
@@ -274,7 +281,7 @@ export default function DashboardScreen() {
             <Pressable
               key={card.title}
               style={({ pressed }) => [s.featureCard, pressed && s.featureCardPressed]}
-              onPress={() => router.push(card.route)}
+              onPress={() => router.push(card.route as any)}
             >
               <View style={s.featureCardInner}>
                 <View style={s.featureCardLeft}>

@@ -107,6 +107,21 @@ export default function MemberLayout() {
           ),
         }}
       />
+      {/* Hidden screens — accessible via router.push but not shown in tab bar */}
+      <Tabs.Screen
+        name="payment-select"
+        options={{
+          href: null,
+          tabBarStyle: { display: 'none' },
+        }}
+      />
+      <Tabs.Screen
+        name="checkout-success"
+        options={{
+          href: null,
+          tabBarStyle: { display: 'none' },
+        }}
+      />
     </Tabs>
   );
 }

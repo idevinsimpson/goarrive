@@ -64,7 +64,7 @@ export function resolvePhaseColor(intensity: string): { text: string; bg: string
 export const phaseColorList: string[] = ['#6EBB7A', '#5B9BD5', '#F5A623'];
 
 export interface SessionTypeGuidance {
-  sessionType: 'Strength' | 'Cardio + Mobility' | 'Mix';
+  sessionType: 'Strength' | 'Cardio + Mobility' | 'Mix' | 'Rest';
   phase1: GuidanceLevel;
   phase2: GuidanceLevel;
   phase3: GuidanceLevel;
@@ -135,26 +135,26 @@ export interface Phase {
 // ─── Nutrition add-on ─────────────────────────────────────────────────────────
 
 export interface NutritionAddOn {
-  enabled: boolean;  // coach controls: show/hide this option for the member
-  active: boolean;   // member controls: add/remove this from the plan
-  type: 'in-house' | 'outsourced';
-  providerName: string;
-  monthlyCost: number;
-  description: string;
+  enabled?: boolean;  // coach controls: show/hide this option for the member
+  active?: boolean;   // member controls: add/remove this from the plan
+  type?: 'in-house' | 'outsourced';
+  providerName?: string;
+  monthlyCost?: number;
+  description?: string;
 }
 
 // ─── Commit to Save add-on ──────────────────────────────────────────────────
 
 export interface CommitToSave {
-  enabled: boolean;
-  active: boolean;
-  monthlySavings: number;
-  missedSessionFee: number;
-  nextMonthPercentOff: number;
-  summary: string;
-  makeUpWindowHours: number;
-  reentryRule: string;
-  emergencyWaiverEnabled: boolean;
+  enabled?: boolean;
+  active?: boolean;
+  monthlySavings?: number;
+  missedSessionFee?: number;
+  nextMonthPercentOff?: number;
+  summary?: string;
+  makeUpWindowHours?: number;
+  reentryRule?: string;
+  emergencyWaiverEnabled?: boolean;
 }
 
 // ─── Post-contract (ongoing / month-to-month) settings ─────────────────────
@@ -189,6 +189,163 @@ export interface PostContract {
    * monthly rate (monthlyRate × 0.5).
    */
   ctsMonthlySavings?: number;
+}
+
+// ─── Continuation pricing (post-contract phase, coach-editable) ─────────────
+/**
+ * Separate from PostContract (display module), ContinuationPricing holds the
+ * coach-editable inputs used to compute the post-contract monthly rate that
+ * feeds into Stripe subscription schedule Phase 2.
+ *
+ * Monthly rate formula (same as initial, but self-reliant time estimates):
+ *   continuationMonthly = continuationHourlyRate
+ *                         × (continuationMinutesPerSession ÷ 60)
+ *                         × sessionsPerMonth
+ *
+ * RISK-001: Ordering of 10% pay-in-full discount vs CTS half-off is unresolved.
+ * Do not hardcode stacking order. Store both inputs and compute at checkout time
+ * using the rule snapshot active at plan-accept time.
+ */
+export interface ContinuationPricing {
+  /** Coach hourly rate for continuation phase. Default: same as initial hourlyRate. */
+  continuationHourlyRate: number;
+  /** Estimated coach time per session (min) in continuation. Default: 3.5. */
+  continuationMinutesPerSession: number;
+  /** Monthly check-in call length (min) in continuation. Default: 30. */
+  continuationCheckInMinutesPerMonth: number;
+  /** Whether the continuation module is enabled (coach toggle). Default: true. */
+  continuationEnabled: boolean;
+}
+
+// ─── Accepted plan snapshot (immutable at checkout time) ─────────────────────
+/**
+ * Frozen snapshot of all pricing inputs at the moment the member accepts the plan.
+ * Checkout sessions and ledger entries reference this snapshot ID — never the
+ * live plan document — so later coach edits cannot corrupt billing history.
+ *
+ * BP-001: Always create checkout from acceptedPlanSnapshot, never from current plan.
+ */
+export interface AcceptedPlanSnapshot {
+  snapshotId: string;          // Firestore doc ID in acceptedPlanSnapshots/{snapshotId}
+  planId: string;              // member_plans/{planId}
+  memberId: string;
+  coachId: string;
+  snapshotAt: any;             // Firestore Timestamp
+
+  // ── Initial contract pricing ──
+  contractLengthMonths: 6 | 9 | 12;
+  hourlyRate: number;
+  sessionLengthMinutes: number;
+  checkInCallMinutes: number;
+  programBuildTimeHours: number;
+  sessionsPerWeek: number;
+  calculatedMonthlyPrice: number;    // rounded whole dollar
+  displayMonthlyPrice: number;       // after CTS/nutrition adjustments
+  payInFullTotal: number;            // displayMonthlyPrice × months × 0.9
+  payInFullMonthlyEquivalent: number;
+
+  // ── Continuation pricing ──
+  continuationHourlyRate: number;
+  continuationMinutesPerSession: number;
+  continuationCheckInMinutesPerMonth: number;
+  continuationMonthlyPrice: number;  // rounded whole dollar
+  continuationPayInFullTotal: number;
+  continuationPayInFullMonthlyEquivalent: number;
+
+  // ── Optional CTS override ──
+  ctsMonthlySavings?: number;        // explicit override; undefined = half of monthly
+
+  // ── Rule snapshot ──
+  tierSplit: 40 | 35 | 30;           // GoArrive share percent at snapshot time
+  applicationFeePercent: number;     // = tierSplit (40/35/30)
+}
+
+// ─── Stripe / billing Firestore document types ────────────────────────────────
+
+/** coachStripeAccounts/{coachId} */
+export interface CoachStripeAccount {
+  coachId: string;
+  stripeAccountId: string;           // acct_xxx
+  accountType: 'standard' | 'express' | 'custom';
+  onboardingStatus: 'pending' | 'in_progress' | 'complete' | 'restricted';
+  chargesEnabled: boolean;
+  payoutsEnabled: boolean;
+  requirementsDue: string[];         // Stripe requirements.currently_due
+  createdAt: any;
+  updatedAt: any;
+  lastStatusSyncAt: any;
+}
+
+/** checkoutIntents/{intentId} */
+export interface CheckoutIntent {
+  intentId: string;
+  memberId: string;
+  coachId: string;
+  planId: string;
+  snapshotId: string;                // references acceptedPlanSnapshots
+  paymentOption: 'monthly' | 'pay_in_full';
+  stripeSessionId?: string;          // set after Stripe session created
+  stripeSessionUrl?: string;
+  status: 'pending' | 'completed' | 'cancelled' | 'expired';
+  createdAt: any;
+  updatedAt: any;
+}
+
+/** memberSubscriptions/{subscriptionId} */
+export interface MemberSubscription {
+  subscriptionId: string;            // Stripe subscription ID
+  memberId: string;
+  coachId: string;
+  planId: string;
+  snapshotId: string;
+  stripeAccountId: string;           // connected coach account
+  stripeScheduleId?: string;         // subscription schedule ID (monthly option)
+  stripeCustomerId: string;
+  paymentOption: 'monthly' | 'pay_in_full';
+  phase: 'contract' | 'continuation';
+  contractStartAt: any;
+  contractEndAt: any;
+  continuationStartAt?: any;
+  status: 'active' | 'past_due' | 'canceled' | 'unpaid' | 'trialing';
+  currentPeriodEnd: any;
+  createdAt: any;
+  updatedAt: any;
+}
+
+/** billingEvents/{eventId} — append-only, idempotent by stripeEventId */
+export interface BillingEvent {
+  eventId: string;                   // Firestore doc ID = stripeEventId
+  stripeEventId: string;             // idempotency key
+  stripeEventType: string;           // e.g. 'invoice.paid'
+  memberId?: string;
+  coachId?: string;
+  planId?: string;
+  snapshotId?: string;
+  rawPayload: Record<string, unknown>; // full Stripe event object
+  processedAt: any;
+}
+
+/** ledgerEntries/{entryId} — append-only, derived from billingEvents */
+export interface LedgerEntry {
+  entryId: string;
+  billingEventId: string;            // references billingEvents
+  memberId: string;
+  coachId: string;
+  planId: string;
+  snapshotId: string;
+  phase: 'contract' | 'continuation';
+  grossAmountCents: number;
+  coachShareCents: number;
+  goArriveShareCents: number;
+  tierSnapshot: 40 | 35 | 30;       // GoArrive share percent used
+  applicationFeePercent: number;
+  stripeInvoiceId?: string;
+  stripeChargeId?: string;
+  contractStartAt: any;
+  contractEndAt: any;
+  pricingSnapshotId: string;
+  ruleSnapshot: Record<string, unknown>; // BP-001: rule snapshot at time of entry
+  createdAt: any;
 }
 
 // ─── Full plan data ───────────────────────────────────────────────────────────
@@ -263,8 +420,19 @@ export interface MemberPlanData {
   // Nutrition add-on
   nutrition?: NutritionAddOn;
 
-  // Post-contract ongoing support module
+  // Post-contract ongoing support module (display card)
   postContract?: PostContract;
+
+  // Continuation pricing inputs (coach-editable, feeds Stripe Phase 2)
+  continuationPricing?: ContinuationPricing;
+
+  // Billing / Stripe fields (set at accept time, do not edit after)
+  acceptedAt?: any;               // Timestamp when member accepted
+  contractStartAt?: any;          // Timestamp when contract begins (= acceptedAt for monthly)
+  contractEndAt?: any;            // Timestamp = contractStartAt + contractLengthMonths
+  acceptedSnapshotId?: string;    // references acceptedPlanSnapshots/{id}
+  stripeCustomerId?: string;      // Stripe customer ID on coach connected account
+  checkoutStatus?: 'pending_payment' | 'paid' | 'pay_in_full_paid' | 'failed';
 
   // Injury notes
   injuryNotes?: string;
@@ -320,12 +488,11 @@ export function monthsToWeeks(months: number): number {
   return Math.round(months * (52 / 12));
 }
 
-export function getDefaultGuidance(sessionType: 'Strength' | 'Cardio + Mobility' | 'Mix'): SessionTypeGuidance {
+export function getDefaultGuidance(sessionType: 'Strength' | 'Cardio + Mobility' | 'Mix' | 'Rest'): SessionTypeGuidance {
   return { sessionType, phase1: 'Fully guided', phase2: 'Blended', phase3: 'Self-reliant' };
 }
-
 export function getGuidanceProfile(
-  sessionType: 'Strength' | 'Cardio + Mobility' | 'Mix',
+  sessionType: 'Strength' | 'Cardio + Mobility' | 'Mix' | 'Rest',
   profiles: SessionTypeGuidance[]
 ): SessionTypeGuidance {
   return profiles.find(p => p.sessionType === sessionType) || getDefaultGuidance(sessionType);

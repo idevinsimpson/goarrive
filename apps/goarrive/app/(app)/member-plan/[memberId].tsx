@@ -30,6 +30,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { CtsOptInModal } from '../../../components/CtsOptInModal';
 import ReactDOM from 'react-dom';
 import {
   View, Text, ScrollView, Pressable, TextInput, StyleSheet,
@@ -40,9 +41,10 @@ import { doc, getDoc, setDoc, addDoc, collection, serverTimestamp } from 'fireba
 import { db } from '../../../lib/firebase';
 import { useAuth } from '../../../lib/AuthContext';
 import { Icon } from '../../../components/Icon';
+import ContinuationCard from '../../../components/ContinuationCard';
 import {
   MemberPlanData, DayPlan, SessionType, Phase,
-  SessionTypeGuidance, GuidanceLevel, PricingResult, PostContract,
+  SessionTypeGuidance, GuidanceLevel, PricingResult, PostContract, ContinuationPricing,
   calculatePricing, formatCurrency, monthsToWeeks,
   createDefaultPlan, createDefaultSchedule, createDefaultPhases,
   countSessionsByType, getGuidanceProfile,
@@ -737,7 +739,7 @@ export function PlanView({ plan, isCoach, onChange }: {
               <Text style={{ color: MUTED, fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 }}>CURRENT</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <Text style={{ color: '#FFF', fontSize: 22, fontWeight: '700', fontFamily: FH }}>{plan.currentWeight || '—'}</Text>
-                {isCoach && <PencilBtn onPress={() => openEdit('currentWeight', plan.currentWeight || '')} />}
+                {isCoach && <PencilBtn onPress={() => openEdit('currentWeight', String(plan.currentWeight ?? ''))} />}
               </View>
             </View>
             <Text style={{ color: MUTED, fontSize: 20 }}>→</Text>
@@ -1395,6 +1397,17 @@ function CoachingInvestmentSection({ plan, pricing, isCoach, onChange }: {
           plan={plan}
           isCoach={isCoach}
           sessionsPerMonth={Math.round((plan.sessionsPerWeek || 3) * (52 / 12))}
+          coachId={plan.coachId ?? ''}
+        />
+      )}
+
+      {/* ── After Contract / Continuation card ── */}
+      {(plan.continuationPricing?.continuationEnabled !== false || isCoach) && (
+        <ContinuationCard
+          plan={plan}
+          isCoach={isCoach}
+          sessionsPerMonth={Math.round((plan.sessionsPerWeek || 3) * (52 / 12))}
+          coachId={plan.coachId ?? ''}
         />
       )}
     </View>
@@ -1535,10 +1548,11 @@ function NutritionAddOnCard({ plan, isCoach, isActive, onToggle, monthlyPrice, n
 }
 
 // ── Post-Contract Ongoing Support card ─────────────────────────────────────
-function PostContractCard({ plan, isCoach, sessionsPerMonth }: {
-  plan: MemberPlanData; isCoach: boolean; sessionsPerMonth: number;
+function PostContractCard({ plan, isCoach, sessionsPerMonth, coachId }: {
+  plan: MemberPlanData; isCoach: boolean; sessionsPerMonth: number; coachId: string;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [ctsModalVisible, setCtsModalVisible] = useState(false);
   const pc = plan.postContract;
   const hourlyRate = pc?.hourlyRate ?? plan.hourlyRate ?? 100;
   const sessionMinutes = pc?.sessionMinutes ?? 3.5;
@@ -1596,7 +1610,33 @@ function PostContractCard({ plan, isCoach, sessionsPerMonth }: {
                 <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
                   Stay consistent and lock in {formatCurrency(ctsMonthly)}/mo — half your standard monthly rate. The same accountability rules apply.
                 </Text>
+                {!isCoach && plan.status === 'active' && (() => {
+                  // CTS button only visible after contract period ends (RISK-001)
+                  const endAt = (plan as any).contractEndAt;
+                  const contractEnded = endAt ? (endAt.toMillis ? endAt.toMillis() : endAt.seconds * 1000) <= Date.now() : false;
+                  return contractEnded;
+                })() && (
+                  <Pressable
+                    onPress={() => setCtsModalVisible(true)}
+                    style={{ marginTop: 8, backgroundColor: GOLD, borderRadius: 8, paddingVertical: 8, alignItems: 'center' }}
+                  >
+                    <Text style={{ color: '#000', fontSize: 13, fontWeight: '700' }}>Commit to Save — {formatCurrency(ctsMonthly)}/mo</Text>
+                  </Pressable>
+                )}
               </View>
+              {!isCoach && (
+                <CtsOptInModal
+                  visible={ctsModalVisible}
+                  onClose={() => setCtsModalVisible(false)}
+                  memberId={plan.memberId}
+                  planId={plan.id ?? ''}
+                  coachId={coachId}
+                  ctsMonthlyRate={ctsMonthly}
+                  standardMonthlyRate={monthlyRate}
+                  ctsMonthlyFormatted={formatCurrency(ctsMonthly)}
+                  standardMonthlyFormatted={formatCurrency(monthlyRate)}
+                />
+              )}
               {/* Nutrition */}
               {nutEnabled && (
                 <View style={{ padding: 10, backgroundColor: 'rgba(110,187,122,0.08)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(110,187,122,0.3)', marginBottom: 8 }}>
@@ -1799,6 +1839,10 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
   const [pcSaved, setPcSaved] = useState<'idle' | 'saved'>('idle');
   // Local string state for session-minutes so backspace-to-empty and decimals work
   const [sessionMinText, setSessionMinText] = useState<string>(String(plan.postContract?.sessionMinutes ?? 3.5));
+  // Local string states for continuation pricing inputs
+  const [contHrText, setContHrText] = useState<string>(String(plan.continuationPricing?.continuationHourlyRate ?? plan.hourlyRate ?? 100));
+  const [contMinText, setContMinText] = useState<string>(String(plan.continuationPricing?.continuationMinutesPerSession ?? 3.5));
+  const [contCheckInText, setContCheckInText] = useState<string>(String(plan.continuationPricing?.continuationCheckInMinutesPerMonth ?? 30));
   const pcSavedTimer = useRef<any>(null);
   const onPcChange = (updates: Partial<MemberPlanData>) => {
     onChange(updates);
@@ -2162,6 +2206,128 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                 })()}
                 </View>
               )}
+            </View>
+
+            {/* ── After Contract / Continuation Pricing ── */}
+            <View style={{ marginTop: 16, borderTopWidth: 1, borderTopColor: BORDER, paddingTop: 12 }}>
+              <Pressable
+                onPress={() => {
+                  const cp = plan.continuationPricing;
+                  onChange({ continuationPricing: { ...(cp || { continuationHourlyRate: plan.hourlyRate ?? 100, continuationMinutesPerSession: 3.5, continuationCheckInMinutesPerMonth: 30, continuationEnabled: true }), continuationEnabled: !(cp?.continuationEnabled ?? true) } });
+                }}
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 }}
+              >
+                <View>
+                  <Text style={{ color: '#FFF', fontSize: 15, fontWeight: '600' }}>🔄 After Contract / Continuation</Text>
+                  <Text style={{ color: MUTED, fontSize: 12, marginTop: 2 }}>Set pricing for the ongoing month-to-month phase</Text>
+                </View>
+                <View style={{ width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: (plan.continuationPricing?.continuationEnabled ?? true) ? PRIMARY : BORDER, backgroundColor: (plan.continuationPricing?.continuationEnabled ?? true) ? PRIMARY : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                  {(plan.continuationPricing?.continuationEnabled ?? true) && <Text style={{ color: '#000', fontSize: 14, fontWeight: '700' }}>✓</Text>}
+                </View>
+              </Pressable>
+
+              {(plan.continuationPricing?.continuationEnabled ?? true) && (() => {
+                const cp = plan.continuationPricing;
+                const baseContHr = cp?.continuationHourlyRate ?? plan.hourlyRate ?? 100;
+                const baseContMin = cp?.continuationMinutesPerSession ?? 3.5;
+                const baseContCheckIn = cp?.continuationCheckInMinutesPerMonth ?? 30;
+                const spm = Math.round((plan.sessionsPerWeek || 3) * (52 / 12));
+                const contMonthly = Math.round(baseContHr * (baseContMin / 60) * spm);
+                const contPifMonthly = Math.round(contMonthly * 12 * 0.9 / 12);
+                const contCts = plan.postContract?.ctsMonthlySavings != null ? plan.postContract.ctsMonthlySavings : Math.round(contMonthly * 0.5);
+
+                const cpBase = (extra: Partial<typeof cp>) => ({
+                  continuationPricing: {
+                    continuationHourlyRate: baseContHr,
+                    continuationMinutesPerSession: baseContMin,
+                    continuationCheckInMinutesPerMonth: baseContCheckIn,
+                    continuationEnabled: true,
+                    ...(cp || {}),
+                    ...extra,
+                  },
+                });
+
+                return (
+                  <View style={{ backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: BORDER, marginBottom: 8 }}>
+                    <Text style={{ color: MUTED, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 12 }}>CONTINUATION PRICING</Text>
+
+                    {/* Continuation hourly rate */}
+                    <Text style={dc.label}>Continuation hourly rate</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                      <Text style={{ color: MUTED, fontSize: 14 }}>$</Text>
+                      <TextInput
+                        style={{ flex: 1, backgroundColor: BG, borderWidth: 1, borderColor: BORDER, borderRadius: 8, padding: 10, color: '#FFF', fontSize: 15 }}
+                        value={contHrText}
+                        keyboardType="decimal-pad" selectTextOnFocus
+                        onChangeText={t => {
+                          setContHrText(t);
+                          const n = parseFloat(t);
+                          if (!isNaN(n) && t !== '' && !t.endsWith('.')) onChange(cpBase({ continuationHourlyRate: n }));
+                        }}
+                        onBlur={() => {
+                          const n = parseFloat(contHrText);
+                          if (isNaN(n) || contHrText === '') { setContHrText(String(baseContHr)); }
+                          else { setContHrText(String(n)); onChange(cpBase({ continuationHourlyRate: n })); }
+                        }}
+                      />
+                      <Text style={{ color: MUTED, fontSize: 13 }}>/hr</Text>
+                    </View>
+
+                    {/* Continuation session minutes */}
+                    <Text style={dc.label}>Avg. coach time per session (min)</Text>
+                    <Text style={{ color: MUTED, fontSize: 11, lineHeight: 16, marginBottom: 6 }}>Self-reliant phase: recommended 3–5 min. Default 3.5.</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                      <TextInput
+                        style={{ flex: 1, backgroundColor: BG, borderWidth: 1, borderColor: BORDER, borderRadius: 8, padding: 10, color: '#FFF', fontSize: 15 }}
+                        value={contMinText}
+                        keyboardType="decimal-pad" selectTextOnFocus
+                        onChangeText={t => {
+                          setContMinText(t);
+                          const n = parseFloat(t);
+                          if (!isNaN(n) && t !== '' && !t.endsWith('.')) onChange(cpBase({ continuationMinutesPerSession: n }));
+                        }}
+                        onBlur={() => {
+                          const n = parseFloat(contMinText);
+                          if (isNaN(n) || contMinText === '') { setContMinText(String(baseContMin)); }
+                          else { setContMinText(String(n)); onChange(cpBase({ continuationMinutesPerSession: n })); }
+                        }}
+                      />
+                      <Text style={{ color: MUTED, fontSize: 13 }}>min</Text>
+                    </View>
+
+                    {/* Continuation check-in call */}
+                    <Text style={dc.label}>Monthly check-in call (min)</Text>
+                    <Text style={{ color: MUTED, fontSize: 11, lineHeight: 16, marginBottom: 6 }}>Default 30 min.</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                      <TextInput
+                        style={{ flex: 1, backgroundColor: BG, borderWidth: 1, borderColor: BORDER, borderRadius: 8, padding: 10, color: '#FFF', fontSize: 15 }}
+                        value={contCheckInText}
+                        keyboardType="decimal-pad" selectTextOnFocus
+                        onChangeText={t => {
+                          setContCheckInText(t);
+                          const n = parseFloat(t);
+                          if (!isNaN(n) && t !== '' && !t.endsWith('.')) onChange(cpBase({ continuationCheckInMinutesPerMonth: n }));
+                        }}
+                        onBlur={() => {
+                          const n = parseFloat(contCheckInText);
+                          if (isNaN(n) || contCheckInText === '') { setContCheckInText(String(baseContCheckIn)); }
+                          else { setContCheckInText(String(n)); onChange(cpBase({ continuationCheckInMinutesPerMonth: n })); }
+                        }}
+                      />
+                      <Text style={{ color: MUTED, fontSize: 13 }}>min/mo</Text>
+                    </View>
+
+                    {/* Live preview */}
+                    <View style={{ padding: 10, backgroundColor: 'rgba(91,155,213,0.08)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(91,155,213,0.3)' }}>
+                      <Text style={{ color: PRIMARY, fontSize: 12, fontWeight: '700', marginBottom: 4 }}>CONTINUATION PREVIEW</Text>
+                      <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>Monthly: <Text style={{ color: '#FFF' }}>{formatCurrency(contMonthly)}/mo</Text></Text>
+                      <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>Pay in full: <Text style={{ color: '#FFF' }}>{formatCurrency(contPifMonthly)}/mo</Text></Text>
+                      <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>Commit to Save: <Text style={{ color: GOLD }}>{formatCurrency(contCts)}/mo</Text></Text>
+                      <Text style={{ color: '#4A5568', fontSize: 10, marginTop: 4 }}>RISK-001: CTS + pay-in-full stacking order is unresolved — do not hardcode</Text>
+                    </View>
+                  </View>
+                );
+              })()}
             </View>
 
             <View style={{ height: 20 }} />

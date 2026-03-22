@@ -344,6 +344,92 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
+    // COACH STRIPE ACCOUNTS (Cloud Functions write via Admin SDK)
+    // Coaches read their own account status; members never see this.
+    // ─────────────────────────────────────────────
+
+    match /coachStripeAccounts/{coachId} {
+      allow read: if isOwnDoc(coachId) || isPlatformAdmin();
+      allow write: if false; // Cloud Functions only (Admin SDK)
+    }
+
+    // ─────────────────────────────────────────────
+    // CHECKOUT INTENTS (Cloud Functions write via Admin SDK)
+    // Members read their own intent to poll status on checkout-success.
+    // Coaches read intents for their members.
+    // ─────────────────────────────────────────────
+
+    match /checkoutIntents/{intentId} {
+      allow read: if isAuthenticated() && (
+        isOwnDoc(resource.data.memberId)
+        || isCoachOrBootstrap(resource.data.coachId)
+        || isPlatformAdmin()
+      );
+      allow write: if false; // Cloud Functions only
+    }
+
+    // ─────────────────────────────────────────────
+    // MEMBER SUBSCRIPTIONS (Cloud Functions write via Admin SDK)
+    // Members read their own subscription; coaches read their members'.
+    // ─────────────────────────────────────────────
+
+    match /memberSubscriptions/{subId} {
+      allow read: if isAuthenticated() && (
+        isOwnDoc(resource.data.memberId)
+        || isCoachOrBootstrap(resource.data.coachId)
+        || isPlatformAdmin()
+      );
+      allow write: if false; // Cloud Functions only
+    }
+
+    // ─────────────────────────────────────────────
+    // BILLING EVENTS (Cloud Functions write via Admin SDK)
+    // Raw Stripe webhook events — internal audit log.
+    // Only platformAdmin can read; never exposed to coaches or members.
+    // ─────────────────────────────────────────────
+
+    match /billingEvents/{eventId} {
+      allow read: if isPlatformAdmin();
+      allow write: if false; // Cloud Functions only
+    }
+
+    // ─────────────────────────────────────────────
+    // LEDGER ENTRIES (append-only; Cloud Functions write via Admin SDK)
+    // Coaches read their own entries; members never see ledger data.
+    // Note: collection name is 'ledgerEntries' (camelCase) to match
+    // the Cloud Functions index.ts writes. The legacy 'ledger_entries'
+    // rule above is kept for backward compatibility.
+    // ─────────────────────────────────────────────
+
+    // ─────────────────────────────────────────────
+    // COMMIT TO SAVE CONSENTS
+    // Members create their own consent; Cloud Function updates status.
+    // Coaches read consents for their members.
+    // ─────────────────────────────────────────────
+
+    match /commitToSaveConsents/{consentId} {
+      // Members can create their own consent
+      allow create: if isAuthenticated()
+                    && request.auth.uid == request.resource.data.memberId;
+      // Members read their own; coaches read their members'
+      allow read: if isAuthenticated() && (
+        isOwnDoc(resource.data.memberId)
+        || isCoachOrBootstrap(resource.data.coachId)
+        || isPlatformAdmin()
+      );
+      // Only Cloud Functions update status (Admin SDK bypasses rules)
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    match /ledgerEntries/{entryId} {
+      allow read: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+      allow create: if false; // Cloud Functions only
+      allow update: if false; // append-only — never update
+      allow delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
     // CATCH-ALL: deny everything else
     // ─────────────────────────────────────────────
 

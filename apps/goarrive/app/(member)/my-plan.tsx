@@ -11,8 +11,9 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, ActivityIndicator,
-  Platform, Pressable, Image,
+  Platform, Pressable, Image, Alert,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { AppHeader } from '../../components/AppHeader';
 import { collection, query, where, getDocs, doc, getDoc, updateDoc, orderBy, limit, writeBatch } from 'firebase/firestore';
@@ -34,6 +35,7 @@ interface Notification {
 
 export default function MyPlan() {
   const { user } = useAuth();
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [plan, setPlan] = useState<MemberPlanData | null>(null);
   const planDocIdRef = useRef<string>('');
@@ -172,18 +174,31 @@ export default function MyPlan() {
   }, []);
 
   // ─── Accept plan handler ──────────────────────────────────────────────────
+  // Navigates to payment selection page instead of writing status directly.
+  // The plan status is updated to 'active' by the stripeWebhook Cloud Function
+  // after checkout.session.completed fires.
+  //
+  // Guard: if the plan is already active or paid, skip the payment flow and
+  // show an informational alert instead of navigating to payment-select.
   async function handleAcceptPlan() {
     if (!user || !plan) return;
     const docId = planDocIdRef.current || plan.id;
-    try {
-      await updateDoc(doc(db, 'member_plans', docId), {
-        status: 'accepted',
-        updatedAt: new Date(),
-      });
-      setPlan(prev => prev ? { ...prev, status: 'accepted' } : null);
-    } catch (err) {
-      console.error('Error accepting plan:', err);
+    if (!docId) return;
+    // Guard: already enrolled
+    if (
+      plan.status === 'active' ||
+      (plan as any).checkoutStatus === 'paid' ||
+      (plan as any).checkoutStatus === 'pay_in_full_paid'
+    ) {
+      Alert.alert(
+        "You're Already Enrolled",
+        'Your plan is active. If you have questions about your enrollment, contact your coach.',
+        [{ text: 'OK' }]
+      );
+      return;
     }
+    // Navigate to payment selection
+    router.push(`/(member)/payment-select?planId=${docId}` as any);
   }
 
   // ─── Loading state ────────────────────────────────────────────────────────
