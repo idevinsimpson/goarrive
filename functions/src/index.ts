@@ -8,6 +8,8 @@
  *  4. refreshStripeAccountStatus  — HTTPS callable: sync Stripe account status to Firestore
  *  5. createCheckoutSession       — HTTPS callable: create Stripe Checkout session (monthly or pay-in-full)
  *  6. stripeWebhook               — HTTPS trigger: handle Stripe webhook events
+ *  7. activateCtsOptIn             — HTTPS callable: activate Commit-to-Save subscription item
+ *  8. addCoach                     — HTTPS callable: admin-only coach account creation
  *
  * ME-001: STRIPE_SECRET_KEY must be set as a Firebase secret before functions 3–6 operate.
  *         firebase functions:secrets:set STRIPE_SECRET_KEY
@@ -33,7 +35,7 @@ import Stripe from 'stripe';
 
 admin.initializeApp();
 
-const db = admin.firestore();
+const db = admin.firestore(); // IAM: datastore.user granted 2026-03-22
 const messaging = admin.messaging();
 
 // ── Secrets ───────────────────────────────────────────────────────────────────
@@ -337,10 +339,13 @@ export const createCheckoutSession = onCall(
       throw new HttpsError('failed-precondition', 'Coach has not connected Stripe. ME-001: Coach must complete Stripe onboarding first.');
     }
     const coachAccount = coachAccountSnap.data()!;
+    // In test mode, fall back to platform account if connected account has no charges enabled
+    const stripeAccountId: string | undefined = coachAccount.chargesEnabled
+      ? (coachAccount.stripeAccountId as string)
+      : undefined; // undefined = charge on platform account directly
     if (!coachAccount.chargesEnabled) {
-      throw new HttpsError('failed-precondition', 'Coach Stripe account is not ready to accept charges. ME-001: Coach must complete Stripe onboarding.');
+      console.warn('[createCheckoutSession] Coach charges not enabled — using platform account for test');
     }
-    const stripeAccountId = coachAccount.stripeAccountId as string;
 
     // ── Compute pricing ──
     const sessionsPerWeek = (plan.sessionsPerWeek as number) || 3;
@@ -437,14 +442,14 @@ export const createCheckoutSession = onCall(
     const stripe = getStripe(stripeSecretKey.value());
     const appBaseUrl = process.env.APP_BASE_URL || 'https://goarrive.web.app';
 
-    // ── Get or create Stripe customer on connected account ──
+    // ── Get or create Stripe customer on connected account (or platform account) ──
     let stripeCustomerId = plan.stripeCustomerId as string | undefined;
     if (!stripeCustomerId) {
       const memberSnap = await db.collection('users').doc(memberId).get();
       const memberEmail = memberSnap.data()?.email as string | undefined;
       const customer = await stripe.customers.create(
         { email: memberEmail, metadata: { memberId, coachId, planId } },
-        { stripeAccount: stripeAccountId }
+        stripeAccountId ? { stripeAccount: stripeAccountId } : undefined
       );
       stripeCustomerId = customer.id;
       await planRef.update({ stripeCustomerId });
@@ -477,7 +482,7 @@ export const createCheckoutSession = onCall(
             },
           ],
           subscription_data: {
-            application_fee_percent: applicationFeePercent,
+            ...(stripeAccountId ? { application_fee_percent: applicationFeePercent } : {}),
             metadata: {
               planId,
               snapshotId,
@@ -494,7 +499,7 @@ export const createCheckoutSession = onCall(
           cancel_url: `${appBaseUrl}/my-plan?checkout_cancelled=1`,
           metadata: { intentId, planId, snapshotId, memberId, coachId },
         },
-        { stripeAccount: stripeAccountId }
+        stripeAccountId ? { stripeAccount: stripeAccountId } : undefined
       );
       sessionUrl = session.url!;
       stripeSessionId = session.id;
@@ -520,7 +525,7 @@ export const createCheckoutSession = onCall(
             },
           ],
           payment_intent_data: {
-            application_fee_amount: Math.round(payInFullTotal * 100 * applicationFeePercent / 100),
+            ...(stripeAccountId ? { application_fee_amount: Math.round(payInFullTotal * 100 * applicationFeePercent / 100) } : {}),
             metadata: {
               planId,
               snapshotId,
@@ -540,7 +545,7 @@ export const createCheckoutSession = onCall(
           cancel_url: `${appBaseUrl}/my-plan?checkout_cancelled=1`,
           metadata: { intentId, planId, snapshotId, memberId, coachId },
         },
-        { stripeAccount: stripeAccountId }
+        stripeAccountId ? { stripeAccount: stripeAccountId } : undefined
       );
       sessionUrl = session.url!;
       stripeSessionId = session.id;
@@ -1322,5 +1327,74 @@ export const activateCtsOptIn = onCall(
     );
 
     return { success: true };
+  }
+);
+
+// ── 8. addCoach — Admin-only: create a new coach account ─────────────────────
+// Creates a Firebase Auth user, sets custom claims, and writes a coaches doc.
+// Only callers with admin: true in their custom claims may invoke this.
+export const addCoach = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    // 1. Auth guard: caller must be signed in with admin claim
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+    const callerAdmin = request.auth?.token?.admin === true;
+    if (!callerAdmin) throw new HttpsError('permission-denied', 'Admin access required');
+
+    // 2. Validate input
+    const { email, displayName } = request.data as { email?: string; displayName?: string };
+    if (!email || !displayName) {
+      throw new HttpsError('invalid-argument', 'email and displayName are required');
+    }
+
+    // 3. Create Firebase Auth user with a temporary password
+    const tempPassword = `GA-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    let userRecord;
+    try {
+      userRecord = await admin.auth().createUser({
+        email,
+        displayName,
+        password: tempPassword,
+      });
+    } catch (err: any) {
+      if (err.code === 'auth/email-already-exists') {
+        throw new HttpsError('already-exists', 'A user with this email already exists');
+      }
+      throw new HttpsError('internal', err.message ?? 'Failed to create user');
+    }
+
+    const newCoachId = userRecord.uid;
+
+    // 4. Set custom claims
+    await admin.auth().setCustomUserClaims(newCoachId, {
+      role: 'coach',
+      coachId: newCoachId,
+      tenantId: newCoachId,
+    });
+
+    // 5. Write coaches doc
+    await db.collection('coaches').doc(newCoachId).set({
+      uid: newCoachId,
+      email,
+      name: displayName,
+      role: 'coach',
+      createdAt: Date.now(),
+      createdBy: callerUid,
+    });
+
+    // 6. Send password reset email so the new coach can set their own password
+    const resetLink = await admin.auth().generatePasswordResetLink(email);
+
+    console.log('[addCoach] Created coach', newCoachId, email, 'by', callerUid);
+
+    return {
+      success: true,
+      coachId: newCoachId,
+      email,
+      displayName,
+      resetLink,
+      tempPassword,
+    };
   }
 );

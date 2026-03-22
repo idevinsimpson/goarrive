@@ -93,6 +93,16 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
+    // COACHES (Cloud Functions write via Admin SDK)
+    // Coaches read their own doc; used by AuthContext to determine role.
+    // ─────────────────────────────────────────────
+
+    match /coaches/{coachId} {
+      allow read: if isOwnDoc(coachId) || isPlatformAdmin();
+      allow write: if false; // Cloud Functions only (Admin SDK)
+    }
+
+    // ─────────────────────────────────────────────
     // COACH BRANDS
     // ─────────────────────────────────────────────
 
