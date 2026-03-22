@@ -92,17 +92,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   userClaims.role = coachData.role || 'coach';
                   userClaims.coachId = firebaseUser.uid;
                 } else {
-                  // Default to 'coach' if no profile found (for backward compatibility)
-                  console.log('[AuthContext] No coach doc found, defaulting to coach role');
-                  userClaims.role = 'coach';
-                  userClaims.coachId = firebaseUser.uid;
+                  // Default to 'member' if no profile found.
+                  // This handles the intake form race condition: createUserWithEmailAndPassword
+                  // fires onAuthStateChanged before the members doc is written, so neither
+                  // collection has a doc yet. New users from intake are always members, not coaches.
+                  // Coaches are always created through the admin flow and will have a coaches doc.
+                  console.log('[AuthContext] No coach doc found, defaulting to member role');
+                  userClaims.role = 'member';
                 }
               }
             } catch (err) {
               console.error('[AuthContext] Error reading Firestore profile:', err);
-              // Default to 'coach' on error
-              userClaims.role = 'coach';
-              userClaims.coachId = firebaseUser.uid;
+              // Default to 'member' on error — same reasoning as above.
+              // A Firestore permissions error here most likely means the members doc
+              // was not yet written (intake race condition). Defaulting to member is safe
+              // because the (member) layout will re-check claims on every render.
+              userClaims.role = 'member';
             }
           }
 

@@ -383,15 +383,39 @@ export default function IntakeForm() {
         submittedAt: Timestamp.now(),
       });
 
+      // Force a token refresh so AuthContext re-reads the now-existing members doc
+      // and resolves the correct 'member' role before navigation. Without this,
+      // onAuthStateChanged fires before setDoc completes, AuthContext finds no
+      // members doc, and defaults the role incorrectly.
+      await userCred.user.getIdToken(true);
+
       // Clear saved draft after successful submission
       if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
         try { localStorage.removeItem(storageKey); } catch { /* ignore */ }
       }
       router.replace('/(member)/home');
     } catch (error: any) {
-      setErrors({
-        submit: error.message || 'Failed to create account',
-      });
+      // Map Firebase auth error codes to friendly, user-facing messages.
+      // Firebase raw messages (e.g. "Firebase: Error (auth/email-already-in-use)") are
+      // never shown to the user.
+      const code: string = error?.code ?? '';
+      let friendlyMessage: string;
+      if (code === 'auth/email-already-in-use') {
+        friendlyMessage =
+          'An account with this email already exists. Please sign in instead, or use a different email address.';
+      } else if (code === 'auth/weak-password') {
+        friendlyMessage =
+          'Your password is too weak. Please choose a password that is at least 6 characters long.';
+      } else if (code === 'auth/invalid-email') {
+        friendlyMessage = 'Please enter a valid email address.';
+      } else if (code === 'auth/too-many-requests') {
+        friendlyMessage = 'Too many attempts. Please wait a moment and try again.';
+      } else if (code === 'auth/network-request-failed') {
+        friendlyMessage = 'Network error. Please check your connection and try again.';
+      } else {
+        friendlyMessage = 'Something went wrong creating your account. Please try again.';
+      }
+      setErrors({ submit: friendlyMessage });
     } finally {
       setSubmitting(false);
     }
