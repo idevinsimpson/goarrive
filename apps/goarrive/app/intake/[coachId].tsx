@@ -333,6 +333,11 @@ export default function IntakeForm() {
 
   function handleBack() {
     setStep((s) => Math.max(0, s - 1));
+    // Clear any submit-level error (including the email-already-in-use code)
+    // so the error banner and inline Sign In link don't linger after the user
+    // navigates back to correct their details.
+    setErrors({});
+    setSubmitErrorCode('');
   }
 
   async function handleSubmit() {

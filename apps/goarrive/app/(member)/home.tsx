@@ -16,6 +16,7 @@ import {
   Pressable,
 } from 'react-native';
 import { useAuth } from '../../lib/AuthContext';
+import { FcmPermissionPrompt } from '../../lib/useFcmToken';
 import { AppHeader } from '../../components/AppHeader';
 import {
   collection,
@@ -166,6 +167,9 @@ export default function MemberHome() {
   return (
     <View style={s.root}>
       <AppHeader title="Member Dashboard" />
+      {/* In-app push notification permission prompt — only shown once per session
+           when the user has not yet granted or denied notification permission */}
+      <FcmPermissionPrompt uid={user?.uid} />
       <ScrollView
         style={s.scroll}
         contentContainerStyle={s.scrollContent}

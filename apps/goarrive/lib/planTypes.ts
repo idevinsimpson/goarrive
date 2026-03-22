@@ -157,6 +157,34 @@ export interface CommitToSave {
   emergencyWaiverEnabled: boolean;
 }
 
+// ─── Post-contract (ongoing / month-to-month) settings ─────────────────────
+/**
+ * Governs the member's ongoing month-to-month rate after the initial contract
+ * period ends.  Pricing is calculated as:
+ *
+ *   monthlyRate = hourlyRate × (sessionMinutes ÷ 60) × sessionsPerMonth
+ *   yearlyRate  = monthlyRate × 12  (with optional pay-in-full 10% off)
+ *
+ * Commit to Save in the post-contract phase gives the member HALF OFF the
+ * standard monthly (or full-payment) amount instead of the flat $100/mo.
+ *
+ * The referral refund clock resets: the member must refer 3 new members within
+ * the same number of months as their original contract to earn a full refund.
+ */
+export interface PostContract {
+  /** Coach controls: show this module to the member */
+  enabled: boolean;
+  /** Hourly rate for post-contract phase. Defaults to the plan's hourlyRate. */
+  hourlyRate: number;
+  /**
+   * Estimated coach time per session (in minutes) during the post-contract
+   * self-reliant phase.  Recommended 3–5 min; default 3.5.
+   */
+  sessionMinutes: number;
+  /** Monthly cost for nutrition add-on in the post-contract phase. Default $25. */
+  nutritionMonthlyCost: number;
+}
+
 // ─── Full plan data ───────────────────────────────────────────────────────────
 
 export interface MemberPlanData {
@@ -228,6 +256,9 @@ export interface MemberPlanData {
 
   // Nutrition add-on
   nutrition?: NutritionAddOn;
+
+  // Post-contract ongoing support module
+  postContract?: PostContract;
 
   // Injury notes
   injuryNotes?: string;

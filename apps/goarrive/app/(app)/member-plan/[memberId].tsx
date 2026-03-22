@@ -42,7 +42,7 @@ import { useAuth } from '../../../lib/AuthContext';
 import { Icon } from '../../../components/Icon';
 import {
   MemberPlanData, DayPlan, SessionType, Phase,
-  SessionTypeGuidance, GuidanceLevel, PricingResult,
+  SessionTypeGuidance, GuidanceLevel, PricingResult, PostContract,
   calculatePricing, formatCurrency, monthsToWeeks,
   createDefaultPlan, createDefaultSchedule, createDefaultPhases,
   countSessionsByType, getGuidanceProfile,
@@ -957,7 +957,8 @@ export function PlanView({ plan, isCoach, onChange }: {
       {pricing && (
         (plan.showInvestment !== false || isCoach ||
           (plan.commitToSave?.enabled ?? false) ||
-          (plan.nutrition?.enabled ?? false)
+          (plan.nutrition?.enabled ?? false) ||
+          (plan.postContract?.enabled ?? false)
         ) && (
           <CoachingInvestmentSection plan={plan} pricing={pricing} isCoach={isCoach} onChange={onChange} />
         )
@@ -1387,6 +1388,15 @@ function CoachingInvestmentSection({ plan, pricing, isCoach, onChange }: {
           Invite 3 friends into a yearly plan and your base membership is refunded.
         </Text>
       </View>}
+
+      {/* ── Post-Contract Ongoing Support card ── */}
+      {(plan.postContract?.enabled || isCoach) && (
+        <PostContractCard
+          plan={plan}
+          isCoach={isCoach}
+          sessionsPerMonth={Math.round((plan.sessionsPerWeek || 3) * (52 / 12))}
+        />
+      )}
     </View>
   );
 }
@@ -1520,6 +1530,93 @@ function NutritionAddOnCard({ plan, isCoach, isActive, onToggle, monthlyPrice, n
           </View>
         </View>
       )}
+    </View>
+  );
+}
+
+// ── Post-Contract Ongoing Support card ─────────────────────────────────────
+function PostContractCard({ plan, isCoach, sessionsPerMonth }: {
+  plan: MemberPlanData; isCoach: boolean; sessionsPerMonth: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const pc = plan.postContract;
+  const hourlyRate = pc?.hourlyRate ?? plan.hourlyRate ?? 100;
+  const sessionMinutes = pc?.sessionMinutes ?? 3.5;
+  const nutCost = pc?.nutritionMonthlyCost ?? 25;
+  const nutEnabled = plan.nutrition?.enabled ?? false;
+
+  // Monthly rate = hourlyRate × (sessionMinutes ÷ 60) × sessionsPerMonth
+  const monthlyRate = Math.round(hourlyRate * (sessionMinutes / 60) * sessionsPerMonth);
+  const yearlyRate = monthlyRate * 12;
+  // Pay-in-full: 10% off yearly
+  const payInFullMonthly = Math.round(yearlyRate * 0.9 / 12);
+  const payInFullSavings = Math.round(yearlyRate - yearlyRate * 0.9);
+  // Commit to Save: half off monthly
+  const ctsMonthly = Math.round(monthlyRate * 0.5);
+  // Nutrition add-on
+  const withNutMonthly = monthlyRate + nutCost;
+
+  return (
+    <View style={[inv.addonCard, { borderColor: 'rgba(91,155,213,0.4)', backgroundColor: 'rgba(91,155,213,0.05)', marginTop: 12 }]}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
+        {/* Icon */}
+        <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(91,155,213,0.2)', alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ fontSize: 16 }}>🔄</Text>
+        </View>
+        {/* Content */}
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: '#FFF', fontSize: 15, fontWeight: '700', fontFamily: FH }}>Ongoing Support</Text>
+          <Text style={{ color: PRIMARY, fontSize: 12, marginTop: 2 }}>After your contract · Month-to-month</Text>
+          <Text style={{ color: MUTED, fontSize: 13, lineHeight: 19, marginTop: 6 }}>
+            You've built the foundation. Ongoing support keeps you accountable, progressing, and connected to your coach — on your terms.
+          </Text>
+          <Pressable onPress={() => setExpanded(!expanded)} style={{ marginTop: 6 }}>
+            <Text style={{ color: PRIMARY, fontSize: 13, fontWeight: '600' }}>
+              {expanded ? 'Hide details ▴' : 'See your ongoing rate ▾'}
+            </Text>
+          </Pressable>
+          {expanded && (
+            <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: BORDER }}>
+              {/* Pricing grid */}
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
+                <View style={[inv.priceCard, { flex: 1 }]}>
+                  <Text style={inv.priceLabel}>MONTHLY</Text>
+                  <Text style={inv.priceAmount}>{formatCurrency(monthlyRate)}<Text style={inv.priceSuffix}>/mo</Text></Text>
+                  <Text style={inv.priceDetail}>Cancel anytime</Text>
+                </View>
+                <View style={[inv.priceCard, { flex: 1, borderColor: GOLD_BORDER }]}>
+                  <Text style={[inv.priceLabel, { color: GOLD }]}>PAY IN FULL</Text>
+                  <Text style={inv.priceAmount}>{formatCurrency(payInFullMonthly)}<Text style={inv.priceSuffix}>/mo</Text></Text>
+                  <Text style={{ color: ACCENT, fontSize: 12, fontWeight: '600', marginTop: 2 }}>Save {formatCurrency(payInFullSavings)}/yr</Text>
+                </View>
+              </View>
+              {/* Commit to Save */}
+              <View style={{ padding: 10, backgroundColor: GOLD_BG, borderRadius: 8, borderWidth: 1, borderColor: GOLD_BORDER, marginBottom: 8 }}>
+                <Text style={{ color: GOLD, fontSize: 13, fontWeight: '700', marginBottom: 2 }}>💡 Commit to Save — Half Off</Text>
+                <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
+                  Stay consistent and lock in {formatCurrency(ctsMonthly)}/mo — half your standard monthly rate. The same accountability rules apply.
+                </Text>
+              </View>
+              {/* Nutrition */}
+              {nutEnabled && (
+                <View style={{ padding: 10, backgroundColor: 'rgba(110,187,122,0.08)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(110,187,122,0.3)', marginBottom: 8 }}>
+                  <Text style={{ color: ACCENT, fontSize: 13, fontWeight: '700', marginBottom: 2 }}>🥗 Nutrition Add-On</Text>
+                  <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
+                    Continue your nutrition coaching for +{formatCurrency(nutCost)}/mo. New monthly: {formatCurrency(withNutMonthly)}.
+                  </Text>
+                </View>
+              )}
+              {/* Referral reset */}
+              <View style={{ padding: 10, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, borderWidth: 1, borderColor: BORDER }}>
+                <Text style={{ color: GOLD, fontSize: 13, fontWeight: '700', marginBottom: 2 }}>🎁 Referral Clock Resets</Text>
+                <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
+                  Refer 3 friends into a yearly plan within {plan.contractMonths || 12} months and your base membership is refunded — same as your original contract.
+                </Text>
+              </View>
+            </View>
+          )}
+        </View>
+      </View>
     </View>
   );
 }
@@ -1922,7 +2019,96 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                   {plan.nutrition?.enabled && <Text style={{ color: '#000', fontSize: 14, fontWeight: '700' }}>✓</Text>}
                 </View>
               </Pressable>
+
+              {/* Post-Contract visibility */}
+              <Pressable
+                onPress={() => onChange({
+                  postContract: {
+                    ...(plan.postContract || { hourlyRate: plan.hourlyRate ?? 100, sessionMinutes: 3.5, nutritionMonthlyCost: 25 }),
+                    enabled: !(plan.postContract?.enabled),
+                  },
+                })}
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 }}
+              >
+                <Text style={{ color: '#FFF', fontSize: 14 }}>Show Ongoing Support to member</Text>
+                <View style={{ width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: plan.postContract?.enabled ? PRIMARY : BORDER, backgroundColor: plan.postContract?.enabled ? PRIMARY : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                  {plan.postContract?.enabled && <Text style={{ color: '#000', fontSize: 14, fontWeight: '700' }}>✓</Text>}
+                </View>
+              </Pressable>
             </View>
+
+            {/* ── Post-Contract Settings ── */}
+            {plan.postContract?.enabled && (
+              <View style={{ marginTop: 16, borderTopWidth: 1, borderTopColor: BORDER, paddingTop: 12 }}>
+                <Text style={{ color: MUTED, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 10 }}>ONGOING SUPPORT PRICING</Text>
+
+                {/* Hourly rate */}
+                <Text style={dc.label}>Post-contract hourly rate</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                  <Text style={{ color: MUTED, fontSize: 14 }}>$</Text>
+                  <TextInput
+                    style={{ flex: 1, backgroundColor: BG, borderWidth: 1, borderColor: BORDER, borderRadius: 8, padding: 10, color: '#FFF', fontSize: 15 }}
+                    value={String(plan.postContract?.hourlyRate ?? plan.hourlyRate ?? 100)}
+                    keyboardType="number-pad" selectTextOnFocus
+                    onChangeText={t => {
+                      const n = parseFloat(t);
+                      if (!isNaN(n)) onChange({ postContract: { ...(plan.postContract || { hourlyRate: plan.hourlyRate ?? 100, sessionMinutes: 3.5, nutritionMonthlyCost: 25, enabled: true }), hourlyRate: n } });
+                    }}
+                  />
+                  <Text style={{ color: MUTED, fontSize: 13 }}>/hr</Text>
+                </View>
+
+                {/* Session time */}
+                <Text style={dc.label}>Avg. coach time per session (min)</Text>
+                <Text style={{ color: MUTED, fontSize: 11, lineHeight: 16, marginBottom: 6 }}>Self-reliant phase: recommended 3–5 min. Default 3.5.</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                  <TextInput
+                    style={{ flex: 1, backgroundColor: BG, borderWidth: 1, borderColor: BORDER, borderRadius: 8, padding: 10, color: '#FFF', fontSize: 15 }}
+                    value={String(plan.postContract?.sessionMinutes ?? 3.5)}
+                    keyboardType="decimal-pad" selectTextOnFocus
+                    onChangeText={t => {
+                      const n = parseFloat(t);
+                      if (!isNaN(n)) onChange({ postContract: { ...(plan.postContract || { hourlyRate: plan.hourlyRate ?? 100, sessionMinutes: 3.5, nutritionMonthlyCost: 25, enabled: true }), sessionMinutes: n } });
+                    }}
+                  />
+                  <Text style={{ color: MUTED, fontSize: 13 }}>min</Text>
+                </View>
+
+                {/* Nutrition monthly cost */}
+                <Text style={dc.label}>Nutrition add-on monthly cost</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                  <Text style={{ color: MUTED, fontSize: 14 }}>$</Text>
+                  <TextInput
+                    style={{ flex: 1, backgroundColor: BG, borderWidth: 1, borderColor: BORDER, borderRadius: 8, padding: 10, color: '#FFF', fontSize: 15 }}
+                    value={String(plan.postContract?.nutritionMonthlyCost ?? 25)}
+                    keyboardType="number-pad" selectTextOnFocus
+                    onChangeText={t => {
+                      const n = parseFloat(t);
+                      if (!isNaN(n)) onChange({ postContract: { ...(plan.postContract || { hourlyRate: plan.hourlyRate ?? 100, sessionMinutes: 3.5, nutritionMonthlyCost: 25, enabled: true }), nutritionMonthlyCost: n } });
+                    }}
+                  />
+                  <Text style={{ color: MUTED, fontSize: 13 }}>/mo</Text>
+                </View>
+
+                {/* Live preview */}
+                {(() => {
+                  const hr = plan.postContract?.hourlyRate ?? plan.hourlyRate ?? 100;
+                  const sm = plan.postContract?.sessionMinutes ?? 3.5;
+                  const spm = Math.round((plan.sessionsPerWeek || 3) * (52 / 12));
+                  const monthly = Math.round(hr * (sm / 60) * spm);
+                  const ctsHalf = Math.round(monthly * 0.5);
+                  const pifMonthly = Math.round(monthly * 12 * 0.9 / 12);
+                  return (
+                    <View style={{ padding: 10, backgroundColor: 'rgba(91,155,213,0.08)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(91,155,213,0.3)' }}>
+                      <Text style={{ color: PRIMARY, fontSize: 12, fontWeight: '700', marginBottom: 4 }}>LIVE PREVIEW</Text>
+                      <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>Monthly: <Text style={{ color: '#FFF' }}>{formatCurrency(monthly)}/mo</Text></Text>
+                      <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>Pay in full: <Text style={{ color: '#FFF' }}>{formatCurrency(pifMonthly)}/mo</Text></Text>
+                      <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>Commit to Save (half off): <Text style={{ color: GOLD }}>{formatCurrency(ctsHalf)}/mo</Text></Text>
+                    </View>
+                  );
+                })()}
+              </View>
+            )}
 
             <View style={{ height: 20 }} />
           </ScrollView>
