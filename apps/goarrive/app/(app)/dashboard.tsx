@@ -47,39 +47,50 @@ interface FeatureCard {
 
 const FEATURE_CARDS: FeatureCard[] = [
   {
+    title: 'Member Plans',
+    description: 'Build and send personalized plans to your members.',
+    week: '',
+    color: '#C084FC',
+    route: '/(app)/members',
+  },
+  {
     title: 'Movement Library',
     description: 'Browse and manage exercises with video demos and muscle-group tags.',
-    week: 'WEEK 2',
+    week: '',
     color: '#7DD3FC',
     route: '/(app)/movements',
   },
   {
     title: 'Workout Builder',
     description: 'Compose structured workouts and assign them to members.',
-    week: 'WEEK 3',
+    week: '',
     color: '#86EFAC',
     route: '/(app)/workouts',
   },
   {
     title: 'Member List',
     description: 'View and manage your roster, progress, and program assignments.',
-    week: 'WEEK 4',
+    week: '',
     color: '#F5A623',
     route: '/(app)/members',
   },
   {
-    title: 'Admin Config',
-    description: 'Configure rule_versions, fee tiers, and platform settings.',
-    week: 'SLICE 2',
-    color: '#8A95A3',
-    route: '/(app)/admin',
-  },
-  {
     title: 'Billing',
-    description: 'Stripe Connect status, payment tasks, tier split, and policy reference.',
-    week: 'SLICE 3',
+    description: 'Stripe Connect status, payment tasks, and tier split.',
+    week: '',
     color: '#F5A623',
     route: '/(app)/billing',
+  },
+];
+
+/** Admin-only cards shown only to platformAdmin role */
+const ADMIN_CARDS: FeatureCard[] = [
+  {
+    title: 'Admin Config',
+    description: 'Configure rule_versions, fee tiers, and platform settings.',
+    week: '',
+    color: '#8A95A3',
+    route: '/(app)/admin',
   },
 ];
 
@@ -277,7 +288,7 @@ export default function DashboardScreen() {
         </View>
 
         <View style={s.featureList}>
-          {FEATURE_CARDS.map((card) => (
+          {[...FEATURE_CARDS, ...(role === 'platformAdmin' ? ADMIN_CARDS : [])].map((card) => (
             <Pressable
               key={card.title}
               style={({ pressed }) => [s.featureCard, pressed && s.featureCardPressed]}
@@ -289,7 +300,7 @@ export default function DashboardScreen() {
                   <Text style={s.featureDesc}>{card.description}</Text>
                 </View>
                 <View style={s.featureCardRight}>
-                  <Text style={s.featureWeek}>{card.week}</Text>
+                  {card.week ? <Text style={s.featureWeek}>{card.week}</Text> : null}
                   <Icon name="chevron-right" size={16} color="#4A5568" />
                 </View>
               </View>

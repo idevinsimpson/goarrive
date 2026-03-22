@@ -38,7 +38,7 @@ admin.initializeApp();
 const db = admin.firestore(); // IAM: datastore.user granted 2026-03-22
 const messaging = admin.messaging();
 
-// ── Secrets ───────────────────────────────────────────────────────────────────
+// ── Secrets (live mode: STRIPE_SECRET_KEY v8, STRIPE_WEBHOOK_SECRET v4) ─────────
 const stripeSecretKey = defineSecret('STRIPE_SECRET_KEY');
 const stripeWebhookSecret = defineSecret('STRIPE_WEBHOOK_SECRET');
 
@@ -54,7 +54,8 @@ function getTierSplit(activePayingMembers: number): 40 | 35 | 30 {
 
 // ── Helper: get Stripe instance ───────────────────────────────────────────────
 function getStripe(secretKey: string): Stripe {
-  return new Stripe(secretKey, { apiVersion: '2026-02-25.clover' });
+  // Trim whitespace/newlines that Secret Manager may append to the key value
+  return new Stripe(secretKey.trim(), { apiVersion: '2026-02-25.clover' });
 }
 
 // ─── 1. FCM Push Notification on plan_shared ─────────────────────────────────
@@ -285,6 +286,93 @@ export const refreshStripeAccountStatus = onCall(
     });
 
     return { success: true, onboardingStatus };
+  }
+);
+
+// ─── 4b. disconnectStripeAccount ────────────────────────────────────────────
+/**
+ * Disconnects (deletes) a coach's Stripe Express account and clears the
+ * coachStripeAccounts/{coachId} Firestore document so they can reconnect fresh.
+ *
+ * Flow:
+ *   1. Verify caller is the coach (or admin).
+ *   2. Retrieve the stripeAccountId from Firestore.
+ *   3. Call stripe.accounts.del(stripeAccountId) to permanently delete the
+ *      Express account on Stripe's side.  Stripe requires the account to have
+ *      a zero balance; if it doesn't, we return a safe error without touching
+ *      Firestore so the coach can resolve the balance first.
+ *   4. Delete the coachStripeAccounts/{coachId} document so the UI resets to
+ *      "Not connected" and the coach can start fresh with Connect Stripe.
+ *
+ * NOTE: stripe.accounts.del() only works on Express/Custom accounts where the
+ * platform is the controller.  It permanently removes the account and all its
+ * data from Stripe — this is intentional for a full reset.
+ *
+ * ME-001: Requires STRIPE_SECRET_KEY secret.
+ */
+export const disconnectStripeAccount = onCall(
+  { secrets: [stripeSecretKey] },
+  async (request) => {
+    const coachId = request.data?.coachId as string | undefined;
+    if (!coachId) throw new HttpsError('invalid-argument', 'coachId is required');
+
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    // Only the coach themselves (or an admin) may disconnect
+    const callerDoc = await db.collection('users').doc(callerUid).get();
+    const isAdmin = callerDoc.exists && callerDoc.data()?.role === 'admin';
+    if (callerUid !== coachId && !isAdmin) {
+      throw new HttpsError('permission-denied', 'You can only disconnect your own Stripe account');
+    }
+
+    const accountRef = db.collection('coachStripeAccounts').doc(coachId);
+    const accountSnap = await accountRef.get();
+
+    if (!accountSnap.exists) {
+      // Already disconnected — idempotent success
+      return { success: true, message: 'No Stripe account was connected.' };
+    }
+
+    const stripeAccountId = accountSnap.data()!.stripeAccountId as string;
+    const stripe = getStripe(stripeSecretKey.value());
+
+    try {
+      // Attempt to delete the Express account on Stripe
+      await stripe.accounts.del(stripeAccountId);
+    } catch (err: any) {
+      const stripeCode = err?.raw?.code || err?.code || '';
+      const stripeMsg = err?.raw?.message || err?.message || String(err);
+
+      if (
+        stripeCode === 'account_invalid' ||
+        stripeMsg.includes('No such account') ||
+        stripeMsg.includes('does not exist')
+      ) {
+        // Account already deleted on Stripe side — safe to clean up Firestore
+        console.warn('[disconnectStripeAccount] Account not found on Stripe, cleaning Firestore only:', stripeAccountId);
+      } else if (
+        stripeCode === 'balance_insufficient' ||
+        stripeMsg.toLowerCase().includes('balance') ||
+        stripeMsg.toLowerCase().includes('outstanding')
+      ) {
+        // Account has a non-zero balance — cannot delete yet
+        throw new HttpsError(
+          'failed-precondition',
+          'This Stripe account has an outstanding balance and cannot be deleted yet. ' +
+          'Please wait for all pending payouts to complete, then try again.'
+        );
+      } else {
+        // Unknown Stripe error — surface it
+        throw new HttpsError('internal', `Stripe error: ${stripeMsg}`);
+      }
+    }
+
+    // Clear the Firestore record so the UI resets to "Not connected"
+    await accountRef.delete();
+
+    console.log(`[disconnectStripeAccount] Coach ${coachId} disconnected Stripe account ${stripeAccountId}`);
+    return { success: true, message: 'Stripe account disconnected. You can now connect a new account.' };
   }
 );
 

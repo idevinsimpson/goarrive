@@ -62,19 +62,7 @@ export default function AccountScreen({ onClose }: Props) {
           <Text style={s.email}>{user?.email ?? '—'}</Text>
         </View>
 
-        {/* Info cards */}
-        <View style={s.card}>
-          <Text style={s.cardLabel}>Role</Text>
-          <Text style={s.cardValue}>{claims?.role ?? 'unknown'}</Text>
-        </View>
-        <View style={s.card}>
-          <Text style={s.cardLabel}>Coach ID</Text>
-          <Text style={s.cardValue}>{claims?.coachId ?? '—'}</Text>
-        </View>
-        <View style={s.card}>
-          <Text style={s.cardLabel}>Tenant ID</Text>
-          <Text style={s.cardValue}>{claims?.tenantId ?? '—'}</Text>
-        </View>
+
 
         {/* Stripe Connect — coaches only */}
         {(claims?.role === 'coach' || claims?.role === 'admin') && claims?.coachId && (

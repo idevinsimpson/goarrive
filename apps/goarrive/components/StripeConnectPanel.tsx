@@ -5,11 +5,10 @@
  *   - Connection status (connected / not connected)
  *   - Onboarding status (pending / in_progress / complete / restricted)
  *   - chargesEnabled and payoutsEnabled flags
- *   - Action buttons: Connect Stripe / Resume Setup / Refresh Status
+ *   - Action buttons: Connect Stripe / Resume Setup / Refresh Status / Disconnect
  *
- * The actual account creation and onboarding link generation are
- * server-side Cloud Function calls (createStripeConnectLink).
- * This panel calls those functions via the Firebase Functions HTTPS callable.
+ * The actual account creation, onboarding link generation, and disconnect are
+ * server-side Cloud Function calls.
  *
  * ME-001: STRIPE_SECRET_KEY must be set in Cloud Functions environment before
  *         the createStripeConnectLink function can operate.
@@ -17,7 +16,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, Pressable, ActivityIndicator, Platform,
+  View, Text, Pressable, ActivityIndicator, Platform, Alert, Modal,
 } from 'react-native';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
@@ -28,6 +27,7 @@ const MUTED = '#7A8A9A';
 const PRIMARY = '#5B9BD5';
 const ACCENT = '#6EBB7A';
 const GOLD = '#F5A623';
+const DANGER = '#E05252';
 const BORDER = '#2A3347';
 const BG = '#0E1117';
 const CARD_BG = '#161B25';
@@ -41,6 +41,7 @@ export default function StripeConnectPanel({ coachId }: Props) {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
 
   // ── Listen to coachStripeAccounts/{coachId} ──────────────────────────────
   useEffect(() => {
@@ -80,7 +81,6 @@ export default function StripeConnectPanel({ coachId }: Props) {
         if (Platform.OS === 'web') {
           window.location.href = url;
         } else {
-          // React Native: open in browser (expo-linking)
           const Linking = require('expo-linking');
           await Linking.openURL(url);
         }
@@ -90,9 +90,9 @@ export default function StripeConnectPanel({ coachId }: Props) {
     } catch (err: any) {
       const msg = err?.message || String(err);
       if (msg.includes('STRIPE_SECRET_KEY')) {
-        setError('ME-001: STRIPE_SECRET_KEY is not configured in Cloud Functions. Set it with: firebase functions:secrets:set STRIPE_SECRET_KEY');
+        setError('ME-001: STRIPE_SECRET_KEY is not configured in Cloud Functions.');
       } else if (msg.includes('not-found') || msg.includes('NOT_FOUND')) {
-        setError('ME-001: createStripeConnectLink function is not deployed yet. Deploy Cloud Functions first.');
+        setError('ME-001: createStripeConnectLink function is not deployed yet.');
       } else {
         setError(msg);
       }
@@ -112,11 +112,61 @@ export default function StripeConnectPanel({ coachId }: Props) {
         'refreshStripeAccountStatus'
       );
       await refreshStatus({ coachId });
-      // Firestore listener will update account state automatically
     } catch (err: any) {
       const msg = err?.message || String(err);
       if (msg.includes('not-found') || msg.includes('NOT_FOUND')) {
         setError('ME-001: refreshStripeAccountStatus function is not deployed yet.');
+      } else {
+        setError(msg);
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  }, [coachId]);
+
+  // ── Disconnect: show confirmation first ──────────────────────────────────
+  const handleDisconnectPress = useCallback(() => {
+    if (Platform.OS === 'web') {
+      // Web: use custom modal (window.confirm is blocked in some contexts)
+      setShowDisconnectConfirm(true);
+    } else {
+      // Native: use Alert
+      Alert.alert(
+        'Disconnect Stripe Account',
+        'This will permanently delete your Stripe Express account and remove all connection data. ' +
+        'Any pending payouts must complete first.\n\nYou can reconnect with a new account afterwards.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Disconnect',
+            style: 'destructive',
+            onPress: performDisconnect,
+          },
+        ]
+      );
+    }
+  }, []);
+
+  const performDisconnect = useCallback(async () => {
+    setShowDisconnectConfirm(false);
+    setActionLoading(true);
+    setError(null);
+    try {
+      const functions = getFunctions();
+      const disconnect = httpsCallable<{ coachId: string }, { success: boolean; message: string }>(
+        functions,
+        'disconnectStripeAccount'
+      );
+      await disconnect({ coachId });
+      // Firestore listener will clear account state automatically
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      if (msg.includes('outstanding balance') || msg.includes('failed-precondition')) {
+        setError(
+          'Your Stripe account has a pending balance. Wait for all payouts to complete, then try again.'
+        );
+      } else if (msg.includes('not-found') || msg.includes('NOT_FOUND')) {
+        setError('ME-001: disconnectStripeAccount function is not deployed yet.');
       } else {
         setError(msg);
       }
@@ -140,7 +190,6 @@ export default function StripeConnectPanel({ coachId }: Props) {
   const payoutsEnabled = account?.payoutsEnabled ?? false;
   const requirementsDue = account?.requirementsDue ?? [];
 
-  // Status colour
   const statusColor = !isConnected
     ? MUTED
     : onboardingComplete && chargesEnabled && payoutsEnabled
@@ -194,7 +243,7 @@ export default function StripeConnectPanel({ coachId }: Props) {
       {/* Error */}
       {error && (
         <View style={{ padding: 10, backgroundColor: 'rgba(224,82,82,0.08)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(224,82,82,0.25)', marginBottom: 12 }}>
-          <Text style={{ color: '#E05252', fontSize: 12, lineHeight: 18 }}>{error}</Text>
+          <Text style={{ color: DANGER, fontSize: 12, lineHeight: 18 }}>{error}</Text>
         </View>
       )}
 
@@ -227,12 +276,78 @@ export default function StripeConnectPanel({ coachId }: Props) {
             onPress={handleRefresh}
           />
         )}
+        {isConnected && (
+          <ActionButton
+            label="Disconnect Stripe"
+            icon="✕"
+            color={DANGER}
+            loading={actionLoading}
+            onPress={handleDisconnectPress}
+          />
+        )}
       </View>
 
-      {/* ME note */}
-      <Text style={{ color: '#4A5568', fontSize: 10, marginTop: 12, lineHeight: 15 }}>
-        {'ME-001: Stripe secret key and webhook signing secret must be configured in Cloud Functions environment before payments go live.'}
-      </Text>
+      {/* Web disconnect confirmation modal */}
+      {Platform.OS === 'web' && showDisconnectConfirm && (
+        <Modal transparent animationType="fade" visible={showDisconnectConfirm}>
+          <View style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.7)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 24,
+          }}>
+            <View style={{
+              backgroundColor: '#1A2030',
+              borderRadius: 14,
+              padding: 24,
+              maxWidth: 360,
+              width: '100%',
+              borderWidth: 1,
+              borderColor: DANGER + '44',
+            }}>
+              <Text style={{ color: '#FFF', fontSize: 16, fontWeight: '700', marginBottom: 10 }}>
+                Disconnect Stripe Account?
+              </Text>
+              <Text style={{ color: MUTED, fontSize: 13, lineHeight: 20, marginBottom: 20 }}>
+                This will permanently delete your Stripe Express account and remove all connection data.
+                Any pending payouts must complete first.{'\n\n'}
+                You can reconnect with a new account afterwards.
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <Pressable
+                  onPress={() => setShowDisconnectConfirm(false)}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 12,
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    borderColor: BORDER,
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text style={{ color: MUTED, fontWeight: '600' }}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  onPress={performDisconnect}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 12,
+                    borderRadius: 10,
+                    backgroundColor: DANGER + '22',
+                    borderWidth: 1,
+                    borderColor: DANGER + '55',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text style={{ color: DANGER, fontWeight: '700' }}>Disconnect</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
     </View>
   );
 }
@@ -242,7 +357,7 @@ export default function StripeConnectPanel({ coachId }: Props) {
 function StatusRow({
   label, value, mono, ok,
 }: { label: string; value: string; mono?: boolean; ok?: boolean }) {
-  const valueColor = ok === true ? ACCENT : ok === false ? '#E05252' : MUTED;
+  const valueColor = ok === true ? ACCENT : ok === false ? DANGER : MUTED;
   return (
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
       <Text style={{ color: MUTED, fontSize: 12 }}>{label}</Text>
