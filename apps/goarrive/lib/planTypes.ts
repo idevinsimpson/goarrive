@@ -183,6 +183,12 @@ export interface PostContract {
   sessionMinutes: number;
   /** Monthly cost for nutrition add-on in the post-contract phase. Default $25. */
   nutritionMonthlyCost: number;
+  /**
+   * Optional override for the Commit to Save monthly savings amount in the
+   * post-contract phase.  When undefined, defaults to half the calculated
+   * monthly rate (monthlyRate × 0.5).
+   */
+  ctsMonthlySavings?: number;
 }
 
 // ─── Full plan data ───────────────────────────────────────────────────────────

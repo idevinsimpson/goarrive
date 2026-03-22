@@ -91,8 +91,12 @@ export function FcmPermissionPrompt({ uid }: { uid: string | null | undefined })
     if (typeof window === 'undefined' || !('Notification' in window)) return;
     if (Notification.permission !== 'default') return;
     try {
+      // Permanently hide after 3 lifetime dismissals
+      const dismissCount = parseInt(localStorage.getItem('fcm_prompt_dismiss_count') ?? '0', 10);
+      if (dismissCount >= 3) return;
+      // Also hide for the rest of this session if already dismissed once today
       if (sessionStorage.getItem('fcm_prompt_dismissed') === '1') return;
-    } catch (_) { /* sessionStorage unavailable */ }
+    } catch (_) { /* storage unavailable */ }
     setVisible(true);
   }, [uid]);
 
@@ -112,7 +116,11 @@ export function FcmPermissionPrompt({ uid }: { uid: string | null | undefined })
 
   function handleDismiss() {
     setVisible(false);
-    try { sessionStorage.setItem('fcm_prompt_dismissed', '1'); } catch (_) { /* ignore */ }
+    try {
+      sessionStorage.setItem('fcm_prompt_dismissed', '1');
+      const prev = parseInt(localStorage.getItem('fcm_prompt_dismiss_count') ?? '0', 10);
+      localStorage.setItem('fcm_prompt_dismiss_count', String(prev + 1));
+    } catch (_) { /* ignore */ }
   }
 
   return (

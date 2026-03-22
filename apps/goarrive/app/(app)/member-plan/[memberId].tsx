@@ -1551,8 +1551,8 @@ function PostContractCard({ plan, isCoach, sessionsPerMonth }: {
   // Pay-in-full: 10% off yearly
   const payInFullMonthly = Math.round(yearlyRate * 0.9 / 12);
   const payInFullSavings = Math.round(yearlyRate - yearlyRate * 0.9);
-  // Commit to Save: half off monthly
-  const ctsMonthly = Math.round(monthlyRate * 0.5);
+  // Commit to Save: use coach override if set, otherwise half off monthly
+  const ctsMonthly = pc?.ctsMonthlySavings != null ? pc.ctsMonthlySavings : Math.round(monthlyRate * 0.5);
   // Nutrition add-on
   const withNutMonthly = monthlyRate + nutCost;
 
@@ -1795,6 +1795,15 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
   const [showPricing, setShowPricing] = useState(false);
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [openGuidanceKey, setOpenGuidanceKey] = useState<string | null>(null);
+  // Post-contract unsaved-changes indicator
+  const [pcSaved, setPcSaved] = useState<'idle' | 'saved'>('idle');
+  const pcSavedTimer = useRef<any>(null);
+  const onPcChange = (updates: Partial<MemberPlanData>) => {
+    onChange(updates);
+    setPcSaved('saved');
+    if (pcSavedTimer.current) clearTimeout(pcSavedTimer.current);
+    pcSavedTimer.current = setTimeout(() => setPcSaved('idle'), 2500);
+  };
 
   if (!visible) return null;
 
@@ -2040,7 +2049,12 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
             {/* ── Post-Contract Settings ── */}
             {plan.postContract?.enabled && (
               <View style={{ marginTop: 16, borderTopWidth: 1, borderTopColor: BORDER, paddingTop: 12 }}>
-                <Text style={{ color: MUTED, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 10 }}>ONGOING SUPPORT PRICING</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <Text style={{ color: MUTED, fontSize: 11, fontWeight: '700', letterSpacing: 1.2 }}>ONGOING SUPPORT PRICING</Text>
+                  {pcSaved === 'saved' && (
+                    <Text style={{ color: '#6EBB7A', fontSize: 11, fontWeight: '600' }}>✓ Saved</Text>
+                  )}
+                </View>
 
                 {/* Hourly rate */}
                 <Text style={dc.label}>Post-contract hourly rate</Text>
@@ -2052,7 +2066,7 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                     keyboardType="number-pad" selectTextOnFocus
                     onChangeText={t => {
                       const n = parseFloat(t);
-                      if (!isNaN(n)) onChange({ postContract: { ...(plan.postContract || { hourlyRate: plan.hourlyRate ?? 100, sessionMinutes: 3.5, nutritionMonthlyCost: 25, enabled: true }), hourlyRate: n } });
+                      if (!isNaN(n)) onPcChange({ postContract: { ...(plan.postContract || { hourlyRate: plan.hourlyRate ?? 100, sessionMinutes: 3.5, nutritionMonthlyCost: 25, enabled: true }), hourlyRate: n } });
                     }}
                   />
                   <Text style={{ color: MUTED, fontSize: 13 }}>/hr</Text>
@@ -2068,7 +2082,7 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                     keyboardType="decimal-pad" selectTextOnFocus
                     onChangeText={t => {
                       const n = parseFloat(t);
-                      if (!isNaN(n)) onChange({ postContract: { ...(plan.postContract || { hourlyRate: plan.hourlyRate ?? 100, sessionMinutes: 3.5, nutritionMonthlyCost: 25, enabled: true }), sessionMinutes: n } });
+                      if (!isNaN(n)) onPcChange({ postContract: { ...(plan.postContract || { hourlyRate: plan.hourlyRate ?? 100, sessionMinutes: 3.5, nutritionMonthlyCost: 25, enabled: true }), sessionMinutes: n } });
                     }}
                   />
                   <Text style={{ color: MUTED, fontSize: 13 }}>min</Text>
@@ -2084,7 +2098,32 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                     keyboardType="number-pad" selectTextOnFocus
                     onChangeText={t => {
                       const n = parseFloat(t);
-                      if (!isNaN(n)) onChange({ postContract: { ...(plan.postContract || { hourlyRate: plan.hourlyRate ?? 100, sessionMinutes: 3.5, nutritionMonthlyCost: 25, enabled: true }), nutritionMonthlyCost: n } });
+                      if (!isNaN(n)) onPcChange({ postContract: { ...(plan.postContract || { hourlyRate: plan.hourlyRate ?? 100, sessionMinutes: 3.5, nutritionMonthlyCost: 25, enabled: true }), nutritionMonthlyCost: n } });
+                    }}
+                  />
+                  <Text style={{ color: MUTED, fontSize: 13 }}>/mo</Text>
+                </View>
+
+                {/* Commit to Save override */}
+                <Text style={dc.label}>Commit to Save monthly rate (optional override)</Text>
+                <Text style={{ color: MUTED, fontSize: 11, marginBottom: 6, marginTop: -8 }}>Leave blank to auto-calculate as half the monthly rate</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                  <Text style={{ color: MUTED, fontSize: 14 }}>$</Text>
+                  <TextInput
+                    style={{ flex: 1, backgroundColor: BG, borderWidth: 1, borderColor: BORDER, borderRadius: 8, padding: 10, color: '#FFF', fontSize: 15 }}
+                    value={plan.postContract?.ctsMonthlySavings != null ? String(plan.postContract.ctsMonthlySavings) : ''}
+                    placeholder="Auto (half monthly)"
+                    placeholderTextColor={MUTED}
+                    keyboardType="number-pad" selectTextOnFocus
+                    onChangeText={t => {
+                      const base = plan.postContract || { hourlyRate: plan.hourlyRate ?? 100, sessionMinutes: 3.5, nutritionMonthlyCost: 25, enabled: true };
+                      if (t === '' || t === null) {
+                        const { ctsMonthlySavings: _removed, ...rest } = { ...base } as any;
+                        onPcChange({ postContract: rest });
+                      } else {
+                        const n = parseFloat(t);
+                        if (!isNaN(n)) onPcChange({ postContract: { ...base, ctsMonthlySavings: n } });
+                      }
                     }}
                   />
                   <Text style={{ color: MUTED, fontSize: 13 }}>/mo</Text>
@@ -2096,7 +2135,7 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                   const sm = plan.postContract?.sessionMinutes ?? 3.5;
                   const spm = Math.round((plan.sessionsPerWeek || 3) * (52 / 12));
                   const monthly = Math.round(hr * (sm / 60) * spm);
-                  const ctsHalf = Math.round(monthly * 0.5);
+                  const ctsHalf = plan.postContract?.ctsMonthlySavings ?? Math.round(monthly * 0.5);
                   const pifMonthly = Math.round(monthly * 12 * 0.9 / 12);
                   return (
                     <View style={{ padding: 10, backgroundColor: 'rgba(91,155,213,0.08)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(91,155,213,0.3)' }}>

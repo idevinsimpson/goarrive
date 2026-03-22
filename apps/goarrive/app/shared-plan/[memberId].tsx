@@ -15,7 +15,7 @@ import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firesto
 import {
   MemberPlanData, DayPlan, goalConfig, typeColors, phaseColorList,
   formatCurrency, calculatePricing, monthsToWeeks, PricingResult,
-  getGoalEmoji, getGoalColor,
+  getGoalEmoji, getGoalColor, PostContract,
 } from '../../lib/planTypes';
 
 // ─── Helpers to normalize old/new field names ───────────────────────────────
@@ -403,12 +403,18 @@ export default function SharedPlanScreen() {
         ) : null}
 
         {/* ── UNIFIED COACHING INVESTMENT (matches coach's Member View) ── */}
-        {activePlan.showInvestment !== false && pricing && (
-          <CoachingInvestmentSection
-            plan={activePlan}
-            pricing={pricing}
-            onChange={handleLocalChange}
-          />
+        {pricing && (
+          (activePlan.showInvestment !== false ||
+            (activePlan.commitToSave?.enabled ?? false) ||
+            (activePlan.nutrition?.enabled ?? false) ||
+            (activePlan.postContract?.enabled ?? false)
+          ) && (
+            <CoachingInvestmentSection
+              plan={activePlan}
+              pricing={pricing}
+              onChange={handleLocalChange}
+            />
+          )
         )}
 
         {/* Footer */}
@@ -442,7 +448,11 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
   plan: MemberPlanData; pricing: PricingResult;
   onChange: (updates: Partial<MemberPlanData>) => void;
 }) {
-  if (plan.showInvestment === false) return null;
+  const pcEnabled = plan.postContract?.enabled ?? false;
+  const ctsEnabledCheck = plan.commitToSave?.enabled ?? false;
+  const nutEnabledCheck = plan.nutrition?.enabled ?? false;
+  const hasVisibleAddOns = ctsEnabledCheck || nutEnabledCheck || pcEnabled;
+  if (plan.showInvestment === false && !hasVisibleAddOns) return null;
 
   const cts = plan.commitToSave || getCts(plan);
   const nut = plan.nutrition || getNutrition(plan);
@@ -542,15 +552,24 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
         />
       )}
 
-      <HowWeGotTheseNumbers plan={plan} pricing={pricing} />
+      {plan.showInvestment !== false && <HowWeGotTheseNumbers plan={plan} pricing={pricing} />}
 
-      {/* Referral Rewards */}
-      <View style={[inv.statsRow, { marginTop: 12, paddingVertical: 14, paddingHorizontal: 16 }]}>
-        <Text style={{ color: MUTED, fontSize: 13, lineHeight: 19, textAlign: 'center' }}>
-          <Text style={{ color: GOLD, fontWeight: '700' }}>Referral Rewards: </Text>
-          Invite 3 friends into a yearly plan and your base membership is refunded.
-        </Text>
-      </View>
+      {plan.showInvestment !== false && (
+        <View style={[inv.statsRow, { marginTop: 12, paddingVertical: 14, paddingHorizontal: 16 }]}>
+          <Text style={{ color: MUTED, fontSize: 13, lineHeight: 19, textAlign: 'center' }}>
+            <Text style={{ color: GOLD, fontWeight: '700' }}>Referral Rewards: </Text>
+            Invite 3 friends into a yearly plan and your base membership is refunded.
+          </Text>
+        </View>
+      )}
+
+      {/* ── Post-Contract Ongoing Support card ── */}
+      {pcEnabled && (
+        <PostContractCard
+          plan={plan}
+          sessionsPerMonth={Math.round((plan.sessionsPerWeek || 3) * (52 / 12))}
+        />
+      )}
     </View>
   );
 }
@@ -671,6 +690,80 @@ function NutritionAddOnCard({ plan, isActive, onToggle, monthlyPrice, nutCost, p
           </View>
         </View>
       )}
+    </View>
+  );
+}
+
+function PostContractCard({ plan, sessionsPerMonth }: {
+  plan: MemberPlanData; sessionsPerMonth: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const pc = plan.postContract;
+  const hourlyRate = pc?.hourlyRate ?? (plan as any).hourlyRate ?? 100;
+  const sessionMinutes = pc?.sessionMinutes ?? 3.5;
+  const nutCost = pc?.nutritionMonthlyCost ?? 25;
+  const nutEnabled = plan.nutrition?.enabled ?? false;
+  const monthlyRate = Math.round(hourlyRate * (sessionMinutes / 60) * sessionsPerMonth);
+  const yearlyRate = monthlyRate * 12;
+  const payInFullMonthly = Math.round(yearlyRate * 0.9 / 12);
+  const payInFullSavings = Math.round(yearlyRate - yearlyRate * 0.9);
+  const ctsMonthly = pc?.ctsMonthlySavings != null ? pc.ctsMonthlySavings : Math.round(monthlyRate * 0.5);
+  const withNutMonthly = monthlyRate + nutCost;
+  return (
+    <View style={[inv.addonCard, { borderColor: 'rgba(91,155,213,0.4)', backgroundColor: 'rgba(91,155,213,0.05)', marginTop: 12 }]}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
+        <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(91,155,213,0.2)', alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ fontSize: 16 }}>🔄</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: '#FFF', fontSize: 15, fontWeight: '700', fontFamily: FH }}>Ongoing Support</Text>
+          <Text style={{ color: PRIMARY, fontSize: 12, marginTop: 2 }}>After your contract · Month-to-month</Text>
+          <Text style={{ color: MUTED, fontSize: 13, lineHeight: 19, marginTop: 6 }}>
+            You've built the foundation. Ongoing support keeps you accountable, progressing, and connected to your coach — on your terms.
+          </Text>
+          <Pressable onPress={() => setExpanded(!expanded)} style={{ marginTop: 6 }}>
+            <Text style={{ color: PRIMARY, fontSize: 13, fontWeight: '600' }}>
+              {expanded ? 'Hide details ▴' : 'See your ongoing rate ▾'}
+            </Text>
+          </Pressable>
+          {expanded && (
+            <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: BORDER }}>
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
+                <View style={[inv.priceCard, { flex: 1 }]}>
+                  <Text style={inv.priceLabel}>MONTHLY</Text>
+                  <Text style={inv.priceAmount}>{formatCurrency(monthlyRate)}<Text style={inv.priceSuffix}>/mo</Text></Text>
+                  <Text style={inv.priceDetail}>Cancel anytime</Text>
+                </View>
+                <View style={[inv.priceCard, { flex: 1, borderColor: GOLD_BORDER }]}>
+                  <Text style={[inv.priceLabel, { color: GOLD }]}>PAY IN FULL</Text>
+                  <Text style={inv.priceAmount}>{formatCurrency(payInFullMonthly)}<Text style={inv.priceSuffix}>/mo</Text></Text>
+                  <Text style={{ color: ACCENT, fontSize: 12, fontWeight: '600', marginTop: 2 }}>Save {formatCurrency(payInFullSavings)}/yr</Text>
+                </View>
+              </View>
+              <View style={{ padding: 10, backgroundColor: GOLD_BG, borderRadius: 8, borderWidth: 1, borderColor: GOLD_BORDER, marginBottom: 8 }}>
+                <Text style={{ color: GOLD, fontSize: 13, fontWeight: '700', marginBottom: 2 }}>💡 Commit to Save — Half Off</Text>
+                <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
+                  Stay consistent and lock in {formatCurrency(ctsMonthly)}/mo — half your standard monthly rate. The same accountability rules apply.
+                </Text>
+              </View>
+              {nutEnabled && (
+                <View style={{ padding: 10, backgroundColor: 'rgba(110,187,122,0.08)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(110,187,122,0.3)', marginBottom: 8 }}>
+                  <Text style={{ color: ACCENT, fontSize: 13, fontWeight: '700', marginBottom: 2 }}>🥗 Nutrition Add-On</Text>
+                  <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
+                    Continue your nutrition coaching for +{formatCurrency(nutCost)}/mo. New monthly: {formatCurrency(withNutMonthly)}.
+                  </Text>
+                </View>
+              )}
+              <View style={{ padding: 10, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, borderWidth: 1, borderColor: BORDER }}>
+                <Text style={{ color: GOLD, fontSize: 13, fontWeight: '700', marginBottom: 2 }}>🎁 Referral Clock Resets</Text>
+                <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
+                  Refer 3 friends into a yearly plan within {plan.contractMonths || 12} months and your base membership is refunded — same as your original contract.
+                </Text>
+              </View>
+            </View>
+          )}
+        </View>
+      </View>
     </View>
   );
 }
