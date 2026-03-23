@@ -85,6 +85,16 @@ const messaging = admin.messaging();
 // ── Secrets (live mode: STRIPE_SECRET_KEY v8, STRIPE_WEBHOOK_SECRET v4) ─────────
 const stripeSecretKey = (0, params_1.defineSecret)('STRIPE_SECRET_KEY');
 const stripeWebhookSecret = (0, params_1.defineSecret)('STRIPE_WEBHOOK_SECRET');
+// ── Zoom Secrets ─────────────────────────────────────────────────────────────
+const zoomAccountId = (0, params_1.defineSecret)('ZOOM_ACCOUNT_ID');
+const zoomClientId = (0, params_1.defineSecret)('ZOOM_CLIENT_ID');
+const zoomClientSecret = (0, params_1.defineSecret)('ZOOM_CLIENT_SECRET');
+// ZOOM_WEBHOOK_SECRET is defined near zoomWebhook CF (line ~2858)
+// ── Notification Secrets ─────────────────────────────────────────────────────
+const emailApiKey = (0, params_1.defineSecret)('EMAIL_API_KEY');
+const twilioAccountSid = (0, params_1.defineSecret)('TWILIO_ACCOUNT_SID');
+const twilioAuthToken = (0, params_1.defineSecret)('TWILIO_AUTH_TOKEN');
+const twilioFromNumber = (0, params_1.defineSecret)('TWILIO_FROM_NUMBER');
 // ── Tier split config (GoArrive share percent) ────────────────────────────────
 // 40% for coaches with < 5 active paying members
 // 35% for coaches with 5–9 active paying members
@@ -1947,7 +1957,7 @@ exports.generateUpcomingInstances = (0, scheduler_1.onSchedule)({ schedule: '0 2
     console.log(`[generateUpcomingInstances] Generated ${totalGenerated} new instances for ${slotsSnap.size} active slots`);
 });
 // ─── 17. allocateSessionInstance — Assign a Zoom room to a session instance ──
-exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber] }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -2059,7 +2069,7 @@ exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1' },
     }
     // Create Zoom meeting via provider (real or mock based on config)
     const memberName = instance.memberName || 'Member';
-    const zoomProvider = (0, zoom_1.getZoomProvider)();
+    const zoomProvider = (0, zoom_1.getZoomProvider)({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
     let meeting;
     try {
         meeting = await zoomProvider.createMeeting({
@@ -2147,7 +2157,7 @@ exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1' },
     return { success: true, roomLabel: allocatedRoom.label, meetingId: meeting.meetingId, providerMode: zoomProvider.mode };
 });
 // ─── 18. allocateAllPendingInstances — Batch allocate all unallocated instances ──
-exports.allocateAllPendingInstances = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+exports.allocateAllPendingInstances = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber] }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -2199,7 +2209,7 @@ exports.allocateAllPendingInstances = (0, https_1.onCall)({ region: 'us-central1
                 }
             }
             if (!hasConflict) {
-                const batchProvider = (0, zoom_1.getZoomProvider)();
+                const batchProvider = (0, zoom_1.getZoomProvider)({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
                 try {
                     const meeting = await batchProvider.createMeeting({
                         topic: `GoArrive Session: ${instance.memberName || 'Member'}`,
@@ -2269,7 +2279,7 @@ exports.allocateAllPendingInstances = (0, https_1.onCall)({ region: 'us-central1
     return { success: true, allocated, failed, total: instances.length };
 });
 // ─── 19. rescheduleInstance — Move a single occurrence to a different date/time ──
-exports.rescheduleInstance = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+exports.rescheduleInstance = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber] }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -2295,7 +2305,7 @@ exports.rescheduleInstance = (0, https_1.onCall)({ region: 'us-central1' }, asyn
     const existingMeetingId = instance.zoomMeetingId;
     // Delete existing Zoom meeting if one was allocated
     if (existingMeetingId) {
-        const provider = (0, zoom_1.getZoomProvider)();
+        const provider = (0, zoom_1.getZoomProvider)({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
         try {
             await provider.deleteMeeting(existingMeetingId);
             await writeSessionEvent({
@@ -2339,7 +2349,7 @@ exports.rescheduleInstance = (0, https_1.onCall)({ region: 'us-central1' }, asyn
         occurrenceId: instanceId,
         eventType: 'session_rescheduled',
         source: rescheduleSource,
-        providerMode: existingMeetingId ? (0, zoom_1.getZoomProvider)().mode : 'mock',
+        providerMode: existingMeetingId ? (0, zoom_1.getZoomProvider)({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() }).mode : 'mock',
         timestamp: firestore_2.FieldValue.serverTimestamp(),
         payload: { from: `${originalDate} ${originalTime}`, to: `${newDate} ${newStartTime}` },
     });
@@ -2361,7 +2371,7 @@ exports.rescheduleInstance = (0, https_1.onCall)({ region: 'us-central1' }, asyn
     return { success: true };
 });
 // ─── 20. cancelInstance — Cancel a single session instance ───────────────────
-exports.cancelInstance = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+exports.cancelInstance = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret] }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -2381,7 +2391,7 @@ exports.cancelInstance = (0, https_1.onCall)({ region: 'us-central1' }, async (r
     // Delete existing Zoom meeting if one was allocated
     const cancelMeetingId = instance.zoomMeetingId;
     if (cancelMeetingId) {
-        const provider = (0, zoom_1.getZoomProvider)();
+        const provider = (0, zoom_1.getZoomProvider)({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
         try {
             await provider.deleteMeeting(cancelMeetingId);
             await writeSessionEvent({
@@ -2406,7 +2416,7 @@ exports.cancelInstance = (0, https_1.onCall)({ region: 'us-central1' }, async (r
         occurrenceId: instanceId,
         eventType: 'session_cancelled',
         source: cancelSource,
-        providerMode: cancelMeetingId ? (0, zoom_1.getZoomProvider)().mode : 'mock',
+        providerMode: cancelMeetingId ? (0, zoom_1.getZoomProvider)({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() }).mode : 'mock',
         timestamp: firestore_2.FieldValue.serverTimestamp(),
         payload: { meetingId: cancelMeetingId || null },
     });
@@ -2645,9 +2655,11 @@ const notifications_1 = require("./notifications");
 const reminders_1 = require("./reminders");
 const zoom_2 = require("./zoom");
 // ─── 22. getSystemHealth — Provider health check for admin dashboard ────────
-exports.getSystemHealth = (0, https_1.onCall)({ region: 'us-central1' }, async () => {
+exports.getSystemHealth = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber] }, async () => {
     var _a, _b, _c;
-    const zoomProvider = (0, zoom_1.getZoomProvider)();
+    // Reset cached providers so health check reflects current secret availability
+    (0, notifications_1.resetNotificationProviders)();
+    const zoomProvider = (0, zoom_1.getZoomProvider)({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
     const notifHealth = (0, notifications_1.getProviderHealth)();
     // Count recent dead-letter items
     const dlSnap = await db.collection('dead_letter')
@@ -2735,7 +2747,7 @@ exports.getSystemHealth = (0, https_1.onCall)({ region: 'us-central1' }, async (
     };
 });
 // ─── 23. processReminders — Scheduled: process due reminder jobs every 5 min ──
-exports.processReminders = (0, scheduler_1.onSchedule)({ schedule: 'every 5 minutes', timeZone: 'UTC', region: 'us-central1' }, async () => {
+exports.processReminders = (0, scheduler_1.onSchedule)({ schedule: 'every 5 minutes', timeZone: 'UTC', region: 'us-central1', secrets: [emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber] }, async () => {
     console.log('[processReminders] Starting reminder processing cycle');
     const stats = await (0, reminders_1.processDueReminders)();
     console.log(`[processReminders] Done: ${stats.processed} processed, ${stats.sent} sent, ${stats.failed} failed, ${stats.skipped} skipped`);
@@ -2929,7 +2941,7 @@ const PHASE_HOSTING_RULES = {
         personalZoomRequired: false,
     },
 };
-exports.updateMemberGuidancePhase = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+exports.updateMemberGuidancePhase = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret] }, async (request) => {
     var _a, _b;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -3025,7 +3037,7 @@ exports.updateMemberGuidancePhase = (0, https_1.onCall)({ region: 'us-central1' 
         occurrenceId: `phase_change_${memberId}_${Date.now()}`,
         eventType: 'phase_transition',
         source: 'coach_action',
-        providerMode: (0, zoom_1.getZoomProvider)().mode,
+        providerMode: (0, zoom_1.getZoomProvider)({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() }).mode,
         timestamp: firestore_2.FieldValue.serverTimestamp(),
         payload: {
             memberId,

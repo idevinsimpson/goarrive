@@ -44,6 +44,7 @@ exports.RealSmsProvider = exports.RealEmailProvider = exports.MockPushProvider =
 exports.getEmailProvider = getEmailProvider;
 exports.getSmsProvider = getSmsProvider;
 exports.getPushProvider = getPushProvider;
+exports.resetNotificationProviders = resetNotificationProviders;
 exports.getProviderHealth = getProviderHealth;
 exports.sendNotification = sendNotification;
 exports.resetProviders = resetProviders;
@@ -265,6 +266,15 @@ function getPushProvider() {
         return _pushProvider;
     _pushProvider = new MockPushProvider();
     return _pushProvider;
+}
+/**
+ * Reset cached providers so next call re-resolves from env/config.
+ * Call at the start of CFs that declare secrets to ensure fresh resolution.
+ */
+function resetNotificationProviders() {
+    _emailProvider = null;
+    _smsProvider = null;
+    _pushProvider = null;
 }
 function getProviderHealth() {
     return {

@@ -26,6 +26,7 @@ import {
   setDoc,
   Timestamp,
 } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../../lib/firebase';
 import { CoachZoomConnection } from '../../lib/schedulingTypes';
 
@@ -114,6 +115,7 @@ function CoachZoomPanel({ coachId }: { coachId: string }) {
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
   const [emailInput, setEmailInput] = useState('');
+  const [zoomMode, setZoomMode] = useState<'mock' | 'live' | 'unknown'>('unknown');
 
   const fetchConnection = useCallback(async () => {
     try {
@@ -134,6 +136,21 @@ function CoachZoomPanel({ coachId }: { coachId: string }) {
   }, [coachId]);
 
   useEffect(() => { fetchConnection(); }, [fetchConnection]);
+
+  // Check Zoom provider mode via getSystemHealth
+  useEffect(() => {
+    (async () => {
+      try {
+        const fns = getFunctions(undefined, 'us-central1');
+        const getHealth = httpsCallable(fns, 'getSystemHealth');
+        const res = await getHealth();
+        const data = res.data as any;
+        setZoomMode(data?.zoom?.mode === 'live' ? 'live' : 'mock');
+      } catch {
+        setZoomMode('unknown');
+      }
+    })();
+  }, []);
 
   async function handleConnect() {
     if (!emailInput.trim()) {
@@ -294,13 +311,17 @@ function CoachZoomPanel({ coachId }: { coachId: string }) {
         </View>
       )}
 
-      {/* Mock mode notice */}
-      <View style={zs.mockNotice}>
-        <Icon name="shield" size={12} color={TEXT_MUTED} />
-        <Text style={zs.mockText}>
-          Zoom integration is in setup mode. Your connection details are saved and will activate when live credentials are configured.
-        </Text>
-      </View>
+      {/* Provider mode notice */}
+      {zoomMode !== 'live' && (
+        <View style={zs.mockNotice}>
+          <Icon name="shield" size={12} color={TEXT_MUTED} />
+          <Text style={zs.mockText}>
+            {zoomMode === 'mock'
+              ? 'Zoom integration is in setup mode. Your connection details are saved and will activate when live credentials are configured.'
+              : 'Checking Zoom connection status...'}
+          </Text>
+        </View>
+      )}
     </View>
   );
 }

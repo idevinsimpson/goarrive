@@ -326,6 +326,16 @@ export function getPushProvider(): NotificationProvider {
   return _pushProvider;
 }
 
+/**
+ * Reset cached providers so next call re-resolves from env/config.
+ * Call at the start of CFs that declare secrets to ensure fresh resolution.
+ */
+export function resetNotificationProviders(): void {
+  _emailProvider = null;
+  _smsProvider = null;
+  _pushProvider = null;
+}
+
 export function getProviderHealth(): {
   email: { mode: 'mock' | 'live'; name: string };
   sms: { mode: 'mock' | 'live'; name: string };

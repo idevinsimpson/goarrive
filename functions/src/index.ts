@@ -57,6 +57,18 @@ const messaging = admin.messaging();
 const stripeSecretKey = defineSecret('STRIPE_SECRET_KEY');
 const stripeWebhookSecret = defineSecret('STRIPE_WEBHOOK_SECRET');
 
+// ── Zoom Secrets ─────────────────────────────────────────────────────────────
+const zoomAccountId = defineSecret('ZOOM_ACCOUNT_ID');
+const zoomClientId = defineSecret('ZOOM_CLIENT_ID');
+const zoomClientSecret = defineSecret('ZOOM_CLIENT_SECRET');
+// ZOOM_WEBHOOK_SECRET is defined near zoomWebhook CF (line ~2858)
+
+// ── Notification Secrets ─────────────────────────────────────────────────────
+const emailApiKey = defineSecret('EMAIL_API_KEY');
+const twilioAccountSid = defineSecret('TWILIO_ACCOUNT_SID');
+const twilioAuthToken = defineSecret('TWILIO_AUTH_TOKEN');
+const twilioFromNumber = defineSecret('TWILIO_FROM_NUMBER');
+
 // ── Tier split config (GoArrive share percent) ────────────────────────────────
 // 40% for coaches with < 5 active paying members
 // 35% for coaches with 5–9 active paying members
@@ -2305,7 +2317,7 @@ export const generateUpcomingInstances = onSchedule(
 
 // ─── 17. allocateSessionInstance — Assign a Zoom room to a session instance ──
 export const allocateSessionInstance = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber] },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -2435,7 +2447,7 @@ export const allocateSessionInstance = onCall(
 
     // Create Zoom meeting via provider (real or mock based on config)
     const memberName = instance.memberName || 'Member';
-    const zoomProvider = getZoomProvider();
+    const zoomProvider = getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
     let meeting;
     try {
       meeting = await zoomProvider.createMeeting({
@@ -2531,7 +2543,7 @@ export const allocateSessionInstance = onCall(
 
 // ─── 18. allocateAllPendingInstances — Batch allocate all unallocated instances ──
 export const allocateAllPendingInstances = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber] },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -2592,7 +2604,7 @@ export const allocateAllPendingInstances = onCall(
         }
 
         if (!hasConflict) {
-          const batchProvider = getZoomProvider();
+          const batchProvider = getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
           try {
             const meeting = await batchProvider.createMeeting({
               topic: `GoArrive Session: ${instance.memberName || 'Member'}`,
@@ -2669,7 +2681,7 @@ export const allocateAllPendingInstances = onCall(
 
 // ─── 19. rescheduleInstance — Move a single occurrence to a different date/time ──
 export const rescheduleInstance = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber] },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -2704,7 +2716,7 @@ export const rescheduleInstance = onCall(
 
     // Delete existing Zoom meeting if one was allocated
     if (existingMeetingId) {
-      const provider = getZoomProvider();
+      const provider = getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
       try {
         await provider.deleteMeeting(existingMeetingId);
         await writeSessionEvent({
@@ -2750,7 +2762,7 @@ export const rescheduleInstance = onCall(
       occurrenceId: instanceId,
       eventType: 'session_rescheduled',
       source: rescheduleSource as any,
-      providerMode: existingMeetingId ? getZoomProvider().mode : 'mock',
+      providerMode: existingMeetingId ? getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() }).mode : 'mock',
       timestamp: FieldValue.serverTimestamp(),
       payload: { from: `${originalDate} ${originalTime}`, to: `${newDate} ${newStartTime}` },
     });
@@ -2777,7 +2789,7 @@ export const rescheduleInstance = onCall(
 
 // ─── 20. cancelInstance — Cancel a single session instance ───────────────────
 export const cancelInstance = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret] },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -2798,7 +2810,7 @@ export const cancelInstance = onCall(
     // Delete existing Zoom meeting if one was allocated
     const cancelMeetingId = instance.zoomMeetingId as string | undefined;
     if (cancelMeetingId) {
-      const provider = getZoomProvider();
+      const provider = getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
       try {
         await provider.deleteMeeting(cancelMeetingId);
         await writeSessionEvent({
@@ -2824,7 +2836,7 @@ export const cancelInstance = onCall(
       occurrenceId: instanceId,
       eventType: 'session_cancelled',
       source: cancelSource as any,
-      providerMode: cancelMeetingId ? getZoomProvider().mode : 'mock',
+      providerMode: cancelMeetingId ? getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() }).mode : 'mock',
       timestamp: FieldValue.serverTimestamp(),
       payload: { meetingId: cancelMeetingId || null },
     });
@@ -3089,15 +3101,17 @@ export const zoomWebhook = onRequest(
 // Provider health, reminder scheduler, dead-letter handling, event log, iCal feed
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { getProviderHealth, sendNotification } from './notifications';
+import { getProviderHealth, sendNotification, resetNotificationProviders } from './notifications';
 import { createRemindersForInstance, processDueReminders, cancelRemindersForInstance } from './reminders';
 import { MockZoomProvider } from './zoom';
 
 // ─── 22. getSystemHealth — Provider health check for admin dashboard ────────
 export const getSystemHealth = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber] },
   async () => {
-    const zoomProvider = getZoomProvider();
+    // Reset cached providers so health check reflects current secret availability
+    resetNotificationProviders();
+    const zoomProvider = getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
     const notifHealth = getProviderHealth();
 
     // Count recent dead-letter items
@@ -3187,7 +3201,7 @@ export const getSystemHealth = onCall(
 
 // ─── 23. processReminders — Scheduled: process due reminder jobs every 5 min ──
 export const processReminders = onSchedule(
-  { schedule: 'every 5 minutes', timeZone: 'UTC', region: 'us-central1' },
+  { schedule: 'every 5 minutes', timeZone: 'UTC', region: 'us-central1', secrets: [emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber] },
   async () => {
     console.log('[processReminders] Starting reminder processing cycle');
     const stats = await processDueReminders();
@@ -3422,7 +3436,7 @@ const PHASE_HOSTING_RULES: Record<string, {
 };
 
 export const updateMemberGuidancePhase = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret] },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -3526,7 +3540,7 @@ export const updateMemberGuidancePhase = onCall(
       occurrenceId: `phase_change_${memberId}_${Date.now()}`,
       eventType: 'phase_transition' as any,
       source: 'coach_action',
-      providerMode: getZoomProvider().mode,
+      providerMode: getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() }).mode,
       timestamp: FieldValue.serverTimestamp(),
       payload: {
         memberId,
