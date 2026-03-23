@@ -14,6 +14,12 @@
  *   4. Private meetings only (each instance gets a distinct meeting context)
  *   5. Future recording compatibility (meeting IDs preserved for lookup)
  *   6. Auditability (every allocation decision is logged)
+ *
+ * Prompt 2 extensions:
+ *   7. Guidance-aware hosting: sessions carry hostingMode + coachExpectedLive
+ *   8. Shared Guidance and Self-Reliant use shared hosted infrastructure
+ *   9. Only coach-led sessions land on the coach's live calendar
+ *  10. Phase transition and CTS awareness per slot/instance
  */
 
 import { Timestamp } from 'firebase/firestore';
@@ -35,22 +41,31 @@ export interface ZoomRoom {
   notes?: string;                   // Admin notes
 }
 
-// ─── Guidance Phase & Room Source ────────────────────────────────────────────
+// ─── Guidance Phase & Hosting ───────────────────────────────────────────────
 
 /**
  * GuidancePhase maps to the three plan phases:
- *   - coach_guided   = Phase 1 (Fully Guided)  → always uses coach's personal Zoom
- *   - shared_guidance = Phase 2 (Blended)       → coach toggles per session: personal or pool
- *   - self_guided     = Phase 3 (Self-Reliant)  → always uses shared round-robin pool
+ *   - coach_guided   = Phase 1 (Fully Guided)  → coach-led, uses coach's personal Zoom
+ *   - shared_guidance = Phase 2 (Blended)       → hosted session infrastructure + coach live window
+ *   - self_guided     = Phase 3 (Self-Reliant)  → hosted session infrastructure only
  */
 export type GuidancePhase = 'coach_guided' | 'shared_guidance' | 'self_guided';
 
 /**
  * RoomSource determines which Zoom account hosts the meeting:
  *   - coach_personal = Coach's own Zoom account (1:1 with the member)
- *   - shared_pool    = Round-robin from the shared Zoom room pool
+ *   - shared_pool    = Shared hosted session infrastructure (internal)
  */
 export type RoomSource = 'coach_personal' | 'shared_pool';
+
+/**
+ * HostingMode — coach-facing concept for how a session is hosted.
+ *   - coach_led: Coach runs the session live on their personal Zoom
+ *   - hosted:    Session runs on shared infrastructure; coach may or may not join
+ *
+ * This is the product-facing term. RoomSource is the internal allocation term.
+ */
+export type HostingMode = 'coach_led' | 'hosted';
 
 export type ScheduleSessionType = 'Strength' | 'Cardio + Mobility' | 'Mix';
 
@@ -63,16 +78,54 @@ export const GUIDANCE_PHASE_LABELS: Record<GuidancePhase, string> = {
   self_guided: 'Self Guided',
 };
 
+/** Coach-facing hosting mode labels (no infrastructure language) */
+export const HOSTING_MODE_LABELS: Record<HostingMode, string> = {
+  coach_led: 'Coach-led',
+  hosted: 'Hosted',
+};
+
 export const ROOM_SOURCE_LABELS: Record<RoomSource, string> = {
   coach_personal: 'Your Zoom',
   shared_pool: 'Shared Room',
 };
 
-/** Determines the default room source for a guidance phase */
+export const SESSION_TYPE_LABELS: Record<SessionType, string> = {
+  strength: 'Strength',
+  cardio: 'Cardio',
+  flexibility: 'Flexibility',
+  hiit: 'HIIT',
+  recovery: 'Recovery',
+  check_in: 'Check-in',
+};
+
+/**
+ * Determines the default room source for a guidance phase.
+ * Prompt 2 correction: shared_guidance now defaults to shared_pool (hosted infrastructure).
+ */
 export function defaultRoomSource(phase: GuidancePhase): RoomSource {
   if (phase === 'coach_guided') return 'coach_personal';
-  if (phase === 'self_guided') return 'shared_pool';
-  return 'coach_personal'; // shared_guidance defaults to coach, but toggleable
+  return 'shared_pool'; // shared_guidance + self_guided → hosted infrastructure
+}
+
+/**
+ * Determines the hosting mode for a guidance phase.
+ * coach_guided → coach_led; shared_guidance + self_guided → hosted
+ */
+export function defaultHostingMode(phase: GuidancePhase): HostingMode {
+  if (phase === 'coach_guided') return 'coach_led';
+  return 'hosted';
+}
+
+/**
+ * Determines whether the coach is expected live for a session based on phase.
+ * coach_guided → always true
+ * shared_guidance → true (coach has a live window, duration set by slider)
+ * self_guided → false
+ */
+export function defaultCoachExpectedLive(phase: GuidancePhase): boolean {
+  if (phase === 'coach_guided') return true;
+  if (phase === 'shared_guidance') return true; // coach has live segment
+  return false; // self_guided
 }
 
 // ─── Recurring Slot ──────────────────────────────────────────────────────────
@@ -99,8 +152,25 @@ export interface RecurringSlot {
   // Phase-aware scheduling fields
   sessionType?: ScheduleSessionType;  // What kind of session (Strength, Cardio, Mix)
   guidancePhase?: GuidancePhase;      // Which plan phase this slot belongs to
-  roomSource?: RoomSource;            // Where the Zoom meeting comes from
+  roomSource?: RoomSource;            // Where the Zoom meeting comes from (internal)
   coachJoining?: boolean;             // For shared_guidance: is the coach joining this session?
+
+  // Prompt 2: Guidance-aware hosting fields
+  hostingMode?: HostingMode;          // coach_led or hosted (product-facing)
+  coachExpectedLive?: boolean;        // Should this session appear on coach's live calendar?
+  personalZoomRequired?: boolean;     // Does this session need the coach's personal Zoom?
+
+  // Prompt 2: Live support window (for shared_guidance)
+  liveCoachingStartMin?: number;      // Minutes from session start when coach joins
+  liveCoachingEndMin?: number;        // Minutes from session start when coach leaves
+  liveCoachingDuration?: number;      // Total live coaching minutes (calendar block)
+
+  // Prompt 2: Phase transition awareness
+  transitionDate?: string;            // YYYY-MM-DD when this slot transitions to next phase
+  transitionToPhase?: GuidancePhase;  // What phase it transitions to
+
+  // Prompt 2: Commit to Save
+  commitToSaveEnabled?: boolean;      // Whether CTS applies to this session stream
 
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -137,6 +207,19 @@ export interface SessionInstance {
   guidancePhase?: GuidancePhase;      // Inherited from slot
   roomSource?: RoomSource;            // Inherited from slot (can be overridden per instance)
   coachJoining?: boolean;             // For shared_guidance: coach toggled on/off for this instance
+
+  // Prompt 2: Guidance-aware hosting fields
+  hostingMode?: HostingMode;          // coach_led or hosted
+  coachExpectedLive?: boolean;        // Should this instance appear on coach's live calendar?
+  personalZoomRequired?: boolean;     // Does this instance need the coach's personal Zoom?
+
+  // Prompt 2: Live support window (for shared_guidance instances)
+  liveCoachingStartMin?: number;      // Minutes from session start when coach joins
+  liveCoachingEndMin?: number;        // Minutes from session start when coach leaves
+  liveCoachingDuration?: number;      // Total live coaching minutes
+
+  // Prompt 2: Commit to Save
+  commitToSaveEnabled?: boolean;      // Whether CTS applies to this session
 
   // Allocation fields
   zoomRoomId?: string;              // Assigned Zoom room doc ID
@@ -223,6 +306,19 @@ export interface ZoomProvider {
   getMeeting(meetingId: string): Promise<ZoomMeetingResponse | null>;
 }
 
+// ─── Coach Zoom Connection (for account/settings) ───────────────────────────
+
+export interface CoachZoomConnection {
+  coachId: string;
+  zoomEmail?: string;               // Coach's personal Zoom email
+  zoomUserId?: string;              // Zoom user ID
+  connected: boolean;               // Whether the connection is active
+  connectedAt?: Timestamp;
+  lastVerifiedAt?: Timestamp;
+  status: 'connected' | 'disconnected' | 'error';
+  errorMessage?: string;
+}
+
 // ─── Helper: Day of week labels ──────────────────────────────────────────────
 
 export const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -243,4 +339,14 @@ export function addMinutesToTime(time24: string, minutes: number): string {
   const newH = Math.floor(totalMinutes / 60) % 24;
   const newM = totalMinutes % 60;
   return `${newH.toString().padStart(2, '0')}:${newM.toString().padStart(2, '0')}`;
+}
+
+// ─── Helper: Format date for display ─────────────────────────────────────────
+
+export function formatDateShort(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  return `${days[date.getDay()]}, ${months[date.getMonth()]} ${d}`;
 }

@@ -1911,7 +1911,7 @@ export const createRecurringSlot = onCall(
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
 
-    const { memberId, memberName, dayOfWeek, startTime, durationMinutes, timezone, recurrencePattern, weekOfMonth, effectiveFrom, sessionType, guidancePhase, roomSource, coachJoining, liveCoachingStartMin, liveCoachingEndMin, liveCoachingDuration } = request.data as {
+    const { memberId, memberName, dayOfWeek, startTime, durationMinutes, timezone, recurrencePattern, weekOfMonth, effectiveFrom, sessionType, guidancePhase, roomSource, coachJoining, liveCoachingStartMin, liveCoachingEndMin, liveCoachingDuration, hostingMode, coachExpectedLive, personalZoomRequired, transitionDate, transitionToPhase, commitToSaveEnabled } = request.data as {
       memberId: string;
       memberName: string;
       dayOfWeek: number;
@@ -1925,9 +1925,16 @@ export const createRecurringSlot = onCall(
       guidancePhase?: 'coach_guided' | 'shared_guidance' | 'self_guided';
       roomSource?: 'coach_personal' | 'shared_pool';
       coachJoining?: boolean;
-      liveCoachingStartMin?: number; // minutes from session start when coach joins
-      liveCoachingEndMin?: number;   // minutes from session start when coach leaves
-      liveCoachingDuration?: number; // total live coaching minutes (calendar block)
+      liveCoachingStartMin?: number;
+      liveCoachingEndMin?: number;
+      liveCoachingDuration?: number;
+      // Prompt 2: Guidance-aware hosting fields
+      hostingMode?: 'coach_led' | 'hosted';
+      coachExpectedLive?: boolean;
+      personalZoomRequired?: boolean;
+      transitionDate?: string; // YYYY-MM-DD
+      transitionToPhase?: 'coach_guided' | 'shared_guidance' | 'self_guided';
+      commitToSaveEnabled?: boolean;
     };
 
     if (!memberId || dayOfWeek === undefined || !startTime || !durationMinutes || !timezone) {
@@ -1982,6 +1989,20 @@ export const createRecurringSlot = onCall(
     if (liveCoachingStartMin !== undefined) slot.liveCoachingStartMin = liveCoachingStartMin;
     if (liveCoachingEndMin !== undefined) slot.liveCoachingEndMin = liveCoachingEndMin;
     if (liveCoachingDuration !== undefined) slot.liveCoachingDuration = liveCoachingDuration;
+
+    // Prompt 2: Guidance-aware hosting fields
+    // Derive hostingMode from guidancePhase if not explicitly provided
+    const resolvedHostingMode = hostingMode || (guidancePhase === 'coach_guided' ? 'coach_led' : 'hosted');
+    slot.hostingMode = resolvedHostingMode;
+    // Coach is expected live for coach_guided (always) and shared_guidance (has live window)
+    const resolvedCoachExpectedLive = coachExpectedLive !== undefined ? coachExpectedLive :
+      (guidancePhase === 'coach_guided' ? true : guidancePhase === 'shared_guidance' ? true : false);
+    slot.coachExpectedLive = resolvedCoachExpectedLive;
+    slot.personalZoomRequired = personalZoomRequired !== undefined ? personalZoomRequired :
+      (resolvedRoomSource === 'coach_personal');
+    if (transitionDate) slot.transitionDate = transitionDate;
+    if (transitionToPhase) slot.transitionToPhase = transitionToPhase;
+    if (commitToSaveEnabled !== undefined) slot.commitToSaveEnabled = commitToSaveEnabled;
 
     await slotRef.set(slot);
 
@@ -2134,6 +2155,11 @@ function generateInstancesForSlot(
         if (slot.liveCoachingStartMin !== undefined) inst.liveCoachingStartMin = slot.liveCoachingStartMin;
         if (slot.liveCoachingEndMin !== undefined) inst.liveCoachingEndMin = slot.liveCoachingEndMin;
         if (slot.liveCoachingDuration !== undefined) inst.liveCoachingDuration = slot.liveCoachingDuration;
+        // Prompt 2: Propagate guidance-aware hosting fields
+        if (slot.hostingMode) inst.hostingMode = slot.hostingMode;
+        if (slot.coachExpectedLive !== undefined) inst.coachExpectedLive = slot.coachExpectedLive;
+        if (slot.personalZoomRequired !== undefined) inst.personalZoomRequired = slot.personalZoomRequired;
+        if (slot.commitToSaveEnabled !== undefined) inst.commitToSaveEnabled = slot.commitToSaveEnabled;
         instances.push(inst);
       }
       month++;
@@ -2196,6 +2222,11 @@ function generateInstancesForSlot(
     if (slot.liveCoachingStartMin !== undefined) inst.liveCoachingStartMin = slot.liveCoachingStartMin;
     if (slot.liveCoachingEndMin !== undefined) inst.liveCoachingEndMin = slot.liveCoachingEndMin;
     if (slot.liveCoachingDuration !== undefined) inst.liveCoachingDuration = slot.liveCoachingDuration;
+    // Prompt 2: Propagate guidance-aware hosting fields
+    if (slot.hostingMode) inst.hostingMode = slot.hostingMode;
+    if (slot.coachExpectedLive !== undefined) inst.coachExpectedLive = slot.coachExpectedLive;
+    if (slot.personalZoomRequired !== undefined) inst.personalZoomRequired = slot.personalZoomRequired;
+    if (slot.commitToSaveEnabled !== undefined) inst.commitToSaveEnabled = slot.commitToSaveEnabled;
 
     instances.push(inst);
 

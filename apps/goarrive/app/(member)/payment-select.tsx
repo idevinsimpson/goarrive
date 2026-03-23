@@ -74,31 +74,39 @@ export default function PaymentSelectScreen() {
     })();
   }, [planId]);
 
-  // ── Compute pricing ────────────────────────────────────────────────────────
-  const sessionsPerWeek = plan?.sessionsPerWeek ?? 3;
-  const sessionsPerMonth = Math.round(sessionsPerWeek * (52 / 12));
+  // ── Read pricing from plan (auto-synced from plan builder) ─────────────────
   const contractMonths = plan?.contractMonths ?? 12;
+  const pr = (plan as any)?.pricingResult;
+  const cp = (plan as any)?.continuationPricing;
 
+  // Monthly price: prefer pricingResult.displayMonthlyPrice (set by plan builder)
   const displayMonthlyPrice = Math.round(
-    (plan as any)?.pricingResult?.displayMonthlyPrice ??
+    pr?.displayMonthlyPrice ??
     (plan as any)?.monthlyPriceOverride ??
-    (plan as any)?.pricingResult?.calculatedMonthlyPrice ??
-    ((plan?.hourlyRate ?? 100) * ((plan?.sessionLengthMinutes ?? 60) / 60) * sessionsPerMonth)
+    pr?.calculatedMonthlyPrice ??
+    0
   );
 
+  // Contract total
   const contractTotal = displayMonthlyPrice * contractMonths;
+
+  // Pay in Full: 10% off contract
   const payInFullTotal = Math.round(contractTotal * 0.9);
   const payInFullMonthly = Math.round(payInFullTotal / contractMonths);
   const payInFullSavings = contractTotal - payInFullTotal;
 
-  // Continuation pricing
-  const cp = (plan as any)?.continuationPricing;
-  const contHr = cp?.continuationHourlyRate ?? plan?.hourlyRate ?? 100;
-  const contMin = cp?.continuationMinutesPerSession ?? 3.5;
-  const continuationMonthly = Math.round(contHr * (contMin / 60) * sessionsPerMonth);
+  // Continuation pricing: read auto-synced fields from Firestore
+  const continuationMonthly = Math.round(
+    cp?.continuationMonthlyPrice ?? pr?.continuationMonthly ?? 0
+  );
 
-  // CTS
-  const ctsSavings = plan?.postContract?.ctsMonthlySavings ?? Math.round(displayMonthlyPrice * 0.5);
+  // CTS: read from plan's postContract or pricingResult
+  const hasCTS = plan?.pricing?.commitToSave === true || plan?.postContract?.ctsMonthlySavings != null;
+  const ctsSavings = plan?.postContract?.ctsMonthlySavings ?? Math.round(continuationMonthly * 0.5);
+
+  // CTS + PIF stacking: both discounts apply
+  // PIF applies to contract, CTS applies to continuation
+  const ctsAfterPif = hasCTS ? Math.round(continuationMonthly - ctsSavings) : continuationMonthly;
 
   // ── Handle checkout ────────────────────────────────────────────────────────
   async function handleProceed() {
@@ -207,7 +215,9 @@ export default function PaymentSelectScreen() {
           <View style={s.optionDetail}>
             <DetailRow label="Contract total" value={formatCurrency(contractTotal)} />
             <DetailRow label="After contract" value={`${formatCurrency(continuationMonthly)}/mo`} />
-            <DetailRow label="Commit to Save rate" value={`${formatCurrency(ctsSavings)}/mo`} accent />
+            {hasCTS && (
+              <DetailRow label="With Commit to Save" value={`${formatCurrency(ctsAfterPif)}/mo`} accent />
+            )}
           </View>
         </Pressable>
 
@@ -239,6 +249,9 @@ export default function PaymentSelectScreen() {
             <DetailRow label="One payment today" value={formatCurrency(payInFullTotal)} highlight />
             <DetailRow label="You save" value={formatCurrency(payInFullSavings)} accent />
             <DetailRow label="After contract" value={`${formatCurrency(continuationMonthly)}/mo`} />
+            {hasCTS && (
+              <DetailRow label="With CTS + PIF" value={`${formatCurrency(ctsAfterPif)}/mo`} accent />
+            )}
           </View>
         </Pressable>
 
@@ -248,7 +261,9 @@ export default function PaymentSelectScreen() {
             {'💡'} Commit to Save — available after contract
           </Text>
           <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
-            {`Stay consistent during your continuation period and lock in ${formatCurrency(ctsSavings)}/mo — half your standard rate. Same accountability rules apply.`}
+            {hasCTS
+              ? `Stay consistent during your continuation period and save ${formatCurrency(ctsSavings)}/mo off your continuation rate. Both Pay in Full and CTS discounts stack.`
+              : 'Stay consistent during your continuation period and unlock savings. Ask your coach about Commit to Save.'}
           </Text>
         </View>
 

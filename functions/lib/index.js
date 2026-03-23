@@ -1626,7 +1626,7 @@ exports.createRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
         throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
-    const { memberId, memberName, dayOfWeek, startTime, durationMinutes, timezone, recurrencePattern, weekOfMonth, effectiveFrom, sessionType, guidancePhase, roomSource, coachJoining, liveCoachingStartMin, liveCoachingEndMin, liveCoachingDuration } = request.data;
+    const { memberId, memberName, dayOfWeek, startTime, durationMinutes, timezone, recurrencePattern, weekOfMonth, effectiveFrom, sessionType, guidancePhase, roomSource, coachJoining, liveCoachingStartMin, liveCoachingEndMin, liveCoachingDuration, hostingMode, coachExpectedLive, personalZoomRequired, transitionDate, transitionToPhase, commitToSaveEnabled } = request.data;
     if (!memberId || dayOfWeek === undefined || !startTime || !durationMinutes || !timezone) {
         throw new https_1.HttpsError('invalid-argument', 'memberId, dayOfWeek, startTime, durationMinutes, and timezone are required');
     }
@@ -1666,6 +1666,22 @@ exports.createRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
         slot.liveCoachingEndMin = liveCoachingEndMin;
     if (liveCoachingDuration !== undefined)
         slot.liveCoachingDuration = liveCoachingDuration;
+    // Prompt 2: Guidance-aware hosting fields
+    // Derive hostingMode from guidancePhase if not explicitly provided
+    const resolvedHostingMode = hostingMode || (guidancePhase === 'coach_guided' ? 'coach_led' : 'hosted');
+    slot.hostingMode = resolvedHostingMode;
+    // Coach is expected live for coach_guided (always) and shared_guidance (has live window)
+    const resolvedCoachExpectedLive = coachExpectedLive !== undefined ? coachExpectedLive :
+        (guidancePhase === 'coach_guided' ? true : guidancePhase === 'shared_guidance' ? true : false);
+    slot.coachExpectedLive = resolvedCoachExpectedLive;
+    slot.personalZoomRequired = personalZoomRequired !== undefined ? personalZoomRequired :
+        (resolvedRoomSource === 'coach_personal');
+    if (transitionDate)
+        slot.transitionDate = transitionDate;
+    if (transitionToPhase)
+        slot.transitionToPhase = transitionToPhase;
+    if (commitToSaveEnabled !== undefined)
+        slot.commitToSaveEnabled = commitToSaveEnabled;
     await slotRef.set(slot);
     await writeAuditLog({
         coachId,
@@ -1795,6 +1811,15 @@ function generateInstancesForSlot(slot, slotId, daysAhead) {
                     inst.liveCoachingEndMin = slot.liveCoachingEndMin;
                 if (slot.liveCoachingDuration !== undefined)
                     inst.liveCoachingDuration = slot.liveCoachingDuration;
+                // Prompt 2: Propagate guidance-aware hosting fields
+                if (slot.hostingMode)
+                    inst.hostingMode = slot.hostingMode;
+                if (slot.coachExpectedLive !== undefined)
+                    inst.coachExpectedLive = slot.coachExpectedLive;
+                if (slot.personalZoomRequired !== undefined)
+                    inst.personalZoomRequired = slot.personalZoomRequired;
+                if (slot.commitToSaveEnabled !== undefined)
+                    inst.commitToSaveEnabled = slot.commitToSaveEnabled;
                 instances.push(inst);
             }
             month++;
@@ -1860,6 +1885,15 @@ function generateInstancesForSlot(slot, slotId, daysAhead) {
             inst.liveCoachingEndMin = slot.liveCoachingEndMin;
         if (slot.liveCoachingDuration !== undefined)
             inst.liveCoachingDuration = slot.liveCoachingDuration;
+        // Prompt 2: Propagate guidance-aware hosting fields
+        if (slot.hostingMode)
+            inst.hostingMode = slot.hostingMode;
+        if (slot.coachExpectedLive !== undefined)
+            inst.coachExpectedLive = slot.coachExpectedLive;
+        if (slot.personalZoomRequired !== undefined)
+            inst.personalZoomRequired = slot.personalZoomRequired;
+        if (slot.commitToSaveEnabled !== undefined)
+            inst.commitToSaveEnabled = slot.commitToSaveEnabled;
         instances.push(inst);
         current.setDate(current.getDate() + step);
     }

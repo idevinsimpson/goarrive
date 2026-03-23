@@ -45,6 +45,7 @@ import { Icon } from './Icon';
 import { router } from 'expo-router';
 import { DAY_LABELS, DAY_SHORT_LABELS, formatTime, addMinutesToTime, type GuidancePhase, type SessionType, type RoomSource } from '../lib/schedulingTypes';
 import { type Phase, type MemberPlanData, resolvePhaseColor } from '../lib/planTypes';
+import { defaultHostingMode, defaultCoachExpectedLive } from '../lib/schedulingTypes';
 
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
@@ -362,6 +363,34 @@ export default function MemberDetail({
   const [liveStart, setLiveStart] = useState(Math.round((selectedDuration * 0.25) / STEP) * STEP);
   const [liveEnd, setLiveEnd] = useState(Math.round((selectedDuration * 0.75) / STEP) * STEP);
 
+  // ── Transition awareness: which phase is the member currently in? ────────
+  const currentPhaseInfo = useMemo(() => {
+    if (!memberPlan?.phases?.length) return null;
+    const startDate = memberPlan.planStartDate
+      ? new Date(memberPlan.planStartDate)
+      : memberPlan.createdAt?.toDate
+        ? memberPlan.createdAt.toDate()
+        : null;
+    if (!startDate) return null;
+    const now = new Date();
+    const elapsedWeeks = Math.max(0, Math.floor((now.getTime() - startDate.getTime()) / (7 * 24 * 60 * 60 * 1000)));
+    let cumulativeWeeks = 0;
+    for (const phase of memberPlan.phases) {
+      cumulativeWeeks += phase.weeks || 0;
+      if (elapsedWeeks < cumulativeWeeks) {
+        return { phase, elapsedWeeks, cumulativeWeeks, startDate };
+      }
+    }
+    // Past all phases — in the last phase
+    const lastPhase = memberPlan.phases[memberPlan.phases.length - 1];
+    return { phase: lastPhase, elapsedWeeks, cumulativeWeeks, startDate };
+  }, [memberPlan]);
+
+  // ── CTS awareness ───────────────────────────────────────────────────────
+  const hasCTS = useMemo(() => {
+    return memberPlan?.pricing?.commitToSave === true;
+  }, [memberPlan]);
+
   // Keep live window within duration when duration changes, re-center if needed
   useEffect(() => {
     const quarter = Math.round((selectedDuration * 0.25) / STEP) * STEP;
@@ -505,6 +534,8 @@ export default function MemberDetail({
       const dayNames: string[] = [];
 
       for (const entry of selectedDays) {
+        const hostingMode = defaultHostingMode(selectedPhase);
+        const coachExpectedLive = defaultCoachExpectedLive(selectedPhase);
         const payload: Record<string, any> = {
           memberId: member.id,
           memberName: currentMember.name || 'Unknown',
@@ -518,6 +549,10 @@ export default function MemberDetail({
           guidancePhase: selectedPhase,
           roomSource: resolvedRoomSource,
           coachJoining: selectedPhase === 'coach_guided',
+          hostingMode,
+          coachExpectedLive,
+          personalZoomRequired: selectedPhase === 'coach_guided',
+          commitToSaveEnabled: hasCTS,
         };
 
         // For shared_guidance, include the live coaching window
@@ -860,7 +895,26 @@ export default function MemberDetail({
                   <Text style={[s.slotMeta, { marginTop: 6 }]}>Loading plan data...</Text>
                 </View>
               ) : (
-                <PhaseTimeline />
+                <>
+                  <PhaseTimeline />
+                  {/* Current Phase Indicator */}
+                  {currentPhaseInfo && (
+                    <View style={s.currentPhaseBar}>
+                      <View style={[s.currentPhaseDot, { backgroundColor: resolvePhaseColor(currentPhaseInfo.phase.intensity).bar }]} />
+                      <Text style={s.currentPhaseText}>
+                        Currently in <Text style={{ fontWeight: '700', color: resolvePhaseColor(currentPhaseInfo.phase.intensity).bar }}>{currentPhaseInfo.phase.name}</Text>
+                        {' '}(week {currentPhaseInfo.elapsedWeeks + 1})
+                      </Text>
+                    </View>
+                  )}
+                  {/* CTS Indicator */}
+                  {hasCTS && (
+                    <View style={s.ctsBar}>
+                      <Icon name="star" size={14} color={GOLD} />
+                      <Text style={s.ctsText}>Commit to Save active — member has a CTS discount</Text>
+                    </View>
+                  )}
+                </>
               )}
 
               {/* Existing Slots */}
@@ -992,14 +1046,13 @@ export default function MemberDetail({
                   })}
                 </View>
 
-                {/* Room Source Indicator (auto-determined) */}
+                {/* Hosting Mode Indicator (auto-determined) */}
                 <View style={s.roomSourceRow}>
                   <Icon name="info" size={14} color={MUTED} />
                   <Text style={s.roomSourceText}>
-                    Room: {resolvedRoomSource === 'coach_personal' ? 'Your Zoom' : 'Shared Pool (Round Robin)'}
-                    {selectedPhase === 'coach_guided' && ' — always your Zoom for Coach Guided'}
-                    {selectedPhase === 'shared_guidance' && ' — always shared pool for Shared Guidance'}
-                    {selectedPhase === 'self_guided' && ' — always shared pool for Self Guided'}
+                    {selectedPhase === 'coach_guided'
+                      ? 'Coach-led — sessions use your personal Zoom'
+                      : 'Hosted — sessions use shared infrastructure'}
                   </Text>
                 </View>
 
@@ -1184,8 +1237,8 @@ export default function MemberDetail({
                     {selectedPhase === 'shared_guidance' && ` (${liveEnd - liveStart}min live)`}
                   </Text>
                   <Text style={s.summaryMeta}>
-                    {resolvedRoomSource === 'coach_personal' ? 'Your Zoom' : 'Shared Pool (Round Robin)'}
-                    {' · '}
+                    {resolvedRoomSource === 'coach_personal' ? 'Coach-led (Your Zoom)' : 'Hosted'}
+                    {' \u00b7 '}
                     {selectedTimezone.split('/')[1]?.replace(/_/g, ' ')} time
                   </Text>
                   {selectedPhase === 'shared_guidance' && (
@@ -1886,6 +1939,41 @@ const s = StyleSheet.create({
   legendText: {
     fontSize: 10,
     color: MUTED,
+    fontFamily: FB,
+  },
+  currentPhaseBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: CARD + '80',
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+  currentPhaseDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  currentPhaseText: {
+    fontSize: 12,
+    color: MUTED,
+    fontFamily: FB,
+  },
+  ctsBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(245,166,35,0.06)',
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+  ctsText: {
+    fontSize: 12,
+    color: GOLD,
     fontFamily: FB,
   },
 });
