@@ -10,7 +10,7 @@
  *   - View Plan / Intake (navigates to member-plan page)
  *   - Edit Profile (opens MemberForm)
  *   - Archive / Restore
- *   - Schedule (assign recurring time slot)
+ *   - Schedule (assign recurring time slot with multi-day support)
  *
  * Coming Soon tiles (future blueprint features):
  *   - Workouts & Playlist
@@ -24,7 +24,7 @@
  *   - Journal
  *   - Send Password Reset
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -36,13 +36,15 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
 import { db, functions } from '../lib/firebase';
-import { doc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, getDocs, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { Icon } from './Icon';
 import { router } from 'expo-router';
-import { DAY_LABELS, DAY_SHORT_LABELS, formatTime, type GuidancePhase, type SessionType, type RoomSource } from '../lib/schedulingTypes';
+import { DAY_LABELS, DAY_SHORT_LABELS, formatTime, addMinutesToTime, type GuidancePhase, type SessionType, type RoomSource } from '../lib/schedulingTypes';
+import { type Phase, type MemberPlanData, resolvePhaseColor } from '../lib/planTypes';
 
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
@@ -56,6 +58,8 @@ const GOLD = '#F5A623';
 const GREEN = '#6EBB7A';
 const BLUE = '#7DD3FC';
 const RED = '#E05252';
+
+const { width: SCREEN_W } = Dimensions.get('window');
 
 interface MemberDetailProps {
   member: any;
@@ -93,6 +97,32 @@ const TIMEZONE_OPTIONS = [
   'Pacific/Honolulu',
 ];
 
+// Phase mapping: plan intensity → scheduling guidance phase
+const INTENSITY_TO_PHASE: Record<string, GuidancePhase> = {
+  'Fully Guided': 'coach_guided',
+  'Shared Guidance': 'shared_guidance',
+  'Self-Reliant': 'self_guided',
+};
+
+// Phase colors for scheduling UI
+const SCHED_PHASE_COLORS: Record<GuidancePhase, string> = {
+  coach_guided: GREEN,
+  shared_guidance: GOLD,
+  self_guided: '#7DD3FC',
+};
+
+const SCHED_PHASE_LABELS: Record<GuidancePhase, string> = {
+  coach_guided: 'Coach Guided',
+  shared_guidance: 'Shared Guidance',
+  self_guided: 'Self Guided',
+};
+
+// ── Multi-day state type ────────────────────────────────────────────────────
+interface DayTimeEntry {
+  dayOfWeek: number;
+  startTime: string;
+}
+
 export default function MemberDetail({
   member,
   onClose,
@@ -103,9 +133,18 @@ export default function MemberDetail({
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [existingSlots, setExistingSlots] = useState<any[]>([]);
 
-  // Schedule form state
-  const [selectedDay, setSelectedDay] = useState(1); // Monday
-  const [selectedTime, setSelectedTime] = useState('06:00');
+  // Plan data for phase sync
+  const [memberPlan, setMemberPlan] = useState<MemberPlanData | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planPhaseOverride, setPlanPhaseOverride] = useState(false);
+
+  // Schedule form state — multi-day
+  const [selectedDays, setSelectedDays] = useState<DayTimeEntry[]>([
+    { dayOfWeek: 1, startTime: '06:00' },
+  ]);
+  const [editingTimeForDay, setEditingTimeForDay] = useState<number | null>(null);
+
+  // Shared settings for all days in this batch
   const [selectedDuration, setSelectedDuration] = useState(30);
   const [selectedTimezone, setSelectedTimezone] = useState('America/New_York');
   const [selectedPattern, setSelectedPattern] = useState<'weekly' | 'biweekly' | 'monthly'>('weekly');
@@ -114,8 +153,8 @@ export default function MemberDetail({
   const [selectedPhase, setSelectedPhase] = useState<GuidancePhase>('coach_guided');
   const [coachJoining, setCoachJoining] = useState(true);
   const [creating, setCreating] = useState(false);
-  const [showTimeSelect, setShowTimeSelect] = useState(false);
 
+  // ── Load member data ──────────────────────────────────────────────────────
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, 'members', member.id), (snapshot) => {
       if (snapshot.exists()) {
@@ -138,6 +177,55 @@ export default function MemberDetail({
     return () => unsubscribe();
   }, [member.id]);
 
+  // ── Load member plan for phase sync ───────────────────────────────────────
+  useEffect(() => {
+    if (!member.id || !showScheduleModal) return;
+    let cancelled = false;
+    (async () => {
+      setPlanLoading(true);
+      try {
+        // Try member.id as plan key first, then uid field
+        const planDoc = await getDoc(doc(db, 'member_plans', member.id));
+        if (planDoc.exists() && !cancelled) {
+          setMemberPlan(planDoc.data() as MemberPlanData);
+        } else {
+          // Try querying by memberId
+          const q = query(collection(db, 'member_plans'), where('memberId', '==', member.id));
+          const snap = await getDocs(q);
+          if (!snap.empty && !cancelled) {
+            setMemberPlan(snap.docs[0].data() as MemberPlanData);
+          }
+        }
+      } catch (err) {
+        console.warn('[MemberDetail] Failed to load plan:', err);
+      }
+      if (!cancelled) setPlanLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [member.id, showScheduleModal]);
+
+  // ── Derived phase data from plan ──────────────────────────────────────────
+  const planPhases = useMemo(() => {
+    if (!memberPlan?.phases?.length) return null;
+    return memberPlan.phases;
+  }, [memberPlan]);
+
+  const totalWeeks = useMemo(() => {
+    if (!planPhases) return 0;
+    return planPhases.reduce((sum, p) => sum + (p.weeks || 0), 0);
+  }, [planPhases]);
+
+  // Map plan phases to scheduling phase labels with week counts
+  const phaseWeekMap = useMemo(() => {
+    const map: Record<GuidancePhase, number> = { coach_guided: 0, shared_guidance: 0, self_guided: 0 };
+    if (!planPhases) return map;
+    for (const p of planPhases) {
+      const schedPhase = INTENSITY_TO_PHASE[p.intensity];
+      if (schedPhase) map[schedPhase] += p.weeks;
+    }
+    return map;
+  }, [planPhases]);
+
   const initials = currentMember.name
     ? currentMember.name
         .trim()
@@ -152,40 +240,72 @@ export default function MemberDetail({
     router.push(`/(app)/member-plan/${currentMember.id}` as any);
   }
 
-  const handleCreateSlot = useCallback(async () => {
+  // ── Multi-day toggle ──────────────────────────────────────────────────────
+  function toggleDay(dayIdx: number) {
+    setSelectedDays(prev => {
+      const exists = prev.find(d => d.dayOfWeek === dayIdx);
+      if (exists) {
+        // Don't remove if it's the last one
+        if (prev.length <= 1) return prev;
+        return prev.filter(d => d.dayOfWeek !== dayIdx);
+      }
+      return [...prev, { dayOfWeek: dayIdx, startTime: '06:00' }].sort((a, b) => a.dayOfWeek - b.dayOfWeek);
+    });
+  }
+
+  function updateDayTime(dayIdx: number, time: string) {
+    setSelectedDays(prev =>
+      prev.map(d => d.dayOfWeek === dayIdx ? { ...d, startTime: time } : d)
+    );
+    setEditingTimeForDay(null);
+  }
+
+  // ── Room source auto-routing ──────────────────────────────────────────────
+  const resolvedRoomSource = useMemo((): RoomSource => {
+    if (selectedPhase === 'coach_guided') return 'coach_personal';
+    if (selectedPhase === 'self_guided') return 'shared_pool';
+    // shared_guidance: depends on coach joining toggle
+    return coachJoining ? 'coach_personal' : 'shared_pool';
+  }, [selectedPhase, coachJoining]);
+
+  // ── Create slots (one per selected day) ───────────────────────────────────
+  const handleCreateSlots = useCallback(async () => {
     setCreating(true);
     try {
       const fn = httpsCallable(functions, 'createRecurringSlot');
-      // Determine room source based on guidance phase
-      let roomSource: RoomSource = 'coach_personal';
-      if (selectedPhase === 'self_guided') roomSource = 'shared_pool';
-      else if (selectedPhase === 'shared_guidance') roomSource = coachJoining ? 'coach_personal' : 'shared_pool';
+      let totalInstances = 0;
+      const dayNames: string[] = [];
 
-      const result = await fn({
-        memberId: member.id,
-        memberName: currentMember.name || 'Unknown',
-        dayOfWeek: selectedDay,
-        startTime: selectedTime,
-        durationMinutes: selectedDuration,
-        timezone: selectedTimezone,
-        recurrencePattern: selectedPattern,
-        weekOfMonth: selectedPattern === 'monthly' ? selectedWeekOfMonth : undefined,
-        sessionType: selectedSessionType,
-        guidancePhase: selectedPhase,
-        roomSource,
-        coachJoining: selectedPhase === 'shared_guidance' ? coachJoining : selectedPhase === 'coach_guided',
-      });
-      const data = result.data as any;
+      for (const entry of selectedDays) {
+        const result = await fn({
+          memberId: member.id,
+          memberName: currentMember.name || 'Unknown',
+          dayOfWeek: entry.dayOfWeek,
+          startTime: entry.startTime,
+          durationMinutes: selectedDuration,
+          timezone: selectedTimezone,
+          recurrencePattern: selectedPattern,
+          weekOfMonth: selectedPattern === 'monthly' ? selectedWeekOfMonth : undefined,
+          sessionType: selectedSessionType,
+          guidancePhase: selectedPhase,
+          roomSource: resolvedRoomSource,
+          coachJoining: selectedPhase === 'shared_guidance' ? coachJoining : selectedPhase === 'coach_guided',
+        });
+        const data = result.data as any;
+        totalInstances += data.instancesGenerated || 0;
+        dayNames.push(`${DAY_LABELS[entry.dayOfWeek]} ${formatTime(entry.startTime)}`);
+      }
+
       Alert.alert(
-        'Slot Created',
-        `Recurring ${DAY_LABELS[selectedDay]} ${formatTime(selectedTime)} slot created.\n${data.instancesGenerated} sessions generated for the next 4 weeks.`
+        selectedDays.length > 1 ? 'Slots Created' : 'Slot Created',
+        `${selectedDays.length} recurring slot${selectedDays.length > 1 ? 's' : ''} created:\n${dayNames.join(', ')}\n\n${totalInstances} total sessions generated for the next 4 weeks.`
       );
       setShowScheduleModal(false);
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Failed to create slot');
+      Alert.alert('Error', err.message || 'Failed to create slot(s)');
     }
     setCreating(false);
-  }, [member.id, currentMember.name, selectedDay, selectedTime, selectedDuration, selectedTimezone, selectedPattern, selectedWeekOfMonth, selectedSessionType, selectedPhase, coachJoining]);
+  }, [member.id, currentMember.name, selectedDays, selectedDuration, selectedTimezone, selectedPattern, selectedWeekOfMonth, selectedSessionType, selectedPhase, coachJoining, resolvedRoomSource]);
 
   const handlePauseSlot = useCallback(async (slotId: string) => {
     try {
@@ -322,6 +442,67 @@ export default function MemberDetail({
     },
   ];
 
+  // ── Phase Timeline Component ──────────────────────────────────────────────
+  function PhaseTimeline() {
+    if (!planPhases || planPhases.length === 0) return null;
+    const barWidth = SCREEN_W - 80; // padding on both sides
+    return (
+      <View style={s.timelineWrap}>
+        <View style={s.timelineHeader}>
+          <Text style={s.timelineTitleText}>Plan Phase Timeline</Text>
+          <TouchableOpacity
+            style={s.editPlanBtn}
+            onPress={() => {
+              setShowScheduleModal(false);
+              navigateToPlan();
+            }}
+          >
+            <Icon name="edit" size={12} color={GOLD} />
+            <Text style={s.editPlanBtnText}>Edit Plan</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={s.timelineBar}>
+          {planPhases.map((phase, idx) => {
+            const pct = totalWeeks > 0 ? (phase.weeks / totalWeeks) : (1 / planPhases!.length);
+            const color = resolvePhaseColor(phase.intensity);
+            return (
+              <View
+                key={idx}
+                style={[
+                  s.timelineSegment,
+                  {
+                    width: Math.max(pct * barWidth, 30),
+                    backgroundColor: color.bar,
+                    borderTopLeftRadius: idx === 0 ? 6 : 0,
+                    borderBottomLeftRadius: idx === 0 ? 6 : 0,
+                    borderTopRightRadius: idx === planPhases!.length - 1 ? 6 : 0,
+                    borderBottomRightRadius: idx === planPhases!.length - 1 ? 6 : 0,
+                  },
+                ]}
+              >
+                <Text style={s.timelineSegText} numberOfLines={1}>
+                  {phase.weeks}w
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+        <View style={s.timelineLegend}>
+          {planPhases.map((phase, idx) => {
+            const color = resolvePhaseColor(phase.intensity);
+            return (
+              <View key={idx} style={s.legendItem}>
+                <View style={[s.legendDot, { backgroundColor: color.bar }]} />
+                <Text style={s.legendText}>{phase.name}: {phase.weeks}w</Text>
+              </View>
+            );
+          })}
+          <Text style={[s.legendText, { marginLeft: 'auto' }]}>{totalWeeks} weeks total</Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <Modal visible={true} animationType="slide" transparent={true}>
       <View style={s.overlay}>
@@ -430,6 +611,16 @@ export default function MemberDetail({
                 </TouchableOpacity>
               </View>
 
+              {/* Plan Phase Timeline */}
+              {planLoading ? (
+                <View style={{ padding: 20, alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color={GOLD} />
+                  <Text style={[s.slotMeta, { marginTop: 6 }]}>Loading plan data...</Text>
+                </View>
+              ) : (
+                <PhaseTimeline />
+              )}
+
               {/* Existing Slots */}
               {activeSlots.length > 0 && (
                 <View style={s.schedSection}>
@@ -489,7 +680,7 @@ export default function MemberDetail({
               {/* New Slot Form */}
               <View style={s.schedSection}>
                 <Text style={s.schedSectionTitle}>
-                  {activeSlots.length > 0 ? 'Add Another Slot' : 'Create Recurring Slot'}
+                  {activeSlots.length > 0 ? 'Add More Slots' : 'Create Recurring Slots'}
                 </Text>
 
                 {/* Session Type */}
@@ -508,36 +699,67 @@ export default function MemberDetail({
                   ))}
                 </View>
 
-                {/* Guidance Phase */}
-                <Text style={s.fieldLabel}>Guidance Phase</Text>
+                {/* Guidance Phase — with week counts from plan */}
+                <View style={s.phaseHeaderRow}>
+                  <Text style={s.fieldLabel}>Guidance Phase</Text>
+                  {planPhases && !planPhaseOverride && (
+                    <TouchableOpacity onPress={() => setPlanPhaseOverride(true)}>
+                      <Text style={s.overrideLink}>Override</Text>
+                    </TouchableOpacity>
+                  )}
+                  {planPhaseOverride && (
+                    <TouchableOpacity onPress={() => setPlanPhaseOverride(false)}>
+                      <Text style={[s.overrideLink, { color: GREEN }]}>Sync to plan</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
                 <View style={s.dayRow}>
-                  {[
+                  {([
                     { key: 'coach_guided' as GuidancePhase, label: 'Coach Guided', color: GREEN },
                     { key: 'shared_guidance' as GuidancePhase, label: 'Shared Guidance', color: GOLD },
                     { key: 'self_guided' as GuidancePhase, label: 'Self Guided', color: '#7DD3FC' },
-                  ].map(phase => (
-                    <TouchableOpacity
-                      key={phase.key}
-                      style={[
-                        s.dayBtn,
-                        selectedPhase === phase.key && { backgroundColor: phase.color + '18', borderColor: phase.color + '60' },
-                        { minWidth: 95 },
-                      ]}
-                      onPress={() => {
-                        setSelectedPhase(phase.key);
-                        if (phase.key === 'coach_guided') setCoachJoining(true);
-                        if (phase.key === 'self_guided') setCoachJoining(false);
-                      }}
-                    >
-                      <Text style={[
-                        s.dayBtnText,
-                        selectedPhase === phase.key && { color: phase.color },
-                        { fontSize: 12 },
-                      ]}>
-                        {phase.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                  ] as const).map(phase => {
+                    const weekCount = phaseWeekMap[phase.key];
+                    return (
+                      <TouchableOpacity
+                        key={phase.key}
+                        style={[
+                          s.phaseBtn,
+                          selectedPhase === phase.key && { backgroundColor: phase.color + '18', borderColor: phase.color + '60' },
+                        ]}
+                        onPress={() => {
+                          setSelectedPhase(phase.key);
+                          if (phase.key === 'coach_guided') setCoachJoining(true);
+                          if (phase.key === 'self_guided') setCoachJoining(false);
+                        }}
+                      >
+                        <Text style={[
+                          s.phaseBtnLabel,
+                          selectedPhase === phase.key && { color: phase.color },
+                        ]}>
+                          {phase.label}
+                        </Text>
+                        {weekCount > 0 && (
+                          <Text style={[
+                            s.phaseBtnWeeks,
+                            selectedPhase === phase.key && { color: phase.color },
+                          ]}>
+                            {weekCount} weeks
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Room Source Indicator (auto-determined) */}
+                <View style={s.roomSourceRow}>
+                  <Icon name="info" size={14} color={MUTED} />
+                  <Text style={s.roomSourceText}>
+                    Room: {resolvedRoomSource === 'coach_personal' ? 'Your Zoom' : 'Shared Pool'}
+                    {selectedPhase === 'coach_guided' && ' (always your Zoom for Coach Guided)'}
+                    {selectedPhase === 'self_guided' && ' (always shared pool for Self Guided)'}
+                  </Text>
                 </View>
 
                 {/* Shared Guidance: Coach Joining Toggle */}
@@ -564,45 +786,70 @@ export default function MemberDetail({
                   </View>
                 )}
 
-                {/* Day of Week */}
-                <Text style={s.fieldLabel}>Day of Week</Text>
+                {/* ── Multi-Day Selector ─────────────────────────────────────── */}
+                <Text style={s.fieldLabel}>Days & Times</Text>
+                <Text style={s.fieldHint}>Tap days to select. Each day gets its own start time.</Text>
                 <View style={s.dayRow}>
-                  {DAY_SHORT_LABELS.map((label, idx) => (
-                    <TouchableOpacity
-                      key={idx}
-                      style={[s.dayBtn, selectedDay === idx && s.dayBtnActive]}
-                      onPress={() => setSelectedDay(idx)}
-                    >
-                      <Text style={[s.dayBtnText, selectedDay === idx && s.dayBtnTextActive]}>
-                        {label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                {/* Start Time */}
-                <Text style={s.fieldLabel}>Start Time</Text>
-                <TouchableOpacity
-                  style={s.selectBtn}
-                  onPress={() => setShowTimeSelect(!showTimeSelect)}
-                >
-                  <Text style={s.selectBtnText}>{formatTime(selectedTime)}</Text>
-                  <Icon name="chevron-down" size={16} color={MUTED} />
-                </TouchableOpacity>
-                {showTimeSelect && (
-                  <ScrollView style={s.timeList} nestedScrollEnabled>
-                    {TIME_OPTIONS.map(t => (
+                  {DAY_SHORT_LABELS.map((label, idx) => {
+                    const isSelected = selectedDays.some(d => d.dayOfWeek === idx);
+                    return (
                       <TouchableOpacity
-                        key={t}
-                        style={[s.timeOption, selectedTime === t && s.timeOptionActive]}
-                        onPress={() => { setSelectedTime(t); setShowTimeSelect(false); }}
+                        key={idx}
+                        style={[s.dayBtn, isSelected && s.dayBtnActive]}
+                        onPress={() => toggleDay(idx)}
                       >
-                        <Text style={[s.timeOptionText, selectedTime === t && { color: GOLD }]}>
-                          {formatTime(t)}
+                        <Text style={[s.dayBtnText, isSelected && s.dayBtnTextActive]}>
+                          {label}
                         </Text>
                       </TouchableOpacity>
-                    ))}
-                  </ScrollView>
+                    );
+                  })}
+                </View>
+
+                {/* Per-day time pickers */}
+                {selectedDays.map(entry => (
+                  <View key={entry.dayOfWeek} style={s.dayTimeRow}>
+                    <View style={s.dayTimeLabel}>
+                      <Text style={s.dayTimeDayText}>{DAY_LABELS[entry.dayOfWeek]}</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={s.dayTimeBtn}
+                      onPress={() => setEditingTimeForDay(
+                        editingTimeForDay === entry.dayOfWeek ? null : entry.dayOfWeek
+                      )}
+                    >
+                      <Text style={s.dayTimeBtnText}>{formatTime(entry.startTime)}</Text>
+                      <Icon name="chevron-down" size={14} color={MUTED} />
+                    </TouchableOpacity>
+                    <Text style={s.dayTimeEnd}>
+                      — {formatTime(addMinutesToTime(entry.startTime, selectedDuration))}
+                    </Text>
+                  </View>
+                ))}
+
+                {/* Time picker dropdown for active day */}
+                {editingTimeForDay !== null && (
+                  <View style={s.timePickerWrap}>
+                    <Text style={s.timePickerTitle}>
+                      Set time for {DAY_LABELS[editingTimeForDay]}
+                    </Text>
+                    <ScrollView style={s.timeList} nestedScrollEnabled>
+                      {TIME_OPTIONS.map(t => {
+                        const isActive = selectedDays.find(d => d.dayOfWeek === editingTimeForDay)?.startTime === t;
+                        return (
+                          <TouchableOpacity
+                            key={t}
+                            style={[s.timeOption, isActive && s.timeOptionActive]}
+                            onPress={() => updateDayTime(editingTimeForDay, t)}
+                          >
+                            <Text style={[s.timeOptionText, isActive && { color: GOLD }]}>
+                              {formatTime(t)}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
                 )}
 
                 {/* Duration — sliding scale */}
@@ -642,7 +889,7 @@ export default function MemberDetail({
                 {/* Week of Month — only visible when Monthly is selected */}
                 {selectedPattern === 'monthly' && (
                   <>
-                    <Text style={s.fieldLabel}>Which {DAY_LABELS[selectedDay]}?</Text>
+                    <Text style={s.fieldLabel}>Which week?</Text>
                     <View style={s.dayRow}>
                       {([1, 2, 3, 4] as const).map(w => {
                         const labels = ['1st', '2nd', '3rd', '4th'];
@@ -686,16 +933,27 @@ export default function MemberDetail({
                 {/* Summary */}
                 <View style={s.summaryCard}>
                   <Text style={s.summaryText}>
+                    {selectedDays.length === 1
+                      ? `${DAY_LABELS[selectedDays[0].dayOfWeek]}s at ${formatTime(selectedDays[0].startTime)} for ${selectedDuration} min`
+                      : `${selectedDays.length} days/week for ${selectedDuration} min each`}
                     {selectedPattern === 'monthly'
-                      ? `${['1st', '2nd', '3rd', '4th'][selectedWeekOfMonth - 1]} ${DAY_LABELS[selectedDay]} at ${formatTime(selectedTime)} for ${selectedDuration} min, monthly`
-                      : `${DAY_LABELS[selectedDay]}s at ${formatTime(selectedTime)} for ${selectedDuration} min, ${selectedPattern}`}
+                      ? `, ${['1st', '2nd', '3rd', '4th'][selectedWeekOfMonth - 1]} week monthly`
+                      : `, ${selectedPattern}`}
                   </Text>
+                  {selectedDays.length > 1 && (
+                    <Text style={s.summaryDays}>
+                      {selectedDays.map(d => `${DAY_SHORT_LABELS[d.dayOfWeek]} ${formatTime(d.startTime)}`).join(' · ')}
+                    </Text>
+                  )}
                   <Text style={s.summaryMeta}>
                     {selectedSessionType === 'check_in' ? 'Check-in' : selectedSessionType.charAt(0).toUpperCase() + selectedSessionType.slice(1)}
                     {' · '}
-                    {selectedPhase === 'coach_guided' ? 'Coach Guided' : selectedPhase === 'shared_guidance' ? (coachJoining ? 'Shared Guidance (you join)' : 'Shared Guidance (on their own)') : 'Self Guided'}
+                    {SCHED_PHASE_LABELS[selectedPhase]}
+                    {selectedPhase === 'shared_guidance' && (coachJoining ? ' (you join)' : ' (on their own)')}
                   </Text>
                   <Text style={s.summaryMeta}>
+                    {resolvedRoomSource === 'coach_personal' ? 'Your Zoom' : 'Shared Pool'}
+                    {' · '}
                     {selectedTimezone.split('/')[1]?.replace(/_/g, ' ')} time
                   </Text>
                 </View>
@@ -703,13 +961,17 @@ export default function MemberDetail({
                 {/* Create Button */}
                 <TouchableOpacity
                   style={s.createBtn}
-                  onPress={handleCreateSlot}
+                  onPress={handleCreateSlots}
                   disabled={creating}
                 >
                   {creating ? (
                     <ActivityIndicator size="small" color={BG} />
                   ) : (
-                    <Text style={s.createBtnText}>Create Recurring Slot</Text>
+                    <Text style={s.createBtnText}>
+                      {selectedDays.length > 1
+                        ? `Create ${selectedDays.length} Recurring Slots`
+                        : 'Create Recurring Slot'}
+                    </Text>
                   )}
                 </TouchableOpacity>
               </View>
@@ -951,6 +1213,13 @@ const s = StyleSheet.create({
     marginBottom: 8,
     marginTop: 14,
   },
+  fieldHint: {
+    fontSize: 11,
+    color: MUTED,
+    fontFamily: FB,
+    marginBottom: 8,
+    marginTop: -4,
+  },
   dayRow: {
     flexDirection: 'row',
     gap: 6,
@@ -978,6 +1247,119 @@ const s = StyleSheet.create({
   dayBtnTextActive: {
     color: '#A78BFA',
   },
+
+  // ── Phase buttons (taller, with week count) ───────────────────────────
+  phaseBtn: {
+    flex: 1,
+    minWidth: 90,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(30,42,58,0.5)',
+    borderWidth: 1,
+    borderColor: BORDER,
+    alignItems: 'center',
+    gap: 2,
+  },
+  phaseBtnLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: MUTED,
+    fontFamily: FB,
+    textAlign: 'center',
+  },
+  phaseBtnWeeks: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: MUTED,
+    fontFamily: FB,
+  },
+  phaseHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 14,
+    marginBottom: 8,
+  },
+  overrideLink: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: GOLD,
+    fontFamily: FB,
+  },
+
+  // ── Room source indicator ─────────────────────────────────────────────
+  roomSourceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  roomSourceText: {
+    fontSize: 11,
+    color: MUTED,
+    fontFamily: FB,
+  },
+
+  // ── Multi-day time rows ───────────────────────────────────────────────
+  dayTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  dayTimeLabel: {
+    width: 80,
+  },
+  dayTimeDayText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#F0F4F8',
+    fontFamily: FB,
+  },
+  dayTimeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(30,42,58,0.5)',
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  dayTimeBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#A78BFA',
+    fontFamily: FB,
+  },
+  dayTimeEnd: {
+    fontSize: 12,
+    color: MUTED,
+    fontFamily: FB,
+  },
+  timePickerWrap: {
+    marginTop: 8,
+    backgroundColor: BG,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: BORDER,
+    overflow: 'hidden',
+  },
+  timePickerTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#F0F4F8',
+    fontFamily: FB,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+
   selectBtn: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -998,10 +1380,6 @@ const s = StyleSheet.create({
   timeList: {
     maxHeight: 180,
     backgroundColor: BG,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: BORDER,
-    marginTop: 4,
   },
   timeOption: {
     paddingHorizontal: 14,
@@ -1063,6 +1441,14 @@ const s = StyleSheet.create({
     fontWeight: '600',
     color: '#F0F4F8',
     fontFamily: FB,
+    textAlign: 'center',
+  },
+  summaryDays: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#A78BFA',
+    fontFamily: FB,
+    marginTop: 4,
     textAlign: 'center',
   },
   summaryMeta: {
@@ -1132,5 +1518,86 @@ const s = StyleSheet.create({
     color: MUTED,
     fontFamily: FB,
     marginTop: 2,
+  },
+
+  // ── Phase Timeline ────────────────────────────────────────────────────
+  timelineWrap: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+  timelineHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  timelineTitleText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FH,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  editPlanBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: 'rgba(245,166,35,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.3)',
+  },
+  editPlanBtnText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: GOLD,
+    fontFamily: FB,
+  },
+  timelineBar: {
+    flexDirection: 'row',
+    height: 28,
+    borderRadius: 6,
+    overflow: 'hidden',
+    gap: 2,
+  },
+  timelineSegment: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: 28,
+  },
+  timelineSegText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#fff',
+    fontFamily: FB,
+  },
+  timelineLegend: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 8,
+    marginBottom: 12,
+    flexWrap: 'wrap',
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  legendText: {
+    fontSize: 10,
+    color: MUTED,
+    fontFamily: FB,
   },
 });

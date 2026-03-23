@@ -9,7 +9,7 @@
  * even when the app tab is not open.
  */
 
-const CACHE_VERSION = '20260323-004000';
+const CACHE_VERSION = '20260323-120000';
 const CACHE_NAME = `goarrive-${CACHE_VERSION}`;
 const STATIC_ASSETS = [
   '/',
