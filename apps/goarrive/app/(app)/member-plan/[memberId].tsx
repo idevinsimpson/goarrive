@@ -501,9 +501,10 @@ function GuidanceDropdown({ value, onChange, isOpen, onOpen }: {
 // Coach mode adds pencil icons, tappable day tiles, sliders, etc.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export function PlanView({ plan, isCoach, onChange }: {
+export function PlanView({ plan, isCoach, onChange, onAccept }: {
   plan: MemberPlanData; isCoach: boolean;
   onChange: (updates: Partial<MemberPlanData>) => void;
+  onAccept?: () => void;
 }) {
   const [editField, setEditField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -976,8 +977,11 @@ export function PlanView({ plan, isCoach, onChange }: {
             </Text>
             <Pressable
               onPress={() => {
-                if (!isCoach) {
-                  // Member accepting: update status
+                if (!isCoach && onAccept) {
+                  // Member accepting: navigate to payment selection
+                  onAccept();
+                } else if (!isCoach) {
+                  // Fallback: update status directly (shouldn't happen)
                   onChange({ status: 'accepted' } as any);
                 }
               }}
@@ -1690,34 +1694,48 @@ function HowWeGotTheseNumbers({ plan, pricing, isCoach }: { plan: MemberPlanData
         <Text style={{ color: PRIMARY, fontSize: 14 }}>{isOpen ? '▴' : '▾'}</Text>
       </Pressable>
 
-      {isOpen && isCoach && (
-        <View style={{ marginTop: 8, padding: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, borderWidth: 1, borderColor: BORDER }}>
-          {phaseBreakdown.map(({ sessionType, sessionsPerWeek: count, phase1Hours: p1Hrs, phase2Hours: p2Hrs, phase3Hours: p3Hrs, phase1Guidance, phase2Guidance, phase3Guidance }) => {
-            const label = sessionType === 'Cardio + Mobility' ? 'Cardio' : sessionType;
-            const fmtLine = (weeks: number, g: string, hrs: number, pLabel: string) => {
-              if (weeks <= 0) return null;
-              if (g === 'Self-reliant') {
-                return <Text key={`${sessionType}-${pLabel}`} style={bd.line}>{label}: {weeks}w × {count} × {selfMin}min = {hrs.toFixed(1)} hrs ({pLabel})</Text>;
-              }
-              return <Text key={`${sessionType}-${pLabel}`} style={bd.line}>{label}: {weeks}w × {count} × {sessionLength}min × {GUIDANCE_FACTORS[g as keyof typeof GUIDANCE_FACTORS]} = {hrs.toFixed(1)} hrs ({pLabel})</Text>;
-            };
-            return (
-              <View key={sessionType} style={{ marginBottom: 4 }}>
-                {fmtLine(P1, phase1Guidance, p1Hrs, 'P1')}
-                {fmtLine(P2, phase2Guidance, p2Hrs, 'P2')}
-                {fmtLine(P3, phase3Guidance, p3Hrs, 'P3')}
-              </View>
-            );
-          })}
-          <Text style={bd.line}>Check-ins: {months} × {checkInMin}min ÷ 60 = {checkInHrs.toFixed(1)} hrs</Text>
-          <Text style={bd.line}>Program build: {buildHrs} hrs</Text>
-          <View style={{ borderTopWidth: 1, borderTopColor: BORDER, marginTop: 6, paddingTop: 6 }}>
-            <Text style={bd.line}>Total: {totalCoachingHrs.toFixed(1)} + {checkInHrs.toFixed(1)} + {buildHrs} = {totalHrs.toFixed(1)} hrs</Text>
-            <Text style={bd.line}>Program: {totalHrs.toFixed(1)} hrs × {formatCurrency(hourlyRate)}/hr = {formatCurrency(Math.round(totalHrs * hourlyRate))}</Text>
-            <Text style={[bd.line, { color: '#FFF', fontWeight: '700' }]}>Monthly: {formatCurrency(Math.round(totalHrs * hourlyRate))} ÷ {months}mo = {formatCurrency(pricing.calculatedMonthlyPrice)}</Text>
+      {isOpen && isCoach && (() => {
+        const BdRow = ({ left, right, bold }: { left: string; right: string; bold?: boolean }) => (
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 }}>
+            <Text style={{ color: MUTED, fontSize: 11, flex: 1 }} numberOfLines={1}>{left}</Text>
+            <Text style={{ color: bold ? '#FFF' : MUTED, fontSize: 11, fontWeight: bold ? '700' : '400', textAlign: 'right', minWidth: 50 }}>{right}</Text>
           </View>
-        </View>
-      )}
+        );
+        return (
+          <View style={{ marginTop: 8, padding: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, borderWidth: 1, borderColor: BORDER }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+              <Text style={{ color: MUTED, fontSize: 10, fontWeight: '700', letterSpacing: 0.5 }}>SESSION TYPE</Text>
+              <Text style={{ color: MUTED, fontSize: 10, fontWeight: '700', letterSpacing: 0.5 }}>HOURS</Text>
+            </View>
+            {phaseBreakdown.map(({ sessionType, sessionsPerWeek: count, phase1Hours: p1Hrs, phase2Hours: p2Hrs, phase3Hours: p3Hrs, phase1Guidance, phase2Guidance, phase3Guidance }) => {
+              const label = sessionType === 'Cardio + Mobility' ? 'Cardio' : sessionType;
+              const rows: { left: string; right: string }[] = [];
+              if (P1 > 0) {
+                const desc = phase1Guidance === 'Self-reliant' ? `P1: ${P1}w × ${count} × ${selfMin}m` : `P1: ${P1}w × ${count} × ${sessionLength}m × ${GUIDANCE_FACTORS[phase1Guidance as keyof typeof GUIDANCE_FACTORS]}`;
+                rows.push({ left: `${label} ${desc}`, right: `${p1Hrs.toFixed(1)}h` });
+              }
+              if (P2 > 0) {
+                const desc = phase2Guidance === 'Self-reliant' ? `P2: ${P2}w × ${count} × ${selfMin}m` : `P2: ${P2}w × ${count} × ${sessionLength}m × ${GUIDANCE_FACTORS[phase2Guidance as keyof typeof GUIDANCE_FACTORS]}`;
+                rows.push({ left: `${label} ${desc}`, right: `${p2Hrs.toFixed(1)}h` });
+              }
+              if (P3 > 0) {
+                const desc = phase3Guidance === 'Self-reliant' ? `P3: ${P3}w × ${count} × ${selfMin}m` : `P3: ${P3}w × ${count} × ${sessionLength}m × ${GUIDANCE_FACTORS[phase3Guidance as keyof typeof GUIDANCE_FACTORS]}`;
+                rows.push({ left: `${label} ${desc}`, right: `${p3Hrs.toFixed(1)}h` });
+              }
+              return <View key={sessionType} style={{ marginBottom: 2 }}>{rows.map((r, i) => <BdRow key={i} left={r.left} right={r.right} />)}</View>;
+            })}
+            <View style={{ borderTopWidth: 1, borderTopColor: BORDER, marginTop: 4, paddingTop: 4 }}>
+              <BdRow left={`Check-ins (${months}mo × ${checkInMin}m)`} right={`${checkInHrs.toFixed(1)}h`} />
+              <BdRow left="Program build" right={`${buildHrs}h`} />
+            </View>
+            <View style={{ borderTopWidth: 1, borderTopColor: BORDER, marginTop: 4, paddingTop: 4 }}>
+              <BdRow left="Total hours" right={`${totalHrs.toFixed(1)}h`} bold />
+              <BdRow left={`${totalHrs.toFixed(1)}h × ${formatCurrency(hourlyRate)}/hr`} right={formatCurrency(Math.round(totalHrs * hourlyRate))} />
+              <BdRow left={`÷ ${months} months`} right={formatCurrency(pricing.calculatedMonthlyPrice)} bold />
+            </View>
+          </View>
+        );
+      })()}
 
       {isOpen && !isCoach && (
         <View style={{ marginTop: 8, padding: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
@@ -1980,7 +1998,7 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                   </View>
                 )}
 
-                {/* Pricing breakdown (inline) */}
+                {/* Pricing breakdown (inline, mobile-friendly table) */}
                 <View style={{ borderTopWidth: 1, borderTopColor: BORDER, marginTop: 12, paddingTop: 12 }}>
                   <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700', marginBottom: 8 }}>Pricing Breakdown</Text>
                   {(() => {
@@ -1997,31 +2015,47 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                     const P1 = (plan.phases && plan.phases[0]?.weeks) || 0;
                     const P2 = (plan.phases && plan.phases[1]?.weeks) || 0;
                     const P3 = (plan.phases && plan.phases[2]?.weeks) || 0;
+
+                    // Table row helper
+                    const Row = ({ left, right, bold }: { left: string; right: string; bold?: boolean }) => (
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 }}>
+                        <Text style={{ color: MUTED, fontSize: 11, flex: 1 }} numberOfLines={1}>{left}</Text>
+                        <Text style={{ color: bold ? '#FFF' : MUTED, fontSize: 11, fontWeight: bold ? '700' : '400', textAlign: 'right', minWidth: 50 }}>{right}</Text>
+                      </View>
+                    );
+
                     return (
                       <View style={{ padding: 10, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, borderWidth: 1, borderColor: BORDER }}>
+                        {/* Phase header */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <Text style={{ color: MUTED, fontSize: 10, fontWeight: '700', letterSpacing: 0.5 }}>SESSION TYPE</Text>
+                          <Text style={{ color: MUTED, fontSize: 10, fontWeight: '700', letterSpacing: 0.5 }}>HOURS</Text>
+                        </View>
                         {phaseBreakdown.map(({ sessionType, sessionsPerWeek: count, phase1Hours: p1Hrs, phase2Hours: p2Hrs, phase3Hours: p3Hrs, phase1Guidance, phase2Guidance, phase3Guidance }) => {
                           const label = sessionType === 'Cardio + Mobility' ? 'Cardio' : sessionType;
-                          const fmtLine = (weeks: number, g: string, hrs: number, pLabel: string) => {
-                            if (weeks <= 0) return null;
-                            if (g === 'Self-reliant') {
-                              return <Text key={`${sessionType}-${pLabel}`} style={bd.line}>{label}: {weeks}w × {count} × {selfMin}min = {hrs.toFixed(1)} hrs ({pLabel})</Text>;
-                            }
-                            return <Text key={`${sessionType}-${pLabel}`} style={bd.line}>{label}: {weeks}w × {count} × {sessionLength}min × {GUIDANCE_FACTORS[g as keyof typeof GUIDANCE_FACTORS]} = {hrs.toFixed(1)} hrs ({pLabel})</Text>;
-                          };
-                          return (
-                            <View key={sessionType} style={{ marginBottom: 4 }}>
-                              {fmtLine(P1, phase1Guidance, p1Hrs, 'P1')}
-                              {fmtLine(P2, phase2Guidance, p2Hrs, 'P2')}
-                              {fmtLine(P3, phase3Guidance, p3Hrs, 'P3')}
-                            </View>
-                          );
+                          const rows: { left: string; right: string }[] = [];
+                          if (P1 > 0) {
+                            const desc = phase1Guidance === 'Self-reliant' ? `P1: ${P1}w × ${count} × ${selfMin}m` : `P1: ${P1}w × ${count} × ${sessionLength}m × ${GUIDANCE_FACTORS[phase1Guidance as keyof typeof GUIDANCE_FACTORS]}`;
+                            rows.push({ left: `${label} ${desc}`, right: `${p1Hrs.toFixed(1)}h` });
+                          }
+                          if (P2 > 0) {
+                            const desc = phase2Guidance === 'Self-reliant' ? `P2: ${P2}w × ${count} × ${selfMin}m` : `P2: ${P2}w × ${count} × ${sessionLength}m × ${GUIDANCE_FACTORS[phase2Guidance as keyof typeof GUIDANCE_FACTORS]}`;
+                            rows.push({ left: `${label} ${desc}`, right: `${p2Hrs.toFixed(1)}h` });
+                          }
+                          if (P3 > 0) {
+                            const desc = phase3Guidance === 'Self-reliant' ? `P3: ${P3}w × ${count} × ${selfMin}m` : `P3: ${P3}w × ${count} × ${sessionLength}m × ${GUIDANCE_FACTORS[phase3Guidance as keyof typeof GUIDANCE_FACTORS]}`;
+                            rows.push({ left: `${label} ${desc}`, right: `${p3Hrs.toFixed(1)}h` });
+                          }
+                          return <View key={sessionType} style={{ marginBottom: 2 }}>{rows.map((r, i) => <Row key={i} left={r.left} right={r.right} />)}</View>;
                         })}
-                        <Text style={bd.line}>Check-ins: {months} × {checkInMin}min ÷ 60 = {checkInHrs.toFixed(1)} hrs</Text>
-                        <Text style={bd.line}>Program build: {buildHrs} hrs</Text>
-                        <View style={{ borderTopWidth: 1, borderTopColor: BORDER, marginTop: 6, paddingTop: 6 }}>
-                          <Text style={bd.line}>Total: {totalCoachingHrs.toFixed(1)} + {checkInHrs.toFixed(1)} + {buildHrs} = {totalHrs.toFixed(1)} hrs</Text>
-                          <Text style={bd.line}>Program: {totalHrs.toFixed(1)} hrs × {formatCurrency(hourlyRate)}/hr = {formatCurrency(Math.round(totalHrs * hourlyRate))}</Text>
-                          <Text style={[bd.line, { color: '#FFF', fontWeight: '700' }]}>Monthly: {formatCurrency(Math.round(totalHrs * hourlyRate))} ÷ {months}mo = {formatCurrency(pricing.calculatedMonthlyPrice)}</Text>
+                        <View style={{ borderTopWidth: 1, borderTopColor: BORDER, marginTop: 4, paddingTop: 4 }}>
+                          <Row left={`Check-ins (${months}mo × ${checkInMin}m)`} right={`${checkInHrs.toFixed(1)}h`} />
+                          <Row left="Program build" right={`${buildHrs}h`} />
+                        </View>
+                        <View style={{ borderTopWidth: 1, borderTopColor: BORDER, marginTop: 4, paddingTop: 4 }}>
+                          <Row left={`Total hours`} right={`${totalHrs.toFixed(1)}h`} bold />
+                          <Row left={`${totalHrs.toFixed(1)}h × ${formatCurrency(hourlyRate)}/hr`} right={formatCurrency(Math.round(totalHrs * hourlyRate))} />
+                          <Row left={`÷ ${months} months`} right={formatCurrency(pricing.calculatedMonthlyPrice)} bold />
                         </View>
                       </View>
                     );
@@ -2055,20 +2089,62 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                     const contSessionHrs = contHr * (contMin / 60) * spm;
                     const contCheckInHrs = contCheckIn / 60; // 1 call/mo
                     const contMonthly = Math.round(contSessionHrs + (contCheckInHrs * contHr));
-                    const contPifMonthly = Math.round(contMonthly * 12 * 0.9 / 12);
+                    // CTS + Pay-in-full stacking: PIF discount first (10% off yearly), then CTS (half off that)
+                    const contYearly = contMonthly * 12;
+                    const contPifYearly = Math.round(contYearly * 0.9); // 10% PIF discount
+                    const contPifMonthly = Math.round(contPifYearly / 12);
                     const contCts = plan.postContract?.ctsMonthlySavings != null ? plan.postContract.ctsMonthlySavings : Math.round(contMonthly * 0.5);
+                    // Stacked: PIF + CTS both apply
+                    const contStackedMonthly = Math.round(contPifMonthly - contCts);
 
-                    // Sync continuation pricing to Firestore whenever it's computed
-                    // (the actual write happens via onChange in the parent)
+                    // Self-reliant minutes validation
+                    const minWarning = contMin < 3 || contMin > 5;
+
+                    // Auto-sync continuation pricing to Firestore
+                    // This ensures the billing system always has up-to-date values
+                    const syncedCp = {
+                      continuationHourlyRate: contHr,
+                      continuationMinutesPerSession: contMin,
+                      continuationCheckInMinutesPerMonth: contCheckIn,
+                      continuationEnabled: true,
+                      continuationMonthlyPrice: contMonthly,
+                      continuationPayInFullTotal: contPifYearly,
+                      continuationPayInFullMonthlyEquivalent: contPifMonthly,
+                      ctsMonthlySavings: contCts,
+                    };
+                    // Check if Firestore values are stale and need syncing
+                    const cp = plan.continuationPricing;
+                    const needsSync = !cp ||
+                      cp.continuationHourlyRate !== contHr ||
+                      cp.continuationMinutesPerSession !== contMin ||
+                      cp.continuationCheckInMinutesPerMonth !== contCheckIn ||
+                      cp.continuationMonthlyPrice !== contMonthly ||
+                      cp.continuationPayInFullTotal !== contPifYearly ||
+                      cp.continuationPayInFullMonthlyEquivalent !== contPifMonthly;
+                    if (needsSync) {
+                      // Debounced sync: schedule a write on next tick to avoid re-render loop
+                      setTimeout(() => onChange({ continuationPricing: syncedCp as any }), 0);
+                    }
+
                     return (
                       <View style={{ marginTop: 8, padding: 10, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, borderWidth: 1, borderColor: BORDER }}>
                         <Text style={{ color: MUTED, fontSize: 11, lineHeight: 16, marginBottom: 6 }}>
                           Uses your hourly rate ({formatCurrency(contHr)}/hr), self-reliant coach time ({contMin} min/session), and check-in call ({contCheckIn} min/mo).
                         </Text>
+                        {minWarning && (
+                          <View style={{ padding: 6, backgroundColor: 'rgba(245,166,35,0.1)', borderRadius: 6, borderWidth: 1, borderColor: 'rgba(245,166,35,0.3)', marginBottom: 6 }}>
+                            <Text style={{ color: GOLD, fontSize: 11, lineHeight: 15 }}>
+                              ⚠️ Self-reliant coach time is outside the recommended 3–5 min range. This may skew pricing significantly.
+                            </Text>
+                          </View>
+                        )}
                         <View style={{ padding: 8, backgroundColor: 'rgba(91,155,213,0.08)', borderRadius: 6, borderWidth: 1, borderColor: 'rgba(91,155,213,0.2)' }}>
                           <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>Monthly: <Text style={{ color: '#FFF', fontWeight: '600' }}>{formatCurrency(contMonthly)}/mo</Text></Text>
-                          <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>Pay in full: <Text style={{ color: '#FFF' }}>{formatCurrency(contPifMonthly)}/mo</Text></Text>
-                          <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>Commit to Save: <Text style={{ color: GOLD }}>{formatCurrency(contCts)}/mo</Text></Text>
+                          <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>Pay in full (10% off): <Text style={{ color: '#FFF' }}>{formatCurrency(contPifMonthly)}/mo</Text></Text>
+                          <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>Commit to Save: <Text style={{ color: GOLD }}>{formatCurrency(contCts)}/mo off</Text></Text>
+                          <View style={{ borderTopWidth: 1, borderTopColor: 'rgba(91,155,213,0.15)', marginTop: 4, paddingTop: 4 }}>
+                            <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>PIF + CTS stacked: <Text style={{ color: ACCENT, fontWeight: '700' }}>{formatCurrency(Math.max(0, contStackedMonthly))}/mo</Text></Text>
+                          </View>
                         </View>
                       </View>
                     );

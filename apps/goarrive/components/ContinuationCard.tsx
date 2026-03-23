@@ -67,8 +67,9 @@ export default function ContinuationCard({
   const contCheckIn = cp?.continuationCheckInMinutesPerMonth ?? 30;
   const contMonthly = Math.round(contHr * (contMin / 60) * sessionsPerMonth);
   const contYearly = contMonthly * 12;
-  const contPifMonthly = Math.round(contYearly * 0.9 / 12);
-  const contPifSavings = Math.round(contYearly - contYearly * 0.9);
+  const contPifYearly = Math.round(contYearly * 0.9); // 10% PIF discount
+  const contPifMonthly = Math.round(contPifYearly / 12);
+  const contPifSavings = contYearly - contPifYearly;
 
   // CTS: use explicit override from postContract if set, otherwise half of continuation monthly
   const contCts =
@@ -145,7 +146,7 @@ export default function ContinuationCard({
                 </View>
               </View>
 
-              {/* Commit to Save */}
+              {/* Commit to Save + PIF stacking */}
               <View
                 style={{
                   padding: 10,
@@ -157,11 +158,19 @@ export default function ContinuationCard({
                 }}
               >
                 <Text style={{ color: GOLD, fontSize: 13, fontWeight: '700', marginBottom: 2 }}>
-                  {'💡'} Commit to Save — Half Off
+                  {'\uD83D\uDCA1'} Commit to Save \u2014 Half Off
                 </Text>
                 <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
-                  {`Stay consistent and lock in ${formatCurrency(contCts)}/mo — half your standard continuation rate. The same accountability rules apply.`}
+                  {`Stay consistent and lock in ${formatCurrency(contCts)}/mo \u2014 half your standard continuation rate. The same accountability rules apply.`}
                 </Text>
+                <View style={{ marginTop: 6, padding: 8, backgroundColor: 'rgba(110,187,122,0.08)', borderRadius: 6, borderWidth: 1, borderColor: 'rgba(110,187,122,0.2)' }}>
+                  <Text style={{ color: ACCENT, fontSize: 12, fontWeight: '600' }}>
+                    Pay in Full + CTS: {formatCurrency(Math.max(0, contPifMonthly - contCts))}/mo
+                  </Text>
+                  <Text style={{ color: MUTED, fontSize: 11, marginTop: 2 }}>
+                    Both discounts stack \u2014 10% pay-in-full + half off CTS
+                  </Text>
+                </View>
                 {!isCoach && plan.status === 'active' && (() => {
                   // CTS button only visible after contract period ends (RISK-001)
                   const endAt = (plan as any).contractEndAt;

@@ -267,6 +267,7 @@ export default function MyPlan() {
           plan={plan}
           isCoach={false}
           onChange={handlePlanChange}
+          onAccept={handleAcceptPlan}
         />
 
         {/* Accept Plan is now rendered inside PlanView */}
