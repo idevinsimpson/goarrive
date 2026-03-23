@@ -2689,9 +2689,10 @@ export const rescheduleInstance = onCall(
     if (!instanceSnap.exists) throw new HttpsError('not-found', 'Session instance not found');
 
     const instance = instanceSnap.data()!;
-    if (instance.coachId !== callerUid) {
+    if (instance.coachId !== callerUid && instance.memberId !== callerUid) {
       throw new HttpsError('permission-denied', 'You can only reschedule your own sessions');
     }
+    const rescheduleSource = (instance.memberId === callerUid) ? 'member_action' : 'coach_action';
 
     if (!['scheduled', 'allocated', 'allocation_failed'].includes(instance.status as string)) {
       throw new HttpsError('failed-precondition', `Cannot reschedule instance in status "${instance.status}"`);
@@ -2709,7 +2710,7 @@ export const rescheduleInstance = onCall(
         await writeSessionEvent({
           occurrenceId: instanceId,
           eventType: 'meeting_deleted',
-          source: 'coach_action',
+          source: rescheduleSource as any,
           providerMode: provider.mode,
           zoomMeetingId: existingMeetingId,
           timestamp: FieldValue.serverTimestamp(),
@@ -2748,7 +2749,7 @@ export const rescheduleInstance = onCall(
     await writeSessionEvent({
       occurrenceId: instanceId,
       eventType: 'session_rescheduled',
-      source: 'coach_action',
+      source: rescheduleSource as any,
       providerMode: existingMeetingId ? getZoomProvider().mode : 'mock',
       timestamp: FieldValue.serverTimestamp(),
       payload: { from: `${originalDate} ${originalTime}`, to: `${newDate} ${newStartTime}` },
@@ -2789,9 +2790,10 @@ export const cancelInstance = onCall(
     if (!instanceSnap.exists) throw new HttpsError('not-found', 'Session instance not found');
 
     const instance = instanceSnap.data()!;
-    if (instance.coachId !== callerUid) {
+    if (instance.coachId !== callerUid && instance.memberId !== callerUid) {
       throw new HttpsError('permission-denied', 'You can only cancel your own sessions');
     }
+    const cancelSource = (instance.memberId === callerUid) ? 'member_action' : 'coach_action';
 
     // Delete existing Zoom meeting if one was allocated
     const cancelMeetingId = instance.zoomMeetingId as string | undefined;
@@ -2802,7 +2804,7 @@ export const cancelInstance = onCall(
         await writeSessionEvent({
           occurrenceId: instanceId,
           eventType: 'meeting_deleted',
-          source: 'coach_action',
+          source: cancelSource as any,
           providerMode: provider.mode,
           zoomMeetingId: cancelMeetingId,
           timestamp: FieldValue.serverTimestamp(),
@@ -2821,7 +2823,7 @@ export const cancelInstance = onCall(
     await writeSessionEvent({
       occurrenceId: instanceId,
       eventType: 'session_cancelled',
-      source: 'coach_action',
+      source: cancelSource as any,
       providerMode: cancelMeetingId ? getZoomProvider().mode : 'mock',
       timestamp: FieldValue.serverTimestamp(),
       payload: { meetingId: cancelMeetingId || null },
@@ -3385,5 +3387,132 @@ export const coachIcalFeed = onRequest(
       'Cache-Control': 'no-cache, no-store, must-revalidate',
     });
     res.status(200).send(lines.join('\r\n'));
+  }
+);
+
+
+// ─── Prompt 5: updateMemberGuidancePhase — Phase-transition automation ──────
+// When a member's guidance phase changes, update all their future scheduled
+// instances and recurring slots with the correct hosting rules.
+// Phase → hosting rules:
+//   coach_guided   → hostingMode: 'coach_led', coachExpectedLive: true,  personalZoomRequired: true
+//   shared_guidance → hostingMode: 'hosted',    coachExpectedLive: true,  personalZoomRequired: false
+//   self_guided     → hostingMode: 'hosted',    coachExpectedLive: false, personalZoomRequired: false
+
+const PHASE_HOSTING_RULES: Record<string, {
+  hostingMode: string;
+  coachExpectedLive: boolean;
+  personalZoomRequired: boolean;
+}> = {
+  coach_guided: {
+    hostingMode: 'coach_led',
+    coachExpectedLive: true,
+    personalZoomRequired: true,
+  },
+  shared_guidance: {
+    hostingMode: 'hosted',
+    coachExpectedLive: true,
+    personalZoomRequired: false,
+  },
+  self_guided: {
+    hostingMode: 'hosted',
+    coachExpectedLive: false,
+    personalZoomRequired: false,
+  },
+};
+
+export const updateMemberGuidancePhase = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const { memberId, newPhase } = request.data as {
+      memberId: string;
+      newPhase: string;
+    };
+
+    if (!memberId || !newPhase) {
+      throw new HttpsError('invalid-argument', 'memberId and newPhase are required');
+    }
+
+    const rules = PHASE_HOSTING_RULES[newPhase];
+    if (!rules) {
+      throw new HttpsError('invalid-argument', `Invalid guidance phase: ${newPhase}. Must be coach_guided, shared_guidance, or self_guided.`);
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // 1. Update all future scheduled/allocated instances for this member
+    const instancesSnap = await db.collection('session_instances')
+      .where('memberId', '==', memberId)
+      .where('scheduledDate', '>=', todayStr)
+      .get();
+
+    let updatedInstances = 0;
+    const batch1 = db.batch();
+    for (const instDoc of instancesSnap.docs) {
+      const inst = instDoc.data();
+      // Only update instances that haven't started yet
+      if (['scheduled', 'allocated', 'allocation_failed'].includes(inst.status as string)) {
+        batch1.update(instDoc.ref, {
+          guidancePhase: newPhase,
+          hostingMode: rules.hostingMode,
+          coachExpectedLive: rules.coachExpectedLive,
+          personalZoomRequired: rules.personalZoomRequired,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        updatedInstances++;
+      }
+    }
+    if (updatedInstances > 0) await batch1.commit();
+
+    // 2. Update all active recurring slots for this member
+    const slotsSnap = await db.collection('recurring_slots')
+      .where('memberId', '==', memberId)
+      .where('status', '==', 'active')
+      .get();
+
+    let updatedSlots = 0;
+    const batch2 = db.batch();
+    for (const slotDoc of slotsSnap.docs) {
+      batch2.update(slotDoc.ref, {
+        guidancePhase: newPhase,
+        hostingMode: rules.hostingMode,
+        coachExpectedLive: rules.coachExpectedLive,
+        personalZoomRequired: rules.personalZoomRequired,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      updatedSlots++;
+    }
+    if (updatedSlots > 0) await batch2.commit();
+
+    // 3. Write session events for audit trail
+    await writeSessionEvent({
+      occurrenceId: `phase_change_${memberId}_${Date.now()}`,
+      eventType: 'phase_transition' as any,
+      source: 'coach_action',
+      providerMode: getZoomProvider().mode,
+      timestamp: FieldValue.serverTimestamp(),
+      payload: {
+        memberId,
+        newPhase,
+        previousPhase: instancesSnap.docs[0]?.data()?.guidancePhase || 'unknown',
+        updatedInstances,
+        updatedSlots,
+        hostingRules: rules,
+      },
+    });
+
+    console.log(`[updateMemberGuidancePhase] member=${memberId} phase=${newPhase} instances=${updatedInstances} slots=${updatedSlots}`);
+
+    return {
+      success: true,
+      memberId,
+      newPhase,
+      updatedInstances,
+      updatedSlots,
+      hostingRules: rules,
+    };
   }
 );

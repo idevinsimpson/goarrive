@@ -70,7 +70,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
+exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -2283,9 +2283,10 @@ exports.rescheduleInstance = (0, https_1.onCall)({ region: 'us-central1' }, asyn
     if (!instanceSnap.exists)
         throw new https_1.HttpsError('not-found', 'Session instance not found');
     const instance = instanceSnap.data();
-    if (instance.coachId !== callerUid) {
+    if (instance.coachId !== callerUid && instance.memberId !== callerUid) {
         throw new https_1.HttpsError('permission-denied', 'You can only reschedule your own sessions');
     }
+    const rescheduleSource = (instance.memberId === callerUid) ? 'member_action' : 'coach_action';
     if (!['scheduled', 'allocated', 'allocation_failed'].includes(instance.status)) {
         throw new https_1.HttpsError('failed-precondition', `Cannot reschedule instance in status "${instance.status}"`);
     }
@@ -2300,7 +2301,7 @@ exports.rescheduleInstance = (0, https_1.onCall)({ region: 'us-central1' }, asyn
             await writeSessionEvent({
                 occurrenceId: instanceId,
                 eventType: 'meeting_deleted',
-                source: 'coach_action',
+                source: rescheduleSource,
                 providerMode: provider.mode,
                 zoomMeetingId: existingMeetingId,
                 timestamp: firestore_2.FieldValue.serverTimestamp(),
@@ -2337,7 +2338,7 @@ exports.rescheduleInstance = (0, https_1.onCall)({ region: 'us-central1' }, asyn
     await writeSessionEvent({
         occurrenceId: instanceId,
         eventType: 'session_rescheduled',
-        source: 'coach_action',
+        source: rescheduleSource,
         providerMode: existingMeetingId ? (0, zoom_1.getZoomProvider)().mode : 'mock',
         timestamp: firestore_2.FieldValue.serverTimestamp(),
         payload: { from: `${originalDate} ${originalTime}`, to: `${newDate} ${newStartTime}` },
@@ -2373,9 +2374,10 @@ exports.cancelInstance = (0, https_1.onCall)({ region: 'us-central1' }, async (r
     if (!instanceSnap.exists)
         throw new https_1.HttpsError('not-found', 'Session instance not found');
     const instance = instanceSnap.data();
-    if (instance.coachId !== callerUid) {
+    if (instance.coachId !== callerUid && instance.memberId !== callerUid) {
         throw new https_1.HttpsError('permission-denied', 'You can only cancel your own sessions');
     }
+    const cancelSource = (instance.memberId === callerUid) ? 'member_action' : 'coach_action';
     // Delete existing Zoom meeting if one was allocated
     const cancelMeetingId = instance.zoomMeetingId;
     if (cancelMeetingId) {
@@ -2385,7 +2387,7 @@ exports.cancelInstance = (0, https_1.onCall)({ region: 'us-central1' }, async (r
             await writeSessionEvent({
                 occurrenceId: instanceId,
                 eventType: 'meeting_deleted',
-                source: 'coach_action',
+                source: cancelSource,
                 providerMode: provider.mode,
                 zoomMeetingId: cancelMeetingId,
                 timestamp: firestore_2.FieldValue.serverTimestamp(),
@@ -2403,7 +2405,7 @@ exports.cancelInstance = (0, https_1.onCall)({ region: 'us-central1' }, async (r
     await writeSessionEvent({
         occurrenceId: instanceId,
         eventType: 'session_cancelled',
-        source: 'coach_action',
+        source: cancelSource,
         providerMode: cancelMeetingId ? (0, zoom_1.getZoomProvider)().mode : 'mock',
         timestamp: firestore_2.FieldValue.serverTimestamp(),
         payload: { meetingId: cancelMeetingId || null },
@@ -2902,5 +2904,111 @@ exports.coachIcalFeed = (0, https_1.onRequest)({ region: 'us-central1' }, async 
         'Cache-Control': 'no-cache, no-store, must-revalidate',
     });
     res.status(200).send(lines.join('\r\n'));
+});
+// ─── Prompt 5: updateMemberGuidancePhase — Phase-transition automation ──────
+// When a member's guidance phase changes, update all their future scheduled
+// instances and recurring slots with the correct hosting rules.
+// Phase → hosting rules:
+//   coach_guided   → hostingMode: 'coach_led', coachExpectedLive: true,  personalZoomRequired: true
+//   shared_guidance → hostingMode: 'hosted',    coachExpectedLive: true,  personalZoomRequired: false
+//   self_guided     → hostingMode: 'hosted',    coachExpectedLive: false, personalZoomRequired: false
+const PHASE_HOSTING_RULES = {
+    coach_guided: {
+        hostingMode: 'coach_led',
+        coachExpectedLive: true,
+        personalZoomRequired: true,
+    },
+    shared_guidance: {
+        hostingMode: 'hosted',
+        coachExpectedLive: true,
+        personalZoomRequired: false,
+    },
+    self_guided: {
+        hostingMode: 'hosted',
+        coachExpectedLive: false,
+        personalZoomRequired: false,
+    },
+};
+exports.updateMemberGuidancePhase = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+    var _a, _b, _c;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const { memberId, newPhase } = request.data;
+    if (!memberId || !newPhase) {
+        throw new https_1.HttpsError('invalid-argument', 'memberId and newPhase are required');
+    }
+    const rules = PHASE_HOSTING_RULES[newPhase];
+    if (!rules) {
+        throw new https_1.HttpsError('invalid-argument', `Invalid guidance phase: ${newPhase}. Must be coach_guided, shared_guidance, or self_guided.`);
+    }
+    const todayStr = new Date().toISOString().split('T')[0];
+    // 1. Update all future scheduled/allocated instances for this member
+    const instancesSnap = await db.collection('session_instances')
+        .where('memberId', '==', memberId)
+        .where('scheduledDate', '>=', todayStr)
+        .get();
+    let updatedInstances = 0;
+    const batch1 = db.batch();
+    for (const instDoc of instancesSnap.docs) {
+        const inst = instDoc.data();
+        // Only update instances that haven't started yet
+        if (['scheduled', 'allocated', 'allocation_failed'].includes(inst.status)) {
+            batch1.update(instDoc.ref, {
+                guidancePhase: newPhase,
+                hostingMode: rules.hostingMode,
+                coachExpectedLive: rules.coachExpectedLive,
+                personalZoomRequired: rules.personalZoomRequired,
+                updatedAt: firestore_2.FieldValue.serverTimestamp(),
+            });
+            updatedInstances++;
+        }
+    }
+    if (updatedInstances > 0)
+        await batch1.commit();
+    // 2. Update all active recurring slots for this member
+    const slotsSnap = await db.collection('recurring_slots')
+        .where('memberId', '==', memberId)
+        .where('status', '==', 'active')
+        .get();
+    let updatedSlots = 0;
+    const batch2 = db.batch();
+    for (const slotDoc of slotsSnap.docs) {
+        batch2.update(slotDoc.ref, {
+            guidancePhase: newPhase,
+            hostingMode: rules.hostingMode,
+            coachExpectedLive: rules.coachExpectedLive,
+            personalZoomRequired: rules.personalZoomRequired,
+            updatedAt: firestore_2.FieldValue.serverTimestamp(),
+        });
+        updatedSlots++;
+    }
+    if (updatedSlots > 0)
+        await batch2.commit();
+    // 3. Write session events for audit trail
+    await writeSessionEvent({
+        occurrenceId: `phase_change_${memberId}_${Date.now()}`,
+        eventType: 'phase_transition',
+        source: 'coach_action',
+        providerMode: (0, zoom_1.getZoomProvider)().mode,
+        timestamp: firestore_2.FieldValue.serverTimestamp(),
+        payload: {
+            memberId,
+            newPhase,
+            previousPhase: ((_c = (_b = instancesSnap.docs[0]) === null || _b === void 0 ? void 0 : _b.data()) === null || _c === void 0 ? void 0 : _c.guidancePhase) || 'unknown',
+            updatedInstances,
+            updatedSlots,
+            hostingRules: rules,
+        },
+    });
+    console.log(`[updateMemberGuidancePhase] member=${memberId} phase=${newPhase} instances=${updatedInstances} slots=${updatedSlots}`);
+    return {
+        success: true,
+        memberId,
+        newPhase,
+        updatedInstances,
+        updatedSlots,
+        hostingRules: rules,
+    };
 });
 //# sourceMappingURL=index.js.map

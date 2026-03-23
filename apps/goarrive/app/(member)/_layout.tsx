@@ -89,6 +89,15 @@ export default function MemberLayout() {
         }}
       />
       <Tabs.Screen
+        name="my-sessions"
+        options={{
+          title: 'Sessions',
+          tabBarIcon: ({ color }) => (
+            <Icon name="calendar" size={26} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="my-plan"
         options={{
           title: 'My Plan',
