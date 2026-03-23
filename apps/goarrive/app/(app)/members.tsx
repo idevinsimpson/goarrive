@@ -413,7 +413,12 @@ export default function MembersScreen() {
 
       {/* Screen title row */}
       <View style={styles.titleRow}>
-        <Text style={styles.title}>Members</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text style={styles.title}>Members</Text>
+          <View style={{ backgroundColor: 'rgba(245,166,35,0.15)', borderRadius: 5, paddingHorizontal: 7, paddingVertical: 2, borderWidth: 1, borderColor: 'rgba(245,166,35,0.35)', alignSelf: 'center' }}>
+            <Text style={{ fontSize: 9, fontWeight: '700', color: '#F5A623', letterSpacing: 1, fontFamily: Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold' }}>BETA</Text>
+          </View>
+        </View>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <Pressable style={styles.shareIntakeBtn} onPress={() => setShowShareModal(true)}>
             <Icon name="share" size={16} color="#6EBB7A" />

@@ -218,7 +218,12 @@ export default function DashboardScreen() {
       >
         {/* Hero greeting */}
         <View style={s.heroSection}>
-          <Text style={s.heroLabel}>COACH DASHBOARD</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={s.heroLabel}>COACH DASHBOARD</Text>
+            <View style={{ backgroundColor: 'rgba(245,166,35,0.15)', borderRadius: 5, paddingHorizontal: 7, paddingVertical: 2, borderWidth: 1, borderColor: 'rgba(245,166,35,0.35)' }}>
+              <Text style={{ fontSize: 9, fontWeight: '700', color: '#F5A623', letterSpacing: 1, fontFamily: Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold' }}>BETA</Text>
+            </View>
+          </View>
           <Text style={s.heroName}>Welcome back,{'\n'}{coachName}</Text>
           <View style={s.roleBadge}>
             <Text style={s.roleText}>{roleLabel.toUpperCase()}</Text>
@@ -349,6 +354,7 @@ const s = StyleSheet.create({
   content: {
     paddingHorizontal: 20,
     paddingTop: 20,
+    paddingBottom: 100,
   },
   heroSection: {
     marginBottom: 20,

@@ -37,7 +37,7 @@ import {
   Platform, Modal, Animated, Dimensions, Image, ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { doc, getDoc, setDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, addDoc, collection, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
 import { useAuth } from '../../../lib/AuthContext';
 import { Icon } from '../../../components/Icon';
@@ -122,7 +122,7 @@ function EditModal({ visible, onClose, title, value, onSave, multiline = false }
 }
 const em = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: CARD, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 36 },
+  sheet: { backgroundColor: CARD, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   title: { fontSize: 17, fontWeight: '700', color: '#FFF', fontFamily: FH },
   input: { backgroundColor: BG, borderWidth: 1, borderColor: BORDER, borderRadius: 10, padding: 14, fontSize: 15, color: '#FFF', marginBottom: 16 },
@@ -1234,7 +1234,7 @@ function GoalEditModal({ visible, onClose, selectedGoals, goalEmojis, onToggle, 
 }
 const gem = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: CARD, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 36 },
+  sheet: { backgroundColor: CARD, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   title: { fontSize: 17, fontWeight: '700', color: '#FFF', fontFamily: Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold' },
   goalCard: {
@@ -1877,7 +1877,11 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
     <Modal transparent animationType="slide" visible={visible} onRequestClose={onClose}>
       <Pressable style={em.overlay} onPress={onClose}>
         <Pressable style={[em.sheet, { maxHeight: '85%' }]} onPress={e => e.stopPropagation()}>
-          <ScrollView showsVerticalScrollIndicator={false}>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+            contentContainerStyle={{ paddingBottom: 32 }}
+          >
             {/* Header */}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -2348,75 +2352,128 @@ const dc = StyleSheet.create({
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// QUESTIONNAIRE VIEWER
+// QUESTIONNAIRE VIEWER (editable by coach)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function QuestionnaireViewer({ data }: { data: any }) {
-  if (!data) return <View style={{ padding: 20 }}><Text style={{ color: MUTED }}>No questionnaire data available.</Text></View>;
-  
+function QuestionnaireViewer({ data, memberId: qMemberId, onSaved }: {
+  data: any;
+  memberId: string;
+  onSaved: (updated: any) => void;
+}) {
+  const [editField, setEditField] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function handleSaveField(field: string, value: string) {
+    setSaving(true);
+    try {
+      await updateDoc(doc(db, 'intakeSubmissions', qMemberId), { [field]: value });
+      onSaved({ ...data, [field]: value });
+    } catch (e) {
+      console.warn('Failed to save intake field:', e);
+    } finally {
+      setSaving(false);
+      setEditField(null);
+    }
+  }
+
+  if (!data) {
+    return (
+      <View style={{ padding: 24, alignItems: 'center' }}>
+        <Text style={{ color: MUTED, fontSize: 15, textAlign: 'center', marginBottom: 8 }}>
+          No intake data yet.
+        </Text>
+        <Text style={{ color: '#4A5568', fontSize: 13, textAlign: 'center' }}>
+          This member was added manually. Their intake answers will appear here once they complete the intake form, or you can add notes below.
+        </Text>
+      </View>
+    );
+  }
+
   // Map fields from intakeSubmissions if needed
   const name = `${data.firstName || ''} ${data.lastName || ''}`.trim();
   const goals = data.primaryGoals || data.goals;
   const weight = data.weight || data.currentWeight;
   const readiness = data.readinessForChange || data.readiness;
   const activity = data.activityLevel || data.occupation;
-  const diet = data.currentDiet || data.diet;
-  
+  const diet = Array.isArray(data.currentDiet) ? data.currentDiet.join(', ') : (data.currentDiet || data.diet);
+
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
+      {/* Edit modal */}
+      {editField && (
+        <Modal transparent animationType="slide" visible={true} onRequestClose={() => setEditField(null)}>
+          <Pressable style={em.overlay} onPress={() => setEditField(null)}>
+            <Pressable style={em.sheet} onPress={e => e.stopPropagation()}>
+              <View style={em.header}>
+                <Text style={em.title}>Edit {editField.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase())}</Text>
+                <Pressable onPress={() => setEditField(null)} hitSlop={8}><Icon name="x" size={20} color={MUTED} /></Pressable>
+              </View>
+              <TextInput
+                style={em.input}
+                value={editValue}
+                onChangeText={setEditValue}
+                multiline
+                numberOfLines={3}
+                placeholderTextColor="#4A5568"
+                autoFocus
+              />
+              <View style={em.buttons}>
+                <Pressable style={em.btnCancel} onPress={() => setEditField(null)}>
+                  <Text style={em.btnCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={[em.btnSave, saving && { opacity: 0.6 }]} onPress={() => handleSaveField(editField, editValue)} disabled={saving}>
+                  <Text style={em.btnSaveText}>{saving ? 'Saving…' : 'Save'}</Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
       <QSection label="About">
         <QRow label="Name" value={name} />
-        <QRow label="Email" value={data.email} />
-        <QRow label="Phone" value={data.phone} />
-        <QRow label="Gender" value={data.gender} />
-        <QRow label="DOB" value={data.dateOfBirth} />
-        <QRow label="Height" value={data.height} />
+        <QRowEdit label="Email" value={data.email} onEdit={() => { setEditField('email'); setEditValue(data.email || ''); }} />
+        <QRowEdit label="Phone" value={data.phone} onEdit={() => { setEditField('phone'); setEditValue(data.phone || ''); }} />
+        <QRowEdit label="Gender" value={data.gender} onEdit={() => { setEditField('gender'); setEditValue(data.gender || ''); }} />
+        <QRowEdit label="DOB" value={data.dateOfBirth} onEdit={() => { setEditField('dateOfBirth'); setEditValue(data.dateOfBirth || ''); }} />
+        <QRowEdit label="Height" value={data.height} onEdit={() => { setEditField('height'); setEditValue(data.height || ''); }} />
+        <QRowEdit label="Weight" value={weight} onEdit={() => { setEditField('weight'); setEditValue(String(weight || '')); }} />
       </QSection>
 
-      {(goals || weight || data.goalWeight) && (
-        <QSection label="Goals">
-          <QRow label="Primary Goals" value={goals} />
-          <QRow label="Specific Goals" value={data.specificGoals} />
-          <QRow label="Current Weight" value={weight} />
-          <QRow label="Goal Weight" value={data.goalWeight} />
-        </QSection>
-      )}
+      <QSection label="Goals">
+        <QRow label="Primary Goals" value={goals} />
+        <QRowEdit label="Specific Goals" value={data.specificGoals} onEdit={() => { setEditField('specificGoals'); setEditValue(data.specificGoals || ''); }} />
+        <QRowEdit label="Goal Weight" value={data.goalWeight} onEdit={() => { setEditField('goalWeight'); setEditValue(data.goalWeight || ''); }} />
+        <QRowEdit label="Why Statement" value={data.whyStatement} onEdit={() => { setEditField('whyStatement'); setEditValue(data.whyStatement || ''); }} />
+      </QSection>
 
-      {(data.whyStatement || readiness || data.motivation) && (
-        <QSection label="Motivation">
-          <QRow label="Why Statement" value={data.whyStatement} />
-          <QRow label="Readiness" value={readiness} />
-          <QRow label="Motivation" value={data.motivation} />
-          <QRow label="Gym Confidence" value={data.gymConfidence} />
-        </QSection>
-      )}
+      <QSection label="Motivation">
+        <QRow label="Readiness" value={readiness} />
+        <QRow label="Motivation" value={data.motivation} />
+        <QRow label="Gym Confidence" value={data.gymConfidence} />
+      </QSection>
 
-      {(activity || diet || data.currentRoutine) && (
-        <QSection label="Lifestyle">
-          <QRow label="Activity/Occupation" value={activity} />
-          <QRow label="Current Routine" value={data.currentRoutine} />
-          <QRow label="Diet" value={diet} />
-          <QRow label="Work Schedule" value={data.workSchedule} />
-        </QSection>
-      )}
+      <QSection label="Lifestyle">
+        <QRowEdit label="Activity/Occupation" value={activity} onEdit={() => { setEditField('activityLevel'); setEditValue(String(activity || '')); }} />
+        <QRowEdit label="Current Routine" value={data.currentRoutine} onEdit={() => { setEditField('currentRoutine'); setEditValue(data.currentRoutine || ''); }} />
+        <QRow label="Diet" value={diet} />
+        <QRowEdit label="Work Schedule" value={data.workSchedule} onEdit={() => { setEditField('workSchedule'); setEditValue(data.workSchedule || ''); }} />
+      </QSection>
 
-      {(data.healthProblems || data.medications || data.injuries || data.currentInjuries) && (
-        <QSection label="Health">
-          <QRow label="Health Problems" value={data.healthProblems} />
-          <QRow label="Medications" value={data.medications} />
-          <QRow label="Injuries" value={data.injuries || data.currentInjuries} />
-          <QRow label="Therapies" value={data.therapies} />
-        </QSection>
-      )}
+      <QSection label="Health">
+        <QRowEdit label="Health Problems" value={data.healthProblems} onEdit={() => { setEditField('healthProblems'); setEditValue(data.healthProblems || ''); }} />
+        <QRowEdit label="Medications" value={data.medications} onEdit={() => { setEditField('medications'); setEditValue(data.medications || ''); }} />
+        <QRowEdit label="Injuries" value={data.currentInjuries || (Array.isArray(data.injuries) ? data.injuries.join(', ') : data.injuries)} onEdit={() => { setEditField('currentInjuries'); setEditValue(data.currentInjuries || ''); }} />
+        <QRowEdit label="Therapies" value={data.therapies} onEdit={() => { setEditField('therapies'); setEditValue(data.therapies || ''); }} />
+      </QSection>
 
-      {(data.preferredDays || data.preferredTime || data.gym) && (
-        <QSection label="Scheduling">
-          <QRow label="Preferred Days" value={data.preferredDays} />
-          <QRow label="Preferred Time" value={data.preferredTime} />
-          <QRow label="Gym" value={data.gym} />
-          <QRow label="Sessions/Week" value={data.sessionsPerWeek} />
-        </QSection>
-      )}
+      <QSection label="Scheduling">
+        <QRow label="Preferred Days" value={Array.isArray(data.preferredDays) ? data.preferredDays.join(', ') : data.preferredDays} />
+        <QRowEdit label="Preferred Time" value={data.preferredTime} onEdit={() => { setEditField('preferredTime'); setEditValue(data.preferredTime || ''); }} />
+        <QRowEdit label="Gym" value={data.gym} onEdit={() => { setEditField('gym'); setEditValue(data.gym || ''); }} />
+        <QRowEdit label="Sessions/Week" value={data.sessionsPerWeek} onEdit={() => { setEditField('sessionsPerWeek'); setEditValue(String(data.sessionsPerWeek || '')); }} />
+      </QSection>
     </ScrollView>
   );
 }
@@ -2439,6 +2496,24 @@ function QRow({ label, value }: { label: string; value?: string | number | strin
       <Text style={{ color: MUTED, fontSize: 13 }}>{label}</Text>
       <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '500', maxWidth: '60%', textAlign: 'right' } as any}>{display}</Text>
     </View>
+  );
+}
+
+function QRowEdit({ label, value, onEdit }: { label: string; value?: string | number | string[]; onEdit: () => void }) {
+  const display = value && !Array.isArray(value) ? String(value) : (Array.isArray(value) ? value.join(', ') : '');
+  return (
+    <Pressable
+      onPress={onEdit}
+      style={({ pressed }) => [{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: BORDER }, pressed && { opacity: 0.7 }]}
+    >
+      <Text style={{ color: MUTED, fontSize: 13, flex: 1 }}>{label}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '65%' }}>
+        <Text style={{ color: display ? '#FFF' : '#4A5568', fontSize: 13, fontWeight: '500', textAlign: 'right' } as any} numberOfLines={2}>
+          {display || 'Tap to add'}
+        </Text>
+        <Text style={{ color: MUTED, fontSize: 11 }}>✏️</Text>
+      </View>
+    </Pressable>
   );
 }
 
@@ -2507,6 +2582,20 @@ export default function MemberPlanScreen() {
       if (qData) setQuestionnaire(qData);
     } catch (err) {
       console.warn('[loadData] Could not load questionnaire:', err);
+    }
+
+    // ── Step 2b: Load coach's preferred pricing defaults ────────────────
+    let coachPricingDefaults: { hourlyRate?: number; sessionLengthMinutes?: number; checkInCallMinutes?: number; programBuildTimeHours?: number } = {};
+    try {
+      const brandDoc = await getDoc(doc(db, 'coach_brands', user.uid));
+      if (brandDoc.exists()) {
+        const brandData = brandDoc.data();
+        if (brandData.defaultPricing) {
+          coachPricingDefaults = brandData.defaultPricing;
+        }
+      }
+    } catch (e) {
+      // Non-blocking — if this fails, use hardcoded defaults
     }
 
     // ── Step 3: Load or create plan ──────────────────────────────────────
@@ -2589,6 +2678,11 @@ export default function MemberPlanScreen() {
     if (!finalPlan) {
       console.log('[loadData] No plan found, creating default plan for:', name);
       const defaultPlan = createDefaultPlan(name, planKey, user.uid);
+      // Apply coach's preferred pricing defaults (overrides hardcoded defaults)
+      if (coachPricingDefaults.hourlyRate != null) defaultPlan.hourlyRate = coachPricingDefaults.hourlyRate;
+      if (coachPricingDefaults.sessionLengthMinutes != null) defaultPlan.sessionLengthMinutes = coachPricingDefaults.sessionLengthMinutes;
+      if (coachPricingDefaults.checkInCallMinutes != null) defaultPlan.checkInCallMinutes = coachPricingDefaults.checkInCallMinutes;
+      if (coachPricingDefaults.programBuildTimeHours != null) defaultPlan.programBuildTimeHours = coachPricingDefaults.programBuildTimeHours;
       // Populate from questionnaire if available
       if (qData) {
         if (qData.dateOfBirth) {
@@ -2673,6 +2767,23 @@ export default function MemberPlanScreen() {
           setSaveStatus('saved');
           if (saveStatusTimer.current) clearTimeout(saveStatusTimer.current);
           saveStatusTimer.current = setTimeout(() => setSaveStatus('idle'), 2000);
+
+          // If pricing fields changed, persist as coach's preferred defaults
+          const pricingKeys: (keyof MemberPlanData)[] = ['hourlyRate', 'sessionLengthMinutes', 'checkInCallMinutes', 'programBuildTimeHours'];
+          const hasPricingChange = pricingKeys.some(k => k in updates);
+          if (hasPricingChange && user) {
+            const coachDocId = user.uid;
+            const pricingDefaults: Record<string, number> = {};
+            if (updated.hourlyRate != null) pricingDefaults.hourlyRate = updated.hourlyRate;
+            if (updated.sessionLengthMinutes != null) pricingDefaults.sessionLengthMinutes = updated.sessionLengthMinutes;
+            if (updated.checkInCallMinutes != null) pricingDefaults.checkInCallMinutes = updated.checkInCallMinutes;
+            if (updated.programBuildTimeHours != null) pricingDefaults.programBuildTimeHours = updated.programBuildTimeHours;
+            try {
+              await setDoc(doc(db, 'coach_brands', coachDocId), { defaultPricing: pricingDefaults }, { merge: true });
+            } catch (e) {
+              console.warn('[pricing defaults] Could not save to coach_brands:', e);
+            }
+          }
         } catch (err) {
           console.error('Error saving plan:', err);
           setSaveStatus('idle');
@@ -2680,7 +2791,7 @@ export default function MemberPlanScreen() {
       }, 800);
       return updated;
     });
-  }, [memberId]);
+  }, [memberId, user]);
 
   // Pricing (memoized)
   const pricing = useMemo(() => {
@@ -2769,6 +2880,9 @@ export default function MemberPlanScreen() {
               style={[mt.btn, isCoachMode && mt.btnActive]}>
               <Icon name="settings" size={14} color={isCoachMode ? '#FFF' : MUTED} />
               <Text style={[mt.btnText, isCoachMode && mt.btnTextActive]}>Coach</Text>
+              <View style={{ backgroundColor: 'rgba(245,166,35,0.2)', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
+                <Text style={{ fontSize: 8, fontWeight: '700', color: '#F5A623', letterSpacing: 0.8 }}>BETA</Text>
+              </View>
             </Pressable>
             <Pressable onPress={() => setIsCoachMode(false)}
               style={[mt.btn, !isCoachMode && mt.btnActive]}>
@@ -2787,7 +2901,11 @@ export default function MemberPlanScreen() {
 
       {/* ─── CONTENT ──────────────────────────────────────────────────────── */}
       {tab === 'questionnaire' ? (
-        <QuestionnaireViewer data={questionnaire} />
+        <QuestionnaireViewer
+          data={questionnaire}
+          memberId={memberId || ''}
+          onSaved={(updated) => setQuestionnaire(updated)}
+        />
       ) : plan ? (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 120 }}>
           <PlanView plan={plan} isCoach={isCoachMode} onChange={handlePlanChange} />

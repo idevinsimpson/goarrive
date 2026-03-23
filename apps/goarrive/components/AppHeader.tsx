@@ -2,12 +2,14 @@
  * AppHeader — Fixed top header for the GoArrive app
  *
  * Displays the real GoArrive logo image on the left and a user avatar on the right.
+ * Tapping the logo navigates to the dashboard.
  * Tapping the avatar opens AccountPanel as a slide-over modal (not a page navigation).
  * Uses env(safe-area-inset-top) for PWA standalone mode on iOS.
  */
 import React, { useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Platform, Image } from 'react-native';
 import { useAuth } from '../lib/AuthContext';
+import { useRouter } from 'expo-router';
 import AccountPanel from './AccountPanel';
 
 const FONT_HEADING =
@@ -15,6 +17,7 @@ const FONT_HEADING =
 
 export function AppHeader() {
   const { user } = useAuth();
+  const router = useRouter();
   const [showPanel, setShowPanel] = useState(false);
 
   const initials = user?.displayName
@@ -29,14 +32,21 @@ export function AppHeader() {
   return (
     <>
       <View style={s.root}>
-        {/* GoArrive Logo */}
-        <Image
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          source={require('../assets/logo.png')}
-          style={s.logo}
-          resizeMode="contain"
-          accessibilityLabel="GoArrive"
-        />
+        {/* GoArrive Logo — tapping navigates to dashboard */}
+        <Pressable
+          onPress={() => router.push('/(app)/dashboard' as any)}
+          accessibilityRole="button"
+          accessibilityLabel="Go to Dashboard"
+          hitSlop={8}
+        >
+          <Image
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            source={require('../assets/logo.png')}
+            style={s.logo}
+            resizeMode="contain"
+            accessibilityLabel="GoArrive"
+          />
+        </Pressable>
 
         {/* Account avatar — opens slide-over panel */}
         <Pressable

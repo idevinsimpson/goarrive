@@ -102,6 +102,17 @@ export default function AccountPanel({ visible, onClose }: Props) {
     showToast('Need help? Email us at support@goarrive.com');
   }
 
+  function handleFeedback() {
+    // Open feedback/bug report form in a new tab (or in-app browser)
+    const url = 'https://forms.gle/GoArriveFeedback'; // placeholder — update with real form URL
+    if (Platform.OS === 'web') {
+      window.open('mailto:support@goarrive.com?subject=GoArrive%20Beta%20Feedback&body=Page%3A%20%0A%0AWhat%20happened%3A%20%0A%0AExpected%3A%20%0A%0ADevice%3A%20', '_blank');
+    } else {
+      showToast('Send feedback to: support@goarrive.com');
+    }
+    onClose();
+  }
+
   const menuItems: MenuItem[] = [
     {
       icon: 'settings',
@@ -111,9 +122,15 @@ export default function AccountPanel({ visible, onClose }: Props) {
     },
     {
       icon: 'help-circle',
-      label: 'Help & Feedback',
-      sublabel: 'Get support or send feedback',
+      label: 'Help & Support',
+      sublabel: 'Get help or contact us',
       onPress: handleHelp,
+    },
+    {
+      icon: 'edit',
+      label: 'Report a Bug / Suggest',
+      sublabel: 'Share feedback or screenshots',
+      onPress: handleFeedback,
     },
   ];
 
