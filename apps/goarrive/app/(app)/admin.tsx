@@ -344,6 +344,24 @@ export default function AdminScreen() {
               </View>
             </View>
           </View>
+
+          {/* Zoom Provider Mode */}
+          <View style={s.card}>
+            <Text style={s.cardTitle}>Zoom Provider</Text>
+            <View style={s.healthRow}>
+              <View style={s.healthItem}>
+                <Text style={[s.healthValue, { color: AMBER }]}>Mock</Text>
+                <Text style={s.healthLabel}>Current Mode</Text>
+              </View>
+              <View style={s.healthItem}>
+                <Text style={s.healthValue}>S2S OAuth</Text>
+                <Text style={s.healthLabel}>Auth Type</Text>
+              </View>
+            </View>
+            <Text style={[s.cardSub, { marginTop: 8 }]}>
+              Set ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID, and ZOOM_CLIENT_SECRET in Firebase config to enable live Zoom meetings. Until then, mock meetings are created for testing.
+            </Text>
+          </View>
         </>
       )}
 

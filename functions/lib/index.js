@@ -18,6 +18,14 @@
  *         firebase functions:secrets:set STRIPE_WEBHOOK_SECRET
  * ME-003: APP_BASE_URL must be set to the deployed app URL for checkout redirects.
  *         firebase functions:config:set app.base_url="https://goarrive.fit"
+ * ME-004: ZOOM_ACCOUNT_ID must be set for live Zoom integration.
+ *         firebase functions:secrets:set ZOOM_ACCOUNT_ID
+ * ME-005: ZOOM_CLIENT_ID must be set for live Zoom integration.
+ *         firebase functions:secrets:set ZOOM_CLIENT_ID
+ * ME-006: ZOOM_CLIENT_SECRET must be set for live Zoom integration.
+ *         firebase functions:secrets:set ZOOM_CLIENT_SECRET
+ * ME-007: ZOOM_WEBHOOK_SECRET must be set for Zoom webhook signature verification.
+ *         firebase functions:secrets:set ZOOM_WEBHOOK_SECRET
  *
  * RISK-001: CTS + pay-in-full discount stacking order is unresolved.
  *           Do not hardcode stacking. Both amounts are stored in the snapshot;
@@ -62,7 +70,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
+exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -70,6 +78,7 @@ const https_1 = require("firebase-functions/v2/https");
 const params_1 = require("firebase-functions/params");
 const firestore_2 = require("firebase-admin/firestore");
 const stripe_1 = __importDefault(require("stripe"));
+const zoom_1 = require("./zoom");
 admin.initializeApp();
 const db = admin.firestore(); // IAM: datastore.user granted 2026-03-22
 const messaging = admin.messaging();
@@ -1480,18 +1489,21 @@ exports.claimMemberAccount = (0, https_1.onCall)({ region: 'us-central1' }, asyn
 //   - session_instances: Concrete generated occurrences
 //   - scheduling_audit_log: Audit trail for all scheduling decisions
 // ═══════════════════════════════════════════════════════════════════════════════
-// ─── Helper: Generate mock Zoom meeting data ─────────────────────────────────
-let mockCounter = 9000;
-function createMockZoomMeeting(topic, startTime, duration, hostEmail) {
-    const meetingId = `mock-${Date.now()}-${++mockCounter}`;
-    const password = Math.random().toString(36).substring(2, 8);
-    return {
-        meetingId,
-        joinUrl: `https://zoom.us/j/${meetingId}?pwd=${password}`,
-        startUrl: `https://zoom.us/s/${meetingId}?zak=mock_host_token`,
-        password,
-        hostEmail,
-    };
+// ─── Helper: Write session event to durable ledger ──────────────────────────
+async function writeSessionEvent(event) {
+    // Idempotency: if idempotencyKey is provided, check for duplicates
+    if (event.idempotencyKey) {
+        const existing = await db.collection('session_events')
+            .where('idempotencyKey', '==', event.idempotencyKey)
+            .limit(1)
+            .get();
+        if (!existing.empty) {
+            console.log(`[SessionEvent] Duplicate skipped: ${event.idempotencyKey}`);
+            return existing.docs[0].id;
+        }
+    }
+    const ref = await db.collection('session_events').add(event);
+    return ref.id;
 }
 // ─── Helper: Write audit log entry ───────────────────────────────────────────
 async function writeAuditLog(entry) {
@@ -2041,21 +2053,62 @@ exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1' },
         });
         return { success: false, reason: 'All candidate Zoom rooms have conflicts at this time' };
     }
-    // Create a mock Zoom meeting (or real one when provider is activated)
+    // Create Zoom meeting via provider (real or mock based on config)
     const memberName = instance.memberName || 'Member';
-    const meeting = createMockZoomMeeting(`GoArrive Session: ${memberName}`, `${scheduledDate}T${scheduledStartTime}:00`, instance.durationMinutes, allocatedRoom.zoomAccountEmail);
+    const zoomProvider = (0, zoom_1.getZoomProvider)();
+    let meeting;
+    try {
+        meeting = await zoomProvider.createMeeting({
+            topic: `GoArrive Session: ${memberName}`,
+            startTime: `${scheduledDate}T${scheduledStartTime}:00`,
+            duration: instance.durationMinutes,
+            timezone: 'America/New_York',
+            hostEmail: allocatedRoom.zoomAccountEmail,
+        });
+    }
+    catch (err) {
+        // Meeting creation failed — log event and mark allocation failed
+        await writeSessionEvent({
+            occurrenceId: instanceId,
+            eventType: 'meeting_creation_failed',
+            source: 'system',
+            providerMode: zoomProvider.mode,
+            timestamp: firestore_2.FieldValue.serverTimestamp(),
+            payload: { error: err.message, roomId: allocatedRoom.id },
+        });
+        await instanceRef.update({
+            status: 'allocation_failed',
+            allocationFailReason: `Zoom meeting creation failed: ${err.message}`,
+            allocationAttempts: (instance.allocationAttempts || 0) + 1,
+            updatedAt: firestore_2.FieldValue.serverTimestamp(),
+        });
+        return { success: false, reason: `Zoom meeting creation failed: ${err.message}` };
+    }
     // Update the instance with allocation data
     await instanceRef.update({
         status: 'allocated',
         zoomRoomId: allocatedRoom.id,
         zoomRoomLabel: allocatedRoom.label,
         zoomMeetingId: meeting.meetingId,
+        zoomMeetingUuid: meeting.uuid || null,
         zoomJoinUrl: meeting.joinUrl,
         zoomStartUrl: meeting.startUrl,
         zoomMeetingPassword: meeting.password,
+        zoomProviderMode: zoomProvider.mode,
         allocatedAt: firestore_2.FieldValue.serverTimestamp(),
         allocationAttempts: (instance.allocationAttempts || 0) + 1,
         updatedAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    // Write session event for traceability
+    await writeSessionEvent({
+        occurrenceId: instanceId,
+        eventType: 'meeting_created',
+        source: 'system',
+        providerMode: zoomProvider.mode,
+        zoomMeetingId: meeting.meetingId,
+        zoomMeetingUuid: meeting.uuid,
+        timestamp: firestore_2.FieldValue.serverTimestamp(),
+        payload: { roomId: allocatedRoom.id, roomLabel: allocatedRoom.label, joinUrl: meeting.joinUrl },
     });
     await writeAuditLog({
         coachId: callerUid,
@@ -2063,11 +2116,11 @@ exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1' },
         sessionInstanceId: instanceId,
         zoomRoomId: allocatedRoom.id,
         memberId: instance.memberId,
-        details: `Allocated room "${allocatedRoom.label}" for ${memberName} at ${scheduledDate} ${scheduledStartTime}`,
-        metadata: { meetingId: meeting.meetingId },
+        details: `Allocated room "${allocatedRoom.label}" for ${memberName} at ${scheduledDate} ${scheduledStartTime} [${zoomProvider.mode}]`,
+        metadata: { meetingId: meeting.meetingId, providerMode: zoomProvider.mode },
     });
-    console.log(`[allocateSessionInstance] Allocated room ${allocatedRoom.id} to instance ${instanceId}`);
-    return { success: true, roomLabel: allocatedRoom.label, meetingId: meeting.meetingId };
+    console.log(`[allocateSessionInstance] Allocated room ${allocatedRoom.id} to instance ${instanceId} [${zoomProvider.mode}]`);
+    return { success: true, roomLabel: allocatedRoom.label, meetingId: meeting.meetingId, providerMode: zoomProvider.mode };
 });
 // ─── 18. allocateAllPendingInstances — Batch allocate all unallocated instances ──
 exports.allocateAllPendingInstances = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
@@ -2122,22 +2175,55 @@ exports.allocateAllPendingInstances = (0, https_1.onCall)({ region: 'us-central1
                 }
             }
             if (!hasConflict) {
-                const meeting = createMockZoomMeeting(`GoArrive Session: ${instance.memberName || 'Member'}`, `${instance.scheduledDate}T${instance.scheduledStartTime}:00`, instance.durationMinutes, room.zoomAccountEmail);
-                await db.collection('session_instances').doc(instance.id).update({
-                    status: 'allocated',
-                    zoomRoomId: roomDoc.id,
-                    zoomRoomLabel: room.label,
-                    zoomMeetingId: meeting.meetingId,
-                    zoomJoinUrl: meeting.joinUrl,
-                    zoomStartUrl: meeting.startUrl,
-                    zoomMeetingPassword: meeting.password,
-                    allocatedAt: firestore_2.FieldValue.serverTimestamp(),
-                    allocationAttempts: (instance.allocationAttempts || 0) + 1,
-                    updatedAt: firestore_2.FieldValue.serverTimestamp(),
-                });
-                allocated++;
-                roomFound = true;
-                break;
+                const batchProvider = (0, zoom_1.getZoomProvider)();
+                try {
+                    const meeting = await batchProvider.createMeeting({
+                        topic: `GoArrive Session: ${instance.memberName || 'Member'}`,
+                        startTime: `${instance.scheduledDate}T${instance.scheduledStartTime}:00`,
+                        duration: instance.durationMinutes,
+                        timezone: 'America/New_York',
+                        hostEmail: room.zoomAccountEmail,
+                    });
+                    await db.collection('session_instances').doc(instance.id).update({
+                        status: 'allocated',
+                        zoomRoomId: roomDoc.id,
+                        zoomRoomLabel: room.label,
+                        zoomMeetingId: meeting.meetingId,
+                        zoomMeetingUuid: meeting.uuid || null,
+                        zoomJoinUrl: meeting.joinUrl,
+                        zoomStartUrl: meeting.startUrl,
+                        zoomMeetingPassword: meeting.password,
+                        zoomProviderMode: batchProvider.mode,
+                        allocatedAt: firestore_2.FieldValue.serverTimestamp(),
+                        allocationAttempts: (instance.allocationAttempts || 0) + 1,
+                        updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                    });
+                    await writeSessionEvent({
+                        occurrenceId: instance.id,
+                        eventType: 'meeting_created',
+                        source: 'system',
+                        providerMode: batchProvider.mode,
+                        zoomMeetingId: meeting.meetingId,
+                        zoomMeetingUuid: meeting.uuid,
+                        timestamp: firestore_2.FieldValue.serverTimestamp(),
+                        payload: { roomId: roomDoc.id, batch: true },
+                    });
+                    allocated++;
+                    roomFound = true;
+                }
+                catch (err) {
+                    await writeSessionEvent({
+                        occurrenceId: instance.id,
+                        eventType: 'meeting_creation_failed',
+                        source: 'system',
+                        providerMode: batchProvider.mode,
+                        timestamp: firestore_2.FieldValue.serverTimestamp(),
+                        payload: { error: err.message, roomId: roomDoc.id, batch: true },
+                    });
+                    // Continue trying other rooms
+                }
+                if (roomFound)
+                    break;
             }
         }
         if (!roomFound) {
@@ -2181,6 +2267,26 @@ exports.rescheduleInstance = (0, https_1.onCall)({ region: 'us-central1' }, asyn
     }
     const originalDate = instance.scheduledDate;
     const originalTime = instance.scheduledStartTime;
+    const existingMeetingId = instance.zoomMeetingId;
+    // Delete existing Zoom meeting if one was allocated
+    if (existingMeetingId) {
+        const provider = (0, zoom_1.getZoomProvider)();
+        try {
+            await provider.deleteMeeting(existingMeetingId);
+            await writeSessionEvent({
+                occurrenceId: instanceId,
+                eventType: 'meeting_deleted',
+                source: 'coach_action',
+                providerMode: provider.mode,
+                zoomMeetingId: existingMeetingId,
+                timestamp: firestore_2.FieldValue.serverTimestamp(),
+                payload: { reason: 'reschedule' },
+            });
+        }
+        catch (err) {
+            console.warn(`[rescheduleInstance] Failed to delete Zoom meeting ${existingMeetingId}: ${err.message}`);
+        }
+    }
     // Calculate new end time
     const [h, m] = newStartTime.split(':').map(Number);
     const endMinutes = h * 60 + m + instance.durationMinutes;
@@ -2195,12 +2301,22 @@ exports.rescheduleInstance = (0, https_1.onCall)({ region: 'us-central1' }, asyn
         zoomRoomId: firestore_2.FieldValue.delete(),
         zoomRoomLabel: firestore_2.FieldValue.delete(),
         zoomMeetingId: firestore_2.FieldValue.delete(),
+        zoomMeetingUuid: firestore_2.FieldValue.delete(),
         zoomJoinUrl: firestore_2.FieldValue.delete(),
         zoomStartUrl: firestore_2.FieldValue.delete(),
         zoomMeetingPassword: firestore_2.FieldValue.delete(),
+        zoomProviderMode: firestore_2.FieldValue.delete(),
         allocatedAt: firestore_2.FieldValue.delete(),
         rescheduledFrom: `${originalDate} ${originalTime}`,
         updatedAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    await writeSessionEvent({
+        occurrenceId: instanceId,
+        eventType: 'session_rescheduled',
+        source: 'coach_action',
+        providerMode: existingMeetingId ? (0, zoom_1.getZoomProvider)().mode : 'mock',
+        timestamp: firestore_2.FieldValue.serverTimestamp(),
+        payload: { from: `${originalDate} ${originalTime}`, to: `${newDate} ${newStartTime}` },
     });
     await writeAuditLog({
         coachId: callerUid,
@@ -2228,9 +2344,37 @@ exports.cancelInstance = (0, https_1.onCall)({ region: 'us-central1' }, async (r
     if (instance.coachId !== callerUid) {
         throw new https_1.HttpsError('permission-denied', 'You can only cancel your own sessions');
     }
+    // Delete existing Zoom meeting if one was allocated
+    const cancelMeetingId = instance.zoomMeetingId;
+    if (cancelMeetingId) {
+        const provider = (0, zoom_1.getZoomProvider)();
+        try {
+            await provider.deleteMeeting(cancelMeetingId);
+            await writeSessionEvent({
+                occurrenceId: instanceId,
+                eventType: 'meeting_deleted',
+                source: 'coach_action',
+                providerMode: provider.mode,
+                zoomMeetingId: cancelMeetingId,
+                timestamp: firestore_2.FieldValue.serverTimestamp(),
+                payload: { reason: 'cancellation' },
+            });
+        }
+        catch (err) {
+            console.warn(`[cancelInstance] Failed to delete Zoom meeting ${cancelMeetingId}: ${err.message}`);
+        }
+    }
     await instanceRef.update({
         status: 'cancelled',
         updatedAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    await writeSessionEvent({
+        occurrenceId: instanceId,
+        eventType: 'session_cancelled',
+        source: 'coach_action',
+        providerMode: cancelMeetingId ? (0, zoom_1.getZoomProvider)().mode : 'mock',
+        timestamp: firestore_2.FieldValue.serverTimestamp(),
+        payload: { meetingId: cancelMeetingId || null },
     });
     await writeAuditLog({
         coachId: callerUid,
@@ -2240,5 +2384,216 @@ exports.cancelInstance = (0, https_1.onCall)({ region: 'us-central1' }, async (r
         details: `Cancelled session for ${instance.memberName} on ${instance.scheduledDate} at ${instance.scheduledStartTime}`,
     });
     return { success: true };
+});
+// ─── 21. zoomWebhook — Handle Zoom webhook events ──────────────────────────
+// Handles: meeting.started, meeting.ended, meeting.participant_joined,
+//          meeting.participant_left, recording.completed
+// CRC validation for Zoom endpoint verification is handled inline.
+// ────────────────────────────────────────────────────────────────────────────
+const ZOOM_WEBHOOK_SECRET = (0, params_1.defineSecret)('ZOOM_WEBHOOK_SECRET');
+exports.zoomWebhook = (0, https_1.onRequest)({ region: 'us-central1', secrets: [ZOOM_WEBHOOK_SECRET] }, async (req, res) => {
+    var _a, _b, _c, _d, _e, _f;
+    // Only accept POST
+    if (req.method !== 'POST') {
+        res.status(405).send('Method Not Allowed');
+        return;
+    }
+    const body = req.body;
+    // ── CRC validation (Zoom endpoint verification) ──
+    if (body.event === 'endpoint.url_validation') {
+        const plainToken = (_a = body.payload) === null || _a === void 0 ? void 0 : _a.plainToken;
+        const secret = ZOOM_WEBHOOK_SECRET.value();
+        if (!plainToken || !secret) {
+            res.status(400).json({ error: 'Missing plainToken or secret' });
+            return;
+        }
+        const response = (0, zoom_1.generateCrcResponse)(plainToken, secret);
+        res.status(200).json(response);
+        return;
+    }
+    // ── Signature verification ──
+    const signature = req.headers['x-zm-signature'];
+    const timestamp = req.headers['x-zm-request-timestamp'];
+    const secret = ZOOM_WEBHOOK_SECRET.value();
+    if (!signature || !timestamp || !secret) {
+        console.warn('[zoomWebhook] Missing signature, timestamp, or secret');
+        res.status(401).send('Unauthorized');
+        return;
+    }
+    const rawBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    if (!(0, zoom_1.verifyWebhookSignature)(signature, timestamp, rawBody, secret)) {
+        console.warn('[zoomWebhook] Invalid webhook signature');
+        res.status(401).send('Invalid signature');
+        return;
+    }
+    // ── Event processing ──
+    const eventType = body.event;
+    const payload = ((_b = body.payload) === null || _b === void 0 ? void 0 : _b.object) || {};
+    const meetingId = String(payload.id || '');
+    const meetingUuid = payload.uuid || '';
+    // Build idempotency key from event + meeting + timestamp
+    const idempotencyKey = `zoom_${eventType}_${meetingId}_${timestamp}`;
+    // Find the session instance linked to this Zoom meeting
+    let occurrenceId = null;
+    if (meetingId) {
+        const instanceSnap = await db.collection('session_instances')
+            .where('zoomMeetingId', '==', meetingId)
+            .limit(1)
+            .get();
+        if (!instanceSnap.empty) {
+            occurrenceId = instanceSnap.docs[0].id;
+        }
+    }
+    switch (eventType) {
+        case 'meeting.started': {
+            if (occurrenceId) {
+                await db.collection('session_instances').doc(occurrenceId).update({
+                    status: 'in_progress',
+                    actualStartTime: payload.start_time || null,
+                    updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                });
+            }
+            await writeSessionEvent({
+                occurrenceId: occurrenceId || `unlinked_${meetingId}`,
+                eventType: 'meeting_started',
+                source: 'zoom_webhook',
+                providerMode: 'live',
+                zoomMeetingId: meetingId,
+                zoomMeetingUuid: meetingUuid,
+                timestamp: firestore_2.FieldValue.serverTimestamp(),
+                idempotencyKey,
+                payload: { startTime: payload.start_time },
+            });
+            break;
+        }
+        case 'meeting.ended': {
+            if (occurrenceId) {
+                await db.collection('session_instances').doc(occurrenceId).update({
+                    status: 'completed',
+                    actualEndTime: payload.end_time || null,
+                    updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                });
+            }
+            await writeSessionEvent({
+                occurrenceId: occurrenceId || `unlinked_${meetingId}`,
+                eventType: 'meeting_ended',
+                source: 'zoom_webhook',
+                providerMode: 'live',
+                zoomMeetingId: meetingId,
+                zoomMeetingUuid: meetingUuid,
+                timestamp: firestore_2.FieldValue.serverTimestamp(),
+                idempotencyKey,
+                payload: { endTime: payload.end_time, duration: payload.duration },
+            });
+            break;
+        }
+        case 'meeting.participant_joined': {
+            const participant = ((_d = (_c = body.payload) === null || _c === void 0 ? void 0 : _c.object) === null || _d === void 0 ? void 0 : _d.participant) || {};
+            await writeSessionEvent({
+                occurrenceId: occurrenceId || `unlinked_${meetingId}`,
+                eventType: 'participant_joined',
+                source: 'zoom_webhook',
+                providerMode: 'live',
+                zoomMeetingId: meetingId,
+                zoomMeetingUuid: meetingUuid,
+                timestamp: firestore_2.FieldValue.serverTimestamp(),
+                idempotencyKey: `zoom_pj_${meetingId}_${participant.id}_${timestamp}`,
+                payload: {
+                    participantId: participant.id,
+                    participantName: participant.user_name,
+                    participantEmail: participant.email,
+                    joinTime: participant.join_time,
+                },
+            });
+            // Update attendance on the instance
+            if (occurrenceId) {
+                await db.collection('session_instances').doc(occurrenceId).update({
+                    [`attendance.${participant.id || participant.user_name}`]: {
+                        name: participant.user_name,
+                        email: participant.email,
+                        joinTime: participant.join_time,
+                    },
+                    updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                });
+            }
+            break;
+        }
+        case 'meeting.participant_left': {
+            const leftParticipant = ((_f = (_e = body.payload) === null || _e === void 0 ? void 0 : _e.object) === null || _f === void 0 ? void 0 : _f.participant) || {};
+            await writeSessionEvent({
+                occurrenceId: occurrenceId || `unlinked_${meetingId}`,
+                eventType: 'participant_left',
+                source: 'zoom_webhook',
+                providerMode: 'live',
+                zoomMeetingId: meetingId,
+                zoomMeetingUuid: meetingUuid,
+                timestamp: firestore_2.FieldValue.serverTimestamp(),
+                idempotencyKey: `zoom_pl_${meetingId}_${leftParticipant.id}_${timestamp}`,
+                payload: {
+                    participantId: leftParticipant.id,
+                    participantName: leftParticipant.user_name,
+                    leaveTime: leftParticipant.leave_time,
+                },
+            });
+            // Update attendance leave time on the instance
+            if (occurrenceId) {
+                const pKey = leftParticipant.id || leftParticipant.user_name;
+                await db.collection('session_instances').doc(occurrenceId).update({
+                    [`attendance.${pKey}.leaveTime`]: leftParticipant.leave_time,
+                    updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                });
+            }
+            break;
+        }
+        case 'recording.completed': {
+            const recordingFiles = payload.recording_files || [];
+            const recordings = recordingFiles.map((f) => ({
+                fileType: f.file_type,
+                fileSize: f.file_size,
+                downloadUrl: f.download_url,
+                playUrl: f.play_url,
+                recordingStart: f.recording_start,
+                recordingEnd: f.recording_end,
+                status: f.status,
+            }));
+            await writeSessionEvent({
+                occurrenceId: occurrenceId || `unlinked_${meetingId}`,
+                eventType: 'recording_completed',
+                source: 'zoom_webhook',
+                providerMode: 'live',
+                zoomMeetingId: meetingId,
+                zoomMeetingUuid: meetingUuid,
+                timestamp: firestore_2.FieldValue.serverTimestamp(),
+                idempotencyKey,
+                payload: { recordingCount: recordings.length, recordings },
+            });
+            // Store recordings on the instance
+            if (occurrenceId) {
+                await db.collection('session_instances').doc(occurrenceId).update({
+                    recordings,
+                    recordingCompletedAt: firestore_2.FieldValue.serverTimestamp(),
+                    updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                });
+            }
+            break;
+        }
+        default: {
+            // Log unhandled events for future expansion
+            await writeSessionEvent({
+                occurrenceId: occurrenceId || `unlinked_${meetingId}`,
+                eventType: `zoom_unhandled_${eventType}`,
+                source: 'zoom_webhook',
+                providerMode: 'live',
+                zoomMeetingId: meetingId,
+                zoomMeetingUuid: meetingUuid,
+                timestamp: firestore_2.FieldValue.serverTimestamp(),
+                idempotencyKey,
+                payload: body,
+            });
+            break;
+        }
+    }
+    console.log(`[zoomWebhook] Processed ${eventType} for meeting ${meetingId} (instance: ${occurrenceId || 'unlinked'})`);
+    res.status(200).json({ status: 'ok' });
 });
 //# sourceMappingURL=index.js.map

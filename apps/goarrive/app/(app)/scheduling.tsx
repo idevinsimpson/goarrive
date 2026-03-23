@@ -684,6 +684,42 @@ function SessionDetailSheet({
         )}
       </View>
 
+      {/* Provider mode */}
+      {inst.zoomProviderMode && (
+        <DetailRow
+          label="Provider"
+          value={inst.zoomProviderMode === 'live' ? 'Live Zoom' : 'Mock (Testing)'}
+          valueColor={inst.zoomProviderMode === 'live' ? GREEN : AMBER}
+        />
+      )}
+      {inst.zoomMeetingUuid && (
+        <DetailRow label="Meeting UUID" value={inst.zoomMeetingUuid} />
+      )}
+
+      {/* Attendance (populated by webhook) */}
+      {inst.actualStartTime && (
+        <View style={s.detailSection}>
+          <Text style={s.detailSectionLabel}>Session Activity</Text>
+          <DetailRow label="Started" value={new Date(inst.actualStartTime).toLocaleTimeString()} />
+          {inst.actualEndTime && (
+            <DetailRow label="Ended" value={new Date(inst.actualEndTime).toLocaleTimeString()} />
+          )}
+        </View>
+      )}
+
+      {/* Recordings */}
+      {inst.recordingAvailable && inst.recordings && inst.recordings.length > 0 && (
+        <View style={s.detailSection}>
+          <Text style={s.detailSectionLabel}>Recordings</Text>
+          {inst.recordings.map((rec: any, idx: number) => (
+            <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
+              <Text style={{ color: TEXT_CLR, fontSize: 12 }}>{rec.fileType}</Text>
+              <Text style={{ color: BLUE, fontSize: 12 }}>{rec.status || 'available'}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
       {/* Zoom link */}
       {inst.zoomJoinUrl && (
         <View style={s.detailSection}>

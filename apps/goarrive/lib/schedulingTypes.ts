@@ -225,20 +225,32 @@ export interface SessionInstance {
   zoomRoomId?: string;              // Assigned Zoom room doc ID
   zoomRoomLabel?: string;           // Denormalized room label
   zoomMeetingId?: string;           // Zoom meeting ID (for join URL)
+  zoomMeetingUuid?: string;         // Zoom meeting UUID (for API lookups)
   zoomJoinUrl?: string;             // Member join URL
   zoomStartUrl?: string;            // Host start URL
   zoomMeetingPassword?: string;     // Meeting password
+  zoomProviderMode?: 'mock' | 'live'; // Which provider created this meeting
   allocatedAt?: Timestamp;
   allocationAttempts?: number;      // How many times allocation was tried
   allocationFailReason?: string;    // Why allocation failed
 
-  // Attendance fields (future — hooks only)
+  // Attendance fields (populated by Zoom webhook)
+  actualStartTime?: string;         // ISO 8601 from meeting.started webhook
+  actualEndTime?: string;           // ISO 8601 from meeting.ended webhook
+  attendance?: Record<string, {     // Keyed by participant ID or name
+    name: string;
+    email?: string;
+    joinTime?: string;
+    leaveTime?: string;
+  }>;
   joinedAt?: Timestamp;
   startedAt?: Timestamp;
   endedAt?: Timestamp;
   attendanceStatus?: 'joined' | 'started' | 'completed' | 'missed' | 'no_show';
 
-  // Recording fields (future — hooks only)
+  // Recording fields (populated by Zoom webhook)
+  recordings?: SessionRecordingMeta[];
+  recordingCompletedAt?: Timestamp;
   recordingAvailable?: boolean;
   recordingUrl?: string;
   recordingReviewedByCoach?: boolean;
@@ -294,6 +306,7 @@ export interface ZoomMeetingRequest {
 
 export interface ZoomMeetingResponse {
   meetingId: string;
+  uuid?: string;                    // Zoom meeting UUID (live provider only)
   joinUrl: string;
   startUrl: string;
   password: string;
@@ -301,9 +314,37 @@ export interface ZoomMeetingResponse {
 }
 
 export interface ZoomProvider {
+  mode: 'mock' | 'live';            // Which provider mode is active
   createMeeting(request: ZoomMeetingRequest): Promise<ZoomMeetingResponse>;
   deleteMeeting(meetingId: string): Promise<void>;
   getMeeting(meetingId: string): Promise<ZoomMeetingResponse | null>;
+}
+
+// ─── Session Recording Metadata ─────────────────────────────────────────────
+
+export interface SessionRecordingMeta {
+  fileType: string;                 // e.g. 'MP4', 'M4A', 'TRANSCRIPT'
+  fileSize?: number;                // bytes
+  downloadUrl?: string;             // Zoom download URL (time-limited)
+  playUrl?: string;                 // Zoom play URL
+  recordingStart?: string;          // ISO 8601
+  recordingEnd?: string;            // ISO 8601
+  status?: string;                  // e.g. 'completed'
+}
+
+// ─── Session Event (Durable Ledger) ─────────────────────────────────────────
+
+export interface SessionEvent {
+  id?: string;                      // Firestore doc ID
+  occurrenceId: string;             // session_instances doc ID
+  eventType: string;                // e.g. 'meeting_created', 'meeting_started', 'participant_joined'
+  source: 'system' | 'zoom_webhook' | 'coach_action' | 'member_action';
+  providerMode: 'mock' | 'live';
+  zoomMeetingId?: string;
+  zoomMeetingUuid?: string;
+  timestamp: any;                   // FieldValue.serverTimestamp() or Timestamp
+  idempotencyKey?: string;          // Prevents duplicate event processing
+  payload?: Record<string, any>;    // Event-specific data
 }
 
 // ─── Coach Zoom Connection (for account/settings) ───────────────────────────
