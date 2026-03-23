@@ -91,40 +91,53 @@ export default function SchedulingScreen() {
 
   // ── Load data ────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!coachId) return;
+    if (!coachId) {
+      setLoading(false);
+      return;
+    }
+
+    let loadedCount = 0;
+    const checkDone = () => { loadedCount++; if (loadedCount >= 3) setLoading(false); };
 
     const unsubRooms = onSnapshot(
       query(collection(db, 'zoom_rooms'), where('coachId', '==', coachId)),
       (snap) => {
         setRooms(snap.docs.map(d => ({ id: d.id, ...d.data() } as ZoomRoom)));
-      }
+        checkDone();
+      },
+      (err) => { console.warn('zoom_rooms query error:', err); checkDone(); }
     );
 
     const unsubSlots = onSnapshot(
       query(collection(db, 'recurring_slots'), where('coachId', '==', coachId)),
       (snap) => {
         setSlots(snap.docs.map(d => ({ id: d.id, ...d.data() } as RecurringSlot)));
-      }
+        checkDone();
+      },
+      (err) => { console.warn('recurring_slots query error:', err); checkDone(); }
     );
 
-    // Load upcoming instances (next 28 days)
-    const today = new Date().toISOString().split('T')[0];
+    // Load all instances for this coach, filter by date client-side
+    // (avoids needing a composite Firestore index on coachId + scheduledDate)
+    const todayStr = new Date().toISOString().split('T')[0];
     const unsubInstances = onSnapshot(
       query(
         collection(db, 'session_instances'),
         where('coachId', '==', coachId),
-        where('scheduledDate', '>=', today),
       ),
       (snap) => {
-        const all = snap.docs.map(d => ({ id: d.id, ...d.data() } as SessionInstance));
+        const all = snap.docs
+          .map(d => ({ id: d.id, ...d.data() } as SessionInstance))
+          .filter(i => i.scheduledDate >= todayStr);
         all.sort((a, b) => {
           const dc = a.scheduledDate.localeCompare(b.scheduledDate);
           if (dc !== 0) return dc;
           return a.scheduledStartTime.localeCompare(b.scheduledStartTime);
         });
         setInstances(all);
-        setLoading(false);
-      }
+        checkDone();
+      },
+      (err) => { console.warn('session_instances query error:', err); checkDone(); }
     );
 
     return () => {
