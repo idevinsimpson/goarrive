@@ -42,7 +42,7 @@ interface FeatureCard {
   description: string;
   week: string;
   color: string;
-  route: '/(app)/movements' | '/(app)/workouts' | '/(app)/members' | '/(app)/admin' | '/(app)/billing';
+  route: '/(app)/movements' | '/(app)/workouts' | '/(app)/members' | '/(app)/admin' | '/(app)/billing' | '/(app)/scheduling';
 }
 
 const FEATURE_CARDS: FeatureCard[] = [
@@ -73,6 +73,13 @@ const FEATURE_CARDS: FeatureCard[] = [
     week: '',
     color: '#F5A623',
     route: '/(app)/members',
+  },
+  {
+    title: 'Scheduling',
+    description: 'Manage Zoom rooms, recurring slots, and session allocation.',
+    week: '',
+    color: '#34D399',
+    route: '/(app)/scheduling',
   },
   {
     title: 'Billing',

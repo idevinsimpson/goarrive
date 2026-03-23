@@ -10,11 +10,11 @@
  *   - View Plan / Intake (navigates to member-plan page)
  *   - Edit Profile (opens MemberForm)
  *   - Archive / Restore
+ *   - Schedule (assign recurring time slot)
  *
  * Coming Soon tiles (future blueprint features):
  *   - Workouts & Playlist
  *   - Sessions & Stats
- *   - Schedule (Calendly)
  *   - Messages
  *   - Check-in Call
  *   - Measurements & Photos
@@ -24,7 +24,7 @@
  *   - Journal
  *   - Send Password Reset
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -32,12 +32,17 @@ import {
   Modal,
   TouchableOpacity,
   ScrollView,
+  TextInput,
   Platform,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
-import { db } from '../lib/firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { db, functions } from '../lib/firebase';
+import { doc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import { Icon } from './Icon';
 import { router } from 'expo-router';
+import { DAY_LABELS, DAY_SHORT_LABELS, formatTime } from '../lib/schedulingTypes';
 
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
@@ -69,6 +74,25 @@ interface HubTile {
   onPress?: () => void;
 }
 
+// ── Time slot options ────────────────────────────────────────────────────────
+const TIME_OPTIONS: string[] = [];
+for (let h = 5; h <= 21; h++) {
+  for (let m = 0; m < 60; m += 15) {
+    TIME_OPTIONS.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
+  }
+}
+
+const DURATION_OPTIONS = [30, 45, 60, 90];
+
+const TIMEZONE_OPTIONS = [
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'America/Phoenix',
+  'Pacific/Honolulu',
+];
+
 export default function MemberDetail({
   member,
   onClose,
@@ -76,12 +100,36 @@ export default function MemberDetail({
   onArchive,
 }: MemberDetailProps) {
   const [currentMember, setCurrentMember] = useState(member);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [existingSlots, setExistingSlots] = useState<any[]>([]);
+
+  // Schedule form state
+  const [selectedDay, setSelectedDay] = useState(1); // Monday
+  const [selectedTime, setSelectedTime] = useState('06:00');
+  const [selectedDuration, setSelectedDuration] = useState(30);
+  const [selectedTimezone, setSelectedTimezone] = useState('America/New_York');
+  const [selectedPattern, setSelectedPattern] = useState<'weekly' | 'biweekly'>('weekly');
+  const [creating, setCreating] = useState(false);
+  const [showTimeSelect, setShowTimeSelect] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, 'members', member.id), (snapshot) => {
       if (snapshot.exists()) {
         setCurrentMember({ id: snapshot.id, ...snapshot.data() });
       }
+    });
+    return () => unsubscribe();
+  }, [member.id]);
+
+  // Load existing slots for this member
+  useEffect(() => {
+    if (!member.id) return;
+    const q = query(
+      collection(db, 'recurring_slots'),
+      where('memberId', '==', member.id),
+    );
+    const unsubscribe = onSnapshot(q, (snap) => {
+      setExistingSlots(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
     return () => unsubscribe();
   }, [member.id]);
@@ -99,6 +147,65 @@ export default function MemberDetail({
     onClose();
     router.push(`/(app)/member-plan/${currentMember.id}` as any);
   }
+
+  const handleCreateSlot = useCallback(async () => {
+    setCreating(true);
+    try {
+      const fn = httpsCallable(functions, 'createRecurringSlot');
+      const result = await fn({
+        memberId: member.id,
+        memberName: currentMember.name || 'Unknown',
+        dayOfWeek: selectedDay,
+        startTime: selectedTime,
+        durationMinutes: selectedDuration,
+        timezone: selectedTimezone,
+        recurrencePattern: selectedPattern,
+      });
+      const data = result.data as any;
+      Alert.alert(
+        'Slot Created',
+        `Recurring ${DAY_LABELS[selectedDay]} ${formatTime(selectedTime)} slot created.\n${data.instancesGenerated} sessions generated for the next 4 weeks.`
+      );
+      setShowScheduleModal(false);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to create slot');
+    }
+    setCreating(false);
+  }, [member.id, currentMember.name, selectedDay, selectedTime, selectedDuration, selectedTimezone, selectedPattern]);
+
+  const handlePauseSlot = useCallback(async (slotId: string) => {
+    try {
+      const fn = httpsCallable(functions, 'updateRecurringSlot');
+      await fn({ slotId, action: 'pause' });
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to pause slot');
+    }
+  }, []);
+
+  const handleResumeSlot = useCallback(async (slotId: string) => {
+    try {
+      const fn = httpsCallable(functions, 'updateRecurringSlot');
+      await fn({ slotId, action: 'resume' });
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to resume slot');
+    }
+  }, []);
+
+  const handleCancelSlot = useCallback(async (slotId: string) => {
+    try {
+      const fn = httpsCallable(functions, 'updateRecurringSlot');
+      const result = await fn({ slotId, action: 'cancel' });
+      const data = result.data as any;
+      Alert.alert('Slot Cancelled', `${data.instancesCancelled || 0} future sessions cancelled.`);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to cancel slot');
+    }
+  }, []);
+
+  const activeSlots = existingSlots.filter(s => s.status === 'active' || s.status === 'paused');
+  const scheduleSubLabel = activeSlots.length > 0
+    ? `${activeSlots.length} active slot${activeSlots.length !== 1 ? 's' : ''}`
+    : 'Assign recurring time';
 
   const tiles: HubTile[] = [
     {
@@ -129,10 +236,11 @@ export default function MemberDetail({
     {
       icon: 'calendar',
       label: 'Schedule',
-      sublabel: 'Book via Calendly',
+      sublabel: scheduleSubLabel,
       color: '#A78BFA',
       bgColor: 'rgba(167,139,250,0.1)',
-      live: false,
+      live: true,
+      onPress: () => setShowScheduleModal(true),
     },
     {
       icon: 'mail',
@@ -294,6 +402,194 @@ export default function MemberDetail({
           </ScrollView>
         </View>
       </View>
+
+      {/* Schedule Modal */}
+      <Modal visible={showScheduleModal} transparent animationType="slide">
+        <View style={s.schedOverlay}>
+          <View style={s.schedSheet}>
+            <ScrollView bounces={false} contentContainerStyle={{ paddingBottom: 40 }}>
+              {/* Header */}
+              <View style={s.schedHeader}>
+                <Text style={s.schedTitle}>Schedule {currentMember.name?.split(' ')[0] || 'Member'}</Text>
+                <TouchableOpacity onPress={() => setShowScheduleModal(false)} hitSlop={8}>
+                  <Icon name="x" size={22} color={MUTED} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Existing Slots */}
+              {activeSlots.length > 0 && (
+                <View style={s.schedSection}>
+                  <Text style={s.schedSectionTitle}>Current Slots</Text>
+                  {activeSlots.map(slot => (
+                    <View key={slot.id} style={s.slotCard}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.slotDay}>
+                          {DAY_LABELS[slot.dayOfWeek]} · {formatTime(slot.startTime)}
+                        </Text>
+                        <Text style={s.slotMeta}>
+                          {slot.durationMinutes}min · {slot.recurrencePattern === 'biweekly' ? 'Every 2 weeks' : 'Weekly'}
+                        </Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        {slot.status === 'active' ? (
+                          <TouchableOpacity
+                            style={[s.slotActionBtn, { backgroundColor: 'rgba(245,166,35,0.1)' }]}
+                            onPress={() => handlePauseSlot(slot.id)}
+                          >
+                            <Text style={[s.slotActionText, { color: GOLD }]}>Pause</Text>
+                          </TouchableOpacity>
+                        ) : (
+                          <TouchableOpacity
+                            style={[s.slotActionBtn, { backgroundColor: 'rgba(110,187,122,0.1)' }]}
+                            onPress={() => handleResumeSlot(slot.id)}
+                          >
+                            <Text style={[s.slotActionText, { color: GREEN }]}>Resume</Text>
+                          </TouchableOpacity>
+                        )}
+                        <TouchableOpacity
+                          style={[s.slotActionBtn, { backgroundColor: 'rgba(224,82,82,0.1)' }]}
+                          onPress={() => handleCancelSlot(slot.id)}
+                        >
+                          <Text style={[s.slotActionText, { color: RED }]}>Cancel</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* New Slot Form */}
+              <View style={s.schedSection}>
+                <Text style={s.schedSectionTitle}>
+                  {activeSlots.length > 0 ? 'Add Another Slot' : 'Create Recurring Slot'}
+                </Text>
+
+                {/* Day of Week */}
+                <Text style={s.fieldLabel}>Day of Week</Text>
+                <View style={s.dayRow}>
+                  {DAY_SHORT_LABELS.map((label, idx) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={[s.dayBtn, selectedDay === idx && s.dayBtnActive]}
+                      onPress={() => setSelectedDay(idx)}
+                    >
+                      <Text style={[s.dayBtnText, selectedDay === idx && s.dayBtnTextActive]}>
+                        {label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Start Time */}
+                <Text style={s.fieldLabel}>Start Time</Text>
+                <TouchableOpacity
+                  style={s.selectBtn}
+                  onPress={() => setShowTimeSelect(!showTimeSelect)}
+                >
+                  <Text style={s.selectBtnText}>{formatTime(selectedTime)}</Text>
+                  <Icon name="chevron-down" size={16} color={MUTED} />
+                </TouchableOpacity>
+                {showTimeSelect && (
+                  <ScrollView style={s.timeList} nestedScrollEnabled>
+                    {TIME_OPTIONS.map(t => (
+                      <TouchableOpacity
+                        key={t}
+                        style={[s.timeOption, selectedTime === t && s.timeOptionActive]}
+                        onPress={() => { setSelectedTime(t); setShowTimeSelect(false); }}
+                      >
+                        <Text style={[s.timeOptionText, selectedTime === t && { color: GOLD }]}>
+                          {formatTime(t)}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                )}
+
+                {/* Duration */}
+                <Text style={s.fieldLabel}>Duration</Text>
+                <View style={s.dayRow}>
+                  {DURATION_OPTIONS.map(d => (
+                    <TouchableOpacity
+                      key={d}
+                      style={[s.dayBtn, selectedDuration === d && s.dayBtnActive, { minWidth: 60 }]}
+                      onPress={() => setSelectedDuration(d)}
+                    >
+                      <Text style={[s.dayBtnText, selectedDuration === d && s.dayBtnTextActive]}>
+                        {d}m
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Pattern */}
+                <Text style={s.fieldLabel}>Recurrence</Text>
+                <View style={s.dayRow}>
+                  <TouchableOpacity
+                    style={[s.dayBtn, selectedPattern === 'weekly' && s.dayBtnActive, { minWidth: 80 }]}
+                    onPress={() => setSelectedPattern('weekly')}
+                  >
+                    <Text style={[s.dayBtnText, selectedPattern === 'weekly' && s.dayBtnTextActive]}>
+                      Weekly
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[s.dayBtn, selectedPattern === 'biweekly' && s.dayBtnActive, { minWidth: 80 }]}
+                    onPress={() => setSelectedPattern('biweekly')}
+                  >
+                    <Text style={[s.dayBtnText, selectedPattern === 'biweekly' && s.dayBtnTextActive]}>
+                      Biweekly
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Timezone */}
+                <Text style={s.fieldLabel}>Timezone</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                  <View style={[s.dayRow, { flexWrap: 'nowrap' }]}>
+                    {TIMEZONE_OPTIONS.map(tz => {
+                      const short = tz.split('/')[1]?.replace(/_/g, ' ') || tz;
+                      return (
+                        <TouchableOpacity
+                          key={tz}
+                          style={[s.dayBtn, selectedTimezone === tz && s.dayBtnActive, { minWidth: 70 }]}
+                          onPress={() => setSelectedTimezone(tz)}
+                        >
+                          <Text style={[s.dayBtnText, selectedTimezone === tz && s.dayBtnTextActive, { fontSize: 11 }]}>
+                            {short}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
+
+                {/* Summary */}
+                <View style={s.summaryCard}>
+                  <Text style={s.summaryText}>
+                    {DAY_LABELS[selectedDay]}s at {formatTime(selectedTime)} for {selectedDuration} min, {selectedPattern}
+                  </Text>
+                  <Text style={s.summaryMeta}>
+                    {selectedTimezone.split('/')[1]?.replace(/_/g, ' ')} time
+                  </Text>
+                </View>
+
+                {/* Create Button */}
+                <TouchableOpacity
+                  style={s.createBtn}
+                  onPress={handleCreateSlot}
+                  disabled={creating}
+                >
+                  {creating ? (
+                    <ActivityIndicator size="small" color={BG} />
+                  ) : (
+                    <Text style={s.createBtnText}>Create Recurring Slot</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 }
@@ -474,5 +770,191 @@ const s = StyleSheet.create({
     fontFamily: FB,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
+  },
+
+  // ── Schedule Modal Styles ──────────────────────────────────────────────
+  schedOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'flex-end',
+  },
+  schedSheet: {
+    backgroundColor: CARD,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '90%',
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderBottomWidth: 0,
+  },
+  schedHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+  schedTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FH,
+  },
+  schedSection: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+  },
+  schedSectionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FH,
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  fieldLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: MUTED,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+    marginTop: 14,
+  },
+  dayRow: {
+    flexDirection: 'row',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  dayBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(30,42,58,0.5)',
+    borderWidth: 1,
+    borderColor: BORDER,
+    alignItems: 'center',
+  },
+  dayBtnActive: {
+    backgroundColor: 'rgba(167,139,250,0.15)',
+    borderColor: '#A78BFA',
+  },
+  dayBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: MUTED,
+    fontFamily: FB,
+  },
+  dayBtnTextActive: {
+    color: '#A78BFA',
+  },
+  selectBtn: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(30,42,58,0.5)',
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  selectBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#F0F4F8',
+    fontFamily: FB,
+  },
+  timeList: {
+    maxHeight: 180,
+    backgroundColor: BG,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: BORDER,
+    marginTop: 4,
+  },
+  timeOption: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+  timeOptionActive: {
+    backgroundColor: 'rgba(167,139,250,0.1)',
+  },
+  timeOptionText: {
+    fontSize: 14,
+    color: '#F0F4F8',
+    fontFamily: FB,
+  },
+  slotCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(30,42,58,0.3)',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  slotDay: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#F0F4F8',
+    fontFamily: FB,
+  },
+  slotMeta: {
+    fontSize: 12,
+    color: MUTED,
+    fontFamily: FB,
+    marginTop: 2,
+  },
+  slotActionBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  slotActionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: FB,
+  },
+  summaryCard: {
+    backgroundColor: 'rgba(167,139,250,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(167,139,250,0.25)',
+    borderRadius: 10,
+    padding: 14,
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  summaryText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#F0F4F8',
+    fontFamily: FB,
+    textAlign: 'center',
+  },
+  summaryMeta: {
+    fontSize: 12,
+    color: MUTED,
+    fontFamily: FB,
+    marginTop: 4,
+  },
+  createBtn: {
+    backgroundColor: '#A78BFA',
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  createBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: BG,
+    fontFamily: FH,
   },
 });

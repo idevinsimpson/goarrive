@@ -1713,3 +1713,795 @@ export const claimMemberAccount = onCall(
     return { success: true };
   }
 );
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SCHEDULING BACKBONE — Recurring Slots, Session Instances, Zoom Allocation
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Architecture:
+//   1. Coaches create recurring_slots for members (owned time rhythms)
+//   2. generateUpcomingInstances runs on schedule to create session_instances
+//   3. allocateSessionInstance assigns a Zoom room to each instance
+//   4. Mock provider generates realistic-looking Zoom meeting data
+//   5. Real Zoom provider is scaffolded for future OAuth activation
+//
+// Collections:
+//   - zoom_rooms: Zoom host account resources
+//   - recurring_slots: Member-owned recurring time slots
+//   - session_instances: Concrete generated occurrences
+//   - scheduling_audit_log: Audit trail for all scheduling decisions
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Helper: Generate mock Zoom meeting data ─────────────────────────────────
+let mockCounter = 9000;
+function createMockZoomMeeting(topic: string, startTime: string, duration: number, hostEmail: string) {
+  const meetingId = `mock-${Date.now()}-${++mockCounter}`;
+  const password = Math.random().toString(36).substring(2, 8);
+  return {
+    meetingId,
+    joinUrl: `https://zoom.us/j/${meetingId}?pwd=${password}`,
+    startUrl: `https://zoom.us/s/${meetingId}?zak=mock_host_token`,
+    password,
+    hostEmail,
+  };
+}
+
+// ─── Helper: Write audit log entry ───────────────────────────────────────────
+async function writeAuditLog(entry: {
+  coachId: string;
+  action: string;
+  sessionInstanceId?: string;
+  recurringSlotId?: string;
+  zoomRoomId?: string;
+  memberId?: string;
+  details: string;
+  metadata?: Record<string, any>;
+}) {
+  await db.collection('scheduling_audit_log').add({
+    ...entry,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+}
+
+// ─── 13. manageZoomRoom — Add/update/deactivate Zoom room resources ─────────
+export const manageZoomRoom = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const { action, roomId, roomData } = request.data as {
+      action: 'add' | 'update' | 'deactivate' | 'activate';
+      roomId?: string;
+      roomData?: {
+        label?: string;
+        zoomAccountEmail?: string;
+        zoomUserId?: string;
+        maxConcurrentMeetings?: number;
+        notes?: string;
+      };
+    };
+
+    if (!action) throw new HttpsError('invalid-argument', 'action is required');
+
+    // Verify caller is a coach (by checking coaches collection or UID match)
+    const coachId = callerUid;
+
+    if (action === 'add') {
+      if (!roomData?.label || !roomData?.zoomAccountEmail) {
+        throw new HttpsError('invalid-argument', 'label and zoomAccountEmail are required');
+      }
+
+      const roomRef = db.collection('zoom_rooms').doc();
+      const room = {
+        coachId,
+        label: roomData.label,
+        zoomAccountEmail: roomData.zoomAccountEmail,
+        zoomUserId: roomData.zoomUserId || '',
+        status: 'active',
+        maxConcurrentMeetings: roomData.maxConcurrentMeetings || 1,
+        notes: roomData.notes || '',
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+
+      await roomRef.set(room);
+
+      await writeAuditLog({
+        coachId,
+        action: 'room_added',
+        zoomRoomId: roomRef.id,
+        details: `Added Zoom room "${roomData.label}" (${roomData.zoomAccountEmail})`,
+      });
+
+      console.log(`[manageZoomRoom] Added room ${roomRef.id} for coach ${coachId}`);
+      return { success: true, roomId: roomRef.id };
+    }
+
+    if (!roomId) throw new HttpsError('invalid-argument', 'roomId is required for update/deactivate/activate');
+
+    const roomRef = db.collection('zoom_rooms').doc(roomId);
+    const roomSnap = await roomRef.get();
+    if (!roomSnap.exists) throw new HttpsError('not-found', 'Zoom room not found');
+
+    const existingRoom = roomSnap.data()!;
+    if (existingRoom.coachId !== coachId) {
+      throw new HttpsError('permission-denied', 'You can only manage your own Zoom rooms');
+    }
+
+    if (action === 'update') {
+      const updates: Record<string, any> = { updatedAt: FieldValue.serverTimestamp() };
+      if (roomData?.label) updates.label = roomData.label;
+      if (roomData?.zoomAccountEmail) updates.zoomAccountEmail = roomData.zoomAccountEmail;
+      if (roomData?.zoomUserId !== undefined) updates.zoomUserId = roomData.zoomUserId;
+      if (roomData?.maxConcurrentMeetings) updates.maxConcurrentMeetings = roomData.maxConcurrentMeetings;
+      if (roomData?.notes !== undefined) updates.notes = roomData.notes;
+
+      await roomRef.update(updates);
+
+      await writeAuditLog({
+        coachId,
+        action: 'room_updated',
+        zoomRoomId: roomId,
+        details: `Updated Zoom room "${existingRoom.label}"`,
+        metadata: updates,
+      });
+
+      return { success: true };
+    }
+
+    if (action === 'deactivate') {
+      await roomRef.update({ status: 'inactive', updatedAt: FieldValue.serverTimestamp() });
+
+      await writeAuditLog({
+        coachId,
+        action: 'room_deactivated',
+        zoomRoomId: roomId,
+        details: `Deactivated Zoom room "${existingRoom.label}"`,
+      });
+
+      return { success: true };
+    }
+
+    if (action === 'activate') {
+      await roomRef.update({ status: 'active', updatedAt: FieldValue.serverTimestamp() });
+
+      await writeAuditLog({
+        coachId,
+        action: 'room_added',
+        zoomRoomId: roomId,
+        details: `Reactivated Zoom room "${existingRoom.label}"`,
+      });
+
+      return { success: true };
+    }
+
+    throw new HttpsError('invalid-argument', `Unknown action: ${action}`);
+  }
+);
+
+// ─── 14. createRecurringSlot — Coach assigns a recurring time slot to a member ──
+export const createRecurringSlot = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const { memberId, memberName, dayOfWeek, startTime, durationMinutes, timezone, recurrencePattern, effectiveFrom } = request.data as {
+      memberId: string;
+      memberName: string;
+      dayOfWeek: number;
+      startTime: string;
+      durationMinutes: number;
+      timezone: string;
+      recurrencePattern?: 'weekly' | 'biweekly';
+      effectiveFrom?: string; // ISO date string
+    };
+
+    if (!memberId || dayOfWeek === undefined || !startTime || !durationMinutes || !timezone) {
+      throw new HttpsError('invalid-argument', 'memberId, dayOfWeek, startTime, durationMinutes, and timezone are required');
+    }
+
+    if (dayOfWeek < 0 || dayOfWeek > 6) {
+      throw new HttpsError('invalid-argument', 'dayOfWeek must be 0-6 (Sunday-Saturday)');
+    }
+
+    const coachId = callerUid;
+
+    // Verify the member belongs to this coach
+    const memberSnap = await db.collection('members').doc(memberId).get();
+    if (!memberSnap.exists) throw new HttpsError('not-found', 'Member not found');
+    if (memberSnap.data()!.coachId !== coachId) {
+      throw new HttpsError('permission-denied', 'This member does not belong to you');
+    }
+
+    const slotRef = db.collection('recurring_slots').doc();
+    const effectiveDate = effectiveFrom ? Timestamp.fromDate(new Date(effectiveFrom)) : Timestamp.now();
+
+    const slot = {
+      coachId,
+      memberId,
+      memberName: memberName || memberSnap.data()!.name || 'Unknown',
+      dayOfWeek,
+      startTime,
+      durationMinutes,
+      timezone,
+      recurrencePattern: recurrencePattern || 'weekly',
+      status: 'active',
+      effectiveFrom: effectiveDate,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+
+    await slotRef.set(slot);
+
+    await writeAuditLog({
+      coachId,
+      action: 'slot_created',
+      recurringSlotId: slotRef.id,
+      memberId,
+      details: `Created recurring slot for ${memberName || 'member'}: day ${dayOfWeek}, ${startTime}, ${durationMinutes}min, ${recurrencePattern || 'weekly'}`,
+    });
+
+    // Immediately generate instances for the next 4 weeks for this slot
+    const instances = generateInstancesForSlot(slot, slotRef.id, 28);
+    for (const inst of instances) {
+      const instRef = db.collection('session_instances').doc();
+      await instRef.set({ ...inst, id: instRef.id });
+    }
+
+    console.log(`[createRecurringSlot] Created slot ${slotRef.id} with ${instances.length} instances for coach ${coachId}`);
+    return { success: true, slotId: slotRef.id, instancesGenerated: instances.length };
+  }
+);
+
+// ─── 15. updateRecurringSlot — Pause/cancel/modify a recurring slot ──────────
+export const updateRecurringSlot = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const { slotId, action: slotAction, updates } = request.data as {
+      slotId: string;
+      action: 'pause' | 'resume' | 'cancel' | 'update';
+      updates?: {
+        dayOfWeek?: number;
+        startTime?: string;
+        durationMinutes?: number;
+      };
+    };
+
+    if (!slotId || !slotAction) throw new HttpsError('invalid-argument', 'slotId and action are required');
+
+    const slotRef = db.collection('recurring_slots').doc(slotId);
+    const slotSnap = await slotRef.get();
+    if (!slotSnap.exists) throw new HttpsError('not-found', 'Recurring slot not found');
+
+    const slot = slotSnap.data()!;
+    if (slot.coachId !== callerUid) {
+      throw new HttpsError('permission-denied', 'You can only manage your own slots');
+    }
+
+    if (slotAction === 'pause') {
+      await slotRef.update({ status: 'paused', updatedAt: FieldValue.serverTimestamp() });
+      await writeAuditLog({
+        coachId: callerUid,
+        action: 'slot_paused',
+        recurringSlotId: slotId,
+        memberId: slot.memberId,
+        details: `Paused recurring slot for ${slot.memberName}`,
+      });
+      return { success: true };
+    }
+
+    if (slotAction === 'resume') {
+      await slotRef.update({ status: 'active', updatedAt: FieldValue.serverTimestamp() });
+      return { success: true };
+    }
+
+    if (slotAction === 'cancel') {
+      await slotRef.update({ status: 'cancelled', updatedAt: FieldValue.serverTimestamp() });
+
+      // Cancel all future scheduled/allocated instances
+      const futureInstances = await db.collection('session_instances')
+        .where('recurringSlotId', '==', slotId)
+        .where('status', 'in', ['scheduled', 'allocated'])
+        .get();
+
+      const batch = db.batch();
+      futureInstances.docs.forEach(d => {
+        batch.update(d.ref, { status: 'cancelled', updatedAt: FieldValue.serverTimestamp() });
+      });
+      await batch.commit();
+
+      await writeAuditLog({
+        coachId: callerUid,
+        action: 'slot_cancelled',
+        recurringSlotId: slotId,
+        memberId: slot.memberId,
+        details: `Cancelled recurring slot for ${slot.memberName}. ${futureInstances.size} future instances cancelled.`,
+      });
+
+      return { success: true, instancesCancelled: futureInstances.size };
+    }
+
+    if (slotAction === 'update' && updates) {
+      const slotUpdates: Record<string, any> = { updatedAt: FieldValue.serverTimestamp() };
+      if (updates.dayOfWeek !== undefined) slotUpdates.dayOfWeek = updates.dayOfWeek;
+      if (updates.startTime) slotUpdates.startTime = updates.startTime;
+      if (updates.durationMinutes) slotUpdates.durationMinutes = updates.durationMinutes;
+
+      await slotRef.update(slotUpdates);
+      return { success: true };
+    }
+
+    throw new HttpsError('invalid-argument', `Unknown action: ${slotAction}`);
+  }
+);
+
+// ─── Helper: Generate concrete instances from a recurring slot ───────────────
+function generateInstancesForSlot(
+  slot: Record<string, any>,
+  slotId: string,
+  daysAhead: number
+): Record<string, any>[] {
+  const instances: Record<string, any>[] = [];
+  const now = new Date();
+  const endDate = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000);
+
+  // Find the next occurrence of the target day of week
+  let current = new Date(now);
+  current.setHours(0, 0, 0, 0);
+
+  // Advance to the next target day
+  while (current.getDay() !== slot.dayOfWeek) {
+    current.setDate(current.getDate() + 1);
+  }
+
+  // If today is the target day but the time has passed, skip to next week
+  if (current.getTime() === new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()) {
+    const [h, m] = (slot.startTime as string).split(':').map(Number);
+    const slotTimeToday = new Date(now);
+    slotTimeToday.setHours(h, m, 0, 0);
+    if (now > slotTimeToday) {
+      current.setDate(current.getDate() + (slot.recurrencePattern === 'biweekly' ? 14 : 7));
+    }
+  }
+
+  const step = slot.recurrencePattern === 'biweekly' ? 14 : 7;
+
+  while (current <= endDate) {
+    const dateStr = current.toISOString().split('T')[0]; // YYYY-MM-DD
+    const [h, m] = (slot.startTime as string).split(':').map(Number);
+    const endMinutes = h * 60 + m + (slot.durationMinutes as number);
+    const endH = Math.floor(endMinutes / 60) % 24;
+    const endM = endMinutes % 60;
+    const endTime = `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
+
+    instances.push({
+      coachId: slot.coachId,
+      memberId: slot.memberId,
+      memberName: slot.memberName || 'Unknown',
+      recurringSlotId: slotId,
+      scheduledDate: dateStr,
+      scheduledStartTime: slot.startTime,
+      scheduledEndTime: endTime,
+      durationMinutes: slot.durationMinutes,
+      timezone: slot.timezone,
+      status: 'scheduled',
+      allocationAttempts: 0,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    current.setDate(current.getDate() + step);
+  }
+
+  return instances;
+}
+
+// ─── 16. generateUpcomingInstances — Scheduled: generate instances for all active slots ──
+export const generateUpcomingInstances = onSchedule(
+  { schedule: '0 2 * * *', timeZone: 'UTC', region: 'us-central1' },
+  async () => {
+    console.log('[generateUpcomingInstances] Starting daily instance generation...');
+
+    // Get all active recurring slots
+    const slotsSnap = await db.collection('recurring_slots')
+      .where('status', '==', 'active')
+      .get();
+
+    let totalGenerated = 0;
+
+    for (const slotDoc of slotsSnap.docs) {
+      const slot = slotDoc.data();
+
+      // Check what instances already exist for this slot in the next 28 days
+      const now = new Date();
+      const futureDate = new Date(now.getTime() + 28 * 24 * 60 * 60 * 1000);
+      const futureDateStr = futureDate.toISOString().split('T')[0];
+
+      const existingSnap = await db.collection('session_instances')
+        .where('recurringSlotId', '==', slotDoc.id)
+        .where('scheduledDate', '>=', now.toISOString().split('T')[0])
+        .where('scheduledDate', '<=', futureDateStr)
+        .get();
+
+      const existingDates = new Set(existingSnap.docs.map(d => d.data().scheduledDate));
+
+      // Generate instances for missing dates
+      const allInstances = generateInstancesForSlot(slot, slotDoc.id, 28);
+      const newInstances = allInstances.filter(inst => !existingDates.has(inst.scheduledDate));
+
+      for (const inst of newInstances) {
+        const instRef = db.collection('session_instances').doc();
+        await instRef.set({ ...inst, id: instRef.id });
+        totalGenerated++;
+      }
+    }
+
+    console.log(`[generateUpcomingInstances] Generated ${totalGenerated} new instances for ${slotsSnap.size} active slots`);
+  }
+);
+
+// ─── 17. allocateSessionInstance — Assign a Zoom room to a session instance ──
+export const allocateSessionInstance = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const { instanceId } = request.data as { instanceId: string };
+    if (!instanceId) throw new HttpsError('invalid-argument', 'instanceId is required');
+
+    const instanceRef = db.collection('session_instances').doc(instanceId);
+    const instanceSnap = await instanceRef.get();
+    if (!instanceSnap.exists) throw new HttpsError('not-found', 'Session instance not found');
+
+    const instance = instanceSnap.data()!;
+    if (instance.coachId !== callerUid) {
+      throw new HttpsError('permission-denied', 'You can only allocate your own sessions');
+    }
+
+    if (instance.status !== 'scheduled' && instance.status !== 'allocation_failed') {
+      throw new HttpsError('failed-precondition', `Instance is in status "${instance.status}", cannot allocate`);
+    }
+
+    // Get all active Zoom rooms for this coach
+    const roomsSnap = await db.collection('zoom_rooms')
+      .where('coachId', '==', callerUid)
+      .where('status', '==', 'active')
+      .get();
+
+    if (roomsSnap.empty) {
+      await instanceRef.update({
+        status: 'allocation_failed',
+        allocationFailReason: 'No active Zoom rooms available',
+        allocationAttempts: (instance.allocationAttempts || 0) + 1,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      await writeAuditLog({
+        coachId: callerUid,
+        action: 'allocation_failed',
+        sessionInstanceId: instanceId,
+        details: 'No active Zoom rooms available for this coach',
+      });
+
+      return { success: false, reason: 'No active Zoom rooms available' };
+    }
+
+    // Check each room for conflicts at the same date/time
+    const scheduledDate = instance.scheduledDate as string;
+    const scheduledStartTime = instance.scheduledStartTime as string;
+    const scheduledEndTime = instance.scheduledEndTime as string;
+
+    let allocatedRoom: any = null;
+
+    for (const roomDoc of roomsSnap.docs) {
+      const room = roomDoc.data();
+
+      // Check for overlapping instances already allocated to this room
+      const conflictsSnap = await db.collection('session_instances')
+        .where('zoomRoomId', '==', roomDoc.id)
+        .where('scheduledDate', '==', scheduledDate)
+        .where('status', 'in', ['allocated', 'in_progress'])
+        .get();
+
+      let hasConflict = false;
+      for (const conflictDoc of conflictsSnap.docs) {
+        const conflict = conflictDoc.data();
+        // Check time overlap: new session overlaps if it starts before existing ends AND ends after existing starts
+        if (scheduledStartTime < conflict.scheduledEndTime && scheduledEndTime > conflict.scheduledStartTime) {
+          hasConflict = true;
+
+          await writeAuditLog({
+            coachId: callerUid,
+            action: 'room_conflict',
+            sessionInstanceId: instanceId,
+            zoomRoomId: roomDoc.id,
+            details: `Room "${room.label}" has conflict at ${scheduledDate} ${scheduledStartTime}-${scheduledEndTime} (existing: ${conflict.scheduledStartTime}-${conflict.scheduledEndTime})`,
+          });
+
+          break;
+        }
+      }
+
+      if (!hasConflict) {
+        allocatedRoom = { id: roomDoc.id, ...room };
+        break;
+      }
+    }
+
+    if (!allocatedRoom) {
+      await instanceRef.update({
+        status: 'allocation_failed',
+        allocationFailReason: 'All Zoom rooms have conflicts at this time',
+        allocationAttempts: (instance.allocationAttempts || 0) + 1,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      await writeAuditLog({
+        coachId: callerUid,
+        action: 'allocation_failed',
+        sessionInstanceId: instanceId,
+        details: `All ${roomsSnap.size} rooms have conflicts at ${scheduledDate} ${scheduledStartTime}`,
+      });
+
+      return { success: false, reason: 'All Zoom rooms have conflicts at this time' };
+    }
+
+    // Create a mock Zoom meeting (or real one when provider is activated)
+    const memberName = instance.memberName || 'Member';
+    const meeting = createMockZoomMeeting(
+      `GoArrive Session: ${memberName}`,
+      `${scheduledDate}T${scheduledStartTime}:00`,
+      instance.durationMinutes as number,
+      allocatedRoom.zoomAccountEmail
+    );
+
+    // Update the instance with allocation data
+    await instanceRef.update({
+      status: 'allocated',
+      zoomRoomId: allocatedRoom.id,
+      zoomRoomLabel: allocatedRoom.label,
+      zoomMeetingId: meeting.meetingId,
+      zoomJoinUrl: meeting.joinUrl,
+      zoomStartUrl: meeting.startUrl,
+      zoomMeetingPassword: meeting.password,
+      allocatedAt: FieldValue.serverTimestamp(),
+      allocationAttempts: (instance.allocationAttempts || 0) + 1,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    await writeAuditLog({
+      coachId: callerUid,
+      action: 'allocation_success',
+      sessionInstanceId: instanceId,
+      zoomRoomId: allocatedRoom.id,
+      memberId: instance.memberId,
+      details: `Allocated room "${allocatedRoom.label}" for ${memberName} at ${scheduledDate} ${scheduledStartTime}`,
+      metadata: { meetingId: meeting.meetingId },
+    });
+
+    console.log(`[allocateSessionInstance] Allocated room ${allocatedRoom.id} to instance ${instanceId}`);
+    return { success: true, roomLabel: allocatedRoom.label, meetingId: meeting.meetingId };
+  }
+);
+
+// ─── 18. allocateAllPendingInstances — Batch allocate all unallocated instances ──
+export const allocateAllPendingInstances = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    // Get all scheduled (unallocated) instances for this coach
+    const pendingSnap = await db.collection('session_instances')
+      .where('coachId', '==', callerUid)
+      .where('status', '==', 'scheduled')
+      .get();
+
+    if (pendingSnap.empty) {
+      return { success: true, allocated: 0, failed: 0, message: 'No pending instances to allocate' };
+    }
+
+    // Get all active Zoom rooms for this coach
+    const roomsSnap = await db.collection('zoom_rooms')
+      .where('coachId', '==', callerUid)
+      .where('status', '==', 'active')
+      .get();
+
+    if (roomsSnap.empty) {
+      return { success: false, allocated: 0, failed: pendingSnap.size, message: 'No active Zoom rooms available' };
+    }
+
+    let allocated = 0;
+    let failed = 0;
+
+    // Sort instances by date/time for orderly allocation
+    const instances = pendingSnap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .sort((a: any, b: any) => {
+        const dateCompare = (a.scheduledDate as string).localeCompare(b.scheduledDate as string);
+        if (dateCompare !== 0) return dateCompare;
+        return (a.scheduledStartTime as string).localeCompare(b.scheduledStartTime as string);
+      });
+
+    for (const inst of instances) {
+      const instance = inst as any;
+      let roomFound = false;
+
+      for (const roomDoc of roomsSnap.docs) {
+        const room = roomDoc.data();
+
+        // Check for conflicts
+        const conflictsSnap = await db.collection('session_instances')
+          .where('zoomRoomId', '==', roomDoc.id)
+          .where('scheduledDate', '==', instance.scheduledDate)
+          .where('status', 'in', ['allocated', 'in_progress'])
+          .get();
+
+        let hasConflict = false;
+        for (const conflictDoc of conflictsSnap.docs) {
+          const conflict = conflictDoc.data();
+          if (instance.scheduledStartTime < conflict.scheduledEndTime && instance.scheduledEndTime > conflict.scheduledStartTime) {
+            hasConflict = true;
+            break;
+          }
+        }
+
+        if (!hasConflict) {
+          const meeting = createMockZoomMeeting(
+            `GoArrive Session: ${instance.memberName || 'Member'}`,
+            `${instance.scheduledDate}T${instance.scheduledStartTime}:00`,
+            instance.durationMinutes,
+            room.zoomAccountEmail
+          );
+
+          await db.collection('session_instances').doc(instance.id).update({
+            status: 'allocated',
+            zoomRoomId: roomDoc.id,
+            zoomRoomLabel: room.label,
+            zoomMeetingId: meeting.meetingId,
+            zoomJoinUrl: meeting.joinUrl,
+            zoomStartUrl: meeting.startUrl,
+            zoomMeetingPassword: meeting.password,
+            allocatedAt: FieldValue.serverTimestamp(),
+            allocationAttempts: (instance.allocationAttempts || 0) + 1,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+
+          allocated++;
+          roomFound = true;
+          break;
+        }
+      }
+
+      if (!roomFound) {
+        await db.collection('session_instances').doc(instance.id).update({
+          status: 'allocation_failed',
+          allocationFailReason: 'All rooms have conflicts',
+          allocationAttempts: (instance.allocationAttempts || 0) + 1,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        failed++;
+      }
+    }
+
+    await writeAuditLog({
+      coachId: callerUid,
+      action: 'allocation_success',
+      details: `Batch allocation: ${allocated} allocated, ${failed} failed out of ${instances.length} pending`,
+    });
+
+    console.log(`[allocateAllPendingInstances] Coach ${callerUid}: ${allocated} allocated, ${failed} failed`);
+    return { success: true, allocated, failed, total: instances.length };
+  }
+);
+
+// ─── 19. rescheduleInstance — Move a single occurrence to a different date/time ──
+export const rescheduleInstance = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const { instanceId, newDate, newStartTime } = request.data as {
+      instanceId: string;
+      newDate: string;      // YYYY-MM-DD
+      newStartTime: string; // HH:mm
+    };
+
+    if (!instanceId || !newDate || !newStartTime) {
+      throw new HttpsError('invalid-argument', 'instanceId, newDate, and newStartTime are required');
+    }
+
+    const instanceRef = db.collection('session_instances').doc(instanceId);
+    const instanceSnap = await instanceRef.get();
+    if (!instanceSnap.exists) throw new HttpsError('not-found', 'Session instance not found');
+
+    const instance = instanceSnap.data()!;
+    if (instance.coachId !== callerUid) {
+      throw new HttpsError('permission-denied', 'You can only reschedule your own sessions');
+    }
+
+    if (!['scheduled', 'allocated', 'allocation_failed'].includes(instance.status as string)) {
+      throw new HttpsError('failed-precondition', `Cannot reschedule instance in status "${instance.status}"`);
+    }
+
+    const originalDate = instance.scheduledDate;
+    const originalTime = instance.scheduledStartTime;
+
+    // Calculate new end time
+    const [h, m] = newStartTime.split(':').map(Number);
+    const endMinutes = h * 60 + m + (instance.durationMinutes as number);
+    const endH = Math.floor(endMinutes / 60) % 24;
+    const endM = endMinutes % 60;
+    const newEndTime = `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
+
+    await instanceRef.update({
+      scheduledDate: newDate,
+      scheduledStartTime: newStartTime,
+      scheduledEndTime: newEndTime,
+      status: 'scheduled', // Reset to scheduled so it can be re-allocated
+      zoomRoomId: FieldValue.delete(),
+      zoomRoomLabel: FieldValue.delete(),
+      zoomMeetingId: FieldValue.delete(),
+      zoomJoinUrl: FieldValue.delete(),
+      zoomStartUrl: FieldValue.delete(),
+      zoomMeetingPassword: FieldValue.delete(),
+      allocatedAt: FieldValue.delete(),
+      rescheduledFrom: `${originalDate} ${originalTime}`,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    await writeAuditLog({
+      coachId: callerUid,
+      action: 'instance_rescheduled',
+      sessionInstanceId: instanceId,
+      memberId: instance.memberId,
+      details: `Rescheduled from ${originalDate} ${originalTime} to ${newDate} ${newStartTime}`,
+    });
+
+    return { success: true };
+  }
+);
+
+// ─── 20. cancelInstance — Cancel a single session instance ───────────────────
+export const cancelInstance = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const { instanceId } = request.data as { instanceId: string };
+    if (!instanceId) throw new HttpsError('invalid-argument', 'instanceId is required');
+
+    const instanceRef = db.collection('session_instances').doc(instanceId);
+    const instanceSnap = await instanceRef.get();
+    if (!instanceSnap.exists) throw new HttpsError('not-found', 'Session instance not found');
+
+    const instance = instanceSnap.data()!;
+    if (instance.coachId !== callerUid) {
+      throw new HttpsError('permission-denied', 'You can only cancel your own sessions');
+    }
+
+    await instanceRef.update({
+      status: 'cancelled',
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    await writeAuditLog({
+      coachId: callerUid,
+      action: 'instance_cancelled',
+      sessionInstanceId: instanceId,
+      memberId: instance.memberId,
+      details: `Cancelled session for ${instance.memberName} on ${instance.scheduledDate} at ${instance.scheduledStartTime}`,
+    });
+
+    return { success: true };
+  }
+);
