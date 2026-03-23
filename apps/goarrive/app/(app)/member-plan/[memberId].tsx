@@ -1663,8 +1663,6 @@ function PostContractCard({ plan, isCoach, sessionsPerMonth, coachId }: {
 
 // ── How we got these numbers (expandable breakdown) ─────────────────────────
 function HowWeGotTheseNumbers({ plan, pricing, isCoach }: { plan: MemberPlanData; pricing: PricingResult; isCoach: boolean }) {
-  // Members should not see the price breakdown
-  if (!isCoach) return null;
   const [isOpen, setIsOpen] = useState(false);
   const months = plan.contractMonths;
   const sessionLength = pricing.sessionLengthMinutes || plan.sessionLengthMinutes || 60;
@@ -1675,6 +1673,7 @@ function HowWeGotTheseNumbers({ plan, pricing, isCoach }: { plan: MemberPlanData
   const totalCoachingHrs = pricing.totalCoachingHours;
   const totalHrs = pricing.totalHours;
   const phaseBreakdown = pricing.phaseBreakdown || [];
+  const selfMin = pricing.selfReliantMinutesPerSession ?? 3.5;
   const P1 = (plan.phases && plan.phases[0]?.weeks) || 0;
   const P2 = (plan.phases && plan.phases[1]?.weeks) || 0;
   const P3 = (plan.phases && plan.phases[2]?.weeks) || 0;
@@ -1686,27 +1685,36 @@ function HowWeGotTheseNumbers({ plan, pricing, isCoach }: { plan: MemberPlanData
         style={[inv.statsRow, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 16 }]}
       >
         <Text style={{ color: PRIMARY, fontSize: 14, fontWeight: '600' }}>
-          {isOpen ? 'Hide breakdown' : 'How we got these numbers'}
+          {isOpen ? 'Hide breakdown' : 'Pricing breakdown'}
         </Text>
         <Text style={{ color: PRIMARY, fontSize: 14 }}>{isOpen ? '▴' : '▾'}</Text>
       </Pressable>
 
       {isOpen && isCoach && (
         <View style={{ marginTop: 8, padding: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, borderWidth: 1, borderColor: BORDER }}>
-          <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700', marginBottom: 8 }}>How monthly price is calculated:</Text>
-          {phaseBreakdown.map(({ sessionType, sessionsPerWeek: count, phase1Hours: p1Hrs, phase2Hours: p2Hrs, phase3Hours: p3Hrs, phase1Guidance, phase2Guidance, phase3Guidance }) => (
-            <View key={sessionType} style={{ marginBottom: 6 }}>
-              {P1 > 0 && <Text style={bd.line}>{sessionType === 'Cardio + Mobility' ? 'Cardio' : sessionType}: {P1} × {count} × {sessionLength} min × {GUIDANCE_FACTORS[phase1Guidance]} = {Math.round(p1Hrs)} hrs (P1)</Text>}
-              {P2 > 0 && <Text style={bd.line}>{sessionType === 'Cardio + Mobility' ? 'Cardio' : sessionType}: {P2} × {count} × {sessionLength} min × {GUIDANCE_FACTORS[phase2Guidance]} = {Math.round(p2Hrs)} hrs (P2)</Text>}
-              {P3 > 0 && <Text style={bd.line}>{sessionType === 'Cardio + Mobility' ? 'Cardio' : sessionType}: {P3} × {count} × {sessionLength} min × {GUIDANCE_FACTORS[phase3Guidance]} = {Math.round(p3Hrs)} hrs (P3)</Text>}
-            </View>
-          ))}
-          <Text style={bd.line}>Check-in calls ({months} months): {months} × {checkInMin} min ÷ 60 = {Math.round(checkInHrs)} hrs</Text>
+          {phaseBreakdown.map(({ sessionType, sessionsPerWeek: count, phase1Hours: p1Hrs, phase2Hours: p2Hrs, phase3Hours: p3Hrs, phase1Guidance, phase2Guidance, phase3Guidance }) => {
+            const label = sessionType === 'Cardio + Mobility' ? 'Cardio' : sessionType;
+            const fmtLine = (weeks: number, g: string, hrs: number, pLabel: string) => {
+              if (weeks <= 0) return null;
+              if (g === 'Self-reliant') {
+                return <Text key={`${sessionType}-${pLabel}`} style={bd.line}>{label}: {weeks}w × {count} × {selfMin}min = {hrs.toFixed(1)} hrs ({pLabel})</Text>;
+              }
+              return <Text key={`${sessionType}-${pLabel}`} style={bd.line}>{label}: {weeks}w × {count} × {sessionLength}min × {GUIDANCE_FACTORS[g as keyof typeof GUIDANCE_FACTORS]} = {hrs.toFixed(1)} hrs ({pLabel})</Text>;
+            };
+            return (
+              <View key={sessionType} style={{ marginBottom: 4 }}>
+                {fmtLine(P1, phase1Guidance, p1Hrs, 'P1')}
+                {fmtLine(P2, phase2Guidance, p2Hrs, 'P2')}
+                {fmtLine(P3, phase3Guidance, p3Hrs, 'P3')}
+              </View>
+            );
+          })}
+          <Text style={bd.line}>Check-ins: {months} × {checkInMin}min ÷ 60 = {checkInHrs.toFixed(1)} hrs</Text>
           <Text style={bd.line}>Program build: {buildHrs} hrs</Text>
-          <View style={{ borderTopWidth: 1, borderTopColor: BORDER, marginTop: 8, paddingTop: 8 }}>
-            <Text style={bd.line}>Total hours: {Math.round(totalCoachingHrs)} + {Math.round(checkInHrs)} + {buildHrs} = {Math.round(totalHrs)} hrs</Text>
-            <Text style={bd.line}>Total program: {Math.round(totalHrs)} hrs × {formatCurrency(hourlyRate)}/hr = {formatCurrency(Math.round(totalHrs * hourlyRate))}</Text>
-            <Text style={[bd.line, { color: '#FFF', fontWeight: '700' }]}>Monthly: {formatCurrency(Math.round(totalHrs * hourlyRate))} ÷ {months} months = {formatCurrency(pricing.calculatedMonthlyPrice)}</Text>
+          <View style={{ borderTopWidth: 1, borderTopColor: BORDER, marginTop: 6, paddingTop: 6 }}>
+            <Text style={bd.line}>Total: {totalCoachingHrs.toFixed(1)} + {checkInHrs.toFixed(1)} + {buildHrs} = {totalHrs.toFixed(1)} hrs</Text>
+            <Text style={bd.line}>Program: {totalHrs.toFixed(1)} hrs × {formatCurrency(hourlyRate)}/hr = {formatCurrency(Math.round(totalHrs * hourlyRate))}</Text>
+            <Text style={[bd.line, { color: '#FFF', fontWeight: '700' }]}>Monthly: {formatCurrency(Math.round(totalHrs * hourlyRate))} ÷ {months}mo = {formatCurrency(pricing.calculatedMonthlyPrice)}</Text>
           </View>
         </View>
       )}
@@ -1715,7 +1723,7 @@ function HowWeGotTheseNumbers({ plan, pricing, isCoach }: { plan: MemberPlanData
         <View style={{ marginTop: 8, padding: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
           <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
             <Text style={{ color: '#FFF', fontWeight: '600' }}>Monthly price: </Text>
-            Based on your hourly coaching rate, session length ({sessionLength} min), {plan.sessionsPerWeek} sessions/week, monthly check-in calls, and initial program build time.
+            Based on your coaching rate, session length ({sessionLength} min), {plan.sessionsPerWeek} sessions/week, monthly check-in calls, and initial program build time.
           </Text>
           <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18, marginTop: 6 }}>
             <Text style={{ color: '#FFF', fontWeight: '600' }}>Per session: </Text>
@@ -1833,16 +1841,13 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
 }) {
   const [showGuidance, setShowGuidance] = useState(false);
   const [showPricing, setShowPricing] = useState(false);
-  const [showBreakdown, setShowBreakdown] = useState(false);
+  // showBreakdown removed — breakdown is now inline in Pricing Settings
   const [openGuidanceKey, setOpenGuidanceKey] = useState<string | null>(null);
   // Post-contract unsaved-changes indicator
   const [pcSaved, setPcSaved] = useState<'idle' | 'saved'>('idle');
   // Local string state for session-minutes so backspace-to-empty and decimals work
   const [sessionMinText, setSessionMinText] = useState<string>(String(plan.postContract?.sessionMinutes ?? 3.5));
-  // Local string states for continuation pricing inputs
-  const [contHrText, setContHrText] = useState<string>(String(plan.continuationPricing?.continuationHourlyRate ?? plan.hourlyRate ?? 100));
-  const [contMinText, setContMinText] = useState<string>(String(plan.continuationPricing?.continuationMinutesPerSession ?? 3.5));
-  const [contCheckInText, setContCheckInText] = useState<string>(String(plan.continuationPricing?.continuationCheckInMinutesPerMonth ?? 30));
+  // contMinText is no longer needed here — self-reliant minutes is managed via sessionMinText above
   const pcSavedTimer = useRef<any>(null);
   const onPcChange = (updates: Partial<MemberPlanData>) => {
     onChange(updates);
@@ -1970,22 +1975,104 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                       );
                     })}
                     <Text style={{ color: '#4A5568', fontSize: 10 }}>
-                      Full = 100% live coach time · Blend = 62.5% · Self = 0%
+                      Full = 100% live coach time · Blend = 62.5% · Self = {plan.postContract?.sessionMinutes ?? 3.5} min/session
                     </Text>
                   </View>
                 )}
 
-                {/* Calculated monthly */}
+                {/* Pricing breakdown (inline) */}
                 <View style={{ borderTopWidth: 1, borderTopColor: BORDER, marginTop: 12, paddingTop: 12 }}>
-                  <Text style={{ color: MUTED, fontSize: 13 }}>
-                    Calculated monthly: {formatCurrency(pricing.calculatedMonthlyPrice)}
-                  </Text>
-                  <Pressable onPress={() => setShowBreakdown(!showBreakdown)} style={{ marginTop: 4 }}>
-                    <Text style={{ color: PRIMARY, fontSize: 13, fontWeight: '600' }}>
-                      {showBreakdown ? 'Hide breakdown ▴' : 'Show breakdown ▾'}
-                    </Text>
+                  <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700', marginBottom: 8 }}>Pricing Breakdown</Text>
+                  {(() => {
+                    const months = plan.contractMonths;
+                    const sessionLength = pricing.sessionLengthMinutes || plan.sessionLengthMinutes || 60;
+                    const hourlyRate = pricing.hourlyRate || plan.hourlyRate || 100;
+                    const checkInMin = pricing.checkInCallLengthMinutes || plan.checkInCallMinutes || 30;
+                    const buildHrs = pricing.buildHours ?? plan.programBuildTimeHours ?? 5;
+                    const checkInHrs = pricing.checkInHours;
+                    const totalCoachingHrs = pricing.totalCoachingHours;
+                    const totalHrs = pricing.totalHours;
+                    const phaseBreakdown = pricing.phaseBreakdown || [];
+                    const selfMin = pricing.selfReliantMinutesPerSession ?? 3.5;
+                    const P1 = (plan.phases && plan.phases[0]?.weeks) || 0;
+                    const P2 = (plan.phases && plan.phases[1]?.weeks) || 0;
+                    const P3 = (plan.phases && plan.phases[2]?.weeks) || 0;
+                    return (
+                      <View style={{ padding: 10, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, borderWidth: 1, borderColor: BORDER }}>
+                        {phaseBreakdown.map(({ sessionType, sessionsPerWeek: count, phase1Hours: p1Hrs, phase2Hours: p2Hrs, phase3Hours: p3Hrs, phase1Guidance, phase2Guidance, phase3Guidance }) => {
+                          const label = sessionType === 'Cardio + Mobility' ? 'Cardio' : sessionType;
+                          const fmtLine = (weeks: number, g: string, hrs: number, pLabel: string) => {
+                            if (weeks <= 0) return null;
+                            if (g === 'Self-reliant') {
+                              return <Text key={`${sessionType}-${pLabel}`} style={bd.line}>{label}: {weeks}w × {count} × {selfMin}min = {hrs.toFixed(1)} hrs ({pLabel})</Text>;
+                            }
+                            return <Text key={`${sessionType}-${pLabel}`} style={bd.line}>{label}: {weeks}w × {count} × {sessionLength}min × {GUIDANCE_FACTORS[g as keyof typeof GUIDANCE_FACTORS]} = {hrs.toFixed(1)} hrs ({pLabel})</Text>;
+                          };
+                          return (
+                            <View key={sessionType} style={{ marginBottom: 4 }}>
+                              {fmtLine(P1, phase1Guidance, p1Hrs, 'P1')}
+                              {fmtLine(P2, phase2Guidance, p2Hrs, 'P2')}
+                              {fmtLine(P3, phase3Guidance, p3Hrs, 'P3')}
+                            </View>
+                          );
+                        })}
+                        <Text style={bd.line}>Check-ins: {months} × {checkInMin}min ÷ 60 = {checkInHrs.toFixed(1)} hrs</Text>
+                        <Text style={bd.line}>Program build: {buildHrs} hrs</Text>
+                        <View style={{ borderTopWidth: 1, borderTopColor: BORDER, marginTop: 6, paddingTop: 6 }}>
+                          <Text style={bd.line}>Total: {totalCoachingHrs.toFixed(1)} + {checkInHrs.toFixed(1)} + {buildHrs} = {totalHrs.toFixed(1)} hrs</Text>
+                          <Text style={bd.line}>Program: {totalHrs.toFixed(1)} hrs × {formatCurrency(hourlyRate)}/hr = {formatCurrency(Math.round(totalHrs * hourlyRate))}</Text>
+                          <Text style={[bd.line, { color: '#FFF', fontWeight: '700' }]}>Monthly: {formatCurrency(Math.round(totalHrs * hourlyRate))} ÷ {months}mo = {formatCurrency(pricing.calculatedMonthlyPrice)}</Text>
+                        </View>
+                      </View>
+                    );
+                  })()}
+                </View>
+
+                {/* ── After Contract / Continuation (inside Pricing Settings) ── */}
+                <View style={{ borderTopWidth: 1, borderTopColor: BORDER, marginTop: 12, paddingTop: 12 }}>
+                  <Pressable
+                    onPress={() => {
+                      const cp = plan.continuationPricing;
+                      onChange({ continuationPricing: { ...(cp || { continuationHourlyRate: plan.hourlyRate ?? 100, continuationMinutesPerSession: plan.postContract?.sessionMinutes ?? 3.5, continuationCheckInMinutesPerMonth: plan.checkInCallMinutes ?? 30, continuationEnabled: true }), continuationEnabled: !(cp?.continuationEnabled ?? true) } });
+                    }}
+                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 }}
+                  >
+                    <View>
+                      <Text style={{ color: '#FFF', fontSize: 14, fontWeight: '600' }}>After Contract / Continuation</Text>
+                      <Text style={{ color: MUTED, fontSize: 11, marginTop: 2 }}>Month-to-month pricing after the contract ends</Text>
+                    </View>
+                    <View style={{ width: 22, height: 22, borderRadius: 5, borderWidth: 2, borderColor: (plan.continuationPricing?.continuationEnabled ?? true) ? PRIMARY : BORDER, backgroundColor: (plan.continuationPricing?.continuationEnabled ?? true) ? PRIMARY : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                      {(plan.continuationPricing?.continuationEnabled ?? true) && <Text style={{ color: '#000', fontSize: 12, fontWeight: '700' }}>✓</Text>}
+                    </View>
                   </Pressable>
-                  {showBreakdown && <HowWeGotTheseNumbers plan={plan} pricing={pricing} isCoach={true} />}
+
+                  {(plan.continuationPricing?.continuationEnabled ?? true) && (() => {
+                    // Continuation uses same hourly rate and check-in as the contract
+                    const contHr = plan.hourlyRate ?? 100;
+                    const contMin = plan.postContract?.sessionMinutes ?? 3.5;
+                    const contCheckIn = plan.checkInCallMinutes ?? 30;
+                    const spm = Math.round((plan.sessionsPerWeek || 3) * (52 / 12));
+                    const contSessionHrs = contHr * (contMin / 60) * spm;
+                    const contCheckInHrs = contCheckIn / 60; // 1 call/mo
+                    const contMonthly = Math.round(contSessionHrs + (contCheckInHrs * contHr));
+                    const contPifMonthly = Math.round(contMonthly * 12 * 0.9 / 12);
+                    const contCts = plan.postContract?.ctsMonthlySavings != null ? plan.postContract.ctsMonthlySavings : Math.round(contMonthly * 0.5);
+
+                    // Sync continuation pricing to Firestore whenever it's computed
+                    // (the actual write happens via onChange in the parent)
+                    return (
+                      <View style={{ marginTop: 8, padding: 10, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, borderWidth: 1, borderColor: BORDER }}>
+                        <Text style={{ color: MUTED, fontSize: 11, lineHeight: 16, marginBottom: 6 }}>
+                          Uses your hourly rate ({formatCurrency(contHr)}/hr), self-reliant coach time ({contMin} min/session), and check-in call ({contCheckIn} min/mo).
+                        </Text>
+                        <View style={{ padding: 8, backgroundColor: 'rgba(91,155,213,0.08)', borderRadius: 6, borderWidth: 1, borderColor: 'rgba(91,155,213,0.2)' }}>
+                          <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>Monthly: <Text style={{ color: '#FFF', fontWeight: '600' }}>{formatCurrency(contMonthly)}/mo</Text></Text>
+                          <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>Pay in full: <Text style={{ color: '#FFF' }}>{formatCurrency(contPifMonthly)}/mo</Text></Text>
+                          <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>Commit to Save: <Text style={{ color: GOLD }}>{formatCurrency(contCts)}/mo</Text></Text>
+                        </View>
+                      </View>
+                    );
+                  })()}
                 </View>
               </View>
             )}
@@ -2212,127 +2299,7 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
               )}
             </View>
 
-            {/* ── After Contract / Continuation Pricing ── */}
-            <View style={{ marginTop: 16, borderTopWidth: 1, borderTopColor: BORDER, paddingTop: 12 }}>
-              <Pressable
-                onPress={() => {
-                  const cp = plan.continuationPricing;
-                  onChange({ continuationPricing: { ...(cp || { continuationHourlyRate: plan.hourlyRate ?? 100, continuationMinutesPerSession: 3.5, continuationCheckInMinutesPerMonth: 30, continuationEnabled: true }), continuationEnabled: !(cp?.continuationEnabled ?? true) } });
-                }}
-                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 }}
-              >
-                <View>
-                  <Text style={{ color: '#FFF', fontSize: 15, fontWeight: '600' }}>🔄 After Contract / Continuation</Text>
-                  <Text style={{ color: MUTED, fontSize: 12, marginTop: 2 }}>Set pricing for the ongoing month-to-month phase</Text>
-                </View>
-                <View style={{ width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: (plan.continuationPricing?.continuationEnabled ?? true) ? PRIMARY : BORDER, backgroundColor: (plan.continuationPricing?.continuationEnabled ?? true) ? PRIMARY : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
-                  {(plan.continuationPricing?.continuationEnabled ?? true) && <Text style={{ color: '#000', fontSize: 14, fontWeight: '700' }}>✓</Text>}
-                </View>
-              </Pressable>
-
-              {(plan.continuationPricing?.continuationEnabled ?? true) && (() => {
-                const cp = plan.continuationPricing;
-                const baseContHr = cp?.continuationHourlyRate ?? plan.hourlyRate ?? 100;
-                const baseContMin = cp?.continuationMinutesPerSession ?? 3.5;
-                const baseContCheckIn = cp?.continuationCheckInMinutesPerMonth ?? 30;
-                const spm = Math.round((plan.sessionsPerWeek || 3) * (52 / 12));
-                const contMonthly = Math.round(baseContHr * (baseContMin / 60) * spm);
-                const contPifMonthly = Math.round(contMonthly * 12 * 0.9 / 12);
-                const contCts = plan.postContract?.ctsMonthlySavings != null ? plan.postContract.ctsMonthlySavings : Math.round(contMonthly * 0.5);
-
-                const cpBase = (extra: Partial<typeof cp>) => ({
-                  continuationPricing: {
-                    continuationHourlyRate: baseContHr,
-                    continuationMinutesPerSession: baseContMin,
-                    continuationCheckInMinutesPerMonth: baseContCheckIn,
-                    continuationEnabled: true,
-                    ...(cp || {}),
-                    ...extra,
-                  },
-                });
-
-                return (
-                  <View style={{ backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: BORDER, marginBottom: 8 }}>
-                    <Text style={{ color: MUTED, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 12 }}>CONTINUATION PRICING</Text>
-
-                    {/* Continuation hourly rate */}
-                    <Text style={dc.label}>Continuation hourly rate</Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-                      <Text style={{ color: MUTED, fontSize: 14 }}>$</Text>
-                      <TextInput
-                        style={{ flex: 1, backgroundColor: BG, borderWidth: 1, borderColor: BORDER, borderRadius: 8, padding: 10, color: '#FFF', fontSize: 15 }}
-                        value={contHrText}
-                        keyboardType="decimal-pad" selectTextOnFocus
-                        onChangeText={t => {
-                          setContHrText(t);
-                          const n = parseFloat(t);
-                          if (!isNaN(n) && t !== '' && !t.endsWith('.')) onChange(cpBase({ continuationHourlyRate: n }));
-                        }}
-                        onBlur={() => {
-                          const n = parseFloat(contHrText);
-                          if (isNaN(n) || contHrText === '') { setContHrText(String(baseContHr)); }
-                          else { setContHrText(String(n)); onChange(cpBase({ continuationHourlyRate: n })); }
-                        }}
-                      />
-                      <Text style={{ color: MUTED, fontSize: 13 }}>/hr</Text>
-                    </View>
-
-                    {/* Continuation session minutes */}
-                    <Text style={dc.label}>Avg. coach time per session (min)</Text>
-                    <Text style={{ color: MUTED, fontSize: 11, lineHeight: 16, marginBottom: 6 }}>Self-reliant phase: recommended 3–5 min. Default 3.5.</Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-                      <TextInput
-                        style={{ flex: 1, backgroundColor: BG, borderWidth: 1, borderColor: BORDER, borderRadius: 8, padding: 10, color: '#FFF', fontSize: 15 }}
-                        value={contMinText}
-                        keyboardType="decimal-pad" selectTextOnFocus
-                        onChangeText={t => {
-                          setContMinText(t);
-                          const n = parseFloat(t);
-                          if (!isNaN(n) && t !== '' && !t.endsWith('.')) onChange(cpBase({ continuationMinutesPerSession: n }));
-                        }}
-                        onBlur={() => {
-                          const n = parseFloat(contMinText);
-                          if (isNaN(n) || contMinText === '') { setContMinText(String(baseContMin)); }
-                          else { setContMinText(String(n)); onChange(cpBase({ continuationMinutesPerSession: n })); }
-                        }}
-                      />
-                      <Text style={{ color: MUTED, fontSize: 13 }}>min</Text>
-                    </View>
-
-                    {/* Continuation check-in call */}
-                    <Text style={dc.label}>Monthly check-in call (min)</Text>
-                    <Text style={{ color: MUTED, fontSize: 11, lineHeight: 16, marginBottom: 6 }}>Default 30 min.</Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-                      <TextInput
-                        style={{ flex: 1, backgroundColor: BG, borderWidth: 1, borderColor: BORDER, borderRadius: 8, padding: 10, color: '#FFF', fontSize: 15 }}
-                        value={contCheckInText}
-                        keyboardType="decimal-pad" selectTextOnFocus
-                        onChangeText={t => {
-                          setContCheckInText(t);
-                          const n = parseFloat(t);
-                          if (!isNaN(n) && t !== '' && !t.endsWith('.')) onChange(cpBase({ continuationCheckInMinutesPerMonth: n }));
-                        }}
-                        onBlur={() => {
-                          const n = parseFloat(contCheckInText);
-                          if (isNaN(n) || contCheckInText === '') { setContCheckInText(String(baseContCheckIn)); }
-                          else { setContCheckInText(String(n)); onChange(cpBase({ continuationCheckInMinutesPerMonth: n })); }
-                        }}
-                      />
-                      <Text style={{ color: MUTED, fontSize: 13 }}>min/mo</Text>
-                    </View>
-
-                    {/* Live preview */}
-                    <View style={{ padding: 10, backgroundColor: 'rgba(91,155,213,0.08)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(91,155,213,0.3)' }}>
-                      <Text style={{ color: PRIMARY, fontSize: 12, fontWeight: '700', marginBottom: 4 }}>CONTINUATION PREVIEW</Text>
-                      <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>Monthly: <Text style={{ color: '#FFF' }}>{formatCurrency(contMonthly)}/mo</Text></Text>
-                      <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>Pay in full: <Text style={{ color: '#FFF' }}>{formatCurrency(contPifMonthly)}/mo</Text></Text>
-                      <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>Commit to Save: <Text style={{ color: GOLD }}>{formatCurrency(contCts)}/mo</Text></Text>
-                      <Text style={{ color: '#4A5568', fontSize: 10, marginTop: 4 }}>RISK-001: CTS + pay-in-full stacking order is unresolved — do not hardcode</Text>
-                    </View>
-                  </View>
-                );
-              })()}
-            </View>
+            {/* After Contract / Continuation is now inside Pricing Settings above */}
 
             <View style={{ height: 20 }} />
           </ScrollView>

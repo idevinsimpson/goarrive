@@ -118,6 +118,7 @@ export interface PricingResult {
   isManualOverride: boolean;
   manualMonthlyOverride?: number;
   phaseBreakdown: PhaseHoursDetail[];
+  selfReliantMinutesPerSession: number;
 }
 
 // ─── Support phases ───────────────────────────────────────────────────────────
@@ -559,6 +560,7 @@ export function calculatePricing(
       p.payInFullDiscountPercent ?? 10,
       p.nutrition?.active ?? false,
       p.nutrition?.monthlyCost ?? 0,
+      p.postContract?.sessionMinutes ?? 3.5,
     );
   }
   // Legacy overload
@@ -588,6 +590,7 @@ function _calculatePricing(
   payInFullDiscountPercent: number = 10,
   nutritionActive: boolean = false,
   nutritionMonthlyCost: number = 0,
+  selfReliantMinutesPerSession: number = 3.5,
 ): PricingResult {
   const safeInputs = inputs || { hourlyRate: 100, sessionLengthMinutes: 60, checkInCallLengthMinutes: 30, programBuildTimeHours: 5 };
   const { hourlyRate, sessionLengthMinutes, checkInCallLengthMinutes, programBuildTimeHours } = safeInputs;
@@ -606,9 +609,17 @@ function _calculatePricing(
     const sessions = sessionCounts[sessionType];
     const guidance = getGuidanceProfile(sessionType, guidanceProfiles);
 
-    const phase1Hours = (sessions * phase1Weeks * (sessionLengthMinutes / 60)) * GUIDANCE_FACTORS[guidance.phase1];
-    const phase2Hours = (sessions * phase2Weeks * (sessionLengthMinutes / 60)) * GUIDANCE_FACTORS[guidance.phase2];
-    const phase3Hours = (sessions * phase3Weeks * (sessionLengthMinutes / 60)) * GUIDANCE_FACTORS[guidance.phase3];
+    // For Self-reliant phases, use the fixed selfReliantMinutesPerSession (default 3.5 min)
+    // instead of factor × sessionLength. This accounts for the coach's brief check-in time.
+    const computePhaseHours = (weeks: number, level: GuidanceLevel) => {
+      if (level === 'Self-reliant') {
+        return sessions * weeks * (selfReliantMinutesPerSession / 60);
+      }
+      return sessions * weeks * (sessionLengthMinutes / 60) * GUIDANCE_FACTORS[level];
+    };
+    const phase1Hours = computePhaseHours(phase1Weeks, guidance.phase1);
+    const phase2Hours = computePhaseHours(phase2Weeks, guidance.phase2);
+    const phase3Hours = computePhaseHours(phase3Weeks, guidance.phase3);
 
     return {
       sessionType,
@@ -673,6 +684,7 @@ function _calculatePricing(
     isManualOverride,
     manualMonthlyOverride,
     phaseBreakdown,
+    selfReliantMinutesPerSession,
   };
 }
 
