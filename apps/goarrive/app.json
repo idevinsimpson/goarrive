@@ -4,7 +4,7 @@
     "slug": "goarrive",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/goarrive-icon.png",
     "scheme": "goarrive",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
@@ -27,7 +27,7 @@
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/goarrive-icon.png"
     },
     "plugins": [
       "expo-router"

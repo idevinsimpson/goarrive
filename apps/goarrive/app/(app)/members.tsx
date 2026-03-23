@@ -49,6 +49,7 @@ import MemberForm, {
   MemberFormData,
   EMPTY_MEMBER,
 } from '../../components/MemberForm';
+import QuickAddMember from '../../components/QuickAddMember';
 import MemberDetail from '../../components/MemberDetail';
 type MemberDetailData = any;
 import ConfirmDialog from '../../components/ConfirmDialog';
@@ -94,6 +95,7 @@ export default function MembersScreen() {
 
   // Form modal state
   const [showForm, setShowForm] = useState(false);
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [formMode, setFormMode] = useState<'add' | 'edit'>('add');
   const [editingMember, setEditingMember] = useState<MemberFormData | undefined>();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -229,10 +231,7 @@ export default function MembersScreen() {
   }
 
   function openAddForm() {
-    setFormMode('add');
-    setEditingMember(undefined);
-    setEditingId(null);
-    setShowForm(true);
+    setShowQuickAdd(true);
   }
 
   function openEditForm(m: MemberDetailData) {
@@ -613,6 +612,13 @@ export default function MembersScreen() {
       )}
 
       {/* Modals */}
+      <QuickAddMember
+        visible={showQuickAdd}
+        onClose={() => setShowQuickAdd(false)}
+        onSaved={() => loadMembers()}
+        coachId={coachId}
+        tenantId={tenantId}
+      />
       <MemberForm
         visible={showForm}
         onClose={() => setShowForm(false)}

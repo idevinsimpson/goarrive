@@ -27,6 +27,7 @@ export default function RootLayout() {
         <Stack.Screen name="(app)" />
         <Stack.Screen name="(member)" />
         <Stack.Screen name="intake" />
+        <Stack.Screen name="coach-signup" />
       </Stack>
     </AuthProvider>
   );

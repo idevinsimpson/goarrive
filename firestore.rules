@@ -284,7 +284,7 @@ service cloud.firestore {
                     || (isAuthenticated() && request.auth.uid == request.resource.data.uid
                         && request.resource.data.keys().hasOnly([
                           'uid', 'coachId', 'email', 'displayName', 'phone',
-                          'gender', 'dateOfBirth', 'height', 'weight', 'createdAt', 'isArchived', 'role'
+                          'gender', 'dateOfBirth', 'height', 'weight', 'createdAt', 'isArchived', 'role', 'hasAccount'
                         ]));
       // Members can update their own safe profile fields
       // Coaches can update members they own OR reassign members to themselves
@@ -448,9 +448,10 @@ service cloud.firestore {
     // ─────────────────────────────────────────────
 
     match /intakeSubmissions/{submissionId} {
-      // Allow unauthenticated users OR just-created users to submit intake forms
+      // Allow unauthenticated users, just-created users, or coaches to submit intake forms
       allow create: if request.auth == null
-                    || (isAuthenticated() && request.auth.uid == request.resource.data.uid);
+                    || (isAuthenticated() && request.auth.uid == request.resource.data.uid)
+                    || (isAuthenticated() && isCoachOrBootstrap(request.resource.data.coachId));
       // get: full document-level check (resource.data available)
       allow get: if isAuthenticated() && isCoachOrBootstrap(resource.data.coachId);
       // list: query-time check — only request.auth available, not resource.data

@@ -7,12 +7,13 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, ActivityIndicator,
-  Platform, Pressable, Image,
+  Platform, Pressable, Image, TextInput, Alert, KeyboardAvoidingView,
 } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import { db, auth } from '../../lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { db, auth, functions } from '../../lib/firebase';
+import { onAuthStateChanged, createUserWithEmailAndPassword, updateProfile, signInWithEmailAndPassword } from 'firebase/auth';
+import { httpsCallable } from 'firebase/functions';
+import { doc, getDoc, collection, query, where, getDocs, updateDoc } from 'firebase/firestore';
 import {
   MemberPlanData, DayPlan, goalConfig, typeColors, phaseColorList,
   formatCurrency, calculatePricing, monthsToWeeks, PricingResult,
@@ -78,12 +79,53 @@ export default function SharedPlanScreen() {
   const [expandedDay, setExpandedDay] = useState<number | null>(null);
   const [localPlan, setLocalPlan] = useState<MemberPlanData | null>(null);
 
+  // Claim gate state
+  const [needsClaim, setNeedsClaim] = useState(false);
+  const [claimed, setClaimed] = useState(false);
+  const [claimEmail, setClaimEmail] = useState('');
+  const [claimPassword, setClaimPassword] = useState('');
+  const [claimConfirm, setClaimConfirm] = useState('');
+  const [claimLoading, setClaimLoading] = useState(false);
+  const [claimError, setClaimError] = useState('');
+  const [memberName, setMemberName] = useState('');
+  const [showSignIn, setShowSignIn] = useState(false);
+
   useEffect(() => {
     if (!memberId) return;
     // Wait for Firebase Auth to initialize before querying Firestore
-    const unsubscribe = onAuthStateChanged(auth, () => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      // Check member doc for hasAccount
+      try {
+        const memberDoc = await getDoc(doc(db, 'members', memberId as string));
+        if (memberDoc.exists()) {
+          const data = memberDoc.data();
+          setMemberName(data.name || '');
+          if (data.hasAccount && data.uid) {
+            // Member has an account — check if currently signed in as that user
+            if (user && user.uid === data.uid) {
+              setClaimed(true);
+            } else if (user) {
+              // Signed in as someone else — still show plan (could be the coach previewing)
+              setClaimed(true);
+            } else {
+              // Not signed in but account exists — show sign-in form
+              setClaimEmail(data.email || '');
+              setNeedsClaim(true);
+              setShowSignIn(true);
+            }
+          } else {
+            // No account yet — show claim gate
+            setClaimEmail(data.email || '');
+            setNeedsClaim(true);
+          }
+        }
+      } catch (err) {
+        console.warn('[SharedPlan] Could not check member doc:', err);
+        // If we can't check, just show the plan (backwards compatible)
+        setClaimed(true);
+      }
       fetchPlan();
-      unsubscribe(); // only need to wait for first auth state
+      unsubscribe();
     });
     return () => unsubscribe();
   }, [memberId]);
@@ -128,6 +170,212 @@ export default function SharedPlanScreen() {
           <ActivityIndicator size="large" color="#F5A623" />
           <Text style={{ color: '#8A95A3', marginTop: 12, fontSize: 14 }}>Loading your fitness plan...</Text>
         </View>
+      </View>
+    );
+  }
+
+  // ─── Claim Gate Handler ─────────────────────────────────────────────────
+  async function handleClaim() {
+    setClaimError('');
+    if (!claimEmail.trim()) { setClaimError('Email is required.'); return; }
+    if (!claimPassword) { setClaimError('Password is required.'); return; }
+    if (claimPassword.length < 8) { setClaimError('Password must be at least 8 characters.'); return; }
+    if (claimPassword !== claimConfirm) { setClaimError('Passwords do not match.'); return; }
+
+    setClaimLoading(true);
+    try {
+      // Create the Firebase Auth account
+      const cred = await createUserWithEmailAndPassword(auth, claimEmail.trim(), claimPassword);
+      await updateProfile(cred.user, { displayName: memberName });
+
+      // Call the Cloud Function to link the account to the member doc
+      const claimFn = httpsCallable(functions, 'claimMemberAccount');
+      await claimFn({ memberId });
+
+      setClaimed(true);
+      setNeedsClaim(false);
+    } catch (err: any) {
+      console.error('[SharedPlan] Claim error:', err);
+      if (err.code === 'auth/email-already-in-use') {
+        setClaimError('An account with this email already exists. Try signing in instead.');
+        setShowSignIn(true);
+      } else if (err.message?.includes('permission-denied')) {
+        setClaimError('This plan belongs to a different email address.');
+      } else {
+        setClaimError(err.message || 'Something went wrong. Please try again.');
+      }
+    } finally {
+      setClaimLoading(false);
+    }
+  }
+
+  async function handleSignIn() {
+    setClaimError('');
+    if (!claimEmail.trim()) { setClaimError('Email is required.'); return; }
+    if (!claimPassword) { setClaimError('Password is required.'); return; }
+
+    setClaimLoading(true);
+    try {
+      await signInWithEmailAndPassword(auth, claimEmail.trim(), claimPassword);
+
+      // Check if account is already linked
+      const memberDoc = await getDoc(doc(db, 'members', memberId as string));
+      if (memberDoc.exists() && !memberDoc.data().hasAccount) {
+        const claimFn = httpsCallable(functions, 'claimMemberAccount');
+        await claimFn({ memberId });
+      }
+
+      setClaimed(true);
+      setNeedsClaim(false);
+    } catch (err: any) {
+      console.error('[SharedPlan] Sign-in error:', err);
+      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        setClaimError('Incorrect password. Please try again.');
+      } else if (err.code === 'auth/user-not-found') {
+        setClaimError('No account found with this email. Create one below.');
+        setShowSignIn(false);
+      } else {
+        setClaimError(err.message || 'Something went wrong.');
+      }
+    } finally {
+      setClaimLoading(false);
+    }
+  }
+
+  // ─── Claim Gate UI ────────────────────────────────────────────────────────
+  if (!loading && plan && needsClaim && !claimed) {
+    return (
+      <View style={st.root}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={{ flex: 1 }}
+        >
+          <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 40 }}>
+            {/* Logo */}
+            <View style={{ alignItems: 'center', marginBottom: 24 }}>
+              <Image
+                source={require('../../assets/logo.png')}
+                style={{ width: 200, height: 50 }}
+                resizeMode="contain"
+              />
+            </View>
+
+            {/* Plan preview teaser */}
+            <View style={{ alignItems: 'center', marginBottom: 32 }}>
+              <Text style={{ fontSize: 22, fontWeight: '700', color: '#F0F4F8', textAlign: 'center', marginBottom: 8 }}>
+                Your Fitness Plan is Ready
+              </Text>
+              <Text style={{ fontSize: 14, color: '#8A95A3', textAlign: 'center', lineHeight: 22 }}>
+                {plan.memberName ? `Hey ${plan.memberName.split(' ')[0]}! ` : ''}Your coach has built a personalized plan for you. Create an account to view it.
+              </Text>
+            </View>
+
+            {/* Plan preview card */}
+            <View style={[st.darkCard, { marginBottom: 28 }]}>
+              {plan.goals?.length ? (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                  {plan.goals.slice(0, 3).map((g: string, i: number) => (
+                    <View key={i} style={[st.chip]}>
+                      <Text style={st.chipText}>{getGoalEmoji(g, plan.goalEmojis)} {g}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+              <Text style={{ color: '#8A95A3', fontSize: 13 }}>
+                {plan.sessionsPerWeek ? `${plan.sessionsPerWeek}x/week` : ''}
+                {plan.contractMonths ? ` · ${plan.contractMonths} month plan` : ''}
+              </Text>
+            </View>
+
+            {/* Form */}
+            <View style={{ backgroundColor: '#161B25', borderRadius: 16, borderWidth: 1, borderColor: '#2A3347', padding: 20 }}>
+              {showSignIn ? (
+                <>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#F0F4F8', marginBottom: 16 }}>Sign In to View Your Plan</Text>
+                  <Text style={{ color: '#8A95A3', fontSize: 12, marginBottom: 4 }}>Email Address</Text>
+                  <TextInput
+                    style={claimInputStyle}
+                    value={claimEmail}
+                    onChangeText={setClaimEmail}
+                    placeholder="your@email.com"
+                    placeholderTextColor="#555"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                  />
+                  <Text style={{ color: '#8A95A3', fontSize: 12, marginBottom: 4 }}>Password</Text>
+                  <TextInput
+                    style={claimInputStyle}
+                    value={claimPassword}
+                    onChangeText={setClaimPassword}
+                    placeholder="Your password"
+                    placeholderTextColor="#555"
+                    secureTextEntry
+                  />
+                  {claimError ? <Text style={{ color: '#E74C3C', fontSize: 13, marginBottom: 12 }}>{claimError}</Text> : null}
+                  <Pressable
+                    onPress={handleSignIn}
+                    style={{ backgroundColor: '#F5A623', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 12 }}
+                    disabled={claimLoading}
+                  >
+                    {claimLoading
+                      ? <ActivityIndicator color="#000" />
+                      : <Text style={{ color: '#000', fontWeight: '700', fontSize: 16 }}>Sign In & View Plan</Text>
+                    }
+                  </Pressable>
+                  <Pressable onPress={() => { setShowSignIn(false); setClaimError(''); setClaimPassword(''); }}>
+                    <Text style={{ color: '#5B9BD5', textAlign: 'center', fontSize: 13 }}>Don't have an account? Create one</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#F0F4F8', marginBottom: 16 }}>Create Your Account</Text>
+                  <Text style={{ color: '#8A95A3', fontSize: 12, marginBottom: 4 }}>Email Address</Text>
+                  <TextInput
+                    style={claimInputStyle}
+                    value={claimEmail}
+                    onChangeText={setClaimEmail}
+                    placeholder="your@email.com"
+                    placeholderTextColor="#555"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                  />
+                  <Text style={{ color: '#8A95A3', fontSize: 12, marginBottom: 4 }}>Password</Text>
+                  <TextInput
+                    style={claimInputStyle}
+                    value={claimPassword}
+                    onChangeText={setClaimPassword}
+                    placeholder="At least 8 characters"
+                    placeholderTextColor="#555"
+                    secureTextEntry
+                  />
+                  <Text style={{ color: '#8A95A3', fontSize: 12, marginBottom: 4 }}>Confirm Password</Text>
+                  <TextInput
+                    style={claimInputStyle}
+                    value={claimConfirm}
+                    onChangeText={setClaimConfirm}
+                    placeholder="Repeat your password"
+                    placeholderTextColor="#555"
+                    secureTextEntry
+                  />
+                  {claimError ? <Text style={{ color: '#E74C3C', fontSize: 13, marginBottom: 12 }}>{claimError}</Text> : null}
+                  <Pressable
+                    onPress={handleClaim}
+                    style={{ backgroundColor: '#F5A623', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 12 }}
+                    disabled={claimLoading}
+                  >
+                    {claimLoading
+                      ? <ActivityIndicator color="#000" />
+                      : <Text style={{ color: '#000', fontWeight: '700', fontSize: 16 }}>Create Account & View Plan</Text>
+                    }
+                  </Pressable>
+                  <Pressable onPress={() => { setShowSignIn(true); setClaimError(''); setClaimPassword(''); }}>
+                    <Text style={{ color: '#5B9BD5', textAlign: 'center', fontSize: 13 }}>Already have an account? Sign in</Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </View>
     );
   }
@@ -810,6 +1058,19 @@ function HowWeGotTheseNumbers({ plan, pricing }: { plan: MemberPlanData; pricing
     </View>
   );
 }
+
+// ─── Claim Gate Input Style ────────────────────────────────────────────────
+const claimInputStyle = {
+  backgroundColor: '#0E1117',
+  borderWidth: 1,
+  borderColor: '#2A3347',
+  borderRadius: 10,
+  color: '#F0F4F8',
+  fontSize: 15,
+  paddingHorizontal: 14,
+  paddingVertical: 12,
+  marginBottom: 14,
+} as const;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // INVESTMENT SECTION STYLES (match [memberId].tsx exactly)

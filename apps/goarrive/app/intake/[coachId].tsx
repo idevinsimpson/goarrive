@@ -379,6 +379,7 @@ export default function IntakeForm() {
         height: `${formData.heightFeet}'${formData.heightInches}"`,
         weight: formData.weight,
         role: 'member',
+        hasAccount: true,
         createdAt: Timestamp.now(),
         isArchived: false,
       });

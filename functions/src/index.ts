@@ -1503,3 +1503,213 @@ export const addCoach = onCall(
     };
   }
 );
+
+// ── 9. inviteCoach — Admin-only: generate a coach invite link ─────────────────
+/**
+ * Creates a coachInvites/{token} document and returns a shareable signup URL.
+ * The invite is valid for 7 days and can only be used once.
+ *
+ * Input:  { email: string, displayName: string }
+ * Output: { inviteUrl: string, token: string, expiresAt: number }
+ */
+export const inviteCoach = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    // Auth guard: caller must be signed in with admin claim
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const token = request.auth?.token;
+    const isAdmin = token?.admin === true || token?.role === 'platformAdmin';
+    if (!isAdmin) throw new HttpsError('permission-denied', 'Admin access required');
+
+    const { email, displayName } = request.data as { email?: string; displayName?: string };
+    if (!email || !displayName) {
+      throw new HttpsError('invalid-argument', 'email and displayName are required');
+    }
+
+    // Check if email is already a registered user
+    try {
+      await admin.auth().getUserByEmail(email.trim().toLowerCase());
+      throw new HttpsError('already-exists', 'A user with this email already exists.');
+    } catch (err: any) {
+      if (err.code === 'functions/already-exists') throw err;
+      if (err.code !== 'auth/user-not-found') {
+        throw new HttpsError('internal', err.message ?? 'Failed to check email');
+      }
+    }
+
+    // Expire any existing pending invites for this email
+    const existingSnap = await db.collection('coachInvites')
+      .where('email', '==', email.trim().toLowerCase())
+      .where('status', '==', 'pending')
+      .limit(10)
+      .get();
+    const batch = db.batch();
+    existingSnap.forEach(doc => batch.update(doc.ref, { status: 'superseded' }));
+    await batch.commit();
+
+    // Generate a secure random token
+    const crypto = require('crypto');
+    const inviteToken: string = crypto.randomBytes(24).toString('hex');
+    const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000; // 7 days
+
+    await db.collection('coachInvites').doc(inviteToken).set({
+      token: inviteToken,
+      email: email.trim().toLowerCase(),
+      displayName: displayName.trim(),
+      status: 'pending',
+      createdBy: callerUid,
+      createdAt: FieldValue.serverTimestamp(),
+      expiresAt,
+    });
+
+    const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
+    const inviteUrl = `${appUrl}/coach-signup?token=${inviteToken}`;
+
+    console.log('[inviteCoach] Invite created for', email, 'by', callerUid);
+    return { inviteUrl, token: inviteToken, expiresAt };
+  }
+);
+
+// ── 10. activateCoachInvite — Called after signup to apply coach role ──────────
+/**
+ * Validates an invite token and sets coach custom claims on the newly-created user.
+ * Called from the /coach-signup page after Firebase Auth account creation.
+ *
+ * Input:  { token: string }
+ * Output: { success: boolean, coachId: string }
+ */
+export const activateCoachInvite = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const { token } = request.data as { token?: string };
+    if (!token) throw new HttpsError('invalid-argument', 'token is required');
+
+    const inviteRef = db.collection('coachInvites').doc(token);
+    const inviteSnap = await inviteRef.get();
+
+    if (!inviteSnap.exists) {
+      throw new HttpsError('not-found', 'Invite not found. Please request a new invite link.');
+    }
+
+    const invite = inviteSnap.data()!;
+
+    if (invite.status !== 'pending') {
+      throw new HttpsError('failed-precondition', 'This invite link has already been used or expired.');
+    }
+
+    if (invite.expiresAt < Date.now()) {
+      await inviteRef.update({ status: 'expired' });
+      throw new HttpsError('deadline-exceeded', 'This invite link has expired. Please request a new one.');
+    }
+
+    // Verify the signed-in user's email matches the invite
+    const userRecord = await admin.auth().getUser(callerUid);
+    const userEmail = userRecord.email?.toLowerCase() ?? '';
+    if (userEmail !== invite.email.toLowerCase()) {
+      throw new HttpsError(
+        'permission-denied',
+        `This invite is for ${invite.email}. Please sign in with that email address.`
+      );
+    }
+
+    // Set custom claims: role = coach
+    await admin.auth().setCustomUserClaims(callerUid, {
+      role: 'coach',
+      admin: false,
+      coachId: callerUid,
+      tenantId: callerUid,
+    });
+
+    // Write coaches doc
+    await db.collection('coaches').doc(callerUid).set({
+      uid: callerUid,
+      email: userEmail,
+      name: invite.displayName,
+      role: 'coach',
+      createdAt: Date.now(),
+      invitedBy: invite.createdBy,
+    });
+
+    // Mark invite as used
+    await inviteRef.update({
+      status: 'used',
+      usedAt: FieldValue.serverTimestamp(),
+      usedBy: callerUid,
+    });
+
+    console.log('[activateCoachInvite] Coach activated:', callerUid, userEmail);
+    return { success: true, coachId: callerUid };
+  }
+);
+
+
+/**
+ * claimMemberAccount – Links a newly created Firebase Auth account to an
+ * existing member doc (created by a coach via quick-add).
+ *
+ * Called by the shared-plan claim gate after the user creates their account.
+ *
+ * Input: { memberId: string }
+ * Output: { success: boolean }
+ */
+export const claimMemberAccount = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const { memberId } = request.data as { memberId?: string };
+    if (!memberId) throw new HttpsError('invalid-argument', 'memberId is required');
+
+    // Fetch the member doc
+    const memberRef = db.collection('members').doc(memberId);
+    const memberSnap = await memberRef.get();
+
+    if (!memberSnap.exists) {
+      throw new HttpsError('not-found', 'Member record not found.');
+    }
+
+    const member = memberSnap.data()!;
+
+    // If the member already has an account, reject
+    if (member.hasAccount === true && member.uid) {
+      throw new HttpsError('already-exists', 'This member already has an account.');
+    }
+
+    // If the member has an email on file, verify it matches the caller's email
+    const userRecord = await admin.auth().getUser(callerUid);
+    const userEmail = userRecord.email?.toLowerCase() ?? '';
+
+    if (member.email && member.email.toLowerCase() !== userEmail) {
+      throw new HttpsError(
+        'permission-denied',
+        `This plan belongs to ${member.email}. Please sign up with that email address.`
+      );
+    }
+
+    // Set custom claims: role = member
+    await admin.auth().setCustomUserClaims(callerUid, {
+      role: 'member',
+      coachId: member.coachId,
+      tenantId: member.tenantId,
+      memberId: memberId,
+    });
+
+    // Update the member doc to link the auth account
+    await memberRef.update({
+      uid: callerUid,
+      hasAccount: true,
+      email: userEmail || member.email || '',
+      displayName: userRecord.displayName || member.name || '',
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    console.log('[claimMemberAccount] Member claimed:', callerUid, memberId);
+    return { success: true };
+  }
+);

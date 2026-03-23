@@ -185,23 +185,24 @@ export default function StripeConnectPanel({ coachId }: Props) {
   }
 
   const isConnected = !!account?.stripeAccountId;
-  const onboardingComplete = account?.onboardingStatus === 'complete';
   const chargesEnabled = account?.chargesEnabled ?? false;
   const payoutsEnabled = account?.payoutsEnabled ?? false;
+  // Treat as complete if charges AND payouts are enabled, regardless of stored status string
+  const onboardingComplete = (chargesEnabled && payoutsEnabled) || account?.onboardingStatus === 'complete';
   const requirementsDue = account?.requirementsDue ?? [];
 
   const statusColor = !isConnected
     ? MUTED
-    : onboardingComplete && chargesEnabled && payoutsEnabled
+    : onboardingComplete
     ? ACCENT
     : GOLD;
 
   const statusLabel = !isConnected
     ? 'Not connected'
-    : account?.onboardingStatus === 'complete'
-    ? chargesEnabled && payoutsEnabled
-      ? 'Active'
-      : 'Restricted'
+    : onboardingComplete
+    ? 'Active'
+    : chargesEnabled || payoutsEnabled
+    ? 'Restricted'
     : account?.onboardingStatus === 'in_progress'
     ? 'Setup in progress'
     : 'Pending setup';

@@ -25,6 +25,24 @@ export default function Root({ children }: { children: React.ReactNode }) {
           name="viewport"
           content="width=device-width, initial-scale=1, maximum-scale=1, shrink-to-fit=no"
         />
+        {/* PWA / App identity */}
+        <meta name="application-name" content="GoArrive" />
+        <meta name="theme-color" content="#0E1117" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="GoArrive" />
+
+        {/* PWA Manifest */}
+        <link rel="manifest" href="/manifest.json" />
+
+        {/* Favicon */}
+        <link rel="icon" type="image/png" href="/favicon.png" />
+
+        {/* iOS home screen icon */}
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+
         <ScrollViewStyleReset />
         {/*
           Global rule: every input, textarea, and select must be at least 16px.

@@ -253,7 +253,8 @@ export default function BillingDashboard() {
     });
   }
 
-  if (stripeAccount?.stripeAccountId && stripeAccount.onboardingStatus !== 'complete') {
+  const stripeFullyActive = stripeAccount?.chargesEnabled && stripeAccount?.payoutsEnabled;
+  if (stripeAccount?.stripeAccountId && !stripeFullyActive && stripeAccount.onboardingStatus !== 'complete') {
     tasks.push({
       id: 'stripe_onboarding', priority: 'urgent', icon: '⚠️',
       title: 'Complete Stripe onboarding',
