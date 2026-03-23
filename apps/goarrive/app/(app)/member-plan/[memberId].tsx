@@ -1248,8 +1248,55 @@ function InlinePaymentSection({ plan, pricing, isCoach, onChange, onAccept }: {
 }) {
   const [selected, setSelected] = useState<PaymentOption | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [copyLinkLoading, setCopyLinkLoading] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { user } = useAuth();
+
+  // Coach-only: generate Stripe checkout URL and copy to clipboard
+  async function handleCopyPaymentLink() {
+    if (!selected || !user) return;
+    const planId = plan.id;
+    if (!planId) { setError('Plan ID not found.'); return; }
+    setCopyLinkLoading(true);
+    setError(null);
+    try {
+      const functions = getFunctions();
+      const createCheckout = httpsCallable<
+        { planId: string; memberId: string; paymentOption: PaymentOption },
+        { sessionUrl: string; intentId: string; snapshotId: string }
+      >(functions, 'createCheckoutSession');
+      const result = await createCheckout({
+        planId,
+        memberId: plan.memberId,
+        paymentOption: selected,
+      });
+      const { sessionUrl } = result.data;
+      if (sessionUrl && Platform.OS === 'web' && navigator.clipboard) {
+        await navigator.clipboard.writeText(sessionUrl);
+        setLinkCopied(true);
+        setTimeout(() => setLinkCopied(false), 3000);
+      } else if (sessionUrl) {
+        // Native fallback — alert the URL so coach can copy manually
+        if (typeof alert !== 'undefined') alert(sessionUrl);
+        setLinkCopied(true);
+        setTimeout(() => setLinkCopied(false), 3000);
+      } else {
+        setError('No checkout URL returned. Please try again.');
+      }
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      if (msg.includes('not-found') || msg.includes('NOT_FOUND')) {
+        setError('ME-001: Payment system is not yet configured.');
+      } else if (msg.includes('failed-precondition') || msg.includes('FAILED_PRECONDITION')) {
+        setError(msg.replace('FAILED_PRECONDITION: ', ''));
+      } else {
+        setError(msg);
+      }
+    } finally {
+      setCopyLinkLoading(false);
+    }
+  }
 
   // Pricing calculations (same as payment-select.tsx)
   const contractMonths = plan.contractMonths ?? 12;
@@ -1478,6 +1525,23 @@ function InlinePaymentSection({ plan, pricing, isCoach, onChange, onAccept }: {
           )}
         </Pressable>
 
+        {/* Coach-only: Copy Payment Link */}
+        {isCoach && (
+          <Pressable
+            onPress={handleCopyPaymentLink}
+            disabled={!selected || copyLinkLoading}
+            style={[ips.copyLinkBtn, (!selected || copyLinkLoading) && { opacity: 0.5 }]}
+          >
+            {copyLinkLoading ? (
+              <ActivityIndicator size="small" color="#5B9BD5" />
+            ) : linkCopied ? (
+              <Text style={ips.copyLinkText}>✓ Payment Link Copied!</Text>
+            ) : (
+              <Text style={ips.copyLinkText}>Copy Payment Link</Text>
+            )}
+          </Pressable>
+        )}
+
         {/* Fine print */}
         <Text style={{ color: '#4A5568', fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 10 }}>
           Payments are processed securely by Stripe. By proceeding you agree to the GoArrive coaching terms. You may cancel month-to-month continuation at any time after your contract ends.
@@ -1528,6 +1592,17 @@ const ips = StyleSheet.create({
     marginTop: 14,
   },
   ctaBtnText: { color: '#000', fontSize: 16, fontWeight: '700' },
+  copyLinkBtn: {
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    borderWidth: 1.5,
+    borderColor: '#5B9BD5',
+    backgroundColor: 'transparent',
+  },
+  copyLinkText: { color: '#5B9BD5', fontSize: 14, fontWeight: '700' },
 });
 
 function CoachingInvestmentSection({ plan, pricing, isCoach, onChange }: {
@@ -2852,6 +2927,8 @@ export default function MemberPlanScreen() {
   const [isCoachMode, setIsCoachMode] = useState(true);
   const [showControls, setShowControls] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [paymentLinkCopied, setPaymentLinkCopied] = useState(false);
+  const [paymentLinkLoading, setPaymentLinkLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const saveTimer = useRef<any>(null);
   const saveStatusTimer = useRef<any>(null);
@@ -3124,6 +3201,42 @@ export default function MemberPlanScreen() {
   }, [plan]);
 
   // Share link
+  // Share Payment Link — generates a Stripe checkout URL and copies it
+  const handleSharePaymentLink = async () => {
+    if (!plan || !user) return;
+    const planId = planKeyRef.current || plan.id;
+    if (!planId) return;
+    setPaymentLinkLoading(true);
+    try {
+      const functions = getFunctions();
+      const createCheckout = httpsCallable<
+        { planId: string; memberId: string; paymentOption: 'monthly' | 'pay_in_full' },
+        { sessionUrl: string; intentId: string; snapshotId: string }
+      >(functions, 'createCheckoutSession');
+      const result = await createCheckout({
+        planId,
+        memberId: plan.memberId,
+        paymentOption: 'monthly', // default to monthly for share
+      });
+      const { sessionUrl } = result.data;
+      if (sessionUrl && Platform.OS === 'web' && navigator.clipboard) {
+        await navigator.clipboard.writeText(sessionUrl);
+        setPaymentLinkCopied(true);
+        setTimeout(() => setPaymentLinkCopied(false), 3000);
+      } else if (sessionUrl) {
+        // Native fallback — alert the URL so coach can copy manually
+        if (typeof alert !== 'undefined') alert(sessionUrl);
+        setPaymentLinkCopied(true);
+        setTimeout(() => setPaymentLinkCopied(false), 3000);
+      }
+    } catch (err: any) {
+      console.error('[handleSharePaymentLink] Error:', err);
+      // Silently fail — the coach can use the inline Copy Payment Link button instead
+    } finally {
+      setPaymentLinkLoading(false);
+    }
+  };
+
   const handleShare = async () => {
     const url = `https://goarrive.web.app/shared-plan/${memberId}`;
     try {
@@ -3241,11 +3354,24 @@ export default function MemberPlanScreen() {
       {/* ─── BOTTOM ACTION BAR ────────────────────────────────────────────── */}
       {tab === 'plan' && isCoachMode && (
         <View style={ab.bar}>
-          <Pressable onPress={handleShare} style={ab.shareBtn}>
+          <Pressable onPress={handleShare} style={[ab.shareBtn, { flex: 1 }]}>
             <Icon name="share" size={18} color="#000" />
             <Text style={ab.shareBtnText}>
               {copied ? 'Link copied!' : `Share with ${plan?.memberName || 'Member'}`}
             </Text>
+          </Pressable>
+          <Pressable
+            onPress={handleSharePaymentLink}
+            disabled={paymentLinkLoading}
+            style={[ab.paymentLinkBtn, paymentLinkLoading && { opacity: 0.5 }]}
+          >
+            {paymentLinkLoading ? (
+              <ActivityIndicator size="small" color="#F5A623" />
+            ) : paymentLinkCopied ? (
+              <Icon name="checkmark" size={18} color="#6EBB7A" />
+            ) : (
+              <Icon name="card" size={18} color="#F5A623" />
+            )}
           </Pressable>
           <Pressable onPress={() => setShowControls(true)} style={ab.controlsBtn}>
             <Icon name="settings" size={18} color={MUTED} />
@@ -3316,6 +3442,10 @@ const ab = StyleSheet.create({
   controlsBtn: {
     width: 52, height: 52, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
     backgroundColor: '#1A2035', borderWidth: 1, borderColor: BORDER,
+  },
+  paymentLinkBtn: {
+    width: 52, height: 52, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#1A2035', borderWidth: 1, borderColor: '#F5A623',
   },
 });
 
