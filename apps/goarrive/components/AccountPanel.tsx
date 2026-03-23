@@ -169,9 +169,9 @@ export default function AccountPanel({ visible, onClose }: Props) {
     // Open feedback/bug report form in a new tab (or in-app browser)
     const url = 'https://forms.gle/GoArriveFeedback'; // placeholder — update with real form URL
     if (Platform.OS === 'web') {
-      window.open('mailto:support@goarrive.com?subject=GoArrive%20Beta%20Feedback&body=Page%3A%20%0A%0AWhat%20happened%3A%20%0A%0AExpected%3A%20%0A%0ADevice%3A%20', '_blank');
+      window.open('mailto:info@goa.fit?subject=GoArrive%20Beta%20Feedback&body=Page%3A%20%0A%0AWhat%20happened%3A%20%0A%0AExpected%3A%20%0A%0ADevice%3A%20', '_blank');
     } else {
-      showToast('Send feedback to: support@goarrive.com');
+      showToast('Send feedback to: info@goa.fit');
     }
     onClose();
   }
@@ -192,7 +192,7 @@ export default function AccountPanel({ visible, onClose }: Props) {
     {
       icon: 'edit',
       label: 'Report a Bug / Suggest',
-      sublabel: 'Share feedback or screenshots',
+      sublabel: 'Share feedback or screenshots to info@goa.fit',
       onPress: handleFeedback,
     },
   ];
