@@ -3059,6 +3059,7 @@ export default function MemberPlanScreen() {
 
     // ── Step 5: Always set plan state ────────────────────────────────────
     planKeyRef.current = planKey; // Store the resolved key for auto-save
+    finalPlan.id = planKey; // Ensure plan.id is set for checkout and other lookups
     console.log('[loadData] Setting plan for:', finalPlan.memberName, 'planKey:', planKey);
     setPlan(finalPlan);
     setLoading(false);
