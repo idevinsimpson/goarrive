@@ -2930,7 +2930,7 @@ const PHASE_HOSTING_RULES = {
     },
 };
 exports.updateMemberGuidancePhase = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
-    var _a, _b, _c;
+    var _a, _b;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
         throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
@@ -2942,49 +2942,84 @@ exports.updateMemberGuidancePhase = (0, https_1.onCall)({ region: 'us-central1' 
     if (!rules) {
         throw new https_1.HttpsError('invalid-argument', `Invalid guidance phase: ${newPhase}. Must be coach_guided, shared_guidance, or self_guided.`);
     }
+    // Authorization: caller must be the member's coach or a platform admin
+    const callerClaims = (((_b = request.auth) === null || _b === void 0 ? void 0 : _b.token) || {});
+    const isAdmin = callerClaims.role === 'admin' || callerClaims.platformAdmin === true;
+    if (!isAdmin) {
+        // Verify caller is the coach for this member by checking a slot or the member doc
+        const memberDoc = await db.collection('members').doc(memberId).get();
+        const memberData = memberDoc.data();
+        if (!memberData || (memberData.coachId !== callerUid && memberData.createdBy !== callerUid)) {
+            throw new https_1.HttpsError('permission-denied', 'Only the member\'s coach or an admin can transition phases');
+        }
+    }
     const todayStr = new Date().toISOString().split('T')[0];
+    // Helper: commit writes in chunks of 450 (under Firestore 500-op batch limit)
+    const CHUNK_SIZE = 450;
+    async function commitInChunks(refs) {
+        for (let i = 0; i < refs.length; i += CHUNK_SIZE) {
+            const chunk = refs.slice(i, i + CHUNK_SIZE);
+            const batch = db.batch();
+            for (const item of chunk) {
+                batch.update(item.ref, item.data);
+            }
+            await batch.commit();
+        }
+    }
     // 1. Update all future scheduled/allocated instances for this member
     const instancesSnap = await db.collection('session_instances')
         .where('memberId', '==', memberId)
         .where('scheduledDate', '>=', todayStr)
         .get();
-    let updatedInstances = 0;
-    const batch1 = db.batch();
+    const instanceUpdates = [];
+    let previousPhase = 'unknown';
     for (const instDoc of instancesSnap.docs) {
         const inst = instDoc.data();
         // Only update instances that haven't started yet
         if (['scheduled', 'allocated', 'allocation_failed'].includes(inst.status)) {
-            batch1.update(instDoc.ref, {
-                guidancePhase: newPhase,
-                hostingMode: rules.hostingMode,
-                coachExpectedLive: rules.coachExpectedLive,
-                personalZoomRequired: rules.personalZoomRequired,
-                updatedAt: firestore_2.FieldValue.serverTimestamp(),
+            // Idempotency: skip if already in the target phase
+            if (inst.guidancePhase === newPhase)
+                continue;
+            if (previousPhase === 'unknown' && inst.guidancePhase)
+                previousPhase = inst.guidancePhase;
+            instanceUpdates.push({
+                ref: instDoc.ref,
+                data: {
+                    guidancePhase: newPhase,
+                    hostingMode: rules.hostingMode,
+                    coachExpectedLive: rules.coachExpectedLive,
+                    personalZoomRequired: rules.personalZoomRequired,
+                    updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                },
             });
-            updatedInstances++;
         }
     }
-    if (updatedInstances > 0)
-        await batch1.commit();
+    if (instanceUpdates.length > 0)
+        await commitInChunks(instanceUpdates);
     // 2. Update all active recurring slots for this member
     const slotsSnap = await db.collection('recurring_slots')
         .where('memberId', '==', memberId)
         .where('status', '==', 'active')
         .get();
-    let updatedSlots = 0;
-    const batch2 = db.batch();
+    const slotUpdates = [];
     for (const slotDoc of slotsSnap.docs) {
-        batch2.update(slotDoc.ref, {
-            guidancePhase: newPhase,
-            hostingMode: rules.hostingMode,
-            coachExpectedLive: rules.coachExpectedLive,
-            personalZoomRequired: rules.personalZoomRequired,
-            updatedAt: firestore_2.FieldValue.serverTimestamp(),
+        const slotData = slotDoc.data();
+        // Idempotency: skip if already in the target phase
+        if (slotData.guidancePhase === newPhase)
+            continue;
+        slotUpdates.push({
+            ref: slotDoc.ref,
+            data: {
+                guidancePhase: newPhase,
+                hostingMode: rules.hostingMode,
+                coachExpectedLive: rules.coachExpectedLive,
+                personalZoomRequired: rules.personalZoomRequired,
+                updatedAt: firestore_2.FieldValue.serverTimestamp(),
+            },
         });
-        updatedSlots++;
     }
-    if (updatedSlots > 0)
-        await batch2.commit();
+    if (slotUpdates.length > 0)
+        await commitInChunks(slotUpdates);
     // 3. Write session events for audit trail
     await writeSessionEvent({
         occurrenceId: `phase_change_${memberId}_${Date.now()}`,
@@ -2995,19 +3030,19 @@ exports.updateMemberGuidancePhase = (0, https_1.onCall)({ region: 'us-central1' 
         payload: {
             memberId,
             newPhase,
-            previousPhase: ((_c = (_b = instancesSnap.docs[0]) === null || _b === void 0 ? void 0 : _b.data()) === null || _c === void 0 ? void 0 : _c.guidancePhase) || 'unknown',
-            updatedInstances,
-            updatedSlots,
+            previousPhase,
+            updatedInstances: instanceUpdates.length,
+            updatedSlots: slotUpdates.length,
             hostingRules: rules,
         },
     });
-    console.log(`[updateMemberGuidancePhase] member=${memberId} phase=${newPhase} instances=${updatedInstances} slots=${updatedSlots}`);
+    console.log(`[updateMemberGuidancePhase] member=${memberId} phase=${newPhase} instances=${instanceUpdates.length} slots=${slotUpdates.length}`);
     return {
         success: true,
         memberId,
         newPhase,
-        updatedInstances,
-        updatedSlots,
+        updatedInstances: instanceUpdates.length,
+        updatedSlots: slotUpdates.length,
         hostingRules: rules,
     };
 });

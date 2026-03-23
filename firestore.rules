@@ -486,8 +486,6 @@ service cloud.firestore {
         || isOwnDoc(resource.data.memberId)
         || isPlatformAdmin()
       );
-      // list: query-time check — only request.auth available
-      allow list: if isAuthenticated();
       allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
       allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
       allow delete: if false; // cancel only
@@ -508,6 +506,67 @@ service cloud.firestore {
       allow create: if false; // Cloud Functions only (Admin SDK)
       allow update: if false; // append-only
       allow delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
+    // SESSION EVENTS (Scheduling — per-instance event log)
+    // Append-only event trail for session lifecycle.
+    // Coach reads own; admin reads all.
+    // Cloud Functions write via Admin SDK.
+    // ─────────────────────────────────────────────
+
+    match /session_events/{eventId} {
+      allow read: if isAuthenticated() && (
+        isCoachOrBootstrap(resource.data.coachId)
+        || isPlatformAdmin()
+      );
+      allow create: if false; // Cloud Functions only (Admin SDK)
+      allow update: if false; // append-only
+      allow delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
+    // REMINDER JOBS (Scheduling — notification reminders)
+    // Cloud Functions create, process, and update.
+    // No client-side access needed.
+    // ─────────────────────────────────────────────
+
+    match /reminder_jobs/{jobId} {
+      allow read: if isPlatformAdmin();
+      allow write: if false; // Cloud Functions only (Admin SDK)
+    }
+
+    // ─────────────────────────────────────────────
+    // DEAD LETTER (Scheduling — failed notification/reminder items)
+    // Cloud Functions write; admin reads for retry.
+    // ─────────────────────────────────────────────
+
+    match /dead_letter/{itemId} {
+      allow read: if isPlatformAdmin();
+      allow write: if false; // Cloud Functions only (Admin SDK)
+    }
+
+    // ─────────────────────────────────────────────
+    // NOTIFICATION LOG (Scheduling — sent notification records)
+    // Cloud Functions write; admin reads for diagnostics.
+    // ─────────────────────────────────────────────
+
+    match /notification_log/{logId} {
+      allow read: if isPlatformAdmin();
+      allow write: if false; // Cloud Functions only (Admin SDK)
+    }
+
+    // ─────────────────────────────────────────────
+    // COACH ZOOM CONNECTIONS (Scheduling — personal Zoom linkage)
+    // Coach reads/writes their own connection.
+    // Admin reads all for diagnostics.
+    // ─────────────────────────────────────────────
+
+    match /coach_zoom_connections/{coachId} {
+      allow read: if isOwnDoc(coachId) || isPlatformAdmin();
+      allow create: if isOwnDoc(coachId);
+      allow update: if isOwnDoc(coachId);
+      allow delete: if isOwnDoc(coachId); // disconnect flow
     }
 
     // ─────────────────────────────────────────────

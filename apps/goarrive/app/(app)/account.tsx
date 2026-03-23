@@ -145,6 +145,11 @@ function CoachZoomPanel({ coachId }: { coachId: string }) {
       Alert.alert('Invalid Email', 'Please enter a valid email address.');
       return;
     }
+    // Skip if email unchanged and already connected
+    if (connection?.connected && connection?.zoomEmail === emailInput.trim()) {
+      setEditing(false);
+      return;
+    }
 
     setSaving(true);
     try {

@@ -358,6 +358,10 @@ export default function MemberDetail({
   const [selectedPhase, setSelectedPhase] = useState<GuidancePhase>('coach_guided');
   const [creating, setCreating] = useState(false);
 
+  // Phase transition control
+  const [transitionPhase, setTransitionPhase] = useState<GuidancePhase | null>(null);
+  const [transitioning, setTransitioning] = useState(false);
+
   // Shared Guidance Window: dual-handle live coaching window (in minutes from session start)
   // Defaults to centered — equal solo time on both sides
   const [liveStart, setLiveStart] = useState(Math.round((selectedDuration * 0.25) / STEP) * STEP);
@@ -612,6 +616,24 @@ export default function MemberDetail({
       Alert.alert('Error', err.message || 'Failed to cancel slot');
     }
   }, []);
+
+  const handlePhaseTransition = useCallback(async (newPhase: GuidancePhase) => {
+    setTransitioning(true);
+    try {
+      const fn = httpsCallable(functions, 'updateMemberGuidancePhase');
+      const result = await fn({ memberId: member.id, newPhase });
+      const data = result.data as any;
+      Alert.alert(
+        'Phase Updated',
+        `Transitioned to ${SCHED_PHASE_LABELS[newPhase]}.\n${data.updatedInstances || 0} session(s) and ${data.updatedSlots || 0} slot(s) updated.`
+      );
+      setTransitionPhase(null);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to transition phase');
+    } finally {
+      setTransitioning(false);
+    }
+  }, [member.id]);
 
   const activeSlots = existingSlots.filter(s => s.status === 'active' || s.status === 'paused');
   const scheduleSubLabel = activeSlots.length > 0
@@ -905,6 +927,80 @@ export default function MemberDetail({
                         Currently in <Text style={{ fontWeight: '700', color: resolvePhaseColor(currentPhaseInfo.phase.intensity).bar }}>{currentPhaseInfo.phase.name}</Text>
                         {' '}(week {currentPhaseInfo.elapsedWeeks + 1})
                       </Text>
+                    </View>
+                  )}
+                  {/* Phase Transition Control */}
+                  {currentPhaseInfo && (
+                    <View style={s.phaseTransitionBar}>
+                      {!transitionPhase ? (
+                        <TouchableOpacity
+                          style={s.phaseTransitionTrigger}
+                          onPress={() => {
+                            const currentKey = INTENSITY_TO_PHASE[currentPhaseInfo.phase.intensity] || 'coach_guided';
+                            // Default to next phase
+                            const order: GuidancePhase[] = ['coach_guided', 'shared_guidance', 'self_guided'];
+                            const idx = order.indexOf(currentKey);
+                            setTransitionPhase(order[Math.min(idx + 1, order.length - 1)] as GuidancePhase);
+                          }}
+                        >
+                          <Icon name="arrow-right" size={12} color={GOLD} />
+                          <Text style={s.phaseTransitionTriggerText}>Transition Phase</Text>
+                        </TouchableOpacity>
+                      ) : (
+                        <View style={s.phaseTransitionPicker}>
+                          <Text style={s.phaseTransitionLabel}>Move to:</Text>
+                          <View style={s.phaseTransitionOptions}>
+                            {([
+                              { key: 'coach_guided' as GuidancePhase, label: 'Guided', color: GREEN },
+                              { key: 'shared_guidance' as GuidancePhase, label: 'Blended', color: '#5B9BD5' },
+                              { key: 'self_guided' as GuidancePhase, label: 'Self-Reliant', color: '#FFC000' },
+                            ] as const).map(p => {
+                              const currentKey = INTENSITY_TO_PHASE[currentPhaseInfo.phase.intensity] || 'coach_guided';
+                              const isCurrent = p.key === currentKey;
+                              const isSelected = p.key === transitionPhase;
+                              return (
+                                <TouchableOpacity
+                                  key={p.key}
+                                  disabled={isCurrent}
+                                  style={[
+                                    s.phaseTransitionChip,
+                                    isSelected && { backgroundColor: p.color + '20', borderColor: p.color },
+                                    isCurrent && { opacity: 0.35 },
+                                  ]}
+                                  onPress={() => setTransitionPhase(p.key)}
+                                >
+                                  <Text style={[
+                                    s.phaseTransitionChipText,
+                                    isSelected && { color: p.color },
+                                  ]}>
+                                    {isCurrent ? `${p.label} (current)` : p.label}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                          <View style={s.phaseTransitionActions}>
+                            <TouchableOpacity
+                              style={s.phaseTransitionCancel}
+                              onPress={() => setTransitionPhase(null)}
+                            >
+                              <Text style={s.phaseTransitionCancelText}>Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[
+                                s.phaseTransitionConfirm,
+                                transitioning && { opacity: 0.5 },
+                              ]}
+                              disabled={transitioning || !transitionPhase || transitionPhase === (INTENSITY_TO_PHASE[currentPhaseInfo.phase.intensity] || 'coach_guided')}
+                              onPress={() => transitionPhase && handlePhaseTransition(transitionPhase)}
+                            >
+                              <Text style={s.phaseTransitionConfirmText}>
+                                {transitioning ? 'Updating...' : 'Confirm Transition'}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      )}
                     </View>
                   )}
                   {/* CTS Indicator */}
@@ -1959,6 +2055,86 @@ const s = StyleSheet.create({
   currentPhaseText: {
     fontSize: 12,
     color: MUTED,
+    fontFamily: FB,
+  },
+  phaseTransitionBar: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+  phaseTransitionTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  phaseTransitionTriggerText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: GOLD,
+    fontFamily: FB,
+  },
+  phaseTransitionPicker: {
+    gap: 8,
+  },
+  phaseTransitionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: MUTED,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  phaseTransitionOptions: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  phaseTransitionChip: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(30,42,58,0.5)',
+    borderWidth: 1,
+    borderColor: BORDER,
+    alignItems: 'center',
+  },
+  phaseTransitionChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: MUTED,
+    fontFamily: FB,
+    textAlign: 'center',
+  },
+  phaseTransitionActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  phaseTransitionCancel: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: BORDER,
+    alignItems: 'center',
+  },
+  phaseTransitionCancelText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: MUTED,
+    fontFamily: FB,
+  },
+  phaseTransitionConfirm: {
+    flex: 2,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: GOLD,
+    alignItems: 'center',
+  },
+  phaseTransitionConfirmText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0B1120',
     fontFamily: FB,
   },
   ctsBar: {
