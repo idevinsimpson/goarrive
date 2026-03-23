@@ -1626,7 +1626,7 @@ exports.createRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
         throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
-    const { memberId, memberName, dayOfWeek, startTime, durationMinutes, timezone, recurrencePattern, weekOfMonth, effectiveFrom, sessionType, guidancePhase, roomSource, coachJoining } = request.data;
+    const { memberId, memberName, dayOfWeek, startTime, durationMinutes, timezone, recurrencePattern, weekOfMonth, effectiveFrom, sessionType, guidancePhase, roomSource, coachJoining, liveCoachingStartMin, liveCoachingEndMin, liveCoachingDuration } = request.data;
     if (!memberId || dayOfWeek === undefined || !startTime || !durationMinutes || !timezone) {
         throw new https_1.HttpsError('invalid-argument', 'memberId, dayOfWeek, startTime, durationMinutes, and timezone are required');
     }
@@ -1644,10 +1644,8 @@ exports.createRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
     const slotRef = db.collection('recurring_slots').doc();
     const effectiveDate = effectiveFrom ? firestore_2.Timestamp.fromDate(new Date(effectiveFrom)) : firestore_2.Timestamp.now();
     // Determine room source from guidance phase if not explicitly provided
-    const resolvedRoomSource = roomSource || (guidancePhase === 'coach_guided' ? 'coach_personal' :
-        guidancePhase === 'self_guided' ? 'shared_pool' :
-            'coach_personal' // shared_guidance defaults to coach personal
-    );
+    // Shared Guidance and Self Guided always use shared pool (round-robin)
+    const resolvedRoomSource = roomSource || (guidancePhase === 'coach_guided' ? 'coach_personal' : 'shared_pool');
     const slot = Object.assign(Object.assign({ coachId,
         memberId, memberName: memberName || memberSnap.data().name || 'Unknown', dayOfWeek,
         startTime,
@@ -1661,6 +1659,13 @@ exports.createRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
     slot.roomSource = resolvedRoomSource;
     if (coachJoining !== undefined)
         slot.coachJoining = coachJoining;
+    // Live coaching window for shared_guidance phase
+    if (liveCoachingStartMin !== undefined)
+        slot.liveCoachingStartMin = liveCoachingStartMin;
+    if (liveCoachingEndMin !== undefined)
+        slot.liveCoachingEndMin = liveCoachingEndMin;
+    if (liveCoachingDuration !== undefined)
+        slot.liveCoachingDuration = liveCoachingDuration;
     await slotRef.set(slot);
     await writeAuditLog({
         coachId,
@@ -1784,6 +1789,12 @@ function generateInstancesForSlot(slot, slotId, daysAhead) {
                     inst.roomSource = slot.roomSource;
                 if (slot.coachJoining !== undefined)
                     inst.coachJoining = slot.coachJoining;
+                if (slot.liveCoachingStartMin !== undefined)
+                    inst.liveCoachingStartMin = slot.liveCoachingStartMin;
+                if (slot.liveCoachingEndMin !== undefined)
+                    inst.liveCoachingEndMin = slot.liveCoachingEndMin;
+                if (slot.liveCoachingDuration !== undefined)
+                    inst.liveCoachingDuration = slot.liveCoachingDuration;
                 instances.push(inst);
             }
             month++;
@@ -1843,6 +1854,12 @@ function generateInstancesForSlot(slot, slotId, daysAhead) {
             inst.roomSource = slot.roomSource;
         if (slot.coachJoining !== undefined)
             inst.coachJoining = slot.coachJoining;
+        if (slot.liveCoachingStartMin !== undefined)
+            inst.liveCoachingStartMin = slot.liveCoachingStartMin;
+        if (slot.liveCoachingEndMin !== undefined)
+            inst.liveCoachingEndMin = slot.liveCoachingEndMin;
+        if (slot.liveCoachingDuration !== undefined)
+            inst.liveCoachingDuration = slot.liveCoachingDuration;
         instances.push(inst);
         current.setDate(current.getDate() + step);
     }

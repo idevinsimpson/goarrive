@@ -1911,7 +1911,7 @@ export const createRecurringSlot = onCall(
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
 
-    const { memberId, memberName, dayOfWeek, startTime, durationMinutes, timezone, recurrencePattern, weekOfMonth, effectiveFrom, sessionType, guidancePhase, roomSource, coachJoining } = request.data as {
+    const { memberId, memberName, dayOfWeek, startTime, durationMinutes, timezone, recurrencePattern, weekOfMonth, effectiveFrom, sessionType, guidancePhase, roomSource, coachJoining, liveCoachingStartMin, liveCoachingEndMin, liveCoachingDuration } = request.data as {
       memberId: string;
       memberName: string;
       dayOfWeek: number;
@@ -1925,6 +1925,9 @@ export const createRecurringSlot = onCall(
       guidancePhase?: 'coach_guided' | 'shared_guidance' | 'self_guided';
       roomSource?: 'coach_personal' | 'shared_pool';
       coachJoining?: boolean;
+      liveCoachingStartMin?: number; // minutes from session start when coach joins
+      liveCoachingEndMin?: number;   // minutes from session start when coach leaves
+      liveCoachingDuration?: number; // total live coaching minutes (calendar block)
     };
 
     if (!memberId || dayOfWeek === undefined || !startTime || !durationMinutes || !timezone) {
@@ -1948,10 +1951,9 @@ export const createRecurringSlot = onCall(
     const effectiveDate = effectiveFrom ? Timestamp.fromDate(new Date(effectiveFrom)) : Timestamp.now();
 
     // Determine room source from guidance phase if not explicitly provided
+    // Shared Guidance and Self Guided always use shared pool (round-robin)
     const resolvedRoomSource = roomSource || (
-      guidancePhase === 'coach_guided' ? 'coach_personal' :
-      guidancePhase === 'self_guided' ? 'shared_pool' :
-      'coach_personal' // shared_guidance defaults to coach personal
+      guidancePhase === 'coach_guided' ? 'coach_personal' : 'shared_pool'
     );
 
     const slot: Record<string, any> = {
@@ -1975,6 +1977,11 @@ export const createRecurringSlot = onCall(
     if (guidancePhase) slot.guidancePhase = guidancePhase;
     slot.roomSource = resolvedRoomSource;
     if (coachJoining !== undefined) slot.coachJoining = coachJoining;
+
+    // Live coaching window for shared_guidance phase
+    if (liveCoachingStartMin !== undefined) slot.liveCoachingStartMin = liveCoachingStartMin;
+    if (liveCoachingEndMin !== undefined) slot.liveCoachingEndMin = liveCoachingEndMin;
+    if (liveCoachingDuration !== undefined) slot.liveCoachingDuration = liveCoachingDuration;
 
     await slotRef.set(slot);
 
@@ -2124,6 +2131,9 @@ function generateInstancesForSlot(
         if (slot.guidancePhase) inst.guidancePhase = slot.guidancePhase;
         if (slot.roomSource) inst.roomSource = slot.roomSource;
         if (slot.coachJoining !== undefined) inst.coachJoining = slot.coachJoining;
+        if (slot.liveCoachingStartMin !== undefined) inst.liveCoachingStartMin = slot.liveCoachingStartMin;
+        if (slot.liveCoachingEndMin !== undefined) inst.liveCoachingEndMin = slot.liveCoachingEndMin;
+        if (slot.liveCoachingDuration !== undefined) inst.liveCoachingDuration = slot.liveCoachingDuration;
         instances.push(inst);
       }
       month++;
@@ -2183,6 +2193,9 @@ function generateInstancesForSlot(
     if (slot.guidancePhase) inst.guidancePhase = slot.guidancePhase;
     if (slot.roomSource) inst.roomSource = slot.roomSource;
     if (slot.coachJoining !== undefined) inst.coachJoining = slot.coachJoining;
+    if (slot.liveCoachingStartMin !== undefined) inst.liveCoachingStartMin = slot.liveCoachingStartMin;
+    if (slot.liveCoachingEndMin !== undefined) inst.liveCoachingEndMin = slot.liveCoachingEndMin;
+    if (slot.liveCoachingDuration !== undefined) inst.liveCoachingDuration = slot.liveCoachingDuration;
 
     instances.push(inst);
 

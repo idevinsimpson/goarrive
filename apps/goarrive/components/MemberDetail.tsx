@@ -24,7 +24,7 @@
  *   - Journal
  *   - Send Password Reset
  */
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -37,6 +37,9 @@ import {
   Alert,
   ActivityIndicator,
   Dimensions,
+  PanResponder,
+  type GestureResponderEvent,
+  type PanResponderGestureState,
 } from 'react-native';
 import { db, functions } from '../lib/firebase';
 import { doc, onSnapshot, collection, query, where, getDocs, getDoc } from 'firebase/firestore';
@@ -60,6 +63,11 @@ const BLUE = '#7DD3FC';
 const RED = '#E05252';
 
 const { width: SCREEN_W } = Dimensions.get('window');
+
+// ── Slider constants ────────────────────────────────────────────────────────
+const SLIDER_TRACK_WIDTH = Math.min(SCREEN_W - 80, 340);
+const HANDLE_SIZE = 28;
+const STEP = 5; // 5-minute increments
 
 interface MemberDetailProps {
   member: any;
@@ -123,6 +131,147 @@ interface DayTimeEntry {
   startTime: string;
 }
 
+// ── Dual-Handle Range Slider ────────────────────────────────────────────────
+function DualHandleSlider({
+  totalMinutes,
+  liveStart,
+  liveEnd,
+  onChangeStart,
+  onChangeEnd,
+}: {
+  totalMinutes: number;
+  liveStart: number;
+  liveEnd: number;
+  onChangeStart: (v: number) => void;
+  onChangeEnd: (v: number) => void;
+}) {
+  const trackWidth = SLIDER_TRACK_WIDTH;
+  const minToX = (min: number) => (min / totalMinutes) * trackWidth;
+  const xToMin = (x: number) => {
+    const raw = (x / trackWidth) * totalMinutes;
+    return Math.round(raw / STEP) * STEP;
+  };
+
+  const leftOffset = useRef(0);
+  const rightOffset = useRef(0);
+
+  const leftPan = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => {
+      leftOffset.current = minToX(liveStart);
+    },
+    onPanResponderMove: (_: GestureResponderEvent, gs: PanResponderGestureState) => {
+      const newX = Math.max(0, Math.min(leftOffset.current + gs.dx, minToX(liveEnd) - minToX(STEP)));
+      const newMin = Math.max(0, Math.min(xToMin(newX), liveEnd - STEP));
+      onChangeStart(newMin);
+    },
+  }), [totalMinutes, liveStart, liveEnd]);
+
+  const rightPan = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => {
+      rightOffset.current = minToX(liveEnd);
+    },
+    onPanResponderMove: (_: GestureResponderEvent, gs: PanResponderGestureState) => {
+      const newX = Math.max(minToX(liveStart) + minToX(STEP), Math.min(rightOffset.current + gs.dx, trackWidth));
+      const newMin = Math.max(liveStart + STEP, Math.min(xToMin(newX), totalMinutes));
+      onChangeEnd(newMin);
+    },
+  }), [totalMinutes, liveStart, liveEnd]);
+
+  const leftX = minToX(liveStart);
+  const rightX = minToX(liveEnd);
+  const liveWidth = rightX - leftX;
+  const selfLeftWidth = leftX;
+  const selfRightWidth = trackWidth - rightX;
+  const liveDuration = liveEnd - liveStart;
+
+  return (
+    <View style={sl.container}>
+      {/* Labels row */}
+      <View style={sl.labelsRow}>
+        {liveStart > 0 && (
+          <Text style={[sl.zoneLabel, { width: selfLeftWidth, textAlign: 'center' }]} numberOfLines={1}>
+            {liveStart}m solo
+          </Text>
+        )}
+        <Text
+          style={[sl.zoneLabelLive, { width: Math.max(liveWidth, 50), textAlign: 'center', marginLeft: liveStart === 0 ? 0 : undefined }]}
+          numberOfLines={1}
+        >
+          {liveDuration}m live
+        </Text>
+        {liveEnd < totalMinutes && (
+          <Text style={[sl.zoneLabel, { width: selfRightWidth, textAlign: 'center' }]} numberOfLines={1}>
+            {totalMinutes - liveEnd}m solo
+          </Text>
+        )}
+      </View>
+
+      {/* Track */}
+      <View style={[sl.track, { width: trackWidth }]}>
+        {/* Self-guided left zone */}
+        {selfLeftWidth > 0 && (
+          <View style={[sl.zoneSelf, { width: selfLeftWidth, borderTopLeftRadius: 8, borderBottomLeftRadius: 8 }]} />
+        )}
+        {/* Live coaching zone */}
+        <View style={[sl.zoneLive, {
+          width: Math.max(liveWidth, 4),
+          borderTopLeftRadius: selfLeftWidth === 0 ? 8 : 0,
+          borderBottomLeftRadius: selfLeftWidth === 0 ? 8 : 0,
+          borderTopRightRadius: selfRightWidth === 0 ? 8 : 0,
+          borderBottomRightRadius: selfRightWidth === 0 ? 8 : 0,
+        }]} />
+        {/* Self-guided right zone */}
+        {selfRightWidth > 0 && (
+          <View style={[sl.zoneSelf, { width: selfRightWidth, borderTopRightRadius: 8, borderBottomRightRadius: 8 }]} />
+        )}
+
+        {/* Left handle */}
+        <View
+          {...leftPan.panHandlers}
+          style={[sl.handle, { left: leftX - HANDLE_SIZE / 2 }]}
+        >
+          <View style={sl.handleInner}>
+            <View style={sl.handleGrip} />
+            <View style={sl.handleGrip} />
+          </View>
+        </View>
+
+        {/* Right handle */}
+        <View
+          {...rightPan.panHandlers}
+          style={[sl.handle, { left: rightX - HANDLE_SIZE / 2 }]}
+        >
+          <View style={sl.handleInner}>
+            <View style={sl.handleGrip} />
+            <View style={sl.handleGrip} />
+          </View>
+        </View>
+      </View>
+
+      {/* Time markers */}
+      <View style={[sl.markersRow, { width: trackWidth }]}>
+        <Text style={sl.marker}>0m</Text>
+        <Text style={sl.marker}>{Math.round(totalMinutes / 2)}m</Text>
+        <Text style={sl.marker}>{totalMinutes}m</Text>
+      </View>
+
+      {/* Summary text */}
+      <View style={sl.summaryRow}>
+        <Text style={sl.summaryText}>
+          Coach joins at {liveStart}min, leaves at {liveEnd}min
+        </Text>
+        <Text style={sl.summaryHighlight}>
+          {liveDuration} min on your calendar
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 export default function MemberDetail({
   member,
   onClose,
@@ -151,8 +300,24 @@ export default function MemberDetail({
   const [selectedWeekOfMonth, setSelectedWeekOfMonth] = useState<1 | 2 | 3 | 4>(1);
   const [selectedSessionType, setSelectedSessionType] = useState<SessionType>('strength');
   const [selectedPhase, setSelectedPhase] = useState<GuidancePhase>('coach_guided');
-  const [coachJoining, setCoachJoining] = useState(true);
   const [creating, setCreating] = useState(false);
+
+  // Shared Guidance: dual-handle live coaching window (in minutes from session start)
+  const [liveStart, setLiveStart] = useState(0);
+  const [liveEnd, setLiveEnd] = useState(30);
+
+  // Keep live window within duration when duration changes
+  useEffect(() => {
+    if (liveEnd > selectedDuration) {
+      setLiveEnd(selectedDuration);
+    }
+    if (liveStart >= selectedDuration) {
+      setLiveStart(Math.max(0, selectedDuration - STEP));
+    }
+    if (liveStart >= liveEnd) {
+      setLiveStart(Math.max(0, liveEnd - STEP));
+    }
+  }, [selectedDuration]);
 
   // ── Load member data ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -184,12 +349,10 @@ export default function MemberDetail({
     (async () => {
       setPlanLoading(true);
       try {
-        // Try member.id as plan key first, then uid field
         const planDoc = await getDoc(doc(db, 'member_plans', member.id));
         if (planDoc.exists() && !cancelled) {
           setMemberPlan(planDoc.data() as MemberPlanData);
         } else {
-          // Try querying by memberId
           const q = query(collection(db, 'member_plans'), where('memberId', '==', member.id));
           const snap = await getDocs(q);
           if (!snap.empty && !cancelled) {
@@ -215,7 +378,6 @@ export default function MemberDetail({
     return planPhases.reduce((sum, p) => sum + (p.weeks || 0), 0);
   }, [planPhases]);
 
-  // Map plan phases to scheduling phase labels with week counts
   const phaseWeekMap = useMemo(() => {
     const map: Record<GuidancePhase, number> = { coach_guided: 0, shared_guidance: 0, self_guided: 0 };
     if (!planPhases) return map;
@@ -245,7 +407,6 @@ export default function MemberDetail({
     setSelectedDays(prev => {
       const exists = prev.find(d => d.dayOfWeek === dayIdx);
       if (exists) {
-        // Don't remove if it's the last one
         if (prev.length <= 1) return prev;
         return prev.filter(d => d.dayOfWeek !== dayIdx);
       }
@@ -261,12 +422,12 @@ export default function MemberDetail({
   }
 
   // ── Room source auto-routing ──────────────────────────────────────────────
+  // Shared Guidance ALWAYS uses shared pool (round-robin)
   const resolvedRoomSource = useMemo((): RoomSource => {
     if (selectedPhase === 'coach_guided') return 'coach_personal';
-    if (selectedPhase === 'self_guided') return 'shared_pool';
-    // shared_guidance: depends on coach joining toggle
-    return coachJoining ? 'coach_personal' : 'shared_pool';
-  }, [selectedPhase, coachJoining]);
+    // Both shared_guidance and self_guided use shared pool
+    return 'shared_pool';
+  }, [selectedPhase]);
 
   // ── Create slots (one per selected day) ───────────────────────────────────
   const handleCreateSlots = useCallback(async () => {
@@ -277,7 +438,7 @@ export default function MemberDetail({
       const dayNames: string[] = [];
 
       for (const entry of selectedDays) {
-        const result = await fn({
+        const payload: Record<string, any> = {
           memberId: member.id,
           memberName: currentMember.name || 'Unknown',
           dayOfWeek: entry.dayOfWeek,
@@ -289,23 +450,37 @@ export default function MemberDetail({
           sessionType: selectedSessionType,
           guidancePhase: selectedPhase,
           roomSource: resolvedRoomSource,
-          coachJoining: selectedPhase === 'shared_guidance' ? coachJoining : selectedPhase === 'coach_guided',
-        });
+          coachJoining: selectedPhase === 'coach_guided',
+        };
+
+        // For shared_guidance, include the live coaching window
+        if (selectedPhase === 'shared_guidance') {
+          payload.coachJoining = true; // coach joins for part of the session
+          payload.liveCoachingStartMin = liveStart;
+          payload.liveCoachingEndMin = liveEnd;
+          payload.liveCoachingDuration = liveEnd - liveStart;
+        }
+
+        const result = await fn(payload);
         const data = result.data as any;
         totalInstances += data.instancesGenerated || 0;
         dayNames.push(`${DAY_LABELS[entry.dayOfWeek]} ${formatTime(entry.startTime)}`);
       }
 
+      const liveInfo = selectedPhase === 'shared_guidance'
+        ? `\n\nLive coaching: ${liveStart}–${liveEnd} min (${liveEnd - liveStart} min on your calendar)`
+        : '';
+
       Alert.alert(
         selectedDays.length > 1 ? 'Slots Created' : 'Slot Created',
-        `${selectedDays.length} recurring slot${selectedDays.length > 1 ? 's' : ''} created:\n${dayNames.join(', ')}\n\n${totalInstances} total sessions generated for the next 4 weeks.`
+        `${selectedDays.length} recurring slot${selectedDays.length > 1 ? 's' : ''} created:\n${dayNames.join(', ')}\n\n${totalInstances} total sessions generated for the next 4 weeks.${liveInfo}`
       );
       setShowScheduleModal(false);
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to create slot(s)');
     }
     setCreating(false);
-  }, [member.id, currentMember.name, selectedDays, selectedDuration, selectedTimezone, selectedPattern, selectedWeekOfMonth, selectedSessionType, selectedPhase, coachJoining, resolvedRoomSource]);
+  }, [member.id, currentMember.name, selectedDays, selectedDuration, selectedTimezone, selectedPattern, selectedWeekOfMonth, selectedSessionType, selectedPhase, resolvedRoomSource, liveStart, liveEnd]);
 
   const handlePauseSlot = useCallback(async (slotId: string) => {
     try {
@@ -445,7 +620,7 @@ export default function MemberDetail({
   // ── Phase Timeline Component ──────────────────────────────────────────────
   function PhaseTimeline() {
     if (!planPhases || planPhases.length === 0) return null;
-    const barWidth = SCREEN_W - 80; // padding on both sides
+    const barWidth = SCREEN_W - 80;
     return (
       <View style={s.timelineWrap}>
         <View style={s.timelineHeader}>
@@ -642,8 +817,8 @@ export default function MemberDetail({
                         {slot.guidancePhase && (
                           <Text style={[s.slotMeta, { color: phaseColors[slot.guidancePhase] || MUTED, fontWeight: '600' }]}>
                             {phaseLabels[slot.guidancePhase] || slot.guidancePhase}
-                            {slot.guidancePhase === 'shared_guidance' && slot.coachJoining !== undefined
-                              ? (slot.coachJoining ? ' (you join)' : ' (on their own)')
+                            {slot.guidancePhase === 'shared_guidance' && slot.liveCoachingDuration
+                              ? ` (${slot.liveCoachingDuration}min live)`
                               : ''}
                           </Text>
                         )}
@@ -729,8 +904,6 @@ export default function MemberDetail({
                         ]}
                         onPress={() => {
                           setSelectedPhase(phase.key);
-                          if (phase.key === 'coach_guided') setCoachJoining(true);
-                          if (phase.key === 'self_guided') setCoachJoining(false);
                         }}
                       >
                         <Text style={[
@@ -756,33 +929,27 @@ export default function MemberDetail({
                 <View style={s.roomSourceRow}>
                   <Icon name="info" size={14} color={MUTED} />
                   <Text style={s.roomSourceText}>
-                    Room: {resolvedRoomSource === 'coach_personal' ? 'Your Zoom' : 'Shared Pool'}
-                    {selectedPhase === 'coach_guided' && ' (always your Zoom for Coach Guided)'}
-                    {selectedPhase === 'self_guided' && ' (always shared pool for Self Guided)'}
+                    Room: {resolvedRoomSource === 'coach_personal' ? 'Your Zoom' : 'Shared Pool (Round Robin)'}
+                    {selectedPhase === 'coach_guided' && ' — always your Zoom for Coach Guided'}
+                    {selectedPhase === 'shared_guidance' && ' — always shared pool for Shared Guidance'}
+                    {selectedPhase === 'self_guided' && ' — always shared pool for Self Guided'}
                   </Text>
                 </View>
 
-                {/* Shared Guidance: Coach Joining Toggle */}
+                {/* ── Shared Guidance: Dual-Handle Live Coaching Slider ────── */}
                 {selectedPhase === 'shared_guidance' && (
-                  <View style={s.coachToggleRow}>
-                    <TouchableOpacity
-                      style={s.toggleBtn}
-                      onPress={() => setCoachJoining(!coachJoining)}
-                    >
-                      <View style={[s.toggleTrack, coachJoining && s.toggleTrackOn]}>
-                        <View style={[s.toggleThumb, coachJoining && s.toggleThumbOn]} />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.toggleLabel}>
-                          {coachJoining ? "You're joining live" : 'Member on their own'}
-                        </Text>
-                        <Text style={s.toggleHint}>
-                          {coachJoining
-                            ? 'Uses your personal Zoom room'
-                            : 'Uses a shared room from the pool'}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
+                  <View style={s.sliderSection}>
+                    <Text style={s.fieldLabel}>Live Coaching Window</Text>
+                    <Text style={s.fieldHint}>
+                      Drag the handles to set when you join and leave the session. The time between the handles is your live coaching — that's what goes on your calendar.
+                    </Text>
+                    <DualHandleSlider
+                      totalMinutes={selectedDuration}
+                      liveStart={liveStart}
+                      liveEnd={liveEnd}
+                      onChangeStart={setLiveStart}
+                      onChangeEnd={setLiveEnd}
+                    />
                   </View>
                 )}
 
@@ -949,13 +1116,18 @@ export default function MemberDetail({
                     {selectedSessionType === 'check_in' ? 'Check-in' : selectedSessionType.charAt(0).toUpperCase() + selectedSessionType.slice(1)}
                     {' · '}
                     {SCHED_PHASE_LABELS[selectedPhase]}
-                    {selectedPhase === 'shared_guidance' && (coachJoining ? ' (you join)' : ' (on their own)')}
+                    {selectedPhase === 'shared_guidance' && ` (${liveEnd - liveStart}min live)`}
                   </Text>
                   <Text style={s.summaryMeta}>
-                    {resolvedRoomSource === 'coach_personal' ? 'Your Zoom' : 'Shared Pool'}
+                    {resolvedRoomSource === 'coach_personal' ? 'Your Zoom' : 'Shared Pool (Round Robin)'}
                     {' · '}
                     {selectedTimezone.split('/')[1]?.replace(/_/g, ' ')} time
                   </Text>
+                  {selectedPhase === 'shared_guidance' && (
+                    <Text style={[s.summaryMeta, { color: GOLD }]}>
+                      Calendar block: {liveEnd - liveStart} min (join at {liveStart}min, leave at {liveEnd}min)
+                    </Text>
+                  )}
                 </View>
 
                 {/* Create Button */}
@@ -983,6 +1155,102 @@ export default function MemberDetail({
   );
 }
 
+// ── Dual-Handle Slider Styles ───────────────────────────────────────────────
+const sl = StyleSheet.create({
+  container: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  labelsRow: {
+    flexDirection: 'row',
+    width: SLIDER_TRACK_WIDTH,
+    marginBottom: 6,
+    alignItems: 'center',
+  },
+  zoneLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: MUTED,
+    fontFamily: FB,
+  },
+  zoneLabelLive: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: GOLD,
+    fontFamily: FB,
+  },
+  track: {
+    height: 24,
+    flexDirection: 'row',
+    borderRadius: 8,
+    overflow: 'visible',
+    position: 'relative',
+  },
+  zoneSelf: {
+    height: 24,
+    backgroundColor: 'rgba(138,149,163,0.2)',
+  },
+  zoneLive: {
+    height: 24,
+    backgroundColor: 'rgba(245,166,35,0.35)',
+    borderTopWidth: 2,
+    borderBottomWidth: 2,
+    borderColor: GOLD,
+  },
+  handle: {
+    position: 'absolute',
+    top: -2,
+    width: HANDLE_SIZE,
+    height: HANDLE_SIZE,
+    borderRadius: HANDLE_SIZE / 2,
+    backgroundColor: '#F0F4F8',
+    justifyContent: 'center',
+    alignItems: 'center',
+    ...(Platform.OS === 'web'
+      ? { cursor: 'grab', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }
+      : { elevation: 4 }
+    ),
+    zIndex: 10,
+  },
+  handleInner: {
+    flexDirection: 'row',
+    gap: 2,
+  },
+  handleGrip: {
+    width: 2,
+    height: 10,
+    borderRadius: 1,
+    backgroundColor: MUTED,
+  },
+  markersRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  marker: {
+    fontSize: 9,
+    color: MUTED,
+    fontFamily: FB,
+  },
+  summaryRow: {
+    alignItems: 'center',
+    marginTop: 10,
+    gap: 2,
+  },
+  summaryText: {
+    fontSize: 12,
+    color: MUTED,
+    fontFamily: FB,
+  },
+  summaryHighlight: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: GOLD,
+    fontFamily: FB,
+  },
+});
+
+// ── Main Styles ─────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
   overlay: {
     flex: 1,
@@ -1300,6 +1568,14 @@ const s = StyleSheet.create({
     fontSize: 11,
     color: MUTED,
     fontFamily: FB,
+    flex: 1,
+  },
+
+  // ── Slider section ────────────────────────────────────────────────────
+  sliderSection: {
+    marginTop: 4,
+    paddingTop: 4,
+    paddingBottom: 4,
   },
 
   // ── Multi-day time rows ───────────────────────────────────────────────
@@ -1359,7 +1635,6 @@ const s = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: BORDER,
   },
-
   selectBtn: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1469,55 +1744,6 @@ const s = StyleSheet.create({
     fontWeight: '700',
     color: BG,
     fontFamily: FH,
-  },
-
-  // ── Coach Joining Toggle ──────────────────────────────────────────────
-  coachToggleRow: {
-    marginTop: 12,
-    marginBottom: 4,
-    backgroundColor: 'rgba(245,166,35,0.06)',
-    borderRadius: 10,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(245,166,35,0.2)',
-  },
-  toggleBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  toggleTrack: {
-    width: 44,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: 'rgba(138,149,163,0.3)',
-    justifyContent: 'center',
-    paddingHorizontal: 2,
-  },
-  toggleTrackOn: {
-    backgroundColor: 'rgba(110,187,122,0.4)',
-  },
-  toggleThumb: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: MUTED,
-  },
-  toggleThumbOn: {
-    backgroundColor: GREEN,
-    alignSelf: 'flex-end',
-  },
-  toggleLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#F0F4F8',
-    fontFamily: FB,
-  },
-  toggleHint: {
-    fontSize: 11,
-    color: MUTED,
-    fontFamily: FB,
-    marginTop: 2,
   },
 
   // ── Phase Timeline ────────────────────────────────────────────────────
