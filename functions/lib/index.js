@@ -70,7 +70,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
+exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -2119,6 +2119,26 @@ exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1' },
         details: `Allocated room "${allocatedRoom.label}" for ${memberName} at ${scheduledDate} ${scheduledStartTime} [${zoomProvider.mode}]`,
         metadata: { meetingId: meeting.meetingId, providerMode: zoomProvider.mode },
     });
+    // Prompt 4: Create reminder jobs after successful allocation
+    try {
+        await (0, reminders_1.createRemindersForInstance)({
+            id: instanceId,
+            date: scheduledDate,
+            startTime: scheduledStartTime,
+            sessionType: instance.sessionType || '',
+            memberId: instance.memberId,
+            coachId: instance.coachId,
+            memberName: memberName,
+            coachName: instance.coachName || '',
+            guidancePhase: instance.guidancePhase || '',
+            joinUrl: meeting.joinUrl,
+            hostingMode: instance.hostingMode || '',
+            coachExpectedLive: instance.coachExpectedLive,
+        });
+    }
+    catch (err) {
+        console.warn(`[allocateSessionInstance] Reminder creation failed for ${instanceId}: ${err.message}`);
+    }
     console.log(`[allocateSessionInstance] Allocated room ${allocatedRoom.id} to instance ${instanceId} [${zoomProvider.mode}]`);
     return { success: true, roomLabel: allocatedRoom.label, meetingId: meeting.meetingId, providerMode: zoomProvider.mode };
 });
@@ -2318,6 +2338,14 @@ exports.rescheduleInstance = (0, https_1.onCall)({ region: 'us-central1' }, asyn
         timestamp: firestore_2.FieldValue.serverTimestamp(),
         payload: { from: `${originalDate} ${originalTime}`, to: `${newDate} ${newStartTime}` },
     });
+    // Prompt 4: Cancel old reminders (new ones created on re-allocation)
+    try {
+        const canceledCount = await (0, reminders_1.cancelRemindersForInstance)(instanceId);
+        console.log(`[rescheduleInstance] Canceled ${canceledCount} old reminder(s) for ${instanceId}`);
+    }
+    catch (err) {
+        console.warn(`[rescheduleInstance] Reminder cancellation failed for ${instanceId}: ${err.message}`);
+    }
     await writeAuditLog({
         coachId: callerUid,
         action: 'instance_rescheduled',
@@ -2376,6 +2404,14 @@ exports.cancelInstance = (0, https_1.onCall)({ region: 'us-central1' }, async (r
         timestamp: firestore_2.FieldValue.serverTimestamp(),
         payload: { meetingId: cancelMeetingId || null },
     });
+    // Prompt 4: Cancel pending reminders for this instance
+    try {
+        const canceledCount = await (0, reminders_1.cancelRemindersForInstance)(instanceId);
+        console.log(`[cancelInstance] Canceled ${canceledCount} reminder(s) for ${instanceId}`);
+    }
+    catch (err) {
+        console.warn(`[cancelInstance] Reminder cancellation failed for ${instanceId}: ${err.message}`);
+    }
     await writeAuditLog({
         coachId: callerUid,
         action: 'instance_cancelled',
@@ -2595,5 +2631,272 @@ exports.zoomWebhook = (0, https_1.onRequest)({ region: 'us-central1', secrets: [
     }
     console.log(`[zoomWebhook] Processed ${eventType} for meeting ${meetingId} (instance: ${occurrenceId || 'unlinked'})`);
     res.status(200).json({ status: 'ok' });
+});
+// ─── Prompt 4: Admin Operations & Communications Layer ──────────────────────
+// Provider health, reminder scheduler, dead-letter handling, event log, iCal feed
+// ─────────────────────────────────────────────────────────────────────────────
+const notifications_1 = require("./notifications");
+const reminders_1 = require("./reminders");
+const zoom_2 = require("./zoom");
+// ─── 22. getSystemHealth — Provider health check for admin dashboard ────────
+exports.getSystemHealth = (0, https_1.onCall)({ region: 'us-central1' }, async () => {
+    var _a, _b, _c;
+    const zoomProvider = (0, zoom_1.getZoomProvider)();
+    const notifHealth = (0, notifications_1.getProviderHealth)();
+    // Count recent dead-letter items
+    const dlSnap = await db.collection('dead_letter')
+        .where('resolved', '==', false)
+        .limit(200)
+        .get();
+    // Count reminder stats for today
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayTs = firestore_2.Timestamp.fromDate(todayStart);
+    const reminderSnap = await db.collection('reminder_jobs')
+        .where('createdAt', '>=', todayTs)
+        .limit(500)
+        .get();
+    const reminderStats = { scheduled: 0, sent: 0, failed: 0, skipped: 0, canceled: 0, total: 0 };
+    reminderSnap.docs.forEach(d => {
+        const s = d.data().status;
+        reminderStats.total++;
+        if (s === 'scheduled')
+            reminderStats.scheduled++;
+        else if (s === 'sent')
+            reminderStats.sent++;
+        else if (s === 'failed')
+            reminderStats.failed++;
+        else if (s === 'skipped')
+            reminderStats.skipped++;
+        else if (s === 'canceled')
+            reminderStats.canceled++;
+    });
+    // Count notification stats for today
+    const notifSnap = await db.collection('notification_log')
+        .where('createdAt', '>=', todayTs)
+        .limit(500)
+        .get();
+    const notifStats = { pending: 0, sent: 0, failed: 0, total: 0 };
+    notifSnap.docs.forEach(d => {
+        const s = d.data().status;
+        notifStats.total++;
+        if (s === 'pending')
+            notifStats.pending++;
+        else if (s === 'sent')
+            notifStats.sent++;
+        else if (s === 'failed')
+            notifStats.failed++;
+    });
+    // Zoom health details
+    const zoomMode = zoomProvider instanceof zoom_2.MockZoomProvider ? 'mock' : 'live';
+    const zoomName = zoomProvider instanceof zoom_2.MockZoomProvider ? 'MockZoomProvider' : 'RealZoomProvider (S2S OAuth)';
+    const zoomCredentials = {
+        accountId: !!process.env.ZOOM_ACCOUNT_ID,
+        clientId: !!process.env.ZOOM_CLIENT_ID,
+        clientSecret: !!process.env.ZOOM_CLIENT_SECRET,
+        webhookSecret: !!process.env.ZOOM_WEBHOOK_SECRET,
+    };
+    // Attempt lightweight Zoom API call if live
+    let zoomApiReachable = null;
+    if (zoomMode === 'live') {
+        try {
+            // Try to get a meeting that doesn't exist — a 404 means API is reachable
+            await zoomProvider.getMeeting('health-check-nonexistent');
+            zoomApiReachable = true;
+        }
+        catch (err) {
+            // A 404 or 400 means the API is reachable; only network errors mean unreachable
+            if (((_a = err.message) === null || _a === void 0 ? void 0 : _a.includes('404')) || ((_b = err.message) === null || _b === void 0 ? void 0 : _b.includes('400')) || ((_c = err.message) === null || _c === void 0 ? void 0 : _c.includes('not found'))) {
+                zoomApiReachable = true;
+            }
+            else {
+                zoomApiReachable = false;
+            }
+        }
+    }
+    return {
+        zoom: {
+            mode: zoomMode,
+            name: zoomName,
+            credentials: zoomCredentials,
+            apiReachable: zoomApiReachable,
+        },
+        notifications: notifHealth,
+        deadLetterCount: dlSnap.size,
+        reminderStats,
+        notificationStats: notifStats,
+        timestamp: new Date().toISOString(),
+    };
+});
+// ─── 23. processReminders — Scheduled: process due reminder jobs every 5 min ──
+exports.processReminders = (0, scheduler_1.onSchedule)({ schedule: 'every 5 minutes', timeZone: 'UTC', region: 'us-central1' }, async () => {
+    console.log('[processReminders] Starting reminder processing cycle');
+    const stats = await (0, reminders_1.processDueReminders)();
+    console.log(`[processReminders] Done: ${stats.processed} processed, ${stats.sent} sent, ${stats.failed} failed, ${stats.skipped} skipped`);
+});
+// ─── 24. retryDeadLetter — Admin: retry a specific dead-letter item ─────────
+exports.retryDeadLetter = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+    var _a, _b;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const { deadLetterId } = request.data;
+    if (!deadLetterId)
+        throw new https_1.HttpsError('invalid-argument', 'deadLetterId required');
+    const dlRef = db.collection('dead_letter').doc(deadLetterId);
+    const dlSnap = await dlRef.get();
+    if (!dlSnap.exists)
+        throw new https_1.HttpsError('not-found', 'Dead letter item not found');
+    const dl = dlSnap.data();
+    if (dl.resolved)
+        throw new https_1.HttpsError('failed-precondition', 'Already resolved');
+    const dlType = dl.type;
+    try {
+        if (dlType === 'notification_delivery_failed' && dl.sourceId) {
+            const notifSnap = await db.collection('notification_log').doc(dl.sourceId).get();
+            if (notifSnap.exists) {
+                const notif = notifSnap.data();
+                await (0, notifications_1.sendNotification)({
+                    messageType: notif.messageType,
+                    channel: notif.channel,
+                    recipient: notif.recipient,
+                    subject: notif.subject,
+                    body: notif.body,
+                    htmlBody: notif.htmlBody,
+                    sessionInstanceId: notif.sessionInstanceId,
+                    coachId: notif.coachId,
+                    memberId: notif.memberId,
+                });
+            }
+        }
+        else if (dlType === 'reminder_processing_failed' && dl.sourceId) {
+            const jobRef = db.collection('reminder_jobs').doc(dl.sourceId);
+            await jobRef.update({ status: 'scheduled' });
+        }
+        else if (dlType === 'allocation_failed' && ((_b = dl.payload) === null || _b === void 0 ? void 0 : _b.instanceId)) {
+            const instanceRef = db.collection('session_instances').doc(dl.payload.instanceId);
+            await instanceRef.update({ status: 'scheduled' });
+        }
+        await dlRef.update({
+            resolved: true,
+            resolvedAt: firestore_2.Timestamp.now(),
+            resolvedBy: callerUid,
+        });
+        return { success: true };
+    }
+    catch (err) {
+        await dlRef.update({
+            retryCount: (dl.retryCount || 0) + 1,
+            lastRetryAt: firestore_2.Timestamp.now(),
+            lastRetryError: err.message || String(err),
+        });
+        throw new https_1.HttpsError('internal', `Retry failed: ${err.message}`);
+    }
+});
+// ─── 25. getDeadLetterItems — Admin: list unresolved dead-letter items ──────
+exports.getDeadLetterItems = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+    var _a;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const { limit: maxItems = 50, includeResolved = false } = request.data || {};
+    let query = db.collection('dead_letter')
+        .orderBy('createdAt', 'desc')
+        .limit(maxItems);
+    if (!includeResolved) {
+        query = query.where('resolved', '==', false);
+    }
+    const snap = await query.get();
+    return snap.docs.map(d => (Object.assign({ id: d.id }, d.data())));
+});
+// ─── 26. getSessionEventLog — Admin: list session events with filters ───────
+exports.getSessionEventLog = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+    var _a;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const { sessionInstanceId, eventType, limit: maxItems = 50 } = request.data || {};
+    let query = db.collection('session_events')
+        .orderBy('timestamp', 'desc')
+        .limit(maxItems);
+    if (sessionInstanceId) {
+        query = query.where('sessionInstanceId', '==', sessionInstanceId);
+    }
+    if (eventType) {
+        query = query.where('eventType', '==', eventType);
+    }
+    const snap = await query.get();
+    return snap.docs.map(d => (Object.assign({ id: d.id }, d.data())));
+});
+// ─── 27. coachIcalFeed — HTTP: iCal feed for coach-live sessions ────────────
+exports.coachIcalFeed = (0, https_1.onRequest)({ region: 'us-central1' }, async (req, res) => {
+    const coachId = req.query.coachId;
+    const token = req.query.token;
+    if (!coachId) {
+        res.status(400).send('Missing coachId');
+        return;
+    }
+    // Simple token validation — coach UID base64 prefix
+    const expectedToken = Buffer.from(coachId).toString('base64').substring(0, 16);
+    if (token !== expectedToken) {
+        res.status(403).send('Invalid token');
+        return;
+    }
+    // Fetch upcoming coach-live sessions (next 90 days)
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const futureDate = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+    const futureStr = futureDate.toISOString().split('T')[0];
+    const snap = await db.collection('session_instances')
+        .where('coachId', '==', coachId)
+        .where('coachExpectedLive', '==', true)
+        .where('scheduledDate', '>=', todayStr)
+        .where('scheduledDate', '<=', futureStr)
+        .orderBy('scheduledDate', 'asc')
+        .limit(200)
+        .get();
+    // Build iCal
+    const lines = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//GoArrive//Session Calendar//EN',
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH',
+        'X-WR-CALNAME:GoArrive Coach Sessions',
+    ];
+    for (const doc of snap.docs) {
+        const d = doc.data();
+        const [year, month, day] = d.scheduledDate.split('-').map(Number);
+        const [hours, mins] = d.scheduledStartTime.split(':').map(Number);
+        const duration = d.liveCoachingDuration || d.durationMinutes || 60;
+        const startOffset = d.liveCoachingStartMin || 0;
+        const startDate = new Date(year, month - 1, day, hours, mins);
+        startDate.setMinutes(startDate.getMinutes() + startOffset);
+        const endDate = new Date(startDate.getTime() + duration * 60 * 1000);
+        const formatIcalDate = (dt) => {
+            return dt.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+        };
+        const memberName = d.memberName || 'Member';
+        const sessionType = d.sessionType ? d.sessionType.charAt(0).toUpperCase() + d.sessionType.slice(1) : 'Session';
+        const phase = d.guidancePhase === 'coach_guided' ? 'Fully Guided' :
+            d.guidancePhase === 'shared_guidance' ? 'Shared Guidance' : 'Session';
+        lines.push('BEGIN:VEVENT');
+        lines.push(`UID:${doc.id}@goarrive.fit`);
+        lines.push(`DTSTART:${formatIcalDate(startDate)}`);
+        lines.push(`DTEND:${formatIcalDate(endDate)}`);
+        lines.push(`SUMMARY:${sessionType} — ${memberName} (${phase})`);
+        lines.push(`DESCRIPTION:${sessionType} session with ${memberName}. ${d.zoomJoinUrl ? 'Join: ' + d.zoomJoinUrl : ''}`);
+        if (d.zoomJoinUrl)
+            lines.push(`URL:${d.zoomJoinUrl}`);
+        lines.push('STATUS:CONFIRMED');
+        lines.push('END:VEVENT');
+    }
+    lines.push('END:VCALENDAR');
+    res.set({
+        'Content-Type': 'text/calendar; charset=utf-8',
+        'Content-Disposition': 'attachment; filename="goarrive-sessions.ics"',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+    });
+    res.status(200).send(lines.join('\r\n'));
 });
 //# sourceMappingURL=index.js.map

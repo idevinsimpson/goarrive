@@ -391,3 +391,216 @@ export function formatDateShort(dateStr: string): string {
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   return `${days[date.getDay()]}, ${months[date.getMonth()]} ${d}`;
 }
+
+// ─── Prompt 4: Admin Operations & Communications Types ──────────────────────
+
+// ─── System Health (returned by getSystemHealth CF) ─────────────────────────
+
+export interface ProviderHealthStatus {
+  mode: 'mock' | 'live';
+  name: string;
+}
+
+export interface ZoomHealthStatus extends ProviderHealthStatus {
+  credentials: {
+    accountId: boolean;
+    clientId: boolean;
+    clientSecret: boolean;
+    webhookSecret: boolean;
+  };
+  apiReachable: boolean | null;
+}
+
+export interface SystemHealth {
+  zoom: ZoomHealthStatus;
+  notifications: {
+    email: ProviderHealthStatus;
+    sms: ProviderHealthStatus;
+    push: ProviderHealthStatus;
+  };
+  deadLetterCount: number;
+  reminderStats: {
+    scheduled: number;
+    sent: number;
+    failed: number;
+    skipped: number;
+    canceled: number;
+    total: number;
+  };
+  notificationStats: {
+    pending: number;
+    sent: number;
+    failed: number;
+    total: number;
+  };
+  timestamp: string;
+}
+
+// ─── Dead Letter ────────────────────────────────────────────────────────────
+
+export type DeadLetterType =
+  | 'notification_delivery_failed'
+  | 'reminder_processing_failed'
+  | 'allocation_failed'
+  | 'webhook_processing_failed'
+  | 'recording_ingestion_failed';
+
+export interface DeadLetterItem {
+  id: string;
+  type: DeadLetterType;
+  sourceCollection?: string;
+  sourceId?: string;
+  error: string;
+  payload?: Record<string, any>;
+  createdAt: Timestamp;
+  resolved: boolean;
+  resolvedAt?: Timestamp;
+  resolvedBy?: string;
+  retryCount?: number;
+  lastRetryAt?: Timestamp;
+  lastRetryError?: string;
+}
+
+// ─── Reminder Job ───────────────────────────────────────────────────────────
+
+export type ReminderType =
+  | 'member_24h'
+  | 'member_1h'
+  | 'coach_24h'
+  | 'coach_1h'
+  | 'missed_session_followup'
+  | 'recording_ready';
+
+export type ReminderStatus =
+  | 'scheduled'
+  | 'processing'
+  | 'sent'
+  | 'failed'
+  | 'canceled'
+  | 'skipped';
+
+export interface ReminderJob {
+  id: string;
+  reminderType: ReminderType;
+  sessionInstanceId: string;
+  recipientUid: string;
+  recipientRole: 'member' | 'coach';
+  coachId: string;
+  memberId: string;
+  scheduledFor: Timestamp;
+  status: ReminderStatus;
+  channels: ('email' | 'sms' | 'push')[];
+  notificationIds: string[];
+  createdAt: Timestamp;
+  processedAt?: Timestamp;
+  error?: string;
+  sessionDate?: string;
+  sessionTime?: string;
+  sessionType?: string;
+  memberName?: string;
+  coachName?: string;
+  guidancePhase?: string;
+  joinUrl?: string;
+}
+
+// ─── Notification Log ───────────────────────────────────────────────────────
+
+export type NotificationChannel = 'email' | 'sms' | 'push';
+export type DeliveryStatus = 'pending' | 'sent' | 'delivered' | 'failed' | 'canceled';
+export type MessageType =
+  | 'session_reminder'
+  | 'session_starting_soon'
+  | 'missed_session_followup'
+  | 'recording_ready'
+  | 'coach_session_reminder'
+  | 'admin_alert';
+
+export interface NotificationLogEntry {
+  id: string;
+  messageType: MessageType;
+  channel: NotificationChannel;
+  recipient: {
+    uid: string;
+    email?: string;
+    phone?: string;
+    displayName?: string;
+    role: 'member' | 'coach' | 'admin';
+  };
+  subject?: string;
+  body: string;
+  sessionInstanceId?: string;
+  coachId?: string;
+  memberId?: string;
+  status: DeliveryStatus;
+  providerMode: 'mock' | 'live';
+  providerName: string;
+  providerMessageId?: string;
+  providerError?: string;
+  createdAt: Timestamp;
+  sentAt?: Timestamp;
+  failedAt?: Timestamp;
+  retryCount: number;
+}
+
+// ─── Recording Status (derived from session instance) ───────────────────────
+
+export type RecordingStatus =
+  | 'not_expected'    // Self-guided or no recording configured
+  | 'pending'         // Session completed, recording expected but not yet received
+  | 'processing'      // Recording webhook received, processing
+  | 'ready'           // Recording available
+  | 'failed'          // Recording ingestion failed
+  | 'missing';        // Session ended but no recording arrived after expected window
+
+export function deriveRecordingStatus(instance: SessionInstance): RecordingStatus {
+  if (!instance.zoomMeetingId) return 'not_expected';
+  if (instance.recordingAvailable && instance.recordings && instance.recordings.length > 0) return 'ready';
+  if (instance.recordingCompletedAt) return 'processing';
+  if (instance.status === 'completed' || instance.actualEndTime) {
+    // Session ended — check if enough time has passed for recording
+    return 'pending';
+  }
+  if (instance.status === 'missed' || instance.status === 'cancelled') return 'not_expected';
+  return 'not_expected';
+}
+
+// ─── Attendance Summary (derived from session events) ───────────────────────
+
+export type AttendanceOutcome =
+  | 'completed'       // Meeting started and ended normally
+  | 'started'         // Meeting started but no end event yet
+  | 'joined'          // Participant joined but meeting status unclear
+  | 'missed'          // No join events received
+  | 'canceled'        // Session was canceled
+  | 'unknown';        // Insufficient data
+
+export function deriveAttendanceOutcome(instance: SessionInstance): AttendanceOutcome {
+  if (instance.status === 'cancelled') return 'canceled';
+  if (instance.attendanceStatus === 'completed' || instance.actualEndTime) return 'completed';
+  if (instance.attendanceStatus === 'started' || instance.actualStartTime) return 'started';
+  if (instance.attendanceStatus === 'joined' || instance.joinedAt) return 'joined';
+  if (instance.status === 'missed') return 'missed';
+  return 'unknown';
+}
+
+// ─── Session Event Types (for event log) ────────────────────────────────────
+
+export const SESSION_EVENT_TYPE_LABELS: Record<string, string> = {
+  meeting_created: 'Meeting Created',
+  meeting_deleted: 'Meeting Deleted',
+  meeting_creation_failed: 'Meeting Creation Failed',
+  meeting_started: 'Meeting Started',
+  meeting_ended: 'Meeting Ended',
+  participant_joined: 'Participant Joined',
+  participant_left: 'Participant Left',
+  recording_completed: 'Recording Completed',
+  session_cancelled: 'Session Cancelled',
+  session_rescheduled: 'Session Rescheduled',
+};
+
+export const SESSION_EVENT_SOURCE_LABELS: Record<string, string> = {
+  system: 'System',
+  zoom_webhook: 'Zoom Webhook',
+  coach_action: 'Coach Action',
+  member_action: 'Member Action',
+};

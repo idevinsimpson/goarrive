@@ -38,9 +38,13 @@ import {
   GUIDANCE_PHASE_LABELS,
   HOSTING_MODE_LABELS,
   SESSION_TYPE_LABELS,
+  deriveRecordingStatus,
+  deriveAttendanceOutcome,
   type RecurringSlot,
   type SessionInstance,
   type HostingMode,
+  type RecordingStatus,
+  type AttendanceOutcome,
 } from '../../lib/schedulingTypes';
 
 // ── Colors ───────────────────────────────────────────────────────────────────
@@ -62,6 +66,26 @@ const PHASE_DISPLAY: Record<string, { label: string; color: string }> = {
   coach_guided:    { label: 'Coach Guided',    color: GREEN },
   shared_guidance: { label: 'Shared Guidance', color: BLUE },
   self_guided:     { label: 'Self Guided',     color: GOLD },
+};
+
+// ── Recording status display ────────────────────────────────────────────────
+const RECORDING_DISPLAY: Record<RecordingStatus, { label: string; color: string; icon: string }> = {
+  not_expected: { label: 'N/A',        color: MUTED,  icon: 'remove-circle-outline' },
+  pending:      { label: 'Pending',    color: AMBER,  icon: 'time-outline' },
+  processing:   { label: 'Processing', color: BLUE,   icon: 'sync-outline' },
+  ready:        { label: 'Ready',      color: GREEN,  icon: 'checkmark-circle-outline' },
+  failed:       { label: 'Failed',     color: RED,    icon: 'alert-circle-outline' },
+  missing:      { label: 'Missing',    color: RED,    icon: 'help-circle-outline' },
+};
+
+// ── Attendance outcome display ──────────────────────────────────────────────
+const ATTENDANCE_DISPLAY: Record<AttendanceOutcome, { label: string; color: string }> = {
+  completed: { label: 'Completed', color: GREEN },
+  started:   { label: 'Started',   color: BLUE },
+  joined:    { label: 'Joined',    color: BLUE },
+  missed:    { label: 'Missed',    color: RED },
+  canceled:  { label: 'Canceled',  color: MUTED },
+  unknown:   { label: 'Unknown',   color: MUTED },
 };
 
 // ── Status display ──────────────────────────────────────────────────────────
@@ -696,29 +720,72 @@ function SessionDetailSheet({
         <DetailRow label="Meeting UUID" value={inst.zoomMeetingUuid} />
       )}
 
-      {/* Attendance (populated by webhook) */}
-      {inst.actualStartTime && (
-        <View style={s.detailSection}>
-          <Text style={s.detailSectionLabel}>Session Activity</Text>
-          <DetailRow label="Started" value={new Date(inst.actualStartTime).toLocaleTimeString()} />
-          {inst.actualEndTime && (
-            <DetailRow label="Ended" value={new Date(inst.actualEndTime).toLocaleTimeString()} />
-          )}
-        </View>
-      )}
+      {/* Prompt 4: Attendance Outcome */}
+      {(() => {
+        const attendance = deriveAttendanceOutcome(inst);
+        const attDisplay = ATTENDANCE_DISPLAY[attendance];
+        return (
+          <View style={s.detailSection}>
+            <Text style={s.detailSectionLabel}>Attendance</Text>
+            <DetailRow label="Outcome" value={attDisplay.label} valueColor={attDisplay.color} />
+            {inst.actualStartTime && (
+              <DetailRow label="Started" value={new Date(inst.actualStartTime).toLocaleTimeString()} />
+            )}
+            {inst.actualEndTime && (
+              <DetailRow label="Ended" value={new Date(inst.actualEndTime).toLocaleTimeString()} />
+            )}
+            {inst.attendance && Object.keys(inst.attendance).length > 0 && (
+              <View style={{ marginTop: 4 }}>
+                <Text style={[s.detailSectionLabel, { fontSize: 11, marginBottom: 2 }]}>Participants</Text>
+                {Object.entries(inst.attendance).map(([key, p]) => (
+                  <View key={key} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 }}>
+                    <Text style={{ color: TEXT_CLR, fontSize: 12, fontFamily: FONT }}>{p.name || key}</Text>
+                    <Text style={{ color: MUTED, fontSize: 11, fontFamily: FONT }}>
+                      {p.joinTime ? new Date(p.joinTime).toLocaleTimeString() : ''}
+                      {p.leaveTime ? ` – ${new Date(p.leaveTime).toLocaleTimeString()}` : ''}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        );
+      })()}
 
-      {/* Recordings */}
-      {inst.recordingAvailable && inst.recordings && inst.recordings.length > 0 && (
-        <View style={s.detailSection}>
-          <Text style={s.detailSectionLabel}>Recordings</Text>
-          {inst.recordings.map((rec: any, idx: number) => (
-            <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
-              <Text style={{ color: TEXT_CLR, fontSize: 12 }}>{rec.fileType}</Text>
-              <Text style={{ color: BLUE, fontSize: 12 }}>{rec.status || 'available'}</Text>
+      {/* Prompt 4: Recording Status */}
+      {(() => {
+        const recStatus = deriveRecordingStatus(inst);
+        const recDisplay = RECORDING_DISPLAY[recStatus];
+        return (
+          <View style={s.detailSection}>
+            <Text style={s.detailSectionLabel}>Recording</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <Icon name={recDisplay.icon as any} size={14} color={recDisplay.color} />
+              <Text style={{ color: recDisplay.color, fontSize: 13, fontWeight: '600', fontFamily: FONT }}>
+                {recDisplay.label}
+              </Text>
             </View>
-          ))}
-        </View>
-      )}
+            {inst.recordingAvailable && inst.recordings && inst.recordings.length > 0 && (
+              inst.recordings.map((rec: any, idx: number) => (
+                <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 }}>
+                  <Text style={{ color: TEXT_CLR, fontSize: 12, fontFamily: FONT }}>{rec.fileType}</Text>
+                  <Text style={{ color: BLUE, fontSize: 12, fontFamily: FONT }}>{rec.status || 'available'}</Text>
+                </View>
+              ))
+            )}
+            {recStatus === 'pending' && (
+              <Text style={{ color: MUTED, fontSize: 11, fontStyle: 'italic', marginTop: 2, fontFamily: FONT }}>
+                Recording expected — waiting for Zoom to process.
+              </Text>
+            )}
+            {recStatus === 'missing' && (
+              <Text style={{ color: RED, fontSize: 11, fontStyle: 'italic', marginTop: 2, fontFamily: FONT }}>
+                Recording not received. Check Zoom recording settings.
+              </Text>
+            )}
+          </View>
+        );
+      })()}
 
       {/* Zoom link */}
       {inst.zoomJoinUrl && (
