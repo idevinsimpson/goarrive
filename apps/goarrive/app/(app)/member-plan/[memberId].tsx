@@ -38,6 +38,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { doc, getDoc, setDoc, addDoc, collection, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../../../lib/firebase';
 import { useAuth } from '../../../lib/AuthContext';
 import { Icon } from '../../../components/Icon';
@@ -978,42 +979,8 @@ export function PlanView({ plan, isCoach, onChange, onAccept }: {
         )
       )}
 
-      {/* ─── PLAN ACCEPTANCE (visible to both coach and member) ──────── */}
-      {(plan.status === 'presented' || plan.status === 'pending' || plan.status === 'draft') && (
-        <View style={{ marginTop: 20, marginBottom: 20, paddingHorizontal: 16 }}>
-          <Text style={{ fontSize: 11, fontWeight: '700', color: '#5B9BD5', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8 }}>PLAN ACCEPTANCE</Text>
-          <View style={{ backgroundColor: '#161B25', borderWidth: 1, borderColor: '#2A3347', borderRadius: 12, padding: 14 }}>
-            <Text style={{ color: '#C5CDD8', fontSize: 14, lineHeight: 22 }}>
-              Your coach has prepared this personalized fitness plan for you. Please review all the details. If you're ready to commit, accept the plan below.
-            </Text>
-            <Pressable
-              onPress={() => {
-                if (!isCoach && onAccept) {
-                  // Member accepting: navigate to payment selection
-                  onAccept();
-                } else if (!isCoach) {
-                  // Fallback: update status directly (shouldn't happen)
-                  onChange({ status: 'accepted' } as any);
-                }
-              }}
-              style={{ backgroundColor: '#6EBB7A', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginTop: 20 }}
-            >
-              <Text style={{ color: '#000', fontSize: 16, fontWeight: '700' }}>Accept Plan</Text>
-            </Pressable>
-          </View>
-        </View>
-      )}
-
-      {plan.status === 'accepted' && (
-        <View style={{ marginTop: 20, marginBottom: 20, paddingHorizontal: 16 }}>
-          <Text style={{ fontSize: 11, fontWeight: '700', color: '#5B9BD5', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8 }}>PLAN STATUS</Text>
-          <View style={{ backgroundColor: '#161B25', borderWidth: 1, borderColor: '#2A3347', borderRadius: 12, padding: 14 }}>
-            <Text style={{ color: '#C5CDD8', fontSize: 14, lineHeight: 22 }}>
-              Congratulations! You have accepted your fitness plan. Let's get to work!
-            </Text>
-          </View>
-        </View>
-      )}
+      {/* ─── PLAN ACCEPTANCE + PAYMENT OPTIONS (visible to both coach and member) ──────── */}
+      <InlinePaymentSection plan={plan} pricing={pricing} isCoach={isCoach} onChange={onChange} onAccept={onAccept} />
 
       {/* Edit Modal */}
       <EditModal
@@ -1270,6 +1237,298 @@ const GOLD = '#F5A623';
 const GOLD_BG = 'rgba(245,166,35,0.12)';
 const GOLD_BORDER = 'rgba(245,166,35,0.5)';
 const GREEN_BORDER = 'rgba(110,187,122,0.5)';
+
+// ─── Inline Payment Options (replaces separate payment-select page) ──────────
+type PaymentOption = 'monthly' | 'pay_in_full';
+
+function InlinePaymentSection({ plan, pricing, isCoach, onChange, onAccept }: {
+  plan: MemberPlanData; pricing: PricingResult | null; isCoach: boolean;
+  onChange: (updates: Partial<MemberPlanData>) => void;
+  onAccept?: () => void;
+}) {
+  const [selected, setSelected] = useState<PaymentOption | null>(null);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { user } = useAuth();
+
+  // Pricing calculations (same as payment-select.tsx)
+  const contractMonths = plan.contractMonths ?? 12;
+  const pr = (plan as any)?.pricingResult;
+  const cp = plan.continuationPricing;
+
+  const displayMonthlyPrice = Math.round(
+    pricing?.displayMonthlyPrice ??
+    pr?.displayMonthlyPrice ??
+    (plan as any)?.monthlyPriceOverride ??
+    pr?.calculatedMonthlyPrice ??
+    0
+  );
+  const contractTotal = displayMonthlyPrice * contractMonths;
+  const payInFullTotal = Math.round(contractTotal * 0.9);
+  const payInFullMonthly = Math.round(payInFullTotal / contractMonths);
+  const payInFullSavings = contractTotal - payInFullTotal;
+
+  const continuationMonthly = Math.round(
+    (cp as any)?.continuationMonthlyPrice ?? pr?.continuationMonthly ?? 0
+  );
+  const hasCTS = plan.pricing?.commitToSave === true || plan.postContract?.ctsMonthlySavings != null;
+  const ctsSavings = plan.postContract?.ctsMonthlySavings ?? Math.round(continuationMonthly * 0.5);
+  const ctsAfterPif = hasCTS ? Math.round(continuationMonthly - ctsSavings) : continuationMonthly;
+
+  // Handle checkout (calls createCheckoutSession CF)
+  async function handleProceed() {
+    if (!selected || !user) return;
+    const planId = plan.id;
+    if (!planId) { setError('Plan ID not found.'); return; }
+    setCheckoutLoading(true);
+    setError(null);
+    try {
+      const functions = getFunctions();
+      const createCheckout = httpsCallable<
+        { planId: string; memberId: string; paymentOption: PaymentOption },
+        { sessionUrl: string; intentId: string; snapshotId: string }
+      >(functions, 'createCheckoutSession');
+      const result = await createCheckout({
+        planId,
+        memberId: user.uid,
+        paymentOption: selected,
+      });
+      const { sessionUrl } = result.data;
+      if (sessionUrl) {
+        if (Platform.OS === 'web') {
+          window.location.href = sessionUrl;
+        } else {
+          const Linking = require('expo-linking');
+          await Linking.openURL(sessionUrl);
+        }
+      } else {
+        setError('No checkout URL returned. Please try again.');
+      }
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      if (msg.includes('not-found') || msg.includes('NOT_FOUND')) {
+        setError('ME-001: Payment system is not yet configured. Please contact your coach.');
+      } else if (msg.includes('permission-denied') || msg.includes('PERMISSION_DENIED')) {
+        setError('Only the member can complete checkout. Share this plan link with your member to proceed.');
+      } else if (msg.includes('failed-precondition') || msg.includes('FAILED_PRECONDITION')) {
+        setError(msg.replace('FAILED_PRECONDITION: ', ''));
+      } else {
+        setError(msg);
+      }
+    } finally {
+      setCheckoutLoading(false);
+    }
+  }
+
+  // Don't show for active plans
+  if (plan.status === 'active') return null;
+
+  // Pre-acceptance: show Accept Plan button
+  if (plan.status === 'presented' || plan.status === 'pending' || plan.status === 'draft') {
+    return (
+      <View style={{ marginTop: 20, marginBottom: 20, paddingHorizontal: 16 }}>
+        <Text style={{ fontSize: 11, fontWeight: '700', color: '#5B9BD5', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8 }}>PLAN ACCEPTANCE</Text>
+        <View style={{ backgroundColor: '#161B25', borderWidth: 1, borderColor: '#2A3347', borderRadius: 12, padding: 14 }}>
+          <Text style={{ color: '#C5CDD8', fontSize: 14, lineHeight: 22 }}>
+            {isCoach
+              ? 'When your member is ready, they will accept the plan and choose a payment option below.'
+              : 'Your coach has prepared this personalized fitness plan for you. Please review all the details. If you\'re ready to commit, accept the plan below.'}
+          </Text>
+          <Pressable
+            onPress={() => {
+              // Both coach and member: update status to 'accepted' to reveal payment options
+              onChange({ status: 'accepted' } as any);
+            }}
+            style={{ backgroundColor: '#6EBB7A', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginTop: 20 }}
+          >
+            <Text style={{ color: '#000', fontSize: 16, fontWeight: '700' }}>Accept Plan</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  // Post-acceptance: show payment options (same UI as payment-select.tsx)
+  if (plan.status === 'accepted') {
+    return (
+      <View style={{ marginTop: 20, marginBottom: 20, paddingHorizontal: 16 }}>
+        <Text style={{ fontSize: 11, fontWeight: '700', color: '#5B9BD5', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8 }}>CHOOSE YOUR PAYMENT</Text>
+
+        <Text style={{ color: '#FFF', fontSize: 20, fontWeight: '700', fontFamily: FH, textAlign: 'center', marginBottom: 4 }}>You're one step away.</Text>
+        <Text style={{ color: MUTED, fontSize: 13, textAlign: 'center', lineHeight: 18, marginBottom: 14 }}>
+          {`${contractMonths}-month contract \u00B7 ${plan.sessionsPerWeek || 3}x/week \u00B7 Continues month-to-month after`}
+        </Text>
+
+        {/* Option: Monthly */}
+        <Pressable
+          onPress={() => setSelected('monthly')}
+          style={[ips.optionCard, selected === 'monthly' && ips.optionCardSelected]}
+        >
+          <View style={ips.optionHeader}>
+            <View style={ips.optionRadio}>
+              {selected === 'monthly' && <View style={ips.optionRadioDot} />}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={ips.optionTitle}>Monthly</Text>
+              <Text style={ips.optionSubtitle}>Flexible \u00B7 Cancel after contract ends</Text>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={ips.optionPrice}>{formatCurrency(displayMonthlyPrice)}</Text>
+              <Text style={ips.optionPriceSuffix}>/mo</Text>
+            </View>
+          </View>
+          <View style={ips.optionDetail}>
+            <View style={ips.detailRow}>
+              <Text style={ips.detailLabel}>Contract total</Text>
+              <Text style={ips.detailValue}>{formatCurrency(contractTotal)}</Text>
+            </View>
+            <View style={ips.detailRow}>
+              <Text style={ips.detailLabel}>After contract</Text>
+              <Text style={ips.detailValue}>{formatCurrency(continuationMonthly)}/mo</Text>
+            </View>
+            {hasCTS && (
+              <View style={ips.detailRow}>
+                <Text style={ips.detailLabel}>With Commit to Save</Text>
+                <Text style={[ips.detailValue, { color: ACCENT }]}>{formatCurrency(ctsAfterPif)}/mo</Text>
+              </View>
+            )}
+          </View>
+        </Pressable>
+
+        {/* Option: Pay in Full */}
+        <Pressable
+          onPress={() => setSelected('pay_in_full')}
+          style={[ips.optionCard, selected === 'pay_in_full' && ips.optionCardSelectedGold, { marginTop: 10 }]}
+        >
+          <View style={ips.optionHeader}>
+            <View style={[ips.optionRadio, { borderColor: GOLD }]}>
+              {selected === 'pay_in_full' && <View style={[ips.optionRadioDot, { backgroundColor: GOLD }]} />}
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={ips.optionTitle}>Pay in Full</Text>
+                <View style={{ paddingHorizontal: 8, paddingVertical: 2, backgroundColor: GOLD_BG, borderRadius: 10, borderWidth: 1, borderColor: GOLD_BORDER }}>
+                  <Text style={{ color: GOLD, fontSize: 10, fontWeight: '700' }}>10% OFF</Text>
+                </View>
+              </View>
+              <Text style={ips.optionSubtitle}>One payment \u00B7 Best value</Text>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={[ips.optionPrice, { color: GOLD }]}>{formatCurrency(payInFullMonthly)}</Text>
+              <Text style={ips.optionPriceSuffix}>/mo</Text>
+            </View>
+          </View>
+          <View style={ips.optionDetail}>
+            <View style={ips.detailRow}>
+              <Text style={ips.detailLabel}>One payment today</Text>
+              <Text style={[ips.detailValue, { color: '#FFF', fontWeight: '700' }]}>{formatCurrency(payInFullTotal)}</Text>
+            </View>
+            <View style={ips.detailRow}>
+              <Text style={ips.detailLabel}>You save</Text>
+              <Text style={[ips.detailValue, { color: ACCENT }]}>{formatCurrency(payInFullSavings)}</Text>
+            </View>
+            <View style={ips.detailRow}>
+              <Text style={ips.detailLabel}>After contract</Text>
+              <Text style={ips.detailValue}>{formatCurrency(continuationMonthly)}/mo</Text>
+            </View>
+            {hasCTS && (
+              <View style={ips.detailRow}>
+                <Text style={ips.detailLabel}>With CTS + PIF</Text>
+                <Text style={[ips.detailValue, { color: ACCENT }]}>{formatCurrency(ctsAfterPif)}/mo</Text>
+              </View>
+            )}
+          </View>
+        </Pressable>
+
+        {/* CTS callout */}
+        <View style={{ padding: 12, backgroundColor: GOLD_BG, borderRadius: 10, borderWidth: 1, borderColor: GOLD_BORDER, marginTop: 12 }}>
+          <Text style={{ color: GOLD, fontSize: 13, fontWeight: '700', marginBottom: 4 }}>
+            Commit to Save \u2014 available after contract
+          </Text>
+          <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
+            {hasCTS
+              ? `Stay consistent during your continuation period and save ${formatCurrency(ctsSavings)}/mo off your continuation rate. Both Pay in Full and CTS discounts stack.`
+              : 'Stay consistent during your continuation period and unlock savings. Ask your coach about Commit to Save.'}
+          </Text>
+        </View>
+
+        {/* Error */}
+        {error && (
+          <View style={{ padding: 12, backgroundColor: 'rgba(224,82,82,0.08)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(224,82,82,0.25)', marginTop: 10 }}>
+            <Text style={{ color: '#E05252', fontSize: 12, lineHeight: 18 }}>{error}</Text>
+          </View>
+        )}
+
+        {/* CTA */}
+        <Pressable
+          onPress={handleProceed}
+          disabled={!selected || checkoutLoading}
+          style={[ips.ctaBtn, (!selected || checkoutLoading) && { opacity: 0.5 }]}
+        >
+          {checkoutLoading ? (
+            <ActivityIndicator size="small" color="#000" />
+          ) : (
+            <Text style={ips.ctaBtnText}>
+              {selected === 'pay_in_full'
+                ? `Pay ${formatCurrency(payInFullTotal)} Now`
+                : selected === 'monthly'
+                ? `Start at ${formatCurrency(displayMonthlyPrice)}/mo`
+                : 'Select a payment option'}
+            </Text>
+          )}
+        </Pressable>
+
+        {/* Fine print */}
+        <Text style={{ color: '#4A5568', fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 10 }}>
+          Payments are processed securely by Stripe. By proceeding you agree to the GoArrive coaching terms. You may cancel month-to-month continuation at any time after your contract ends.
+        </Text>
+      </View>
+    );
+  }
+
+  return null;
+}
+
+const ips = StyleSheet.create({
+  optionCard: {
+    backgroundColor: '#161B25',
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: '#2A3347',
+  },
+  optionCardSelected: { borderColor: '#5B9BD5' },
+  optionCardSelectedGold: { borderColor: '#F5A623' },
+  optionHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  optionRadio: {
+    width: 20, height: 20, borderRadius: 10,
+    borderWidth: 2, borderColor: '#5B9BD5',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  optionRadioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#5B9BD5' },
+  optionTitle: { color: '#FFF', fontSize: 15, fontWeight: '700' },
+  optionSubtitle: { color: '#7A8A9A', fontSize: 12, marginTop: 1 },
+  optionPrice: { color: '#FFF', fontSize: 20, fontWeight: '700' },
+  optionPriceSuffix: { color: '#7A8A9A', fontSize: 11 },
+  optionDetail: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#2A3347',
+  },
+  detailRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  detailLabel: { color: '#7A8A9A', fontSize: 12 },
+  detailValue: { color: '#7A8A9A', fontSize: 12 },
+  ctaBtn: {
+    backgroundColor: '#F5A623',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 14,
+  },
+  ctaBtnText: { color: '#000', fontSize: 16, fontWeight: '700' },
+});
 
 function CoachingInvestmentSection({ plan, pricing, isCoach, onChange }: {
   plan: MemberPlanData; pricing: PricingResult; isCoach: boolean;

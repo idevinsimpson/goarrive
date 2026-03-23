@@ -132,6 +132,7 @@ export default function SharedPlanScreen() {
 
   async function fetchPlan() {
     try {
+      // Try plan_${memberId} key first (legacy format)
       const planDocSnap = await getDoc(doc(db, 'member_plans', `plan_${memberId}`));
       if (planDocSnap.exists()) {
         const data = { id: planDocSnap.id, ...planDocSnap.data() } as MemberPlanData;
@@ -140,20 +141,34 @@ export default function SharedPlanScreen() {
         } else {
           setPlan(data);
         }
-      } else {
-        const plansQuery = query(collection(db, 'member_plans'), where('memberId', '==', memberId));
-        const snap = await getDocs(plansQuery);
-        if (!snap.empty) {
-          const planDoc = snap.docs[0];
-          const data = { id: planDoc.id, ...planDoc.data() } as MemberPlanData;
-          if (data.status === 'draft') {
-            setError('This plan is still being built. Check back soon!');
-          } else {
-            setPlan(data);
-          }
+        return;
+      }
+
+      // Try direct memberId key (current format — matches how coach saves)
+      const directSnap = await getDoc(doc(db, 'member_plans', memberId as string));
+      if (directSnap.exists()) {
+        const data = { id: directSnap.id, ...directSnap.data() } as MemberPlanData;
+        if (data.status === 'draft') {
+          setError('This plan is still being built. Check back soon!');
         } else {
-          setError('No plan found for this member.');
+          setPlan(data);
         }
+        return;
+      }
+
+      // Fallback: query by memberId field
+      const plansQuery = query(collection(db, 'member_plans'), where('memberId', '==', memberId));
+      const snap = await getDocs(plansQuery);
+      if (!snap.empty) {
+        const planDoc = snap.docs[0];
+        const data = { id: planDoc.id, ...planDoc.data() } as MemberPlanData;
+        if (data.status === 'draft') {
+          setError('This plan is still being built. Check back soon!');
+        } else {
+          setPlan(data);
+        }
+      } else {
+        setError('No plan found for this member.');
       }
     } catch (err) {
       console.error('[SharedPlan] Error:', err);
