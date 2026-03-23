@@ -423,8 +423,8 @@ export const createCheckoutSession = onCall(
     }
 
     const callerUid = request.auth?.uid;
-    if (!callerUid || callerUid !== memberId) {
-      throw new HttpsError('permission-denied', 'Must be signed in as the member');
+    if (!callerUid) {
+      throw new HttpsError('permission-denied', 'Must be signed in');
     }
 
     // ── Load plan ──
@@ -435,6 +435,11 @@ export const createCheckoutSession = onCall(
 
     const coachId = plan.coachId as string;
     if (!coachId) throw new HttpsError('failed-precondition', 'Plan has no coachId');
+
+    // Allow the member OR the plan's coach to create a checkout session
+    if (callerUid !== memberId && callerUid !== coachId) {
+      throw new HttpsError('permission-denied', 'Must be signed in as the member or the plan\'s coach');
+    }
 
     // ── Load coach Stripe account ──
     const coachAccountSnap = await db.collection('coachStripeAccounts').doc(coachId).get();
