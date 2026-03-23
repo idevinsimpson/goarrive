@@ -20,9 +20,14 @@ import {
   Modal,
   Animated,
   Dimensions,
+  TextInput,
+  ScrollView,
 } from 'react-native';
 import { Icon } from './Icon';
 import { useAuth } from '../lib/AuthContext';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 
 const FONT_HEADING =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -73,6 +78,64 @@ export default function AccountPanel({ visible, onClose }: Props) {
       }).start();
     }
   }, [visible]);
+
+  const [zoomEmail, setZoomEmail] = useState('');
+  const [zoomLabel, setZoomLabel] = useState('');
+  const [zoomSaved, setZoomSaved] = useState(false);
+  const [zoomLoading, setZoomLoading] = useState(false);
+  const [showZoom, setShowZoom] = useState(false);
+
+  // Load coach's personal Zoom from coach_brands on mount
+  useEffect(() => {
+    if (!user?.uid) return;
+    (async () => {
+      try {
+        const brandDoc = await getDoc(doc(db, 'coach_brands', user.uid));
+        if (brandDoc.exists()) {
+          const data = brandDoc.data();
+          if (data.personalZoom) {
+            setZoomEmail(data.personalZoom.email || '');
+            setZoomLabel(data.personalZoom.label || '');
+            setZoomSaved(!!data.personalZoom.email);
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load personal Zoom:', e);
+      }
+    })();
+  }, [user?.uid]);
+
+  async function handleSaveZoom() {
+    if (!user?.uid || !zoomEmail.trim()) return;
+    setZoomLoading(true);
+    try {
+      // Save to coach_brands
+      await setDoc(doc(db, 'coach_brands', user.uid), {
+        personalZoom: {
+          email: zoomEmail.trim(),
+          label: zoomLabel.trim() || 'My Zoom',
+        },
+      }, { merge: true });
+
+      // Also register as a zoom_room with isPersonal: true via Cloud Function
+      const functions = getFunctions();
+      const manageZoomRoom = httpsCallable(functions, 'manageZoomRoom');
+      await manageZoomRoom({
+        action: 'add',
+        label: zoomLabel.trim() || 'My Zoom',
+        zoomAccountEmail: zoomEmail.trim(),
+        isPersonal: true,
+      });
+
+      setZoomSaved(true);
+      showToast('Personal Zoom saved!');
+    } catch (e: any) {
+      console.error('Failed to save Zoom:', e);
+      showToast('Failed to save — try again');
+    } finally {
+      setZoomLoading(false);
+    }
+  }
 
   const displayName = user?.displayName ?? user?.email?.split('@')[0] ?? 'User';
   const initials = displayName
@@ -170,6 +233,7 @@ export default function AccountPanel({ visible, onClose }: Props) {
         <View style={s.divider} />
 
         {/* Menu items */}
+        <ScrollView style={{ flex: 1 }} bounces={false}>
         <View style={s.menu}>
           {menuItems.map((item) => (
             <Pressable
@@ -196,6 +260,59 @@ export default function AccountPanel({ visible, onClose }: Props) {
         {/* Divider */}
         <View style={s.divider} />
 
+        {/* My Zoom Account */}
+        <Pressable
+          style={({ pressed }) => [s.menuItem, pressed && s.menuItemPressed]}
+          onPress={() => setShowZoom(!showZoom)}
+        >
+          <View style={s.menuIconWrap}>
+            <Icon name="video" size={20} color={zoomSaved ? '#6EBB7A' : '#8A95A3'} />
+          </View>
+          <View style={s.menuTextWrap}>
+            <Text style={s.menuLabel}>My Zoom Account</Text>
+            <Text style={s.menuSublabel}>
+              {zoomSaved ? zoomEmail : 'Connect your personal Zoom'}
+            </Text>
+          </View>
+          <Icon name={showZoom ? 'chevron-down' : 'chevron-right'} size={16} color="#4A5568" />
+        </Pressable>
+
+        {showZoom && (
+          <View style={s.zoomSection}>
+            <Text style={s.zoomHint}>
+              This Zoom is used for Coach Guided sessions where you join live with your member.
+            </Text>
+            <TextInput
+              style={s.zoomInput}
+              placeholder="Zoom account email"
+              placeholderTextColor="#5A6478"
+              value={zoomEmail}
+              onChangeText={setZoomEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+            <TextInput
+              style={s.zoomInput}
+              placeholder='Label (e.g. "My Zoom")'
+              placeholderTextColor="#5A6478"
+              value={zoomLabel}
+              onChangeText={setZoomLabel}
+            />
+            <Pressable
+              style={[s.zoomSaveBtn, zoomLoading && { opacity: 0.5 }]}
+              onPress={handleSaveZoom}
+              disabled={zoomLoading || !zoomEmail.trim()}
+            >
+              <Text style={s.zoomSaveBtnText}>
+                {zoomLoading ? 'Saving...' : zoomSaved ? 'Update Zoom' : 'Connect Zoom'}
+              </Text>
+            </Pressable>
+          </View>
+        )}
+
+        {/* Divider */}
+        <View style={s.divider} />
+
         {/* Sign out */}
         <Pressable
           style={({ pressed }) => [s.signOutBtn, pressed && s.signOutBtnPressed]}
@@ -214,8 +331,8 @@ export default function AccountPanel({ visible, onClose }: Props) {
           </View>
         )}
 
-        {/* Bottom safe area spacer */}
-        <View style={s.bottomSpacer} />
+        </ScrollView>
+
       </Animated.View>
     </Modal>
   );
@@ -379,5 +496,40 @@ const s = StyleSheet.create({
     ...(Platform.OS === 'web'
       ? ({ height: 'max(16px, env(safe-area-inset-bottom, 16px))' as any } as any)
       : {}),
+  },
+  zoomSection: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(110,187,122,0.04)',
+    gap: 10,
+  },
+  zoomHint: {
+    fontSize: 12,
+    color: '#6A7585',
+    fontFamily: FONT_BODY,
+    lineHeight: 17,
+  },
+  zoomInput: {
+    backgroundColor: '#1A2035',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#F0F4F8',
+    fontFamily: FONT_BODY,
+    borderWidth: 1,
+    borderColor: '#2A3548',
+  },
+  zoomSaveBtn: {
+    backgroundColor: '#6EBB7A',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  zoomSaveBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0A0F1A',
+    fontFamily: FONT_BODY,
   },
 });

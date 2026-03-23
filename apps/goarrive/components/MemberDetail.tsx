@@ -42,7 +42,7 @@ import { doc, onSnapshot, collection, query, where, getDocs } from 'firebase/fir
 import { httpsCallable } from 'firebase/functions';
 import { Icon } from './Icon';
 import { router } from 'expo-router';
-import { DAY_LABELS, DAY_SHORT_LABELS, formatTime } from '../lib/schedulingTypes';
+import { DAY_LABELS, DAY_SHORT_LABELS, formatTime, type GuidancePhase, type SessionType, type RoomSource } from '../lib/schedulingTypes';
 
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
@@ -109,6 +109,9 @@ export default function MemberDetail({
   const [selectedDuration, setSelectedDuration] = useState(30);
   const [selectedTimezone, setSelectedTimezone] = useState('America/New_York');
   const [selectedPattern, setSelectedPattern] = useState<'weekly' | 'biweekly'>('weekly');
+  const [selectedSessionType, setSelectedSessionType] = useState<SessionType>('strength');
+  const [selectedPhase, setSelectedPhase] = useState<GuidancePhase>('coach_guided');
+  const [coachJoining, setCoachJoining] = useState(true);
   const [creating, setCreating] = useState(false);
   const [showTimeSelect, setShowTimeSelect] = useState(false);
 
@@ -152,6 +155,11 @@ export default function MemberDetail({
     setCreating(true);
     try {
       const fn = httpsCallable(functions, 'createRecurringSlot');
+      // Determine room source based on guidance phase
+      let roomSource: RoomSource = 'coach_personal';
+      if (selectedPhase === 'self_guided') roomSource = 'shared_pool';
+      else if (selectedPhase === 'shared_guidance') roomSource = coachJoining ? 'coach_personal' : 'shared_pool';
+
       const result = await fn({
         memberId: member.id,
         memberName: currentMember.name || 'Unknown',
@@ -160,6 +168,10 @@ export default function MemberDetail({
         durationMinutes: selectedDuration,
         timezone: selectedTimezone,
         recurrencePattern: selectedPattern,
+        sessionType: selectedSessionType,
+        guidancePhase: selectedPhase,
+        roomSource,
+        coachJoining: selectedPhase === 'shared_guidance' ? coachJoining : selectedPhase === 'coach_guided',
       });
       const data = result.data as any;
       Alert.alert(
@@ -171,7 +183,7 @@ export default function MemberDetail({
       Alert.alert('Error', err.message || 'Failed to create slot');
     }
     setCreating(false);
-  }, [member.id, currentMember.name, selectedDay, selectedTime, selectedDuration, selectedTimezone, selectedPattern]);
+  }, [member.id, currentMember.name, selectedDay, selectedTime, selectedDuration, selectedTimezone, selectedPattern, selectedSessionType, selectedPhase, coachJoining]);
 
   const handlePauseSlot = useCallback(async (slotId: string) => {
     try {
@@ -420,7 +432,11 @@ export default function MemberDetail({
               {activeSlots.length > 0 && (
                 <View style={s.schedSection}>
                   <Text style={s.schedSectionTitle}>Current Slots</Text>
-                  {activeSlots.map(slot => (
+                  {activeSlots.map(slot => {
+                    const phaseColors: Record<string, string> = { coach_guided: GREEN, shared_guidance: GOLD, self_guided: '#7DD3FC' };
+                    const phaseLabels: Record<string, string> = { coach_guided: 'Coach Guided', shared_guidance: 'Shared Guidance', self_guided: 'Self Guided' };
+                    const stLabel = slot.sessionType === 'check_in' ? 'Check-in' : (slot.sessionType || '').charAt(0).toUpperCase() + (slot.sessionType || '').slice(1);
+                    return (
                     <View key={slot.id} style={s.slotCard}>
                       <View style={{ flex: 1 }}>
                         <Text style={s.slotDay}>
@@ -428,7 +444,16 @@ export default function MemberDetail({
                         </Text>
                         <Text style={s.slotMeta}>
                           {slot.durationMinutes}min · {slot.recurrencePattern === 'biweekly' ? 'Every 2 weeks' : 'Weekly'}
+                          {stLabel ? ` · ${stLabel}` : ''}
                         </Text>
+                        {slot.guidancePhase && (
+                          <Text style={[s.slotMeta, { color: phaseColors[slot.guidancePhase] || MUTED, fontWeight: '600' }]}>
+                            {phaseLabels[slot.guidancePhase] || slot.guidancePhase}
+                            {slot.guidancePhase === 'shared_guidance' && slot.coachJoining !== undefined
+                              ? (slot.coachJoining ? ' (you join)' : ' (on their own)')
+                              : ''}
+                          </Text>
+                        )}
                       </View>
                       <View style={{ flexDirection: 'row', gap: 8 }}>
                         {slot.status === 'active' ? (
@@ -454,7 +479,8 @@ export default function MemberDetail({
                         </TouchableOpacity>
                       </View>
                     </View>
-                  ))}
+                    );
+                  })}
                 </View>
               )}
 
@@ -463,6 +489,78 @@ export default function MemberDetail({
                 <Text style={s.schedSectionTitle}>
                   {activeSlots.length > 0 ? 'Add Another Slot' : 'Create Recurring Slot'}
                 </Text>
+
+                {/* Session Type */}
+                <Text style={s.fieldLabel}>Session Type</Text>
+                <View style={s.dayRow}>
+                  {(['strength', 'cardio', 'flexibility', 'hiit', 'recovery', 'check_in'] as SessionType[]).map(st => (
+                    <TouchableOpacity
+                      key={st}
+                      style={[s.dayBtn, selectedSessionType === st && s.dayBtnActive, { minWidth: 70 }]}
+                      onPress={() => setSelectedSessionType(st)}
+                    >
+                      <Text style={[s.dayBtnText, selectedSessionType === st && s.dayBtnTextActive, { fontSize: 12 }]}>
+                        {st === 'check_in' ? 'Check-in' : st.charAt(0).toUpperCase() + st.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Guidance Phase */}
+                <Text style={s.fieldLabel}>Guidance Phase</Text>
+                <View style={s.dayRow}>
+                  {[
+                    { key: 'coach_guided' as GuidancePhase, label: 'Coach Guided', color: GREEN },
+                    { key: 'shared_guidance' as GuidancePhase, label: 'Shared Guidance', color: GOLD },
+                    { key: 'self_guided' as GuidancePhase, label: 'Self Guided', color: '#7DD3FC' },
+                  ].map(phase => (
+                    <TouchableOpacity
+                      key={phase.key}
+                      style={[
+                        s.dayBtn,
+                        selectedPhase === phase.key && { backgroundColor: phase.color + '18', borderColor: phase.color + '60' },
+                        { minWidth: 95 },
+                      ]}
+                      onPress={() => {
+                        setSelectedPhase(phase.key);
+                        if (phase.key === 'coach_guided') setCoachJoining(true);
+                        if (phase.key === 'self_guided') setCoachJoining(false);
+                      }}
+                    >
+                      <Text style={[
+                        s.dayBtnText,
+                        selectedPhase === phase.key && { color: phase.color },
+                        { fontSize: 12 },
+                      ]}>
+                        {phase.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Shared Guidance: Coach Joining Toggle */}
+                {selectedPhase === 'shared_guidance' && (
+                  <View style={s.coachToggleRow}>
+                    <TouchableOpacity
+                      style={s.toggleBtn}
+                      onPress={() => setCoachJoining(!coachJoining)}
+                    >
+                      <View style={[s.toggleTrack, coachJoining && s.toggleTrackOn]}>
+                        <View style={[s.toggleThumb, coachJoining && s.toggleThumbOn]} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.toggleLabel}>
+                          {coachJoining ? "You're joining live" : 'Member on their own'}
+                        </Text>
+                        <Text style={s.toggleHint}>
+                          {coachJoining
+                            ? 'Uses your personal Zoom room'
+                            : 'Uses a shared room from the pool'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                )}
 
                 {/* Day of Week */}
                 <Text style={s.fieldLabel}>Day of Week</Text>
@@ -567,6 +665,11 @@ export default function MemberDetail({
                 <View style={s.summaryCard}>
                   <Text style={s.summaryText}>
                     {DAY_LABELS[selectedDay]}s at {formatTime(selectedTime)} for {selectedDuration} min, {selectedPattern}
+                  </Text>
+                  <Text style={s.summaryMeta}>
+                    {selectedSessionType === 'check_in' ? 'Check-in' : selectedSessionType.charAt(0).toUpperCase() + selectedSessionType.slice(1)}
+                    {' · '}
+                    {selectedPhase === 'coach_guided' ? 'Coach Guided' : selectedPhase === 'shared_guidance' ? (coachJoining ? 'Shared Guidance (you join)' : 'Shared Guidance (on their own)') : 'Self Guided'}
                   </Text>
                   <Text style={s.summaryMeta}>
                     {selectedTimezone.split('/')[1]?.replace(/_/g, ' ')} time
@@ -956,5 +1059,54 @@ const s = StyleSheet.create({
     fontWeight: '700',
     color: BG,
     fontFamily: FH,
+  },
+
+  // ── Coach Joining Toggle ──────────────────────────────────────────────
+  coachToggleRow: {
+    marginTop: 12,
+    marginBottom: 4,
+    backgroundColor: 'rgba(245,166,35,0.06)',
+    borderRadius: 10,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.2)',
+  },
+  toggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  toggleTrack: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(138,149,163,0.3)',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  toggleTrackOn: {
+    backgroundColor: 'rgba(110,187,122,0.4)',
+  },
+  toggleThumb: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: MUTED,
+  },
+  toggleThumbOn: {
+    backgroundColor: GREEN,
+    alignSelf: 'flex-end',
+  },
+  toggleLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#F0F4F8',
+    fontFamily: FB,
+  },
+  toggleHint: {
+    fontSize: 11,
+    color: MUTED,
+    fontFamily: FB,
+    marginTop: 2,
   },
 });

@@ -1,12 +1,12 @@
 /**
- * scheduling.tsx — Coach Scheduling Command Center
+ * scheduling.tsx — Coach Scheduling Workspace
  *
- * Operational dashboard for the GoArrive scheduling backbone.
- * Shows Zoom room pool, recurring member slots, upcoming session instances,
- * allocation status, and action buttons for managing the schedule.
+ * Simplified, session-centric view for coaches. Uses the plan-phase
+ * terminology: Coach Guided, Shared Guidance, Self Guided.
  *
- * Design: KW-style Command Center — high-signal cards, clear statuses,
- * readable lists, obvious calls to action, minimal clutter.
+ * Shows upcoming sessions grouped by day, with guidance phase badges,
+ * Zoom links, and quick actions. Backend room/pool management is
+ * relocated to admin-only surfaces.
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -14,12 +14,10 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
-  TextInput,
   ActivityIndicator,
   StyleSheet,
   Platform,
   Alert,
-  Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
@@ -29,17 +27,13 @@ import {
   collection,
   query,
   where,
-  orderBy,
   onSnapshot,
-  getDocs,
-  Timestamp,
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../../lib/firebase';
 import {
   DAY_SHORT_LABELS,
   formatTime,
-  type ZoomRoom,
   type RecurringSlot,
   type SessionInstance,
 } from '../../lib/schedulingTypes';
@@ -52,23 +46,39 @@ const GOLD = '#F5A623';
 const GREEN = '#34D399';
 const RED = '#EF4444';
 const AMBER = '#F59E0B';
+const BLUE = '#3B82F6';
 const MUTED = '#6B7280';
-const TEXT = '#E5E7EB';
+const TEXT_CLR = '#E5E7EB';
 const WHITE = '#FFFFFF';
+const FONT = Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined;
+
+// ── Phase labels & colors ────────────────────────────────────────────────────
+const PHASE_DISPLAY: Record<string, { label: string; color: string; icon: string }> = {
+  coach_guided:    { label: 'Coach Guided',    color: GREEN,  icon: 'user' },
+  shared_guidance: { label: 'Shared Guidance', color: GOLD,   icon: 'users' },
+  self_guided:     { label: 'Self Guided',     color: BLUE,   icon: 'zap' },
+};
+
+const SESSION_TYPE_LABELS: Record<string, string> = {
+  strength: 'Strength',
+  cardio: 'Cardio',
+  flexibility: 'Flexibility',
+  hiit: 'HIIT',
+  recovery: 'Recovery',
+  check_in: 'Check-in',
+  custom: 'Custom',
+};
 
 // ── Status badge colors ──────────────────────────────────────────────────────
 const STATUS_COLORS: Record<string, string> = {
   active: GREEN,
-  inactive: MUTED,
-  maintenance: AMBER,
   scheduled: GOLD,
   allocated: GREEN,
   allocation_failed: RED,
-  in_progress: '#3B82F6',
+  in_progress: BLUE,
   completed: GREEN,
   missed: RED,
   cancelled: MUTED,
-  rescheduled: AMBER,
   paused: AMBER,
 };
 
@@ -78,35 +88,18 @@ export default function SchedulingScreen() {
   const coachId = claims?.coachId || user?.uid || '';
 
   // ── State ────────────────────────────────────────────────────────────────
-  const [rooms, setRooms] = useState<ZoomRoom[]>([]);
   const [slots, setSlots] = useState<RecurringSlot[]>([]);
   const [instances, setInstances] = useState<SessionInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [allocating, setAllocating] = useState(false);
-  const [showAddRoom, setShowAddRoom] = useState(false);
-  const [newRoomLabel, setNewRoomLabel] = useState('');
-  const [newRoomEmail, setNewRoomEmail] = useState('');
-  const [addingRoom, setAddingRoom] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'rooms' | 'slots' | 'sessions'>('overview');
+  const [activeTab, setActiveTab] = useState<'schedule' | 'members' | 'alerts'>('schedule');
 
   // ── Load data ────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!coachId) {
-      setLoading(false);
-      return;
-    }
+    if (!coachId) { setLoading(false); return; }
 
     let loadedCount = 0;
-    const checkDone = () => { loadedCount++; if (loadedCount >= 3) setLoading(false); };
-
-    const unsubRooms = onSnapshot(
-      query(collection(db, 'zoom_rooms'), where('coachId', '==', coachId)),
-      (snap) => {
-        setRooms(snap.docs.map(d => ({ id: d.id, ...d.data() } as ZoomRoom)));
-        checkDone();
-      },
-      (err) => { console.warn('zoom_rooms query error:', err); checkDone(); }
-    );
+    const checkDone = () => { loadedCount++; if (loadedCount >= 2) setLoading(false); };
 
     const unsubSlots = onSnapshot(
       query(collection(db, 'recurring_slots'), where('coachId', '==', coachId)),
@@ -114,77 +107,37 @@ export default function SchedulingScreen() {
         setSlots(snap.docs.map(d => ({ id: d.id, ...d.data() } as RecurringSlot)));
         checkDone();
       },
-      (err) => { console.warn('recurring_slots query error:', err); checkDone(); }
+      (err) => { console.warn('recurring_slots error:', err); checkDone(); }
     );
 
-    // Load all instances for this coach, filter by date client-side
-    // (avoids needing a composite Firestore index on coachId + scheduledDate)
     const todayStr = new Date().toISOString().split('T')[0];
     const unsubInstances = onSnapshot(
-      query(
-        collection(db, 'session_instances'),
-        where('coachId', '==', coachId),
-      ),
+      query(collection(db, 'session_instances'), where('coachId', '==', coachId)),
       (snap) => {
         const all = snap.docs
           .map(d => ({ id: d.id, ...d.data() } as SessionInstance))
           .filter(i => i.scheduledDate >= todayStr);
         all.sort((a, b) => {
           const dc = a.scheduledDate.localeCompare(b.scheduledDate);
-          if (dc !== 0) return dc;
-          return a.scheduledStartTime.localeCompare(b.scheduledStartTime);
+          return dc !== 0 ? dc : a.scheduledStartTime.localeCompare(b.scheduledStartTime);
         });
         setInstances(all);
         checkDone();
       },
-      (err) => { console.warn('session_instances query error:', err); checkDone(); }
+      (err) => { console.warn('session_instances error:', err); checkDone(); }
     );
 
-    return () => {
-      unsubRooms();
-      unsubSlots();
-      unsubInstances();
-    };
+    return () => { unsubSlots(); unsubInstances(); };
   }, [coachId]);
 
   // ── Actions ──────────────────────────────────────────────────────────────
-  const handleAddRoom = useCallback(async () => {
-    if (!newRoomLabel.trim() || !newRoomEmail.trim()) return;
-    setAddingRoom(true);
-    try {
-      const fn = httpsCallable(functions, 'manageZoomRoom');
-      await fn({ action: 'add', roomData: { label: newRoomLabel.trim(), zoomAccountEmail: newRoomEmail.trim() } });
-      setNewRoomLabel('');
-      setNewRoomEmail('');
-      setShowAddRoom(false);
-    } catch (err: any) {
-      Alert.alert('Error', err.message || 'Failed to add room');
-    }
-    setAddingRoom(false);
-  }, [newRoomLabel, newRoomEmail]);
-
-  const handleToggleRoom = useCallback(async (room: ZoomRoom) => {
-    try {
-      const fn = httpsCallable(functions, 'manageZoomRoom');
-      await fn({
-        action: room.status === 'active' ? 'deactivate' : 'activate',
-        roomId: room.id,
-      });
-    } catch (err: any) {
-      Alert.alert('Error', err.message || 'Failed to update room');
-    }
-  }, []);
-
   const handleAllocateAll = useCallback(async () => {
     setAllocating(true);
     try {
       const fn = httpsCallable(functions, 'allocateAllPendingInstances');
       const result = await fn({});
       const data = result.data as any;
-      Alert.alert(
-        'Allocation Complete',
-        `${data.allocated} allocated, ${data.failed} failed out of ${data.total} pending`
-      );
+      Alert.alert('Done', `${data.allocated} sessions allocated, ${data.failed} need attention.`);
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Allocation failed');
     }
@@ -200,14 +153,56 @@ export default function SchedulingScreen() {
     }
   }, []);
 
-  // ── Computed stats ───────────────────────────────────────────────────────
-  const activeRooms = rooms.filter(r => r.status === 'active');
-  const activeSlots = slots.filter(s => s.status === 'active');
-  const pendingInstances = instances.filter(i => i.status === 'scheduled');
-  const allocatedInstances = instances.filter(i => i.status === 'allocated');
-  const failedInstances = instances.filter(i => i.status === 'allocation_failed');
+  const handleToggleCoachJoining = useCallback(async (inst: SessionInstance) => {
+    // Toggle coachJoining for a Shared Guidance session
+    // This would update the instance and optionally set as default
+    Alert.alert(
+      inst.coachJoining ? 'Switch to Self Guided?' : 'Join this session?',
+      inst.coachJoining
+        ? 'This session will use a shared room instead of your personal Zoom.'
+        : 'You\'ll join this session live using your personal Zoom.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Just this one',
+          onPress: async () => {
+            try {
+              const fn = httpsCallable(functions, 'allocateSessionInstance');
+              // For now, we'd need a toggleCoachJoining function — stub the alert
+              Alert.alert('Coming soon', 'Per-session toggle will be available in the next update.');
+            } catch (e) {}
+          },
+        },
+        {
+          text: 'Make default',
+          onPress: () => {
+            Alert.alert('Coming soon', 'Default toggle per session type/day will be available in the next update.');
+          },
+        },
+      ]
+    );
+  }, []);
+
+  // ── Computed ──────────────────────────────────────────────────────────────
   const todayStr = new Date().toISOString().split('T')[0];
+  const tomorrowDate = new Date();
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrowStr = tomorrowDate.toISOString().split('T')[0];
+
   const todaySessions = instances.filter(i => i.scheduledDate === todayStr && i.status !== 'cancelled');
+  const tomorrowSessions = instances.filter(i => i.scheduledDate === tomorrowStr && i.status !== 'cancelled');
+  const upcomingSessions = instances.filter(i => i.scheduledDate > tomorrowStr && i.status !== 'cancelled');
+  const pendingInstances = instances.filter(i => i.status === 'scheduled');
+  const failedInstances = instances.filter(i => i.status === 'allocation_failed');
+  const activeSlots = slots.filter(s => s.status === 'active');
+
+  // Group slots by member
+  const memberSlots = new Map<string, RecurringSlot[]>();
+  activeSlots.forEach(slot => {
+    const key = slot.memberId;
+    if (!memberSlots.has(key)) memberSlots.set(key, []);
+    memberSlots.get(key)!.push(slot);
+  });
 
   if (loading) {
     return (
@@ -227,11 +222,14 @@ export default function SchedulingScreen() {
         {/* Header */}
         <View style={s.headerRow}>
           <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-            <Icon name="back" size={22} color={TEXT} />
+            <Icon name="back" size={22} color={TEXT_CLR} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
-            <Text style={s.pageTitle}>Scheduling Command Center</Text>
-            <Text style={s.subtitle}>Manage rooms, slots, and sessions</Text>
+            <Text style={s.pageTitle}>My Schedule</Text>
+            <Text style={s.subtitle}>
+              {todaySessions.length} session{todaySessions.length !== 1 ? 's' : ''} today
+              {failedInstances.length > 0 ? ` · ${failedInstances.length} need attention` : ''}
+            </Text>
           </View>
           <View style={s.betaBadge}>
             <Text style={s.betaText}>BETA</Text>
@@ -240,305 +238,238 @@ export default function SchedulingScreen() {
 
         {/* Tab Bar */}
         <View style={s.tabBar}>
-          {(['overview', 'rooms', 'slots', 'sessions'] as const).map(tab => (
+          {([
+            { key: 'schedule' as const, label: 'Schedule' },
+            { key: 'members' as const, label: 'Members' },
+            { key: 'alerts' as const, label: `Alerts${failedInstances.length > 0 ? ` (${failedInstances.length})` : ''}` },
+          ]).map(tab => (
             <TouchableOpacity
-              key={tab}
-              style={[s.tab, activeTab === tab && s.tabActive]}
-              onPress={() => setActiveTab(tab)}
+              key={tab.key}
+              style={[s.tab, activeTab === tab.key && s.tabActive]}
+              onPress={() => setActiveTab(tab.key)}
             >
-              <Text style={[s.tabText, activeTab === tab && s.tabTextActive]}>
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              <Text style={[s.tabText, activeTab === tab.key && s.tabTextActive]}>
+                {tab.label}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
 
-        {/* Overview Tab */}
-        {activeTab === 'overview' && (
+        {/* ─── Schedule Tab ─── */}
+        {activeTab === 'schedule' && (
           <View>
-            {/* Summary Cards */}
-            <View style={s.cardRow}>
-              <View style={s.statCard}>
-                <Text style={s.statNumber}>{activeRooms.length}</Text>
-                <Text style={s.statLabel}>Active Rooms</Text>
-              </View>
-              <View style={s.statCard}>
-                <Text style={s.statNumber}>{activeSlots.length}</Text>
-                <Text style={s.statLabel}>Active Slots</Text>
-              </View>
-              <View style={s.statCard}>
-                <Text style={[s.statNumber, { color: pendingInstances.length > 0 ? AMBER : GREEN }]}>
-                  {pendingInstances.length}
-                </Text>
-                <Text style={s.statLabel}>Pending</Text>
-              </View>
-              <View style={s.statCard}>
-                <Text style={[s.statNumber, { color: failedInstances.length > 0 ? RED : GREEN }]}>
-                  {failedInstances.length}
-                </Text>
-                <Text style={s.statLabel}>Failed</Text>
-              </View>
-            </View>
-
-            {/* Today's Sessions */}
-            <View style={s.sectionHeader}>
-              <Text style={s.sectionTitle}>Today's Sessions ({todaySessions.length})</Text>
-            </View>
-            {todaySessions.length === 0 ? (
-              <View style={s.emptyCard}>
-                <Text style={s.emptyText}>No sessions scheduled for today.</Text>
-              </View>
-            ) : (
-              todaySessions.map(inst => (
-                <View key={inst.id} style={s.sessionCard}>
-                  <View style={s.sessionRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.sessionMember}>{inst.memberName}</Text>
-                      <Text style={s.sessionTime}>
-                        {formatTime(inst.scheduledStartTime)} – {formatTime(inst.scheduledEndTime)}
-                      </Text>
-                    </View>
-                    <StatusBadge status={inst.status} />
-                  </View>
-                  {inst.zoomRoomLabel && (
-                    <Text style={s.roomLabel}>🖥 {inst.zoomRoomLabel}</Text>
-                  )}
-                  {inst.zoomJoinUrl && (
-                    <Text style={s.zoomLink} numberOfLines={1}>🔗 {inst.zoomJoinUrl}</Text>
-                  )}
+            {/* Phase Legend */}
+            <View style={s.legendRow}>
+              {Object.entries(PHASE_DISPLAY).map(([key, val]) => (
+                <View key={key} style={s.legendItem}>
+                  <View style={[s.legendDot, { backgroundColor: val.color }]} />
+                  <Text style={s.legendText}>{val.label}</Text>
                 </View>
-              ))
-            )}
-
-            {/* Quick Actions */}
-            <View style={s.sectionHeader}>
-              <Text style={s.sectionTitle}>Quick Actions</Text>
+              ))}
             </View>
-            <View style={s.actionRow}>
+
+            {/* Pending allocation bar */}
+            {pendingInstances.length > 0 && (
               <TouchableOpacity
-                style={[s.actionBtn, { backgroundColor: GOLD }]}
+                style={s.allocateBar}
                 onPress={handleAllocateAll}
-                disabled={allocating || pendingInstances.length === 0}
+                disabled={allocating}
               >
                 {allocating ? (
                   <ActivityIndicator size="small" color={BG} />
                 ) : (
-                  <Text style={s.actionBtnText}>
-                    Allocate All ({pendingInstances.length})
+                  <Text style={s.allocateBarText}>
+                    Assign Zoom rooms to {pendingInstances.length} pending session{pendingInstances.length !== 1 ? 's' : ''}
                   </Text>
                 )}
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.actionBtn, { backgroundColor: '#1E2A3A' }]}
-                onPress={() => setShowAddRoom(true)}
-              >
-                <Text style={[s.actionBtnText, { color: TEXT }]}>+ Add Room</Text>
-              </TouchableOpacity>
-            </View>
+            )}
 
-            {/* Needs Attention */}
-            {failedInstances.length > 0 && (
-              <View>
-                <View style={s.sectionHeader}>
-                  <Text style={[s.sectionTitle, { color: RED }]}>⚠ Needs Attention</Text>
+            {/* Today */}
+            <SectionHeader title="Today" count={todaySessions.length} />
+            {todaySessions.length === 0 ? (
+              <EmptyCard text="No sessions today. Enjoy the rest!" />
+            ) : (
+              todaySessions.map(inst => (
+                <SessionCard
+                  key={inst.id}
+                  inst={inst}
+                  onCancel={handleCancelInstance}
+                  onToggleCoachJoining={handleToggleCoachJoining}
+                />
+              ))
+            )}
+
+            {/* Tomorrow */}
+            <SectionHeader title="Tomorrow" count={tomorrowSessions.length} />
+            {tomorrowSessions.length === 0 ? (
+              <EmptyCard text="Nothing scheduled for tomorrow." />
+            ) : (
+              tomorrowSessions.map(inst => (
+                <SessionCard
+                  key={inst.id}
+                  inst={inst}
+                  onCancel={handleCancelInstance}
+                  onToggleCoachJoining={handleToggleCoachJoining}
+                />
+              ))
+            )}
+
+            {/* Upcoming */}
+            {upcomingSessions.length > 0 && (
+              <>
+                <SectionHeader title="Upcoming" count={upcomingSessions.length} />
+                {upcomingSessions.slice(0, 20).map(inst => (
+                  <SessionCard
+                    key={inst.id}
+                    inst={inst}
+                    onCancel={handleCancelInstance}
+                    onToggleCoachJoining={handleToggleCoachJoining}
+                    showDate
+                  />
+                ))}
+                {upcomingSessions.length > 20 && (
+                  <Text style={s.moreText}>+ {upcomingSessions.length - 20} more sessions</Text>
+                )}
+              </>
+            )}
+
+            {/* Empty state for entire schedule */}
+            {instances.filter(i => i.status !== 'cancelled').length === 0 && (
+              <View style={s.emptyHero}>
+                <Icon name="calendar" size={48} color={MUTED} />
+                <Text style={s.emptyHeroTitle}>No sessions scheduled yet</Text>
+                <Text style={s.emptyHeroSub}>
+                  Assign recurring time slots to your members from their Member Hub to get started.
+                </Text>
+                <TouchableOpacity
+                  style={s.emptyHeroBtn}
+                  onPress={() => router.push('/(app)/members' as any)}
+                >
+                  <Text style={s.emptyHeroBtnText}>Go to Members</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* ─── Members Tab ─── */}
+        {activeTab === 'members' && (
+          <View>
+            <SectionHeader title="Member Schedules" count={memberSlots.size} />
+            {memberSlots.size === 0 ? (
+              <EmptyCard text="No recurring schedules set up yet. Assign time slots from the Member Hub." />
+            ) : (
+              Array.from(memberSlots.entries()).map(([memberId, mSlots]) => (
+                <View key={memberId} style={s.memberCard}>
+                  <Text style={s.memberName}>{mSlots[0]?.memberName || 'Member'}</Text>
+                  {mSlots.map(slot => {
+                    const phase = PHASE_DISPLAY[slot.guidancePhase || ''] || PHASE_DISPLAY.self_guided;
+                    const sessionLabel = SESSION_TYPE_LABELS[slot.sessionType || ''] || slot.sessionType || '';
+                    return (
+                      <View key={slot.id} style={s.slotRow}>
+                        <View style={[s.phaseDot, { backgroundColor: phase.color }]} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={s.slotText}>
+                            {DAY_SHORT_LABELS[slot.dayOfWeek]} · {formatTime(slot.startTime)} · {slot.durationMinutes}min
+                          </Text>
+                          <Text style={s.slotMeta}>
+                            {phase.label}{sessionLabel ? ` · ${sessionLabel}` : ''} · {slot.recurrencePattern === 'biweekly' ? 'Every 2 weeks' : 'Weekly'}
+                          </Text>
+                        </View>
+                        <StatusBadge status={slot.status} />
+                      </View>
+                    );
+                  })}
                 </View>
-                {failedInstances.map(inst => (
-                  <View key={inst.id} style={[s.sessionCard, { borderLeftColor: RED, borderLeftWidth: 3 }]}>
+              ))
+            )}
+          </View>
+        )}
+
+        {/* ─── Alerts Tab ─── */}
+        {activeTab === 'alerts' && (
+          <View>
+            <SectionHeader title="Needs Attention" count={failedInstances.length} />
+            {failedInstances.length === 0 ? (
+              <EmptyCard text="All clear! No scheduling issues right now." />
+            ) : (
+              failedInstances.map(inst => {
+                const phase = PHASE_DISPLAY[inst.guidancePhase || ''] || null;
+                return (
+                  <View key={inst.id} style={[s.sessionCardBase, { borderLeftColor: RED, borderLeftWidth: 3 }]}>
                     <View style={s.sessionRow}>
                       <View style={{ flex: 1 }}>
                         <Text style={s.sessionMember}>{inst.memberName}</Text>
                         <Text style={s.sessionTime}>
                           {inst.scheduledDate} · {formatTime(inst.scheduledStartTime)}
                         </Text>
-                        <Text style={[s.roomLabel, { color: RED }]}>
-                          {inst.allocationFailReason || 'Allocation failed'}
+                        {phase && (
+                          <Text style={[s.phaseLabel, { color: phase.color }]}>{phase.label}</Text>
+                        )}
+                        <Text style={[s.alertReason]}>
+                          {inst.allocationFailReason || 'Room allocation failed'}
                         </Text>
                       </View>
                       <StatusBadge status={inst.status} />
                     </View>
-                  </View>
-                ))}
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* Rooms Tab */}
-        {activeTab === 'rooms' && (
-          <View>
-            <View style={s.sectionHeader}>
-              <Text style={s.sectionTitle}>Zoom Room Pool ({rooms.length})</Text>
-              <TouchableOpacity onPress={() => setShowAddRoom(true)}>
-                <Text style={s.addLink}>+ Add Room</Text>
-              </TouchableOpacity>
-            </View>
-            {rooms.length === 0 ? (
-              <View style={s.emptyCard}>
-                <Text style={s.emptyText}>No Zoom rooms configured yet.</Text>
-                <Text style={[s.emptyText, { marginTop: 4 }]}>
-                  Add your Zoom account(s) to start scheduling sessions.
-                </Text>
-                <TouchableOpacity
-                  style={[s.actionBtn, { backgroundColor: GOLD, marginTop: 12, alignSelf: 'center' }]}
-                  onPress={() => setShowAddRoom(true)}
-                >
-                  <Text style={s.actionBtnText}>+ Add Your First Room</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              rooms.map(room => (
-                <View key={room.id} style={s.roomCard}>
-                  <View style={s.sessionRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.sessionMember}>{room.label}</Text>
-                      <Text style={s.sessionTime}>{room.zoomAccountEmail}</Text>
-                    </View>
-                    <TouchableOpacity
-                      style={[s.statusToggle, { backgroundColor: room.status === 'active' ? GREEN + '20' : MUTED + '20' }]}
-                      onPress={() => handleToggleRoom(room)}
-                    >
-                      <Text style={[s.statusToggleText, { color: room.status === 'active' ? GREEN : MUTED }]}>
-                        {room.status === 'active' ? 'Active' : 'Inactive'}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                  <Text style={s.roomLabel}>Max concurrent: {room.maxConcurrentMeetings}</Text>
-                </View>
-              ))
-            )}
-          </View>
-        )}
-
-        {/* Slots Tab */}
-        {activeTab === 'slots' && (
-          <View>
-            <View style={s.sectionHeader}>
-              <Text style={s.sectionTitle}>Recurring Slots ({slots.length})</Text>
-            </View>
-            {slots.length === 0 ? (
-              <View style={s.emptyCard}>
-                <Text style={s.emptyText}>No recurring slots created yet.</Text>
-                <Text style={[s.emptyText, { marginTop: 4 }]}>
-                  Assign recurring time slots to members from their Member Hub.
-                </Text>
-              </View>
-            ) : (
-              slots.map(slot => (
-                <View key={slot.id} style={s.roomCard}>
-                  <View style={s.sessionRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.sessionMember}>{slot.memberName}</Text>
-                      <Text style={s.sessionTime}>
-                        {DAY_SHORT_LABELS[slot.dayOfWeek]} · {formatTime(slot.startTime)} · {slot.durationMinutes}min
-                      </Text>
-                      <Text style={s.roomLabel}>
-                        {slot.recurrencePattern === 'biweekly' ? 'Every 2 weeks' : 'Weekly'} · {slot.timezone}
-                      </Text>
-                    </View>
-                    <StatusBadge status={slot.status} />
-                  </View>
-                </View>
-              ))
-            )}
-          </View>
-        )}
-
-        {/* Sessions Tab */}
-        {activeTab === 'sessions' && (
-          <View>
-            <View style={s.sectionHeader}>
-              <Text style={s.sectionTitle}>Upcoming Sessions ({instances.filter(i => i.status !== 'cancelled').length})</Text>
-            </View>
-            {instances.filter(i => i.status !== 'cancelled').length === 0 ? (
-              <View style={s.emptyCard}>
-                <Text style={s.emptyText}>No upcoming sessions.</Text>
-              </View>
-            ) : (
-              instances
-                .filter(i => i.status !== 'cancelled')
-                .map(inst => (
-                  <View key={inst.id} style={s.sessionCard}>
-                    <View style={s.sessionRow}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.sessionMember}>{inst.memberName}</Text>
-                        <Text style={s.sessionTime}>
-                          {inst.scheduledDate} · {formatTime(inst.scheduledStartTime)} – {formatTime(inst.scheduledEndTime)}
-                        </Text>
-                        {inst.zoomRoomLabel && (
-                          <Text style={s.roomLabel}>🖥 {inst.zoomRoomLabel}</Text>
-                        )}
-                        {inst.rescheduledFrom && (
-                          <Text style={[s.roomLabel, { color: AMBER }]}>
-                            Rescheduled from {inst.rescheduledFrom}
-                          </Text>
-                        )}
-                      </View>
-                      <View style={{ alignItems: 'flex-end', gap: 6 }}>
-                        <StatusBadge status={inst.status} />
-                        {(inst.status === 'scheduled' || inst.status === 'allocated') && (
-                          <TouchableOpacity
-                            onPress={() => handleCancelInstance(inst.id)}
-                            style={s.cancelBtn}
-                          >
-                            <Text style={s.cancelBtnText}>Cancel</Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
+                    <View style={s.alertActions}>
+                      <TouchableOpacity
+                        style={s.retryBtn}
+                        onPress={async () => {
+                          try {
+                            const fn = httpsCallable(functions, 'allocateSessionInstance');
+                            const result = await fn({ instanceId: inst.id });
+                            const data = result.data as any;
+                            if (data.success) {
+                              Alert.alert('Success', 'Room allocated!');
+                            } else {
+                              Alert.alert('Still failing', data.reason || 'Try adding more rooms.');
+                            }
+                          } catch (e: any) {
+                            Alert.alert('Error', e.message);
+                          }
+                        }}
+                      >
+                        <Text style={s.retryBtnText}>Retry</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={s.cancelSmBtn}
+                        onPress={() => handleCancelInstance(inst.id)}
+                      >
+                        <Text style={s.cancelSmBtnText}>Cancel</Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
-                ))
+                );
+              })
             )}
           </View>
         )}
       </ScrollView>
-
-      {/* Add Room Modal */}
-      <Modal visible={showAddRoom} transparent animationType="slide">
-        <View style={s.modalOverlay}>
-          <View style={s.modalContent}>
-            <View style={s.modalHeader}>
-              <Text style={s.modalTitle}>Add Zoom Room</Text>
-              <TouchableOpacity onPress={() => setShowAddRoom(false)}>
-                <Icon name="close" size={22} color={TEXT} />
-              </TouchableOpacity>
-            </View>
-            <Text style={s.fieldLabel}>Room Label</Text>
-            <TextInput
-              style={s.input}
-              value={newRoomLabel}
-              onChangeText={setNewRoomLabel}
-              placeholder="e.g., Zoom Room A"
-              placeholderTextColor={MUTED}
-            />
-            <Text style={s.fieldLabel}>Zoom Account Email</Text>
-            <TextInput
-              style={s.input}
-              value={newRoomEmail}
-              onChangeText={setNewRoomEmail}
-              placeholder="e.g., zoom1@goarrive.fit"
-              placeholderTextColor={MUTED}
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-            <TouchableOpacity
-              style={[s.actionBtn, { backgroundColor: GOLD, marginTop: 16 }]}
-              onPress={handleAddRoom}
-              disabled={addingRoom || !newRoomLabel.trim() || !newRoomEmail.trim()}
-            >
-              {addingRoom ? (
-                <ActivityIndicator size="small" color={BG} />
-              ) : (
-                <Text style={s.actionBtnText}>Add Room</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
 
-// ── Status Badge Component ───────────────────────────────────────────────────
+// ── Sub-components ──────────────────────────────────────────────────────────
+
+function SectionHeader({ title, count }: { title: string; count: number }) {
+  return (
+    <View style={s.sectionHeader}>
+      <Text style={s.sectionTitle}>{title}</Text>
+      <Text style={s.sectionCount}>{count}</Text>
+    </View>
+  );
+}
+
+function EmptyCard({ text }: { text: string }) {
+  return (
+    <View style={s.emptyCard}>
+      <Text style={s.emptyText}>{text}</Text>
+    </View>
+  );
+}
+
 function StatusBadge({ status }: { status: string }) {
   const color = STATUS_COLORS[status] || MUTED;
   return (
@@ -547,6 +478,72 @@ function StatusBadge({ status }: { status: string }) {
       <Text style={[s.badgeText, { color }]}>
         {status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
       </Text>
+    </View>
+  );
+}
+
+function SessionCard({
+  inst,
+  onCancel,
+  onToggleCoachJoining,
+  showDate,
+}: {
+  inst: SessionInstance;
+  onCancel: (id: string) => void;
+  onToggleCoachJoining: (inst: SessionInstance) => void;
+  showDate?: boolean;
+}) {
+  const phase = PHASE_DISPLAY[inst.guidancePhase || ''] || null;
+  const sessionLabel = SESSION_TYPE_LABELS[inst.sessionType || ''] || '';
+  const isSharedGuidance = inst.guidancePhase === 'shared_guidance';
+
+  return (
+    <View style={s.sessionCardBase}>
+      <View style={s.sessionRow}>
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={s.sessionMember}>{inst.memberName}</Text>
+            {phase && (
+              <View style={[s.phaseBadge, { backgroundColor: phase.color + '18' }]}>
+                <Text style={[s.phaseBadgeText, { color: phase.color }]}>{phase.label}</Text>
+              </View>
+            )}
+          </View>
+          <Text style={s.sessionTime}>
+            {showDate ? `${inst.scheduledDate} · ` : ''}
+            {formatTime(inst.scheduledStartTime)} – {formatTime(inst.scheduledEndTime)}
+            {sessionLabel ? ` · ${sessionLabel}` : ''}
+          </Text>
+          {inst.zoomRoomLabel && (
+            <Text style={s.roomLabel}>{inst.zoomRoomLabel}</Text>
+          )}
+          {inst.zoomJoinUrl && (
+            <Text style={s.zoomLink} numberOfLines={1}>{inst.zoomJoinUrl}</Text>
+          )}
+        </View>
+        <View style={{ alignItems: 'flex-end', gap: 6 }}>
+          <StatusBadge status={inst.status} />
+          {(inst.status === 'scheduled' || inst.status === 'allocated') && (
+            <TouchableOpacity onPress={() => onCancel(inst.id)} style={s.cancelSmBtn}>
+              <Text style={s.cancelSmBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {/* Shared Guidance toggle */}
+      {isSharedGuidance && (inst.status === 'scheduled' || inst.status === 'allocated') && (
+        <TouchableOpacity
+          style={s.coachToggle}
+          onPress={() => onToggleCoachJoining(inst)}
+        >
+          <View style={[s.toggleDot, inst.coachJoining ? s.toggleDotOn : s.toggleDotOff]} />
+          <Text style={s.toggleText}>
+            {inst.coachJoining ? 'You\'re joining live' : 'Member on their own'}
+          </Text>
+          <Text style={s.toggleHint}>tap to change</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -560,64 +557,88 @@ const s = StyleSheet.create({
 
   headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 10 },
   backBtn: { padding: 6 },
-  pageTitle: { color: WHITE, fontSize: 20, fontWeight: '700', fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined },
-  subtitle: { color: MUTED, fontSize: 13, marginTop: 2, fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined },
+  pageTitle: { color: WHITE, fontSize: 20, fontWeight: '700', fontFamily: FONT },
+  subtitle: { color: MUTED, fontSize: 13, marginTop: 2, fontFamily: FONT },
   betaBadge: { backgroundColor: GOLD + '20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
   betaText: { color: GOLD, fontSize: 10, fontWeight: '700', letterSpacing: 1 },
 
   tabBar: { flexDirection: 'row', marginBottom: 16, gap: 4 },
   tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8, backgroundColor: CARD_BG },
   tabActive: { backgroundColor: GOLD + '20' },
-  tabText: { color: MUTED, fontSize: 13, fontWeight: '600', fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined },
+  tabText: { color: MUTED, fontSize: 13, fontWeight: '600', fontFamily: FONT },
   tabTextActive: { color: GOLD },
 
-  cardRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
-  statCard: { flex: 1, backgroundColor: CARD_BG, borderRadius: 10, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: BORDER },
-  statNumber: { color: WHITE, fontSize: 24, fontWeight: '700' },
-  statLabel: { color: MUTED, fontSize: 11, marginTop: 4, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  legendRow: { flexDirection: 'row', gap: 16, marginBottom: 14, paddingHorizontal: 4 },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  legendDot: { width: 8, height: 8, borderRadius: 4 },
+  legendText: { color: MUTED, fontSize: 11, fontWeight: '600', fontFamily: FONT },
 
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, marginTop: 8 },
-  sectionTitle: { color: WHITE, fontSize: 16, fontWeight: '700', fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined },
-  addLink: { color: GOLD, fontSize: 14, fontWeight: '600' },
+  allocateBar: {
+    backgroundColor: GOLD,
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  allocateBarText: { color: BG, fontSize: 14, fontWeight: '700', fontFamily: FONT },
+
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, marginTop: 12 },
+  sectionTitle: { color: WHITE, fontSize: 16, fontWeight: '700', fontFamily: FONT },
+  sectionCount: { color: MUTED, fontSize: 13, fontWeight: '600' },
 
   emptyCard: { backgroundColor: CARD_BG, borderRadius: 10, padding: 20, borderWidth: 1, borderColor: BORDER, marginBottom: 12 },
-  emptyText: { color: MUTED, fontSize: 14, textAlign: 'center' },
+  emptyText: { color: MUTED, fontSize: 14, textAlign: 'center', fontFamily: FONT },
 
-  sessionCard: { backgroundColor: CARD_BG, borderRadius: 10, padding: 14, borderWidth: 1, borderColor: BORDER, marginBottom: 8 },
-  sessionRow: { flexDirection: 'row', alignItems: 'center' },
-  sessionMember: { color: WHITE, fontSize: 15, fontWeight: '600', fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined },
-  sessionTime: { color: MUTED, fontSize: 13, marginTop: 2 },
+  emptyHero: { alignItems: 'center', paddingVertical: 40, gap: 12 },
+  emptyHeroTitle: { color: WHITE, fontSize: 18, fontWeight: '700', fontFamily: FONT },
+  emptyHeroSub: { color: MUTED, fontSize: 14, textAlign: 'center', maxWidth: 280, lineHeight: 20, fontFamily: FONT },
+  emptyHeroBtn: { backgroundColor: GOLD, borderRadius: 8, paddingHorizontal: 24, paddingVertical: 12, marginTop: 8 },
+  emptyHeroBtnText: { color: BG, fontSize: 14, fontWeight: '700', fontFamily: FONT },
+
+  sessionCardBase: { backgroundColor: CARD_BG, borderRadius: 10, padding: 14, borderWidth: 1, borderColor: BORDER, marginBottom: 8 },
+  sessionRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  sessionMember: { color: WHITE, fontSize: 15, fontWeight: '600', fontFamily: FONT },
+  sessionTime: { color: MUTED, fontSize: 13, marginTop: 3, fontFamily: FONT },
   roomLabel: { color: MUTED, fontSize: 12, marginTop: 4 },
-  zoomLink: { color: '#3B82F6', fontSize: 12, marginTop: 4 },
+  zoomLink: { color: BLUE, fontSize: 12, marginTop: 4 },
 
-  roomCard: { backgroundColor: CARD_BG, borderRadius: 10, padding: 14, borderWidth: 1, borderColor: BORDER, marginBottom: 8 },
-  statusToggle: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
-  statusToggleText: { fontSize: 12, fontWeight: '700' },
+  phaseBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
+  phaseBadgeText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
+  phaseLabel: { fontSize: 12, fontWeight: '600', marginTop: 3 },
 
-  actionRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
-  actionBtn: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-  actionBtnText: { color: BG, fontSize: 14, fontWeight: '700', fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined },
+  memberCard: { backgroundColor: CARD_BG, borderRadius: 10, padding: 14, borderWidth: 1, borderColor: BORDER, marginBottom: 10 },
+  memberName: { color: WHITE, fontSize: 16, fontWeight: '700', marginBottom: 8, fontFamily: FONT },
+  slotRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, borderTopWidth: 1, borderTopColor: BORDER },
+  phaseDot: { width: 8, height: 8, borderRadius: 4 },
+  slotText: { color: TEXT_CLR, fontSize: 14, fontFamily: FONT },
+  slotMeta: { color: MUTED, fontSize: 12, marginTop: 2, fontFamily: FONT },
 
-  cancelBtn: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 4, backgroundColor: RED + '20' },
-  cancelBtnText: { color: RED, fontSize: 11, fontWeight: '600' },
+  alertReason: { color: RED, fontSize: 12, marginTop: 4, fontStyle: 'italic' },
+  alertActions: { flexDirection: 'row', gap: 10, marginTop: 10 },
+  retryBtn: { backgroundColor: GOLD + '20', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6 },
+  retryBtnText: { color: GOLD, fontSize: 12, fontWeight: '700' },
+
+  cancelSmBtn: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 4, backgroundColor: RED + '20' },
+  cancelSmBtnText: { color: RED, fontSize: 11, fontWeight: '600' },
+
+  coachToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: BORDER,
+  },
+  toggleDot: { width: 10, height: 10, borderRadius: 5 },
+  toggleDotOn: { backgroundColor: GREEN },
+  toggleDotOff: { backgroundColor: MUTED },
+  toggleText: { color: TEXT_CLR, fontSize: 12, fontWeight: '600', flex: 1, fontFamily: FONT },
+  toggleHint: { color: MUTED, fontSize: 10, fontStyle: 'italic' },
+
+  moreText: { color: MUTED, fontSize: 13, textAlign: 'center', paddingVertical: 12 },
 
   badge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, gap: 5 },
   badgeDot: { width: 6, height: 6, borderRadius: 3 },
   badgeText: { fontSize: 11, fontWeight: '600', textTransform: 'capitalize' },
-
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: CARD_BG, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20, paddingBottom: 40 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  modalTitle: { color: WHITE, fontSize: 18, fontWeight: '700', fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined },
-  fieldLabel: { color: MUTED, fontSize: 12, fontWeight: '600', marginBottom: 6, marginTop: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
-  input: {
-    backgroundColor: BG,
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 8,
-    padding: 12,
-    color: WHITE,
-    fontSize: 16,
-    fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined,
-  },
 });

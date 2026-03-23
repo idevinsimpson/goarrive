@@ -1503,7 +1503,18 @@ exports.manageZoomRoom = (0, https_1.onCall)({ region: 'us-central1' }, async (r
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
         throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
-    const { action, roomId, roomData } = request.data;
+    const data = request.data;
+    const action = data.action;
+    const roomId = data.roomId;
+    // Support both nested roomData and flat params (from AccountPanel)
+    const roomData = data.roomData || {
+        label: data.label,
+        zoomAccountEmail: data.zoomAccountEmail,
+        zoomUserId: data.zoomUserId,
+        maxConcurrentMeetings: data.maxConcurrentMeetings,
+        notes: data.notes,
+        isPersonal: data.isPersonal,
+    };
     if (!action)
         throw new https_1.HttpsError('invalid-argument', 'action is required');
     // Verify caller is a coach (by checking coaches collection or UID match)
@@ -1513,6 +1524,24 @@ exports.manageZoomRoom = (0, https_1.onCall)({ region: 'us-central1' }, async (r
             throw new https_1.HttpsError('invalid-argument', 'label and zoomAccountEmail are required');
         }
         const roomRef = db.collection('zoom_rooms').doc();
+        // Check if a personal room already exists for this coach (avoid duplicates)
+        if (roomData.isPersonal) {
+            const existingPersonal = await db.collection('zoom_rooms')
+                .where('coachId', '==', coachId)
+                .where('isPersonal', '==', true)
+                .get();
+            if (!existingPersonal.empty) {
+                // Update existing personal room instead of creating a new one
+                const existingRef = existingPersonal.docs[0].ref;
+                await existingRef.update({
+                    label: roomData.label,
+                    zoomAccountEmail: roomData.zoomAccountEmail,
+                    status: 'active',
+                    updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                });
+                return { success: true, roomId: existingPersonal.docs[0].id, updated: true };
+            }
+        }
         const room = {
             coachId,
             label: roomData.label,
@@ -1524,6 +1553,9 @@ exports.manageZoomRoom = (0, https_1.onCall)({ region: 'us-central1' }, async (r
             createdAt: firestore_2.FieldValue.serverTimestamp(),
             updatedAt: firestore_2.FieldValue.serverTimestamp(),
         };
+        // Tag as personal room if specified
+        if (roomData.isPersonal)
+            room.isPersonal = true;
         await roomRef.set(room);
         await writeAuditLog({
             coachId,
@@ -1594,7 +1626,7 @@ exports.createRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
         throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
-    const { memberId, memberName, dayOfWeek, startTime, durationMinutes, timezone, recurrencePattern, effectiveFrom } = request.data;
+    const { memberId, memberName, dayOfWeek, startTime, durationMinutes, timezone, recurrencePattern, effectiveFrom, sessionType, guidancePhase, roomSource, coachJoining } = request.data;
     if (!memberId || dayOfWeek === undefined || !startTime || !durationMinutes || !timezone) {
         throw new https_1.HttpsError('invalid-argument', 'memberId, dayOfWeek, startTime, durationMinutes, and timezone are required');
     }
@@ -1611,6 +1643,11 @@ exports.createRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
     }
     const slotRef = db.collection('recurring_slots').doc();
     const effectiveDate = effectiveFrom ? firestore_2.Timestamp.fromDate(new Date(effectiveFrom)) : firestore_2.Timestamp.now();
+    // Determine room source from guidance phase if not explicitly provided
+    const resolvedRoomSource = roomSource || (guidancePhase === 'coach_guided' ? 'coach_personal' :
+        guidancePhase === 'self_guided' ? 'shared_pool' :
+            'coach_personal' // shared_guidance defaults to coach personal
+    );
     const slot = {
         coachId,
         memberId,
@@ -1625,6 +1662,14 @@ exports.createRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
         createdAt: firestore_2.FieldValue.serverTimestamp(),
         updatedAt: firestore_2.FieldValue.serverTimestamp(),
     };
+    // Add phase-aware fields if provided
+    if (sessionType)
+        slot.sessionType = sessionType;
+    if (guidancePhase)
+        slot.guidancePhase = guidancePhase;
+    slot.roomSource = resolvedRoomSource;
+    if (coachJoining !== undefined)
+        slot.coachJoining = coachJoining;
     await slotRef.set(slot);
     await writeAuditLog({
         coachId,
@@ -1737,7 +1782,7 @@ function generateInstancesForSlot(slot, slotId, daysAhead) {
         const endH = Math.floor(endMinutes / 60) % 24;
         const endM = endMinutes % 60;
         const endTime = `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
-        instances.push({
+        const inst = {
             coachId: slot.coachId,
             memberId: slot.memberId,
             memberName: slot.memberName || 'Unknown',
@@ -1751,7 +1796,17 @@ function generateInstancesForSlot(slot, slotId, daysAhead) {
             allocationAttempts: 0,
             createdAt: firestore_2.FieldValue.serverTimestamp(),
             updatedAt: firestore_2.FieldValue.serverTimestamp(),
-        });
+        };
+        // Propagate phase-aware fields from slot to instance
+        if (slot.sessionType)
+            inst.sessionType = slot.sessionType;
+        if (slot.guidancePhase)
+            inst.guidancePhase = slot.guidancePhase;
+        if (slot.roomSource)
+            inst.roomSource = slot.roomSource;
+        if (slot.coachJoining !== undefined)
+            inst.coachJoining = slot.coachJoining;
+        instances.push(inst);
         current.setDate(current.getDate() + step);
     }
     return instances;
@@ -1807,15 +1862,38 @@ exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1' },
     if (instance.status !== 'scheduled' && instance.status !== 'allocation_failed') {
         throw new https_1.HttpsError('failed-precondition', `Instance is in status "${instance.status}", cannot allocate`);
     }
-    // Get all active Zoom rooms for this coach
-    const roomsSnap = await db.collection('zoom_rooms')
+    // Phase-aware room routing:
+    //   coach_personal → use coach's personal Zoom room (tagged isPersonal: true)
+    //   shared_pool    → round-robin from shared pool rooms (isPersonal !== true)
+    //   (no roomSource) → legacy behavior: try all active rooms
+    const roomSource = instance.roomSource || '';
+    let roomQuery = db.collection('zoom_rooms')
         .where('coachId', '==', callerUid)
-        .where('status', '==', 'active')
-        .get();
-    if (roomsSnap.empty) {
+        .where('status', '==', 'active');
+    const roomsSnap = await roomQuery.get();
+    // Filter rooms based on roomSource
+    let candidateRooms = roomsSnap.docs;
+    if (roomSource === 'coach_personal') {
+        // Prefer rooms tagged as personal; fall back to all if none tagged
+        const personalRooms = candidateRooms.filter(d => d.data().isPersonal === true);
+        if (personalRooms.length > 0)
+            candidateRooms = personalRooms;
+    }
+    else if (roomSource === 'shared_pool') {
+        // Prefer rooms NOT tagged as personal; fall back to all if none
+        const poolRooms = candidateRooms.filter(d => d.data().isPersonal !== true);
+        if (poolRooms.length > 0)
+            candidateRooms = poolRooms;
+    }
+    if (candidateRooms.length === 0) {
+        const reason = roomSource === 'coach_personal'
+            ? 'No personal Zoom room configured. Add your Zoom in Settings.'
+            : roomSource === 'shared_pool'
+                ? 'No shared pool rooms available.'
+                : 'No active Zoom rooms available.';
         await instanceRef.update({
             status: 'allocation_failed',
-            allocationFailReason: 'No active Zoom rooms available',
+            allocationFailReason: reason,
             allocationAttempts: (instance.allocationAttempts || 0) + 1,
             updatedAt: firestore_2.FieldValue.serverTimestamp(),
         });
@@ -1823,16 +1901,16 @@ exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1' },
             coachId: callerUid,
             action: 'allocation_failed',
             sessionInstanceId: instanceId,
-            details: 'No active Zoom rooms available for this coach',
+            details: reason,
         });
-        return { success: false, reason: 'No active Zoom rooms available' };
+        return { success: false, reason };
     }
-    // Check each room for conflicts at the same date/time
+    // Check each candidate room for conflicts at the same date/time
     const scheduledDate = instance.scheduledDate;
     const scheduledStartTime = instance.scheduledStartTime;
     const scheduledEndTime = instance.scheduledEndTime;
     let allocatedRoom = null;
-    for (const roomDoc of roomsSnap.docs) {
+    for (const roomDoc of candidateRooms) {
         const room = roomDoc.data();
         // Check for overlapping instances already allocated to this room
         const conflictsSnap = await db.collection('session_instances')
@@ -1843,7 +1921,6 @@ exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1' },
         let hasConflict = false;
         for (const conflictDoc of conflictsSnap.docs) {
             const conflict = conflictDoc.data();
-            // Check time overlap: new session overlaps if it starts before existing ends AND ends after existing starts
             if (scheduledStartTime < conflict.scheduledEndTime && scheduledEndTime > conflict.scheduledStartTime) {
                 hasConflict = true;
                 await writeAuditLog({
@@ -1864,7 +1941,7 @@ exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1' },
     if (!allocatedRoom) {
         await instanceRef.update({
             status: 'allocation_failed',
-            allocationFailReason: 'All Zoom rooms have conflicts at this time',
+            allocationFailReason: 'All candidate Zoom rooms have conflicts at this time',
             allocationAttempts: (instance.allocationAttempts || 0) + 1,
             updatedAt: firestore_2.FieldValue.serverTimestamp(),
         });
@@ -1872,9 +1949,9 @@ exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1' },
             coachId: callerUid,
             action: 'allocation_failed',
             sessionInstanceId: instanceId,
-            details: `All ${roomsSnap.size} rooms have conflicts at ${scheduledDate} ${scheduledStartTime}`,
+            details: `All ${candidateRooms.length} candidate rooms (source: ${roomSource || 'any'}) have conflicts at ${scheduledDate} ${scheduledStartTime}`,
         });
-        return { success: false, reason: 'All Zoom rooms have conflicts at this time' };
+        return { success: false, reason: 'All candidate Zoom rooms have conflicts at this time' };
     }
     // Create a mock Zoom meeting (or real one when provider is activated)
     const memberName = instance.memberName || 'Member';

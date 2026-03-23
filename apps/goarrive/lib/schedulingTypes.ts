@@ -35,6 +35,43 @@ export interface ZoomRoom {
   notes?: string;                   // Admin notes
 }
 
+// ─── Guidance Phase & Room Source ────────────────────────────────────────────
+
+/**
+ * GuidancePhase maps to the three plan phases:
+ *   - coach_guided   = Phase 1 (Fully Guided)  → always uses coach's personal Zoom
+ *   - shared_guidance = Phase 2 (Blended)       → coach toggles per session: personal or pool
+ *   - self_guided     = Phase 3 (Self-Reliant)  → always uses shared round-robin pool
+ */
+export type GuidancePhase = 'coach_guided' | 'shared_guidance' | 'self_guided';
+
+/**
+ * RoomSource determines which Zoom account hosts the meeting:
+ *   - coach_personal = Coach's own Zoom account (1:1 with the member)
+ *   - shared_pool    = Round-robin from the shared Zoom room pool
+ */
+export type RoomSource = 'coach_personal' | 'shared_pool';
+
+export type ScheduleSessionType = 'Strength' | 'Cardio + Mobility' | 'Mix';
+
+export const GUIDANCE_PHASE_LABELS: Record<GuidancePhase, string> = {
+  coach_guided: 'Coach Guided',
+  shared_guidance: 'Shared Guidance',
+  self_guided: 'Self Guided',
+};
+
+export const ROOM_SOURCE_LABELS: Record<RoomSource, string> = {
+  coach_personal: 'Your Zoom',
+  shared_pool: 'Shared Room',
+};
+
+/** Determines the default room source for a guidance phase */
+export function defaultRoomSource(phase: GuidancePhase): RoomSource {
+  if (phase === 'coach_guided') return 'coach_personal';
+  if (phase === 'self_guided') return 'shared_pool';
+  return 'coach_personal'; // shared_guidance defaults to coach, but toggleable
+}
+
 // ─── Recurring Slot ──────────────────────────────────────────────────────────
 
 export type RecurrencePattern = 'weekly' | 'biweekly';
@@ -54,6 +91,13 @@ export interface RecurringSlot {
   status: SlotStatus;
   effectiveFrom: Timestamp;         // When this slot starts generating instances
   effectiveUntil?: Timestamp;       // Optional end date
+
+  // Phase-aware scheduling fields
+  sessionType?: ScheduleSessionType;  // What kind of session (Strength, Cardio, Mix)
+  guidancePhase?: GuidancePhase;      // Which plan phase this slot belongs to
+  roomSource?: RoomSource;            // Where the Zoom meeting comes from
+  coachJoining?: boolean;             // For shared_guidance: is the coach joining this session?
+
   createdAt: Timestamp;
   updatedAt: Timestamp;
   notes?: string;
@@ -83,6 +127,12 @@ export interface SessionInstance {
   durationMinutes: number;
   timezone: string;
   status: InstanceStatus;
+
+  // Phase-aware scheduling fields
+  sessionType?: ScheduleSessionType;  // Inherited from slot
+  guidancePhase?: GuidancePhase;      // Inherited from slot
+  roomSource?: RoomSource;            // Inherited from slot (can be overridden per instance)
+  coachJoining?: boolean;             // For shared_guidance: coach toggled on/off for this instance
 
   // Allocation fields
   zoomRoomId?: string;              // Assigned Zoom room doc ID

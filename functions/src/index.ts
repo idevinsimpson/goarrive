@@ -1771,16 +1771,17 @@ export const manageZoomRoom = onCall(
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
 
-    const { action, roomId, roomData } = request.data as {
-      action: 'add' | 'update' | 'deactivate' | 'activate';
-      roomId?: string;
-      roomData?: {
-        label?: string;
-        zoomAccountEmail?: string;
-        zoomUserId?: string;
-        maxConcurrentMeetings?: number;
-        notes?: string;
-      };
+    const data = request.data as Record<string, any>;
+    const action = data.action as 'add' | 'update' | 'deactivate' | 'activate';
+    const roomId = data.roomId as string | undefined;
+    // Support both nested roomData and flat params (from AccountPanel)
+    const roomData = data.roomData || {
+      label: data.label,
+      zoomAccountEmail: data.zoomAccountEmail,
+      zoomUserId: data.zoomUserId,
+      maxConcurrentMeetings: data.maxConcurrentMeetings,
+      notes: data.notes,
+      isPersonal: data.isPersonal,
     };
 
     if (!action) throw new HttpsError('invalid-argument', 'action is required');
@@ -1794,7 +1795,26 @@ export const manageZoomRoom = onCall(
       }
 
       const roomRef = db.collection('zoom_rooms').doc();
-      const room = {
+      // Check if a personal room already exists for this coach (avoid duplicates)
+      if (roomData.isPersonal) {
+        const existingPersonal = await db.collection('zoom_rooms')
+          .where('coachId', '==', coachId)
+          .where('isPersonal', '==', true)
+          .get();
+        if (!existingPersonal.empty) {
+          // Update existing personal room instead of creating a new one
+          const existingRef = existingPersonal.docs[0].ref;
+          await existingRef.update({
+            label: roomData.label,
+            zoomAccountEmail: roomData.zoomAccountEmail,
+            status: 'active',
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+          return { success: true, roomId: existingPersonal.docs[0].id, updated: true };
+        }
+      }
+
+      const room: Record<string, any> = {
         coachId,
         label: roomData.label,
         zoomAccountEmail: roomData.zoomAccountEmail,
@@ -1805,6 +1825,9 @@ export const manageZoomRoom = onCall(
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       };
+
+      // Tag as personal room if specified
+      if (roomData.isPersonal) room.isPersonal = true;
 
       await roomRef.set(room);
 
@@ -1888,7 +1911,7 @@ export const createRecurringSlot = onCall(
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
 
-    const { memberId, memberName, dayOfWeek, startTime, durationMinutes, timezone, recurrencePattern, effectiveFrom } = request.data as {
+    const { memberId, memberName, dayOfWeek, startTime, durationMinutes, timezone, recurrencePattern, effectiveFrom, sessionType, guidancePhase, roomSource, coachJoining } = request.data as {
       memberId: string;
       memberName: string;
       dayOfWeek: number;
@@ -1897,6 +1920,10 @@ export const createRecurringSlot = onCall(
       timezone: string;
       recurrencePattern?: 'weekly' | 'biweekly';
       effectiveFrom?: string; // ISO date string
+      sessionType?: 'Strength' | 'Cardio + Mobility' | 'Mix';
+      guidancePhase?: 'coach_guided' | 'shared_guidance' | 'self_guided';
+      roomSource?: 'coach_personal' | 'shared_pool';
+      coachJoining?: boolean;
     };
 
     if (!memberId || dayOfWeek === undefined || !startTime || !durationMinutes || !timezone) {
@@ -1919,7 +1946,14 @@ export const createRecurringSlot = onCall(
     const slotRef = db.collection('recurring_slots').doc();
     const effectiveDate = effectiveFrom ? Timestamp.fromDate(new Date(effectiveFrom)) : Timestamp.now();
 
-    const slot = {
+    // Determine room source from guidance phase if not explicitly provided
+    const resolvedRoomSource = roomSource || (
+      guidancePhase === 'coach_guided' ? 'coach_personal' :
+      guidancePhase === 'self_guided' ? 'shared_pool' :
+      'coach_personal' // shared_guidance defaults to coach personal
+    );
+
+    const slot: Record<string, any> = {
       coachId,
       memberId,
       memberName: memberName || memberSnap.data()!.name || 'Unknown',
@@ -1933,6 +1967,12 @@ export const createRecurringSlot = onCall(
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     };
+
+    // Add phase-aware fields if provided
+    if (sessionType) slot.sessionType = sessionType;
+    if (guidancePhase) slot.guidancePhase = guidancePhase;
+    slot.roomSource = resolvedRoomSource;
+    if (coachJoining !== undefined) slot.coachJoining = coachJoining;
 
     await slotRef.set(slot);
 
@@ -2080,7 +2120,7 @@ function generateInstancesForSlot(
     const endM = endMinutes % 60;
     const endTime = `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
 
-    instances.push({
+    const inst: Record<string, any> = {
       coachId: slot.coachId,
       memberId: slot.memberId,
       memberName: slot.memberName || 'Unknown',
@@ -2094,7 +2134,15 @@ function generateInstancesForSlot(
       allocationAttempts: 0,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
-    });
+    };
+
+    // Propagate phase-aware fields from slot to instance
+    if (slot.sessionType) inst.sessionType = slot.sessionType;
+    if (slot.guidancePhase) inst.guidancePhase = slot.guidancePhase;
+    if (slot.roomSource) inst.roomSource = slot.roomSource;
+    if (slot.coachJoining !== undefined) inst.coachJoining = slot.coachJoining;
+
+    instances.push(inst);
 
     current.setDate(current.getDate() + step);
   }
@@ -2169,16 +2217,40 @@ export const allocateSessionInstance = onCall(
       throw new HttpsError('failed-precondition', `Instance is in status "${instance.status}", cannot allocate`);
     }
 
-    // Get all active Zoom rooms for this coach
-    const roomsSnap = await db.collection('zoom_rooms')
-      .where('coachId', '==', callerUid)
-      .where('status', '==', 'active')
-      .get();
+    // Phase-aware room routing:
+    //   coach_personal → use coach's personal Zoom room (tagged isPersonal: true)
+    //   shared_pool    → round-robin from shared pool rooms (isPersonal !== true)
+    //   (no roomSource) → legacy behavior: try all active rooms
+    const roomSource = (instance.roomSource as string) || '';
 
-    if (roomsSnap.empty) {
+    let roomQuery = db.collection('zoom_rooms')
+      .where('coachId', '==', callerUid)
+      .where('status', '==', 'active');
+
+    const roomsSnap = await roomQuery.get();
+
+    // Filter rooms based on roomSource
+    let candidateRooms = roomsSnap.docs;
+    if (roomSource === 'coach_personal') {
+      // Prefer rooms tagged as personal; fall back to all if none tagged
+      const personalRooms = candidateRooms.filter(d => d.data().isPersonal === true);
+      if (personalRooms.length > 0) candidateRooms = personalRooms;
+    } else if (roomSource === 'shared_pool') {
+      // Prefer rooms NOT tagged as personal; fall back to all if none
+      const poolRooms = candidateRooms.filter(d => d.data().isPersonal !== true);
+      if (poolRooms.length > 0) candidateRooms = poolRooms;
+    }
+
+    if (candidateRooms.length === 0) {
+      const reason = roomSource === 'coach_personal'
+        ? 'No personal Zoom room configured. Add your Zoom in Settings.'
+        : roomSource === 'shared_pool'
+        ? 'No shared pool rooms available.'
+        : 'No active Zoom rooms available.';
+
       await instanceRef.update({
         status: 'allocation_failed',
-        allocationFailReason: 'No active Zoom rooms available',
+        allocationFailReason: reason,
         allocationAttempts: (instance.allocationAttempts || 0) + 1,
         updatedAt: FieldValue.serverTimestamp(),
       });
@@ -2187,20 +2259,20 @@ export const allocateSessionInstance = onCall(
         coachId: callerUid,
         action: 'allocation_failed',
         sessionInstanceId: instanceId,
-        details: 'No active Zoom rooms available for this coach',
+        details: reason,
       });
 
-      return { success: false, reason: 'No active Zoom rooms available' };
+      return { success: false, reason };
     }
 
-    // Check each room for conflicts at the same date/time
+    // Check each candidate room for conflicts at the same date/time
     const scheduledDate = instance.scheduledDate as string;
     const scheduledStartTime = instance.scheduledStartTime as string;
     const scheduledEndTime = instance.scheduledEndTime as string;
 
     let allocatedRoom: any = null;
 
-    for (const roomDoc of roomsSnap.docs) {
+    for (const roomDoc of candidateRooms) {
       const room = roomDoc.data();
 
       // Check for overlapping instances already allocated to this room
@@ -2213,7 +2285,6 @@ export const allocateSessionInstance = onCall(
       let hasConflict = false;
       for (const conflictDoc of conflictsSnap.docs) {
         const conflict = conflictDoc.data();
-        // Check time overlap: new session overlaps if it starts before existing ends AND ends after existing starts
         if (scheduledStartTime < conflict.scheduledEndTime && scheduledEndTime > conflict.scheduledStartTime) {
           hasConflict = true;
 
@@ -2238,7 +2309,7 @@ export const allocateSessionInstance = onCall(
     if (!allocatedRoom) {
       await instanceRef.update({
         status: 'allocation_failed',
-        allocationFailReason: 'All Zoom rooms have conflicts at this time',
+        allocationFailReason: 'All candidate Zoom rooms have conflicts at this time',
         allocationAttempts: (instance.allocationAttempts || 0) + 1,
         updatedAt: FieldValue.serverTimestamp(),
       });
@@ -2247,10 +2318,10 @@ export const allocateSessionInstance = onCall(
         coachId: callerUid,
         action: 'allocation_failed',
         sessionInstanceId: instanceId,
-        details: `All ${roomsSnap.size} rooms have conflicts at ${scheduledDate} ${scheduledStartTime}`,
+        details: `All ${candidateRooms.length} candidate rooms (source: ${roomSource || 'any'}) have conflicts at ${scheduledDate} ${scheduledStartTime}`,
       });
 
-      return { success: false, reason: 'All Zoom rooms have conflicts at this time' };
+      return { success: false, reason: 'All candidate Zoom rooms have conflicts at this time' };
     }
 
     // Create a mock Zoom meeting (or real one when provider is activated)
