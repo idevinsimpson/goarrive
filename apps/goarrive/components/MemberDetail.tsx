@@ -37,9 +37,6 @@ import {
   Alert,
   ActivityIndicator,
   Dimensions,
-  PanResponder,
-  type GestureResponderEvent,
-  type PanResponderGestureState,
 } from 'react-native';
 import { db, functions } from '../lib/firebase';
 import { doc, onSnapshot, collection, query, where, getDocs, getDoc } from 'firebase/firestore';
@@ -59,7 +56,7 @@ const BORDER = '#1E2A3A';
 const MUTED = '#8A95A3';
 const GOLD = '#F5A623';
 const GREEN = '#6EBB7A';
-const BLUE = '#7DD3FC';
+const BLUE = '#5B9BD5';
 const RED = '#E05252';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -112,11 +109,11 @@ const INTENSITY_TO_PHASE: Record<string, GuidancePhase> = {
   'Self-Reliant': 'self_guided',
 };
 
-// Phase colors for scheduling UI
+// Phase colors for scheduling UI — matches planTypes.ts phaseColors
 const SCHED_PHASE_COLORS: Record<GuidancePhase, string> = {
   coach_guided: GREEN,
-  shared_guidance: GOLD,
-  self_guided: '#7DD3FC',
+  shared_guidance: '#5B9BD5',
+  self_guided: '#FFC000',
 };
 
 const SCHED_PHASE_LABELS: Record<GuidancePhase, string> = {
@@ -131,7 +128,7 @@ interface DayTimeEntry {
   startTime: string;
 }
 
-// ── Dual-Handle Range Slider ────────────────────────────────────────────────
+// ── Dual-Handle Range Slider (web-native pointer events for smooth dragging) ─
 function DualHandleSlider({
   totalMinutes,
   liveStart,
@@ -145,41 +142,91 @@ function DualHandleSlider({
   onChangeStart: (v: number) => void;
   onChangeEnd: (v: number) => void;
 }) {
+  const trackRef = useRef<View>(null);
+  const trackLeft = useRef(0);
+  const dragType = useRef<'left' | 'right' | 'middle' | null>(null);
+  const dragStartX = useRef(0);
+  const dragStartLiveStart = useRef(0);
+  const dragStartLiveEnd = useRef(0);
+
   const trackWidth = SLIDER_TRACK_WIDTH;
   const minToX = (min: number) => (min / totalMinutes) * trackWidth;
   const xToMin = (x: number) => {
     const raw = (x / trackWidth) * totalMinutes;
-    return Math.round(raw / STEP) * STEP;
+    return Math.max(0, Math.min(Math.round(raw / STEP) * STEP, totalMinutes));
   };
 
-  const leftOffset = useRef(0);
-  const rightOffset = useRef(0);
+  // Measure track position on mount and layout changes
+  const measureTrack = useCallback(() => {
+    if (Platform.OS === 'web' && trackRef.current) {
+      const el = trackRef.current as any;
+      if (el.getBoundingClientRect) {
+        trackLeft.current = el.getBoundingClientRect().left;
+      } else if (el.measure) {
+        el.measure((_x: number, _y: number, _w: number, _h: number, px: number) => {
+          trackLeft.current = px;
+        });
+      }
+    }
+  }, []);
 
-  const leftPan = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: () => true,
-    onPanResponderGrant: () => {
-      leftOffset.current = minToX(liveStart);
-    },
-    onPanResponderMove: (_: GestureResponderEvent, gs: PanResponderGestureState) => {
-      const newX = Math.max(0, Math.min(leftOffset.current + gs.dx, minToX(liveEnd) - minToX(STEP)));
-      const newMin = Math.max(0, Math.min(xToMin(newX), liveEnd - STEP));
-      onChangeStart(newMin);
-    },
-  }), [totalMinutes, liveStart, liveEnd]);
+  const getPointerX = useCallback((e: any): number => {
+    if (e.clientX !== undefined) return e.clientX;
+    if (e.nativeEvent?.pageX !== undefined) return e.nativeEvent.pageX;
+    if (e.touches?.[0]?.clientX !== undefined) return e.touches[0].clientX;
+    return 0;
+  }, []);
 
-  const rightPan = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: () => true,
-    onPanResponderGrant: () => {
-      rightOffset.current = minToX(liveEnd);
-    },
-    onPanResponderMove: (_: GestureResponderEvent, gs: PanResponderGestureState) => {
-      const newX = Math.max(minToX(liveStart) + minToX(STEP), Math.min(rightOffset.current + gs.dx, trackWidth));
-      const newMin = Math.max(liveStart + STEP, Math.min(xToMin(newX), totalMinutes));
-      onChangeEnd(newMin);
-    },
-  }), [totalMinutes, liveStart, liveEnd]);
+  const handlePointerDown = useCallback((type: 'left' | 'right' | 'middle') => (e: any) => {
+    e.preventDefault?.();
+    e.stopPropagation?.();
+    measureTrack();
+    dragType.current = type;
+    dragStartX.current = getPointerX(e);
+    dragStartLiveStart.current = liveStart;
+    dragStartLiveEnd.current = liveEnd;
+
+    const onMove = (ev: any) => {
+      ev.preventDefault?.();
+      const clientX = ev.clientX ?? ev.touches?.[0]?.clientX ?? 0;
+      const dx = clientX - dragStartX.current;
+      const dMin = xToMin(Math.abs(dx)) * (dx < 0 ? -1 : 1);
+
+      if (dragType.current === 'left') {
+        const newStart = Math.max(0, Math.min(dragStartLiveStart.current + dMin, dragStartLiveEnd.current - STEP));
+        const snapped = Math.round(newStart / STEP) * STEP;
+        onChangeStart(Math.max(0, Math.min(snapped, liveEnd - STEP)));
+      } else if (dragType.current === 'right') {
+        const newEnd = Math.max(dragStartLiveStart.current + STEP, Math.min(dragStartLiveEnd.current + dMin, totalMinutes));
+        const snapped = Math.round(newEnd / STEP) * STEP;
+        onChangeEnd(Math.max(liveStart + STEP, Math.min(snapped, totalMinutes)));
+      } else if (dragType.current === 'middle') {
+        const duration = dragStartLiveEnd.current - dragStartLiveStart.current;
+        let newStart = dragStartLiveStart.current + dMin;
+        newStart = Math.round(newStart / STEP) * STEP;
+        newStart = Math.max(0, Math.min(newStart, totalMinutes - duration));
+        onChangeStart(newStart);
+        onChangeEnd(newStart + duration);
+      }
+    };
+
+    const onUp = () => {
+      dragType.current = null;
+      if (Platform.OS === 'web') {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('touchmove', onMove);
+        window.removeEventListener('touchend', onUp);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      window.addEventListener('pointermove', onMove, { passive: false });
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('touchmove', onMove, { passive: false });
+      window.addEventListener('touchend', onUp);
+    }
+  }, [liveStart, liveEnd, totalMinutes, measureTrack, getPointerX, onChangeStart, onChangeEnd]);
 
   const leftX = minToX(liveStart);
   const rightX = minToX(liveEnd);
@@ -211,19 +258,28 @@ function DualHandleSlider({
       </View>
 
       {/* Track */}
-      <View style={[sl.track, { width: trackWidth }]}>
+      <View
+        ref={trackRef}
+        onLayout={measureTrack}
+        style={[sl.track, { width: trackWidth }]}
+      >
         {/* Self-guided left zone */}
         {selfLeftWidth > 0 && (
           <View style={[sl.zoneSelf, { width: selfLeftWidth, borderTopLeftRadius: 8, borderBottomLeftRadius: 8 }]} />
         )}
-        {/* Live coaching zone */}
-        <View style={[sl.zoneLive, {
-          width: Math.max(liveWidth, 4),
-          borderTopLeftRadius: selfLeftWidth === 0 ? 8 : 0,
-          borderBottomLeftRadius: selfLeftWidth === 0 ? 8 : 0,
-          borderTopRightRadius: selfRightWidth === 0 ? 8 : 0,
-          borderBottomRightRadius: selfRightWidth === 0 ? 8 : 0,
-        }]} />
+        {/* Live coaching zone — draggable as a whole */}
+        <View
+          onPointerDown={handlePointerDown('middle')}
+          onTouchStart={handlePointerDown('middle')}
+          style={[sl.zoneLive, {
+            width: Math.max(liveWidth, 4),
+            borderTopLeftRadius: selfLeftWidth === 0 ? 8 : 0,
+            borderBottomLeftRadius: selfLeftWidth === 0 ? 8 : 0,
+            borderTopRightRadius: selfRightWidth === 0 ? 8 : 0,
+            borderBottomRightRadius: selfRightWidth === 0 ? 8 : 0,
+            ...(Platform.OS === 'web' ? { cursor: 'grab' } : {}),
+          }]}
+        />
         {/* Self-guided right zone */}
         {selfRightWidth > 0 && (
           <View style={[sl.zoneSelf, { width: selfRightWidth, borderTopRightRadius: 8, borderBottomRightRadius: 8 }]} />
@@ -231,7 +287,8 @@ function DualHandleSlider({
 
         {/* Left handle */}
         <View
-          {...leftPan.panHandlers}
+          onPointerDown={handlePointerDown('left')}
+          onTouchStart={handlePointerDown('left')}
           style={[sl.handle, { left: leftX - HANDLE_SIZE / 2 }]}
         >
           <View style={sl.handleInner}>
@@ -242,7 +299,8 @@ function DualHandleSlider({
 
         {/* Right handle */}
         <View
-          {...rightPan.panHandlers}
+          onPointerDown={handlePointerDown('right')}
+          onTouchStart={handlePointerDown('right')}
           style={[sl.handle, { left: rightX - HANDLE_SIZE / 2 }]}
         >
           <View style={sl.handleInner}>
@@ -261,9 +319,6 @@ function DualHandleSlider({
 
       {/* Summary text */}
       <View style={sl.summaryRow}>
-        <Text style={sl.summaryText}>
-          Coach joins at {liveStart}min, leaves at {liveEnd}min
-        </Text>
         <Text style={sl.summaryHighlight}>
           {liveDuration} min on your calendar
         </Text>
@@ -302,22 +357,34 @@ export default function MemberDetail({
   const [selectedPhase, setSelectedPhase] = useState<GuidancePhase>('coach_guided');
   const [creating, setCreating] = useState(false);
 
-  // Shared Guidance: dual-handle live coaching window (in minutes from session start)
-  const [liveStart, setLiveStart] = useState(0);
-  const [liveEnd, setLiveEnd] = useState(30);
+  // Shared Guidance Window: dual-handle live coaching window (in minutes from session start)
+  // Defaults to centered — equal solo time on both sides
+  const [liveStart, setLiveStart] = useState(Math.round((selectedDuration * 0.25) / STEP) * STEP);
+  const [liveEnd, setLiveEnd] = useState(Math.round((selectedDuration * 0.75) / STEP) * STEP);
 
-  // Keep live window within duration when duration changes
+  // Keep live window within duration when duration changes, re-center if needed
   useEffect(() => {
-    if (liveEnd > selectedDuration) {
-      setLiveEnd(selectedDuration);
-    }
-    if (liveStart >= selectedDuration) {
-      setLiveStart(Math.max(0, selectedDuration - STEP));
-    }
-    if (liveStart >= liveEnd) {
-      setLiveStart(Math.max(0, liveEnd - STEP));
+    const quarter = Math.round((selectedDuration * 0.25) / STEP) * STEP;
+    const threeQuarter = Math.round((selectedDuration * 0.75) / STEP) * STEP;
+    if (liveEnd > selectedDuration || liveStart >= selectedDuration || liveStart >= liveEnd) {
+      // Re-center when duration shrinks below current window
+      setLiveStart(quarter);
+      setLiveEnd(threeQuarter);
     }
   }, [selectedDuration]);
+
+  // Default duration from plan's sessionLengthMinutes (on plan load)
+  useEffect(() => {
+    if (memberPlan?.pricing?.sessionLengthMinutes) {
+      const planDuration = memberPlan.pricing.sessionLengthMinutes;
+      if (DURATION_OPTIONS.includes(planDuration)) {
+        setSelectedDuration(planDuration);
+        // Re-center the slider for the new duration
+        setLiveStart(Math.round((planDuration * 0.25) / STEP) * STEP);
+        setLiveEnd(Math.round((planDuration * 0.75) / STEP) * STEP);
+      }
+    }
+  }, [memberPlan]);
 
   // ── Load member data ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -801,7 +868,7 @@ export default function MemberDetail({
                 <View style={s.schedSection}>
                   <Text style={s.schedSectionTitle}>Current Slots</Text>
                   {activeSlots.map(slot => {
-                    const phaseColors: Record<string, string> = { coach_guided: GREEN, shared_guidance: GOLD, self_guided: '#7DD3FC' };
+                    const phaseColors: Record<string, string> = { coach_guided: GREEN, shared_guidance: '#5B9BD5', self_guided: '#FFC000' };
                     const phaseLabels: Record<string, string> = { coach_guided: 'Coach Guided', shared_guidance: 'Shared Guidance', self_guided: 'Self Guided' };
                     const stLabel = slot.sessionType === 'check_in' ? 'Check-in' : (slot.sessionType || '').charAt(0).toUpperCase() + (slot.sessionType || '').slice(1);
                     return (
@@ -891,8 +958,8 @@ export default function MemberDetail({
                 <View style={s.dayRow}>
                   {([
                     { key: 'coach_guided' as GuidancePhase, label: 'Coach Guided', color: GREEN },
-                    { key: 'shared_guidance' as GuidancePhase, label: 'Shared Guidance', color: GOLD },
-                    { key: 'self_guided' as GuidancePhase, label: 'Self Guided', color: '#7DD3FC' },
+                    { key: 'shared_guidance' as GuidancePhase, label: 'Shared Guidance', color: '#5B9BD5' },
+                    { key: 'self_guided' as GuidancePhase, label: 'Self Guided', color: '#FFC000' },
                   ] as const).map(phase => {
                     const weekCount = phaseWeekMap[phase.key];
                     return (
@@ -936,22 +1003,20 @@ export default function MemberDetail({
                   </Text>
                 </View>
 
-                {/* ── Shared Guidance: Dual-Handle Live Coaching Slider ────── */}
-                {selectedPhase === 'shared_guidance' && (
-                  <View style={s.sliderSection}>
-                    <Text style={s.fieldLabel}>Live Coaching Window</Text>
-                    <Text style={s.fieldHint}>
-                      Drag the handles to set when you join and leave the session. The time between the handles is your live coaching — that's what goes on your calendar.
-                    </Text>
-                    <DualHandleSlider
-                      totalMinutes={selectedDuration}
-                      liveStart={liveStart}
-                      liveEnd={liveEnd}
-                      onChangeStart={setLiveStart}
-                      onChangeEnd={setLiveEnd}
-                    />
-                  </View>
-                )}
+                {/* ── Shared Guidance Window (always visible) ──────────────── */}
+                <View style={s.sliderSection}>
+                  <Text style={s.fieldLabel}>Shared Guidance Window</Text>
+                  <Text style={s.fieldHint}>
+                    Drag the handles to set when you'll be guiding your member
+                  </Text>
+                  <DualHandleSlider
+                    totalMinutes={selectedDuration}
+                    liveStart={liveStart}
+                    liveEnd={liveEnd}
+                    onChangeStart={setLiveStart}
+                    onChangeEnd={setLiveEnd}
+                  />
+                </View>
 
                 {/* ── Multi-Day Selector ─────────────────────────────────────── */}
                 <Text style={s.fieldLabel}>Days & Times</Text>
@@ -1185,6 +1250,7 @@ const sl = StyleSheet.create({
     borderRadius: 8,
     overflow: 'visible',
     position: 'relative',
+    ...(Platform.OS === 'web' ? { touchAction: 'none', userSelect: 'none' } as any : {}),
   },
   zoneSelf: {
     height: 24,
@@ -1196,6 +1262,7 @@ const sl = StyleSheet.create({
     borderTopWidth: 2,
     borderBottomWidth: 2,
     borderColor: GOLD,
+    ...(Platform.OS === 'web' ? { touchAction: 'none', cursor: 'grab' } as any : {}),
   },
   handle: {
     position: 'absolute',
@@ -1207,7 +1274,7 @@ const sl = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     ...(Platform.OS === 'web'
-      ? { cursor: 'grab', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }
+      ? { cursor: 'grab', boxShadow: '0 2px 6px rgba(0,0,0,0.4)', touchAction: 'none', userSelect: 'none' } as any
       : { elevation: 4 }
     ),
     zIndex: 10,
@@ -1236,11 +1303,6 @@ const sl = StyleSheet.create({
     alignItems: 'center',
     marginTop: 10,
     gap: 2,
-  },
-  summaryText: {
-    fontSize: 12,
-    color: MUTED,
-    fontFamily: FB,
   },
   summaryHighlight: {
     fontSize: 13,
