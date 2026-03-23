@@ -560,14 +560,25 @@ export function PlanView({ plan, isCoach, onChange, onAccept }: {
       breakdown: [],
     };
     const newSessionCount = newSchedule.filter(d => d.isSession && d.type !== 'Rest').length as SessionsPerWeek;
-    onChange({ weeklySchedule: newSchedule, sessionsPerWeek: newSessionCount });
+    const updatedIncluded = (plan.whatsIncluded || []).map(item =>
+      /^\d+ coaching sessions? per week$/i.test(item)
+        ? `${newSessionCount} coaching sessions per week`
+        : item
+    );
+    onChange({ weeklySchedule: newSchedule, sessionsPerWeek: newSessionCount, whatsIncluded: updatedIncluded });
   };
 
   // Handle sessions per week slider change
   const handleSessionsChange = (count: number) => {
     const clamped = Math.max(2, Math.min(6, count)) as SessionsPerWeek;
     const newSchedule = createDefaultSchedule(clamped);
-    onChange({ sessionsPerWeek: clamped, weeklySchedule: newSchedule });
+    // Update whatsIncluded to reflect new session count
+    const updatedIncluded = (plan.whatsIncluded || []).map(item =>
+      /^\d+ coaching sessions? per week$/i.test(item)
+        ? `${clamped} coaching sessions per week`
+        : item
+    );
+    onChange({ sessionsPerWeek: clamped, weeklySchedule: newSchedule, whatsIncluded: updatedIncluded });
   };
 
   // Handle phase duration change
@@ -1920,7 +1931,12 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
               <ButtonGroup options={[2, 3, 4, 5, 6] as number[]} value={plan.sessionsPerWeek} onChange={(v) => {
                 const clamped = v as SessionsPerWeek;
                 const newSchedule = createDefaultSchedule(clamped);
-                onChange({ sessionsPerWeek: clamped, weeklySchedule: newSchedule });
+                const updatedIncluded = (plan.whatsIncluded || []).map(item =>
+                  /^\d+ coaching sessions? per week$/i.test(item)
+                    ? `${clamped} coaching sessions per week`
+                    : item
+                );
+                onChange({ sessionsPerWeek: clamped, weeklySchedule: newSchedule, whatsIncluded: updatedIncluded });
               }} />
             </View>
 
