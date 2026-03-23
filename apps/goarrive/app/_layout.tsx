@@ -26,10 +26,11 @@ export default function RootLayout() {
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(app)" />
         <Stack.Screen name="(member)" />
-        <Stack.Screen name="intake" />
+        <Stack.Screen name="intake/index" />
+        <Stack.Screen name="intake/[coachId]" />
         <Stack.Screen name="coach-signup" />
         <Stack.Screen name="checkout-success" />
-        <Stack.Screen name="shared-plan" />
+        <Stack.Screen name="shared-plan/[memberId]" />
       </Stack>
     </AuthProvider>
   );
