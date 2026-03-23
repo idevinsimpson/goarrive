@@ -70,7 +70,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
+exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -556,8 +556,8 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
                     continuationMonthlyPriceCents: String(continuationMonthlyPrice * 100),
                     tierSplit: String(tierSplit),
                 } }),
-            success_url: `${appBaseUrl}/checkout-success?intent=${intentId}`,
-            cancel_url: `${appBaseUrl}/my-plan?checkout_cancelled=1`,
+            success_url: `${appBaseUrl}/checkout-success?intent=${intentId}&memberId=${memberId}`,
+            cancel_url: `${appBaseUrl}/shared-plan/${memberId}?checkout_cancelled=1`,
             metadata: { intentId, planId, snapshotId, memberId, coachId },
         }, stripeAccountId ? { stripeAccount: stripeAccountId } : undefined);
         sessionUrl = session.url;
@@ -596,8 +596,8 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
                     // Store for future renewed pay-in-full option (BP-002)
                     continuationPayInFullTotal: String(continuationPayInFullTotal),
                 } }),
-            success_url: `${appBaseUrl}/checkout-success?intent=${intentId}`,
-            cancel_url: `${appBaseUrl}/my-plan?checkout_cancelled=1`,
+            success_url: `${appBaseUrl}/checkout-success?intent=${intentId}&memberId=${memberId}`,
+            cancel_url: `${appBaseUrl}/shared-plan/${memberId}?checkout_cancelled=1`,
             metadata: { intentId, planId, snapshotId, memberId, coachId },
         }, stripeAccountId ? { stripeAccount: stripeAccountId } : undefined);
         sessionUrl = session.url;
@@ -3057,5 +3057,63 @@ exports.updateMemberGuidancePhase = (0, https_1.onCall)({ region: 'us-central1',
         updatedSlots: slotUpdates.length,
         hostingRules: rules,
     };
+});
+// ─── PUBLIC SHARED PLAN ENDPOINT ──────────────────────────────────────────────
+// Returns plan data for the shared plan page without requiring authentication.
+// Only returns plans with status 'presented', 'accepted', or 'active'.
+// This is the ONLY way unauthenticated visitors can view a plan.
+exports.getSharedPlan = (0, https_1.onRequest)({ cors: true, region: 'us-central1' }, async (req, res) => {
+    var _a, _b, _c;
+    const memberId = req.query.memberId || ((_a = req.body) === null || _a === void 0 ? void 0 : _a.memberId);
+    if (!memberId) {
+        res.status(400).json({ error: 'memberId is required' });
+        return;
+    }
+    try {
+        // Try direct memberId key first (current format)
+        let planSnap = await db.collection('member_plans').doc(memberId).get();
+        // Fallback: try plan_${memberId} key (legacy format)
+        if (!planSnap.exists) {
+            planSnap = await db.collection('member_plans').doc(`plan_${memberId}`).get();
+        }
+        // Fallback: query by memberId field
+        if (!planSnap.exists) {
+            const q = await db.collection('member_plans')
+                .where('memberId', '==', memberId)
+                .limit(1)
+                .get();
+            if (!q.empty) {
+                planSnap = q.docs[0];
+            }
+        }
+        if (!planSnap.exists) {
+            res.status(404).json({ error: 'No plan found for this member.' });
+            return;
+        }
+        const planData = planSnap.data();
+        const allowedStatuses = ['presented', 'accepted', 'active'];
+        if (!allowedStatuses.includes(planData.status || '')) {
+            res.status(403).json({ error: 'This plan is still being built. Check back soon!' });
+            return;
+        }
+        // Also fetch member name for display
+        let memberName = '';
+        try {
+            const memberDoc = await db.collection('members').doc(memberId).get();
+            if (memberDoc.exists) {
+                memberName = ((_b = memberDoc.data()) === null || _b === void 0 ? void 0 : _b.name) || ((_c = memberDoc.data()) === null || _c === void 0 ? void 0 : _c.displayName) || '';
+            }
+        }
+        catch (_) { /* ignore */ }
+        // Return plan data with id
+        res.status(200).json({
+            plan: Object.assign({ id: planSnap.id }, planData),
+            memberName,
+        });
+    }
+    catch (err) {
+        console.error('[getSharedPlan] Error:', err);
+        res.status(500).json({ error: 'Something went wrong loading this plan.' });
+    }
 });
 //# sourceMappingURL=index.js.map

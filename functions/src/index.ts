@@ -615,8 +615,8 @@ export const createCheckoutSession = onCall(
               tierSplit: String(tierSplit),
             },
           },
-          success_url: `${appBaseUrl}/checkout-success?intent=${intentId}`,
-          cancel_url: `${appBaseUrl}/my-plan?checkout_cancelled=1`,
+          success_url: `${appBaseUrl}/checkout-success?intent=${intentId}&memberId=${memberId}`,
+          cancel_url: `${appBaseUrl}/shared-plan/${memberId}?checkout_cancelled=1`,
           metadata: { intentId, planId, snapshotId, memberId, coachId },
         },
         stripeAccountId ? { stripeAccount: stripeAccountId } : undefined
@@ -661,8 +661,8 @@ export const createCheckoutSession = onCall(
               continuationPayInFullTotal: String(continuationPayInFullTotal),
             },
           },
-          success_url: `${appBaseUrl}/checkout-success?intent=${intentId}`,
-          cancel_url: `${appBaseUrl}/my-plan?checkout_cancelled=1`,
+          success_url: `${appBaseUrl}/checkout-success?intent=${intentId}&memberId=${memberId}`,
+          cancel_url: `${appBaseUrl}/shared-plan/${memberId}?checkout_cancelled=1`,
           metadata: { intentId, planId, snapshotId, memberId, coachId },
         },
         stripeAccountId ? { stripeAccount: stripeAccountId } : undefined
@@ -3562,5 +3562,72 @@ export const updateMemberGuidancePhase = onCall(
       updatedSlots: slotUpdates.length,
       hostingRules: rules,
     };
+  }
+);
+
+
+// ─── PUBLIC SHARED PLAN ENDPOINT ──────────────────────────────────────────────
+// Returns plan data for the shared plan page without requiring authentication.
+// Only returns plans with status 'presented', 'accepted', or 'active'.
+// This is the ONLY way unauthenticated visitors can view a plan.
+export const getSharedPlan = onRequest(
+  { cors: true, region: 'us-central1' },
+  async (req, res) => {
+    const memberId = req.query.memberId as string || req.body?.memberId;
+    if (!memberId) {
+      res.status(400).json({ error: 'memberId is required' });
+      return;
+    }
+
+    try {
+      // Try direct memberId key first (current format)
+      let planSnap = await db.collection('member_plans').doc(memberId).get();
+
+      // Fallback: try plan_${memberId} key (legacy format)
+      if (!planSnap.exists) {
+        planSnap = await db.collection('member_plans').doc(`plan_${memberId}`).get();
+      }
+
+      // Fallback: query by memberId field
+      if (!planSnap.exists) {
+        const q = await db.collection('member_plans')
+          .where('memberId', '==', memberId)
+          .limit(1)
+          .get();
+        if (!q.empty) {
+          planSnap = q.docs[0];
+        }
+      }
+
+      if (!planSnap.exists) {
+        res.status(404).json({ error: 'No plan found for this member.' });
+        return;
+      }
+
+      const planData = planSnap.data()!;
+      const allowedStatuses = ['presented', 'accepted', 'active'];
+      if (!allowedStatuses.includes(planData.status || '')) {
+        res.status(403).json({ error: 'This plan is still being built. Check back soon!' });
+        return;
+      }
+
+      // Also fetch member name for display
+      let memberName = '';
+      try {
+        const memberDoc = await db.collection('members').doc(memberId).get();
+        if (memberDoc.exists) {
+          memberName = memberDoc.data()?.name || memberDoc.data()?.displayName || '';
+        }
+      } catch (_) { /* ignore */ }
+
+      // Return plan data with id
+      res.status(200).json({
+        plan: { id: planSnap.id, ...planData },
+        memberName,
+      });
+    } catch (err: any) {
+      console.error('[getSharedPlan] Error:', err);
+      res.status(500).json({ error: 'Something went wrong loading this plan.' });
+    }
   }
 );

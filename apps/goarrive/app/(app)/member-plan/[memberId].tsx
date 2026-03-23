@@ -3360,19 +3360,6 @@ export default function MemberPlanScreen() {
               {copied ? 'Link copied!' : `Share with ${plan?.memberName || 'Member'}`}
             </Text>
           </Pressable>
-          <Pressable
-            onPress={handleSharePaymentLink}
-            disabled={paymentLinkLoading}
-            style={[ab.paymentLinkBtn, paymentLinkLoading && { opacity: 0.5 }]}
-          >
-            {paymentLinkLoading ? (
-              <ActivityIndicator size="small" color="#F5A623" />
-            ) : paymentLinkCopied ? (
-              <Icon name="checkmark" size={18} color="#6EBB7A" />
-            ) : (
-              <Icon name="card" size={18} color="#F5A623" />
-            )}
-          </Pressable>
           <Pressable onPress={() => setShowControls(true)} style={ab.controlsBtn}>
             <Icon name="settings" size={18} color={MUTED} />
           </Pressable>
@@ -3442,10 +3429,6 @@ const ab = StyleSheet.create({
   controlsBtn: {
     width: 52, height: 52, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
     backgroundColor: '#1A2035', borderWidth: 1, borderColor: BORDER,
-  },
-  paymentLinkBtn: {
-    width: 52, height: 52, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#1A2035', borderWidth: 1, borderColor: '#F5A623',
   },
 });
 
