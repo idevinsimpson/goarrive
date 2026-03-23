@@ -54,6 +54,9 @@ export type RoomSource = 'coach_personal' | 'shared_pool';
 
 export type ScheduleSessionType = 'Strength' | 'Cardio + Mobility' | 'Mix';
 
+/** Session type used in scheduling UI (lowercase, granular) */
+export type SessionType = 'strength' | 'cardio' | 'flexibility' | 'hiit' | 'recovery' | 'check_in';
+
 export const GUIDANCE_PHASE_LABELS: Record<GuidancePhase, string> = {
   coach_guided: 'Coach Guided',
   shared_guidance: 'Shared Guidance',
@@ -74,7 +77,7 @@ export function defaultRoomSource(phase: GuidancePhase): RoomSource {
 
 // ─── Recurring Slot ──────────────────────────────────────────────────────────
 
-export type RecurrencePattern = 'weekly' | 'biweekly';
+export type RecurrencePattern = 'weekly' | 'biweekly' | 'monthly';
 
 export type SlotStatus = 'active' | 'paused' | 'cancelled';
 
@@ -88,6 +91,7 @@ export interface RecurringSlot {
   durationMinutes: number;          // Session length, e.g. 30 or 60
   timezone: string;                 // IANA timezone, e.g. "America/New_York"
   recurrencePattern: RecurrencePattern;
+  weekOfMonth?: 1 | 2 | 3 | 4;       // Only for monthly: 1st, 2nd, 3rd, or 4th occurrence of the day
   status: SlotStatus;
   effectiveFrom: Timestamp;         // When this slot starts generating instances
   effectiveUntil?: Timestamp;       // Optional end date

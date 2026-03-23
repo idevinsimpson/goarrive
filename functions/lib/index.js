@@ -1626,7 +1626,7 @@ exports.createRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
         throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
-    const { memberId, memberName, dayOfWeek, startTime, durationMinutes, timezone, recurrencePattern, effectiveFrom, sessionType, guidancePhase, roomSource, coachJoining } = request.data;
+    const { memberId, memberName, dayOfWeek, startTime, durationMinutes, timezone, recurrencePattern, weekOfMonth, effectiveFrom, sessionType, guidancePhase, roomSource, coachJoining } = request.data;
     if (!memberId || dayOfWeek === undefined || !startTime || !durationMinutes || !timezone) {
         throw new https_1.HttpsError('invalid-argument', 'memberId, dayOfWeek, startTime, durationMinutes, and timezone are required');
     }
@@ -1648,20 +1648,11 @@ exports.createRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
         guidancePhase === 'self_guided' ? 'shared_pool' :
             'coach_personal' // shared_guidance defaults to coach personal
     );
-    const slot = {
-        coachId,
-        memberId,
-        memberName: memberName || memberSnap.data().name || 'Unknown',
-        dayOfWeek,
+    const slot = Object.assign(Object.assign({ coachId,
+        memberId, memberName: memberName || memberSnap.data().name || 'Unknown', dayOfWeek,
         startTime,
         durationMinutes,
-        timezone,
-        recurrencePattern: recurrencePattern || 'weekly',
-        status: 'active',
-        effectiveFrom: effectiveDate,
-        createdAt: firestore_2.FieldValue.serverTimestamp(),
-        updatedAt: firestore_2.FieldValue.serverTimestamp(),
-    };
+        timezone, recurrencePattern: recurrencePattern || 'weekly' }, (recurrencePattern === 'monthly' && weekOfMonth ? { weekOfMonth } : {})), { status: 'active', effectiveFrom: effectiveDate, createdAt: firestore_2.FieldValue.serverTimestamp(), updatedAt: firestore_2.FieldValue.serverTimestamp() });
     // Add phase-aware fields if provided
     if (sessionType)
         slot.sessionType = sessionType;
@@ -1676,7 +1667,7 @@ exports.createRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
         action: 'slot_created',
         recurringSlotId: slotRef.id,
         memberId,
-        details: `Created recurring slot for ${memberName || 'member'}: day ${dayOfWeek}, ${startTime}, ${durationMinutes}min, ${recurrencePattern || 'weekly'}`,
+        details: `Created recurring slot for ${memberName || 'member'}: day ${dayOfWeek}, ${startTime}, ${durationMinutes}min, ${recurrencePattern || 'weekly'}${recurrencePattern === 'monthly' && weekOfMonth ? ` (${weekOfMonth}${weekOfMonth === 1 ? 'st' : weekOfMonth === 2 ? 'nd' : weekOfMonth === 3 ? 'rd' : 'th'})` : ''}`,
     });
     // Immediately generate instances for the next 4 weeks for this slot
     const instances = generateInstancesForSlot(slot, slotRef.id, 28);
@@ -1758,6 +1749,52 @@ function generateInstancesForSlot(slot, slotId, daysAhead) {
     const instances = [];
     const now = new Date();
     const endDate = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000);
+    // ── Monthly recurrence: find Nth occurrence of dayOfWeek in each month ──
+    if (slot.recurrencePattern === 'monthly' && slot.weekOfMonth) {
+        const weekNum = slot.weekOfMonth; // 1-4
+        // Start from current month
+        let month = now.getMonth();
+        let year = now.getFullYear();
+        // Check up to 4 months ahead to cover daysAhead window
+        for (let i = 0; i < 4; i++) {
+            // Find the Nth occurrence of dayOfWeek in this month
+            const firstOfMonth = new Date(year, month, 1);
+            let dayOffset = (slot.dayOfWeek - firstOfMonth.getDay() + 7) % 7;
+            const nthDate = new Date(year, month, 1 + dayOffset + (weekNum - 1) * 7);
+            // Verify it's still in the same month
+            if (nthDate.getMonth() === month && nthDate >= now && nthDate <= endDate) {
+                const dateStr = nthDate.toISOString().split('T')[0];
+                const [h, m] = slot.startTime.split(':').map(Number);
+                const endMinutes = h * 60 + m + slot.durationMinutes;
+                const endH = Math.floor(endMinutes / 60) % 24;
+                const endM = endMinutes % 60;
+                const endTime = `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
+                const inst = {
+                    coachId: slot.coachId, memberId: slot.memberId, memberName: slot.memberName || 'Unknown',
+                    recurringSlotId: slotId, scheduledDate: dateStr, scheduledStartTime: slot.startTime,
+                    scheduledEndTime: endTime, durationMinutes: slot.durationMinutes, timezone: slot.timezone,
+                    status: 'scheduled', allocationAttempts: 0,
+                    createdAt: firestore_2.FieldValue.serverTimestamp(), updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                };
+                if (slot.sessionType)
+                    inst.sessionType = slot.sessionType;
+                if (slot.guidancePhase)
+                    inst.guidancePhase = slot.guidancePhase;
+                if (slot.roomSource)
+                    inst.roomSource = slot.roomSource;
+                if (slot.coachJoining !== undefined)
+                    inst.coachJoining = slot.coachJoining;
+                instances.push(inst);
+            }
+            month++;
+            if (month > 11) {
+                month = 0;
+                year++;
+            }
+        }
+        return instances;
+    }
+    // ── Weekly / Biweekly recurrence ──
     // Find the next occurrence of the target day of week
     let current = new Date(now);
     current.setHours(0, 0, 0, 0);

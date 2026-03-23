@@ -82,7 +82,7 @@ for (let h = 5; h <= 21; h++) {
   }
 }
 
-const DURATION_OPTIONS = [30, 45, 60, 90];
+const DURATION_OPTIONS = [15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90];
 
 const TIMEZONE_OPTIONS = [
   'America/New_York',
@@ -108,7 +108,8 @@ export default function MemberDetail({
   const [selectedTime, setSelectedTime] = useState('06:00');
   const [selectedDuration, setSelectedDuration] = useState(30);
   const [selectedTimezone, setSelectedTimezone] = useState('America/New_York');
-  const [selectedPattern, setSelectedPattern] = useState<'weekly' | 'biweekly'>('weekly');
+  const [selectedPattern, setSelectedPattern] = useState<'weekly' | 'biweekly' | 'monthly'>('weekly');
+  const [selectedWeekOfMonth, setSelectedWeekOfMonth] = useState<1 | 2 | 3 | 4>(1);
   const [selectedSessionType, setSelectedSessionType] = useState<SessionType>('strength');
   const [selectedPhase, setSelectedPhase] = useState<GuidancePhase>('coach_guided');
   const [coachJoining, setCoachJoining] = useState(true);
@@ -168,6 +169,7 @@ export default function MemberDetail({
         durationMinutes: selectedDuration,
         timezone: selectedTimezone,
         recurrencePattern: selectedPattern,
+        weekOfMonth: selectedPattern === 'monthly' ? selectedWeekOfMonth : undefined,
         sessionType: selectedSessionType,
         guidancePhase: selectedPhase,
         roomSource,
@@ -183,7 +185,7 @@ export default function MemberDetail({
       Alert.alert('Error', err.message || 'Failed to create slot');
     }
     setCreating(false);
-  }, [member.id, currentMember.name, selectedDay, selectedTime, selectedDuration, selectedTimezone, selectedPattern, selectedSessionType, selectedPhase, coachJoining]);
+  }, [member.id, currentMember.name, selectedDay, selectedTime, selectedDuration, selectedTimezone, selectedPattern, selectedWeekOfMonth, selectedSessionType, selectedPhase, coachJoining]);
 
   const handlePauseSlot = useCallback(async (slotId: string) => {
     try {
@@ -603,42 +605,62 @@ export default function MemberDetail({
                   </ScrollView>
                 )}
 
-                {/* Duration */}
-                <Text style={s.fieldLabel}>Duration</Text>
+                {/* Duration — sliding scale */}
+                <Text style={s.fieldLabel}>Duration — {selectedDuration} min</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }}>
+                  <View style={[s.dayRow, { flexWrap: 'nowrap' }]}>
+                    {DURATION_OPTIONS.map(d => (
+                      <TouchableOpacity
+                        key={d}
+                        style={[s.dayBtn, selectedDuration === d && s.dayBtnActive, { minWidth: 48, paddingHorizontal: 8 }]}
+                        onPress={() => setSelectedDuration(d)}
+                      >
+                        <Text style={[s.dayBtnText, selectedDuration === d && s.dayBtnTextActive, { fontSize: 12 }]}>
+                          {d}m
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </ScrollView>
+
+                {/* Pattern */}
+                <Text style={s.fieldLabel}>Recurrence</Text>
                 <View style={s.dayRow}>
-                  {DURATION_OPTIONS.map(d => (
+                  {(['weekly', 'biweekly', 'monthly'] as const).map(p => (
                     <TouchableOpacity
-                      key={d}
-                      style={[s.dayBtn, selectedDuration === d && s.dayBtnActive, { minWidth: 60 }]}
-                      onPress={() => setSelectedDuration(d)}
+                      key={p}
+                      style={[s.dayBtn, selectedPattern === p && s.dayBtnActive, { minWidth: 80 }]}
+                      onPress={() => setSelectedPattern(p)}
                     >
-                      <Text style={[s.dayBtnText, selectedDuration === d && s.dayBtnTextActive]}>
-                        {d}m
+                      <Text style={[s.dayBtnText, selectedPattern === p && s.dayBtnTextActive]}>
+                        {p.charAt(0).toUpperCase() + p.slice(1)}
                       </Text>
                     </TouchableOpacity>
                   ))}
                 </View>
 
-                {/* Pattern */}
-                <Text style={s.fieldLabel}>Recurrence</Text>
-                <View style={s.dayRow}>
-                  <TouchableOpacity
-                    style={[s.dayBtn, selectedPattern === 'weekly' && s.dayBtnActive, { minWidth: 80 }]}
-                    onPress={() => setSelectedPattern('weekly')}
-                  >
-                    <Text style={[s.dayBtnText, selectedPattern === 'weekly' && s.dayBtnTextActive]}>
-                      Weekly
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[s.dayBtn, selectedPattern === 'biweekly' && s.dayBtnActive, { minWidth: 80 }]}
-                    onPress={() => setSelectedPattern('biweekly')}
-                  >
-                    <Text style={[s.dayBtnText, selectedPattern === 'biweekly' && s.dayBtnTextActive]}>
-                      Biweekly
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                {/* Week of Month — only visible when Monthly is selected */}
+                {selectedPattern === 'monthly' && (
+                  <>
+                    <Text style={s.fieldLabel}>Which {DAY_LABELS[selectedDay]}?</Text>
+                    <View style={s.dayRow}>
+                      {([1, 2, 3, 4] as const).map(w => {
+                        const labels = ['1st', '2nd', '3rd', '4th'];
+                        return (
+                          <TouchableOpacity
+                            key={w}
+                            style={[s.dayBtn, selectedWeekOfMonth === w && s.dayBtnActive, { minWidth: 60 }]}
+                            onPress={() => setSelectedWeekOfMonth(w)}
+                          >
+                            <Text style={[s.dayBtnText, selectedWeekOfMonth === w && s.dayBtnTextActive]}>
+                              {labels[w - 1]}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </>
+                )}
 
                 {/* Timezone */}
                 <Text style={s.fieldLabel}>Timezone</Text>
@@ -664,7 +686,9 @@ export default function MemberDetail({
                 {/* Summary */}
                 <View style={s.summaryCard}>
                   <Text style={s.summaryText}>
-                    {DAY_LABELS[selectedDay]}s at {formatTime(selectedTime)} for {selectedDuration} min, {selectedPattern}
+                    {selectedPattern === 'monthly'
+                      ? `${['1st', '2nd', '3rd', '4th'][selectedWeekOfMonth - 1]} ${DAY_LABELS[selectedDay]} at ${formatTime(selectedTime)} for ${selectedDuration} min, monthly`
+                      : `${DAY_LABELS[selectedDay]}s at ${formatTime(selectedTime)} for ${selectedDuration} min, ${selectedPattern}`}
                   </Text>
                   <Text style={s.summaryMeta}>
                     {selectedSessionType === 'check_in' ? 'Check-in' : selectedSessionType.charAt(0).toUpperCase() + selectedSessionType.slice(1)}
