@@ -62,7 +62,11 @@ const AMBER = '#F59E0B';
 const BLUE = '#5B9BD5';
 const MUTED = '#8A95A3';
 const TEXT_CLR = '#F0F4F8';
+const FG = '#F0F4F8';
+const CARD = '#1A2035';
 const PURPLE = '#A78BFA';
+const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+const FH = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Medium';
 
 interface CoachRow { uid: string; name: string; email: string; createdAt?: number; stripeReady?: boolean; }
 
@@ -88,7 +92,7 @@ const copyToClipboard = async (text: string) => {
   }
 };
 
-type AdminTab = 'operations' | 'events' | 'recordings' | 'deadletter' | 'cts_billing' | 'coaches';
+type AdminTab = 'operations' | 'events' | 'recordings' | 'deadletter' | 'cts_billing' | 'analytics' | 'coaches';
 
 export default function AdminScreen() {
   const { user, claims, adminCoachOverride, setAdminCoachOverride } = useAuth();
@@ -540,6 +544,7 @@ export default function AdminScreen() {
     { key: 'recordings', label: 'Recordings', icon: 'videocam-outline' },
     { key: 'deadletter', label: 'Failures', icon: 'alert-circle-outline' },
     { key: 'cts_billing', label: 'CTS Billing', icon: 'cash-outline' },
+    { key: 'analytics', label: 'Analytics', icon: 'bar-chart-outline' },
     { key: 'coaches', label: 'Coaches', icon: 'people-outline' },
   ];
 
@@ -1129,6 +1134,13 @@ export default function AdminScreen() {
       )}
 
       {/* ══════════════════════════════════════════════════════════════════════
+         TAB: ANALYTICS
+         ══════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'analytics' && (
+        <AnalyticsDashboard />
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
          TAB: COACHES
          ══════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'coaches' && (
@@ -1351,6 +1363,168 @@ export default function AdminScreen() {
         </>
       )}
     </ScrollView>
+  );
+}
+
+// ─── Analytics Dashboard (Item 10) ──────────────────────────────────────────
+
+function AnalyticsDashboard() {
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<{
+    totalSessions: number;
+    completed: number;
+    missed: number;
+    cancelled: number;
+    rescheduled: number;
+    skipped: number;
+    attendanceRate: number;
+    coachStats: { coachId: string; coachName: string; total: number; completed: number; missed: number; attendanceRate: number; memberCount: number }[];
+    templateUsage: { name: string; count: number }[];
+  } | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        // Fetch all session instances from the last 90 days
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - 90);
+        const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
+
+        const instQ = query(
+          collection(db, 'session_instances'),
+          where('scheduledDate', '>=', cutoffStr),
+          limit(5000),
+        );
+        const instSnap = await getDocs(instQ);
+        const instances = instSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+
+        const totalSessions = instances.length;
+        const completed = instances.filter((i: any) => i.status === 'completed').length;
+        const missed = instances.filter((i: any) => i.status === 'missed').length;
+        const cancelled = instances.filter((i: any) => i.status === 'cancelled').length;
+        const rescheduled = instances.filter((i: any) => i.status === 'rescheduled').length;
+        const skipped = instances.filter((i: any) => i.status === 'skipped').length;
+        const attendanceRate = (completed + missed) > 0 ? Math.round((completed / (completed + missed)) * 100) : 0;
+
+        // Coach-level stats
+        const coachMap: Record<string, { total: number; completed: number; missed: number; members: Set<string> }> = {};
+        for (const inst of instances) {
+          const cid = inst.coachId || 'unknown';
+          if (!coachMap[cid]) coachMap[cid] = { total: 0, completed: 0, missed: 0, members: new Set() };
+          coachMap[cid].total++;
+          if (inst.status === 'completed') coachMap[cid].completed++;
+          if (inst.status === 'missed') coachMap[cid].missed++;
+          if (inst.memberId) coachMap[cid].members.add(inst.memberId);
+        }
+
+        // Fetch coach names
+        const coachSnap = await getDocs(collection(db, 'coaches'));
+        const coachNames: Record<string, string> = {};
+        coachSnap.docs.forEach(d => {
+          const data = d.data();
+          coachNames[d.id] = data.displayName || data.name || d.id;
+        });
+
+        const coachStats = Object.entries(coachMap).map(([cid, s]) => ({
+          coachId: cid,
+          coachName: coachNames[cid] || cid,
+          total: s.total,
+          completed: s.completed,
+          missed: s.missed,
+          attendanceRate: (s.completed + s.missed) > 0 ? Math.round((s.completed / (s.completed + s.missed)) * 100) : 0,
+          memberCount: s.members.size,
+        })).sort((a, b) => b.total - a.total);
+
+        // Template usage
+        const tmplSnap = await getDocs(collection(db, 'shared_templates'));
+        const tmplUsage: Record<string, number> = {};
+        tmplSnap.docs.forEach(d => {
+          const data = d.data();
+          const name = data.name || 'Unnamed';
+          tmplUsage[name] = (tmplUsage[name] || 0) + 1;
+        });
+        const templateUsage = Object.entries(tmplUsage).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
+
+        setStats({ totalSessions, completed, missed, cancelled, rescheduled, skipped, attendanceRate, coachStats, templateUsage });
+      } catch (err) {
+        console.error('[Analytics] fetch error:', err);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  if (loading) {
+    return (
+      <View style={{ padding: 20, alignItems: 'center' }}>
+        <ActivityIndicator size="large" color={GOLD} />
+        <Text style={{ color: MUTED, fontFamily: FB, marginTop: 8 }}>Loading analytics...</Text>
+      </View>
+    );
+  }
+
+  if (!stats) {
+    return <Text style={{ color: RED, fontFamily: FB, padding: 20 }}>Failed to load analytics data.</Text>;
+  }
+
+  return (
+    <View>
+      <Text style={s.sectionTitle}>Session Analytics</Text>
+      <Text style={s.sectionSub}>Last 90 days across all coaches and members</Text>
+
+      {/* Summary cards */}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+        {[
+          { label: 'Total Sessions', value: stats.totalSessions, color: GOLD },
+          { label: 'Completed', value: stats.completed, color: GREEN },
+          { label: 'Missed', value: stats.missed, color: RED },
+          { label: 'Cancelled', value: stats.cancelled, color: MUTED },
+          { label: 'Rescheduled', value: stats.rescheduled, color: BLUE },
+          { label: 'Skipped', value: stats.skipped, color: '#FFC000' },
+          { label: 'Attendance Rate', value: `${stats.attendanceRate}%`, color: stats.attendanceRate >= 80 ? GREEN : stats.attendanceRate >= 60 ? GOLD : RED },
+        ].map((card, i) => (
+          <View key={i} style={{ flex: 1, minWidth: 100, backgroundColor: card.color + '10', borderRadius: 8, padding: 12, borderWidth: 1, borderColor: card.color + '20' }}>
+            <Text style={{ fontSize: 22, color: card.color, fontFamily: FH }}>{card.value}</Text>
+            <Text style={{ fontSize: 10, color: MUTED, fontFamily: FB, marginTop: 2 }}>{card.label}</Text>
+          </View>
+        ))}
+      </View>
+
+      {/* Coach performance table */}
+      <Text style={[s.sectionTitle, { fontSize: 16, marginTop: 8 }]}>Coach Performance</Text>
+      <View style={{ backgroundColor: CARD + '80', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
+        {/* Header */}
+        <View style={{ flexDirection: 'row', padding: 8, backgroundColor: 'rgba(255,255,255,0.05)' }}>
+          <Text style={{ flex: 2, fontSize: 10, color: MUTED, fontFamily: FH }}>Coach</Text>
+          <Text style={{ flex: 1, fontSize: 10, color: MUTED, fontFamily: FH, textAlign: 'center' }}>Members</Text>
+          <Text style={{ flex: 1, fontSize: 10, color: MUTED, fontFamily: FH, textAlign: 'center' }}>Sessions</Text>
+          <Text style={{ flex: 1, fontSize: 10, color: MUTED, fontFamily: FH, textAlign: 'center' }}>Attend %</Text>
+        </View>
+        {stats.coachStats.map((cs, i) => (
+          <View key={cs.coachId} style={{ flexDirection: 'row', padding: 8, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: 'rgba(255,255,255,0.05)' }}>
+            <Text style={{ flex: 2, fontSize: 12, color: FG, fontFamily: FB }} numberOfLines={1}>{cs.coachName}</Text>
+            <Text style={{ flex: 1, fontSize: 12, color: MUTED, fontFamily: FB, textAlign: 'center' }}>{cs.memberCount}</Text>
+            <Text style={{ flex: 1, fontSize: 12, color: MUTED, fontFamily: FB, textAlign: 'center' }}>{cs.total}</Text>
+            <Text style={{ flex: 1, fontSize: 12, color: cs.attendanceRate >= 80 ? GREEN : cs.attendanceRate >= 60 ? GOLD : RED, fontFamily: FH, textAlign: 'center' }}>{cs.attendanceRate}%</Text>
+          </View>
+        ))}
+      </View>
+
+      {/* Template usage */}
+      {stats.templateUsage.length > 0 && (
+        <>
+          <Text style={[s.sectionTitle, { fontSize: 16, marginTop: 8 }]}>Shared Template Usage</Text>
+          <View style={{ backgroundColor: CARD + '80', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
+            {stats.templateUsage.map((t, i) => (
+              <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', padding: 8, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: 'rgba(255,255,255,0.05)' }}>
+                <Text style={{ fontSize: 12, color: FG, fontFamily: FB }}>{t.name}</Text>
+                <Text style={{ fontSize: 12, color: BLUE, fontFamily: FH }}>{t.count} shared</Text>
+              </View>
+            ))}
+          </View>
+        </>
+      )}
+    </View>
   );
 }
 

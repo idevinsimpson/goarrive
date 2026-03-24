@@ -426,6 +426,31 @@ export default function MemberDetail({
   const [sharedTemplates, setSharedTemplates] = useState<any[]>([]);
   const [showSharedTemplates, setShowSharedTemplates] = useState(false);
 
+  // Item 1: Drag-and-drop calendar state
+  const [dragSlot, setDragSlot] = useState<{ id: string; startY: number; startDay: number; startMin: number } | null>(null);
+  const [dragPreview, setDragPreview] = useState<{ day: number; min: number } | null>(null);
+
+  // Item 2: Skip instance state
+  const [skipReason, setSkipReason] = useState('');
+  const [skippingInstanceId, setSkippingInstanceId] = useState<string | null>(null);
+
+  // Item 4: Conflict resolution suggestions
+  const [conflictSuggestions, setConflictSuggestions] = useState<{ day: string; time: string; dayIdx: number }[]>([]);
+
+  // Item 5: Template versioning
+  const [templateUpdateAvailable, setTemplateUpdateAvailable] = useState<Record<string, boolean>>({});
+
+  // Item 6: Batch slot creation
+  const [showBatchPicker, setShowBatchPicker] = useState(false);
+  const [batchMembers, setBatchMembers] = useState<any[]>([]);
+  const [selectedBatchMembers, setSelectedBatchMembers] = useState<Set<string>>(new Set());
+  const [batchCreating, setBatchCreating] = useState(false);
+
+  // Item 7: Session notes per instance
+  const [instanceNotes, setInstanceNotes] = useState<Record<string, string>>({});
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [noteText, setNoteText] = useState('');
+
   // Shared Guidance Window: dual-handle live coaching window (in minutes from session start)
   // Defaults to centered — equal solo time on both sides
   const [liveStart, setLiveStart] = useState(Math.round((selectedDuration * 0.25) / STEP) * STEP);
@@ -770,6 +795,41 @@ export default function MemberDetail({
     setConflictWarning(unique.length > 0 ? unique.join('\n') : null);
   }, [selectedDays, selectedDuration, selectedPhase, liveStart, liveEnd, allCoachSlots, editingSlotId, coachInstances]);
 
+  // Item 4: Conflict resolution — suggest free time slots when conflicts are detected
+  useEffect(() => {
+    if (!conflictWarning) { setConflictSuggestions([]); return; }
+    const suggestions: { day: string; time: string; dayIdx: number }[] = [];
+    const busySlots: Record<number, { start: number; end: number }[]> = {};
+    for (const slot of allCoachSlots) {
+      if (slot.guidancePhase === 'self_guided') continue;
+      const d = slot.dayOfWeek as number;
+      if (!busySlots[d]) busySlots[d] = [];
+      const s = timeToMinutes(slot.startTime);
+      const e = s + (slot.durationMinutes || 30);
+      busySlots[d].push({ start: s, end: e });
+    }
+    // Check each selected day for free 30-min windows between 6 AM and 9 PM
+    for (const entry of selectedDays) {
+      const dayBusy = (busySlots[entry.dayOfWeek] || []).sort((a, b) => a.start - b.start);
+      for (let t = 360; t <= 1260 - selectedDuration; t += 15) {
+        const tEnd = t + selectedDuration;
+        const isFree = !dayBusy.some(b => t < b.end && tEnd > b.start);
+        if (isFree && suggestions.length < 6) {
+          const h = Math.floor(t / 60);
+          const m = t % 60;
+          const ampm = h >= 12 ? 'PM' : 'AM';
+          const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
+          suggestions.push({
+            day: DAY_LABELS[entry.dayOfWeek],
+            time: `${h12}:${m.toString().padStart(2, '0')} ${ampm}`,
+            dayIdx: entry.dayOfWeek,
+          });
+        }
+      }
+    }
+    setConflictSuggestions(suggestions.slice(0, 6));
+  }, [conflictWarning, allCoachSlots, selectedDays, selectedDuration]);
+
   // ── Session type validation against plan guidance profiles ──────────────────
   const sessionTypeWarning = useMemo((): string | null => {
     if (!memberPlan?.sessionGuidanceProfiles?.length) return null;
@@ -929,7 +989,115 @@ export default function MemberDetail({
     }
   }, [editingSlotId]);
 
-  // ── Create slots (one per selected day) ───────────────────────────────────────
+  // Item 2: Skip instance handler
+  const handleSkipInstance = useCallback(async (slotId: string, instanceId: string, reason: string) => {
+    try {
+      const fn = httpsCallable(functions, 'updateRecurringSlot');
+      await fn({ slotId, action: 'skip_instance', instanceId, reason });
+      setSkippingInstanceId(null);
+      setSkipReason('');
+      // Refresh instances
+      setExpandedSlotId(prev => { const v = prev; setExpandedSlotId(null); setTimeout(() => setExpandedSlotId(v), 100); return prev; });
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to skip instance');
+    }
+  }, []);
+
+  // Item 7: Save instance notes handler
+  const handleSaveInstanceNotes = useCallback(async (slotId: string, instanceId: string, notes: string) => {
+    try {
+      const fn = httpsCallable(functions, 'updateRecurringSlot');
+      await fn({ slotId, action: 'update_instance_notes', instanceId, notes });
+      setInstanceNotes(prev => ({ ...prev, [instanceId]: notes }));
+      setEditingNoteId(null);
+      setNoteText('');
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to save notes');
+    }
+  }, []);
+
+  // Item 6: Batch slot creation — create same schedule for multiple members
+  const handleBatchCreate = useCallback(async () => {
+    if (selectedBatchMembers.size === 0) return;
+    setBatchCreating(true);
+    try {
+      const fn = httpsCallable(functions, 'createRecurringSlot');
+      let created = 0;
+      for (const bm of batchMembers) {
+        if (!selectedBatchMembers.has(bm.id)) continue;
+        for (const entry of selectedDays) {
+          const hostingMode = defaultHostingMode(selectedPhase);
+          const payload: Record<string, any> = {
+            memberId: bm.id, memberName: bm.name || 'Unknown',
+            dayOfWeek: entry.dayOfWeek, startTime: entry.startTime,
+            durationMinutes: selectedDuration, timezone: selectedTimezone,
+            recurrencePattern: selectedRecurrence, sessionType: selectedSessionType,
+            guidancePhase: selectedPhase, roomSource: 'platform',
+            coachJoining: selectedPhase !== 'self_guided',
+            hostingMode, coachExpectedLive: hostingMode !== 'hosted' || selectedPhase === 'shared_guidance',
+            personalZoomRequired: hostingMode === 'coach_led',
+          };
+          if (selectedPhase === 'shared_guidance') {
+            payload.liveCoachingStartMin = liveStart;
+            payload.liveCoachingEndMin = liveEnd;
+            payload.liveCoachingDuration = liveEnd - liveStart;
+          }
+          await fn(payload);
+          created++;
+        }
+      }
+      Alert.alert('Batch Created', `Created ${created} slots for ${selectedBatchMembers.size} members.`);
+      setShowBatchPicker(false);
+      setSelectedBatchMembers(new Set());
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Batch creation failed');
+    } finally {
+      setBatchCreating(false);
+    }
+  }, [selectedBatchMembers, batchMembers, selectedDays, selectedDuration, selectedTimezone, selectedRecurrence, selectedSessionType, selectedPhase, liveStart, liveEnd]);
+
+  // Item 1: Drag-and-drop handler — update slot time after drag
+  const handleDragDrop = useCallback(async (slotId: string, newDay: number, newMinutes: number) => {
+    const h = Math.floor(newMinutes / 60);
+    const m = newMinutes % 60;
+    const newTime = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+    try {
+      const fn = httpsCallable(functions, 'updateRecurringSlot');
+      await fn({ slotId, action: 'update', dayOfWeek: newDay, startTime: newTime });
+      // Refresh slots
+      setDragSlot(null);
+      setDragPreview(null);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to move slot');
+    }
+  }, []);
+
+  // Item 5: Template versioning — check for updates
+  useEffect(() => {
+    if (!slotTemplates.length || !sharedTemplates.length) return;
+    const updates: Record<string, boolean> = {};
+    for (const local of slotTemplates) {
+      if (local.sharedTemplateId) {
+        const shared = sharedTemplates.find(s => s.id === local.sharedTemplateId);
+        if (shared && shared.version && local.version && shared.version > local.version) {
+          updates[local.id] = true;
+        }
+      }
+    }
+    setTemplateUpdateAvailable(updates);
+  }, [slotTemplates, sharedTemplates]);
+
+  // Item 6: Load batch members (all coach's members except current)
+  useEffect(() => {
+    if (!showBatchPicker || !user) return;
+    const q = query(collection(db, 'members'), where('coachId', '==', user.uid));
+    getDocs(q).then(snap => {
+      const members = snap.docs.filter(d => d.id !== member.id).map(d => ({ id: d.id, ...d.data() }));
+      setBatchMembers(members);
+    });
+  }, [showBatchPicker, user, member.id]);
+
+  // ── Create slots (one per selected day) ─────────────────────────────────────────
   const handleCreateSlots = useCallback(async () => {
     setCreating(true); try {
       const fn = httpsCallable(functions, editingSlotId ? 'updateRecurringSlot' : 'createRecurringSlot');
@@ -1492,22 +1660,48 @@ export default function MemberDetail({
                                   <View key={h} style={{ position: 'absolute', top: (h - minHour) * HOUR_HEIGHT, left: 0, right: 0, height: 1, backgroundColor: 'rgba(255,255,255,0.04)' }} />
                                 ))}
                                 {/* Slot blocks */}
+                                {/* Item 1: Drag-and-drop preview */}
+                                {dragPreview && dragPreview.day === dayIdx && (
+                                  <View style={{ position: 'absolute', top: ((dragPreview.min / 60) - minHour) * HOUR_HEIGHT, left: 0, right: 0, height: Math.max(12, (selectedDuration / 60) * HOUR_HEIGHT), backgroundColor: 'rgba(91,155,213,0.3)', borderRadius: 2, borderWidth: 1, borderColor: BLUE, borderStyle: 'dashed' }} />
+                                )}
                                 {daySlots.map((slot: any) => {
                                   const mins = timeToMinutes(slot.startTime || '06:00');
                                   const top = ((mins / 60) - minHour) * HOUR_HEIGHT;
                                   const height = Math.max(12, ((slot.durationMinutes || 30) / 60) * HOUR_HEIGHT);
                                   const isCurrentMember = slot.memberId === member.id;
+                                  const isDragging = dragSlot?.id === slot.id;
                                   const phaseColors: Record<string, string> = { coach_guided: GREEN, shared_guidance: BLUE, self_guided: '#FFC000' };
                                   const borderColor = phaseColors[slot.guidancePhase] || MUTED;
                                   return (
-                                    <View key={slot.id} style={{ position: 'absolute', top, left: 1, right: 1, height, backgroundColor: isCurrentMember ? 'rgba(91,155,213,0.2)' : 'rgba(255,255,255,0.06)', borderRadius: 2, borderLeftWidth: 2, borderLeftColor: borderColor, padding: 1, overflow: 'hidden' }}>
+                                    <TouchableOpacity
+                                      key={slot.id}
+                                      activeOpacity={0.7}
+                                      delayLongPress={400}
+                                      onLongPress={() => {
+                                        if (isCurrentMember) {
+                                          setDragSlot({ id: slot.id, startY: 0, startDay: dayIdx, startMin: mins });
+                                          Alert.alert(
+                                            'Move Slot',
+                                            `Drag ${slot.memberName}'s ${slot.startTime} slot to a new time.\n\nSelect a new time:`,
+                                            [
+                                              { text: 'Cancel', style: 'cancel', onPress: () => setDragSlot(null) },
+                                              { text: '30 min earlier', onPress: () => handleDragDrop(slot.id, dayIdx, Math.max(0, mins - 30)) },
+                                              { text: '30 min later', onPress: () => handleDragDrop(slot.id, dayIdx, Math.min(1410, mins + 30)) },
+                                              { text: '1 hour earlier', onPress: () => handleDragDrop(slot.id, dayIdx, Math.max(0, mins - 60)) },
+                                              { text: '1 hour later', onPress: () => handleDragDrop(slot.id, dayIdx, Math.min(1410, mins + 60)) },
+                                            ]
+                                          );
+                                        }
+                                      }}
+                                      style={{ position: 'absolute', top, left: 1, right: 1, height, backgroundColor: isDragging ? 'rgba(91,155,213,0.4)' : isCurrentMember ? 'rgba(91,155,213,0.2)' : 'rgba(255,255,255,0.06)', borderRadius: 2, borderLeftWidth: 2, borderLeftColor: borderColor, padding: 1, overflow: 'hidden' }}
+                                    >
                                       <Text style={{ fontSize: 6, color: isCurrentMember ? BLUE : MUTED, fontFamily: FH }} numberOfLines={1}>
                                         {slot.startTime?.slice(0, 5)}
                                       </Text>
                                       <Text style={{ fontSize: 6, color: isCurrentMember ? FG : MUTED, fontFamily: FB }} numberOfLines={1}>
                                         {slot.memberName?.split(' ')[0] || '?'}
                                       </Text>
-                                    </View>
+                                    </TouchableOpacity>
                                   );
                                 })}
                               </View>
@@ -1676,6 +1870,71 @@ export default function MemberDetail({
                                     )}
                                   </View>
                                 )}
+                                {/* Item 2: Skip instance */}
+                                {inst.status !== 'completed' && inst.status !== 'missed' && inst.status !== 'skipped' && (
+                                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+                                    {skippingInstanceId === inst.id ? (
+                                      <View style={{ flex: 1, backgroundColor: 'rgba(255,200,0,0.06)', borderRadius: 6, padding: 6 }}>
+                                        <TextInput
+                                          style={{ backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 4, padding: 4, color: FG, fontFamily: FB, fontSize: 10, marginBottom: 4 }}
+                                          placeholder="Reason (e.g., holiday, vacation)"
+                                          placeholderTextColor={MUTED}
+                                          value={skipReason}
+                                          onChangeText={setSkipReason}
+                                        />
+                                        <View style={{ flexDirection: 'row', gap: 6 }}>
+                                          <TouchableOpacity onPress={() => handleSkipInstance(slot.id, inst.id, skipReason)} style={{ backgroundColor: '#FFC000' + '20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 }}>
+                                            <Text style={{ fontSize: 9, color: '#FFC000', fontFamily: FH }}>Confirm Skip</Text>
+                                          </TouchableOpacity>
+                                          <TouchableOpacity onPress={() => { setSkippingInstanceId(null); setSkipReason(''); }}>
+                                            <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB }}>Cancel</Text>
+                                          </TouchableOpacity>
+                                        </View>
+                                      </View>
+                                    ) : (
+                                      <TouchableOpacity onPress={() => { setSkippingInstanceId(inst.id); setSkipReason(''); }}>
+                                        <Text style={{ fontSize: 9, color: '#FFC000', fontFamily: FB }}>Skip</Text>
+                                      </TouchableOpacity>
+                                    )}
+                                  </View>
+                                )}
+                                {inst.status === 'skipped' && inst.skipReason && (
+                                  <Text style={{ fontSize: 9, color: '#FFC000', fontFamily: FB, marginTop: 2 }}>Skipped: {inst.skipReason}</Text>
+                                )}
+                                {/* Item 7: Session notes */}
+                                <View style={{ marginTop: 4 }}>
+                                  {editingNoteId === inst.id ? (
+                                    <View style={{ backgroundColor: 'rgba(91,155,213,0.06)', borderRadius: 6, padding: 6 }}>
+                                      <TextInput
+                                        style={{ backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 4, padding: 4, color: FG, fontFamily: FB, fontSize: 10, minHeight: 40 }}
+                                        placeholder="Session notes..."
+                                        placeholderTextColor={MUTED}
+                                        value={noteText}
+                                        onChangeText={setNoteText}
+                                        multiline
+                                      />
+                                      <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
+                                        <TouchableOpacity onPress={() => handleSaveInstanceNotes(slot.id, inst.id, noteText)} style={{ backgroundColor: BLUE + '20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 }}>
+                                          <Text style={{ fontSize: 9, color: BLUE, fontFamily: FH }}>Save Note</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity onPress={() => { setEditingNoteId(null); setNoteText(''); }}>
+                                          <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB }}>Cancel</Text>
+                                        </TouchableOpacity>
+                                      </View>
+                                    </View>
+                                  ) : (
+                                    <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                                      {(instanceNotes[inst.id] || inst.notes) ? (
+                                        <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB, flex: 1 }} numberOfLines={2}>
+                                          📝 {instanceNotes[inst.id] || inst.notes}
+                                        </Text>
+                                      ) : null}
+                                      <TouchableOpacity onPress={() => { setEditingNoteId(inst.id); setNoteText(instanceNotes[inst.id] || inst.notes || ''); }}>
+                                        <Text style={{ fontSize: 9, color: BLUE, fontFamily: FB }}>{(instanceNotes[inst.id] || inst.notes) ? 'Edit Note' : 'Add Note'}</Text>
+                                      </TouchableOpacity>
+                                    </View>
+                                  )}
+                                </View>
                               </View>
                               );
                             })
@@ -1720,7 +1979,14 @@ export default function MemberDetail({
                         {slotTemplates.map((t: any) => (
                           <View key={t.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
                             <TouchableOpacity style={{ flex: 1 }} onPress={() => handleLoadTemplate(t)}>
-                              <Text style={{ fontSize: 12, color: FG, fontFamily: FB }}>{t.name}</Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <Text style={{ fontSize: 12, color: FG, fontFamily: FB }}>{t.name}</Text>
+                                {templateUpdateAvailable[t.id] && (
+                                  <View style={{ backgroundColor: '#FFC000' + '20', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 3 }}>
+                                    <Text style={{ fontSize: 8, color: '#FFC000', fontFamily: FH }}>Update Available</Text>
+                                  </View>
+                                )}
+                              </View>
                               <Text style={{ fontSize: 10, color: MUTED, fontFamily: FB }}>
                                 {t.sessionType} · {t.guidancePhase} · {t.durationMinutes}min · {t.recurrencePattern}
                               </Text>
@@ -1728,7 +1994,11 @@ export default function MemberDetail({
                             <View style={{ flexDirection: 'row', gap: 8 }}>
                               <TouchableOpacity onPress={async () => {
                                 try {
-                                  await addDoc(collection(db, 'shared_templates'), { ...t, sharedBy: coachId, sharedAt: new Date() });
+                                  const version = (t.version || 0) + 1;
+                                  await addDoc(collection(db, 'shared_templates'), { ...t, sharedBy: coachId, sharedAt: new Date(), version });
+                                  // Update local template with sharedTemplateId reference
+                                  const tRef = doc(db, 'coaches', coachId, 'slot_templates', t.id);
+                                  await updateDoc(tRef, { version });
                                   Alert.alert('Shared', 'Template shared with all coaches');
                                 } catch (err) { console.error('Share failed:', err); }
                               }}>
@@ -2091,6 +2361,91 @@ export default function MemberDetail({
                     <Text style={{ fontSize: 12, color: RED, fontFamily: FH, marginBottom: 4 }}>⚠ Schedule Conflict</Text>
                     <Text style={{ fontSize: 11, color: RED, fontFamily: FB }}>{conflictWarning}</Text>
                     <Text style={{ fontSize: 10, color: MUTED, fontFamily: FB, marginTop: 4, fontStyle: 'italic' }}>You can still create this slot, but you'll need to be in two places at once.</Text>
+                    {/* Item 4: Conflict resolution suggestions */}
+                    {conflictSuggestions.length > 0 && (
+                      <View style={{ marginTop: 8 }}>
+                        <Text style={{ fontSize: 10, color: GREEN, fontFamily: FH, marginBottom: 4 }}>Available times:</Text>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                          {conflictSuggestions.map((s, i) => (
+                            <TouchableOpacity
+                              key={i}
+                              style={{ backgroundColor: GREEN + '15', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, borderWidth: 1, borderColor: GREEN + '30' }}
+                              onPress={() => {
+                                // Apply suggested time to the matching day
+                                const [hStr, rest] = s.time.split(':');
+                                const mStr = rest.slice(0, 2);
+                                const ampm = rest.slice(3);
+                                let h = parseInt(hStr);
+                                if (ampm === 'PM' && h !== 12) h += 12;
+                                if (ampm === 'AM' && h === 12) h = 0;
+                                const newTime = `${h.toString().padStart(2, '0')}:${mStr}`;
+                                setSelectedDays(prev => prev.map(d => d.dayOfWeek === s.dayIdx ? { ...d, startTime: newTime } : d));
+                              }}
+                            >
+                              <Text style={{ fontSize: 10, color: GREEN, fontFamily: FB }}>{s.day} {s.time}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </View>
+                    )}
+                  </View>
+                )}
+
+                {/* Item 6: Batch creation button */}
+                {!editingSlotId && (
+                  <TouchableOpacity
+                    style={{ marginBottom: 8, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: BLUE + '40', alignItems: 'center' }}
+                    onPress={() => setShowBatchPicker(true)}
+                  >
+                    <Text style={{ fontSize: 12, color: BLUE, fontFamily: FH }}>Apply to Multiple Members</Text>
+                  </TouchableOpacity>
+                )}
+
+                {/* Item 6: Batch member picker modal */}
+                {showBatchPicker && (
+                  <View style={{ backgroundColor: 'rgba(91,155,213,0.06)', borderRadius: 8, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: BLUE + '20' }}>
+                    <Text style={{ fontSize: 12, color: BLUE, fontFamily: FH, marginBottom: 6 }}>Select Members</Text>
+                    {batchMembers.length === 0 ? (
+                      <Text style={{ fontSize: 11, color: MUTED, fontFamily: FB }}>Loading members...</Text>
+                    ) : (
+                      <ScrollView style={{ maxHeight: 150 }} nestedScrollEnabled>
+                        {batchMembers.map((bm: any) => (
+                          <TouchableOpacity
+                            key={bm.id}
+                            style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}
+                            onPress={() => {
+                              setSelectedBatchMembers(prev => {
+                                const next = new Set(prev);
+                                if (next.has(bm.id)) next.delete(bm.id); else next.add(bm.id);
+                                return next;
+                              });
+                            }}
+                          >
+                            <View style={{ width: 18, height: 18, borderRadius: 3, borderWidth: 1, borderColor: selectedBatchMembers.has(bm.id) ? BLUE : MUTED, backgroundColor: selectedBatchMembers.has(bm.id) ? BLUE + '30' : 'transparent', marginRight: 8, alignItems: 'center', justifyContent: 'center' }}>
+                              {selectedBatchMembers.has(bm.id) && <Text style={{ fontSize: 10, color: BLUE }}>✓</Text>}
+                            </View>
+                            <Text style={{ fontSize: 12, color: FG, fontFamily: FB }}>{bm.name || bm.id}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    )}
+                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                      <TouchableOpacity
+                        style={{ flex: 1, backgroundColor: BLUE, paddingVertical: 8, borderRadius: 6, alignItems: 'center', opacity: selectedBatchMembers.size === 0 || batchCreating ? 0.5 : 1 }}
+                        onPress={handleBatchCreate}
+                        disabled={selectedBatchMembers.size === 0 || batchCreating}
+                      >
+                        <Text style={{ fontSize: 12, color: '#fff', fontFamily: FH }}>
+                          {batchCreating ? 'Creating...' : `Create for ${selectedBatchMembers.size} Members`}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6 }}
+                        onPress={() => { setShowBatchPicker(false); setSelectedBatchMembers(new Set()); }}
+                      >
+                        <Text style={{ fontSize: 12, color: MUTED, fontFamily: FB }}>Cancel</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 )}
 

@@ -71,7 +71,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
+exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -1933,6 +1933,55 @@ exports.updateRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
         });
         return { success: true, updatedInstances: newInstances.length };
     }
+    // Item 2: Skip instance (recurring exception dates)
+    if (slotAction === 'skip_instance') {
+        const { instanceId, reason } = request.data;
+        if (!instanceId)
+            throw new https_1.HttpsError('invalid-argument', 'instanceId is required for skip');
+        const instRef = db.collection('session_instances').doc(instanceId);
+        const instSnap = await instRef.get();
+        if (!instSnap.exists)
+            throw new https_1.HttpsError('not-found', 'Instance not found');
+        const inst = instSnap.data();
+        if (inst.recurringSlotId !== slotId && inst.slotId !== slotId) {
+            throw new https_1.HttpsError('permission-denied', 'Instance does not belong to this slot');
+        }
+        if (!['scheduled', 'allocated', 'allocation_failed'].includes(inst.status)) {
+            throw new https_1.HttpsError('failed-precondition', 'Can only skip future scheduled instances');
+        }
+        await instRef.update({
+            status: 'skipped',
+            skipReason: reason || 'Coach skipped',
+            updatedAt: firestore_2.FieldValue.serverTimestamp(),
+        });
+        await writeAuditLog({
+            coachId: callerUid,
+            action: 'instance_skipped',
+            recurringSlotId: slotId,
+            memberId: slot.memberId,
+            details: `Skipped instance on ${inst.scheduledDate}${reason ? ': ' + reason : ''}`,
+        });
+        return { success: true };
+    }
+    // Item 7: Update instance notes
+    if (slotAction === 'update_instance_notes') {
+        const { instanceId, notes: instanceNotes } = request.data;
+        if (!instanceId)
+            throw new https_1.HttpsError('invalid-argument', 'instanceId is required');
+        const instRef = db.collection('session_instances').doc(instanceId);
+        const instSnap = await instRef.get();
+        if (!instSnap.exists)
+            throw new https_1.HttpsError('not-found', 'Instance not found');
+        const inst = instSnap.data();
+        if (inst.recurringSlotId !== slotId && inst.slotId !== slotId) {
+            throw new https_1.HttpsError('permission-denied', 'Instance does not belong to this slot');
+        }
+        await instRef.update({
+            coachNotes: instanceNotes || '',
+            updatedAt: firestore_2.FieldValue.serverTimestamp(),
+        });
+        return { success: true };
+    }
     if (slotAction === 'reschedule_instance') {
         const { instanceId, newDate, newTime } = request.data;
         if (!instanceId || !newDate) {
@@ -3035,18 +3084,18 @@ exports.coachIcalFeed = (0, https_1.onRequest)({ region: 'us-central1' }, async 
         res.status(403).send('Invalid token');
         return;
     }
-    // Fetch upcoming coach-live sessions (next 90 days)
+    // Item 9: Fetch ALL upcoming sessions (not just coach-live) for full calendar sync
     const now = new Date();
     const todayStr = now.toISOString().split('T')[0];
     const futureDate = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
     const futureStr = futureDate.toISOString().split('T')[0];
     const snap = await db.collection('session_instances')
         .where('coachId', '==', coachId)
-        .where('coachExpectedLive', '==', true)
         .where('scheduledDate', '>=', todayStr)
         .where('scheduledDate', '<=', futureStr)
+        .where('status', 'in', ['scheduled', 'allocated', 'in_progress'])
         .orderBy('scheduledDate', 'asc')
-        .limit(200)
+        .limit(500)
         .get();
     // Build iCal
     const lines = [
@@ -3072,13 +3121,24 @@ exports.coachIcalFeed = (0, https_1.onRequest)({ region: 'us-central1' }, async 
         const memberName = d.memberName || 'Member';
         const sessionType = d.sessionType ? d.sessionType.charAt(0).toUpperCase() + d.sessionType.slice(1) : 'Session';
         const phase = d.guidancePhase === 'coach_guided' ? 'Fully Guided' :
-            d.guidancePhase === 'shared_guidance' ? 'Shared Guidance' : 'Session';
+            d.guidancePhase === 'shared_guidance' ? 'Shared Guidance' :
+                d.guidancePhase === 'self_guided' ? 'Self-Reliant' : 'Session';
+        const coachLive = d.coachExpectedLive ? ' [LIVE]' : '';
+        const cts = d.commitToSaveEnabled ? ' [CTS]' : '';
         lines.push('BEGIN:VEVENT');
         lines.push(`UID:${doc.id}@goarrive.fit`);
         lines.push(`DTSTART:${formatIcalDate(startDate)}`);
         lines.push(`DTEND:${formatIcalDate(endDate)}`);
-        lines.push(`SUMMARY:${sessionType} — ${memberName} (${phase})`);
-        lines.push(`DESCRIPTION:${sessionType} session with ${memberName}. ${d.zoomJoinUrl ? 'Join: ' + d.zoomJoinUrl : ''}`);
+        lines.push(`SUMMARY:${sessionType} — ${memberName}${coachLive}${cts}`);
+        const descParts = [
+            `${sessionType} session with ${memberName}`,
+            `Phase: ${phase}`,
+            `Duration: ${d.durationMinutes || 30} min`,
+            d.coachExpectedLive ? `Coach live: ${d.liveCoachingDuration || d.durationMinutes || 30} min` : 'Self-guided (no live)',
+            d.coachNotes ? `Notes: ${d.coachNotes}` : '',
+            d.zoomJoinUrl ? `Join: ${d.zoomJoinUrl}` : '',
+        ].filter(Boolean).join('\\n');
+        lines.push(`DESCRIPTION:${descParts}`);
         if (d.zoomJoinUrl)
             lines.push(`URL:${d.zoomJoinUrl}`);
         lines.push('STATUS:CONFIRMED');
@@ -4094,5 +4154,72 @@ exports.syncSlotDuration = (0, firestore_1.onDocumentUpdated)({ document: 'membe
             console.log(`[syncSlotDuration] Updated ${instCount} future instances for member ${memberId}`);
         }
     }
+});
+// ─── Item 8: detectNoShows — Scheduled: auto-mark missed instances ──────────
+// Runs every 30 minutes. Finds instances where:
+//   - status is 'allocated' (Zoom room assigned)
+//   - scheduledDate + scheduledStartTime + 15 min has passed
+//   - No meeting.started event exists in session_events
+// Marks them as 'missed' automatically.
+exports.detectNoShows = (0, scheduler_1.onSchedule)({ schedule: '*/30 * * * *', timeZone: 'America/New_York', region: 'us-central1' }, async () => {
+    const now = new Date();
+    // Look at instances from the past 4 hours (to catch any that were missed)
+    const fourHoursAgo = new Date(now.getTime() - 4 * 60 * 60 * 1000);
+    const todayStr = now.toISOString().split('T')[0];
+    const fourHoursAgoStr = fourHoursAgo.toISOString().split('T')[0];
+    // Query allocated instances from today and possibly yesterday
+    const datesToCheck = [todayStr];
+    if (fourHoursAgoStr !== todayStr)
+        datesToCheck.push(fourHoursAgoStr);
+    let marked = 0;
+    let checked = 0;
+    let skipped = 0;
+    for (const dateStr of datesToCheck) {
+        const snap = await db.collection('session_instances')
+            .where('status', '==', 'allocated')
+            .where('scheduledDate', '==', dateStr)
+            .limit(200)
+            .get();
+        for (const doc of snap.docs) {
+            checked++;
+            const inst = doc.data();
+            const [h, m] = (inst.scheduledStartTime || '00:00').split(':').map(Number);
+            const [year, month, day] = dateStr.split('-').map(Number);
+            const scheduledTime = new Date(year, month - 1, day, h, m);
+            const graceDeadline = new Date(scheduledTime.getTime() + 15 * 60 * 1000);
+            // Only mark as missed if 15 minutes past start time
+            if (now < graceDeadline) {
+                skipped++;
+                continue;
+            }
+            // Check if a meeting.started event exists for this instance
+            const eventsSnap = await db.collection('session_events')
+                .where('instanceId', '==', doc.id)
+                .where('eventType', '==', 'meeting.started')
+                .limit(1)
+                .get();
+            if (!eventsSnap.empty) {
+                skipped++; // Meeting did start, not a no-show
+                continue;
+            }
+            // No meeting started — mark as missed
+            await doc.ref.update({
+                status: 'missed',
+                missedReason: 'auto_no_show',
+                missedAt: firestore_2.FieldValue.serverTimestamp(),
+                updatedAt: firestore_2.FieldValue.serverTimestamp(),
+            });
+            marked++;
+            // Write audit log
+            await writeAuditLog({
+                coachId: inst.coachId,
+                action: 'instance_auto_missed',
+                recurringSlotId: inst.recurringSlotId || '',
+                memberId: inst.memberId,
+                details: `Auto-marked as missed (no-show): ${inst.memberName} on ${dateStr} at ${inst.scheduledStartTime}`,
+            });
+        }
+    }
+    console.log(`[detectNoShows] Done. checked=${checked} marked=${marked} skipped=${skipped}`);
 });
 //# sourceMappingURL=index.js.map

@@ -135,7 +135,7 @@ export default function MySessionsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [selectedSession, setSelectedSession] = useState<SessionInstance | null>(null);
   const [showReschedule, setShowReschedule] = useState(false);
-  const [tab, setTab] = useState<'upcoming' | 'past'>('upcoming');
+  const [tab, setTab] = useState<'upcoming' | 'past' | 'calendar'>('upcoming');
 
   const fetchSessions = useCallback(async () => {
     if (!user) return;
@@ -269,10 +269,23 @@ export default function MySessionsScreen() {
             Past{past.length > 0 ? ` (${past.length})` : ''}
           </Text>
         </Pressable>
+        <Pressable
+          style={[s.tabBtn, tab === 'calendar' && s.tabBtnActive]}
+          onPress={() => setTab('calendar')}
+        >
+          <Text style={[s.tabText, tab === 'calendar' && s.tabTextActive]}>
+            Calendar
+          </Text>
+        </Pressable>
       </View>
 
+      {/* Calendar view */}
+      {tab === 'calendar' && (
+        <MemberCalendarView sessions={upcoming} onSelectSession={setSelectedSession} />
+      )}
+
       {/* Session list */}
-      <ScrollView
+      {tab !== 'calendar' && <ScrollView
         style={s.scroll}
         contentContainerStyle={s.scrollContent}
         refreshControl={
@@ -293,7 +306,7 @@ export default function MySessionsScreen() {
         )}
         {/* Bottom padding for tab bar */}
         <View style={{ height: 100 }} />
-      </ScrollView>
+      </ScrollView>}
 
       {/* Session detail modal */}
       {selectedSession && (
@@ -321,6 +334,102 @@ export default function MySessionsScreen() {
         />
       )}
     </View>
+  );
+}
+
+// ─── Member Calendar View (Item 3) ─────────────────────────────────────────
+
+const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const HOUR_START = 5;
+const HOUR_END = 22;
+
+function MemberCalendarView({
+  sessions,
+  onSelectSession,
+}: {
+  sessions: SessionInstance[];
+  onSelectSession: (s: SessionInstance) => void;
+}) {
+  // Group sessions by day of week
+  const sessionsByDay: Record<number, SessionInstance[]> = {};
+  for (const sess of sessions) {
+    const d = new Date(sess.scheduledDate + 'T00:00:00');
+    const dow = d.getDay();
+    if (!sessionsByDay[dow]) sessionsByDay[dow] = [];
+    sessionsByDay[dow].push(sess);
+  }
+
+  const hourHeight = 40;
+  const totalHeight = (HOUR_END - HOUR_START) * hourHeight;
+
+  return (
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }}>
+      <View style={{ flexDirection: 'row', paddingHorizontal: 4, paddingTop: 8 }}>
+        {/* Time axis */}
+        <View style={{ width: 40, marginTop: 24 }}>
+          {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => {
+            const h = HOUR_START + i;
+            const label = h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`;
+            return (
+              <View key={h} style={{ height: hourHeight, justifyContent: 'flex-start' }}>
+                <Text style={{ fontSize: 9, color: TEXT_MUTED, fontFamily: FB, textAlign: 'right', paddingRight: 4 }}>{label}</Text>
+              </View>
+            );
+          })}
+        </View>
+        {/* Day columns */}
+        {DAYS_OF_WEEK.map((dayName, dayIdx) => {
+          const daySessions = sessionsByDay[dayIdx] || [];
+          return (
+            <View key={dayIdx} style={{ flex: 1, marginHorizontal: 1 }}>
+              <Text style={{ fontSize: 10, color: TEXT_SECONDARY, fontFamily: FH, textAlign: 'center', marginBottom: 4 }}>{dayName}</Text>
+              <View style={{ height: totalHeight, backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: 4, position: 'relative' as any }}>
+                {/* Hour grid lines */}
+                {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => (
+                  <View key={i} style={{ position: 'absolute' as any, top: i * hourHeight, left: 0, right: 0, height: 1, backgroundColor: 'rgba(255,255,255,0.04)' }} />
+                ))}
+                {/* Session blocks */}
+                {daySessions.map((sess) => {
+                  const [hh, mm] = (sess.scheduledStartTime || '06:00').split(':').map(Number);
+                  const [eh, em] = (sess.scheduledEndTime || '06:30').split(':').map(Number);
+                  const startMin = hh * 60 + mm;
+                  const endMin = eh * 60 + em;
+                  const top = ((startMin - HOUR_START * 60) / 60) * hourHeight;
+                  const height = Math.max(((endMin - startMin) / 60) * hourHeight, 16);
+                  const statusInfo = STATUS_LABELS[sess.status] || { label: sess.status, color: TEXT_MUTED };
+                  return (
+                    <Pressable
+                      key={sess.id}
+                      style={{
+                        position: 'absolute' as any,
+                        top,
+                        left: 1,
+                        right: 1,
+                        height,
+                        backgroundColor: statusInfo.color + '25',
+                        borderLeftWidth: 2,
+                        borderLeftColor: statusInfo.color,
+                        borderRadius: 3,
+                        padding: 2,
+                        overflow: 'hidden' as any,
+                      }}
+                      onPress={() => onSelectSession(sess)}
+                    >
+                      <Text style={{ fontSize: 8, color: statusInfo.color, fontFamily: FH }} numberOfLines={1}>
+                        {formatTime(sess.scheduledStartTime)}
+                      </Text>
+                      <Text style={{ fontSize: 7, color: TEXT_SECONDARY, fontFamily: FB }} numberOfLines={1}>
+                        {SESSION_TYPE_LABELS[sess.sessionType || ''] || sess.sessionType || 'Session'}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          );
+        })}
+      </View>
+    </ScrollView>
   );
 }
 
