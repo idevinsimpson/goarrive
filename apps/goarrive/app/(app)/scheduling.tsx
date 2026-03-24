@@ -391,8 +391,8 @@ export default function SchedulingScreen() {
               <View>
                 {/* Week navigation */}
                 <View style={s.calNavRow}>
-                  <TouchableOpacity onPress={() => setCalendarWeekOffset(o => o - 1)} style={s.calNavBtn}>
-                    <Icon name="back" size={18} color={TEXT_CLR} />
+                  <TouchableOpacity onPress={() => setCalendarWeekOffset(o => o - 1)} style={s.calNavBtn} hitSlop={12}>
+                    <Icon name="chevron-left" size={22} color={TEXT_CLR} />
                   </TouchableOpacity>
                   <TouchableOpacity onPress={() => setCalendarWeekOffset(0)}>
                     <Text style={s.calNavLabel}>
@@ -402,8 +402,8 @@ export default function SchedulingScreen() {
                        `${calendarData.days[0].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${calendarData.days[6].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
                     </Text>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={() => setCalendarWeekOffset(o => o + 1)} style={s.calNavBtn}>
-                    <Icon name="forward" size={18} color={TEXT_CLR} />
+                  <TouchableOpacity onPress={() => setCalendarWeekOffset(o => o + 1)} style={s.calNavBtn} hitSlop={12}>
+                    <Icon name="chevron-right" size={22} color={TEXT_CLR} />
                   </TouchableOpacity>
                 </View>
 

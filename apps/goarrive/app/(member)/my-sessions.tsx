@@ -72,8 +72,12 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   missed: { label: 'Missed', color: RED },
   cancelled: { label: 'Cancelled', color: TEXT_MUTED },
   rescheduled: { label: 'Rescheduled', color: GOLD },
+  skipped: { label: 'Skipped', color: TEXT_MUTED },
+  skip_requested: { label: 'Skip Pending', color: GOLD },
   allocation_failed: { label: 'Upcoming', color: GOLD }, // hide infra detail
 };
+
+const SKIP_CATEGORIES = ['Holiday', 'Vacation', 'Illness', 'Other'] as const;
 
 const SESSION_TYPE_LABELS: Record<string, string> = {
   Strength: 'Strength Training',
@@ -125,6 +129,10 @@ function canCancel(inst: SessionInstance): boolean {
   return ['scheduled', 'allocated', 'allocation_failed'].includes(inst.status) && inst.scheduledDate >= todayStr();
 }
 
+function canRequestSkip(inst: SessionInstance): boolean {
+  return ['scheduled', 'allocated', 'allocation_failed'].includes(inst.status) && inst.scheduledDate >= todayStr();
+}
+
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export default function MySessionsScreen() {
@@ -135,6 +143,7 @@ export default function MySessionsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [selectedSession, setSelectedSession] = useState<SessionInstance | null>(null);
   const [showReschedule, setShowReschedule] = useState(false);
+  const [showSkipRequest, setShowSkipRequest] = useState(false);
   const [tab, setTab] = useState<'upcoming' | 'past' | 'calendar'>('upcoming');
 
   const fetchSessions = useCallback(async () => {
@@ -167,10 +176,10 @@ export default function MySessionsScreen() {
 
   const today = todayStr();
   const upcoming = sessions.filter(
-    (s) => s.scheduledDate >= today && !['cancelled', 'completed', 'missed'].includes(s.status)
+    (s) => s.scheduledDate >= today && !['cancelled', 'completed', 'missed', 'skipped'].includes(s.status)
   );
   const past = sessions.filter(
-    (s) => s.scheduledDate < today || ['completed', 'missed', 'cancelled'].includes(s.status)
+    (s) => s.scheduledDate < today || ['completed', 'missed', 'cancelled', 'skipped'].includes(s.status)
   ).reverse(); // most recent first
 
   const displayList = tab === 'upcoming' ? upcoming : past;
@@ -318,6 +327,9 @@ export default function MySessionsScreen() {
           onReschedule={() => {
             setShowReschedule(true);
           }}
+          onSkipRequest={() => {
+            setShowSkipRequest(true);
+          }}
         />
       )}
 
@@ -328,6 +340,19 @@ export default function MySessionsScreen() {
           onClose={() => setShowReschedule(false)}
           onDone={() => {
             setShowReschedule(false);
+            setSelectedSession(null);
+            fetchSessions();
+          }}
+        />
+      )}
+
+      {/* Skip request modal */}
+      {showSkipRequest && selectedSession && (
+        <SkipRequestModal
+          inst={selectedSession}
+          onClose={() => setShowSkipRequest(false)}
+          onDone={() => {
+            setShowSkipRequest(false);
             setSelectedSession(null);
             fetchSessions();
           }}
@@ -350,23 +375,63 @@ function MemberCalendarView({
   sessions: SessionInstance[];
   onSelectSession: (s: SessionInstance) => void;
 }) {
-  // Group sessions by day of week
-  const sessionsByDay: Record<number, SessionInstance[]> = {};
-  for (const sess of sessions) {
-    const d = new Date(sess.scheduledDate + 'T00:00:00');
-    const dow = d.getDay();
-    if (!sessionsByDay[dow]) sessionsByDay[dow] = [];
-    sessionsByDay[dow].push(sess);
+  const [weekOffset, setWeekOffset] = useState(0);
+
+  // Compute week dates based on offset
+  const weekDays = React.useMemo(() => {
+    const now = new Date();
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - now.getDay() + (weekOffset * 7));
+    startOfWeek.setHours(0, 0, 0, 0);
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(startOfWeek);
+      d.setDate(startOfWeek.getDate() + i);
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      return { date: d, dateStr, dayName: DAYS_OF_WEEK[d.getDay()], dayNum: d.getDate(), isToday: dateStr === todayStr() };
+    });
+  }, [weekOffset]);
+
+  // Filter sessions to this week
+  const weekSessions = React.useMemo(() => {
+    const startStr = weekDays[0].dateStr;
+    const endStr = weekDays[6].dateStr;
+    return sessions.filter(s => s.scheduledDate >= startStr && s.scheduledDate <= endStr);
+  }, [sessions, weekDays]);
+
+  // Group by date string
+  const sessionsByDate: Record<string, SessionInstance[]> = {};
+  for (const sess of weekSessions) {
+    if (!sessionsByDate[sess.scheduledDate]) sessionsByDate[sess.scheduledDate] = [];
+    sessionsByDate[sess.scheduledDate].push(sess);
   }
+
+  // Week label
+  const weekLabel = weekOffset === 0 ? 'This Week' :
+    weekOffset === 1 ? 'Next Week' :
+    weekOffset === -1 ? 'Last Week' :
+    `${weekDays[0].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${weekDays[6].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
 
   const hourHeight = 40;
   const totalHeight = (HOUR_END - HOUR_START) * hourHeight;
 
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }}>
-      <View style={{ flexDirection: 'row', paddingHorizontal: 4, paddingTop: 8 }}>
+      {/* Week navigation with arrows */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8 }}>
+        <Pressable onPress={() => setWeekOffset(o => o - 1)} hitSlop={12} style={{ padding: 6 }}>
+          <Icon name="chevron-left" size={22} color={TEXT_PRIMARY} />
+        </Pressable>
+        <Pressable onPress={() => setWeekOffset(0)}>
+          <Text style={{ fontSize: 15, fontWeight: '600', color: TEXT_PRIMARY, fontFamily: FH }}>{weekLabel}</Text>
+        </Pressable>
+        <Pressable onPress={() => setWeekOffset(o => o + 1)} hitSlop={12} style={{ padding: 6 }}>
+          <Icon name="chevron-right" size={22} color={TEXT_PRIMARY} />
+        </Pressable>
+      </View>
+
+      <View style={{ flexDirection: 'row', paddingHorizontal: 4 }}>
         {/* Time axis */}
-        <View style={{ width: 40, marginTop: 24 }}>
+        <View style={{ width: 40, marginTop: 36 }}>
           {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => {
             const h = HOUR_START + i;
             const label = h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`;
@@ -378,12 +443,15 @@ function MemberCalendarView({
           })}
         </View>
         {/* Day columns */}
-        {DAYS_OF_WEEK.map((dayName, dayIdx) => {
-          const daySessions = sessionsByDay[dayIdx] || [];
+        {weekDays.map((day) => {
+          const daySessions = sessionsByDate[day.dateStr] || [];
           return (
-            <View key={dayIdx} style={{ flex: 1, marginHorizontal: 1 }}>
-              <Text style={{ fontSize: 10, color: TEXT_SECONDARY, fontFamily: FH, textAlign: 'center', marginBottom: 4 }}>{dayName}</Text>
-              <View style={{ height: totalHeight, backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: 4, position: 'relative' as any }}>
+            <View key={day.dateStr} style={{ flex: 1, marginHorizontal: 1 }}>
+              <View style={{ alignItems: 'center', marginBottom: 4 }}>
+                <Text style={{ fontSize: 10, color: day.isToday ? GOLD : TEXT_SECONDARY, fontFamily: FH }}>{day.dayName}</Text>
+                <Text style={{ fontSize: 11, color: day.isToday ? GOLD : TEXT_MUTED, fontFamily: FH, fontWeight: day.isToday ? '700' : '400' }}>{day.dayNum}</Text>
+              </View>
+              <View style={{ height: totalHeight, backgroundColor: day.isToday ? 'rgba(245,166,35,0.04)' : 'rgba(255,255,255,0.02)', borderRadius: 4, position: 'relative' as any }}>
                 {/* Hour grid lines */}
                 {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => (
                   <View key={i} style={{ position: 'absolute' as any, top: i * hourHeight, left: 0, right: 0, height: 1, backgroundColor: 'rgba(255,255,255,0.04)' }} />
@@ -532,12 +600,14 @@ function SessionDetailModal({
   onJoin,
   onCancel,
   onReschedule,
+  onSkipRequest,
 }: {
   inst: SessionInstance;
   onClose: () => void;
   onJoin: () => void;
   onCancel: () => void;
   onReschedule: () => void;
+  onSkipRequest: () => void;
 }) {
   const statusInfo = STATUS_LABELS[inst.status] || { label: inst.status, color: TEXT_MUTED };
   const sessionLabel = inst.sessionType
@@ -547,6 +617,8 @@ function SessionDetailModal({
   const showJoin = canJoin(inst);
   const showReschedule = canReschedule(inst);
   const showCancel = canCancel(inst);
+  const showSkipRequest = canRequestSkip(inst);
+  const isSkipPending = inst.status === ('skip_requested' as any);
 
   // Coach live info for member
   const coachLiveInfo = inst.coachExpectedLive
@@ -668,6 +740,18 @@ function SessionDetailModal({
               </View>
             )}
 
+            {/* Skip pending notice */}
+            {isSkipPending && (
+              <View style={s.detailSection}>
+                <View style={[s.infoCard, { backgroundColor: GOLD_DIM }]}>
+                  <Icon name="clock" size={16} color={GOLD} />
+                  <Text style={[s.infoText, { color: GOLD }]}>
+                    Your skip request is pending coach approval.
+                  </Text>
+                </View>
+              </View>
+            )}
+
             {/* Actions */}
             <View style={s.actionSection}>
               {showJoin && (
@@ -680,6 +764,12 @@ function SessionDetailModal({
                 <Pressable style={s.secondaryBtn} onPress={onReschedule}>
                   <Icon name="calendar" size={16} color={GOLD} />
                   <Text style={s.secondaryBtnText}>Reschedule</Text>
+                </Pressable>
+              )}
+              {showSkipRequest && !isSkipPending && (
+                <Pressable style={s.secondaryBtn} onPress={onSkipRequest}>
+                  <Icon name="skip-forward" size={16} color={GOLD} />
+                  <Text style={s.secondaryBtnText}>Request Skip</Text>
                 </Pressable>
               )}
               {showCancel && (
@@ -797,6 +887,117 @@ function RescheduleModal({
                 <ActivityIndicator size="small" color="#FFF" />
               ) : (
                 <Text style={s.primaryBtnText}>Confirm Reschedule</Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── Skip Request Modal (Member self-skip with coach approval) ─────────────
+
+function SkipRequestModal({
+  inst,
+  onClose,
+  onDone,
+}: {
+  inst: SessionInstance;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [selectedCategory, setSelectedCategory] = useState<string>('Holiday');
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function handleSubmit() {
+    setSubmitting(true);
+    setErr(null);
+    try {
+      const skipFn = httpsCallable(functions, 'requestSkipInstance');
+      await skipFn({
+        instanceId: inst.id,
+        skipCategory: selectedCategory,
+        reason: reason.trim() || undefined,
+      });
+      onDone();
+    } catch (e: any) {
+      setErr(e.message || 'Unable to request skip. Please try again or contact your coach.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const hasCTS = inst.commitToSaveEnabled;
+
+  return (
+    <Modal visible animationType="fade" transparent>
+      <View style={s.modalOverlay}>
+        <View style={[s.modalSheet, { maxHeight: 520 }]}>
+          <View style={s.modalHeader}>
+            <Text style={s.modalTitle}>Request Skip</Text>
+            <Pressable onPress={onClose} hitSlop={12}>
+              <Icon name="close" size={22} color={TEXT_SECONDARY} />
+            </Pressable>
+          </View>
+
+          <View style={s.rescheduleBody}>
+            <Text style={s.rescheduleInfo}>
+              Request to skip your {friendlyDate(inst.scheduledDate)} session at {formatTime(inst.scheduledStartTime)}. Your coach will review and approve.
+            </Text>
+
+            {hasCTS && (
+              <View style={[s.infoCard, { backgroundColor: GOLD_DIM, marginBottom: 4 }]}>
+                <Icon name="zap" size={16} color={GOLD} />
+                <Text style={[s.infoText, { color: GOLD }]}>
+                  Commit to Save is active. Your coach will determine if accountability fees apply.
+                </Text>
+              </View>
+            )}
+
+            <Text style={s.inputLabel}>Reason</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+              {SKIP_CATEGORIES.map((cat) => (
+                <Pressable
+                  key={cat}
+                  style={[
+                    s.skipCategoryBtn,
+                    selectedCategory === cat && s.skipCategoryBtnActive,
+                  ]}
+                  onPress={() => setSelectedCategory(cat)}
+                >
+                  <Text style={[
+                    s.skipCategoryText,
+                    selectedCategory === cat && s.skipCategoryTextActive,
+                  ]}>{cat}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={s.inputLabel}>Additional Details (optional)</Text>
+            <TextInput
+              style={[s.input, { minHeight: 60, textAlignVertical: 'top' }]}
+              placeholder="Any details for your coach..."
+              placeholderTextColor={TEXT_MUTED}
+              value={reason}
+              onChangeText={setReason}
+              multiline
+              autoCapitalize="sentences"
+            />
+
+            {err && <Text style={s.errText}>{err}</Text>}
+
+            <Pressable
+              style={[s.primaryBtn, submitting && { opacity: 0.6 }]}
+              onPress={handleSubmit}
+              disabled={submitting}
+            >
+              {submitting ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <Text style={s.primaryBtnText}>Submit Skip Request</Text>
               )}
             </Pressable>
           </View>
@@ -939,4 +1140,13 @@ const s = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, color: TEXT_PRIMARY, fontFamily: FB,
   },
   errText: { fontSize: 13, color: RED, fontFamily: FB },
+
+  // Skip category buttons
+  skipCategoryBtn: {
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+    borderWidth: 1, borderColor: BORDER, backgroundColor: 'transparent',
+  },
+  skipCategoryBtnActive: { backgroundColor: GOLD_DIM, borderColor: GOLD + '60' },
+  skipCategoryText: { fontSize: 13, fontWeight: '600', color: TEXT_MUTED, fontFamily: FB },
+  skipCategoryTextActive: { color: GOLD },
 });

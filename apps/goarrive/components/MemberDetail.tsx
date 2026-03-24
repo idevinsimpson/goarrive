@@ -37,6 +37,7 @@ import {
   Alert,
   ActivityIndicator,
   Dimensions,
+  Linking,
 } from 'react-native';
 import { db, functions } from '../lib/firebase';
 import { doc, onSnapshot, collection, query, where, getDocs, getDoc, addDoc, deleteDoc, updateDoc } from 'firebase/firestore';
@@ -1031,7 +1032,7 @@ export default function MemberDetail({
             memberId: bm.id, memberName: bm.name || 'Unknown',
             dayOfWeek: entry.dayOfWeek, startTime: entry.startTime,
             durationMinutes: selectedDuration, timezone: selectedTimezone,
-            recurrencePattern: selectedRecurrence, sessionType: selectedSessionType,
+            recurrencePattern: selectedPattern, sessionType: selectedSessionType,
             guidancePhase: selectedPhase, roomSource: 'platform',
             coachJoining: selectedPhase !== 'self_guided',
             hostingMode, coachExpectedLive: hostingMode !== 'hosted' || selectedPhase === 'shared_guidance',
@@ -1054,7 +1055,7 @@ export default function MemberDetail({
     } finally {
       setBatchCreating(false);
     }
-  }, [selectedBatchMembers, batchMembers, selectedDays, selectedDuration, selectedTimezone, selectedRecurrence, selectedSessionType, selectedPhase, liveStart, liveEnd]);
+  }, [selectedBatchMembers, batchMembers, selectedDays, selectedDuration, selectedTimezone, selectedPattern, selectedSessionType, selectedPhase, liveStart, liveEnd]);
 
   // Item 1: Drag-and-drop handler — update slot time after drag
   const handleDragDrop = useCallback(async (slotId: string, newDay: number, newMinutes: number) => {
@@ -1100,6 +1101,40 @@ export default function MemberDetail({
   // ── Create slots (one per selected day) ─────────────────────────────────────────
   const handleCreateSlots = useCallback(async () => {
     setCreating(true); try {
+      // Server-side conflict detection before creation (catches race conditions)
+      if (selectedPhase !== 'self_guided') {
+        const conflictFn = httpsCallable(functions, 'checkSlotConflicts');
+        for (const entry of selectedDays) {
+          try {
+            const cResult = await conflictFn({
+              coachId: user?.uid,
+              dayOfWeek: entry.dayOfWeek,
+              startTime: entry.startTime,
+              durationMinutes: selectedDuration,
+              guidancePhase: selectedPhase,
+              excludeSlotId: editingSlotId || undefined,
+            });
+            const cData = cResult.data as any;
+            if (cData.hasConflict) {
+              const conflictNames = cData.conflicts.map((c: any) => `${c.memberName} at ${c.startTime}`).join(', ');
+              const proceed = await new Promise<boolean>((resolve) => {
+                Alert.alert(
+                  'Schedule Conflict Detected',
+                  `Server detected a conflict on ${DAY_LABELS[entry.dayOfWeek]} with: ${conflictNames}. Continue anyway?`,
+                  [
+                    { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                    { text: 'Continue', onPress: () => resolve(true) },
+                  ]
+                );
+              });
+              if (!proceed) { setCreating(false); return; }
+            }
+          } catch (conflictErr: any) {
+            console.warn('Server conflict check failed, proceeding:', conflictErr.message);
+          }
+        }
+      }
+
       const fn = httpsCallable(functions, editingSlotId ? 'updateRecurringSlot' : 'createRecurringSlot');
       let totalInstances = 0;
       const dayNames: string[] = [];
@@ -1935,6 +1970,36 @@ export default function MemberDetail({
                                     </View>
                                   )}
                                 </View>
+                                {/* Zoom recording link — coaches/admins only */}
+                                {inst.recordings && inst.recordings.length > 0 && (
+                                  <View style={{ marginTop: 4, backgroundColor: 'rgba(91,155,213,0.06)', borderRadius: 4, padding: 4 }}>
+                                    <Text style={{ fontSize: 9, color: BLUE, fontFamily: FH, marginBottom: 2 }}>Session Recordings</Text>
+                                    {inst.recordings.map((rec: any, ri: number) => (
+                                      <TouchableOpacity
+                                        key={ri}
+                                        onPress={() => {
+                                          const url = rec.playUrl || rec.downloadUrl;
+                                          if (url) Linking.openURL(url);
+                                        }}
+                                        style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2 }}
+                                      >
+                                        <Icon name="video" size={10} color={BLUE} />
+                                        <Text style={{ fontSize: 9, color: BLUE, fontFamily: FB, textDecorationLine: 'underline' }} numberOfLines={1}>
+                                          {rec.topic || `Recording ${ri + 1}`}
+                                        </Text>
+                                      </TouchableOpacity>
+                                    ))}
+                                  </View>
+                                )}
+                                {inst.zoomRecordingUrl && !inst.recordings?.length && (
+                                  <TouchableOpacity
+                                    onPress={() => Linking.openURL(inst.zoomRecordingUrl)}
+                                    style={{ marginTop: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                                  >
+                                    <Icon name="video" size={10} color={BLUE} />
+                                    <Text style={{ fontSize: 9, color: BLUE, fontFamily: FB, textDecorationLine: 'underline' }}>View Recording</Text>
+                                  </TouchableOpacity>
+                                )}
                               </View>
                               );
                             })
@@ -2404,6 +2469,26 @@ export default function MemberDetail({
                 {/* Item 6: Batch member picker modal */}
                 {showBatchPicker && (
                   <View style={{ backgroundColor: 'rgba(91,155,213,0.06)', borderRadius: 8, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: BLUE + '20' }}>
+                    {/* Batch template picker */}
+                    {(slotTemplates.length > 0 || sharedTemplates.length > 0) && (
+                      <View style={{ marginBottom: 8 }}>
+                        <Text style={{ fontSize: 11, color: GOLD, fontFamily: FH, marginBottom: 4 }}>Apply Template First</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }}>
+                          <View style={{ flexDirection: 'row', gap: 6 }}>
+                            {[...slotTemplates, ...sharedTemplates].map((t: any) => (
+                              <TouchableOpacity
+                                key={t.id}
+                                style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, borderWidth: 1, borderColor: GOLD + '40', backgroundColor: 'rgba(245,166,35,0.08)' }}
+                                onPress={() => handleLoadTemplate(t)}
+                              >
+                                <Text style={{ fontSize: 10, color: GOLD, fontFamily: FB }}>{t.name}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        </ScrollView>
+                        <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB }}>Tap a template to load its settings, then select members below.</Text>
+                      </View>
+                    )}
                     <Text style={{ fontSize: 12, color: BLUE, fontFamily: FH, marginBottom: 6 }}>Select Members</Text>
                     {batchMembers.length === 0 ? (
                       <Text style={{ fontSize: 11, color: MUTED, fontFamily: FB }}>Loading members...</Text>

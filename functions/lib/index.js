@@ -71,7 +71,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
+exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -1756,6 +1756,33 @@ exports.createRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
     if (memberSnap.data().coachId !== coachId) {
         throw new https_1.HttpsError('permission-denied', 'This member does not belong to you');
     }
+    // Server-side conflict detection: catch race conditions during slot creation
+    if (guidancePhase !== 'self_guided') {
+        const [ph, pm] = startTime.split(':').map(Number);
+        const proposedStart = ph * 60 + pm;
+        const proposedEnd = proposedStart + durationMinutes;
+        const existingSlotsSnap = await db.collection('recurring_slots')
+            .where('coachId', '==', coachId)
+            .where('dayOfWeek', '==', dayOfWeek)
+            .where('status', '==', 'active')
+            .get();
+        const serverConflicts = [];
+        for (const sd of existingSlotsSnap.docs) {
+            const s = sd.data();
+            if (s.guidancePhase === 'self_guided')
+                continue;
+            const [sh, sm] = s.startTime.split(':').map(Number);
+            const sStart = sh * 60 + sm;
+            const sEnd = sStart + (s.durationMinutes || 30);
+            if (proposedStart < sEnd && proposedEnd > sStart) {
+                serverConflicts.push(`${s.memberName || 'another member'} at ${s.startTime}`);
+            }
+        }
+        if (serverConflicts.length > 0) {
+            console.warn(`[createRecurringSlot] Server-side conflict detected: ${serverConflicts.join(', ')}`);
+            // Log the conflict but allow creation (coach was already warned client-side)
+        }
+    }
     const slotRef = db.collection('recurring_slots').doc();
     const effectiveDate = effectiveFrom ? firestore_2.Timestamp.fromDate(new Date(effectiveFrom)) : firestore_2.Timestamp.now();
     // Determine room source from guidance phase if not explicitly provided
@@ -1935,7 +1962,7 @@ exports.updateRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
     }
     // Item 2: Skip instance (recurring exception dates)
     if (slotAction === 'skip_instance') {
-        const { instanceId, reason } = request.data;
+        const { instanceId, reason, skipCategory } = request.data;
         if (!instanceId)
             throw new https_1.HttpsError('invalid-argument', 'instanceId is required for skip');
         const instRef = db.collection('session_instances').doc(instanceId);
@@ -1949,9 +1976,12 @@ exports.updateRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
         if (!['scheduled', 'allocated', 'allocation_failed'].includes(inst.status)) {
             throw new https_1.HttpsError('failed-precondition', 'Can only skip future scheduled instances');
         }
+        const VALID_SKIP_CATEGORIES = ['Holiday', 'Vacation', 'Illness', 'Coach Unavailable', 'Other'];
+        const resolvedCategory = skipCategory && VALID_SKIP_CATEGORIES.includes(skipCategory) ? skipCategory : 'Other';
         await instRef.update({
             status: 'skipped',
-            skipReason: reason || 'Coach skipped',
+            skipCategory: resolvedCategory,
+            skipReason: reason || (resolvedCategory !== 'Other' ? resolvedCategory : 'Coach skipped'),
             updatedAt: firestore_2.FieldValue.serverTimestamp(),
         });
         await writeAuditLog({
@@ -1959,7 +1989,7 @@ exports.updateRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
             action: 'instance_skipped',
             recurringSlotId: slotId,
             memberId: slot.memberId,
-            details: `Skipped instance on ${inst.scheduledDate}${reason ? ': ' + reason : ''}`,
+            details: `Skipped instance on ${inst.scheduledDate} [${resolvedCategory}]${reason ? ': ' + reason : ''}`,
         });
         return { success: true };
     }
@@ -2010,6 +2040,74 @@ exports.updateRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
             recurringSlotId: slotId,
             memberId: slot.memberId,
             details: `Rescheduled instance from ${inst.scheduledDate} to ${newDate}`,
+        });
+        return { success: true };
+    }
+    // Member self-skip: coach approves or denies a pending skip request
+    if (slotAction === 'approve_skip_request') {
+        const { instanceId } = request.data;
+        if (!instanceId)
+            throw new https_1.HttpsError('invalid-argument', 'instanceId is required');
+        const instRef = db.collection('session_instances').doc(instanceId);
+        const instSnap = await instRef.get();
+        if (!instSnap.exists)
+            throw new https_1.HttpsError('not-found', 'Instance not found');
+        const inst = instSnap.data();
+        if (inst.recurringSlotId !== slotId && inst.slotId !== slotId) {
+            throw new https_1.HttpsError('permission-denied', 'Instance does not belong to this slot');
+        }
+        if (inst.status !== 'skip_requested') {
+            throw new https_1.HttpsError('failed-precondition', 'Instance is not in skip_requested status');
+        }
+        await instRef.update({
+            status: 'skipped',
+            skipCategory: inst.skipCategory || 'Other',
+            skipReason: inst.skipReason || 'Member requested skip (approved)',
+            skipApprovedBy: callerUid,
+            skipApprovedAt: firestore_2.FieldValue.serverTimestamp(),
+            updatedAt: firestore_2.FieldValue.serverTimestamp(),
+        });
+        await writeAuditLog({
+            coachId: callerUid,
+            action: 'skip_request_approved',
+            recurringSlotId: slotId,
+            memberId: slot.memberId,
+            details: `Approved member skip request for ${inst.scheduledDate} [${inst.skipCategory || 'Other'}]`,
+        });
+        return { success: true };
+    }
+    if (slotAction === 'deny_skip_request') {
+        const { instanceId } = request.data;
+        if (!instanceId)
+            throw new https_1.HttpsError('invalid-argument', 'instanceId is required');
+        const instRef = db.collection('session_instances').doc(instanceId);
+        const instSnap = await instRef.get();
+        if (!instSnap.exists)
+            throw new https_1.HttpsError('not-found', 'Instance not found');
+        const inst = instSnap.data();
+        if (inst.recurringSlotId !== slotId && inst.slotId !== slotId) {
+            throw new https_1.HttpsError('permission-denied', 'Instance does not belong to this slot');
+        }
+        if (inst.status !== 'skip_requested') {
+            throw new https_1.HttpsError('failed-precondition', 'Instance is not in skip_requested status');
+        }
+        // Restore to previous status (allocated or scheduled)
+        const restoreStatus = inst.previousStatus || 'scheduled';
+        await instRef.update({
+            status: restoreStatus,
+            skipCategory: firestore_2.FieldValue.delete(),
+            skipReason: firestore_2.FieldValue.delete(),
+            skipRequestedAt: firestore_2.FieldValue.delete(),
+            skipRequestedBy: firestore_2.FieldValue.delete(),
+            previousStatus: firestore_2.FieldValue.delete(),
+            updatedAt: firestore_2.FieldValue.serverTimestamp(),
+        });
+        await writeAuditLog({
+            coachId: callerUid,
+            action: 'skip_request_denied',
+            recurringSlotId: slotId,
+            memberId: slot.memberId,
+            details: `Denied member skip request for ${inst.scheduledDate}`,
         });
         return { success: true };
     }
@@ -2843,13 +2941,18 @@ exports.zoomWebhook = (0, https_1.onRequest)({ region: 'us-central1', secrets: [
                 idempotencyKey,
                 payload: { recordingCount: recordings.length, recordings },
             });
-            // Store recordings on the instance
+            // Store recordings on the instance + Zoom recording URL for direct access
+            const zoomRecordingUrl = payload.share_url || (recordingFiles.length > 0 ? recordingFiles[0].play_url : null);
             if (occurrenceId) {
-                await db.collection('session_instances').doc(occurrenceId).update({
+                const recUpdate = {
                     recordings,
+                    recordingAvailable: true,
                     recordingCompletedAt: firestore_2.FieldValue.serverTimestamp(),
                     updatedAt: firestore_2.FieldValue.serverTimestamp(),
-                });
+                };
+                if (zoomRecordingUrl)
+                    recUpdate.zoomRecordingUrl = zoomRecordingUrl;
+                await db.collection('session_instances').doc(occurrenceId).update(recUpdate);
             }
             break;
         }
@@ -4186,8 +4289,24 @@ exports.detectNoShows = (0, scheduler_1.onSchedule)({ schedule: '*/30 * * * *', 
             const [h, m] = (inst.scheduledStartTime || '00:00').split(':').map(Number);
             const [year, month, day] = dateStr.split('-').map(Number);
             const scheduledTime = new Date(year, month - 1, day, h, m);
-            const graceDeadline = new Date(scheduledTime.getTime() + 15 * 60 * 1000);
-            // Only mark as missed if 15 minutes past start time
+            // Configurable no-show grace period: check coach doc, fall back to 15 min
+            let gracePeriodMinutes = 15;
+            try {
+                if (inst.coachId) {
+                    const coachSnap = await db.collection('coaches').doc(inst.coachId).get();
+                    if (coachSnap.exists) {
+                        const coachData = coachSnap.data();
+                        if (typeof coachData.noShowGraceMinutes === 'number' && coachData.noShowGraceMinutes >= 5 && coachData.noShowGraceMinutes <= 60) {
+                            gracePeriodMinutes = coachData.noShowGraceMinutes;
+                        }
+                    }
+                }
+            }
+            catch (err) {
+                console.warn(`[detectNoShows] Failed to read coach grace period for ${inst.coachId}: ${err.message}`);
+            }
+            const graceDeadline = new Date(scheduledTime.getTime() + gracePeriodMinutes * 60 * 1000);
+            // Only mark as missed if grace period has passed
             if (now < graceDeadline) {
                 skipped++;
                 continue;
@@ -4221,5 +4340,127 @@ exports.detectNoShows = (0, scheduler_1.onSchedule)({ schedule: '*/30 * * * *', 
         }
     }
     console.log(`[detectNoShows] Done. checked=${checked} marked=${marked} skipped=${skipped}`);
+});
+// ─── requestSkipInstance — Member requests a skip (with coach approval) ──────
+exports.requestSkipInstance = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+    var _a;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const { instanceId, skipCategory, reason } = request.data;
+    if (!instanceId)
+        throw new https_1.HttpsError('invalid-argument', 'instanceId is required');
+    const instRef = db.collection('session_instances').doc(instanceId);
+    const instSnap = await instRef.get();
+    if (!instSnap.exists)
+        throw new https_1.HttpsError('not-found', 'Session instance not found');
+    const inst = instSnap.data();
+    if (inst.memberId !== callerUid) {
+        throw new https_1.HttpsError('permission-denied', 'You can only request skips for your own sessions');
+    }
+    if (!['scheduled', 'allocated', 'allocation_failed'].includes(inst.status)) {
+        throw new https_1.HttpsError('failed-precondition', `Cannot request skip for instance in status "${inst.status}"`);
+    }
+    const VALID_SKIP_CATEGORIES = ['Holiday', 'Vacation', 'Illness', 'Other'];
+    const resolvedCategory = skipCategory && VALID_SKIP_CATEGORIES.includes(skipCategory) ? skipCategory : 'Other';
+    await instRef.update({
+        previousStatus: inst.status,
+        status: 'skip_requested',
+        skipCategory: resolvedCategory,
+        skipReason: reason || resolvedCategory,
+        skipRequestedAt: firestore_2.FieldValue.serverTimestamp(),
+        skipRequestedBy: callerUid,
+        updatedAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    await writeAuditLog({
+        coachId: inst.coachId,
+        action: 'skip_requested_by_member',
+        sessionInstanceId: instanceId,
+        memberId: callerUid,
+        details: `Member requested skip for ${inst.scheduledDate} [${resolvedCategory}]${reason ? ': ' + reason : ''}`,
+    });
+    return { success: true };
+});
+// ─── checkSlotConflicts — Server-side real-time conflict detection ───────────
+// Called during slot creation to catch race conditions where two coaches
+// create overlapping slots simultaneously.
+exports.checkSlotConflicts = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+    var _a;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const { coachId, dayOfWeek, startTime, durationMinutes, guidancePhase, excludeSlotId } = request.data;
+    if (!coachId || dayOfWeek === undefined || !startTime || !durationMinutes) {
+        throw new https_1.HttpsError('invalid-argument', 'coachId, dayOfWeek, startTime, and durationMinutes are required');
+    }
+    // Self-guided sessions don't need coach presence — no conflict
+    if (guidancePhase === 'self_guided') {
+        return { hasConflict: false, conflicts: [] };
+    }
+    // Parse the proposed slot time
+    const [ph, pm] = startTime.split(':').map(Number);
+    const proposedStart = ph * 60 + pm;
+    const proposedEnd = proposedStart + durationMinutes;
+    // Query all active slots for this coach on this day
+    const slotsSnap = await db.collection('recurring_slots')
+        .where('coachId', '==', coachId)
+        .where('dayOfWeek', '==', dayOfWeek)
+        .where('status', '==', 'active')
+        .get();
+    const conflicts = [];
+    for (const slotDoc of slotsSnap.docs) {
+        if (excludeSlotId && slotDoc.id === excludeSlotId)
+            continue;
+        const slot = slotDoc.data();
+        if (slot.guidancePhase === 'self_guided')
+            continue;
+        const [sh, sm] = slot.startTime.split(':').map(Number);
+        const slotStart = sh * 60 + sm;
+        const slotEnd = slotStart + (slot.durationMinutes || 30);
+        if (proposedStart < slotEnd && proposedEnd > slotStart) {
+            conflicts.push({
+                slotId: slotDoc.id,
+                memberName: slot.memberName || 'Unknown',
+                startTime: slot.startTime,
+                durationMinutes: slot.durationMinutes || 30,
+            });
+        }
+    }
+    // Also check actual instances for the next 4 weeks (catches biweekly/monthly)
+    const now = new Date();
+    const fourWeeksOut = new Date(now.getTime() + 28 * 24 * 60 * 60 * 1000);
+    const todayStr = now.toISOString().split('T')[0];
+    const futureStr = fourWeeksOut.toISOString().split('T')[0];
+    const instancesSnap = await db.collection('session_instances')
+        .where('coachId', '==', coachId)
+        .where('scheduledDate', '>=', todayStr)
+        .where('scheduledDate', '<=', futureStr)
+        .where('status', 'in', ['scheduled', 'allocated'])
+        .get();
+    for (const instDoc of instancesSnap.docs) {
+        const inst = instDoc.data();
+        if (excludeSlotId && (inst.recurringSlotId === excludeSlotId || inst.slotId === excludeSlotId))
+            continue;
+        // Check if instance falls on the same day of week
+        const instDate = new Date(inst.scheduledDate + 'T00:00:00');
+        if (instDate.getDay() !== dayOfWeek)
+            continue;
+        // Check if the instance's parent slot is already counted
+        const parentAlreadyCounted = conflicts.some(c => c.slotId === inst.recurringSlotId || c.slotId === inst.slotId);
+        if (parentAlreadyCounted)
+            continue;
+        const [ih, im] = (inst.scheduledStartTime || inst.startTime || '00:00').split(':').map(Number);
+        const instStart = ih * 60 + im;
+        const instEnd = instStart + (inst.durationMinutes || 30);
+        if (proposedStart < instEnd && proposedEnd > instStart) {
+            conflicts.push({
+                slotId: inst.recurringSlotId || inst.slotId || instDoc.id,
+                memberName: inst.memberName || 'Unknown',
+                startTime: inst.scheduledStartTime || inst.startTime || '00:00',
+                durationMinutes: inst.durationMinutes || 30,
+            });
+        }
+    }
+    return { hasConflict: conflicts.length > 0, conflicts };
 });
 //# sourceMappingURL=index.js.map

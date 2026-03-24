@@ -931,9 +931,30 @@ export default function AdminScreen() {
                     <Text style={s.failMember}>{inst.memberName || 'Unknown'}</Text>
                     <Text style={s.failMeta}>{inst.scheduledDate} · {inst.scheduledStartTime}</Text>
                     {inst.recordings && inst.recordings.length > 0 && (
-                      <Text style={[s.failMeta, { color: GREEN }]}>
-                        {inst.recordings.length} file{inst.recordings.length !== 1 ? 's' : ''} · {inst.recordings.map(r => r.fileType).join(', ')}
-                      </Text>
+                      <View>
+                        <Text style={[s.failMeta, { color: GREEN }]}>
+                          {inst.recordings.length} file{inst.recordings.length !== 1 ? 's' : ''} · {inst.recordings.map((r: any) => r.fileType).join(', ')}
+                        </Text>
+                        {inst.recordings.map((rec: any, ri: number) => (
+                          <Pressable
+                            key={ri}
+                            onPress={() => {
+                              const url = rec.playUrl || rec.downloadUrl;
+                              if (url) Linking.openURL(url);
+                            }}
+                            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2 }}
+                          >
+                            <Text style={{ fontSize: 10, color: BLUE, fontFamily: FONT_BODY, textDecorationLine: 'underline' }} numberOfLines={1}>
+                              {rec.playUrl ? 'Play' : 'Download'} {rec.fileType || `Recording ${ri + 1}`}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    )}
+                    {inst.zoomRecordingUrl && !inst.recordings?.length && (
+                      <Pressable onPress={() => Linking.openURL(inst.zoomRecordingUrl!)} style={{ paddingVertical: 2 }}>
+                        <Text style={{ fontSize: 10, color: BLUE, fontFamily: FONT_BODY, textDecorationLine: 'underline' }}>View Recording</Text>
+                      </Pressable>
                     )}
                   </View>
                   <View style={[s.statusPill, { backgroundColor: GREEN + '20' }]}>

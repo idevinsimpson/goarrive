@@ -97,6 +97,16 @@ export default function AccountScreen({ onClose }: Props) {
           <CoachZoomPanel coachId={coachId} />
         )}
 
+        {/* No-Show Grace Period — coaches only */}
+        {isCoach && coachId && (
+          <NoShowGracePanel coachId={coachId} />
+        )}
+
+        {/* iCal Subscription URL — coaches only */}
+        {isCoach && coachId && (
+          <ICalSyncPanel coachId={coachId} />
+        )}
+
         {/* Sign out */}
         <Pressable style={s.signOutBtn} onPress={handleSignOut}>
           <Icon name="logout" size={18} color="#E05252" />
@@ -322,6 +332,143 @@ function CoachZoomPanel({ coachId }: { coachId: string }) {
           </Text>
         </View>
       )}
+    </View>
+  );
+}
+
+// ─── No-Show Grace Period Panel ───────────────────────────────────────────────
+
+function NoShowGracePanel({ coachId }: { coachId: string }) {
+  const [graceMinutes, setGraceMinutes] = useState(15);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const coachRef = doc(db, 'coaches', coachId);
+        const snap = await getDoc(coachRef);
+        if (snap.exists() && typeof snap.data().noShowGraceMinutes === 'number') {
+          setGraceMinutes(snap.data().noShowGraceMinutes);
+        }
+      } catch (err) {
+        console.error('[NoShowGracePanel] fetch error:', err);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [coachId]);
+
+  async function handleSave(newVal: number) {
+    if (newVal < 5 || newVal > 60) {
+      Alert.alert('Invalid Value', 'Grace period must be between 5 and 60 minutes.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const coachRef = doc(db, 'coaches', coachId);
+      await setDoc(coachRef, { noShowGraceMinutes: newVal }, { merge: true });
+      setGraceMinutes(newVal);
+    } catch (err: any) {
+      Alert.alert('Error', 'Failed to save grace period setting.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <View style={zs.panel}>
+        <ActivityIndicator size="small" color={GOLD} />
+      </View>
+    );
+  }
+
+  const options = [5, 10, 15, 20, 30, 45, 60];
+
+  return (
+    <View style={zs.panel}>
+      <View style={zs.panelHeader}>
+        <View style={zs.panelTitleRow}>
+          <Icon name="clock" size={18} color={TEXT_SECONDARY} />
+          <Text style={zs.panelTitle}>No-Show Grace Period</Text>
+        </View>
+      </View>
+      <Text style={zs.statusText}>
+        How long after the scheduled start time before a session is marked as missed.
+      </Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+        {options.map((val) => (
+          <Pressable
+            key={val}
+            style={[
+              zs.graceBtn,
+              graceMinutes === val && zs.graceBtnActive,
+            ]}
+            onPress={() => handleSave(val)}
+            disabled={saving}
+          >
+            <Text style={[
+              zs.graceBtnText,
+              graceMinutes === val && zs.graceBtnTextActive,
+            ]}>{val} min</Text>
+          </Pressable>
+        ))}
+      </View>
+      {saving && <ActivityIndicator size="small" color={GOLD} style={{ marginTop: 8 }} />}
+    </View>
+  );
+}
+
+// ─── iCal Subscription URL Panel ──────────────────────────────────────────────
+
+function ICalSyncPanel({ coachId }: { coachId: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const icalUrl = `https://us-central1-goarrive.cloudfunctions.net/coachIcalFeed?coachId=${coachId}`;
+
+  async function handleCopy() {
+    try {
+      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(icalUrl);
+      } else {
+        // For native, use Clipboard from react-native
+        const { Clipboard: RNClipboard } = require('react-native');
+        RNClipboard?.setString?.(icalUrl);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 3000);
+    } catch (err) {
+      Alert.alert('Copy URL', icalUrl);
+    }
+  }
+
+  return (
+    <View style={zs.panel}>
+      <View style={zs.panelHeader}>
+        <View style={zs.panelTitleRow}>
+          <Icon name="calendar" size={18} color={TEXT_SECONDARY} />
+          <Text style={zs.panelTitle}>Sync to Calendar</Text>
+        </View>
+      </View>
+      <Text style={zs.statusText}>
+        Subscribe to this URL in Google Calendar, Apple Calendar, or Outlook to see your coaching sessions automatically.
+      </Text>
+      <View style={{ marginTop: 8, backgroundColor: '#0E1117', borderRadius: 8, padding: 10, borderWidth: 1, borderColor: BORDER }}>
+        <Text style={{ fontSize: 11, color: TEXT_MUTED, fontFamily: FONT_BODY }} numberOfLines={2} selectable>
+          {icalUrl}
+        </Text>
+      </View>
+      <Pressable
+        style={[zs.connectBtn, { marginTop: 10 }, copied && { backgroundColor: GREEN }]}
+        onPress={handleCopy}
+      >
+        <Icon name={copied ? 'check' : 'copy'} size={16} color="#FFF" />
+        <Text style={zs.connectBtnText}>{copied ? 'Copied!' : 'Copy iCal URL'}</Text>
+      </Pressable>
+      <Text style={[zs.hint, { marginTop: 6 }]}>
+        Paste this URL as a calendar subscription (not a one-time import) so it stays updated.
+      </Text>
     </View>
   );
 }
@@ -610,5 +757,26 @@ const zs = StyleSheet.create({
     fontFamily: FONT_BODY,
     lineHeight: 15,
     flex: 1,
+  },
+  graceBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: 'transparent',
+  },
+  graceBtnActive: {
+    backgroundColor: 'rgba(245,166,35,0.15)',
+    borderColor: 'rgba(245,166,35,0.5)',
+  },
+  graceBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: TEXT_MUTED,
+    fontFamily: FONT_BODY,
+  },
+  graceBtnTextActive: {
+    color: GOLD,
   },
 });

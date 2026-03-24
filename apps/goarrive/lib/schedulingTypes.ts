@@ -187,7 +187,11 @@ export type InstanceStatus =
   | 'completed'       // Session finished
   | 'missed'          // Member did not join
   | 'cancelled'       // Cancelled by coach or member
-  | 'rescheduled';    // Moved to a different time
+  | 'rescheduled'     // Moved to a different time
+  | 'skipped'         // Skipped by coach or approved skip request
+  | 'skip_requested'; // Member requested skip, awaiting coach approval
+
+export type SkipCategory = 'Holiday' | 'Vacation' | 'Illness' | 'Coach Unavailable' | 'Other';
 
 export interface SessionInstance {
   id: string;                       // Firestore doc ID
@@ -254,6 +258,19 @@ export interface SessionInstance {
   recordingAvailable?: boolean;
   recordingUrl?: string;
   recordingReviewedByCoach?: boolean;
+
+  // Skip fields
+  skipReason?: string;              // Freeform reason for skip
+  skipCategory?: SkipCategory;      // Predefined category for reporting
+  skipRequestedBy?: string;         // UID of member who requested skip
+  skipRequestedAt?: Timestamp;      // When skip was requested
+  skipApprovedBy?: string;          // UID of coach who approved/denied
+
+  // Zoom recording URL (set by recording.completed webhook)
+  zoomRecordingUrl?: string;        // Direct URL to Zoom cloud recording
+
+  // Session notes
+  notes?: string;                   // Coach notes for this instance
 
   // Rescheduling
   rescheduledFrom?: string;         // Original date if rescheduled

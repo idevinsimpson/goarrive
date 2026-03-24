@@ -141,6 +141,9 @@ const ICONS: Record<string, IconDef> = {
   'arrow-right': {
     paths: ['M5 12h14', 'M12 5l7 7-7 7'],
   },
+  'chevron-left': {
+    paths: ['M15 18l-6-6 6-6'],
+  },
   'chevron-right': {
     paths: ['M9 18l6-6-6-6'],
   },
@@ -315,6 +318,12 @@ const ICONS: Record<string, IconDef> = {
     paths: [
       'M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71',
       'M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71',
+    ],
+  },
+  'copy': {
+    paths: [
+      'M20 9h-9a2 2 0 00-2 2v9a2 2 0 002 2h9a2 2 0 002-2v-9a2 2 0 00-2-2z',
+      'M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1',
     ],
   },
   'calendar': {
