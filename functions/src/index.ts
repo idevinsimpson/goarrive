@@ -424,10 +424,12 @@ export const disconnectStripeAccount = onCall(
 export const createCheckoutSession = onCall(
   { secrets: [stripeSecretKey] },
   async (request) => {
-    const { planId, memberId, paymentOption } = request.data as {
+    const { planId, memberId, paymentOption, commitToSave, nutritionAddOn } = request.data as {
       planId: string;
       memberId: string;
       paymentOption: 'monthly' | 'pay_in_full';
+      commitToSave?: boolean;
+      nutritionAddOn?: boolean;
     };
 
     if (!planId || !memberId || !paymentOption) {
@@ -479,12 +481,24 @@ export const createCheckoutSession = onCall(
     const programBuildTimeHours = (plan.programBuildTimeHours as number) || 5;
 
     // Use stored pricingResult if available, otherwise compute
-    const displayMonthlyPrice = Math.round(
+    const baseMonthlyPrice = Math.round(
       plan.pricingResult?.displayMonthlyPrice ??
       plan.monthlyPriceOverride ??
       plan.pricingResult?.calculatedMonthlyPrice ??
       (hourlyRate * (sessionLengthMinutes / 60) * sessionsPerMonth)
     );
+
+    // ── Apply CTS discount and nutrition add-on ──
+    const ctsActive = commitToSave === true;
+    const nutActive = nutritionAddOn === true;
+    const ctsMonthlySavings = ctsActive
+      ? ((plan.commitToSave?.monthlySavings as number) ?? (plan.commitToSaveMonthlySavings as number) ?? 100)
+      : 0;
+    const nutritionMonthlyCost = nutActive
+      ? ((plan.nutrition?.monthlyCost as number) ?? (plan.nutritionMonthlyCost as number) ?? 100)
+      : 0;
+    const displayMonthlyPrice = Math.round(baseMonthlyPrice - ctsMonthlySavings + nutritionMonthlyCost);
+
     const payInFullTotal = Math.round(displayMonthlyPrice * contractMonths * 0.9);
     const payInFullMonthlyEquivalent = Math.round(payInFullTotal / contractMonths);
 
@@ -536,7 +550,11 @@ export const createCheckoutSession = onCall(
       continuationMonthlyPrice,
       continuationPayInFullTotal,
       continuationPayInFullMonthlyEquivalent,
-      ctsMonthlySavings: plan.postContract?.ctsMonthlySavings ?? null,
+      baseMonthlyPrice,
+      ctsActive,
+      ctsMonthlySavings: ctsActive ? ctsMonthlySavings : (plan.postContract?.ctsMonthlySavings ?? null),
+      nutActive,
+      nutritionMonthlyCost: nutActive ? nutritionMonthlyCost : 0,
       tierSplit,
       applicationFeePercent,
       contractStartAt,
@@ -592,7 +610,7 @@ export const createCheckoutSession = onCall(
               price_data: {
                 currency: 'usd',
                 product_data: {
-                  name: `GoArrive Coaching — ${contractMonths}-Month Contract`,
+                  name: `GoArrive Coaching — ${contractMonths}-Month Contract${ctsActive ? ' (Commit to Save)' : ''}${nutActive ? ' + Nutrition' : ''}`,
                   metadata: { planId, snapshotId },
                 },
                 unit_amount: displayMonthlyPrice * 100, // cents
@@ -636,7 +654,7 @@ export const createCheckoutSession = onCall(
               price_data: {
                 currency: 'usd',
                 product_data: {
-                  name: `GoArrive Coaching — ${contractMonths}-Month Pay in Full (10% off)`,
+                  name: `GoArrive Coaching — ${contractMonths}-Month Pay in Full (10% off)${ctsActive ? ' + Commit to Save' : ''}${nutActive ? ' + Nutrition' : ''}`,
                   metadata: { planId, snapshotId },
                 },
                 unit_amount: payInFullTotal * 100, // cents

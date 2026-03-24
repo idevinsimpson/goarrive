@@ -396,8 +396,8 @@ exports.disconnectStripeAccount = (0, https_1.onCall)({ secrets: [stripeSecretKe
  * RISK-001: CTS + pay-in-full stacking order is unresolved; both amounts stored in snapshot.
  */
 exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey] }, async (request) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
-    const { planId, memberId, paymentOption } = request.data;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t;
+    const { planId, memberId, paymentOption, commitToSave, nutritionAddOn } = request.data;
     if (!planId || !memberId || !paymentOption) {
         throw new https_1.HttpsError('invalid-argument', 'planId, memberId, and paymentOption are required');
     }
@@ -441,14 +441,24 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
     const checkInCallMinutes = plan.checkInCallMinutes || 30;
     const programBuildTimeHours = plan.programBuildTimeHours || 5;
     // Use stored pricingResult if available, otherwise compute
-    const displayMonthlyPrice = Math.round((_f = (_d = (_c = (_b = plan.pricingResult) === null || _b === void 0 ? void 0 : _b.displayMonthlyPrice) !== null && _c !== void 0 ? _c : plan.monthlyPriceOverride) !== null && _d !== void 0 ? _d : (_e = plan.pricingResult) === null || _e === void 0 ? void 0 : _e.calculatedMonthlyPrice) !== null && _f !== void 0 ? _f : (hourlyRate * (sessionLengthMinutes / 60) * sessionsPerMonth));
+    const baseMonthlyPrice = Math.round((_f = (_d = (_c = (_b = plan.pricingResult) === null || _b === void 0 ? void 0 : _b.displayMonthlyPrice) !== null && _c !== void 0 ? _c : plan.monthlyPriceOverride) !== null && _d !== void 0 ? _d : (_e = plan.pricingResult) === null || _e === void 0 ? void 0 : _e.calculatedMonthlyPrice) !== null && _f !== void 0 ? _f : (hourlyRate * (sessionLengthMinutes / 60) * sessionsPerMonth));
+    // ── Apply CTS discount and nutrition add-on ──
+    const ctsActive = commitToSave === true;
+    const nutActive = nutritionAddOn === true;
+    const ctsMonthlySavings = ctsActive
+        ? ((_j = (_h = (_g = plan.commitToSave) === null || _g === void 0 ? void 0 : _g.monthlySavings) !== null && _h !== void 0 ? _h : plan.commitToSaveMonthlySavings) !== null && _j !== void 0 ? _j : 100)
+        : 0;
+    const nutritionMonthlyCost = nutActive
+        ? ((_m = (_l = (_k = plan.nutrition) === null || _k === void 0 ? void 0 : _k.monthlyCost) !== null && _l !== void 0 ? _l : plan.nutritionMonthlyCost) !== null && _m !== void 0 ? _m : 100)
+        : 0;
+    const displayMonthlyPrice = Math.round(baseMonthlyPrice - ctsMonthlySavings + nutritionMonthlyCost);
     const payInFullTotal = Math.round(displayMonthlyPrice * contractMonths * 0.9);
     const payInFullMonthlyEquivalent = Math.round(payInFullTotal / contractMonths);
     // Continuation monthly
     const cp = plan.continuationPricing;
-    const contHr = (_g = cp === null || cp === void 0 ? void 0 : cp.continuationHourlyRate) !== null && _g !== void 0 ? _g : hourlyRate;
-    const contMin = (_h = cp === null || cp === void 0 ? void 0 : cp.continuationMinutesPerSession) !== null && _h !== void 0 ? _h : 3.5;
-    const contCheckIn = (_j = cp === null || cp === void 0 ? void 0 : cp.continuationCheckInMinutesPerMonth) !== null && _j !== void 0 ? _j : 30;
+    const contHr = (_o = cp === null || cp === void 0 ? void 0 : cp.continuationHourlyRate) !== null && _o !== void 0 ? _o : hourlyRate;
+    const contMin = (_p = cp === null || cp === void 0 ? void 0 : cp.continuationMinutesPerSession) !== null && _p !== void 0 ? _p : 3.5;
+    const contCheckIn = (_q = cp === null || cp === void 0 ? void 0 : cp.continuationCheckInMinutesPerMonth) !== null && _q !== void 0 ? _q : 30;
     const continuationMonthlyPrice = Math.round(contHr * (contMin / 60) * sessionsPerMonth);
     const continuationPayInFullTotal = Math.round(continuationMonthlyPrice * 12 * 0.9);
     const continuationPayInFullMonthlyEquivalent = Math.round(continuationPayInFullTotal / 12);
@@ -489,7 +499,11 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
         continuationMonthlyPrice,
         continuationPayInFullTotal,
         continuationPayInFullMonthlyEquivalent,
-        ctsMonthlySavings: (_l = (_k = plan.postContract) === null || _k === void 0 ? void 0 : _k.ctsMonthlySavings) !== null && _l !== void 0 ? _l : null,
+        baseMonthlyPrice,
+        ctsActive,
+        ctsMonthlySavings: ctsActive ? ctsMonthlySavings : ((_s = (_r = plan.postContract) === null || _r === void 0 ? void 0 : _r.ctsMonthlySavings) !== null && _s !== void 0 ? _s : null),
+        nutActive,
+        nutritionMonthlyCost: nutActive ? nutritionMonthlyCost : 0,
         tierSplit,
         applicationFeePercent,
         contractStartAt,
@@ -516,7 +530,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
     let stripeCustomerId = plan.stripeCustomerId;
     if (!stripeCustomerId) {
         const memberSnap = await db.collection('users').doc(memberId).get();
-        const memberEmail = (_m = memberSnap.data()) === null || _m === void 0 ? void 0 : _m.email;
+        const memberEmail = (_t = memberSnap.data()) === null || _t === void 0 ? void 0 : _t.email;
         const customer = await stripe.customers.create({ email: memberEmail, metadata: { memberId, coachId, planId } }, stripeAccountId ? { stripeAccount: stripeAccountId } : undefined);
         stripeCustomerId = customer.id;
         await planRef.update({ stripeCustomerId });
@@ -536,7 +550,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
                     price_data: {
                         currency: 'usd',
                         product_data: {
-                            name: `GoArrive Coaching — ${contractMonths}-Month Contract`,
+                            name: `GoArrive Coaching — ${contractMonths}-Month Contract${ctsActive ? ' (Commit to Save)' : ''}${nutActive ? ' + Nutrition' : ''}`,
                             metadata: { planId, snapshotId },
                         },
                         unit_amount: displayMonthlyPrice * 100, // cents
@@ -574,7 +588,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
                     price_data: {
                         currency: 'usd',
                         product_data: {
-                            name: `GoArrive Coaching — ${contractMonths}-Month Pay in Full (10% off)`,
+                            name: `GoArrive Coaching — ${contractMonths}-Month Pay in Full (10% off)${ctsActive ? ' + Commit to Save' : ''}${nutActive ? ' + Nutrition' : ''}`,
                             metadata: { planId, snapshotId },
                         },
                         unit_amount: payInFullTotal * 100, // cents

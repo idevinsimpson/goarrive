@@ -463,6 +463,10 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
   const payInFullSavings = Math.round(monthlyPrice * (plan.contractMonths || 12) - payInFullTotal);
   const payInFullPct = plan.payInFullDiscountPercent || 10;
 
+  // Effective prices after CTS discount and nutrition add-on
+  const effectiveMonthly = monthlyPrice - (ctsActive ? ctsSavings : 0) + (nutActive ? nutCost : 0);
+  const effectivePayInFullTotal = Math.round(effectiveMonthly * (plan.contractMonths || 12) * 0.9);
+
   const totalSessions = pricing.totalSessions;
   const perSession = pricing.perSessionPrice;
   const programTotal = Math.round(monthlyPrice * (plan.contractMonths || 12));
@@ -497,6 +501,8 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
         planId: plan.id || plan.memberId,
         memberId: plan.memberId,
         paymentOption: selected,
+        commitToSave: ctsActive,
+        nutritionAddOn: nutActive,
       });
       const { sessionUrl } = result.data as { sessionUrl: string };
       if (sessionUrl) {
@@ -652,9 +658,9 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
         ) : (
           <Text style={ips.ctaBtnText}>
             {selected === 'pay_in_full'
-              ? `Pay ${formatCurrency(payInFullTotal)} Now`
+              ? `Pay ${formatCurrency(effectivePayInFullTotal)} Now`
               : selected === 'monthly'
-              ? `Pay ${formatCurrency(monthlyPrice)} Now`
+              ? `Pay ${formatCurrency(effectiveMonthly)}/mo Now`
               : 'Select a payment option'}
           </Text>
         )}
