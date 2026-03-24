@@ -438,6 +438,8 @@ export const createCheckoutSession = onCall(
       throw new HttpsError('invalid-argument', 'planId, memberId, and paymentOption are required');
     }
 
+    try { // Global try-catch for error visibility in logs
+
     // Auth is optional — shared-plan members are not signed in.
     // When signed in, we verify the caller is the member or coach.
     const callerUid = request.auth?.uid;
@@ -495,12 +497,16 @@ export const createCheckoutSession = onCall(
       throw new HttpsError('failed-precondition', 'Coach has not connected Stripe. ME-001: Coach must complete Stripe onboarding first.');
     }
     const coachAccount = coachAccountSnap.data()!;
-    // In test mode, fall back to platform account if connected account has no charges enabled
-    const stripeAccountId: string | undefined = coachAccount.chargesEnabled
-      ? (coachAccount.stripeAccountId as string)
-      : undefined; // undefined = charge on platform account directly
+    // (5) Stripe connected account guard — block if charges not enabled
     if (!coachAccount.chargesEnabled) {
-      console.warn('[createCheckoutSession] Coach charges not enabled — using platform account for test');
+      throw new HttpsError(
+        'failed-precondition',
+        'Coach Stripe account is not ready for charges. Please ask your coach to complete Stripe onboarding.'
+      );
+    }
+    const stripeAccountId: string = coachAccount.stripeAccountId as string;
+    if (!stripeAccountId) {
+      throw new HttpsError('failed-precondition', 'Coach Stripe account ID is missing.');
     }
 
     // ── Compute pricing ──
@@ -647,7 +653,7 @@ export const createCheckoutSession = onCall(
         || (plan.email as string | undefined);
       const customer = await stripe.customers.create(
         { email: memberEmail, metadata: { memberId, coachId, planId } },
-        stripeAccountId ? { stripeAccount: stripeAccountId } : undefined
+        { stripeAccount: stripeAccountId }
       );
       stripeCustomerId = customer.id;
       await planRef.update({ stripeCustomerId });
@@ -680,7 +686,7 @@ export const createCheckoutSession = onCall(
             },
           ],
           subscription_data: {
-            ...(stripeAccountId ? { application_fee_percent: applicationFeePercent } : {}),
+            application_fee_percent: applicationFeePercent,
             metadata: {
               planId,
               snapshotId,
@@ -698,7 +704,7 @@ export const createCheckoutSession = onCall(
           cancel_url: `${appBaseUrl}/shared-plan/${memberId}?checkout_cancelled=1`,
           metadata: { intentId, planId, snapshotId, memberId, coachId },
         },
-        stripeAccountId ? { stripeAccount: stripeAccountId } : undefined
+        { stripeAccount: stripeAccountId }
       );
       sessionUrl = session.url!;
       stripeSessionId = session.id;
@@ -724,7 +730,7 @@ export const createCheckoutSession = onCall(
             },
           ],
           payment_intent_data: {
-            ...(stripeAccountId ? { application_fee_amount: Math.round(payInFullTotal * 100 * applicationFeePercent / 100) } : {}),
+            application_fee_amount: Math.round(payInFullTotal * 100 * applicationFeePercent / 100),
             metadata: {
               planId,
               snapshotId,
@@ -745,7 +751,7 @@ export const createCheckoutSession = onCall(
           cancel_url: `${appBaseUrl}/shared-plan/${memberId}?checkout_cancelled=1`,
           metadata: { intentId, planId, snapshotId, memberId, coachId },
         },
-        stripeAccountId ? { stripeAccount: stripeAccountId } : undefined
+        { stripeAccount: stripeAccountId }
       );
       sessionUrl = session.url!;
       stripeSessionId = session.id;
@@ -759,6 +765,13 @@ export const createCheckoutSession = onCall(
     });
 
     return { sessionUrl, intentId, snapshotId };
+
+    } catch (err: any) {
+      // Re-throw HttpsError as-is; wrap unexpected errors with logging
+      if (err?.code && err?.httpErrorCode) throw err; // Already an HttpsError
+      console.error('[createCheckoutSession] Unhandled error:', err?.message ?? err, err?.stack ?? '');
+      throw new HttpsError('internal', 'Something went wrong creating checkout. Please try again.');
+    }
   }
 );
 

@@ -28,6 +28,7 @@ import { useAuth } from '../lib/AuthContext';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { router } from 'expo-router';
 
 const FONT_HEADING =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -308,6 +309,26 @@ export default function AccountPanel({ visible, onClose }: Props) {
               </Text>
             </Pressable>
           </View>
+        )}
+
+        {/* Admin link — only visible to platformAdmin */}
+        {(claims?.admin === true || claims?.role === 'platformAdmin') && (
+          <>
+            <View style={s.divider} />
+            <Pressable
+              style={({ pressed }) => [s.menuItem, pressed && s.menuItemPressed]}
+              onPress={() => { onClose(); setTimeout(() => router.push('/(app)/admin'), 240); }}
+            >
+              <View style={s.menuIconWrap}>
+                <Icon name="settings" size={20} color="#F5A623" />
+              </View>
+              <View style={s.menuTextWrap}>
+                <Text style={s.menuLabel}>Admin</Text>
+                <Text style={s.menuSublabel}>Operations center & coach management</Text>
+              </View>
+              <Icon name="chevron-right" size={16} color="#4A5568" />
+            </Pressable>
+          </>
         )}
 
         {/* Divider */}

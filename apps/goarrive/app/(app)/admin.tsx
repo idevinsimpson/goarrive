@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { Icon } from '../../components/Icon';
 import { useAuth } from '../../lib/AuthContext';
+import { router } from 'expo-router';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getAuth } from 'firebase/auth';
 import {
@@ -65,6 +66,19 @@ const PURPLE = '#A78BFA';
 
 interface CoachRow { uid: string; name: string; email: string; createdAt?: number; }
 
+interface CoachMember {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  isArchived?: boolean;
+  planId?: string;
+  planStatus?: string;
+  checkoutStatus?: string;
+  contractMonths?: number;
+  displayMonthlyPrice?: number;
+}
+
 type AdminTab = 'operations' | 'events' | 'recordings' | 'deadletter' | 'coaches';
 
 export default function AdminScreen() {
@@ -104,6 +118,11 @@ export default function AdminScreen() {
   const [loadingDL, setLoadingDL] = useState(false);
   const [retryingDL, setRetryingDL] = useState<string | null>(null);
 
+  // Coach member drill-down state
+  const [expandedCoachId, setExpandedCoachId] = useState<string | null>(null);
+  const [coachMembers, setCoachMembers] = useState<CoachMember[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+
   const isAdmin = claims?.admin === true || claims?.role === 'platformAdmin';
 
   // ── Load coaches ──────────────────────────────────────────────────────────
@@ -121,6 +140,53 @@ export default function AdminScreen() {
       setCoaches(rows);
     } catch (err) { console.warn('[admin] Failed to load coaches', err); }
     finally { setLoadingCoaches(false); }
+  }, []);
+
+  // ── Load coach members (drill-down) ───────────────────────────────────
+  const fetchCoachMembers = useCallback(async (coachUid: string) => {
+    setLoadingMembers(true);
+    try {
+      const dbRef = getFirestore();
+      // Fetch members for this coach
+      const mQ = query(collection(dbRef, 'members'), where('coachId', '==', coachUid));
+      const mSnap = await getDocs(mQ);
+      const memberList: CoachMember[] = [];
+      const memberIds = mSnap.docs.map(d => d.id);
+
+      // Fetch member plans for this coach
+      const pQ = query(collection(dbRef, 'member_plans'), where('coachId', '==', coachUid), limit(200));
+      const pSnap = await getDocs(pQ);
+      const planMap: Record<string, any> = {};
+      pSnap.docs.forEach(d => {
+        const data = d.data();
+        const mid = data.memberId ?? d.id;
+        planMap[mid] = { id: d.id, ...data };
+      });
+
+      mSnap.docs.forEach(d => {
+        const data = d.data();
+        const plan = planMap[d.id];
+        memberList.push({
+          id: d.id,
+          name: data.name || data.displayName || `${data.firstName ?? ''} ${data.lastName ?? ''}`.trim() || 'Unknown',
+          email: data.email ?? '',
+          phone: data.phone ?? '',
+          isArchived: data.isArchived ?? false,
+          planId: plan?.id,
+          planStatus: plan?.status ?? 'no plan',
+          checkoutStatus: plan?.checkoutStatus,
+          contractMonths: plan?.contractMonths,
+          displayMonthlyPrice: plan?.pricingResult?.displayMonthlyPrice,
+        });
+      });
+
+      setCoachMembers(memberList);
+    } catch (err) {
+      console.warn('[admin] Failed to load coach members', err);
+      setCoachMembers([]);
+    } finally {
+      setLoadingMembers(false);
+    }
   }, []);
 
   // ── Load system health ────────────────────────────────────────────────────
@@ -852,13 +918,80 @@ export default function AdminScreen() {
           ) : (
             <View style={s.coachList}>
               {coaches.map((c, i) => (
-                <View key={c.uid} style={[s.coachRow, i === coaches.length - 1 && s.coachRowLast]}>
-                  <View style={s.avatar}><Text style={s.avatarInitial}>{(c.name?.[0] ?? '?').toUpperCase()}</Text></View>
-                  <View style={s.coachInfo}>
-                    <Text style={s.coachName}>{c.name}</Text>
-                    <Text style={s.coachEmail}>{c.email}</Text>
-                    {c.createdAt ? <Text style={s.coachDate}>Joined {new Date(c.createdAt).toLocaleDateString()}</Text> : null}
-                  </View>
+                <View key={c.uid}>
+                  <TouchableOpacity
+                    style={[s.coachRow, i === coaches.length - 1 && !expandedCoachId && s.coachRowLast]}
+                    onPress={() => {
+                      if (expandedCoachId === c.uid) {
+                        setExpandedCoachId(null);
+                        setCoachMembers([]);
+                      } else {
+                        setExpandedCoachId(c.uid);
+                        fetchCoachMembers(c.uid);
+                      }
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={s.avatar}><Text style={s.avatarInitial}>{(c.name?.[0] ?? '?').toUpperCase()}</Text></View>
+                    <View style={s.coachInfo}>
+                      <Text style={s.coachName}>{c.name}</Text>
+                      <Text style={s.coachEmail}>{c.email}</Text>
+                      {c.createdAt ? <Text style={s.coachDate}>Joined {new Date(c.createdAt).toLocaleDateString()}</Text> : null}
+                    </View>
+                    <Icon name={expandedCoachId === c.uid ? 'chevron-down' : 'chevron-right'} size={16} color={MUTED} />
+                  </TouchableOpacity>
+
+                  {/* Expanded member list */}
+                  {expandedCoachId === c.uid && (
+                    <View style={s.memberSection}>
+                      {loadingMembers ? (
+                        <ActivityIndicator color={GOLD} style={{ marginVertical: 12 }} />
+                      ) : coachMembers.length === 0 ? (
+                        <Text style={[s.emptyText, { paddingHorizontal: 16, paddingVertical: 8 }]}>No members yet.</Text>
+                      ) : (
+                        coachMembers.map((m) => {
+                          const statusColor = m.checkoutStatus === 'paid' ? GREEN
+                            : m.checkoutStatus === 'pending' ? AMBER
+                            : m.planStatus === 'sent' ? BLUE
+                            : MUTED;
+                          const statusLabel = m.checkoutStatus === 'paid' ? 'Paid'
+                            : m.checkoutStatus === 'pending' ? 'Pending'
+                            : m.planStatus === 'sent' ? 'Plan Sent'
+                            : m.planStatus === 'draft' ? 'Draft'
+                            : m.planStatus ?? 'No Plan';
+                          return (
+                            <TouchableOpacity
+                              key={m.id}
+                              style={s.memberRow}
+                              onPress={() => {
+                                if (m.planId) {
+                                  router.push(`/(app)/member-plan/${m.id}`);
+                                }
+                              }}
+                              activeOpacity={m.planId ? 0.7 : 1}
+                            >
+                              <View style={{ flex: 1 }}>
+                                <Text style={s.failMember}>
+                                  {m.name}{m.isArchived ? ' (archived)' : ''}
+                                </Text>
+                                <Text style={s.failMeta}>{m.email}</Text>
+                                {m.displayMonthlyPrice != null && (
+                                  <Text style={s.failMeta}>
+                                    ${Math.round(m.displayMonthlyPrice)}/mo · {m.contractMonths ?? '?'} months
+                                  </Text>
+                                )}
+                              </View>
+                              <View style={[s.statusPill, { backgroundColor: statusColor + '20' }]}>
+                                <Text style={{ fontSize: 10, color: statusColor, fontFamily: FONT_BODY, fontWeight: '600' }}>
+                                  {statusLabel}
+                                </Text>
+                              </View>
+                            </TouchableOpacity>
+                          );
+                        })
+                      )}
+                    </View>
+                  )}
                 </View>
               ))}
             </View>
@@ -1032,6 +1165,8 @@ const s = StyleSheet.create({
   coachName: { fontSize: 14, fontWeight: '600', color: TEXT_CLR, fontFamily: FONT_HEADING },
   coachEmail: { fontSize: 12, color: MUTED, fontFamily: FONT_BODY },
   coachDate: { fontSize: 11, color: '#4A5568', fontFamily: FONT_BODY },
+  memberSection: { backgroundColor: BG, borderTopWidth: 1, borderTopColor: BORDER },
+  memberRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BORDER, gap: 8 },
 
   // Invite
   fieldWrap: { gap: 6 },

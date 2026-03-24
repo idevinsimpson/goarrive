@@ -396,289 +396,305 @@ exports.disconnectStripeAccount = (0, https_1.onCall)({ secrets: [stripeSecretKe
  * RISK-001: CTS + pay-in-full stacking order is unresolved; both amounts stored in snapshot.
  */
 exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey] }, async (request) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v;
     const { planId, memberId, paymentOption, commitToSave, nutritionAddOn, displayedMonthlyPrice: clientMonthly, displayedPayInFullTotal: clientPayInFull } = request.data;
     if (!planId || !memberId || !paymentOption) {
         throw new https_1.HttpsError('invalid-argument', 'planId, memberId, and paymentOption are required');
     }
-    // Auth is optional — shared-plan members are not signed in.
-    // When signed in, we verify the caller is the member or coach.
-    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
-    // ── Load plan ──
-    const planRef = db.collection('member_plans').doc(planId);
-    const planSnap = await planRef.get();
-    if (!planSnap.exists)
-        throw new https_1.HttpsError('not-found', 'Plan not found');
-    const plan = planSnap.data();
-    const coachId = plan.coachId;
-    if (!coachId)
-        throw new https_1.HttpsError('failed-precondition', 'Plan has no coachId');
-    // If signed in, verify the caller is the member or the plan's coach
-    if (callerUid && callerUid !== memberId && callerUid !== coachId) {
-        throw new https_1.HttpsError('permission-denied', 'Not authorized for this plan');
-    }
-    // Verify the memberId matches the plan (prevents guessing planIds)
-    if (plan.memberId !== memberId) {
-        throw new https_1.HttpsError('permission-denied', 'Member ID does not match this plan');
-    }
-    // ── (1) Plan status check — block checkout if already paid or cancelled ──
-    const planStatus = plan.checkoutStatus;
-    if (planStatus === 'paid') {
-        throw new https_1.HttpsError('failed-precondition', 'This plan has already been paid.');
-    }
-    if (planStatus === 'cancelled') {
-        throw new https_1.HttpsError('failed-precondition', 'This plan has been cancelled.');
-    }
-    // ── (2) Rate limiting — max 5 pending checkout intents per plan per hour ──
-    try {
-        const oneHourAgo = firestore_2.Timestamp.fromMillis(Date.now() - 60 * 60 * 1000);
-        const recentIntentsSnap = await db.collection('checkoutIntents')
-            .where('planId', '==', planId)
-            .where('status', '==', 'pending')
-            .get();
-        const recentCount = recentIntentsSnap.docs.filter((d) => d.data().createdAt && d.data().createdAt.toMillis() >= oneHourAgo.toMillis()).length;
-        if (recentCount >= 5) {
-            throw new https_1.HttpsError('resource-exhausted', 'Too many checkout attempts. Please wait a few minutes and try again.');
+    try { // Global try-catch for error visibility in logs
+        // Auth is optional — shared-plan members are not signed in.
+        // When signed in, we verify the caller is the member or coach.
+        const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+        // ── Load plan ──
+        const planRef = db.collection('member_plans').doc(planId);
+        const planSnap = await planRef.get();
+        if (!planSnap.exists)
+            throw new https_1.HttpsError('not-found', 'Plan not found');
+        const plan = planSnap.data();
+        const coachId = plan.coachId;
+        if (!coachId)
+            throw new https_1.HttpsError('failed-precondition', 'Plan has no coachId');
+        // If signed in, verify the caller is the member or the plan's coach
+        if (callerUid && callerUid !== memberId && callerUid !== coachId) {
+            throw new https_1.HttpsError('permission-denied', 'Not authorized for this plan');
         }
-    }
-    catch (e) {
-        // If it's our own rate-limit error, re-throw; otherwise log and continue
-        if ((e === null || e === void 0 ? void 0 : e.code) === 'resource-exhausted')
-            throw e;
-        console.warn('[createCheckoutSession] Rate limit check failed, proceeding:', e === null || e === void 0 ? void 0 : e.message);
-    }
-    // ── Load coach Stripe account ──
-    const coachAccountSnap = await db.collection('coachStripeAccounts').doc(coachId).get();
-    if (!coachAccountSnap.exists) {
-        throw new https_1.HttpsError('failed-precondition', 'Coach has not connected Stripe. ME-001: Coach must complete Stripe onboarding first.');
-    }
-    const coachAccount = coachAccountSnap.data();
-    // In test mode, fall back to platform account if connected account has no charges enabled
-    const stripeAccountId = coachAccount.chargesEnabled
-        ? coachAccount.stripeAccountId
-        : undefined; // undefined = charge on platform account directly
-    if (!coachAccount.chargesEnabled) {
-        console.warn('[createCheckoutSession] Coach charges not enabled — using platform account for test');
-    }
-    // ── Compute pricing ──
-    const sessionsPerWeek = plan.sessionsPerWeek || 3;
-    const sessionsPerMonth = Math.round(sessionsPerWeek * (52 / 12));
-    const contractMonths = plan.contractMonths || 12;
-    // Initial monthly
-    const hourlyRate = plan.hourlyRate || 100;
-    const sessionLengthMinutes = plan.sessionLengthMinutes || 60;
-    const checkInCallMinutes = plan.checkInCallMinutes || 30;
-    const programBuildTimeHours = plan.programBuildTimeHours || 5;
-    // ── Pricing: use client-sent displayed prices to avoid rounding mismatches ──
-    // The frontend's calculatePricing() already applies CTS, nutrition, manual
-    // overrides, and pay-in-full discount using the exact same formula the member
-    // sees. We trust those values but validate they are within a sane range of
-    // the server-side estimate.
-    const ctsActive = commitToSave === true;
-    const nutActive = nutritionAddOn === true;
-    // Server-side fallback calculation (used for validation & snapshot)
-    const serverBaseMonthly = Math.round((_f = (_d = (_c = (_b = plan.pricingResult) === null || _b === void 0 ? void 0 : _b.displayMonthlyPrice) !== null && _c !== void 0 ? _c : plan.monthlyPriceOverride) !== null && _d !== void 0 ? _d : (_e = plan.pricingResult) === null || _e === void 0 ? void 0 : _e.calculatedMonthlyPrice) !== null && _f !== void 0 ? _f : (hourlyRate * (sessionLengthMinutes / 60) * sessionsPerMonth));
-    const ctsMonthlySavings = ctsActive
-        ? ((_j = (_h = (_g = plan.commitToSave) === null || _g === void 0 ? void 0 : _g.monthlySavings) !== null && _h !== void 0 ? _h : plan.commitToSaveMonthlySavings) !== null && _j !== void 0 ? _j : 100)
-        : 0;
-    const nutritionMonthlyCost = nutActive
-        ? ((_m = (_l = (_k = plan.nutrition) === null || _k === void 0 ? void 0 : _k.monthlyCost) !== null && _l !== void 0 ? _l : plan.nutritionMonthlyCost) !== null && _m !== void 0 ? _m : 100)
-        : 0;
-    const serverMonthly = serverBaseMonthly - ctsMonthlySavings + nutritionMonthlyCost;
-    const payInFullDiscountPct = plan.payInFullDiscountPercent || 10;
-    const serverPayInFull = Math.round(serverMonthly * contractMonths * (1 - payInFullDiscountPct / 100));
-    // Use client-sent prices when available; fall back to server calculation
-    const displayMonthlyPrice = (typeof clientMonthly === 'number' && clientMonthly > 0)
-        ? Math.round(clientMonthly)
-        : Math.round(serverMonthly);
-    const payInFullTotal = (typeof clientPayInFull === 'number' && clientPayInFull > 0)
-        ? Math.round(clientPayInFull)
-        : serverPayInFull;
-    // Sanity check: client price must be within $10 of server estimate
-    if (Math.abs(displayMonthlyPrice - Math.round(serverMonthly)) > 10) {
-        console.error(`[createCheckoutSession] Monthly price mismatch: client=${displayMonthlyPrice}, server=${Math.round(serverMonthly)}`);
-        throw new https_1.HttpsError('invalid-argument', 'Price mismatch — please refresh and try again.');
-    }
-    if (paymentOption === 'pay_in_full' && Math.abs(payInFullTotal - serverPayInFull) > 50) {
-        console.error(`[createCheckoutSession] Pay-in-full price mismatch: client=${payInFullTotal}, server=${serverPayInFull}`);
-        throw new https_1.HttpsError('invalid-argument', 'Price mismatch — please refresh and try again.');
-    }
-    const payInFullMonthlyEquivalent = Math.round(payInFullTotal / contractMonths);
-    // Continuation monthly
-    const cp = plan.continuationPricing;
-    const contHr = (_o = cp === null || cp === void 0 ? void 0 : cp.continuationHourlyRate) !== null && _o !== void 0 ? _o : hourlyRate;
-    const contMin = (_p = cp === null || cp === void 0 ? void 0 : cp.continuationMinutesPerSession) !== null && _p !== void 0 ? _p : 3.5;
-    const contCheckIn = (_q = cp === null || cp === void 0 ? void 0 : cp.continuationCheckInMinutesPerMonth) !== null && _q !== void 0 ? _q : 30;
-    const continuationMonthlyPrice = Math.round(contHr * (contMin / 60) * sessionsPerMonth);
-    const continuationPayInFullTotal = Math.round(continuationMonthlyPrice * 12 * 0.9);
-    const continuationPayInFullMonthlyEquivalent = Math.round(continuationPayInFullTotal / 12);
-    // Tier split (count active paying members for this coach)
-    const activePayingSnap = await db.collection('member_plans')
-        .where('coachId', '==', coachId)
-        .where('checkoutStatus', '==', 'paid')
-        .get();
-    const activePayingCount = activePayingSnap.size;
-    const tierSplit = getTierSplit(activePayingCount);
-    const applicationFeePercent = tierSplit;
-    // ── Create acceptedPlanSnapshot ──
-    const snapshotRef = db.collection('acceptedPlanSnapshots').doc();
-    const snapshotId = snapshotRef.id;
-    const now = firestore_2.Timestamp.now();
-    const contractStartAt = now;
-    const contractEndAtMs = now.toMillis() + contractMonths * 30.44 * 24 * 60 * 60 * 1000;
-    const contractEndAt = firestore_2.Timestamp.fromMillis(contractEndAtMs);
-    const snapshot = {
-        snapshotId,
-        planId,
-        memberId,
-        coachId,
-        snapshotAt: now,
-        contractLengthMonths: contractMonths,
-        hourlyRate,
-        sessionLengthMinutes,
-        checkInCallMinutes,
-        programBuildTimeHours,
-        sessionsPerWeek,
-        calculatedMonthlyPrice: displayMonthlyPrice,
-        displayMonthlyPrice,
-        payInFullTotal,
-        payInFullMonthlyEquivalent,
-        continuationHourlyRate: contHr,
-        continuationMinutesPerSession: contMin,
-        continuationCheckInMinutesPerMonth: contCheckIn,
-        continuationMonthlyPrice,
-        continuationPayInFullTotal,
-        continuationPayInFullMonthlyEquivalent,
-        baseMonthlyPrice: serverBaseMonthly,
-        ctsActive,
-        ctsMonthlySavings: ctsActive ? ctsMonthlySavings : ((_s = (_r = plan.postContract) === null || _r === void 0 ? void 0 : _r.ctsMonthlySavings) !== null && _s !== void 0 ? _s : null),
-        nutActive,
-        nutritionMonthlyCost: nutActive ? nutritionMonthlyCost : 0,
-        tierSplit,
-        applicationFeePercent,
-        contractStartAt,
-        contractEndAt,
-    };
-    await snapshotRef.set(snapshot);
-    // ── Create checkoutIntent ──
-    const intentRef = db.collection('checkoutIntents').doc();
-    const intentId = intentRef.id;
-    await intentRef.set({
-        intentId,
-        memberId,
-        coachId,
-        planId,
-        snapshotId,
-        paymentOption,
-        status: 'pending',
-        createdAt: firestore_2.FieldValue.serverTimestamp(),
-        updatedAt: firestore_2.FieldValue.serverTimestamp(),
-    });
-    const stripe = getStripe(stripeSecretKey.value());
-    const appBaseUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
-    // ── (3) Get or create Stripe customer — email fallback for unauthenticated members ──
-    let stripeCustomerId = plan.stripeCustomerId;
-    if (!stripeCustomerId) {
-        // Try user account first, then fall back to email stored on the plan
-        const memberSnap = await db.collection('users').doc(memberId).get();
-        const memberEmail = ((_t = memberSnap.data()) === null || _t === void 0 ? void 0 : _t.email)
-            || plan.memberEmail
-            || plan.email;
-        const customer = await stripe.customers.create({ email: memberEmail, metadata: { memberId, coachId, planId } }, stripeAccountId ? { stripeAccount: stripeAccountId } : undefined);
-        stripeCustomerId = customer.id;
-        await planRef.update({ stripeCustomerId });
-    }
-    let sessionUrl;
-    let stripeSessionId;
-    if (paymentOption === 'monthly') {
-        // ── Monthly: subscription schedule with two phases ──
-        // Phase 1: contractMonths at displayMonthlyPrice
-        // Phase 2: indefinite at continuationMonthlyPrice
-        const session = await stripe.checkout.sessions.create({
-            customer: stripeCustomerId,
-            payment_method_types: ['card'],
-            mode: 'subscription',
-            line_items: [
-                {
-                    price_data: {
-                        currency: 'usd',
-                        product_data: {
-                            name: `GoArrive Coaching — ${contractMonths}-Month Contract${ctsActive ? ' (Commit to Save)' : ''}${nutActive ? ' + Nutrition' : ''}`,
-                            metadata: { planId, snapshotId },
+        // Verify the memberId matches the plan (prevents guessing planIds)
+        if (plan.memberId !== memberId) {
+            throw new https_1.HttpsError('permission-denied', 'Member ID does not match this plan');
+        }
+        // ── (1) Plan status check — block checkout if already paid or cancelled ──
+        const planStatus = plan.checkoutStatus;
+        if (planStatus === 'paid') {
+            throw new https_1.HttpsError('failed-precondition', 'This plan has already been paid.');
+        }
+        if (planStatus === 'cancelled') {
+            throw new https_1.HttpsError('failed-precondition', 'This plan has been cancelled.');
+        }
+        // ── (2) Rate limiting — max 5 pending checkout intents per plan per hour ──
+        try {
+            const oneHourAgo = firestore_2.Timestamp.fromMillis(Date.now() - 60 * 60 * 1000);
+            const recentIntentsSnap = await db.collection('checkoutIntents')
+                .where('planId', '==', planId)
+                .where('status', '==', 'pending')
+                .get();
+            const recentCount = recentIntentsSnap.docs.filter((d) => d.data().createdAt && d.data().createdAt.toMillis() >= oneHourAgo.toMillis()).length;
+            if (recentCount >= 5) {
+                throw new https_1.HttpsError('resource-exhausted', 'Too many checkout attempts. Please wait a few minutes and try again.');
+            }
+        }
+        catch (e) {
+            // If it's our own rate-limit error, re-throw; otherwise log and continue
+            if ((e === null || e === void 0 ? void 0 : e.code) === 'resource-exhausted')
+                throw e;
+            console.warn('[createCheckoutSession] Rate limit check failed, proceeding:', e === null || e === void 0 ? void 0 : e.message);
+        }
+        // ── Load coach Stripe account ──
+        const coachAccountSnap = await db.collection('coachStripeAccounts').doc(coachId).get();
+        if (!coachAccountSnap.exists) {
+            throw new https_1.HttpsError('failed-precondition', 'Coach has not connected Stripe. ME-001: Coach must complete Stripe onboarding first.');
+        }
+        const coachAccount = coachAccountSnap.data();
+        // (5) Stripe connected account guard — block if charges not enabled
+        if (!coachAccount.chargesEnabled) {
+            throw new https_1.HttpsError('failed-precondition', 'Coach Stripe account is not ready for charges. Please ask your coach to complete Stripe onboarding.');
+        }
+        const stripeAccountId = coachAccount.stripeAccountId;
+        if (!stripeAccountId) {
+            throw new https_1.HttpsError('failed-precondition', 'Coach Stripe account ID is missing.');
+        }
+        // ── Compute pricing ──
+        const sessionsPerWeek = plan.sessionsPerWeek || 3;
+        const sessionsPerMonth = Math.round(sessionsPerWeek * (52 / 12));
+        const contractMonths = plan.contractMonths || 12;
+        // Initial monthly
+        const hourlyRate = plan.hourlyRate || 100;
+        const sessionLengthMinutes = plan.sessionLengthMinutes || 60;
+        const checkInCallMinutes = plan.checkInCallMinutes || 30;
+        const programBuildTimeHours = plan.programBuildTimeHours || 5;
+        // ── Pricing: use client-sent displayed prices to avoid rounding mismatches ──
+        // The frontend's calculatePricing() already applies CTS, nutrition, manual
+        // overrides, and pay-in-full discount using the exact same formula the member
+        // sees. We trust those values but validate they are within a sane range of
+        // the server-side estimate.
+        const ctsActive = commitToSave === true;
+        const nutActive = nutritionAddOn === true;
+        // Server-side fallback calculation (used for validation & snapshot)
+        const serverBaseMonthly = Math.round((_f = (_d = (_c = (_b = plan.pricingResult) === null || _b === void 0 ? void 0 : _b.displayMonthlyPrice) !== null && _c !== void 0 ? _c : plan.monthlyPriceOverride) !== null && _d !== void 0 ? _d : (_e = plan.pricingResult) === null || _e === void 0 ? void 0 : _e.calculatedMonthlyPrice) !== null && _f !== void 0 ? _f : (hourlyRate * (sessionLengthMinutes / 60) * sessionsPerMonth));
+        const ctsMonthlySavings = ctsActive
+            ? ((_j = (_h = (_g = plan.commitToSave) === null || _g === void 0 ? void 0 : _g.monthlySavings) !== null && _h !== void 0 ? _h : plan.commitToSaveMonthlySavings) !== null && _j !== void 0 ? _j : 100)
+            : 0;
+        const nutritionMonthlyCost = nutActive
+            ? ((_m = (_l = (_k = plan.nutrition) === null || _k === void 0 ? void 0 : _k.monthlyCost) !== null && _l !== void 0 ? _l : plan.nutritionMonthlyCost) !== null && _m !== void 0 ? _m : 100)
+            : 0;
+        const serverMonthly = serverBaseMonthly - ctsMonthlySavings + nutritionMonthlyCost;
+        const payInFullDiscountPct = plan.payInFullDiscountPercent || 10;
+        const serverPayInFull = Math.round(serverMonthly * contractMonths * (1 - payInFullDiscountPct / 100));
+        // Use client-sent prices when available; fall back to server calculation
+        const displayMonthlyPrice = (typeof clientMonthly === 'number' && clientMonthly > 0)
+            ? Math.round(clientMonthly)
+            : Math.round(serverMonthly);
+        const payInFullTotal = (typeof clientPayInFull === 'number' && clientPayInFull > 0)
+            ? Math.round(clientPayInFull)
+            : serverPayInFull;
+        // Sanity check: client price must be within $10 of server estimate
+        if (Math.abs(displayMonthlyPrice - Math.round(serverMonthly)) > 10) {
+            console.error(`[createCheckoutSession] Monthly price mismatch: client=${displayMonthlyPrice}, server=${Math.round(serverMonthly)}`);
+            throw new https_1.HttpsError('invalid-argument', 'Price mismatch — please refresh and try again.');
+        }
+        if (paymentOption === 'pay_in_full' && Math.abs(payInFullTotal - serverPayInFull) > 50) {
+            console.error(`[createCheckoutSession] Pay-in-full price mismatch: client=${payInFullTotal}, server=${serverPayInFull}`);
+            throw new https_1.HttpsError('invalid-argument', 'Price mismatch — please refresh and try again.');
+        }
+        const payInFullMonthlyEquivalent = Math.round(payInFullTotal / contractMonths);
+        // Continuation monthly
+        const cp = plan.continuationPricing;
+        const contHr = (_o = cp === null || cp === void 0 ? void 0 : cp.continuationHourlyRate) !== null && _o !== void 0 ? _o : hourlyRate;
+        const contMin = (_p = cp === null || cp === void 0 ? void 0 : cp.continuationMinutesPerSession) !== null && _p !== void 0 ? _p : 3.5;
+        const contCheckIn = (_q = cp === null || cp === void 0 ? void 0 : cp.continuationCheckInMinutesPerMonth) !== null && _q !== void 0 ? _q : 30;
+        const continuationMonthlyPrice = Math.round(contHr * (contMin / 60) * sessionsPerMonth);
+        const continuationPayInFullTotal = Math.round(continuationMonthlyPrice * 12 * 0.9);
+        const continuationPayInFullMonthlyEquivalent = Math.round(continuationPayInFullTotal / 12);
+        // Tier split (count active paying members for this coach)
+        const activePayingSnap = await db.collection('member_plans')
+            .where('coachId', '==', coachId)
+            .where('checkoutStatus', '==', 'paid')
+            .get();
+        const activePayingCount = activePayingSnap.size;
+        const tierSplit = getTierSplit(activePayingCount);
+        const applicationFeePercent = tierSplit;
+        // ── Create acceptedPlanSnapshot ──
+        const snapshotRef = db.collection('acceptedPlanSnapshots').doc();
+        const snapshotId = snapshotRef.id;
+        const now = firestore_2.Timestamp.now();
+        const contractStartAt = now;
+        const contractEndAtMs = now.toMillis() + contractMonths * 30.44 * 24 * 60 * 60 * 1000;
+        const contractEndAt = firestore_2.Timestamp.fromMillis(contractEndAtMs);
+        const snapshot = {
+            snapshotId,
+            planId,
+            memberId,
+            coachId,
+            snapshotAt: now,
+            contractLengthMonths: contractMonths,
+            hourlyRate,
+            sessionLengthMinutes,
+            checkInCallMinutes,
+            programBuildTimeHours,
+            sessionsPerWeek,
+            calculatedMonthlyPrice: displayMonthlyPrice,
+            displayMonthlyPrice,
+            payInFullTotal,
+            payInFullMonthlyEquivalent,
+            continuationHourlyRate: contHr,
+            continuationMinutesPerSession: contMin,
+            continuationCheckInMinutesPerMonth: contCheckIn,
+            continuationMonthlyPrice,
+            continuationPayInFullTotal,
+            continuationPayInFullMonthlyEquivalent,
+            baseMonthlyPrice: serverBaseMonthly,
+            ctsActive,
+            ctsMonthlySavings: ctsActive ? ctsMonthlySavings : ((_s = (_r = plan.postContract) === null || _r === void 0 ? void 0 : _r.ctsMonthlySavings) !== null && _s !== void 0 ? _s : null),
+            nutActive,
+            nutritionMonthlyCost: nutActive ? nutritionMonthlyCost : 0,
+            tierSplit,
+            applicationFeePercent,
+            contractStartAt,
+            contractEndAt,
+        };
+        await snapshotRef.set(snapshot);
+        // ── Create checkoutIntent ──
+        const intentRef = db.collection('checkoutIntents').doc();
+        const intentId = intentRef.id;
+        await intentRef.set({
+            intentId,
+            memberId,
+            coachId,
+            planId,
+            snapshotId,
+            paymentOption,
+            status: 'pending',
+            createdAt: firestore_2.FieldValue.serverTimestamp(),
+            updatedAt: firestore_2.FieldValue.serverTimestamp(),
+        });
+        const stripe = getStripe(stripeSecretKey.value());
+        const appBaseUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
+        // ── (3) Get or create Stripe customer — email fallback for unauthenticated members ──
+        let stripeCustomerId = plan.stripeCustomerId;
+        if (!stripeCustomerId) {
+            // Try user account first, then fall back to email stored on the plan
+            const memberSnap = await db.collection('users').doc(memberId).get();
+            const memberEmail = ((_t = memberSnap.data()) === null || _t === void 0 ? void 0 : _t.email)
+                || plan.memberEmail
+                || plan.email;
+            const customer = await stripe.customers.create({ email: memberEmail, metadata: { memberId, coachId, planId } }, { stripeAccount: stripeAccountId });
+            stripeCustomerId = customer.id;
+            await planRef.update({ stripeCustomerId });
+        }
+        let sessionUrl;
+        let stripeSessionId;
+        if (paymentOption === 'monthly') {
+            // ── Monthly: subscription schedule with two phases ──
+            // Phase 1: contractMonths at displayMonthlyPrice
+            // Phase 2: indefinite at continuationMonthlyPrice
+            const session = await stripe.checkout.sessions.create({
+                customer: stripeCustomerId,
+                payment_method_types: ['card'],
+                mode: 'subscription',
+                line_items: [
+                    {
+                        price_data: {
+                            currency: 'usd',
+                            product_data: {
+                                name: `GoArrive Coaching — ${contractMonths}-Month Contract${ctsActive ? ' (Commit to Save)' : ''}${nutActive ? ' + Nutrition' : ''}`,
+                                metadata: { planId, snapshotId },
+                            },
+                            unit_amount: displayMonthlyPrice * 100, // cents
+                            recurring: { interval: 'month' },
                         },
-                        unit_amount: displayMonthlyPrice * 100, // cents
-                        recurring: { interval: 'month' },
+                        quantity: 1,
                     },
-                    quantity: 1,
+                ],
+                subscription_data: {
+                    application_fee_percent: applicationFeePercent,
+                    metadata: {
+                        planId,
+                        snapshotId,
+                        intentId,
+                        memberId,
+                        coachId,
+                        paymentOption: 'monthly',
+                        contractMonths: String(contractMonths),
+                        continuationMonthlyPriceCents: String(continuationMonthlyPrice * 100),
+                        tierSplit: String(tierSplit),
+                    },
                 },
-            ],
-            subscription_data: Object.assign(Object.assign({}, (stripeAccountId ? { application_fee_percent: applicationFeePercent } : {})), { metadata: {
-                    planId,
-                    snapshotId,
-                    intentId,
-                    memberId,
-                    coachId,
-                    paymentOption: 'monthly',
-                    contractMonths: String(contractMonths),
-                    continuationMonthlyPriceCents: String(continuationMonthlyPrice * 100),
-                    tierSplit: String(tierSplit),
-                } }),
-            // (4) Include planId in success URL so checkout-success page can link the account
-            success_url: `${appBaseUrl}/checkout-success?intent=${intentId}&memberId=${memberId}&planId=${planId}`,
-            cancel_url: `${appBaseUrl}/shared-plan/${memberId}?checkout_cancelled=1`,
-            metadata: { intentId, planId, snapshotId, memberId, coachId },
-        }, stripeAccountId ? { stripeAccount: stripeAccountId } : undefined);
-        sessionUrl = session.url;
-        stripeSessionId = session.id;
-    }
-    else {
-        // ── Pay in full: one-time payment + deferred continuation subscription ──
-        const session = await stripe.checkout.sessions.create({
-            customer: stripeCustomerId,
-            payment_method_types: ['card'],
-            mode: 'payment',
-            line_items: [
-                {
-                    price_data: {
-                        currency: 'usd',
-                        product_data: {
-                            name: `GoArrive Coaching — ${contractMonths}-Month Pay in Full (10% off)${ctsActive ? ' + Commit to Save' : ''}${nutActive ? ' + Nutrition' : ''}`,
-                            metadata: { planId, snapshotId },
+                // (4) Include planId in success URL so checkout-success page can link the account
+                success_url: `${appBaseUrl}/checkout-success?intent=${intentId}&memberId=${memberId}&planId=${planId}`,
+                cancel_url: `${appBaseUrl}/shared-plan/${memberId}?checkout_cancelled=1`,
+                metadata: { intentId, planId, snapshotId, memberId, coachId },
+            }, { stripeAccount: stripeAccountId });
+            sessionUrl = session.url;
+            stripeSessionId = session.id;
+        }
+        else {
+            // ── Pay in full: one-time payment + deferred continuation subscription ──
+            const session = await stripe.checkout.sessions.create({
+                customer: stripeCustomerId,
+                payment_method_types: ['card'],
+                mode: 'payment',
+                line_items: [
+                    {
+                        price_data: {
+                            currency: 'usd',
+                            product_data: {
+                                name: `GoArrive Coaching — ${contractMonths}-Month Pay in Full (10% off)${ctsActive ? ' + Commit to Save' : ''}${nutActive ? ' + Nutrition' : ''}`,
+                                metadata: { planId, snapshotId },
+                            },
+                            unit_amount: payInFullTotal * 100, // cents
                         },
-                        unit_amount: payInFullTotal * 100, // cents
+                        quantity: 1,
                     },
-                    quantity: 1,
+                ],
+                payment_intent_data: {
+                    application_fee_amount: Math.round(payInFullTotal * 100 * applicationFeePercent / 100),
+                    metadata: {
+                        planId,
+                        snapshotId,
+                        intentId,
+                        memberId,
+                        coachId,
+                        paymentOption: 'pay_in_full',
+                        contractMonths: String(contractMonths),
+                        contractEndAtMs: String(contractEndAtMs),
+                        continuationMonthlyPriceCents: String(continuationMonthlyPrice * 100),
+                        tierSplit: String(tierSplit),
+                        // Store for future renewed pay-in-full option (BP-002)
+                        continuationPayInFullTotal: String(continuationPayInFullTotal),
+                    },
                 },
-            ],
-            payment_intent_data: Object.assign(Object.assign({}, (stripeAccountId ? { application_fee_amount: Math.round(payInFullTotal * 100 * applicationFeePercent / 100) } : {})), { metadata: {
-                    planId,
-                    snapshotId,
-                    intentId,
-                    memberId,
-                    coachId,
-                    paymentOption: 'pay_in_full',
-                    contractMonths: String(contractMonths),
-                    contractEndAtMs: String(contractEndAtMs),
-                    continuationMonthlyPriceCents: String(continuationMonthlyPrice * 100),
-                    tierSplit: String(tierSplit),
-                    // Store for future renewed pay-in-full option (BP-002)
-                    continuationPayInFullTotal: String(continuationPayInFullTotal),
-                } }),
-            // (4) Include planId in success URL so checkout-success page can link the account
-            success_url: `${appBaseUrl}/checkout-success?intent=${intentId}&memberId=${memberId}&planId=${planId}`,
-            cancel_url: `${appBaseUrl}/shared-plan/${memberId}?checkout_cancelled=1`,
-            metadata: { intentId, planId, snapshotId, memberId, coachId },
-        }, stripeAccountId ? { stripeAccount: stripeAccountId } : undefined);
-        sessionUrl = session.url;
-        stripeSessionId = session.id;
+                // (4) Include planId in success URL so checkout-success page can link the account
+                success_url: `${appBaseUrl}/checkout-success?intent=${intentId}&memberId=${memberId}&planId=${planId}`,
+                cancel_url: `${appBaseUrl}/shared-plan/${memberId}?checkout_cancelled=1`,
+                metadata: { intentId, planId, snapshotId, memberId, coachId },
+            }, { stripeAccount: stripeAccountId });
+            sessionUrl = session.url;
+            stripeSessionId = session.id;
+        }
+        // Update intent with Stripe session ID
+        await intentRef.update({
+            stripeSessionId,
+            stripeSessionUrl: sessionUrl,
+            updatedAt: firestore_2.FieldValue.serverTimestamp(),
+        });
+        return { sessionUrl, intentId, snapshotId };
     }
-    // Update intent with Stripe session ID
-    await intentRef.update({
-        stripeSessionId,
-        stripeSessionUrl: sessionUrl,
-        updatedAt: firestore_2.FieldValue.serverTimestamp(),
-    });
-    return { sessionUrl, intentId, snapshotId };
+    catch (err) {
+        // Re-throw HttpsError as-is; wrap unexpected errors with logging
+        if ((err === null || err === void 0 ? void 0 : err.code) && (err === null || err === void 0 ? void 0 : err.httpErrorCode))
+            throw err; // Already an HttpsError
+        console.error('[createCheckoutSession] Unhandled error:', (_u = err === null || err === void 0 ? void 0 : err.message) !== null && _u !== void 0 ? _u : err, (_v = err === null || err === void 0 ? void 0 : err.stack) !== null && _v !== void 0 ? _v : '');
+        throw new https_1.HttpsError('internal', 'Something went wrong creating checkout. Please try again.');
+    }
 });
 // ─── 6. stripeWebhook ─────────────────────────────────────────────────────────
 /**
