@@ -10,6 +10,7 @@
  *  6. stripeWebhook               — HTTPS trigger: handle Stripe webhook events
  *  7. activateCtsOptIn             — HTTPS callable: activate Commit-to-Save subscription item
  *  8. addCoach                     — HTTPS callable: admin-only coach account creation
+ * 26. enforceCtsAccountability     — Scheduled (hourly): auto-charge CTS missed session fees after 48h
  *
  * ME-001: STRIPE_SECRET_KEY must be set as a Firebase secret before functions 3–6 operate.
  *         firebase functions:secrets:set STRIPE_SECRET_KEY
@@ -3863,5 +3864,321 @@ export const adminGetCoachData = onCall(
     });
 
     return { members };
+  }
+);
+
+
+// ─── 26. enforceCtsAccountability — Scheduled: auto-charge missed session fees ──
+/**
+ * Runs every hour. For each active Commit-to-Save member:
+ *   1. Finds session_instances that were scheduled > 48 hours ago where the
+ *      member did not attend (no attendance record and status is NOT 'completed').
+ *   2. Checks idempotency via ctsAccountabilityFees collection.
+ *   3. Creates a Stripe invoice item for the missed-session fee ($50 default)
+ *      on the coach's connected account, then finalizes the invoice.
+ *   4. Records the fee in ctsAccountabilityFees and ledgerEntries.
+ *   5. Sends a notification to the member.
+ *
+ * The 48-hour window gives the member time to reschedule/make up the session.
+ * Emergency waivers are handled manually by the coach (set waived: true on the
+ * ctsAccountabilityFees doc).
+ */
+export const enforceCtsAccountability = onSchedule(
+  { schedule: 'every 1 hours', timeZone: 'UTC', region: 'us-central1', secrets: [stripeSecretKey, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber] },
+  async () => {
+    console.log('[enforceCtsAccountability] Starting CTS accountability check');
+
+    const stripe = getStripe(stripeSecretKey.value());
+    const now = Timestamp.now();
+    const fortyEightHoursAgoMs = now.toMillis() - 48 * 60 * 60 * 1000;
+    // Only look at sessions from the last 7 days (avoid scanning ancient data)
+    const sevenDaysAgoMs = now.toMillis() - 7 * 24 * 60 * 60 * 1000;
+
+    // Reset notification providers so secrets are freshly resolved
+    const { resetNotificationProviders } = await import('./notifications');
+    resetNotificationProviders();
+
+    let totalProcessed = 0;
+    let totalCharged = 0;
+    let totalSkipped = 0;
+    let totalFailed = 0;
+
+    try {
+      // 1. Find all active CTS consents
+      const activeConsentsSnap = await db.collection('commitToSaveConsents')
+        .where('status', '==', 'active')
+        .get();
+
+      if (activeConsentsSnap.empty) {
+        console.log('[enforceCtsAccountability] No active CTS consents found');
+        return;
+      }
+
+      console.log(`[enforceCtsAccountability] Found ${activeConsentsSnap.size} active CTS consents`);
+
+      for (const consentDoc of activeConsentsSnap.docs) {
+        const consent = consentDoc.data();
+        const memberId = consent.memberId as string;
+        const planId = consent.planId as string;
+        const coachId = consent.coachId as string;
+        const missedSessionFee = (consent.missedSessionFee as number) ?? 50; // Default $50
+
+        if (!memberId || !planId || !coachId) {
+          console.warn('[enforceCtsAccountability] Skipping consent', consentDoc.id, '— missing fields');
+          continue;
+        }
+
+        try {
+          // 2. Find missed sessions for this member in the accountability window
+          //    Sessions that were scheduled between 7 days ago and 48 hours ago,
+          //    where the member did NOT attend.
+          const fortyEightHoursAgoDate = new Date(fortyEightHoursAgoMs).toISOString().split('T')[0];
+          const sevenDaysAgoDate = new Date(sevenDaysAgoMs).toISOString().split('T')[0];
+
+          const instancesSnap = await db.collection('session_instances')
+            .where('memberId', '==', memberId)
+            .where('coachId', '==', coachId)
+            .where('scheduledDate', '>=', sevenDaysAgoDate)
+            .where('scheduledDate', '<=', fortyEightHoursAgoDate)
+            .get();
+
+          for (const instanceDoc of instancesSnap.docs) {
+            const instance = instanceDoc.data();
+            totalProcessed++;
+
+            // Skip if session was cancelled, rescheduled, or completed
+            if (['completed', 'cancelled', 'rescheduled', 'in_progress'].includes(instance.status)) {
+              totalSkipped++;
+              continue;
+            }
+
+            // Skip if member actually attended (has attendance data or actualStartTime)
+            const hasAttendance = instance.attendance && Object.keys(instance.attendance).length > 0;
+            const hasActualStart = !!instance.actualStartTime;
+            const attendanceStatus = instance.attendanceStatus;
+            if (hasAttendance || hasActualStart || attendanceStatus === 'joined' || attendanceStatus === 'completed') {
+              totalSkipped++;
+              continue;
+            }
+
+            // Skip if CTS is not enabled on this specific session instance
+            if (instance.commitToSaveEnabled === false) {
+              totalSkipped++;
+              continue;
+            }
+
+            // 3. Idempotency check — have we already charged for this instance?
+            const existingFeeSnap = await db.collection('ctsAccountabilityFees')
+              .where('sessionInstanceId', '==', instanceDoc.id)
+              .where('memberId', '==', memberId)
+              .limit(1)
+              .get();
+
+            if (!existingFeeSnap.empty) {
+              totalSkipped++; // Already processed
+              continue;
+            }
+
+            // 4. Look up Stripe details
+            const planSnap = await db.collection('member_plans').doc(planId).get();
+            const planData = planSnap.data();
+            const stripeCustomerId = planData?.stripeCustomerId as string | undefined;
+            if (!stripeCustomerId) {
+              console.warn('[enforceCtsAccountability] No stripeCustomerId for plan', planId, '— skipping');
+              totalSkipped++;
+              continue;
+            }
+
+            const coachAccountSnap = await db.collection('coachStripeAccounts').doc(coachId).get();
+            const stripeAccountId = coachAccountSnap.data()?.stripeAccountId as string | undefined;
+            if (!stripeAccountId) {
+              console.warn('[enforceCtsAccountability] No stripeAccountId for coach', coachId, '— skipping');
+              totalSkipped++;
+              continue;
+            }
+
+            // 5. Create Stripe invoice item and finalize the invoice
+            try {
+              // Create an invoice item on the customer
+              await stripe.invoiceItems.create(
+                {
+                  customer: stripeCustomerId,
+                  amount: missedSessionFee * 100, // cents
+                  currency: 'usd',
+                  description: `Commit to Save — Missed Session Fee (${instance.scheduledDate} ${instance.scheduledStartTime || ''})`,
+                  metadata: {
+                    type: 'cts_missed_session_fee',
+                    sessionInstanceId: instanceDoc.id,
+                    memberId,
+                    coachId,
+                    planId,
+                  },
+                },
+                { stripeAccount: stripeAccountId }
+              );
+
+              // Create and finalize the invoice (auto-charges the default payment method)
+              const invoice = await stripe.invoices.create(
+                {
+                  customer: stripeCustomerId,
+                  auto_advance: true, // Auto-finalize and attempt payment
+                  collection_method: 'charge_automatically',
+                  metadata: {
+                    type: 'cts_missed_session_fee',
+                    sessionInstanceId: instanceDoc.id,
+                    memberId,
+                    coachId,
+                    planId,
+                  },
+                },
+                { stripeAccount: stripeAccountId }
+              );
+
+              // Finalize the invoice to trigger payment
+              await stripe.invoices.finalizeInvoice(
+                invoice.id,
+                {},
+                { stripeAccount: stripeAccountId }
+              );
+
+              // Compute tier split for the fee
+              const activePayingSnap = await db.collection('member_plans')
+                .where('coachId', '==', coachId)
+                .where('checkoutStatus', '==', 'paid')
+                .get();
+              const tierSplit = getTierSplit(activePayingSnap.size);
+              const feeCents = missedSessionFee * 100;
+              const goArriveShareCents = Math.round(feeCents * tierSplit / 100);
+              const coachShareCents = feeCents - goArriveShareCents;
+
+              // 6. Record the fee in ctsAccountabilityFees
+              const feeRef = db.collection('ctsAccountabilityFees').doc();
+              await feeRef.set({
+                feeId: feeRef.id,
+                sessionInstanceId: instanceDoc.id,
+                memberId,
+                coachId,
+                planId,
+                consentId: consentDoc.id,
+                scheduledDate: instance.scheduledDate,
+                scheduledStartTime: instance.scheduledStartTime || '',
+                feeCents,
+                stripeInvoiceId: invoice.id,
+                stripeAccountId,
+                stripeCustomerId,
+                status: 'charged',
+                waived: false,
+                tierSplit,
+                goArriveShareCents,
+                coachShareCents,
+                createdAt: FieldValue.serverTimestamp(),
+              });
+
+              // 7. Record in ledgerEntries
+              const ledgerRef = db.collection('ledgerEntries').doc();
+              await ledgerRef.set({
+                entryId: ledgerRef.id,
+                billingEventId: `cts_fee_${feeRef.id}`,
+                memberId,
+                coachId,
+                planId,
+                snapshotId: planData?.acceptedSnapshotId ?? '',
+                phase: 'continuation',
+                grossAmountCents: feeCents,
+                coachShareCents,
+                goArriveShareCents,
+                tierSnapshot: tierSplit,
+                applicationFeePercent: tierSplit,
+                stripeInvoiceId: invoice.id,
+                type: 'cts_missed_session_fee',
+                description: `CTS missed session fee — ${instance.scheduledDate}`,
+                createdAt: FieldValue.serverTimestamp(),
+              });
+
+              // 8. Update the session instance to mark it as missed
+              await db.collection('session_instances').doc(instanceDoc.id).update({
+                status: 'missed',
+                ctsFeeCarged: true,
+                ctsFeeId: feeRef.id,
+                updatedAt: FieldValue.serverTimestamp(),
+              });
+
+              // 9. Send notification to member
+              try {
+                const { sendNotification } = await import('./notifications');
+                const memberSnap = await db.collection('users').doc(memberId).get();
+                const memberData = memberSnap.exists ? memberSnap.data()! : {};
+                const coachSnap = await db.collection('coaches').doc(coachId).get();
+                const coachName = coachSnap.data()?.name || 'your coach';
+
+                await sendNotification({
+                  messageType: 'admin_alert',
+                  channel: 'email',
+                  recipient: {
+                    uid: memberId,
+                    email: memberData.email || '',
+                    displayName: memberData.displayName || '',
+                    role: 'member',
+                  },
+                  subject: `Commit to Save — Missed Session Fee ($${missedSessionFee})`,
+                  body: `Hi ${(memberData.displayName || 'there').split(' ')[0]}, you missed your session on ${instance.scheduledDate} and did not make it up within 48 hours. A $${missedSessionFee} accountability fee has been charged per your Commit to Save agreement. If this was an emergency, contact ${coachName} to request a waiver. — GoArrive`,
+                  htmlBody: `
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; color: #E8E6E3;">
+  <div style="background: #1A1D23; border-radius: 12px; padding: 24px;">
+    <h2 style="color: #FFC000; margin: 0 0 16px 0; font-size: 20px;">Missed Session Fee</h2>
+    <p style="margin: 0 0 12px 0; line-height: 1.5;">Hi ${(memberData.displayName || 'there').split(' ')[0]}, you missed your session on <strong>${instance.scheduledDate}</strong> and did not make it up within 48 hours.</p>
+    <p style="margin: 0 0 12px 0; line-height: 1.5;">A <strong>$${missedSessionFee}</strong> accountability fee has been charged per your Commit to Save agreement.</p>
+    <p style="margin: 0 0 12px 0; line-height: 1.5; color: #9CA3AF;">If this was a family emergency or illness, contact <strong>${coachName}</strong> to request a waiver.</p>
+    <p style="margin: 16px 0 0 0; color: #9CA3AF;">— GoArrive</p>
+  </div>
+</div>`,
+                  memberId,
+                  coachId,
+                });
+              } catch (notifErr) {
+                console.warn('[enforceCtsAccountability] Failed to send notification for instance', instanceDoc.id, ':', notifErr);
+              }
+
+              totalCharged++;
+              console.log(
+                '[enforceCtsAccountability] Charged $' + missedSessionFee,
+                'for missed session', instanceDoc.id,
+                'member', memberId,
+                'invoice', invoice.id
+              );
+            } catch (stripeErr: any) {
+              totalFailed++;
+              console.error(
+                '[enforceCtsAccountability] Stripe charge failed for instance',
+                instanceDoc.id, ':', stripeErr.message || stripeErr
+              );
+
+              // Write to dead_letter for visibility
+              await db.collection('dead_letter').add({
+                type: 'cts_fee_charge_failed',
+                sourceCollection: 'session_instances',
+                sourceId: instanceDoc.id,
+                error: stripeErr.message || String(stripeErr),
+                payload: { memberId, coachId, planId, scheduledDate: instance.scheduledDate },
+                createdAt: Timestamp.now(),
+                resolved: false,
+              });
+            }
+          }
+        } catch (queryErr: any) {
+          console.error(
+            '[enforceCtsAccountability] Error processing consent',
+            consentDoc.id, ':', queryErr.message || queryErr
+          );
+        }
+      }
+    } catch (err: any) {
+      console.error('[enforceCtsAccountability] Fatal error:', err.message || err);
+    }
+
+    console.log(
+      `[enforceCtsAccountability] Done: ${totalProcessed} sessions checked, ` +
+      `${totalCharged} charged, ${totalSkipped} skipped, ${totalFailed} failed`
+    );
   }
 );
