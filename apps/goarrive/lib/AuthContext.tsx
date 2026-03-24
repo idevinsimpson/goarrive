@@ -21,7 +21,7 @@ import {
   User,
   signOut as firebaseSignOut,
 } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from './firebase';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -61,7 +61,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [claims, setClaims] = useState<CustomClaims | null>(null);
   const [loading, setLoading] = useState(true);
-  const [adminCoachOverride, setAdminCoachOverride] = useState<string | null>(null);
+  const [adminCoachOverride, _setAdminCoachOverride] = useState<string | null>(null);
+
+  // Wrap setAdminCoachOverride to log audit events
+  const setAdminCoachOverride = React.useCallback((coachId: string | null) => {
+    _setAdminCoachOverride(coachId);
+    // Fire-and-forget audit log
+    if (user) {
+      const eventType = coachId ? 'admin_impersonate_start' : 'admin_impersonate_end';
+      addDoc(collection(db, 'eventLog'), {
+        type: eventType,
+        adminUid: user.uid,
+        adminEmail: user.email ?? '',
+        targetCoachId: coachId ?? 'exited',
+        timestamp: serverTimestamp(),
+      }).catch(err => console.warn('[AuthContext] Audit log failed:', err));
+    }
+  }, [user]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {

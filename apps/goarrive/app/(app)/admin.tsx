@@ -66,6 +66,8 @@ const PURPLE = '#A78BFA';
 
 interface CoachRow { uid: string; name: string; email: string; createdAt?: number; stripeReady?: boolean; }
 
+interface PendingInvite { id: string; email: string; displayName: string; status: string; createdAt?: any; expiresAt?: number; }
+
 interface CoachMember {
   id: string;
   name: string;
@@ -130,6 +132,10 @@ export default function AdminScreen() {
   const [coachMembers, setCoachMembers] = useState<CoachMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
 
+  // Pending invites state
+  const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
+  const [loadingInvites, setLoadingInvites] = useState(false);
+
   const isAdmin = claims?.admin === true || claims?.role === 'platformAdmin';
 
   // ── Load coaches ──────────────────────────────────────────────────────────
@@ -140,14 +146,16 @@ export default function AdminScreen() {
       let q = query(collection(dbRef, 'coaches'), orderBy('createdAt', 'desc'));
       let snap = await getDocs(q);
 
-      // Auto-seed: if no coaches docs exist, call seedMissingCoachDocs and re-fetch
-      if (snap.empty) {
+      // One-time seed: if no coaches docs exist and we haven't seeded yet this session
+      if (snap.empty && !(window as any).__coachesSeeded) {
         try {
           const seedFn = httpsCallable(getFunctions(), 'seedMissingCoachDocs');
           await seedFn({});
+          (window as any).__coachesSeeded = true;
           snap = await getDocs(q);
         } catch (seedErr) {
           console.warn('[admin] seedMissingCoachDocs failed', seedErr);
+          (window as any).__coachesSeeded = true; // Don't retry on failure
         }
       }
 
@@ -175,48 +183,49 @@ export default function AdminScreen() {
     finally { setLoadingCoaches(false); }
   }, []);
 
-  // ── Load coach members (drill-down) ───────────────────────────────────
+  // ── Load coach members (drill-down) — uses server-side Cloud Function ──
   const fetchCoachMembers = useCallback(async (coachUid: string) => {
     setLoadingMembers(true);
     try {
-      const dbRef = getFirestore();
-      // Fetch members for this coach
-      const mQ = query(collection(dbRef, 'members'), where('coachId', '==', coachUid));
-      const mSnap = await getDocs(mQ);
-      const memberList: CoachMember[] = [];
-      const memberIds = mSnap.docs.map(d => d.id);
-
-      // Fetch member plans for this coach
-      const pQ = query(collection(dbRef, 'member_plans'), where('coachId', '==', coachUid), limit(200));
-      const pSnap = await getDocs(pQ);
-      const planMap: Record<string, any> = {};
-      pSnap.docs.forEach(d => {
-        const data = d.data();
-        const mid = data.memberId ?? d.id;
-        planMap[mid] = { id: d.id, ...data };
-      });
-
-      mSnap.docs.forEach(d => {
-        const data = d.data();
-        const plan = planMap[d.id];
-        memberList.push({
-          id: d.id,
-          name: data.name || data.displayName || `${data.firstName ?? ''} ${data.lastName ?? ''}`.trim() || 'Unknown',
-          email: data.email ?? '',
-          phone: data.phone ?? '',
-          isArchived: data.isArchived ?? false,
-          planId: plan?.id,
-          planStatus: plan?.status ?? 'no plan',
-          checkoutStatus: plan?.checkoutStatus,
-          contractMonths: plan?.contractMonths,
-          displayMonthlyPrice: plan?.pricingResult?.displayMonthlyPrice,
-        });
-      });
-
-      setCoachMembers(memberList);
+      const fn = httpsCallable(getFunctions(), 'adminGetCoachData');
+      const result = await fn({ coachUid });
+      const data = result.data as { members: CoachMember[] };
+      setCoachMembers(data.members ?? []);
     } catch (err) {
       console.warn('[admin] Failed to load coach members', err);
-      setCoachMembers([]);
+      // Fallback to client-side query if Cloud Function fails
+      try {
+        const dbRef = getFirestore();
+        const mQ = query(collection(dbRef, 'members'), where('coachId', '==', coachUid));
+        const mSnap = await getDocs(mQ);
+        const pQ = query(collection(dbRef, 'member_plans'), where('coachId', '==', coachUid), limit(200));
+        const pSnap = await getDocs(pQ);
+        const planMap: Record<string, any> = {};
+        pSnap.docs.forEach(d => {
+          const dd = d.data();
+          planMap[dd.memberId ?? d.id] = { id: d.id, ...dd };
+        });
+        const memberList: CoachMember[] = mSnap.docs.map(d => {
+          const dd = d.data();
+          const plan = planMap[d.id];
+          return {
+            id: d.id,
+            name: dd.name || dd.displayName || `${dd.firstName ?? ''} ${dd.lastName ?? ''}`.trim() || 'Unknown',
+            email: dd.email ?? '',
+            phone: dd.phone ?? '',
+            isArchived: dd.isArchived ?? false,
+            planId: plan?.id,
+            planStatus: plan?.status ?? 'no plan',
+            checkoutStatus: plan?.checkoutStatus,
+            contractMonths: plan?.contractMonths,
+            displayMonthlyPrice: plan?.pricingResult?.displayMonthlyPrice,
+          };
+        });
+        setCoachMembers(memberList);
+      } catch (fallbackErr) {
+        console.warn('[admin] Fallback query also failed', fallbackErr);
+        setCoachMembers([]);
+      }
     } finally {
       setLoadingMembers(false);
     }
@@ -263,10 +272,48 @@ export default function AdminScreen() {
     setLoadingDL(false);
   }, []);
 
+  // ── Load pending coach invites ──────────────────────────────────────────
+  const fetchPendingInvites = useCallback(async () => {
+    setLoadingInvites(true);
+    try {
+      const dbRef = getFirestore();
+      const q = query(collection(dbRef, 'coachInvites'), where('status', '==', 'pending'));
+      const snap = await getDocs(q);
+      const invites: PendingInvite[] = snap.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id,
+          email: data.email ?? '',
+          displayName: data.displayName ?? '',
+          status: data.status ?? 'pending',
+          createdAt: data.createdAt,
+          expiresAt: data.expiresAt,
+        };
+      });
+      setPendingInvites(invites);
+    } catch (err) {
+      console.warn('[admin] Failed to load pending invites', err);
+    } finally {
+      setLoadingInvites(false);
+    }
+  }, []);
+
+  // ── Auto-upgrade admin role if needed ────────────────────────────────────
+  useEffect(() => {
+    if (!isAdmin || !user) return;
+    if (claims?.admin === true && claims?.role !== 'platformAdmin') {
+      const upgradeFn = httpsCallable(getFunctions(), 'setAdminRole');
+      upgradeFn({ targetUid: user.uid })
+        .then(() => console.log('[admin] Role upgraded to platformAdmin — sign out and back in for full effect'))
+        .catch((err: any) => console.warn('[admin] Auto-upgrade failed', err));
+    }
+  }, [isAdmin, user, claims]);
+
   // ── Load scheduling operations data ───────────────────────────────────────
   useEffect(() => {
     if (!isAdmin) return;
     fetchCoaches();
+    fetchPendingInvites();
     fetchHealth();
 
     let opsLoaded = 0;
@@ -303,7 +350,7 @@ export default function AdminScreen() {
     );
 
     return () => { unsubRooms(); unsubFailed(); unsubPending(); unsubAllocated(); unsubCompleted(); };
-  }, [isAdmin, fetchCoaches, fetchHealth]);
+  }, [isAdmin, fetchCoaches, fetchPendingInvites, fetchHealth]);
 
   // Load tab-specific data
   useEffect(() => {
@@ -328,6 +375,7 @@ export default function AdminScreen() {
       setInviteeName(coachName.trim());
       setCoachName(''); setCoachEmail('');
       fetchCoaches();
+      fetchPendingInvites();
     } catch (err: any) {
       const msg = err?.message?.includes('already-exists') ? 'A user with this email already exists.'
         : err?.message?.includes('permission-denied') ? 'Admin access required. Please sign out and back in, then try again.'
@@ -1062,6 +1110,37 @@ export default function AdminScreen() {
                 </View>
               ))}
             </View>
+          )}
+
+          {/* ── Pending Invites ── */}
+          {pendingInvites.length > 0 && (
+            <>
+              <View style={s.divider} />
+              <Text style={s.sectionTitle}>Pending Invites</Text>
+              <Text style={s.sectionSub}>Coaches who have been invited but haven't activated yet.</Text>
+              <View style={s.coachList}>
+                {pendingInvites.map((inv) => {
+                  const isExpired = inv.expiresAt ? inv.expiresAt < Date.now() : false;
+                  return (
+                    <View key={inv.id} style={s.coachRow}>
+                      <View style={s.avatar}><Text style={s.avatarInitial}>{(inv.displayName?.[0] ?? '?').toUpperCase()}</Text></View>
+                      <View style={s.coachInfo}>
+                        <Text style={s.coachName}>{inv.displayName || 'Unnamed'}</Text>
+                        <Text style={s.coachEmail}>{inv.email}</Text>
+                        <Text style={[s.coachDate, isExpired && { color: RED }]}>
+                          {isExpired ? 'Expired' : 'Pending activation'}
+                        </Text>
+                      </View>
+                      <View style={[s.statusPill, { backgroundColor: isExpired ? RED + '20' : AMBER + '20' }]}>
+                        <Text style={[s.statusPillText, { color: isExpired ? RED : AMBER }]}>
+                          {isExpired ? 'Expired' : 'Pending'}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </>
           )}
 
           {/* ── Invite a Coach ── */}

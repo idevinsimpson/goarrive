@@ -453,8 +453,10 @@ export const createCheckoutSession = onCall(
     const coachId = plan.coachId as string;
     if (!coachId) throw new HttpsError('failed-precondition', 'Plan has no coachId');
 
-    // If signed in, verify the caller is the member or the plan's coach
-    if (callerUid && callerUid !== memberId && callerUid !== coachId) {
+    // If signed in, verify the caller is the member, the plan's coach, or a platform admin
+    const callerToken = request.auth?.token as Record<string, any> | undefined;
+    const callerIsAdmin = callerToken?.role === 'platformAdmin' || callerToken?.admin === true;
+    if (callerUid && callerUid !== memberId && callerUid !== coachId && !callerIsAdmin) {
       throw new HttpsError('permission-denied', 'Not authorized for this plan');
     }
 
@@ -3766,5 +3768,99 @@ export const seedMissingCoachDocs = onCall(
     } while (nextPageToken);
 
     return { success: true, created };
+  }
+);
+
+/**
+ * setAdminRole — One-time utility to set a user's role to platformAdmin.
+ * Called by the admin from the admin page. Updates both custom claims and
+ * the coaches collection doc.
+ *
+ * Input: { targetUid: string }
+ */
+export const setAdminRole = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+    const callerToken = request.auth?.token as Record<string, any> | undefined;
+    const isAdmin = callerToken?.role === 'platformAdmin' || callerToken?.admin === true;
+    if (!isAdmin) throw new HttpsError('permission-denied', 'Admin only');
+
+    const { targetUid } = request.data as { targetUid?: string };
+    const uid = targetUid || callerUid;
+
+    // Update custom claims
+    const user = await admin.auth().getUser(uid);
+    const existingClaims = user.customClaims ?? {};
+    await admin.auth().setCustomUserClaims(uid, {
+      ...existingClaims,
+      role: 'platformAdmin',
+      admin: true,
+      coachId: uid,
+    });
+
+    // Update coaches doc if it exists
+    const coachRef = db.collection('coaches').doc(uid);
+    const coachDoc = await coachRef.get();
+    if (coachDoc.exists) {
+      await coachRef.update({ role: 'platformAdmin' });
+    }
+
+    console.log(`[setAdminRole] Set ${uid} to platformAdmin by ${callerUid}`);
+    return { success: true, uid };
+  }
+);
+
+/**
+ * adminGetCoachData — Server-side data fetch for admin "View as Coach" mode.
+ * Returns a coach's members and their plan summaries without requiring
+ * client-side Firestore queries (avoids rule-tightening risks).
+ *
+ * Input: { coachUid: string }
+ * Output: { members: Array<{ id, name, email, phone, isArchived, planId, planStatus, checkoutStatus, contractMonths, displayMonthlyPrice }> }
+ */
+export const adminGetCoachData = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+    const callerToken = request.auth?.token as Record<string, any> | undefined;
+    const isAdmin = callerToken?.role === 'platformAdmin' || callerToken?.admin === true;
+    if (!isAdmin) throw new HttpsError('permission-denied', 'Admin only');
+
+    const { coachUid } = request.data as { coachUid?: string };
+    if (!coachUid) throw new HttpsError('invalid-argument', 'coachUid is required');
+
+    // Fetch members for this coach
+    const mSnap = await db.collection('members').where('coachId', '==', coachUid).get();
+
+    // Fetch member plans for this coach
+    const pSnap = await db.collection('member_plans').where('coachId', '==', coachUid).limit(200).get();
+    const planMap: Record<string, any> = {};
+    pSnap.docs.forEach(d => {
+      const data = d.data();
+      const mid = data.memberId ?? d.id;
+      planMap[mid] = { id: d.id, ...data };
+    });
+
+    const members = mSnap.docs.map(d => {
+      const data = d.data();
+      const plan = planMap[d.id];
+      return {
+        id: d.id,
+        name: data.name || data.displayName || `${data.firstName ?? ''} ${data.lastName ?? ''}`.trim() || 'Unknown',
+        email: data.email ?? '',
+        phone: data.phone ?? '',
+        isArchived: data.isArchived ?? false,
+        planId: plan?.id ?? null,
+        planStatus: plan?.status ?? 'no plan',
+        checkoutStatus: plan?.checkoutStatus ?? null,
+        contractMonths: plan?.contractMonths ?? null,
+        displayMonthlyPrice: plan?.pricingResult?.displayMonthlyPrice ?? null,
+      };
+    });
+
+    return { members };
   }
 );

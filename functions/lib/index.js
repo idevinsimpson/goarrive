@@ -70,7 +70,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
+exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -396,7 +396,7 @@ exports.disconnectStripeAccount = (0, https_1.onCall)({ secrets: [stripeSecretKe
  * RISK-001: CTS + pay-in-full stacking order is unresolved; both amounts stored in snapshot.
  */
 exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey] }, async (request) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w;
     const { planId, memberId, paymentOption, commitToSave, nutritionAddOn, displayedMonthlyPrice: clientMonthly, displayedPayInFullTotal: clientPayInFull } = request.data;
     if (!planId || !memberId || !paymentOption) {
         throw new https_1.HttpsError('invalid-argument', 'planId, memberId, and paymentOption are required');
@@ -414,8 +414,10 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
         const coachId = plan.coachId;
         if (!coachId)
             throw new https_1.HttpsError('failed-precondition', 'Plan has no coachId');
-        // If signed in, verify the caller is the member or the plan's coach
-        if (callerUid && callerUid !== memberId && callerUid !== coachId) {
+        // If signed in, verify the caller is the member, the plan's coach, or a platform admin
+        const callerToken = (_b = request.auth) === null || _b === void 0 ? void 0 : _b.token;
+        const callerIsAdmin = (callerToken === null || callerToken === void 0 ? void 0 : callerToken.role) === 'platformAdmin' || (callerToken === null || callerToken === void 0 ? void 0 : callerToken.admin) === true;
+        if (callerUid && callerUid !== memberId && callerUid !== coachId && !callerIsAdmin) {
             throw new https_1.HttpsError('permission-denied', 'Not authorized for this plan');
         }
         // Verify the memberId matches the plan (prevents guessing planIds)
@@ -479,12 +481,12 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
         const ctsActive = commitToSave === true;
         const nutActive = nutritionAddOn === true;
         // Server-side fallback calculation (used for validation & snapshot)
-        const serverBaseMonthly = Math.round((_f = (_d = (_c = (_b = plan.pricingResult) === null || _b === void 0 ? void 0 : _b.displayMonthlyPrice) !== null && _c !== void 0 ? _c : plan.monthlyPriceOverride) !== null && _d !== void 0 ? _d : (_e = plan.pricingResult) === null || _e === void 0 ? void 0 : _e.calculatedMonthlyPrice) !== null && _f !== void 0 ? _f : (hourlyRate * (sessionLengthMinutes / 60) * sessionsPerMonth));
+        const serverBaseMonthly = Math.round((_g = (_e = (_d = (_c = plan.pricingResult) === null || _c === void 0 ? void 0 : _c.displayMonthlyPrice) !== null && _d !== void 0 ? _d : plan.monthlyPriceOverride) !== null && _e !== void 0 ? _e : (_f = plan.pricingResult) === null || _f === void 0 ? void 0 : _f.calculatedMonthlyPrice) !== null && _g !== void 0 ? _g : (hourlyRate * (sessionLengthMinutes / 60) * sessionsPerMonth));
         const ctsMonthlySavings = ctsActive
-            ? ((_j = (_h = (_g = plan.commitToSave) === null || _g === void 0 ? void 0 : _g.monthlySavings) !== null && _h !== void 0 ? _h : plan.commitToSaveMonthlySavings) !== null && _j !== void 0 ? _j : 100)
+            ? ((_k = (_j = (_h = plan.commitToSave) === null || _h === void 0 ? void 0 : _h.monthlySavings) !== null && _j !== void 0 ? _j : plan.commitToSaveMonthlySavings) !== null && _k !== void 0 ? _k : 100)
             : 0;
         const nutritionMonthlyCost = nutActive
-            ? ((_m = (_l = (_k = plan.nutrition) === null || _k === void 0 ? void 0 : _k.monthlyCost) !== null && _l !== void 0 ? _l : plan.nutritionMonthlyCost) !== null && _m !== void 0 ? _m : 100)
+            ? ((_o = (_m = (_l = plan.nutrition) === null || _l === void 0 ? void 0 : _l.monthlyCost) !== null && _m !== void 0 ? _m : plan.nutritionMonthlyCost) !== null && _o !== void 0 ? _o : 100)
             : 0;
         const serverMonthly = serverBaseMonthly - ctsMonthlySavings + nutritionMonthlyCost;
         const payInFullDiscountPct = plan.payInFullDiscountPercent || 10;
@@ -508,9 +510,9 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
         const payInFullMonthlyEquivalent = Math.round(payInFullTotal / contractMonths);
         // Continuation monthly
         const cp = plan.continuationPricing;
-        const contHr = (_o = cp === null || cp === void 0 ? void 0 : cp.continuationHourlyRate) !== null && _o !== void 0 ? _o : hourlyRate;
-        const contMin = (_p = cp === null || cp === void 0 ? void 0 : cp.continuationMinutesPerSession) !== null && _p !== void 0 ? _p : 3.5;
-        const contCheckIn = (_q = cp === null || cp === void 0 ? void 0 : cp.continuationCheckInMinutesPerMonth) !== null && _q !== void 0 ? _q : 30;
+        const contHr = (_p = cp === null || cp === void 0 ? void 0 : cp.continuationHourlyRate) !== null && _p !== void 0 ? _p : hourlyRate;
+        const contMin = (_q = cp === null || cp === void 0 ? void 0 : cp.continuationMinutesPerSession) !== null && _q !== void 0 ? _q : 3.5;
+        const contCheckIn = (_r = cp === null || cp === void 0 ? void 0 : cp.continuationCheckInMinutesPerMonth) !== null && _r !== void 0 ? _r : 30;
         const continuationMonthlyPrice = Math.round(contHr * (contMin / 60) * sessionsPerMonth);
         const continuationPayInFullTotal = Math.round(continuationMonthlyPrice * 12 * 0.9);
         const continuationPayInFullMonthlyEquivalent = Math.round(continuationPayInFullTotal / 12);
@@ -553,7 +555,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
             continuationPayInFullMonthlyEquivalent,
             baseMonthlyPrice: serverBaseMonthly,
             ctsActive,
-            ctsMonthlySavings: ctsActive ? ctsMonthlySavings : ((_s = (_r = plan.postContract) === null || _r === void 0 ? void 0 : _r.ctsMonthlySavings) !== null && _s !== void 0 ? _s : null),
+            ctsMonthlySavings: ctsActive ? ctsMonthlySavings : ((_t = (_s = plan.postContract) === null || _s === void 0 ? void 0 : _s.ctsMonthlySavings) !== null && _t !== void 0 ? _t : null),
             nutActive,
             nutritionMonthlyCost: nutActive ? nutritionMonthlyCost : 0,
             tierSplit,
@@ -583,7 +585,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
         if (!stripeCustomerId) {
             // Try user account first, then fall back to email stored on the plan
             const memberSnap = await db.collection('users').doc(memberId).get();
-            const memberEmail = ((_t = memberSnap.data()) === null || _t === void 0 ? void 0 : _t.email)
+            const memberEmail = ((_u = memberSnap.data()) === null || _u === void 0 ? void 0 : _u.email)
                 || plan.memberEmail
                 || plan.email;
             const customer = await stripe.customers.create({ email: memberEmail, metadata: { memberId, coachId, planId } }, { stripeAccount: stripeAccountId });
@@ -692,7 +694,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
         // Re-throw HttpsError as-is; wrap unexpected errors with logging
         if ((err === null || err === void 0 ? void 0 : err.code) && (err === null || err === void 0 ? void 0 : err.httpErrorCode))
             throw err; // Already an HttpsError
-        console.error('[createCheckoutSession] Unhandled error:', (_u = err === null || err === void 0 ? void 0 : err.message) !== null && _u !== void 0 ? _u : err, (_v = err === null || err === void 0 ? void 0 : err.stack) !== null && _v !== void 0 ? _v : '');
+        console.error('[createCheckoutSession] Unhandled error:', (_v = err === null || err === void 0 ? void 0 : err.message) !== null && _v !== void 0 ? _v : err, (_w = err === null || err === void 0 ? void 0 : err.stack) !== null && _w !== void 0 ? _w : '');
         throw new https_1.HttpsError('internal', 'Something went wrong creating checkout. Please try again.');
     }
 });
@@ -3240,5 +3242,86 @@ exports.seedMissingCoachDocs = (0, https_1.onCall)({ region: 'us-central1' }, as
         nextPageToken = listResult.pageToken;
     } while (nextPageToken);
     return { success: true, created };
+});
+/**
+ * setAdminRole — One-time utility to set a user's role to platformAdmin.
+ * Called by the admin from the admin page. Updates both custom claims and
+ * the coaches collection doc.
+ *
+ * Input: { targetUid: string }
+ */
+exports.setAdminRole = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+    var _a, _b, _c;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const callerToken = (_b = request.auth) === null || _b === void 0 ? void 0 : _b.token;
+    const isAdmin = (callerToken === null || callerToken === void 0 ? void 0 : callerToken.role) === 'platformAdmin' || (callerToken === null || callerToken === void 0 ? void 0 : callerToken.admin) === true;
+    if (!isAdmin)
+        throw new https_1.HttpsError('permission-denied', 'Admin only');
+    const { targetUid } = request.data;
+    const uid = targetUid || callerUid;
+    // Update custom claims
+    const user = await admin.auth().getUser(uid);
+    const existingClaims = (_c = user.customClaims) !== null && _c !== void 0 ? _c : {};
+    await admin.auth().setCustomUserClaims(uid, Object.assign(Object.assign({}, existingClaims), { role: 'platformAdmin', admin: true, coachId: uid }));
+    // Update coaches doc if it exists
+    const coachRef = db.collection('coaches').doc(uid);
+    const coachDoc = await coachRef.get();
+    if (coachDoc.exists) {
+        await coachRef.update({ role: 'platformAdmin' });
+    }
+    console.log(`[setAdminRole] Set ${uid} to platformAdmin by ${callerUid}`);
+    return { success: true, uid };
+});
+/**
+ * adminGetCoachData — Server-side data fetch for admin "View as Coach" mode.
+ * Returns a coach's members and their plan summaries without requiring
+ * client-side Firestore queries (avoids rule-tightening risks).
+ *
+ * Input: { coachUid: string }
+ * Output: { members: Array<{ id, name, email, phone, isArchived, planId, planStatus, checkoutStatus, contractMonths, displayMonthlyPrice }> }
+ */
+exports.adminGetCoachData = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+    var _a, _b;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const callerToken = (_b = request.auth) === null || _b === void 0 ? void 0 : _b.token;
+    const isAdmin = (callerToken === null || callerToken === void 0 ? void 0 : callerToken.role) === 'platformAdmin' || (callerToken === null || callerToken === void 0 ? void 0 : callerToken.admin) === true;
+    if (!isAdmin)
+        throw new https_1.HttpsError('permission-denied', 'Admin only');
+    const { coachUid } = request.data;
+    if (!coachUid)
+        throw new https_1.HttpsError('invalid-argument', 'coachUid is required');
+    // Fetch members for this coach
+    const mSnap = await db.collection('members').where('coachId', '==', coachUid).get();
+    // Fetch member plans for this coach
+    const pSnap = await db.collection('member_plans').where('coachId', '==', coachUid).limit(200).get();
+    const planMap = {};
+    pSnap.docs.forEach(d => {
+        var _a;
+        const data = d.data();
+        const mid = (_a = data.memberId) !== null && _a !== void 0 ? _a : d.id;
+        planMap[mid] = Object.assign({ id: d.id }, data);
+    });
+    const members = mSnap.docs.map(d => {
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+        const data = d.data();
+        const plan = planMap[d.id];
+        return {
+            id: d.id,
+            name: data.name || data.displayName || `${(_a = data.firstName) !== null && _a !== void 0 ? _a : ''} ${(_b = data.lastName) !== null && _b !== void 0 ? _b : ''}`.trim() || 'Unknown',
+            email: (_c = data.email) !== null && _c !== void 0 ? _c : '',
+            phone: (_d = data.phone) !== null && _d !== void 0 ? _d : '',
+            isArchived: (_e = data.isArchived) !== null && _e !== void 0 ? _e : false,
+            planId: (_f = plan === null || plan === void 0 ? void 0 : plan.id) !== null && _f !== void 0 ? _f : null,
+            planStatus: (_g = plan === null || plan === void 0 ? void 0 : plan.status) !== null && _g !== void 0 ? _g : 'no plan',
+            checkoutStatus: (_h = plan === null || plan === void 0 ? void 0 : plan.checkoutStatus) !== null && _h !== void 0 ? _h : null,
+            contractMonths: (_j = plan === null || plan === void 0 ? void 0 : plan.contractMonths) !== null && _j !== void 0 ? _j : null,
+            displayMonthlyPrice: (_l = (_k = plan === null || plan === void 0 ? void 0 : plan.pricingResult) === null || _k === void 0 ? void 0 : _k.displayMonthlyPrice) !== null && _l !== void 0 ? _l : null,
+        };
+    });
+    return { members };
 });
 //# sourceMappingURL=index.js.map

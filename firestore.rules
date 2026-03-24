@@ -601,6 +601,37 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ─────────────────────────────────────────────
+    // COACH INVITES (Admin reads pending invites)
+    // Cloud Functions create/update via Admin SDK.
+    // ─────────────────────────────────────────────
+
+    match /coachInvites/{inviteId} {
+      allow read: if isPlatformAdmin();
+      allow write: if false; // Cloud Functions only (Admin SDK)
+    }
+
+    // ─────────────────────────────────────────────
+    // EVENT LOG (Admin audit trail)
+    // Admins can read and write audit events.
+    // ─────────────────────────────────────────────
+
+    match /eventLog/{eventId} {
+      allow read: if isPlatformAdmin();
+      allow create: if isAuthenticated() && isPlatformAdmin();
+      allow update, delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
+    // CHECKOUT INTENTS (Rate limiting for checkout)
+    // Cloud Functions create; admin reads for diagnostics.
+    // ─────────────────────────────────────────────
+
+    match /checkoutIntents/{intentId} {
+      allow read: if isPlatformAdmin();
+      allow write: if false; // Cloud Functions only (Admin SDK)
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
