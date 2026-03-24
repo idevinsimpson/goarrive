@@ -70,7 +70,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
+exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -456,11 +456,11 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
         const coachAccount = coachAccountSnap.data();
         // (5) Stripe connected account guard — block if charges not enabled
         if (!coachAccount.chargesEnabled) {
-            throw new https_1.HttpsError('failed-precondition', 'Coach Stripe account is not ready for charges. Please ask your coach to complete Stripe onboarding.');
+            throw new https_1.HttpsError('failed-precondition', 'Your coach is still setting up payments. Please contact them directly.');
         }
         const stripeAccountId = coachAccount.stripeAccountId;
         if (!stripeAccountId) {
-            throw new https_1.HttpsError('failed-precondition', 'Coach Stripe account ID is missing.');
+            throw new https_1.HttpsError('failed-precondition', 'Your coach is still setting up payments. Please contact them directly.');
         }
         // ── Compute pricing ──
         const sessionsPerWeek = plan.sessionsPerWeek || 3;
@@ -3200,5 +3200,45 @@ exports.getSharedPlan = (0, https_1.onRequest)({ cors: true, region: 'us-central
         console.error('[getSharedPlan] Error:', err);
         res.status(500).json({ error: 'Something went wrong loading this plan.' });
     }
+});
+/**
+ * seedMissingCoachDocs — Admin-only one-time utility.
+ * Iterates all Firebase Auth users with role=coach claims and ensures each
+ * has a corresponding document in the `coaches` collection.
+ */
+exports.seedMissingCoachDocs = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+    var _a, _b, _c, _d, _e;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const callerToken = (_b = request.auth) === null || _b === void 0 ? void 0 : _b.token;
+    const isAdmin = (callerToken === null || callerToken === void 0 ? void 0 : callerToken.role) === 'platformAdmin' || (callerToken === null || callerToken === void 0 ? void 0 : callerToken.admin) === true;
+    if (!isAdmin)
+        throw new https_1.HttpsError('permission-denied', 'Admin only');
+    const created = [];
+    let nextPageToken;
+    do {
+        const listResult = await admin.auth().listUsers(100, nextPageToken);
+        for (const user of listResult.users) {
+            const claims = (_c = user.customClaims) !== null && _c !== void 0 ? _c : {};
+            if (claims.role === 'coach' || claims.admin === true) {
+                const docRef = db.collection('coaches').doc(user.uid);
+                const existing = await docRef.get();
+                if (!existing.exists) {
+                    await docRef.set({
+                        uid: user.uid,
+                        email: (_d = user.email) !== null && _d !== void 0 ? _d : '',
+                        name: (_e = user.displayName) !== null && _e !== void 0 ? _e : '',
+                        role: claims.admin ? 'platformAdmin' : 'coach',
+                        createdAt: Date.now(),
+                        createdBy: 'seedMissingCoachDocs',
+                    });
+                    created.push(user.uid);
+                }
+            }
+        }
+        nextPageToken = listResult.pageToken;
+    } while (nextPageToken);
+    return { success: true, created };
 });
 //# sourceMappingURL=index.js.map

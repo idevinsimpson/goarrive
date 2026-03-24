@@ -7,7 +7,7 @@
 import React from 'react';
 import { Tabs, Redirect } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
-import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { Icon } from '../../components/Icon';
 
 const TAB_BG = '#0E1117';
@@ -16,7 +16,7 @@ const ACTIVE_COLOR = '#F5A623';
 const INACTIVE_COLOR = '#4A5568';
 
 export default function AppLayout() {
-  const { user, claims, loading } = useAuth();
+  const { user, claims, loading, adminCoachOverride, setAdminCoachOverride } = useAuth();
 
   if (loading) {
     return (
@@ -36,6 +36,20 @@ export default function AppLayout() {
   }
 
   return (
+    <View style={{ flex: 1 }}>
+      {adminCoachOverride && (
+        <View style={styles.overrideBanner}>
+          <Text style={styles.overrideText}>
+            Viewing as coach: {adminCoachOverride.slice(0, 8)}...
+          </Text>
+          <TouchableOpacity
+            style={styles.overrideExitBtn}
+            onPress={() => setAdminCoachOverride(null)}
+          >
+            <Text style={styles.overrideExitText}>Exit</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -125,6 +139,7 @@ export default function AppLayout() {
         }}
       />
     </Tabs>
+    </View>
   );
 }
 
@@ -134,5 +149,35 @@ const styles = StyleSheet.create({
     backgroundColor: '#0E1117',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  overrideBanner: {
+    backgroundColor: '#F5A623',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    gap: 12,
+    ...(Platform.OS === 'web'
+      ? ({ paddingTop: 'max(6px, env(safe-area-inset-top, 0px))' } as any)
+      : {}),
+  },
+  overrideText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0E1117',
+    fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined,
+  },
+  overrideExitBtn: {
+    backgroundColor: '#0E1117',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  overrideExitText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#F5A623',
+    fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : undefined,
   },
 });

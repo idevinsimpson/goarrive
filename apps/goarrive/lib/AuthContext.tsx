@@ -39,6 +39,9 @@ interface AuthContextValue {
   claims: CustomClaims | null;
   loading: boolean;
   signOut: () => Promise<void>;
+  /** Admin-only: override coachId to view another coach's data */
+  adminCoachOverride: string | null;
+  setAdminCoachOverride: (coachId: string | null) => void;
 }
 
 // ── Context ────────────────────────────────────────────────────────────────
@@ -48,6 +51,8 @@ const AuthContext = createContext<AuthContextValue>({
   claims: null,
   loading: true,
   signOut: async () => {},
+  adminCoachOverride: null,
+  setAdminCoachOverride: () => {},
 });
 
 // ── Provider ───────────────────────────────────────────────────────────────
@@ -56,6 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [claims, setClaims] = useState<CustomClaims | null>(null);
   const [loading, setLoading] = useState(true);
+  const [adminCoachOverride, setAdminCoachOverride] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -142,9 +148,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // When admin override is active, produce modified claims with the overridden coachId
+  const effectiveClaims = React.useMemo(() => {
+    if (!claims || !adminCoachOverride) return claims;
+    if (claims.role !== 'platformAdmin' && claims.admin !== true) return claims;
+    return { ...claims, coachId: adminCoachOverride };
+  }, [claims, adminCoachOverride]);
+
   return (
     <AuthContext.Provider
-      value={{ user, claims, loading, signOut: handleSignOut }}
+      value={{ user, claims: effectiveClaims, loading, signOut: handleSignOut, adminCoachOverride, setAdminCoachOverride }}
     >
       {children}
     </AuthContext.Provider>

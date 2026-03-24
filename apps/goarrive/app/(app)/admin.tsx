@@ -64,7 +64,7 @@ const MUTED = '#8A95A3';
 const TEXT_CLR = '#F0F4F8';
 const PURPLE = '#A78BFA';
 
-interface CoachRow { uid: string; name: string; email: string; createdAt?: number; }
+interface CoachRow { uid: string; name: string; email: string; createdAt?: number; stripeReady?: boolean; }
 
 interface CoachMember {
   id: string;
@@ -79,10 +79,17 @@ interface CoachMember {
   displayMonthlyPrice?: number;
 }
 
+/** Copy text to clipboard (web + native) */
+const copyToClipboard = async (text: string) => {
+  if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+    await navigator.clipboard.writeText(text);
+  }
+};
+
 type AdminTab = 'operations' | 'events' | 'recordings' | 'deadletter' | 'coaches';
 
 export default function AdminScreen() {
-  const { user, claims } = useAuth();
+  const { user, claims, adminCoachOverride, setAdminCoachOverride } = useAuth();
   const [activeTab, setActiveTab] = useState<AdminTab>('operations');
 
   // Coach invite state
@@ -130,13 +137,39 @@ export default function AdminScreen() {
     setLoadingCoaches(true);
     try {
       const dbRef = getFirestore();
-      const q = query(collection(dbRef, 'coaches'), orderBy('createdAt', 'desc'));
-      const snap = await getDocs(q);
+      let q = query(collection(dbRef, 'coaches'), orderBy('createdAt', 'desc'));
+      let snap = await getDocs(q);
+
+      // Auto-seed: if no coaches docs exist, call seedMissingCoachDocs and re-fetch
+      if (snap.empty) {
+        try {
+          const seedFn = httpsCallable(getFunctions(), 'seedMissingCoachDocs');
+          await seedFn({});
+          snap = await getDocs(q);
+        } catch (seedErr) {
+          console.warn('[admin] seedMissingCoachDocs failed', seedErr);
+        }
+      }
+
       const rows: CoachRow[] = [];
       snap.forEach((doc) => {
         const d = doc.data();
         rows.push({ uid: doc.id, name: d.name ?? '\u2014', email: d.email ?? '\u2014', createdAt: d.createdAt });
       });
+
+      // Fetch Stripe onboarding status for each coach
+      try {
+        const stripeSnap = await getDocs(collection(dbRef, 'coachStripeAccounts'));
+        const stripeMap: Record<string, boolean> = {};
+        stripeSnap.forEach((doc) => {
+          const sd = doc.data();
+          stripeMap[doc.id] = sd.chargesEnabled === true;
+        });
+        rows.forEach(r => { r.stripeReady = stripeMap[r.uid] ?? false; });
+      } catch (err) {
+        console.warn('[admin] Failed to load Stripe accounts', err);
+      }
+
       setCoaches(rows);
     } catch (err) { console.warn('[admin] Failed to load coaches', err); }
     finally { setLoadingCoaches(false); }
@@ -934,7 +967,10 @@ export default function AdminScreen() {
                   >
                     <View style={s.avatar}><Text style={s.avatarInitial}>{(c.name?.[0] ?? '?').toUpperCase()}</Text></View>
                     <View style={s.coachInfo}>
-                      <Text style={s.coachName}>{c.name}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={s.coachName}>{c.name}</Text>
+                        <View style={[s.statusDot, { backgroundColor: c.stripeReady ? GREEN : RED }]} />
+                      </View>
                       <Text style={s.coachEmail}>{c.email}</Text>
                       {c.createdAt ? <Text style={s.coachDate}>Joined {new Date(c.createdAt).toLocaleDateString()}</Text> : null}
                     </View>
@@ -944,6 +980,18 @@ export default function AdminScreen() {
                   {/* Expanded member list */}
                   {expandedCoachId === c.uid && (
                     <View style={s.memberSection}>
+                      {/* View as Coach button */}
+                      <TouchableOpacity
+                        style={s.viewAsCoachBtn}
+                        onPress={() => {
+                          setAdminCoachOverride(c.uid);
+                          router.push('/(app)/dashboard');
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <Icon name="eye-outline" size={14} color={GOLD} />
+                        <Text style={s.viewAsCoachBtnText}>View as {c.name.split(' ')[0]}</Text>
+                      </TouchableOpacity>
                       {loadingMembers ? (
                         <ActivityIndicator color={GOLD} style={{ marginVertical: 12 }} />
                       ) : coachMembers.length === 0 ? (
@@ -981,10 +1029,29 @@ export default function AdminScreen() {
                                   </Text>
                                 )}
                               </View>
-                              <View style={[s.statusPill, { backgroundColor: statusColor + '20' }]}>
-                                <Text style={{ fontSize: 10, color: statusColor, fontFamily: FONT_BODY, fontWeight: '600' }}>
-                                  {statusLabel}
-                                </Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                {m.planId && (
+                                  <TouchableOpacity
+                                    onPress={async () => {
+                                      const url = `https://goarrive.web.app/shared-plan/${m.id}`;
+                                      await copyToClipboard(url);
+                                      if (Platform.OS === 'web') {
+                                        alert('Plan link copied!');
+                                      } else {
+                                        Alert.alert('Copied', 'Plan link copied to clipboard.');
+                                      }
+                                    }}
+                                    activeOpacity={0.7}
+                                    style={{ padding: 4 }}
+                                  >
+                                    <Icon name="link-outline" size={14} color={BLUE} />
+                                  </TouchableOpacity>
+                                )}
+                                <View style={[s.statusPill, { backgroundColor: statusColor + '20' }]}>
+                                  <Text style={{ fontSize: 10, color: statusColor, fontFamily: FONT_BODY, fontWeight: '600' }}>
+                                    {statusLabel}
+                                  </Text>
+                                </View>
                               </View>
                             </TouchableOpacity>
                           );
@@ -1167,6 +1234,8 @@ const s = StyleSheet.create({
   coachDate: { fontSize: 11, color: '#4A5568', fontFamily: FONT_BODY },
   memberSection: { backgroundColor: BG, borderTopWidth: 1, borderTopColor: BORDER },
   memberRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BORDER, gap: 8 },
+  viewAsCoachBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, marginHorizontal: 16, marginTop: 8, backgroundColor: GOLD + '15', borderRadius: 8, borderWidth: 1, borderColor: GOLD + '30' },
+  viewAsCoachBtnText: { fontSize: 12, fontWeight: '600', color: GOLD, fontFamily: FONT_BODY },
 
   // Invite
   fieldWrap: { gap: 6 },

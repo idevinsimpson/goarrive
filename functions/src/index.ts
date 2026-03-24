@@ -501,12 +501,12 @@ export const createCheckoutSession = onCall(
     if (!coachAccount.chargesEnabled) {
       throw new HttpsError(
         'failed-precondition',
-        'Coach Stripe account is not ready for charges. Please ask your coach to complete Stripe onboarding.'
+        'Your coach is still setting up payments. Please contact them directly.'
       );
     }
     const stripeAccountId: string = coachAccount.stripeAccountId as string;
     if (!stripeAccountId) {
-      throw new HttpsError('failed-precondition', 'Coach Stripe account ID is missing.');
+      throw new HttpsError('failed-precondition', 'Your coach is still setting up payments. Please contact them directly.');
     }
 
     // ── Compute pricing ──
@@ -3722,5 +3722,49 @@ export const getSharedPlan = onRequest(
       console.error('[getSharedPlan] Error:', err);
       res.status(500).json({ error: 'Something went wrong loading this plan.' });
     }
+  }
+);
+
+
+/**
+ * seedMissingCoachDocs — Admin-only one-time utility.
+ * Iterates all Firebase Auth users with role=coach claims and ensures each
+ * has a corresponding document in the `coaches` collection.
+ */
+export const seedMissingCoachDocs = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+    const callerToken = request.auth?.token as Record<string, any> | undefined;
+    const isAdmin = callerToken?.role === 'platformAdmin' || callerToken?.admin === true;
+    if (!isAdmin) throw new HttpsError('permission-denied', 'Admin only');
+
+    const created: string[] = [];
+    let nextPageToken: string | undefined;
+    do {
+      const listResult = await admin.auth().listUsers(100, nextPageToken);
+      for (const user of listResult.users) {
+        const claims = user.customClaims ?? {};
+        if (claims.role === 'coach' || claims.admin === true) {
+          const docRef = db.collection('coaches').doc(user.uid);
+          const existing = await docRef.get();
+          if (!existing.exists) {
+            await docRef.set({
+              uid: user.uid,
+              email: user.email ?? '',
+              name: user.displayName ?? '',
+              role: claims.admin ? 'platformAdmin' : 'coach',
+              createdAt: Date.now(),
+              createdBy: 'seedMissingCoachDocs',
+            });
+            created.push(user.uid);
+          }
+        }
+      }
+      nextPageToken = listResult.pageToken;
+    } while (nextPageToken);
+
+    return { success: true, created };
   }
 );
