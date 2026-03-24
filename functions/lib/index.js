@@ -3829,7 +3829,7 @@ const PLAN_INTENSITY_TO_SCHED_PHASE = {
     'Self-reliant': 'self_guided',
 };
 exports.batchPhaseTransition = (0, scheduler_1.onSchedule)({ schedule: 'every day 03:00', region: 'us-central1', timeZone: 'America/New_York', secrets: [zoomAccountId, zoomClientId, zoomClientSecret] }, async () => {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e;
     console.log('[batchPhaseTransition] Starting daily phase transition check');
     // Find all member plans that have contractStartAt and phases
     const plansSnap = await db.collection('member_plans')
@@ -3964,6 +3964,59 @@ exports.batchPhaseTransition = (0, scheduler_1.onSchedule)({ schedule: 'every da
                     updatedSlots: slotCount,
                 },
             });
+            // Item 5: Send notification to member and coach about phase transition
+            const PHASE_LABELS = {
+                coach_guided: 'Coach Guided',
+                shared_guidance: 'Shared Guidance',
+                self_guided: 'Self Guided',
+            };
+            const fromLabel = PHASE_LABELS[currentSlotPhase] || currentSlotPhase;
+            const toLabel = PHASE_LABELS[newSchedPhase] || newSchedPhase;
+            try {
+                // Notify member
+                const memberDoc = await db.collection('members').doc(memberId).get();
+                const memberData = memberDoc.data();
+                if (memberData === null || memberData === void 0 ? void 0 : memberData.email) {
+                    await (0, notifications_1.sendNotification)({
+                        messageType: 'admin_alert',
+                        channel: 'email',
+                        recipient: {
+                            uid: memberId,
+                            email: memberData.email,
+                            displayName: memberData.name || 'Member',
+                            role: 'member',
+                        },
+                        subject: `Your guidance phase has changed to ${toLabel}`,
+                        body: `Hi ${((_d = memberData.name) === null || _d === void 0 ? void 0 : _d.split(' ')[0]) || 'there'},\n\nYour coaching sessions have transitioned from ${fromLabel} to ${toLabel} (Phase ${targetPhase.id}, Week ${weeksElapsed}).\n\nThis means your upcoming sessions will be updated automatically. No action is needed on your end.\n\n— GoArrive`,
+                        memberId,
+                    });
+                }
+                // Notify coach
+                const coachIdForNotif = plan.coachId || (memberData === null || memberData === void 0 ? void 0 : memberData.coachId);
+                if (coachIdForNotif) {
+                    const coachDoc = await db.collection('coaches').doc(coachIdForNotif).get();
+                    const coachData = coachDoc.data();
+                    if (coachData === null || coachData === void 0 ? void 0 : coachData.email) {
+                        await (0, notifications_1.sendNotification)({
+                            messageType: 'admin_alert',
+                            channel: 'email',
+                            recipient: {
+                                uid: coachIdForNotif,
+                                email: coachData.email,
+                                displayName: coachData.name || 'Coach',
+                                role: 'coach',
+                            },
+                            subject: `${(memberData === null || memberData === void 0 ? void 0 : memberData.name) || 'A member'} transitioned to ${toLabel}`,
+                            body: `Hi ${((_e = coachData.name) === null || _e === void 0 ? void 0 : _e.split(' ')[0]) || 'Coach'},\n\n${(memberData === null || memberData === void 0 ? void 0 : memberData.name) || 'A member'} has automatically transitioned from ${fromLabel} to ${toLabel} (Phase ${targetPhase.id}, Week ${weeksElapsed}).\n\n${instCount} upcoming instances and ${slotCount} slots were updated.\n\n— GoArrive`,
+                            coachId: coachIdForNotif,
+                            memberId,
+                        });
+                    }
+                }
+            }
+            catch (notifErr) {
+                console.warn(`[batchPhaseTransition] Notification failed for ${memberId}:`, notifErr.message);
+            }
             transitioned++;
         }
         catch (err) {
@@ -4013,6 +4066,33 @@ exports.syncSlotDuration = (0, firestore_1.onDocumentUpdated)({ document: 'membe
     if (count > 0) {
         await batch.commit();
         console.log(`[syncSlotDuration] Updated ${count} slots for member ${memberId}`);
+    }
+    // Item 9: Also update future session instances (skip started/completed/missed)
+    const todayStr = new Date().toISOString().split('T')[0];
+    const instSnap = await db.collection('session_instances')
+        .where('memberId', '==', memberId)
+        .where('scheduledDate', '>=', todayStr)
+        .get();
+    if (!instSnap.empty) {
+        const instBatch = db.batch();
+        let instCount = 0;
+        const SKIP_STATUSES = ['completed', 'in_progress', 'missed', 'cancelled'];
+        for (const instDoc of instSnap.docs) {
+            const inst = instDoc.data();
+            if (SKIP_STATUSES.includes(inst.status))
+                continue;
+            if (inst.durationMinutes === oldDuration) {
+                instBatch.update(instDoc.ref, {
+                    durationMinutes: newDuration,
+                    updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                });
+                instCount++;
+            }
+        }
+        if (instCount > 0) {
+            await instBatch.commit();
+            console.log(`[syncSlotDuration] Updated ${instCount} future instances for member ${memberId}`);
+        }
     }
 });
 //# sourceMappingURL=index.js.map

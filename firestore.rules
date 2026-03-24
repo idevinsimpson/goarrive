@@ -110,6 +110,15 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
+    // SHARED TEMPLATES (Item 4: cross-coach template sharing)
+    // ─────────────────────────────────────────────
+    match /shared_templates/{templateId} {
+      allow read: if isAuthenticated() && (isCoach() || isPlatformAdmin());
+      allow create: if isAuthenticated() && (isCoach() || isPlatformAdmin());
+      allow delete: if isPlatformAdmin() || (isCoach() && resource.data.sharedBy == getCoachId());
+    }
+
+    // ─────────────────────────────────────────────
     // COACH BRANDS
     // ─────────────────────────────────────────────
 

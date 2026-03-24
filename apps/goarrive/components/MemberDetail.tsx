@@ -60,6 +60,7 @@ const GOLD = '#F5A623';
 const GREEN = '#6EBB7A';
 const BLUE = '#5B9BD5';
 const RED = '#E05252';
+const FG = '#F0F4F8';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -405,6 +406,26 @@ export default function MemberDetail({
   const [expandedSlotId, setExpandedSlotId] = useState<string | null>(null);
   const [slotInstances, setSlotInstances] = useState<any[]>([]);
 
+  // Reschedule UI state (Item 1)
+  const [rescheduleInstanceId, setRescheduleInstanceId] = useState<string | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState('');
+  const [rescheduleTime, setRescheduleTime] = useState('06:00');
+  const [rescheduling, setRescheduling] = useState(false);
+
+  // Edit confirmation modal (Item 6)
+  const [pendingEditPayload, setPendingEditPayload] = useState<any>(null);
+  const [showEditConfirm, setShowEditConfirm] = useState(false);
+
+  // Instance attendance data (Item 7)
+  const [instanceAttendance, setInstanceAttendance] = useState<Record<string, any>>({});
+
+  // Precise conflict detection: actual instance dates for biweekly/monthly (Item 2)
+  const [coachInstances, setCoachInstances] = useState<any[]>([]);
+
+  // Shared templates (Item 4)
+  const [sharedTemplates, setSharedTemplates] = useState<any[]>([]);
+  const [showSharedTemplates, setShowSharedTemplates] = useState(false);
+
   // Shared Guidance Window: dual-handle live coaching window (in minutes from session start)
   // Defaults to centered — equal solo time on both sides
   const [liveStart, setLiveStart] = useState(Math.round((selectedDuration * 0.25) / STEP) * STEP);
@@ -485,7 +506,7 @@ export default function MemberDetail({
     return () => unsubscribe();
   }, [member.id]);
 
-  // Load ALL coach's active slots (for conflict detection)
+  // Load ALL coach's active slots (for conflict detection) — Item 10: limit for performance
   useEffect(() => {
     if (!coachId || !showScheduleModal) return;
     const q = query(
@@ -499,6 +520,35 @@ export default function MemberDetail({
     return () => unsubscribe();
   }, [coachId, showScheduleModal]);
 
+  // Item 2: Load actual coach session instances for next 4 weeks (precise biweekly/monthly conflict detection)
+  useEffect(() => {
+    if (!coachId || !showScheduleModal) return;
+    const today = new Date();
+    const fourWeeksOut = new Date(today.getTime() + 28 * 24 * 60 * 60 * 1000);
+    const todayStr = today.toISOString().split('T')[0];
+    const futureStr = fourWeeksOut.toISOString().split('T')[0];
+    const q = query(
+      collection(db, 'session_instances'),
+      where('coachId', '==', coachId),
+      where('scheduledDate', '>=', todayStr),
+    );
+    const unsubscribe = onSnapshot(q, (snap) => {
+      const instances = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter((i: any) => i.scheduledDate <= futureStr);
+      setCoachInstances(instances);
+    });
+    return () => unsubscribe();
+  }, [coachId, showScheduleModal]);
+
+  // Item 4: Load shared templates
+  useEffect(() => {
+    if (!showScheduleModal) return;
+    const q = query(collection(db, 'shared_templates'));
+    const unsubscribe = onSnapshot(q, (snap) => {
+      setSharedTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsubscribe();
+  }, [showScheduleModal]);
+
   // Load slot templates for this coach
   useEffect(() => {
     if (!coachId || !showScheduleModal) return;
@@ -511,16 +561,43 @@ export default function MemberDetail({
 
   // Load instances for expanded slot (View Instances)
   useEffect(() => {
-    if (!expandedSlotId) { setSlotInstances([]); return; }
+    if (!expandedSlotId) { setSlotInstances([]); setInstanceAttendance({}); return; }
     const q = query(
       collection(db, 'session_instances'),
       where('slotId', '==', expandedSlotId),
       where('scheduledDate', '>=', new Date().toISOString().split('T')[0]),
     );
-    const unsubscribe = onSnapshot(q, (snap) => {
+    const unsubscribe = onSnapshot(q, async (snap) => {
       const instances = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       instances.sort((a: any, b: any) => (a.scheduledDate || '').localeCompare(b.scheduledDate || ''));
-      setSlotInstances(instances.slice(0, 8)); // Show next 8 instances
+      const sliced = instances.slice(0, 8);
+      setSlotInstances(sliced);
+
+      // Item 7: Load attendance data from session_events for each instance
+      const attendance: Record<string, any> = {};
+      for (const inst of sliced) {
+        try {
+          const evQ = query(
+            collection(db, 'session_events'),
+            where('occurrenceId', '==', inst.id),
+          );
+          const evSnap = await getDocs(evQ);
+          const events = evSnap.docs.map(d => d.data());
+          const joined = events.some((e: any) => e.eventType === 'participant_joined');
+          const left = events.some((e: any) => e.eventType === 'participant_left');
+          const started = events.some((e: any) => e.eventType === 'meeting_started');
+          attendance[inst.id] = {
+            joined,
+            left,
+            started,
+            eventCount: events.length,
+            label: joined ? 'Attended' : (inst.status === 'missed' ? 'Missed' : (started ? 'No-show' : 'Pending')),
+          };
+        } catch {
+          attendance[inst.id] = { label: '—', eventCount: 0 };
+        }
+      }
+      setInstanceAttendance(attendance);
     });
     return () => unsubscribe();
   }, [expandedSlotId]);
@@ -634,7 +711,7 @@ export default function MemberDetail({
     }
   }, [selectedSessionType]);
 
-  // ── Slot conflict detection ─────────────────────────────────────────────────
+  // ── Slot conflict detection (Item 2: precise biweekly/monthly via instances) ──
   // Only relevant for coach_guided (full session) and shared_guidance (live window)
   useEffect(() => {
     if (!allCoachSlots.length || selectedPhase === 'self_guided') {
@@ -645,29 +722,53 @@ export default function MemberDetail({
     for (const entry of selectedDays) {
       const entryStart = timeToMinutes(entry.startTime);
       const entryEnd = entryStart + selectedDuration;
-      // For shared_guidance, the coach is only busy during the live window
       const coachBusyStart = selectedPhase === 'shared_guidance' ? entryStart + liveStart : entryStart;
       const coachBusyEnd = selectedPhase === 'shared_guidance' ? entryStart + liveEnd : entryEnd;
 
+      // Weekly slots: use the existing slot-level check
       for (const slot of allCoachSlots) {
-        if (editingSlotId && slot.id === editingSlotId) continue; // skip self
-        if (slot.dayOfWeek !== entry.dayOfWeek) continue;
-        // Skip self_guided slots (coach not present)
+        if (editingSlotId && slot.id === editingSlotId) continue;
         if (slot.guidancePhase === 'self_guided') continue;
-        // Determine the coach's busy window for the existing slot
+        // For biweekly/monthly slots, skip slot-level check — use instance-level below
+        if (slot.recurrencePattern === 'biweekly' || slot.recurrencePattern === 'monthly') continue;
+        if (slot.dayOfWeek !== entry.dayOfWeek) continue;
         const slotStart = timeToMinutes(slot.startTime);
         const slotEnd = slotStart + (slot.durationMinutes || 30);
         const slotBusyStart = slot.guidancePhase === 'shared_guidance' ? slotStart + (slot.liveCoachingStartMin || 0) : slotStart;
         const slotBusyEnd = slot.guidancePhase === 'shared_guidance' ? slotStart + (slot.liveCoachingEndMin || slot.durationMinutes || 30) : slotEnd;
-        // Check overlap
         if (coachBusyStart < slotBusyEnd && coachBusyEnd > slotBusyStart) {
           const memberName = slot.memberName || 'another member';
-          conflicts.push(`${DAY_LABELS[entry.dayOfWeek]} ${formatTime(entry.startTime)} overlaps with ${memberName}'s ${formatTime(slot.startTime)} slot`);
+          conflicts.push(`${DAY_LABELS[entry.dayOfWeek]} ${formatTime(entry.startTime)} overlaps with ${memberName}'s ${formatTime(slot.startTime)} weekly slot`);
+        }
+      }
+
+      // Biweekly/monthly: use actual instances for precise detection
+      if (coachInstances.length > 0) {
+        const dayName = DAY_LABELS[entry.dayOfWeek];
+        for (const inst of coachInstances) {
+          if (editingSlotId && (inst as any).slotId === editingSlotId) continue;
+          // Check if instance falls on the same day of week
+          const instDate = new Date((inst as any).scheduledDate + 'T00:00:00');
+          if (instDate.getDay() !== entry.dayOfWeek) continue;
+          // Check if the instance's slot is biweekly or monthly
+          const parentSlot = allCoachSlots.find(s => s.id === (inst as any).slotId);
+          if (!parentSlot || (parentSlot.recurrencePattern !== 'biweekly' && parentSlot.recurrencePattern !== 'monthly')) continue;
+          if (parentSlot.guidancePhase === 'self_guided') continue;
+          const instStart = timeToMinutes((inst as any).startTime || parentSlot.startTime);
+          const instEnd = instStart + (parentSlot.durationMinutes || 30);
+          const instBusyStart = parentSlot.guidancePhase === 'shared_guidance' ? instStart + (parentSlot.liveCoachingStartMin || 0) : instStart;
+          const instBusyEnd = parentSlot.guidancePhase === 'shared_guidance' ? instStart + (parentSlot.liveCoachingEndMin || parentSlot.durationMinutes || 30) : instEnd;
+          if (coachBusyStart < instBusyEnd && coachBusyEnd > instBusyStart) {
+            const memberName = parentSlot.memberName || 'another member';
+            conflicts.push(`${dayName} ${formatTime(entry.startTime)} overlaps with ${memberName}'s ${(inst as any).scheduledDate} instance`);
+          }
         }
       }
     }
-    setConflictWarning(conflicts.length > 0 ? conflicts.join('\n') : null);
-  }, [selectedDays, selectedDuration, selectedPhase, liveStart, liveEnd, allCoachSlots, editingSlotId]);
+    // Deduplicate
+    const unique = [...new Set(conflicts)];
+    setConflictWarning(unique.length > 0 ? unique.join('\n') : null);
+  }, [selectedDays, selectedDuration, selectedPhase, liveStart, liveEnd, allCoachSlots, editingSlotId, coachInstances]);
 
   // ── Session type validation against plan guidance profiles ──────────────────
   const sessionTypeWarning = useMemo((): string | null => {
@@ -812,10 +913,25 @@ export default function MemberDetail({
     }
   }, []);
 
-  // ── Create slots (one per selected day) ───────────────────────────────────
+  // ── Item 6: Confirmation before editing an existing slot ──────────────────
+  const handleCreateOrUpdate = useCallback(() => {
+    if (editingSlotId) {
+      Alert.alert(
+        'Confirm Slot Update',
+        'This will update the slot and regenerate all future sessions. Past sessions are not affected. Continue?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Update', onPress: () => handleCreateSlots() },
+        ]
+      );
+    } else {
+      handleCreateSlots();
+    }
+  }, [editingSlotId]);
+
+  // ── Create slots (one per selected day) ───────────────────────────────────────
   const handleCreateSlots = useCallback(async () => {
-    setCreating(true);
-    try {
+    setCreating(true); try {
       const fn = httpsCallable(functions, editingSlotId ? 'updateRecurringSlot' : 'createRecurringSlot');
       let totalInstances = 0;
       const dayNames: string[] = [];
@@ -1316,7 +1432,7 @@ export default function MemberDetail({
                 </>
               )}
 
-              {/* Calendar View Toggle */}
+              {/* Calendar View Toggle (Item 3: with time axis) */}
               {allCoachSlots.length > 0 && (
                 <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
                   <TouchableOpacity
@@ -1326,43 +1442,82 @@ export default function MemberDetail({
                     <Icon name={showCalendarView ? 'chevron-down' : 'chevron-right'} size={14} color={BLUE} />
                     <Text style={{ fontSize: 12, color: BLUE, fontFamily: FH }}>Weekly Calendar (All Members)</Text>
                   </TouchableOpacity>
-                  {showCalendarView && (
+                  {showCalendarView && (() => {
+                    // Compute hour range from all slots
+                    let minHour = 24, maxHour = 0;
+                    for (const slot of allCoachSlots) {
+                      const mins = timeToMinutes(slot.startTime || '06:00');
+                      const endMins = mins + (slot.durationMinutes || 30);
+                      minHour = Math.min(minHour, Math.floor(mins / 60));
+                      maxHour = Math.max(maxHour, Math.ceil(endMins / 60));
+                    }
+                    if (minHour >= maxHour) { minHour = 5; maxHour = 21; }
+                    minHour = Math.max(0, minHour - 1);
+                    maxHour = Math.min(24, maxHour + 1);
+                    const hours = Array.from({ length: maxHour - minHour }, (_, i) => minHour + i);
+                    const HOUR_HEIGHT = 32;
+                    return (
                     <View style={{ marginTop: 8, borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
                       {/* Header row */}
                       <View style={{ flexDirection: 'row' }}>
+                        <View style={{ width: 30, paddingVertical: 4, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center' }}>
+                          <Text style={{ fontSize: 8, color: MUTED, fontFamily: FH }}> </Text>
+                        </View>
                         {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, idx) => (
-                          <View key={day} style={{ flex: 1, paddingVertical: 4, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', borderRightWidth: idx < 6 ? 1 : 0, borderRightColor: 'rgba(255,255,255,0.05)' }}>
+                          <View key={day} style={{ flex: 1, paddingVertical: 4, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', borderLeftWidth: 1, borderLeftColor: 'rgba(255,255,255,0.05)' }}>
                             <Text style={{ fontSize: 9, color: MUTED, fontFamily: FH }}>{day}</Text>
                           </View>
                         ))}
                       </View>
-                      {/* Slot cells */}
-                      <View style={{ flexDirection: 'row', minHeight: 60 }}>
-                        {[1, 2, 3, 4, 5, 6, 0].map((dayIdx, colIdx) => {
-                          const daySlots = allCoachSlots.filter(s => s.dayOfWeek === dayIdx);
-                          daySlots.sort((a: any, b: any) => (a.startTime || '').localeCompare(b.startTime || ''));
-                          return (
-                            <View key={dayIdx} style={{ flex: 1, borderRightWidth: colIdx < 6 ? 1 : 0, borderRightColor: 'rgba(255,255,255,0.05)', padding: 2 }}>
-                              {daySlots.map((slot: any) => {
-                                const isCurrentMember = slot.memberId === member.id;
-                                const bgColor = isCurrentMember ? 'rgba(91,155,213,0.2)' : 'rgba(255,255,255,0.05)';
-                                return (
-                                  <View key={slot.id} style={{ backgroundColor: bgColor, borderRadius: 3, padding: 2, marginBottom: 2 }}>
-                                    <Text style={{ fontSize: 7, color: isCurrentMember ? BLUE : MUTED, fontFamily: FH }} numberOfLines={1}>
-                                      {slot.startTime?.slice(0, 5)}
-                                    </Text>
-                                    <Text style={{ fontSize: 7, color: isCurrentMember ? FG : MUTED, fontFamily: FB }} numberOfLines={1}>
-                                      {slot.memberName?.split(' ')[0] || '?'}
-                                    </Text>
-                                  </View>
-                                );
-                              })}
-                            </View>
-                          );
-                        })}
-                      </View>
+                      {/* Time grid */}
+                      <ScrollView style={{ maxHeight: 240 }} nestedScrollEnabled>
+                        <View style={{ flexDirection: 'row', height: hours.length * HOUR_HEIGHT }}>
+                          {/* Time axis */}
+                          <View style={{ width: 30 }}>
+                            {hours.map(h => (
+                              <View key={h} style={{ height: HOUR_HEIGHT, justifyContent: 'flex-start', paddingTop: 1, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.04)' }}>
+                                <Text style={{ fontSize: 7, color: MUTED, fontFamily: FB, textAlign: 'right', paddingRight: 3 }}>
+                                  {h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`}
+                                </Text>
+                              </View>
+                            ))}
+                          </View>
+                          {/* Day columns */}
+                          {[1, 2, 3, 4, 5, 6, 0].map((dayIdx) => {
+                            const daySlots = allCoachSlots.filter(s => s.dayOfWeek === dayIdx);
+                            return (
+                              <View key={dayIdx} style={{ flex: 1, borderLeftWidth: 1, borderLeftColor: 'rgba(255,255,255,0.04)', position: 'relative' }}>
+                                {/* Hour grid lines */}
+                                {hours.map(h => (
+                                  <View key={h} style={{ position: 'absolute', top: (h - minHour) * HOUR_HEIGHT, left: 0, right: 0, height: 1, backgroundColor: 'rgba(255,255,255,0.04)' }} />
+                                ))}
+                                {/* Slot blocks */}
+                                {daySlots.map((slot: any) => {
+                                  const mins = timeToMinutes(slot.startTime || '06:00');
+                                  const top = ((mins / 60) - minHour) * HOUR_HEIGHT;
+                                  const height = Math.max(12, ((slot.durationMinutes || 30) / 60) * HOUR_HEIGHT);
+                                  const isCurrentMember = slot.memberId === member.id;
+                                  const phaseColors: Record<string, string> = { coach_guided: GREEN, shared_guidance: BLUE, self_guided: '#FFC000' };
+                                  const borderColor = phaseColors[slot.guidancePhase] || MUTED;
+                                  return (
+                                    <View key={slot.id} style={{ position: 'absolute', top, left: 1, right: 1, height, backgroundColor: isCurrentMember ? 'rgba(91,155,213,0.2)' : 'rgba(255,255,255,0.06)', borderRadius: 2, borderLeftWidth: 2, borderLeftColor: borderColor, padding: 1, overflow: 'hidden' }}>
+                                      <Text style={{ fontSize: 6, color: isCurrentMember ? BLUE : MUTED, fontFamily: FH }} numberOfLines={1}>
+                                        {slot.startTime?.slice(0, 5)}
+                                      </Text>
+                                      <Text style={{ fontSize: 6, color: isCurrentMember ? FG : MUTED, fontFamily: FB }} numberOfLines={1}>
+                                        {slot.memberName?.split(' ')[0] || '?'}
+                                      </Text>
+                                    </View>
+                                  );
+                                })}
+                              </View>
+                            );
+                          })}
+                        </View>
+                      </ScrollView>
                     </View>
-                  )}
+                    );
+                  })()}
                 </View>
               )}
 
@@ -1431,24 +1586,99 @@ export default function MemberDetail({
                           {expandedSlotId === slot.id ? 'Hide Instances' : 'View Instances'}
                         </Text>
                       </TouchableOpacity>
-                      {/* Instance list expansion */}
+                      {/* Instance list expansion (Item 1: reschedule UI, Item 7: attendance) */}
                       {expandedSlotId === slot.id && (
                         <View style={{ marginTop: 8, paddingLeft: 4 }}>
                           {slotInstances.length === 0 ? (
                             <Text style={{ fontSize: 11, color: MUTED, fontFamily: FB }}>No upcoming instances</Text>
                           ) : (
-                            slotInstances.map((inst: any) => (
-                              <View key={inst.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
-                                <View>
-                                  <Text style={{ fontSize: 11, color: FG, fontFamily: FB }}>
-                                    {inst.scheduledDate} at {inst.startTime || '—'}
-                                  </Text>
-                                  <Text style={{ fontSize: 10, color: inst.status === 'completed' ? GREEN : inst.status === 'missed' ? RED : MUTED, fontFamily: FB }}>
-                                    {inst.status || 'scheduled'}
-                                  </Text>
+                            slotInstances.map((inst: any) => {
+                              const att = instanceAttendance[inst.id];
+                              const attColor = att?.label === 'Attended' ? GREEN : att?.label === 'Missed' || att?.label === 'No-show' ? RED : MUTED;
+                              const isRescheduling = rescheduleInstanceId === inst.id;
+                              return (
+                              <View key={inst.id} style={{ paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: 11, color: FG, fontFamily: FB }}>
+                                      {inst.scheduledDate} at {inst.startTime || '—'}
+                                    </Text>
+                                    <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 2 }}>
+                                      <Text style={{ fontSize: 10, color: inst.status === 'completed' ? GREEN : inst.status === 'missed' ? RED : MUTED, fontFamily: FB }}>
+                                        {inst.status || 'scheduled'}
+                                      </Text>
+                                      {att && (
+                                        <Text style={{ fontSize: 9, color: attColor, fontFamily: FB }}>
+                                          {att.label}{att.eventCount > 0 ? ` (${att.eventCount} events)` : ''}
+                                        </Text>
+                                      )}
+                                    </View>
+                                  </View>
+                                  {inst.status !== 'completed' && inst.status !== 'missed' && (
+                                    <TouchableOpacity
+                                      onPress={() => {
+                                        setRescheduleInstanceId(isRescheduling ? null : inst.id);
+                                        setRescheduleDate(inst.scheduledDate || '');
+                                        setRescheduleTime(inst.startTime || '06:00');
+                                      }}
+                                    >
+                                      <Text style={{ fontSize: 10, color: BLUE, fontFamily: FB }}>
+                                        {isRescheduling ? 'Cancel' : 'Reschedule'}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  )}
                                 </View>
+                                {/* Reschedule form */}
+                                {isRescheduling && (
+                                  <View style={{ marginTop: 6, backgroundColor: 'rgba(91,155,213,0.06)', borderRadius: 6, padding: 8 }}>
+                                    <Text style={{ fontSize: 10, color: MUTED, fontFamily: FH, marginBottom: 4 }}>New Date & Time</Text>
+                                    <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                                      <TextInput
+                                        style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 6, padding: 6, color: FG, fontFamily: FB, fontSize: 11 }}
+                                        placeholder="YYYY-MM-DD"
+                                        placeholderTextColor={MUTED}
+                                        value={rescheduleDate}
+                                        onChangeText={setRescheduleDate}
+                                      />
+                                      <TouchableOpacity
+                                        style={{ backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 6, padding: 6 }}
+                                        onPress={() => setEditingTimeForDay(editingTimeForDay === -99 ? null : -99)}
+                                      >
+                                        <Text style={{ fontSize: 11, color: FG, fontFamily: FB }}>{formatTime(rescheduleTime)}</Text>
+                                      </TouchableOpacity>
+                                      <TouchableOpacity
+                                        style={{ backgroundColor: BLUE + '20', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 }}
+                                        onPress={async () => {
+                                          if (!rescheduleDate || !rescheduleTime) return;
+                                          await handleRescheduleInstance(inst.id, rescheduleDate, rescheduleTime);
+                                          setRescheduleInstanceId(null);
+                                          Alert.alert('Rescheduled', `Session moved to ${rescheduleDate} at ${formatTime(rescheduleTime)}`);
+                                        }}
+                                      >
+                                        <Text style={{ fontSize: 10, color: BLUE, fontFamily: FH }}>Confirm</Text>
+                                      </TouchableOpacity>
+                                    </View>
+                                    {/* Quick time picker for reschedule */}
+                                    {editingTimeForDay === -99 && (
+                                      <ScrollView horizontal style={{ marginTop: 6 }} showsHorizontalScrollIndicator={false}>
+                                        <View style={{ flexDirection: 'row', gap: 4 }}>
+                                          {TIME_OPTIONS.filter((_, i) => i % 2 === 0).map(t => (
+                                            <TouchableOpacity
+                                              key={t}
+                                              style={[{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, backgroundColor: rescheduleTime === t ? BLUE + '30' : 'rgba(255,255,255,0.06)' }]}
+                                              onPress={() => { setRescheduleTime(t); setEditingTimeForDay(null); }}
+                                            >
+                                              <Text style={{ fontSize: 10, color: rescheduleTime === t ? BLUE : MUTED, fontFamily: FB }}>{formatTime(t)}</Text>
+                                            </TouchableOpacity>
+                                          ))}
+                                        </View>
+                                      </ScrollView>
+                                    )}
+                                  </View>
+                                )}
                               </View>
-                            ))
+                              );
+                            })
                           )}
                         </View>
                       )}
@@ -1481,23 +1711,52 @@ export default function MemberDetail({
                   </View>
                 </View>
 
-                {/* Template menu dropdown */}
-                {showTemplateMenu && slotTemplates.length > 0 && (
+                {/* Template menu dropdown (Item 4: includes shared templates) */}
+                {showTemplateMenu && (slotTemplates.length > 0 || sharedTemplates.length > 0) && (
                   <View style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 6, padding: 8, marginBottom: 8 }}>
-                    <Text style={{ fontSize: 11, color: MUTED, fontFamily: FH, marginBottom: 4 }}>Load Template</Text>
-                    {slotTemplates.map((t: any) => (
-                      <View key={t.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
-                        <TouchableOpacity style={{ flex: 1 }} onPress={() => handleLoadTemplate(t)}>
-                          <Text style={{ fontSize: 12, color: FG, fontFamily: FB }}>{t.name}</Text>
-                          <Text style={{ fontSize: 10, color: MUTED, fontFamily: FB }}>
-                            {t.sessionType} · {t.guidancePhase} · {t.durationMinutes}min · {t.recurrencePattern}
-                          </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={() => handleDeleteTemplate(t.id)}>
-                          <Text style={{ fontSize: 10, color: RED, fontFamily: FB }}>Delete</Text>
-                        </TouchableOpacity>
-                      </View>
-                    ))}
+                    {slotTemplates.length > 0 && (
+                      <>
+                        <Text style={{ fontSize: 11, color: MUTED, fontFamily: FH, marginBottom: 4 }}>My Templates</Text>
+                        {slotTemplates.map((t: any) => (
+                          <View key={t.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
+                            <TouchableOpacity style={{ flex: 1 }} onPress={() => handleLoadTemplate(t)}>
+                              <Text style={{ fontSize: 12, color: FG, fontFamily: FB }}>{t.name}</Text>
+                              <Text style={{ fontSize: 10, color: MUTED, fontFamily: FB }}>
+                                {t.sessionType} · {t.guidancePhase} · {t.durationMinutes}min · {t.recurrencePattern}
+                              </Text>
+                            </TouchableOpacity>
+                            <View style={{ flexDirection: 'row', gap: 8 }}>
+                              <TouchableOpacity onPress={async () => {
+                                try {
+                                  await addDoc(collection(db, 'shared_templates'), { ...t, sharedBy: coachId, sharedAt: new Date() });
+                                  Alert.alert('Shared', 'Template shared with all coaches');
+                                } catch (err) { console.error('Share failed:', err); }
+                              }}>
+                                <Text style={{ fontSize: 10, color: BLUE, fontFamily: FB }}>Share</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity onPress={() => handleDeleteTemplate(t.id)}>
+                                <Text style={{ fontSize: 10, color: RED, fontFamily: FB }}>Delete</Text>
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                        ))}
+                      </>
+                    )}
+                    {sharedTemplates.length > 0 && (
+                      <>
+                        <Text style={{ fontSize: 11, color: BLUE, fontFamily: FH, marginTop: slotTemplates.length > 0 ? 8 : 0, marginBottom: 4 }}>Shared Templates</Text>
+                        {sharedTemplates.map((t: any) => (
+                          <View key={t.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
+                            <TouchableOpacity style={{ flex: 1 }} onPress={() => handleLoadTemplate(t)}>
+                              <Text style={{ fontSize: 12, color: FG, fontFamily: FB }}>{t.name}</Text>
+                              <Text style={{ fontSize: 10, color: MUTED, fontFamily: FB }}>
+                                {t.sessionType} · {t.guidancePhase} · {t.durationMinutes}min · {t.recurrencePattern}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        ))}
+                      </>
+                    )}
                   </View>
                 )}
 
@@ -1838,7 +2097,7 @@ export default function MemberDetail({
                 {/* Create Button */}
                 <TouchableOpacity
                   style={s.createBtn}
-                  onPress={handleCreateSlots}
+                  onPress={handleCreateOrUpdate}
                   disabled={creating}
                 >
                   {creating ? (

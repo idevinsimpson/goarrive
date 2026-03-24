@@ -3269,7 +3269,7 @@ export const zoomWebhook = onRequest(
 // Provider health, reminder scheduler, dead-letter handling, event log, iCal feed
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { getProviderHealth, sendNotification, resetNotificationProviders } from './notifications';
+import { getProviderHealth, sendNotification, resetNotificationProviders, MessageType } from './notifications';
 import { createRemindersForInstance, processDueReminders, cancelRemindersForInstance } from './reminders';
 import { MockZoomProvider } from './zoom';
 
@@ -4571,6 +4571,59 @@ export const batchPhaseTransition = onSchedule(
           },
         });
 
+        // Item 5: Send notification to member and coach about phase transition
+        const PHASE_LABELS: Record<string, string> = {
+          coach_guided: 'Coach Guided',
+          shared_guidance: 'Shared Guidance',
+          self_guided: 'Self Guided',
+        };
+        const fromLabel = PHASE_LABELS[currentSlotPhase] || currentSlotPhase;
+        const toLabel = PHASE_LABELS[newSchedPhase] || newSchedPhase;
+        try {
+          // Notify member
+          const memberDoc = await db.collection('members').doc(memberId).get();
+          const memberData = memberDoc.data();
+          if (memberData?.email) {
+            await sendNotification({
+              messageType: 'admin_alert' as MessageType,
+              channel: 'email',
+              recipient: {
+                uid: memberId,
+                email: memberData.email,
+                displayName: memberData.name || 'Member',
+                role: 'member',
+              },
+              subject: `Your guidance phase has changed to ${toLabel}`,
+              body: `Hi ${memberData.name?.split(' ')[0] || 'there'},\n\nYour coaching sessions have transitioned from ${fromLabel} to ${toLabel} (Phase ${targetPhase.id}, Week ${weeksElapsed}).\n\nThis means your upcoming sessions will be updated automatically. No action is needed on your end.\n\n— GoArrive`,
+              memberId,
+            });
+          }
+          // Notify coach
+          const coachIdForNotif = plan.coachId || memberData?.coachId;
+          if (coachIdForNotif) {
+            const coachDoc = await db.collection('coaches').doc(coachIdForNotif).get();
+            const coachData = coachDoc.data();
+            if (coachData?.email) {
+              await sendNotification({
+                messageType: 'admin_alert' as MessageType,
+                channel: 'email',
+                recipient: {
+                  uid: coachIdForNotif,
+                  email: coachData.email,
+                  displayName: coachData.name || 'Coach',
+                  role: 'coach',
+                },
+                subject: `${memberData?.name || 'A member'} transitioned to ${toLabel}`,
+                body: `Hi ${coachData.name?.split(' ')[0] || 'Coach'},\n\n${memberData?.name || 'A member'} has automatically transitioned from ${fromLabel} to ${toLabel} (Phase ${targetPhase.id}, Week ${weeksElapsed}).\n\n${instCount} upcoming instances and ${slotCount} slots were updated.\n\n— GoArrive`,
+                coachId: coachIdForNotif,
+                memberId,
+              });
+            }
+          }
+        } catch (notifErr: any) {
+          console.warn(`[batchPhaseTransition] Notification failed for ${memberId}:`, notifErr.message);
+        }
+
         transitioned++;
       } catch (err: any) {
         errors++;
@@ -4629,6 +4682,34 @@ export const syncSlotDuration = onDocumentUpdated(
     if (count > 0) {
       await batch.commit();
       console.log(`[syncSlotDuration] Updated ${count} slots for member ${memberId}`);
+    }
+
+    // Item 9: Also update future session instances (skip started/completed/missed)
+    const todayStr = new Date().toISOString().split('T')[0];
+    const instSnap = await db.collection('session_instances')
+      .where('memberId', '==', memberId)
+      .where('scheduledDate', '>=', todayStr)
+      .get();
+
+    if (!instSnap.empty) {
+      const instBatch = db.batch();
+      let instCount = 0;
+      const SKIP_STATUSES = ['completed', 'in_progress', 'missed', 'cancelled'];
+      for (const instDoc of instSnap.docs) {
+        const inst = instDoc.data();
+        if (SKIP_STATUSES.includes(inst.status as string)) continue;
+        if (inst.durationMinutes === oldDuration) {
+          instBatch.update(instDoc.ref, {
+            durationMinutes: newDuration,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+          instCount++;
+        }
+      }
+      if (instCount > 0) {
+        await instBatch.commit();
+        console.log(`[syncSlotDuration] Updated ${instCount} future instances for member ${memberId}`);
+      }
     }
   }
 );
