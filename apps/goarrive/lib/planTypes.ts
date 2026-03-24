@@ -435,6 +435,9 @@ export interface MemberPlanData {
   stripeCustomerId?: string;      // Stripe customer ID on coach connected account
   checkoutStatus?: 'pending_payment' | 'paid' | 'pay_in_full_paid' | 'failed';
 
+  // No-show grace period (per-plan override, takes precedence over coach-level)
+  noShowGraceMinutes?: number;
+
   // Injury notes
   injuryNotes?: string;
 

@@ -268,6 +268,11 @@ export interface SessionInstance {
 
   // Zoom recording URL (set by recording.completed webhook)
   zoomRecordingUrl?: string;        // Direct URL to Zoom cloud recording
+  zoomRecordingMeetingId?: string;  // Zoom meeting ID for recording refresh proxy
+
+  // Transcription fields (populated by recording.completed webhook)
+  transcriptionUrl?: string;        // URL to Zoom transcription file
+  transcriptionStatus?: 'available' | 'processing' | 'none';
 
   // Session notes
   notes?: string;                   // Coach notes for this instance

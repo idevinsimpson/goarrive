@@ -1401,6 +1401,9 @@ function AnalyticsDashboard() {
     attendanceRate: number;
     coachStats: { coachId: string; coachName: string; total: number; completed: number; missed: number; attendanceRate: number; memberCount: number }[];
     templateUsage: { name: string; count: number }[];
+    skipByCategory: { category: string; count: number }[];
+    skipByMember: { memberId: string; memberName: string; count: number }[];
+    skipByWeekday: { day: string; count: number }[];
   } | null>(null);
 
   useEffect(() => {
@@ -1466,7 +1469,30 @@ function AnalyticsDashboard() {
         });
         const templateUsage = Object.entries(tmplUsage).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
 
-        setStats({ totalSessions, completed, missed, cancelled, rescheduled, skipped, attendanceRate, coachStats, templateUsage });
+        // Skip analytics: by category, by member, by weekday
+        const skippedInstances = instances.filter((i: any) => i.status === 'skipped' || i.status === 'skip_requested');
+        const catMap: Record<string, number> = {};
+        const memberSkipMap: Record<string, { name: string; count: number }> = {};
+        const weekdayMap: Record<string, number> = { Sun: 0, Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0 };
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        for (const si of skippedInstances) {
+          const cat = si.skipCategory || 'Other';
+          catMap[cat] = (catMap[cat] || 0) + 1;
+          const mid = si.memberId || 'unknown';
+          if (!memberSkipMap[mid]) memberSkipMap[mid] = { name: si.memberName || mid, count: 0 };
+          memberSkipMap[mid].count++;
+          if (si.scheduledDate) {
+            const [y, m, d] = si.scheduledDate.split('-').map(Number);
+            const dt = new Date(y, m - 1, d);
+            const dayName = dayNames[dt.getDay()];
+            weekdayMap[dayName] = (weekdayMap[dayName] || 0) + 1;
+          }
+        }
+        const skipByCategory = Object.entries(catMap).map(([category, count]) => ({ category, count })).sort((a, b) => b.count - a.count);
+        const skipByMember = Object.entries(memberSkipMap).map(([memberId, v]) => ({ memberId, memberName: v.name, count: v.count })).sort((a, b) => b.count - a.count).slice(0, 10);
+        const skipByWeekday = dayNames.map(day => ({ day, count: weekdayMap[day] }));
+
+        setStats({ totalSessions, completed, missed, cancelled, rescheduled, skipped, attendanceRate, coachStats, templateUsage, skipByCategory, skipByMember, skipByWeekday });
       } catch (err) {
         console.error('[Analytics] fetch error:', err);
       } finally {
@@ -1530,6 +1556,76 @@ function AnalyticsDashboard() {
           </View>
         ))}
       </View>
+
+      {/* Skip Analytics */}
+      {(stats.skipByCategory.length > 0 || stats.skipByMember.length > 0) && (
+        <>
+          <Text style={[s.sectionTitle, { fontSize: 16, marginTop: 8 }]}>Skip Analytics</Text>
+          <Text style={{ fontSize: 11, color: MUTED, fontFamily: FB, marginBottom: 8 }}>Patterns from {stats.skipped} skipped sessions (last 90 days)</Text>
+
+          {/* By Category */}
+          {stats.skipByCategory.length > 0 && (
+            <View style={{ backgroundColor: CARD + '80', borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
+              <View style={{ padding: 8, backgroundColor: 'rgba(255,255,255,0.05)' }}>
+                <Text style={{ fontSize: 11, color: MUTED, fontFamily: FH }}>By Category</Text>
+              </View>
+              {stats.skipByCategory.map((c, i) => {
+                const catColors: Record<string, string> = { Holiday: '#4CAF50', Vacation: '#2196F3', Illness: '#FF5722', 'Coach Unavailable': '#FF9800', Other: MUTED };
+                const barColor = catColors[c.category] || MUTED;
+                const maxCount = stats.skipByCategory[0]?.count || 1;
+                return (
+                  <View key={i} style={{ padding: 8, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: 'rgba(255,255,255,0.05)' }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <Text style={{ fontSize: 12, color: FG, fontFamily: FB }}>{c.category}</Text>
+                      <Text style={{ fontSize: 12, color: barColor, fontFamily: FH }}>{c.count}</Text>
+                    </View>
+                    <View style={{ height: 4, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 2 }}>
+                      <View style={{ height: 4, backgroundColor: barColor, borderRadius: 2, width: `${Math.round((c.count / maxCount) * 100)}%` }} />
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
+          {/* By Weekday */}
+          <View style={{ backgroundColor: CARD + '80', borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
+            <View style={{ padding: 8, backgroundColor: 'rgba(255,255,255,0.05)' }}>
+              <Text style={{ fontSize: 11, color: MUTED, fontFamily: FH }}>By Weekday</Text>
+            </View>
+            <View style={{ flexDirection: 'row', padding: 8, gap: 4 }}>
+              {stats.skipByWeekday.map((w, i) => {
+                const maxW = Math.max(...stats.skipByWeekday.map(x => x.count), 1);
+                const barH = Math.max(4, Math.round((w.count / maxW) * 40));
+                return (
+                  <View key={i} style={{ flex: 1, alignItems: 'center' }}>
+                    <View style={{ height: 40, justifyContent: 'flex-end', width: '100%', alignItems: 'center' }}>
+                      <View style={{ height: barH, width: '70%', backgroundColor: w.count > 0 ? '#FFC000' : 'rgba(255,255,255,0.05)', borderRadius: 2 }} />
+                    </View>
+                    <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB, marginTop: 4 }}>{w.day}</Text>
+                    <Text style={{ fontSize: 9, color: FG, fontFamily: FH }}>{w.count}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+
+          {/* Top Skip Members */}
+          {stats.skipByMember.length > 0 && (
+            <View style={{ backgroundColor: CARD + '80', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
+              <View style={{ padding: 8, backgroundColor: 'rgba(255,255,255,0.05)' }}>
+                <Text style={{ fontSize: 11, color: MUTED, fontFamily: FH }}>Top Members by Skip Count</Text>
+              </View>
+              {stats.skipByMember.map((m, i) => (
+                <View key={m.memberId} style={{ flexDirection: 'row', justifyContent: 'space-between', padding: 8, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: 'rgba(255,255,255,0.05)' }}>
+                  <Text style={{ fontSize: 12, color: FG, fontFamily: FB }} numberOfLines={1}>{m.memberName}</Text>
+                  <Text style={{ fontSize: 12, color: m.count >= 5 ? RED : m.count >= 3 ? '#FFC000' : MUTED, fontFamily: FH }}>{m.count} skips</Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </>
+      )}
 
       {/* Template usage */}
       {stats.templateUsage.length > 0 && (

@@ -99,10 +99,10 @@ service cloud.firestore {
 
     match /coaches/{coachId} {
       allow read: if isOwnDoc(coachId) || isPlatformAdmin();
-      // Coaches can update their own noShowGraceMinutes setting
+      // Coaches can update their own scheduling settings
       allow update: if isOwnDoc(coachId)
                     && request.resource.data.diff(resource.data).affectedKeys()
-                        .hasOnly(['noShowGraceMinutes']);
+                        .hasOnly(['noShowGraceMinutes', 'autoApproveSkipCategories', 'autoApproveSkipLeadDays', 'icalToken']);
       allow create, delete: if false; // Cloud Functions only (Admin SDK)
 
       // Slot templates — coach manages their own templates

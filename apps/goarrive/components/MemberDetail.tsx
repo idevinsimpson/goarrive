@@ -446,6 +446,7 @@ export default function MemberDetail({
   const [batchMembers, setBatchMembers] = useState<any[]>([]);
   const [selectedBatchMembers, setSelectedBatchMembers] = useState<Set<string>>(new Set());
   const [batchCreating, setBatchCreating] = useState(false);
+  const [batchOverrides, setBatchOverrides] = useState<Record<string, { dayOfWeek?: string; startTime?: string }>>({});
 
   // Item 7: Session notes per instance
   const [instanceNotes, setInstanceNotes] = useState<Record<string, string>>({});
@@ -1026,11 +1027,13 @@ export default function MemberDetail({
       let created = 0;
       for (const bm of batchMembers) {
         if (!selectedBatchMembers.has(bm.id)) continue;
+        const override = batchOverrides[bm.id];
         for (const entry of selectedDays) {
           const hostingMode = defaultHostingMode(selectedPhase);
           const payload: Record<string, any> = {
             memberId: bm.id, memberName: bm.name || 'Unknown',
-            dayOfWeek: entry.dayOfWeek, startTime: entry.startTime,
+            dayOfWeek: override?.dayOfWeek || entry.dayOfWeek,
+            startTime: override?.startTime || entry.startTime,
             durationMinutes: selectedDuration, timezone: selectedTimezone,
             recurrencePattern: selectedPattern, sessionType: selectedSessionType,
             guidancePhase: selectedPhase, roomSource: 'platform',
@@ -1055,7 +1058,7 @@ export default function MemberDetail({
     } finally {
       setBatchCreating(false);
     }
-  }, [selectedBatchMembers, batchMembers, selectedDays, selectedDuration, selectedTimezone, selectedPattern, selectedSessionType, selectedPhase, liveStart, liveEnd]);
+  }, [selectedBatchMembers, batchMembers, selectedDays, selectedDuration, selectedTimezone, selectedPattern, selectedSessionType, selectedPhase, liveStart, liveEnd, batchOverrides]);
 
   // Item 1: Drag-and-drop handler — update slot time after drag
   const handleDragDrop = useCallback(async (slotId: string, newDay: number, newMinutes: number) => {
@@ -1833,8 +1836,8 @@ export default function MemberDetail({
                                       {inst.scheduledDate} at {inst.startTime || '—'}
                                     </Text>
                                     <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 2 }}>
-                                      <Text style={{ fontSize: 10, color: inst.status === 'completed' ? GREEN : inst.status === 'missed' ? RED : MUTED, fontFamily: FB }}>
-                                        {inst.status || 'scheduled'}
+                                      <Text style={{ fontSize: 10, color: inst.status === 'completed' ? GREEN : inst.status === 'missed' ? RED : inst.status === 'skip_requested' ? '#FFC000' : inst.status === 'skipped' ? '#FFC000' : MUTED, fontFamily: FB }}>
+                                        {inst.status === 'skip_requested' ? 'skip requested' : (inst.status || 'scheduled')}
                                       </Text>
                                       {att && (
                                         <Text style={{ fontSize: 9, color: attColor, fontFamily: FB }}>
@@ -1906,7 +1909,7 @@ export default function MemberDetail({
                                   </View>
                                 )}
                                 {/* Item 2: Skip instance */}
-                                {inst.status !== 'completed' && inst.status !== 'missed' && inst.status !== 'skipped' && (
+                                {inst.status !== 'completed' && inst.status !== 'missed' && inst.status !== 'skipped' && inst.status !== 'skip_requested' && (
                                   <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
                                     {skippingInstanceId === inst.id ? (
                                       <View style={{ flex: 1, backgroundColor: 'rgba(255,200,0,0.06)', borderRadius: 6, padding: 6 }}>
@@ -1933,8 +1936,49 @@ export default function MemberDetail({
                                     )}
                                   </View>
                                 )}
-                                {inst.status === 'skipped' && inst.skipReason && (
-                                  <Text style={{ fontSize: 9, color: '#FFC000', fontFamily: FB, marginTop: 2 }}>Skipped: {inst.skipReason}</Text>
+                                {inst.status === 'skipped' && (inst.skipReason || inst.skipCategory) && (
+                                  <View style={{ marginTop: 2 }}>
+                                    <Text style={{ fontSize: 9, color: '#FFC000', fontFamily: FB }}>Skipped{inst.skipCategory ? ` [${inst.skipCategory}]` : ''}{inst.skipReason ? `: ${inst.skipReason}` : ''}</Text>
+                                    {inst.skipRequestedBy && <Text style={{ fontSize: 8, color: MUTED, fontFamily: FB }}>Requested by member</Text>}
+                                  </View>
+                                )}
+                                {/* Skip request pending — approve/deny buttons */}
+                                {inst.status === 'skip_requested' && (
+                                  <View style={{ marginTop: 4, backgroundColor: 'rgba(255,200,0,0.06)', borderRadius: 6, padding: 6 }}>
+                                    <Text style={{ fontSize: 10, color: '#FFC000', fontFamily: FH, marginBottom: 2 }}>Skip Requested</Text>
+                                    {inst.skipCategory && <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB }}>Category: {inst.skipCategory}</Text>}
+                                    {inst.skipReason && <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB }}>Reason: {inst.skipReason}</Text>}
+                                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+                                      <TouchableOpacity
+                                        style={{ backgroundColor: GREEN + '20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 4 }}
+                                        onPress={async () => {
+                                          try {
+                                            const fn = httpsCallable(functions, 'updateRecurringSlot');
+                                            await fn({ slotId: slot.id, action: 'approve_skip_request', instanceId: inst.id });
+                                            Alert.alert('Approved', 'Skip request has been approved.');
+                                          } catch (err: any) {
+                                            Alert.alert('Error', err.message || 'Failed to approve skip request');
+                                          }
+                                        }}
+                                      >
+                                        <Text style={{ fontSize: 9, color: GREEN, fontFamily: FH }}>Approve</Text>
+                                      </TouchableOpacity>
+                                      <TouchableOpacity
+                                        style={{ backgroundColor: RED + '20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 4 }}
+                                        onPress={async () => {
+                                          try {
+                                            const fn = httpsCallable(functions, 'updateRecurringSlot');
+                                            await fn({ slotId: slot.id, action: 'deny_skip_request', instanceId: inst.id });
+                                            Alert.alert('Denied', 'Skip request has been denied.');
+                                          } catch (err: any) {
+                                            Alert.alert('Error', err.message || 'Failed to deny skip request');
+                                          }
+                                        }}
+                                      >
+                                        <Text style={{ fontSize: 9, color: RED, fontFamily: FH }}>Deny</Text>
+                                      </TouchableOpacity>
+                                    </View>
+                                  </View>
                                 )}
                                 {/* Item 7: Session notes */}
                                 <View style={{ marginTop: 4 }}>
@@ -1992,13 +2036,34 @@ export default function MemberDetail({
                                   </View>
                                 )}
                                 {inst.zoomRecordingUrl && !inst.recordings?.length && (
-                                  <TouchableOpacity
-                                    onPress={() => Linking.openURL(inst.zoomRecordingUrl)}
-                                    style={{ marginTop: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}
-                                  >
-                                    <Icon name="video" size={10} color={BLUE} />
-                                    <Text style={{ fontSize: 9, color: BLUE, fontFamily: FB, textDecorationLine: 'underline' }}>View Recording</Text>
-                                  </TouchableOpacity>
+                                  <View style={{ marginTop: 4, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                    <TouchableOpacity
+                                      onPress={() => Linking.openURL(inst.zoomRecordingUrl)}
+                                      style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                                    >
+                                      <Icon name="video" size={10} color={BLUE} />
+                                      <Text style={{ fontSize: 9, color: BLUE, fontFamily: FB, textDecorationLine: 'underline' }}>View Recording</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                      onPress={async () => {
+                                        try {
+                                          const fn = httpsCallable(functions, 'refreshRecordingUrl');
+                                          const result = await fn({ instanceId: inst.id }) as any;
+                                          if (result.data?.recordingUrl) {
+                                            Linking.openURL(result.data.recordingUrl);
+                                          } else {
+                                            Alert.alert('Info', 'No updated recording URL available.');
+                                          }
+                                        } catch (err: any) {
+                                          Alert.alert('Error', err.message || 'Failed to refresh recording URL');
+                                        }
+                                      }}
+                                      style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}
+                                    >
+                                      <Icon name="refresh" size={9} color={MUTED} />
+                                      <Text style={{ fontSize: 8, color: MUTED, fontFamily: FB }}>Refresh</Text>
+                                    </TouchableOpacity>
+                                  </View>
                                 )}
                               </View>
                               );
@@ -2514,6 +2579,37 @@ export default function MemberDetail({
                         ))}
                       </ScrollView>
                     )}
+                    {/* Per-member day/time overrides */}
+                    {selectedBatchMembers.size > 0 && (
+                      <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)', paddingTop: 8 }}>
+                        <Text style={{ fontSize: 11, color: GOLD, fontFamily: FH, marginBottom: 4 }}>Per-Member Overrides (optional)</Text>
+                        <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB, marginBottom: 6 }}>Set a different day or time for specific members. Leave blank to use the form defaults.</Text>
+                        {batchMembers.filter(bm => selectedBatchMembers.has(bm.id)).map((bm: any) => {
+                          const ov = batchOverrides[bm.id];
+                          return (
+                            <View key={bm.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                              <Text style={{ fontSize: 10, color: FG, fontFamily: FB, width: 80 }} numberOfLines={1}>{bm.name || bm.id}</Text>
+                              <TextInput
+                                style={{ flex: 1, backgroundColor: '#0E1117', borderRadius: 4, borderWidth: 1, borderColor: MUTED + '30', color: FG, fontSize: 10, fontFamily: FB, paddingHorizontal: 6, paddingVertical: 3 }}
+                                placeholder="Day (e.g. 1=Mon)"
+                                placeholderTextColor={MUTED}
+                                value={ov?.dayOfWeek ?? ''}
+                                onChangeText={(v) => setBatchOverrides(prev => ({ ...prev, [bm.id]: { ...prev[bm.id], dayOfWeek: v || undefined } }))}
+                                keyboardType="numeric"
+                              />
+                              <TextInput
+                                style={{ flex: 1, backgroundColor: '#0E1117', borderRadius: 4, borderWidth: 1, borderColor: MUTED + '30', color: FG, fontSize: 10, fontFamily: FB, paddingHorizontal: 6, paddingVertical: 3 }}
+                                placeholder="Time (HH:MM)"
+                                placeholderTextColor={MUTED}
+                                value={ov?.startTime ?? ''}
+                                onChangeText={(v) => setBatchOverrides(prev => ({ ...prev, [bm.id]: { ...prev[bm.id], startTime: v || undefined } }))}
+                              />
+                            </View>
+                          );
+                        })}
+                      </View>
+                    )}
+
                     <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                       <TouchableOpacity
                         style={{ flex: 1, backgroundColor: BLUE, paddingVertical: 8, borderRadius: 6, alignItems: 'center', opacity: selectedBatchMembers.size === 0 || batchCreating ? 0.5 : 1 }}

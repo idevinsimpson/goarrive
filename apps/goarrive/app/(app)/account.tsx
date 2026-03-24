@@ -102,6 +102,11 @@ export default function AccountScreen({ onClose }: Props) {
           <NoShowGracePanel coachId={coachId} />
         )}
 
+        {/* Skip Auto-Approval Rules — coaches only */}
+        {isCoach && coachId && (
+          <SkipAutoApprovalPanel coachId={coachId} />
+        )}
+
         {/* iCal Subscription URL — coaches only */}
         {isCoach && coachId && (
           <ICalSyncPanel coachId={coachId} />
@@ -420,19 +425,177 @@ function NoShowGracePanel({ coachId }: { coachId: string }) {
   );
 }
 
+// ─── Skip Auto-Approval Rules Panel ─────────────────────────────────────────
+
+const SKIP_CATEGORIES_FOR_RULES = ['Holiday', 'Vacation', 'Illness', 'Coach Unavailable'] as const;
+
+function SkipAutoApprovalPanel({ coachId }: { coachId: string }) {
+  const [autoApproveCategories, setAutoApproveCategories] = useState<string[]>([]);
+  const [autoApproveLeadDays, setAutoApproveLeadDays] = useState(0); // 0 = disabled
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const coachRef = doc(db, 'coaches', coachId);
+        const snap = await getDoc(coachRef);
+        if (snap.exists()) {
+          const data = snap.data();
+          if (Array.isArray(data.autoApproveSkipCategories)) {
+            setAutoApproveCategories(data.autoApproveSkipCategories);
+          }
+          if (typeof data.autoApproveSkipLeadDays === 'number') {
+            setAutoApproveLeadDays(data.autoApproveSkipLeadDays);
+          }
+        }
+      } catch (err) {
+        console.error('[SkipAutoApprovalPanel] fetch error:', err);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [coachId]);
+
+  async function handleSave(categories: string[], leadDays: number) {
+    setSaving(true);
+    try {
+      const coachRef = doc(db, 'coaches', coachId);
+      await setDoc(coachRef, {
+        autoApproveSkipCategories: categories,
+        autoApproveSkipLeadDays: leadDays,
+      }, { merge: true });
+      setAutoApproveCategories(categories);
+      setAutoApproveLeadDays(leadDays);
+    } catch (err: any) {
+      Alert.alert('Error', 'Failed to save auto-approval settings.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function toggleCategory(cat: string) {
+    const updated = autoApproveCategories.includes(cat)
+      ? autoApproveCategories.filter(c => c !== cat)
+      : [...autoApproveCategories, cat];
+    handleSave(updated, autoApproveLeadDays);
+  }
+
+  function setLeadDays(val: number) {
+    handleSave(autoApproveCategories, val);
+  }
+
+  if (loading) {
+    return (
+      <View style={zs.panel}>
+        <ActivityIndicator size="small" color={GOLD} />
+      </View>
+    );
+  }
+
+  const leadOptions = [0, 3, 5, 7, 14];
+
+  return (
+    <View style={zs.panel}>
+      <View style={zs.panelHeader}>
+        <View style={zs.panelTitleRow}>
+          <Icon name="check" size={18} color={TEXT_SECONDARY} />
+          <Text style={zs.panelTitle}>Skip Auto-Approval</Text>
+        </View>
+      </View>
+      <Text style={zs.statusText}>
+        Member skip requests matching these categories will be automatically approved without needing your review.
+      </Text>
+
+      <Text style={[zs.statusText, { fontSize: 11, color: TEXT_MUTED, marginTop: 8, marginBottom: 4 }]}>Auto-approve categories:</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {SKIP_CATEGORIES_FOR_RULES.map((cat) => {
+          const isActive = autoApproveCategories.includes(cat);
+          return (
+            <Pressable
+              key={cat}
+              style={[
+                zs.graceBtn,
+                isActive && zs.graceBtnActive,
+              ]}
+              onPress={() => toggleCategory(cat)}
+              disabled={saving}
+            >
+              <Text style={[
+                zs.graceBtnText,
+                isActive && zs.graceBtnTextActive,
+              ]}>{cat}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <Text style={[zs.statusText, { fontSize: 11, color: TEXT_MUTED, marginTop: 12, marginBottom: 4 }]}>Auto-approve if requested at least N days before session:</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {leadOptions.map((val) => (
+          <Pressable
+            key={val}
+            style={[
+              zs.graceBtn,
+              autoApproveLeadDays === val && zs.graceBtnActive,
+            ]}
+            onPress={() => setLeadDays(val)}
+            disabled={saving}
+          >
+            <Text style={[
+              zs.graceBtnText,
+              autoApproveLeadDays === val && zs.graceBtnTextActive,
+            ]}>{val === 0 ? 'Off' : `${val} days`}</Text>
+          </Pressable>
+        ))}
+      </View>
+      {saving && <ActivityIndicator size="small" color={GOLD} style={{ marginTop: 8 }} />}
+    </View>
+  );
+}
+
 // ─── iCal Subscription URL Panel ──────────────────────────────────────────────
 
 function ICalSyncPanel({ coachId }: { coachId: string }) {
   const [copied, setCopied] = useState(false);
+  const [icalToken, setIcalToken] = useState<string | null>(null);
+  const [regenerating, setRegenerating] = useState(false);
+  const [loadingToken, setLoadingToken] = useState(true);
 
-  const icalUrl = `https://us-central1-goarrive.cloudfunctions.net/coachIcalFeed?coachId=${coachId}`;
+  // Load the coach's icalToken from Firestore
+  useEffect(() => {
+    (async () => {
+      try {
+        const coachSnap = await getDoc(doc(db, 'coaches', coachId));
+        if (coachSnap.exists()) {
+          const data = coachSnap.data();
+          if (data.icalToken) {
+            setIcalToken(data.icalToken);
+          } else {
+            // Legacy fallback: base64 prefix
+            const legacy = btoa(coachId).substring(0, 16);
+            setIcalToken(legacy);
+          }
+        }
+      } catch (err) {
+        console.warn('[ICalSyncPanel] Failed to load icalToken:', err);
+        // Fallback to legacy
+        setIcalToken(btoa(coachId).substring(0, 16));
+      } finally {
+        setLoadingToken(false);
+      }
+    })();
+  }, [coachId]);
+
+  const icalUrl = icalToken
+    ? `https://us-central1-goarrive.cloudfunctions.net/coachIcalFeed?coachId=${coachId}&token=${icalToken}`
+    : `https://us-central1-goarrive.cloudfunctions.net/coachIcalFeed?coachId=${coachId}`;
 
   async function handleCopy() {
     try {
       if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
         await navigator.clipboard.writeText(icalUrl);
       } else {
-        // For native, use Clipboard from react-native
         const { Clipboard: RNClipboard } = require('react-native');
         RNClipboard?.setString?.(icalUrl);
       }
@@ -441,6 +604,44 @@ function ICalSyncPanel({ coachId }: { coachId: string }) {
     } catch (err) {
       Alert.alert('Copy URL', icalUrl);
     }
+  }
+
+  async function handleRegenerate() {
+    Alert.alert(
+      'Regenerate iCal Token',
+      'This will invalidate your current calendar subscription URL. You will need to re-subscribe with the new URL. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Regenerate',
+          style: 'destructive',
+          onPress: async () => {
+            setRegenerating(true);
+            try {
+              const fns = getFunctions(undefined, 'us-central1');
+              const regenerateFn = httpsCallable(fns, 'regenerateIcalToken');
+              const result = await regenerateFn({}) as any;
+              if (result.data?.token) {
+                setIcalToken(result.data.token);
+                Alert.alert('Token Regenerated', 'Your iCal URL has been updated. Copy the new URL and re-subscribe in your calendar app.');
+              }
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Failed to regenerate token');
+            } finally {
+              setRegenerating(false);
+            }
+          },
+        },
+      ]
+    );
+  }
+
+  if (loadingToken) {
+    return (
+      <View style={zs.panel}>
+        <ActivityIndicator size="small" color={ACCENT} />
+      </View>
+    );
   }
 
   return (
@@ -459,16 +660,34 @@ function ICalSyncPanel({ coachId }: { coachId: string }) {
           {icalUrl}
         </Text>
       </View>
-      <Pressable
-        style={[zs.connectBtn, { marginTop: 10 }, copied && { backgroundColor: GREEN }]}
-        onPress={handleCopy}
-      >
-        <Icon name={copied ? 'check' : 'copy'} size={16} color="#FFF" />
-        <Text style={zs.connectBtnText}>{copied ? 'Copied!' : 'Copy iCal URL'}</Text>
-      </Pressable>
+      <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+        <Pressable
+          style={[zs.connectBtn, { flex: 1 }, copied && { backgroundColor: GREEN }]}
+          onPress={handleCopy}
+        >
+          <Icon name={copied ? 'check' : 'copy'} size={16} color="#FFF" />
+          <Text style={zs.connectBtnText}>{copied ? 'Copied!' : 'Copy iCal URL'}</Text>
+        </Pressable>
+        <Pressable
+          style={[zs.connectBtn, { backgroundColor: '#374151', paddingHorizontal: 12 }]}
+          onPress={handleRegenerate}
+          disabled={regenerating}
+        >
+          {regenerating
+            ? <ActivityIndicator size="small" color="#FFF" />
+            : <Icon name="refresh" size={16} color="#FFF" />
+          }
+        </Pressable>
+      </View>
       <Text style={[zs.hint, { marginTop: 6 }]}>
-        Paste this URL as a calendar subscription (not a one-time import) so it stays updated.
+        Paste this URL as a calendar subscription (not a one-time import) so it stays updated. Use the refresh button to regenerate the token if compromised.
       </Text>
+      <View style={{ marginTop: 10, backgroundColor: '#1A1F2B', borderRadius: 6, padding: 8, borderWidth: 1, borderColor: BORDER }}>
+        <Text style={{ fontSize: 10, color: TEXT_MUTED, fontFamily: FONT_HEADING }}>Bidirectional Sync (Coming Soon)</Text>
+        <Text style={{ fontSize: 9, color: TEXT_MUTED, fontFamily: FONT_BODY, marginTop: 2, lineHeight: 14 }}>
+          Currently, this is a one-way feed from GoArrive to your calendar. Bidirectional sync (Google Calendar API) is planned for a future update, which will allow changes in your external calendar to reflect back in GoArrive.
+        </Text>
+      </View>
     </View>
   );
 }

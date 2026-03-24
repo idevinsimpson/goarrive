@@ -2369,6 +2369,31 @@ export const updateRecurringSlot = onCall(
       if (inst.recurringSlotId !== slotId && inst.slotId !== slotId) {
         throw new HttpsError('permission-denied', 'Instance does not belong to this slot');
       }
+      // Conflict detection for rescheduled instances
+      const rescheduleTime = newTime || inst.scheduledStartTime || inst.startTime || '00:00';
+      const [rh, rm] = rescheduleTime.split(':').map(Number);
+      const rStart = rh * 60 + rm;
+      const rEnd = rStart + (inst.durationMinutes || 30);
+      const guidancePhase = inst.guidancePhase || slot.guidancePhase;
+      if (guidancePhase !== 'self_guided') {
+        const conflictSnap = await db.collection('session_instances')
+          .where('coachId', '==', callerUid)
+          .where('scheduledDate', '==', newDate)
+          .where('status', 'in', ['scheduled', 'allocated'])
+          .get();
+        for (const cDoc of conflictSnap.docs) {
+          if (cDoc.id === instanceId) continue;
+          const c = cDoc.data();
+          const cPhase = c.guidancePhase;
+          if (cPhase === 'self_guided') continue;
+          const [ch, cm] = ((c.scheduledStartTime || c.startTime || '00:00') as string).split(':').map(Number);
+          const cStart = ch * 60 + cm;
+          const cEnd = cStart + (c.durationMinutes || 30);
+          if (rStart < cEnd && rEnd > cStart) {
+            throw new HttpsError('already-exists', `Conflict: ${c.memberName || 'another member'} has a session at ${c.scheduledStartTime || c.startTime} on ${newDate}. Choose a different time.`);
+          }
+        }
+      }
       const updateData: Record<string, any> = {
         scheduledDate: newDate,
         updatedAt: FieldValue.serverTimestamp(),
@@ -2416,6 +2441,29 @@ export const updateRecurringSlot = onCall(
         memberId: slot.memberId,
         details: `Approved member skip request for ${inst.scheduledDate} [${inst.skipCategory || 'Other'}]`,
       });
+      // Push notification to member
+      try {
+        const { sendNotification } = await import('./notifications');
+        const memberSnap = await db.collection('members').doc(slot.memberId).get();
+        const memberData = memberSnap.exists ? memberSnap.data()! : {} as any;
+        await sendNotification({
+          messageType: 'skip_request_resolved',
+          channel: 'push',
+          recipient: {
+            uid: slot.memberId,
+            email: memberData.email,
+            displayName: memberData.displayName || 'Member',
+            role: 'member',
+          },
+          subject: 'Skip Request Approved',
+          body: `Your skip request for ${inst.scheduledDate} has been approved by your coach.`,
+          sessionInstanceId: instanceId,
+          coachId: callerUid,
+          memberId: slot.memberId,
+        });
+      } catch (err: any) {
+        console.warn(`[approve_skip_request] Failed to send notification: ${err.message}`);
+      }
       return { success: true };
     }
 
@@ -2450,6 +2498,29 @@ export const updateRecurringSlot = onCall(
         memberId: slot.memberId,
         details: `Denied member skip request for ${inst.scheduledDate}`,
       });
+      // Push notification to member
+      try {
+        const { sendNotification } = await import('./notifications');
+        const memberSnap = await db.collection('members').doc(slot.memberId).get();
+        const memberData = memberSnap.exists ? memberSnap.data()! : {} as any;
+        await sendNotification({
+          messageType: 'skip_request_resolved',
+          channel: 'push',
+          recipient: {
+            uid: slot.memberId,
+            email: memberData.email,
+            displayName: memberData.displayName || 'Member',
+            role: 'member',
+          },
+          subject: 'Skip Request Denied',
+          body: `Your skip request for ${inst.scheduledDate} has been denied. The session remains on your schedule.`,
+          sessionInstanceId: instanceId,
+          coachId: callerUid,
+          memberId: slot.memberId,
+        });
+      } catch (err: any) {
+        console.warn(`[deny_skip_request] Failed to send notification: ${err.message}`);
+      }
       return { success: true };
     }
 
@@ -3376,6 +3447,13 @@ export const zoomWebhook = onRequest(
 
         // Store recordings on the instance + Zoom recording URL for direct access
         const zoomRecordingUrl = payload.share_url || (recordingFiles.length > 0 ? recordingFiles[0].play_url : null);
+        // Extract transcription data if available
+        const transcriptFiles = recordingFiles.filter((f: any) => f.file_type === 'TRANSCRIPT' || f.recording_type === 'audio_transcript');
+        const transcripts = transcriptFiles.map((f: any) => ({
+          downloadUrl: f.download_url,
+          fileType: f.file_type,
+          status: f.status,
+        }));
         if (occurrenceId) {
           const recUpdate: Record<string, any> = {
             recordings,
@@ -3384,6 +3462,7 @@ export const zoomWebhook = onRequest(
             updatedAt: FieldValue.serverTimestamp(),
           };
           if (zoomRecordingUrl) recUpdate.zoomRecordingUrl = zoomRecordingUrl;
+          if (transcripts.length > 0) recUpdate.transcripts = transcripts;
           await db.collection('session_instances').doc(occurrenceId).update(recUpdate);
         }
         break;
@@ -3645,11 +3724,28 @@ export const coachIcalFeed = onRequest(
       return;
     }
 
-    // Simple token validation — coach UID base64 prefix
-    const expectedToken = Buffer.from(coachId).toString('base64').substring(0, 16);
-    if (token !== expectedToken) {
-      res.status(403).send('Invalid token');
+    // Token-based authentication: check coach document for icalToken
+    // If no token stored yet, fall back to legacy base64 prefix for backward compat
+    const coachDoc = await db.collection('coaches').doc(coachId).get();
+    if (!coachDoc.exists) {
+      res.status(404).send('Coach not found');
       return;
+    }
+    const coachData = coachDoc.data()!;
+    const storedToken = coachData.icalToken as string | undefined;
+    if (storedToken) {
+      // Use the stored regenerable token
+      if (token !== storedToken) {
+        res.status(403).send('Invalid token');
+        return;
+      }
+    } else {
+      // Legacy fallback: base64 prefix
+      const legacyToken = Buffer.from(coachId).toString('base64').substring(0, 16);
+      if (token !== legacyToken) {
+        res.status(403).send('Invalid token');
+        return;
+      }
     }
 
     // Item 9: Fetch ALL upcoming sessions (not just coach-live) for full calendar sync
@@ -4910,10 +5006,26 @@ export const detectNoShows = onSchedule(
         const [year, month, day] = dateStr.split('-').map(Number);
         const scheduledTime = new Date(year, month - 1, day, h, m);
 
-        // Configurable no-show grace period: check coach doc, fall back to 15 min
+        // Configurable no-show grace period: plan-level > coach-level > default 15 min
         let gracePeriodMinutes = 15;
         try {
-          if (inst.coachId) {
+          // Check plan-level grace period first (most specific)
+          if (inst.memberId && inst.coachId) {
+            const planSnap = await db.collection('member_plans')
+              .where('memberId', '==', inst.memberId)
+              .where('coachId', '==', inst.coachId)
+              .where('status', '==', 'active')
+              .limit(1)
+              .get();
+            if (!planSnap.empty) {
+              const planData = planSnap.docs[0].data();
+              if (typeof planData.noShowGraceMinutes === 'number' && planData.noShowGraceMinutes >= 5 && planData.noShowGraceMinutes <= 60) {
+                gracePeriodMinutes = planData.noShowGraceMinutes;
+              }
+            }
+          }
+          // Fall back to coach-level grace period if plan didn't set one
+          if (gracePeriodMinutes === 15 && inst.coachId) {
             const coachSnap = await db.collection('coaches').doc(inst.coachId).get();
             if (coachSnap.exists) {
               const coachData = coachSnap.data()!;
@@ -4923,7 +5035,7 @@ export const detectNoShows = onSchedule(
             }
           }
         } catch (err: any) {
-          console.warn(`[detectNoShows] Failed to read coach grace period for ${inst.coachId}: ${err.message}`);
+          console.warn(`[detectNoShows] Failed to read grace period for ${inst.coachId}/${inst.memberId}: ${err.message}`);
         }
         const graceDeadline = new Date(scheduledTime.getTime() + gracePeriodMinutes * 60 * 1000);
 
@@ -4996,8 +5108,68 @@ export const requestSkipInstance = onCall(
       throw new HttpsError('failed-precondition', `Cannot request skip for instance in status "${inst.status}"`);
     }
 
+    // Rate limiting: max 3 pending skip requests per member
+    const pendingSnap = await db.collection('session_instances')
+      .where('memberId', '==', callerUid)
+      .where('status', '==', 'skip_requested')
+      .limit(4)
+      .get();
+    if (pendingSnap.size >= 3) {
+      throw new HttpsError('resource-exhausted', 'You already have 3 pending skip requests. Please wait for your coach to review them before requesting more.');
+    }
+
     const VALID_SKIP_CATEGORIES = ['Holiday', 'Vacation', 'Illness', 'Other'];
     const resolvedCategory = skipCategory && VALID_SKIP_CATEGORIES.includes(skipCategory) ? skipCategory : 'Other';
+
+    // Auto-approval rules: check coach settings
+    let autoApproved = false;
+    try {
+      const coachSnap = await db.collection('coaches').doc(inst.coachId).get();
+      if (coachSnap.exists) {
+        const coachData = coachSnap.data()!;
+        const autoRules = coachData.skipAutoApproveRules as { categories?: string[]; hoursInAdvance?: number } | undefined;
+        if (autoRules) {
+          // Auto-approve by category
+          if (autoRules.categories && autoRules.categories.includes(resolvedCategory)) {
+            autoApproved = true;
+          }
+          // Auto-approve if requested far enough in advance
+          if (!autoApproved && typeof autoRules.hoursInAdvance === 'number' && autoRules.hoursInAdvance > 0) {
+            const [year, month, day] = (inst.scheduledDate as string).split('-').map(Number);
+            const [h, m] = ((inst.scheduledStartTime || inst.startTime || '00:00') as string).split(':').map(Number);
+            const sessionTime = new Date(year, month - 1, day, h, m);
+            const hoursUntil = (sessionTime.getTime() - Date.now()) / (1000 * 60 * 60);
+            if (hoursUntil >= autoRules.hoursInAdvance) {
+              autoApproved = true;
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[requestSkipInstance] Failed to check auto-approval rules: ${err.message}`);
+    }
+
+    if (autoApproved) {
+      // Auto-approve: skip directly
+      await instRef.update({
+        status: 'skipped',
+        skipCategory: resolvedCategory,
+        skipReason: reason || resolvedCategory,
+        skipRequestedBy: callerUid,
+        skipRequestedAt: FieldValue.serverTimestamp(),
+        skipApprovedBy: 'auto',
+        skipApprovedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      await writeAuditLog({
+        coachId: inst.coachId,
+        action: 'skip_auto_approved',
+        sessionInstanceId: instanceId,
+        memberId: callerUid,
+        details: `Auto-approved skip for ${inst.scheduledDate} [${resolvedCategory}]${reason ? ': ' + reason : ''}`,
+      });
+      return { success: true, autoApproved: true };
+    }
 
     await instRef.update({
       previousStatus: inst.status,
@@ -5017,7 +5189,31 @@ export const requestSkipInstance = onCall(
       details: `Member requested skip for ${inst.scheduledDate} [${resolvedCategory}]${reason ? ': ' + reason : ''}`,
     });
 
-    return { success: true };
+    // Push notification to coach
+    try {
+      const { sendNotification } = await import('./notifications');
+      const coachSnap = await db.collection('coaches').doc(inst.coachId).get();
+      const coachData = coachSnap.exists ? coachSnap.data()! : {} as any;
+      await sendNotification({
+        messageType: 'skip_request_received',
+        channel: 'push',
+        recipient: {
+          uid: inst.coachId,
+          email: coachData.email,
+          displayName: coachData.displayName || 'Coach',
+          role: 'coach',
+        },
+        subject: 'Skip Request from Member',
+        body: `${inst.memberName || 'A member'} requested to skip their ${inst.scheduledDate} session [${resolvedCategory}].`,
+        sessionInstanceId: instanceId,
+        coachId: inst.coachId,
+        memberId: callerUid,
+      });
+    } catch (err: any) {
+      console.warn(`[requestSkipInstance] Failed to send push notification: ${err.message}`);
+    }
+
+    return { success: true, autoApproved: false };
   }
 );
 
@@ -5119,5 +5315,150 @@ export const checkSlotConflicts = onCall(
     }
 
     return { hasConflict: conflicts.length > 0, conflicts };
+  }
+);
+
+
+// ─── refreshRecordingUrl — Proxy to get fresh Zoom recording download URL ───
+// Zoom recording play_url and download_url contain time-limited tokens.
+// This CF fetches a fresh URL via the Zoom API using S2S OAuth.
+export const refreshRecordingUrl = onCall(
+  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret] },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const { instanceId } = request.data as { instanceId: string };
+    if (!instanceId) throw new HttpsError('invalid-argument', 'instanceId is required');
+
+    // Verify caller is coach or admin
+    const coachSnap = await db.collection('coaches').doc(callerUid).get();
+    const isCoach = coachSnap.exists;
+    const adminSnap = await db.collection('admins').doc(callerUid).get();
+    const isAdmin = adminSnap.exists;
+    if (!isCoach && !isAdmin) {
+      throw new HttpsError('permission-denied', 'Only coaches and admins can access recordings');
+    }
+
+    const instRef = db.collection('session_instances').doc(instanceId);
+    const instSnap = await instRef.get();
+    if (!instSnap.exists) throw new HttpsError('not-found', 'Session instance not found');
+
+    const inst = instSnap.data()!;
+    // Coach can only access their own sessions
+    if (isCoach && !isAdmin && inst.coachId !== callerUid) {
+      throw new HttpsError('permission-denied', 'You can only access recordings for your own sessions');
+    }
+
+    const zoomMeetingId = inst.zoomMeetingId;
+    if (!zoomMeetingId) {
+      throw new HttpsError('failed-precondition', 'No Zoom meeting associated with this session');
+    }
+
+    try {
+      const provider = getZoomProvider({
+        accountId: zoomAccountId.value(),
+        clientId: zoomClientId.value(),
+        clientSecret: zoomClientSecret.value(),
+      });
+
+      if (provider.mode === 'mock') {
+        return {
+          success: true,
+          recordingUrl: inst.zoomRecordingUrl || null,
+          message: 'Mock mode — returning stored URL',
+        };
+      }
+
+      // Use the Zoom API to get fresh recording URLs
+      // GET /meetings/{meetingId}/recordings
+      const realProvider = provider as any;
+      const token = await realProvider.getToken();
+      const response = await fetch(`https://api.zoom.us/v2/meetings/${zoomMeetingId}/recordings`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          return { success: false, error: 'Recording not found or has been deleted from Zoom' };
+        }
+        const errorText = await response.text();
+        throw new Error(`Zoom API error (${response.status}): ${errorText}`);
+      }
+
+      const data = await response.json() as {
+        share_url?: string;
+        recording_files?: Array<{
+          file_type: string;
+          play_url: string;
+          download_url: string;
+          recording_start: string;
+          recording_end: string;
+          status: string;
+        }>;
+      };
+
+      const freshShareUrl = data.share_url;
+      const freshPlayUrl = data.recording_files?.find(f => f.file_type === 'MP4')?.play_url;
+      const freshDownloadUrl = data.recording_files?.find(f => f.file_type === 'MP4')?.download_url;
+      const recordingUrl = freshShareUrl || freshPlayUrl || inst.zoomRecordingUrl;
+
+      // Update the instance with fresh URLs
+      const updateData: Record<string, any> = {
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+      if (recordingUrl) updateData.zoomRecordingUrl = recordingUrl;
+      if (data.recording_files) {
+        updateData.recordings = data.recording_files.map(f => ({
+          fileType: f.file_type,
+          playUrl: f.play_url,
+          downloadUrl: f.download_url,
+          recordingStart: f.recording_start,
+          recordingEnd: f.recording_end,
+          status: f.status,
+        }));
+      }
+      await instRef.update(updateData);
+
+      return {
+        success: true,
+        recordingUrl,
+        downloadUrl: freshDownloadUrl || null,
+        playUrl: freshPlayUrl || null,
+        shareUrl: freshShareUrl || null,
+      };
+    } catch (err: any) {
+      console.error(`[refreshRecordingUrl] Error: ${err.message}`);
+      throw new HttpsError('internal', `Failed to refresh recording URL: ${err.message}`);
+    }
+  }
+);
+
+// ─── regenerateIcalToken — Coach regenerates their iCal feed token ───────────
+export const regenerateIcalToken = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const coachRef = db.collection('coaches').doc(callerUid);
+    const coachSnap = await coachRef.get();
+    if (!coachSnap.exists) throw new HttpsError('permission-denied', 'Not a coach');
+
+    // Generate a new random token (24 chars, URL-safe)
+    const crypto = await import('crypto');
+    const newToken = crypto.randomBytes(18).toString('base64url');
+
+    await coachRef.update({
+      icalToken: newToken,
+      icalTokenUpdatedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    return { success: true, token: newToken };
   }
 );

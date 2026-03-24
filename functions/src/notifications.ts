@@ -27,7 +27,9 @@ export type MessageType =
   | 'missed_session_followup'
   | 'recording_ready'
   | 'coach_session_reminder'
-  | 'admin_alert';
+  | 'admin_alert'
+  | 'skip_request_received'
+  | 'skip_request_resolved';
 
 export interface NotificationRecipient {
   uid: string;
