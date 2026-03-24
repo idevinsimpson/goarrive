@@ -421,7 +421,8 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
             throw new https_1.HttpsError('permission-denied', 'Not authorized for this plan');
         }
         // Verify the memberId matches the plan (prevents guessing planIds)
-        if (plan.memberId !== memberId) {
+        // Allow platform admins to bypass this check for testing purposes
+        if (!callerIsAdmin && plan.memberId !== memberId) {
             throw new https_1.HttpsError('permission-denied', 'Member ID does not match this plan');
         }
         // ── (1) Plan status check — block checkout if already paid or cancelled ──

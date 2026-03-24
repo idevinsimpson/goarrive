@@ -1337,7 +1337,7 @@ function InlinePaymentSection({ plan, pricing, isCoach, onChange, onAccept }: {
       >(functions, 'createCheckoutSession');
       const result = await createCheckout({
         planId,
-        memberId: user.uid,
+        memberId: plan.memberId,
         paymentOption: selected,
       });
       const { sessionUrl } = result.data;

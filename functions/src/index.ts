@@ -461,7 +461,8 @@ export const createCheckoutSession = onCall(
     }
 
     // Verify the memberId matches the plan (prevents guessing planIds)
-    if (plan.memberId !== memberId) {
+    // Allow platform admins to bypass this check for testing purposes
+    if (!callerIsAdmin && plan.memberId !== memberId) {
       throw new HttpsError('permission-denied', 'Member ID does not match this plan');
     }
 
