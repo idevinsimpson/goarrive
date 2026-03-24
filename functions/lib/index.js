@@ -421,6 +421,32 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
     if (plan.memberId !== memberId) {
         throw new https_1.HttpsError('permission-denied', 'Member ID does not match this plan');
     }
+    // ── (1) Plan status check — block checkout if already paid or cancelled ──
+    const planStatus = plan.checkoutStatus;
+    if (planStatus === 'paid') {
+        throw new https_1.HttpsError('failed-precondition', 'This plan has already been paid.');
+    }
+    if (planStatus === 'cancelled') {
+        throw new https_1.HttpsError('failed-precondition', 'This plan has been cancelled.');
+    }
+    // ── (2) Rate limiting — max 5 pending checkout intents per plan per hour ──
+    try {
+        const oneHourAgo = firestore_2.Timestamp.fromMillis(Date.now() - 60 * 60 * 1000);
+        const recentIntentsSnap = await db.collection('checkoutIntents')
+            .where('planId', '==', planId)
+            .where('status', '==', 'pending')
+            .get();
+        const recentCount = recentIntentsSnap.docs.filter((d) => d.data().createdAt && d.data().createdAt.toMillis() >= oneHourAgo.toMillis()).length;
+        if (recentCount >= 5) {
+            throw new https_1.HttpsError('resource-exhausted', 'Too many checkout attempts. Please wait a few minutes and try again.');
+        }
+    }
+    catch (e) {
+        // If it's our own rate-limit error, re-throw; otherwise log and continue
+        if ((e === null || e === void 0 ? void 0 : e.code) === 'resource-exhausted')
+            throw e;
+        console.warn('[createCheckoutSession] Rate limit check failed, proceeding:', e === null || e === void 0 ? void 0 : e.message);
+    }
     // ── Load coach Stripe account ──
     const coachAccountSnap = await db.collection('coachStripeAccounts').doc(coachId).get();
     if (!coachAccountSnap.exists) {
@@ -550,11 +576,14 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
     });
     const stripe = getStripe(stripeSecretKey.value());
     const appBaseUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
-    // ── Get or create Stripe customer on connected account (or platform account) ──
+    // ── (3) Get or create Stripe customer — email fallback for unauthenticated members ──
     let stripeCustomerId = plan.stripeCustomerId;
     if (!stripeCustomerId) {
+        // Try user account first, then fall back to email stored on the plan
         const memberSnap = await db.collection('users').doc(memberId).get();
-        const memberEmail = (_t = memberSnap.data()) === null || _t === void 0 ? void 0 : _t.email;
+        const memberEmail = ((_t = memberSnap.data()) === null || _t === void 0 ? void 0 : _t.email)
+            || plan.memberEmail
+            || plan.email;
         const customer = await stripe.customers.create({ email: memberEmail, metadata: { memberId, coachId, planId } }, stripeAccountId ? { stripeAccount: stripeAccountId } : undefined);
         stripeCustomerId = customer.id;
         await planRef.update({ stripeCustomerId });
@@ -594,7 +623,8 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
                     continuationMonthlyPriceCents: String(continuationMonthlyPrice * 100),
                     tierSplit: String(tierSplit),
                 } }),
-            success_url: `${appBaseUrl}/checkout-success?intent=${intentId}&memberId=${memberId}`,
+            // (4) Include planId in success URL so checkout-success page can link the account
+            success_url: `${appBaseUrl}/checkout-success?intent=${intentId}&memberId=${memberId}&planId=${planId}`,
             cancel_url: `${appBaseUrl}/shared-plan/${memberId}?checkout_cancelled=1`,
             metadata: { intentId, planId, snapshotId, memberId, coachId },
         }, stripeAccountId ? { stripeAccount: stripeAccountId } : undefined);
@@ -634,7 +664,8 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
                     // Store for future renewed pay-in-full option (BP-002)
                     continuationPayInFullTotal: String(continuationPayInFullTotal),
                 } }),
-            success_url: `${appBaseUrl}/checkout-success?intent=${intentId}&memberId=${memberId}`,
+            // (4) Include planId in success URL so checkout-success page can link the account
+            success_url: `${appBaseUrl}/checkout-success?intent=${intentId}&memberId=${memberId}&planId=${planId}`,
             cancel_url: `${appBaseUrl}/shared-plan/${memberId}?checkout_cancelled=1`,
             metadata: { intentId, planId, snapshotId, memberId, coachId },
         }, stripeAccountId ? { stripeAccount: stripeAccountId } : undefined);
