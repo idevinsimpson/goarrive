@@ -71,7 +71,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
+exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -1933,6 +1933,37 @@ exports.updateRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
         });
         return { success: true, updatedInstances: newInstances.length };
     }
+    if (slotAction === 'reschedule_instance') {
+        const { instanceId, newDate, newTime } = request.data;
+        if (!instanceId || !newDate) {
+            throw new https_1.HttpsError('invalid-argument', 'instanceId and newDate are required for reschedule');
+        }
+        const instRef = db.collection('session_instances').doc(instanceId);
+        const instSnap = await instRef.get();
+        if (!instSnap.exists)
+            throw new https_1.HttpsError('not-found', 'Instance not found');
+        const inst = instSnap.data();
+        if (inst.recurringSlotId !== slotId && inst.slotId !== slotId) {
+            throw new https_1.HttpsError('permission-denied', 'Instance does not belong to this slot');
+        }
+        const updateData = {
+            scheduledDate: newDate,
+            updatedAt: firestore_2.FieldValue.serverTimestamp(),
+            rescheduled: true,
+            originalDate: inst.scheduledDate,
+        };
+        if (newTime)
+            updateData.startTime = newTime;
+        await instRef.update(updateData);
+        await writeAuditLog({
+            coachId: callerUid,
+            action: 'instance_rescheduled',
+            recurringSlotId: slotId,
+            memberId: slot.memberId,
+            details: `Rescheduled instance from ${inst.scheduledDate} to ${newDate}`,
+        });
+        return { success: true };
+    }
     throw new https_1.HttpsError('invalid-argument', `Unknown action: ${slotAction}`);
 });
 // ─── Helper: Generate concrete instances from a recurring slot ───────────────
@@ -3783,5 +3814,205 @@ exports.waiveCtsFee = (0, https_1.onCall)({ region: 'us-central1', secrets: [str
     });
     console.log('[waiveCtsFee] Fee', feeId, 'waived by', callerUid);
     return { success: true, message: 'Fee waived and refund issued' };
+});
+// ─── Item 2: batchPhaseTransition — Auto-detect and apply phase transitions ──
+// Runs daily. For each active member plan with contractStartAt and phases[],
+// calculates which phase the member should be in based on weeks elapsed,
+// then calls updateMemberGuidancePhase logic if the current slots are in a
+// different phase.
+const PLAN_INTENSITY_TO_SCHED_PHASE = {
+    'Fully Guided': 'coach_guided',
+    'Fully guided': 'coach_guided',
+    'Shared Guidance': 'shared_guidance',
+    'Blended': 'shared_guidance',
+    'Self-Reliant': 'self_guided',
+    'Self-reliant': 'self_guided',
+};
+exports.batchPhaseTransition = (0, scheduler_1.onSchedule)({ schedule: 'every day 03:00', region: 'us-central1', timeZone: 'America/New_York', secrets: [zoomAccountId, zoomClientId, zoomClientSecret] }, async () => {
+    var _a, _b, _c;
+    console.log('[batchPhaseTransition] Starting daily phase transition check');
+    // Find all member plans that have contractStartAt and phases
+    const plansSnap = await db.collection('member_plans')
+        .where('checkoutStatus', 'in', ['paid', 'pay_in_full_paid'])
+        .get();
+    const now = new Date();
+    let transitioned = 0;
+    let skipped = 0;
+    let errors = 0;
+    for (const planDoc of plansSnap.docs) {
+        try {
+            const plan = planDoc.data();
+            const memberId = planDoc.id;
+            // Need contractStartAt and phases array
+            const contractStartAt = (_c = (_b = (_a = plan.contractStartAt) === null || _a === void 0 ? void 0 : _a.toDate) === null || _b === void 0 ? void 0 : _b.call(_a)) !== null && _c !== void 0 ? _c : plan.contractStartAt;
+            if (!contractStartAt || !plan.phases || !Array.isArray(plan.phases) || plan.phases.length === 0) {
+                skipped++;
+                continue;
+            }
+            // Calculate weeks elapsed since contract start
+            const msElapsed = now.getTime() - new Date(contractStartAt).getTime();
+            const weeksElapsed = Math.floor(msElapsed / (7 * 24 * 60 * 60 * 1000));
+            if (weeksElapsed < 0) {
+                skipped++;
+                continue;
+            }
+            // Determine which phase the member should be in
+            let cumulativeWeeks = 0;
+            let targetPhase = null;
+            for (const phase of plan.phases) {
+                cumulativeWeeks += (phase.weeks || 0);
+                if (weeksElapsed < cumulativeWeeks) {
+                    targetPhase = { id: phase.id, intensity: phase.intensity };
+                    break;
+                }
+            }
+            // If past all phases, use the last phase
+            if (!targetPhase && plan.phases.length > 0) {
+                const lastPhase = plan.phases[plan.phases.length - 1];
+                targetPhase = { id: lastPhase.id, intensity: lastPhase.intensity };
+            }
+            if (!targetPhase) {
+                skipped++;
+                continue;
+            }
+            // Map plan intensity to scheduling guidance phase
+            const newSchedPhase = PLAN_INTENSITY_TO_SCHED_PHASE[targetPhase.intensity];
+            if (!newSchedPhase) {
+                skipped++;
+                continue;
+            }
+            // Check if any active slot for this member is in a different phase
+            const slotsSnap = await db.collection('recurring_slots')
+                .where('memberId', '==', memberId)
+                .where('status', '==', 'active')
+                .limit(1)
+                .get();
+            if (slotsSnap.empty) {
+                skipped++;
+                continue;
+            }
+            const currentSlotPhase = slotsSnap.docs[0].data().guidancePhase;
+            if (currentSlotPhase === newSchedPhase) {
+                skipped++;
+                continue;
+            }
+            // Phase transition needed — apply it
+            console.log(`[batchPhaseTransition] member=${memberId} from=${currentSlotPhase} to=${newSchedPhase} (phase ${targetPhase.id}, week ${weeksElapsed})`);
+            const rules = PHASE_HOSTING_RULES[newSchedPhase];
+            if (!rules) {
+                skipped++;
+                continue;
+            }
+            const todayStr = now.toISOString().split('T')[0];
+            // Update future instances
+            const instancesSnap = await db.collection('session_instances')
+                .where('memberId', '==', memberId)
+                .where('scheduledDate', '>=', todayStr)
+                .get();
+            const batch1 = db.batch();
+            let instCount = 0;
+            for (const instDoc of instancesSnap.docs) {
+                const inst = instDoc.data();
+                if (['scheduled', 'allocated', 'allocation_failed'].includes(inst.status) && inst.guidancePhase !== newSchedPhase) {
+                    batch1.update(instDoc.ref, {
+                        guidancePhase: newSchedPhase,
+                        hostingMode: rules.hostingMode,
+                        coachExpectedLive: rules.coachExpectedLive,
+                        personalZoomRequired: rules.personalZoomRequired,
+                        updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                    });
+                    instCount++;
+                }
+            }
+            if (instCount > 0)
+                await batch1.commit();
+            // Update active recurring slots
+            const allSlotsSnap = await db.collection('recurring_slots')
+                .where('memberId', '==', memberId)
+                .where('status', '==', 'active')
+                .get();
+            const batch2 = db.batch();
+            let slotCount = 0;
+            for (const slotDoc of allSlotsSnap.docs) {
+                if (slotDoc.data().guidancePhase !== newSchedPhase) {
+                    batch2.update(slotDoc.ref, {
+                        guidancePhase: newSchedPhase,
+                        hostingMode: rules.hostingMode,
+                        coachExpectedLive: rules.coachExpectedLive,
+                        personalZoomRequired: rules.personalZoomRequired,
+                        updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                    });
+                    slotCount++;
+                }
+            }
+            if (slotCount > 0)
+                await batch2.commit();
+            // Audit trail
+            await writeSessionEvent({
+                occurrenceId: `auto_phase_${memberId}_${Date.now()}`,
+                eventType: 'phase_transition',
+                source: 'batch_scheduler',
+                providerMode: (0, zoom_1.getZoomProvider)({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() }).mode,
+                timestamp: firestore_2.FieldValue.serverTimestamp(),
+                payload: {
+                    memberId,
+                    previousPhase: currentSlotPhase,
+                    newPhase: newSchedPhase,
+                    phaseId: targetPhase.id,
+                    weeksElapsed,
+                    updatedInstances: instCount,
+                    updatedSlots: slotCount,
+                },
+            });
+            transitioned++;
+        }
+        catch (err) {
+            errors++;
+            console.error(`[batchPhaseTransition] Error processing plan ${planDoc.id}:`, err.message || err);
+        }
+    }
+    console.log(`[batchPhaseTransition] Done. transitioned=${transitioned} skipped=${skipped} errors=${errors}`);
+});
+// ─── Item 3: syncSlotDuration — Auto-sync session duration from plan changes ──
+// Firestore trigger: when a member_plans document is updated and
+// sessionLengthMinutes changes, update all active recurring slots for that member.
+exports.syncSlotDuration = (0, firestore_1.onDocumentUpdated)({ document: 'member_plans/{memberId}', region: 'us-central1' }, async (event) => {
+    var _a, _b, _c, _d;
+    const before = (_b = (_a = event.data) === null || _a === void 0 ? void 0 : _a.before) === null || _b === void 0 ? void 0 : _b.data();
+    const after = (_d = (_c = event.data) === null || _c === void 0 ? void 0 : _c.after) === null || _d === void 0 ? void 0 : _d.data();
+    if (!before || !after)
+        return;
+    const memberId = event.params.memberId;
+    const oldDuration = before.sessionLengthMinutes;
+    const newDuration = after.sessionLengthMinutes;
+    // Only act if sessionLengthMinutes actually changed
+    if (!newDuration || oldDuration === newDuration)
+        return;
+    console.log(`[syncSlotDuration] member=${memberId} duration ${oldDuration} → ${newDuration}`);
+    // Update all active recurring slots for this member
+    const slotsSnap = await db.collection('recurring_slots')
+        .where('memberId', '==', memberId)
+        .where('status', '==', 'active')
+        .get();
+    if (slotsSnap.empty)
+        return;
+    const batch = db.batch();
+    let count = 0;
+    for (const slotDoc of slotsSnap.docs) {
+        const slotData = slotDoc.data();
+        // Only update if the slot's current duration matches the old plan duration
+        // (don't override manually customized durations)
+        if (slotData.durationMinutes === oldDuration) {
+            batch.update(slotDoc.ref, {
+                durationMinutes: newDuration,
+                updatedAt: firestore_2.FieldValue.serverTimestamp(),
+            });
+            count++;
+        }
+    }
+    if (count > 0) {
+        await batch.commit();
+        console.log(`[syncSlotDuration] Updated ${count} slots for member ${memberId}`);
+    }
 });
 //# sourceMappingURL=index.js.map

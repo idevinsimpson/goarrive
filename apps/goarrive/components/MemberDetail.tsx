@@ -39,10 +39,11 @@ import {
   Dimensions,
 } from 'react-native';
 import { db, functions } from '../lib/firebase';
-import { doc, onSnapshot, collection, query, where, getDocs, getDoc } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, getDocs, getDoc, addDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { Icon } from './Icon';
 import { router } from 'expo-router';
+import { useAuth } from '../lib/AuthContext';
 import { DAY_LABELS, DAY_SHORT_LABELS, formatTime, addMinutesToTime, type GuidancePhase, type SessionType, type RoomSource } from '../lib/schedulingTypes';
 import { type Phase, type MemberPlanData, type SessionTypeGuidance, type GuidanceLevel, resolvePhaseColor } from '../lib/planTypes';
 import { defaultHostingMode, defaultCoachExpectedLive } from '../lib/schedulingTypes';
@@ -139,6 +140,12 @@ const SCHED_PHASE_LABELS: Record<GuidancePhase, string> = {
   shared_guidance: 'Shared Guidance',
   self_guided: 'Self Guided',
 };
+
+// ── Helper: convert HH:MM to total minutes ─────────────────────────────────
+function timeToMinutes(t: string): number {
+  const [h, m] = t.split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
 
 // ── Multi-day state type ────────────────────────────────────────────────────
 interface DayTimeEntry {
@@ -351,9 +358,15 @@ export default function MemberDetail({
   onEdit,
   onArchive,
 }: MemberDetailProps) {
+  const { user: authUser, claims } = useAuth();
+  const coachId = claims?.coachId ?? authUser?.uid ?? '';
   const [currentMember, setCurrentMember] = useState(member);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [existingSlots, setExistingSlots] = useState<any[]>([]);
+  // All coach's slots (for conflict detection)
+  const [allCoachSlots, setAllCoachSlots] = useState<any[]>([]);
+  const [conflictWarning, setConflictWarning] = useState<string | null>(null);
+  const [showCalendarView, setShowCalendarView] = useState(false);
 
   // Plan data for phase sync
   const [memberPlan, setMemberPlan] = useState<MemberPlanData | null>(null);
@@ -381,6 +394,16 @@ export default function MemberDetail({
 
   // Editing existing slot
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
+
+  // Slot template presets
+  const [slotTemplates, setSlotTemplates] = useState<any[]>([]);
+  const [showTemplateMenu, setShowTemplateMenu] = useState(false);
+  const [templateName, setTemplateName] = useState('');
+  const [showSaveTemplate, setShowSaveTemplate] = useState(false);
+
+  // View Instances expansion
+  const [expandedSlotId, setExpandedSlotId] = useState<string | null>(null);
+  const [slotInstances, setSlotInstances] = useState<any[]>([]);
 
   // Shared Guidance Window: dual-handle live coaching window (in minutes from session start)
   // Defaults to centered — equal solo time on both sides
@@ -461,6 +484,46 @@ export default function MemberDetail({
     });
     return () => unsubscribe();
   }, [member.id]);
+
+  // Load ALL coach's active slots (for conflict detection)
+  useEffect(() => {
+    if (!coachId || !showScheduleModal) return;
+    const q = query(
+      collection(db, 'recurring_slots'),
+      where('coachId', '==', coachId),
+      where('status', '==', 'active'),
+    );
+    const unsubscribe = onSnapshot(q, (snap) => {
+      setAllCoachSlots(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsubscribe();
+  }, [coachId, showScheduleModal]);
+
+  // Load slot templates for this coach
+  useEffect(() => {
+    if (!coachId || !showScheduleModal) return;
+    const q = query(collection(db, 'coaches', coachId, 'slot_templates'));
+    const unsubscribe = onSnapshot(q, (snap) => {
+      setSlotTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsubscribe();
+  }, [coachId, showScheduleModal]);
+
+  // Load instances for expanded slot (View Instances)
+  useEffect(() => {
+    if (!expandedSlotId) { setSlotInstances([]); return; }
+    const q = query(
+      collection(db, 'session_instances'),
+      where('slotId', '==', expandedSlotId),
+      where('scheduledDate', '>=', new Date().toISOString().split('T')[0]),
+    );
+    const unsubscribe = onSnapshot(q, (snap) => {
+      const instances = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      instances.sort((a: any, b: any) => (a.scheduledDate || '').localeCompare(b.scheduledDate || ''));
+      setSlotInstances(instances.slice(0, 8)); // Show next 8 instances
+    });
+    return () => unsubscribe();
+  }, [expandedSlotId]);
 
   // ── Load member plan for phase sync ───────────────────────────────────────
   useEffect(() => {
@@ -571,6 +634,53 @@ export default function MemberDetail({
     }
   }, [selectedSessionType]);
 
+  // ── Slot conflict detection ─────────────────────────────────────────────────
+  // Only relevant for coach_guided (full session) and shared_guidance (live window)
+  useEffect(() => {
+    if (!allCoachSlots.length || selectedPhase === 'self_guided') {
+      setConflictWarning(null);
+      return;
+    }
+    const conflicts: string[] = [];
+    for (const entry of selectedDays) {
+      const entryStart = timeToMinutes(entry.startTime);
+      const entryEnd = entryStart + selectedDuration;
+      // For shared_guidance, the coach is only busy during the live window
+      const coachBusyStart = selectedPhase === 'shared_guidance' ? entryStart + liveStart : entryStart;
+      const coachBusyEnd = selectedPhase === 'shared_guidance' ? entryStart + liveEnd : entryEnd;
+
+      for (const slot of allCoachSlots) {
+        if (editingSlotId && slot.id === editingSlotId) continue; // skip self
+        if (slot.dayOfWeek !== entry.dayOfWeek) continue;
+        // Skip self_guided slots (coach not present)
+        if (slot.guidancePhase === 'self_guided') continue;
+        // Determine the coach's busy window for the existing slot
+        const slotStart = timeToMinutes(slot.startTime);
+        const slotEnd = slotStart + (slot.durationMinutes || 30);
+        const slotBusyStart = slot.guidancePhase === 'shared_guidance' ? slotStart + (slot.liveCoachingStartMin || 0) : slotStart;
+        const slotBusyEnd = slot.guidancePhase === 'shared_guidance' ? slotStart + (slot.liveCoachingEndMin || slot.durationMinutes || 30) : slotEnd;
+        // Check overlap
+        if (coachBusyStart < slotBusyEnd && coachBusyEnd > slotBusyStart) {
+          const memberName = slot.memberName || 'another member';
+          conflicts.push(`${DAY_LABELS[entry.dayOfWeek]} ${formatTime(entry.startTime)} overlaps with ${memberName}'s ${formatTime(slot.startTime)} slot`);
+        }
+      }
+    }
+    setConflictWarning(conflicts.length > 0 ? conflicts.join('\n') : null);
+  }, [selectedDays, selectedDuration, selectedPhase, liveStart, liveEnd, allCoachSlots, editingSlotId]);
+
+  // ── Session type validation against plan guidance profiles ──────────────────
+  const sessionTypeWarning = useMemo((): string | null => {
+    if (!memberPlan?.sessionGuidanceProfiles?.length) return null;
+    if (selectedSessionType === 'check_in' || selectedSessionType === 'recovery') return null;
+    const planSessionType = SCHED_TO_PLAN_SESSION_TYPE[selectedSessionType];
+    const profile = memberPlan.sessionGuidanceProfiles.find(p => p.sessionType === planSessionType);
+    if (!profile) {
+      return `This member's plan does not include a "${planSessionType}" session type. The plan has: ${memberPlan.sessionGuidanceProfiles.map(p => p.sessionType).join(', ')}.`;
+    }
+    return null;
+  }, [memberPlan, selectedSessionType]);
+
   const initials = currentMember.name
     ? currentMember.name
         .trim()
@@ -641,6 +751,65 @@ export default function MemberDetail({
     if (slot.liveCoachingStartMin !== undefined) setLiveStart(slot.liveCoachingStartMin);
     if (slot.liveCoachingEndMin !== undefined) setLiveEnd(slot.liveCoachingEndMin);
     setPlanPhaseOverride(true); // allow manual control when editing
+  }, []);
+
+  // ── Save current form as a template ──────────────────────────────────────
+  const handleSaveTemplate = useCallback(async () => {
+    if (!coachId || !templateName.trim()) return;
+    try {
+      await addDoc(collection(db, 'coaches', coachId, 'slot_templates'), {
+        name: templateName.trim(),
+        sessionType: selectedSessionType,
+        guidancePhase: selectedPhase,
+        durationMinutes: selectedDuration,
+        recurrencePattern: selectedPattern,
+        timezone: selectedTimezone,
+        liveStart,
+        liveEnd,
+        days: selectedDays.map(d => d.dayOfWeek),
+        createdAt: new Date(),
+      });
+      setShowSaveTemplate(false);
+      setTemplateName('');
+    } catch (err) {
+      console.error('Failed to save template:', err);
+    }
+  }, [coachId, templateName, selectedSessionType, selectedPhase, selectedDuration, selectedPattern, selectedTimezone, liveStart, liveEnd, selectedDays]);
+
+  // ── Load a template into the form ────────────────────────────────────────
+  const handleLoadTemplate = useCallback((template: any) => {
+    setSelectedSessionType(template.sessionType || 'strength');
+    setSelectedPhase(template.guidancePhase || 'coach_guided');
+    setSelectedDuration(template.durationMinutes || 30);
+    setSelectedPattern(template.recurrencePattern || 'weekly');
+    setSelectedTimezone(template.timezone || 'America/New_York');
+    if (template.liveStart !== undefined) setLiveStart(template.liveStart);
+    if (template.liveEnd !== undefined) setLiveEnd(template.liveEnd);
+    if (template.days?.length) {
+      setSelectedDays(template.days.map((d: number) => ({ dayOfWeek: d, startTime: '06:00' })));
+    }
+    setShowTemplateMenu(false);
+    setPlanPhaseOverride(true);
+  }, []);
+
+  // ── Delete a template ─────────────────────────────────────────────────
+  const handleDeleteTemplate = useCallback(async (templateId: string) => {
+    if (!coachId) return;
+    try {
+      await deleteDoc(doc(db, 'coaches', coachId, 'slot_templates', templateId));
+    } catch (err) {
+      console.error('Failed to delete template:', err);
+    }
+  }, [coachId]);
+
+  // ── Reschedule a single instance ────────────────────────────────────────
+  const handleRescheduleInstance = useCallback(async (instanceId: string, newDate: string, newTime: string) => {
+    try {
+      const fn = httpsCallable(functions, 'updateRecurringSlot');
+      await fn({ slotId: instanceId, action: 'reschedule_instance', newDate, newTime });
+    } catch (err) {
+      console.error('Failed to reschedule instance:', err);
+    }
   }, []);
 
   // ── Create slots (one per selected day) ───────────────────────────────────
@@ -1147,6 +1316,56 @@ export default function MemberDetail({
                 </>
               )}
 
+              {/* Calendar View Toggle */}
+              {allCoachSlots.length > 0 && (
+                <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                    onPress={() => setShowCalendarView(!showCalendarView)}
+                  >
+                    <Icon name={showCalendarView ? 'chevron-down' : 'chevron-right'} size={14} color={BLUE} />
+                    <Text style={{ fontSize: 12, color: BLUE, fontFamily: FH }}>Weekly Calendar (All Members)</Text>
+                  </TouchableOpacity>
+                  {showCalendarView && (
+                    <View style={{ marginTop: 8, borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
+                      {/* Header row */}
+                      <View style={{ flexDirection: 'row' }}>
+                        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, idx) => (
+                          <View key={day} style={{ flex: 1, paddingVertical: 4, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', borderRightWidth: idx < 6 ? 1 : 0, borderRightColor: 'rgba(255,255,255,0.05)' }}>
+                            <Text style={{ fontSize: 9, color: MUTED, fontFamily: FH }}>{day}</Text>
+                          </View>
+                        ))}
+                      </View>
+                      {/* Slot cells */}
+                      <View style={{ flexDirection: 'row', minHeight: 60 }}>
+                        {[1, 2, 3, 4, 5, 6, 0].map((dayIdx, colIdx) => {
+                          const daySlots = allCoachSlots.filter(s => s.dayOfWeek === dayIdx);
+                          daySlots.sort((a: any, b: any) => (a.startTime || '').localeCompare(b.startTime || ''));
+                          return (
+                            <View key={dayIdx} style={{ flex: 1, borderRightWidth: colIdx < 6 ? 1 : 0, borderRightColor: 'rgba(255,255,255,0.05)', padding: 2 }}>
+                              {daySlots.map((slot: any) => {
+                                const isCurrentMember = slot.memberId === member.id;
+                                const bgColor = isCurrentMember ? 'rgba(91,155,213,0.2)' : 'rgba(255,255,255,0.05)';
+                                return (
+                                  <View key={slot.id} style={{ backgroundColor: bgColor, borderRadius: 3, padding: 2, marginBottom: 2 }}>
+                                    <Text style={{ fontSize: 7, color: isCurrentMember ? BLUE : MUTED, fontFamily: FH }} numberOfLines={1}>
+                                      {slot.startTime?.slice(0, 5)}
+                                    </Text>
+                                    <Text style={{ fontSize: 7, color: isCurrentMember ? FG : MUTED, fontFamily: FB }} numberOfLines={1}>
+                                      {slot.memberName?.split(' ')[0] || '?'}
+                                    </Text>
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  )}
+                </View>
+              )}
+
               {/* Existing Slots */}
               {activeSlots.length > 0 && (
                 <View style={s.schedSection}>
@@ -1203,6 +1422,36 @@ export default function MemberDetail({
                           <Text style={[s.slotActionText, { color: RED }]}>Cancel</Text>
                         </TouchableOpacity>
                       </View>
+                      {/* View Instances toggle */}
+                      <TouchableOpacity
+                        style={{ marginTop: 6 }}
+                        onPress={() => setExpandedSlotId(expandedSlotId === slot.id ? null : slot.id)}
+                      >
+                        <Text style={{ fontSize: 11, color: BLUE, fontFamily: FB }}>
+                          {expandedSlotId === slot.id ? 'Hide Instances' : 'View Instances'}
+                        </Text>
+                      </TouchableOpacity>
+                      {/* Instance list expansion */}
+                      {expandedSlotId === slot.id && (
+                        <View style={{ marginTop: 8, paddingLeft: 4 }}>
+                          {slotInstances.length === 0 ? (
+                            <Text style={{ fontSize: 11, color: MUTED, fontFamily: FB }}>No upcoming instances</Text>
+                          ) : (
+                            slotInstances.map((inst: any) => (
+                              <View key={inst.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
+                                <View>
+                                  <Text style={{ fontSize: 11, color: FG, fontFamily: FB }}>
+                                    {inst.scheduledDate} at {inst.startTime || '—'}
+                                  </Text>
+                                  <Text style={{ fontSize: 10, color: inst.status === 'completed' ? GREEN : inst.status === 'missed' ? RED : MUTED, fontFamily: FB }}>
+                                    {inst.status || 'scheduled'}
+                                  </Text>
+                                </View>
+                              </View>
+                            ))
+                          )}
+                        </View>
+                      )}
                     </View>
                     );
                   })}
@@ -1215,12 +1464,64 @@ export default function MemberDetail({
                   <Text style={s.schedSectionTitle}>
                     {editingSlotId ? 'Edit Slot' : (activeSlots.length > 0 ? 'Add More Slots' : 'Create Recurring Slots')}
                   </Text>
-                  {editingSlotId && (
-                    <TouchableOpacity onPress={resetForm}>
-                      <Text style={[s.overrideLink, { color: MUTED }]}>Cancel Edit</Text>
+                  <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                    {editingSlotId && (
+                      <TouchableOpacity onPress={resetForm}>
+                        <Text style={[s.overrideLink, { color: MUTED }]}>Cancel Edit</Text>
+                      </TouchableOpacity>
+                    )}
+                    {slotTemplates.length > 0 && (
+                      <TouchableOpacity onPress={() => setShowTemplateMenu(!showTemplateMenu)}>
+                        <Text style={{ fontSize: 11, color: BLUE, fontFamily: FB }}>Templates</Text>
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity onPress={() => setShowSaveTemplate(!showSaveTemplate)}>
+                      <Text style={{ fontSize: 11, color: GREEN, fontFamily: FB }}>Save as Template</Text>
                     </TouchableOpacity>
-                  )}
+                  </View>
                 </View>
+
+                {/* Template menu dropdown */}
+                {showTemplateMenu && slotTemplates.length > 0 && (
+                  <View style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 6, padding: 8, marginBottom: 8 }}>
+                    <Text style={{ fontSize: 11, color: MUTED, fontFamily: FH, marginBottom: 4 }}>Load Template</Text>
+                    {slotTemplates.map((t: any) => (
+                      <View key={t.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
+                        <TouchableOpacity style={{ flex: 1 }} onPress={() => handleLoadTemplate(t)}>
+                          <Text style={{ fontSize: 12, color: FG, fontFamily: FB }}>{t.name}</Text>
+                          <Text style={{ fontSize: 10, color: MUTED, fontFamily: FB }}>
+                            {t.sessionType} · {t.guidancePhase} · {t.durationMinutes}min · {t.recurrencePattern}
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => handleDeleteTemplate(t.id)}>
+                          <Text style={{ fontSize: 10, color: RED, fontFamily: FB }}>Delete</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {/* Save template input */}
+                {showSaveTemplate && (
+                  <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                    <TextInput
+                      style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 6, padding: 8, color: FG, fontFamily: FB, fontSize: 12 }}
+                      placeholder="Template name..."
+                      placeholderTextColor={MUTED}
+                      value={templateName}
+                      onChangeText={setTemplateName}
+                    />
+                    <TouchableOpacity
+                      style={{ backgroundColor: GREEN + '20', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6 }}
+                      onPress={handleSaveTemplate}
+                    >
+                      <Text style={{ fontSize: 11, color: GREEN, fontFamily: FH }}>Save</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => { setShowSaveTemplate(false); setTemplateName(''); }}>
+                      <Text style={{ fontSize: 11, color: MUTED, fontFamily: FB }}>Cancel</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
 
                 {/* Session Type */}
                 <Text style={s.fieldLabel}>Session Type</Text>
@@ -1241,6 +1542,14 @@ export default function MemberDetail({
                     );
                   })}
                 </View>
+                {/* Session type validation warning */}
+                {sessionTypeWarning && (
+                  <View style={{ backgroundColor: 'rgba(245,166,35,0.1)', padding: 8, borderRadius: 6, marginTop: 6 }}>
+                    <Text style={{ fontSize: 11, color: GOLD, fontFamily: FB }}>
+                      ⚠ {sessionTypeWarning}
+                    </Text>
+                  </View>
+                )}
 
                 {/* Guidance Phase — with week counts from plan (hidden for check-in) */}
                 {selectedSessionType !== 'check_in' && (<>
@@ -1516,6 +1825,15 @@ export default function MemberDetail({
                     </Text>
                   )}
                 </View>
+
+                {/* Conflict Warning */}
+                {conflictWarning && (
+                  <View style={{ backgroundColor: 'rgba(224,82,82,0.1)', padding: 10, borderRadius: 6, marginBottom: 8, borderWidth: 1, borderColor: RED + '40' }}>
+                    <Text style={{ fontSize: 12, color: RED, fontFamily: FH, marginBottom: 4 }}>⚠ Schedule Conflict</Text>
+                    <Text style={{ fontSize: 11, color: RED, fontFamily: FB }}>{conflictWarning}</Text>
+                    <Text style={{ fontSize: 10, color: MUTED, fontFamily: FB, marginTop: 4, fontStyle: 'italic' }}>You can still create this slot, but you'll need to be in two places at once.</Text>
+                  </View>
+                )}
 
                 {/* Create Button */}
                 <TouchableOpacity
