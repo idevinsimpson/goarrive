@@ -44,7 +44,7 @@ import { httpsCallable } from 'firebase/functions';
 import { Icon } from './Icon';
 import { router } from 'expo-router';
 import { DAY_LABELS, DAY_SHORT_LABELS, formatTime, addMinutesToTime, type GuidancePhase, type SessionType, type RoomSource } from '../lib/schedulingTypes';
-import { type Phase, type MemberPlanData, resolvePhaseColor } from '../lib/planTypes';
+import { type Phase, type MemberPlanData, type SessionTypeGuidance, type GuidanceLevel, resolvePhaseColor } from '../lib/planTypes';
 import { defaultHostingMode, defaultCoachExpectedLive } from '../lib/schedulingTypes';
 
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -108,6 +108,23 @@ const INTENSITY_TO_PHASE: Record<string, GuidancePhase> = {
   'Fully Guided': 'coach_guided',
   'Shared Guidance': 'shared_guidance',
   'Self-Reliant': 'self_guided',
+};
+
+// Map GuidanceLevel (plan types) → GuidancePhase (scheduling types)
+const GUIDANCE_LEVEL_TO_PHASE: Record<GuidanceLevel, GuidancePhase> = {
+  'Fully guided': 'coach_guided',
+  'Blended': 'shared_guidance',
+  'Self-reliant': 'self_guided',
+};
+
+// Map scheduling session type → plan session type for guidance profile lookup
+const SCHED_TO_PLAN_SESSION_TYPE: Record<SessionType, string> = {
+  strength: 'Strength',
+  cardio: 'Cardio + Mobility',
+  flexibility: 'Cardio + Mobility',
+  hiit: 'Mix',
+  recovery: 'Rest',
+  check_in: 'check_in', // special: always coach_guided
 };
 
 // Phase colors for scheduling UI — matches planTypes.ts phaseColors
@@ -362,6 +379,9 @@ export default function MemberDetail({
   const [transitionPhase, setTransitionPhase] = useState<GuidancePhase | null>(null);
   const [transitioning, setTransitioning] = useState(false);
 
+  // Editing existing slot
+  const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
+
   // Shared Guidance Window: dual-handle live coaching window (in minutes from session start)
   // Defaults to centered — equal solo time on both sides
   const [liveStart, setLiveStart] = useState(Math.round((selectedDuration * 0.25) / STEP) * STEP);
@@ -488,6 +508,69 @@ export default function MemberDetail({
     return map;
   }, [planPhases]);
 
+  // ── Auto-determine guidance phase from plan's sessionGuidanceProfiles ─────
+  const autoPhaseForSessionType = useMemo((): GuidancePhase | null => {
+    if (!memberPlan || planPhaseOverride) return null;
+    // Check-in is always coach_guided
+    if (selectedSessionType === 'check_in') return 'coach_guided';
+    // Find the current phase index based on elapsed weeks
+    const phases = memberPlan.phases;
+    if (!phases?.length) return null;
+    const startDate = memberPlan.createdAt?.toDate ? memberPlan.createdAt.toDate() : null;
+    if (!startDate) return null;
+    const now = new Date();
+    const elapsedWeeks = Math.max(0, Math.floor((now.getTime() - startDate.getTime()) / (7 * 24 * 60 * 60 * 1000)));
+    let currentPhaseIdx = phases.length - 1;
+    let cumulativeWeeks = 0;
+    for (let i = 0; i < phases.length; i++) {
+      cumulativeWeeks += phases[i].weeks || 0;
+      if (elapsedWeeks < cumulativeWeeks) { currentPhaseIdx = i; break; }
+    }
+    // Look up the guidance profile for this session type
+    const profiles = memberPlan.sessionGuidanceProfiles;
+    if (!profiles?.length) {
+      // Fallback: use the phase intensity
+      const phase = phases[currentPhaseIdx];
+      return INTENSITY_TO_PHASE[phase.intensity] || 'coach_guided';
+    }
+    const planSessionType = SCHED_TO_PLAN_SESSION_TYPE[selectedSessionType];
+    const profile = profiles.find(p => p.sessionType === planSessionType);
+    if (!profile) {
+      const phase = phases[currentPhaseIdx];
+      return INTENSITY_TO_PHASE[phase.intensity] || 'coach_guided';
+    }
+    // Map phase index to phase1/phase2/phase3
+    const phaseKey = currentPhaseIdx === 0 ? 'phase1' : currentPhaseIdx === 1 ? 'phase2' : 'phase3';
+    const guidanceLevel = profile[phaseKey as keyof SessionTypeGuidance] as GuidanceLevel;
+    return GUIDANCE_LEVEL_TO_PHASE[guidanceLevel] || 'coach_guided';
+  }, [memberPlan, selectedSessionType, planPhaseOverride]);
+
+  // Auto-set the guidance phase when session type changes (unless overriding)
+  useEffect(() => {
+    if (autoPhaseForSessionType && !planPhaseOverride) {
+      setSelectedPhase(autoPhaseForSessionType);
+    }
+  }, [autoPhaseForSessionType, planPhaseOverride]);
+
+  // ── Session types that already have active slots ──────────────────────────
+  const usedSessionTypes = useMemo(() => {
+    const used = new Set<string>();
+    for (const slot of existingSlots) {
+      if (slot.status === 'active' || slot.status === 'paused') {
+        if (slot.sessionType) used.add(slot.sessionType);
+      }
+    }
+    return used;
+  }, [existingSlots]);
+
+  // ── Check-in defaults: auto-set monthly recurrence when check-in selected ──
+  useEffect(() => {
+    if (selectedSessionType === 'check_in') {
+      setSelectedPattern('monthly');
+      setSelectedPhase('coach_guided');
+    }
+  }, [selectedSessionType]);
+
   const initials = currentMember.name
     ? currentMember.name
         .trim()
@@ -529,18 +612,66 @@ export default function MemberDetail({
     return 'shared_pool';
   }, [selectedPhase]);
 
+  // ── Reset form to defaults ──────────────────────────────────────────────────
+  const resetForm = useCallback(() => {
+    setSelectedDays([{ dayOfWeek: 1, startTime: '06:00' }]);
+    setSelectedSessionType('strength');
+    setSelectedPhase('coach_guided');
+    setSelectedPattern('weekly');
+    setSelectedWeekOfMonth(1);
+    setSelectedTimezone('America/New_York');
+    const dur = memberPlan?.pricing?.sessionLengthMinutes || 30;
+    setSelectedDuration(DURATION_OPTIONS.includes(dur) ? dur : 30);
+    setLiveStart(Math.round((dur * 0.25) / STEP) * STEP);
+    setLiveEnd(Math.round((dur * 0.75) / STEP) * STEP);
+    setEditingSlotId(null);
+    setPlanPhaseOverride(false);
+  }, [memberPlan]);
+
+  // ── Edit existing slot: populate form with slot data ──────────────────────
+  const handleEditSlot = useCallback((slot: any) => {
+    setEditingSlotId(slot.id);
+    setSelectedSessionType(slot.sessionType || 'strength');
+    setSelectedPhase(slot.guidancePhase || 'coach_guided');
+    setSelectedDays([{ dayOfWeek: slot.dayOfWeek, startTime: slot.startTime || '06:00' }]);
+    setSelectedDuration(slot.durationMinutes || 30);
+    setSelectedPattern(slot.recurrencePattern || 'weekly');
+    if (slot.weekOfMonth) setSelectedWeekOfMonth(slot.weekOfMonth);
+    setSelectedTimezone(slot.timezone || 'America/New_York');
+    if (slot.liveCoachingStartMin !== undefined) setLiveStart(slot.liveCoachingStartMin);
+    if (slot.liveCoachingEndMin !== undefined) setLiveEnd(slot.liveCoachingEndMin);
+    setPlanPhaseOverride(true); // allow manual control when editing
+  }, []);
+
   // ── Create slots (one per selected day) ───────────────────────────────────
   const handleCreateSlots = useCallback(async () => {
     setCreating(true);
     try {
-      const fn = httpsCallable(functions, 'createRecurringSlot');
+      const fn = httpsCallable(functions, editingSlotId ? 'updateRecurringSlot' : 'createRecurringSlot');
       let totalInstances = 0;
       const dayNames: string[] = [];
 
       for (const entry of selectedDays) {
         const hostingMode = defaultHostingMode(selectedPhase);
         const coachExpectedLive = defaultCoachExpectedLive(selectedPhase);
-        const payload: Record<string, any> = {
+        const payload: Record<string, any> = editingSlotId ? {
+          slotId: editingSlotId,
+          action: 'update',
+          dayOfWeek: entry.dayOfWeek,
+          startTime: entry.startTime,
+          durationMinutes: selectedDuration,
+          timezone: selectedTimezone,
+          recurrencePattern: selectedPattern,
+          weekOfMonth: selectedPattern === 'monthly' ? selectedWeekOfMonth : undefined,
+          sessionType: selectedSessionType,
+          guidancePhase: selectedPhase,
+          roomSource: resolvedRoomSource,
+          coachJoining: selectedPhase === 'coach_guided',
+          hostingMode,
+          coachExpectedLive,
+          personalZoomRequired: selectedPhase === 'coach_guided',
+          commitToSaveEnabled: hasCTS,
+        } : {
           memberId: member.id,
           memberName: currentMember.name || 'Unknown',
           dayOfWeek: entry.dayOfWeek,
@@ -569,24 +700,27 @@ export default function MemberDetail({
 
         const result = await fn(payload);
         const data = result.data as any;
-        totalInstances += data.instancesGenerated || 0;
+        totalInstances += data.instancesGenerated || data.updatedInstances || 0;
         dayNames.push(`${DAY_LABELS[entry.dayOfWeek]} ${formatTime(entry.startTime)}`);
       }
 
       const liveInfo = selectedPhase === 'shared_guidance'
-        ? `\n\nLive coaching: ${liveStart}–${liveEnd} min (${liveEnd - liveStart} min on your calendar)`
+        ? `\n\nLive coaching: ${liveStart}\u2013${liveEnd} min (${liveEnd - liveStart} min on your calendar)`
         : '';
 
       Alert.alert(
-        selectedDays.length > 1 ? 'Slots Created' : 'Slot Created',
-        `${selectedDays.length} recurring slot${selectedDays.length > 1 ? 's' : ''} created:\n${dayNames.join(', ')}\n\n${totalInstances} total sessions generated for the next 4 weeks.${liveInfo}`
+        editingSlotId ? 'Slot Updated' : (selectedDays.length > 1 ? 'Slots Created' : 'Slot Created'),
+        editingSlotId
+          ? `Slot updated: ${dayNames.join(', ')}${liveInfo}`
+          : `${selectedDays.length} recurring slot${selectedDays.length > 1 ? 's' : ''} created:\n${dayNames.join(', ')}\n\n${totalInstances} total sessions generated for the next 4 weeks.${liveInfo}`
       );
-      setShowScheduleModal(false);
+      // Reset form after successful creation
+      resetForm();
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to create slot(s)');
     }
     setCreating(false);
-  }, [member.id, currentMember.name, selectedDays, selectedDuration, selectedTimezone, selectedPattern, selectedWeekOfMonth, selectedSessionType, selectedPhase, resolvedRoomSource, liveStart, liveEnd]);
+  }, [member.id, currentMember.name, selectedDays, selectedDuration, selectedTimezone, selectedPattern, selectedWeekOfMonth, selectedSessionType, selectedPhase, resolvedRoomSource, liveStart, liveEnd, editingSlotId, hasCTS, resetForm]);
 
   const handlePauseSlot = useCallback(async (slotId: string) => {
     try {
@@ -1041,6 +1175,12 @@ export default function MemberDetail({
                         )}
                       </View>
                       <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <TouchableOpacity
+                          style={[s.slotActionBtn, { backgroundColor: 'rgba(91,155,213,0.1)' }]}
+                          onPress={() => handleEditSlot(slot)}
+                        >
+                          <Text style={[s.slotActionText, { color: BLUE }]}>Edit</Text>
+                        </TouchableOpacity>
                         {slot.status === 'active' ? (
                           <TouchableOpacity
                             style={[s.slotActionBtn, { backgroundColor: 'rgba(245,166,35,0.1)' }]}
@@ -1071,27 +1211,39 @@ export default function MemberDetail({
 
               {/* New Slot Form */}
               <View style={s.schedSection}>
-                <Text style={s.schedSectionTitle}>
-                  {activeSlots.length > 0 ? 'Add More Slots' : 'Create Recurring Slots'}
-                </Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={s.schedSectionTitle}>
+                    {editingSlotId ? 'Edit Slot' : (activeSlots.length > 0 ? 'Add More Slots' : 'Create Recurring Slots')}
+                  </Text>
+                  {editingSlotId && (
+                    <TouchableOpacity onPress={resetForm}>
+                      <Text style={[s.overrideLink, { color: MUTED }]}>Cancel Edit</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
 
                 {/* Session Type */}
                 <Text style={s.fieldLabel}>Session Type</Text>
                 <View style={s.dayRow}>
-                  {(['strength', 'cardio', 'flexibility', 'hiit', 'recovery', 'check_in'] as SessionType[]).map(st => (
-                    <TouchableOpacity
-                      key={st}
-                      style={[s.dayBtn, selectedSessionType === st && s.dayBtnActive, { minWidth: 70 }]}
-                      onPress={() => setSelectedSessionType(st)}
-                    >
-                      <Text style={[s.dayBtnText, selectedSessionType === st && s.dayBtnTextActive, { fontSize: 12 }]}>
-                        {st === 'check_in' ? 'Check-in' : st.charAt(0).toUpperCase() + st.slice(1)}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                  {(['strength', 'cardio', 'flexibility', 'hiit', 'recovery', 'check_in'] as SessionType[]).map(st => {
+                    const isUsed = usedSessionTypes.has(st) && !editingSlotId;
+                    return (
+                      <TouchableOpacity
+                        key={st}
+                        style={[s.dayBtn, selectedSessionType === st && s.dayBtnActive, isUsed && { opacity: 0.4 }, { minWidth: 70 }]}
+                        onPress={() => setSelectedSessionType(st)}
+                      >
+                        <Text style={[s.dayBtnText, selectedSessionType === st && s.dayBtnTextActive, { fontSize: 12 }]}>
+                          {st === 'check_in' ? 'Check-in' : st.charAt(0).toUpperCase() + st.slice(1)}
+                        </Text>
+                        {isUsed && <Text style={{ fontSize: 8, color: MUTED, fontFamily: FB, marginTop: 1 }}>Active</Text>}
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
 
-                {/* Guidance Phase — with week counts from plan */}
+                {/* Guidance Phase — with week counts from plan (hidden for check-in) */}
+                {selectedSessionType !== 'check_in' && (<>
                 <View style={s.phaseHeaderRow}>
                   <Text style={s.fieldLabel}>Guidance Phase</Text>
                   {planPhases && !planPhaseOverride && (
@@ -1112,16 +1264,19 @@ export default function MemberDetail({
                     { key: 'self_guided' as GuidancePhase, label: 'Self Guided', color: '#FFC000' },
                   ] as const).map(phase => {
                     const weekCount = phaseWeekMap[phase.key];
+                    const isDisabled = !planPhaseOverride && autoPhaseForSessionType !== null && selectedSessionType !== 'check_in';
                     return (
                       <TouchableOpacity
                         key={phase.key}
                         style={[
                           s.phaseBtn,
                           selectedPhase === phase.key && { backgroundColor: phase.color + '18', borderColor: phase.color + '60' },
+                          isDisabled && selectedPhase !== phase.key && { opacity: 0.35 },
                         ]}
                         onPress={() => {
-                          setSelectedPhase(phase.key);
+                          if (!isDisabled) setSelectedPhase(phase.key);
                         }}
+                        disabled={isDisabled}
                       >
                         <Text style={[
                           s.phaseBtnLabel,
@@ -1141,31 +1296,49 @@ export default function MemberDetail({
                     );
                   })}
                 </View>
-
-                {/* Hosting Mode Indicator (auto-determined) */}
-                <View style={s.roomSourceRow}>
-                  <Icon name="info" size={14} color={MUTED} />
-                  <Text style={s.roomSourceText}>
-                    {selectedPhase === 'coach_guided'
-                      ? 'Coach-led — sessions use your personal Zoom'
-                      : 'Hosted — sessions use shared infrastructure'}
+                {!planPhaseOverride && autoPhaseForSessionType !== null && (
+                  <Text style={{ fontSize: 10, color: MUTED, fontFamily: FB, marginTop: 4, fontStyle: 'italic' }}>
+                    Auto-set from plan. Tap "Override" to change.
                   </Text>
-                </View>
+                )}
+                </>)}
+                {selectedSessionType === 'check_in' && (
+                  <View style={s.roomSourceRow}>
+                    <Icon name="info" size={14} color={GREEN} />
+                    <Text style={[s.roomSourceText, { color: GREEN }]}>
+                      Check-in — always coach-guided, monthly
+                    </Text>
+                  </View>
+                )}
 
-                {/* ── Shared Guidance Window (always visible) ──────────────── */}
-                <View style={s.sliderSection}>
-                  <Text style={s.fieldLabel}>Shared Guidance Window</Text>
-                  <Text style={s.fieldHint}>
-                    Drag the handles to set when you'll be guiding your member
-                  </Text>
-                  <DualHandleSlider
-                    totalMinutes={selectedDuration}
-                    liveStart={liveStart}
-                    liveEnd={liveEnd}
-                    onChangeStart={setLiveStart}
-                    onChangeEnd={setLiveEnd}
-                  />
-                </View>
+                {/* Hosting Mode Indicator (auto-determined, hidden for check-in) */}
+                {selectedSessionType !== 'check_in' && (
+                  <View style={s.roomSourceRow}>
+                    <Icon name="info" size={14} color={MUTED} />
+                    <Text style={s.roomSourceText}>
+                      {selectedPhase === 'coach_guided'
+                        ? 'Coach-led \u2014 sessions use your personal Zoom'
+                        : 'Hosted \u2014 sessions use shared infrastructure'}
+                    </Text>
+                  </View>
+                )}
+
+                {/* ── Shared Guidance Window (only for shared_guidance phase, not check-in) ── */}
+                {selectedPhase === 'shared_guidance' && selectedSessionType !== 'check_in' && (
+                  <View style={s.sliderSection}>
+                    <Text style={s.fieldLabel}>Shared Guidance Window</Text>
+                    <Text style={s.fieldHint}>
+                      Drag the handles to set when you'll be guiding your member
+                    </Text>
+                    <DualHandleSlider
+                      totalMinutes={selectedDuration}
+                      liveStart={liveStart}
+                      liveEnd={liveEnd}
+                      onChangeStart={setLiveStart}
+                      onChangeEnd={setLiveEnd}
+                    />
+                  </View>
+                )}
 
                 {/* ── Multi-Day Selector ─────────────────────────────────────── */}
                 <Text style={s.fieldLabel}>Days & Times</Text>
@@ -1354,9 +1527,11 @@ export default function MemberDetail({
                     <ActivityIndicator size="small" color={BG} />
                   ) : (
                     <Text style={s.createBtnText}>
-                      {selectedDays.length > 1
-                        ? `Create ${selectedDays.length} Recurring Slots`
-                        : 'Create Recurring Slot'}
+                      {editingSlotId
+                        ? 'Update Slot'
+                        : selectedDays.length > 1
+                          ? `Create ${selectedDays.length} Recurring Slots`
+                          : 'Create Recurring Slot'}
                     </Text>
                   )}
                 </TouchableOpacity>

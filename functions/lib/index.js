@@ -1820,7 +1820,7 @@ exports.updateRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
         throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
-    const { slotId, action: slotAction, updates } = request.data;
+    const { slotId, action: slotAction } = request.data;
     if (!slotId || !slotAction)
         throw new https_1.HttpsError('invalid-argument', 'slotId and action are required');
     const slotRef = db.collection('recurring_slots').doc(slotId);
@@ -1867,16 +1867,71 @@ exports.updateRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
         });
         return { success: true, instancesCancelled: futureInstances.size };
     }
-    if (slotAction === 'update' && updates) {
+    if (slotAction === 'update') {
+        // Accept all scheduling fields directly on request.data
+        const d = request.data;
         const slotUpdates = { updatedAt: firestore_2.FieldValue.serverTimestamp() };
-        if (updates.dayOfWeek !== undefined)
-            slotUpdates.dayOfWeek = updates.dayOfWeek;
-        if (updates.startTime)
-            slotUpdates.startTime = updates.startTime;
-        if (updates.durationMinutes)
-            slotUpdates.durationMinutes = updates.durationMinutes;
+        if (d.dayOfWeek !== undefined)
+            slotUpdates.dayOfWeek = d.dayOfWeek;
+        if (d.startTime)
+            slotUpdates.startTime = d.startTime;
+        if (d.durationMinutes)
+            slotUpdates.durationMinutes = d.durationMinutes;
+        if (d.timezone)
+            slotUpdates.timezone = d.timezone;
+        if (d.recurrencePattern)
+            slotUpdates.recurrencePattern = d.recurrencePattern;
+        if (d.weekOfMonth !== undefined)
+            slotUpdates.weekOfMonth = d.weekOfMonth;
+        if (d.sessionType)
+            slotUpdates.sessionType = d.sessionType;
+        if (d.guidancePhase)
+            slotUpdates.guidancePhase = d.guidancePhase;
+        if (d.roomSource)
+            slotUpdates.roomSource = d.roomSource;
+        if (d.coachJoining !== undefined)
+            slotUpdates.coachJoining = d.coachJoining;
+        if (d.hostingMode)
+            slotUpdates.hostingMode = d.hostingMode;
+        if (d.coachExpectedLive !== undefined)
+            slotUpdates.coachExpectedLive = d.coachExpectedLive;
+        if (d.personalZoomRequired !== undefined)
+            slotUpdates.personalZoomRequired = d.personalZoomRequired;
+        if (d.liveCoachingStartMin !== undefined)
+            slotUpdates.liveCoachingStartMin = d.liveCoachingStartMin;
+        if (d.liveCoachingEndMin !== undefined)
+            slotUpdates.liveCoachingEndMin = d.liveCoachingEndMin;
+        if (d.liveCoachingDuration !== undefined)
+            slotUpdates.liveCoachingDuration = d.liveCoachingDuration;
+        if (d.commitToSaveEnabled !== undefined)
+            slotUpdates.commitToSaveEnabled = d.commitToSaveEnabled;
         await slotRef.update(slotUpdates);
-        return { success: true };
+        // Cancel future scheduled/allocated instances and regenerate
+        const futureInstances = await db.collection('session_instances')
+            .where('recurringSlotId', '==', slotId)
+            .where('status', 'in', ['scheduled', 'allocated'])
+            .get();
+        const batch = db.batch();
+        futureInstances.docs.forEach(doc => {
+            batch.update(doc.ref, { status: 'cancelled', updatedAt: firestore_2.FieldValue.serverTimestamp() });
+        });
+        await batch.commit();
+        // Regenerate instances with updated slot data
+        const updatedSlotSnap = await slotRef.get();
+        const updatedSlot = updatedSlotSnap.data();
+        const newInstances = generateInstancesForSlot(updatedSlot, slotId, 28);
+        for (const inst of newInstances) {
+            const instRef = db.collection('session_instances').doc();
+            await instRef.set(Object.assign(Object.assign({}, inst), { id: instRef.id }));
+        }
+        await writeAuditLog({
+            coachId: callerUid,
+            action: 'slot_updated',
+            recurringSlotId: slotId,
+            memberId: slot.memberId,
+            details: `Updated recurring slot for ${slot.memberName}. ${futureInstances.size} old instances cancelled, ${newInstances.length} new instances generated.`,
+        });
+        return { success: true, updatedInstances: newInstances.length };
     }
     throw new https_1.HttpsError('invalid-argument', `Unknown action: ${slotAction}`);
 });

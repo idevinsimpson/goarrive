@@ -2165,14 +2165,9 @@ export const updateRecurringSlot = onCall(
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
 
-    const { slotId, action: slotAction, updates } = request.data as {
+    const { slotId, action: slotAction } = request.data as {
       slotId: string;
       action: 'pause' | 'resume' | 'cancel' | 'update';
-      updates?: {
-        dayOfWeek?: number;
-        startTime?: string;
-        durationMinutes?: number;
-      };
     };
 
     if (!slotId || !slotAction) throw new HttpsError('invalid-argument', 'slotId and action are required');
@@ -2229,14 +2224,60 @@ export const updateRecurringSlot = onCall(
       return { success: true, instancesCancelled: futureInstances.size };
     }
 
-    if (slotAction === 'update' && updates) {
+    if (slotAction === 'update') {
+      // Accept all scheduling fields directly on request.data
+      const d = request.data as Record<string, any>;
       const slotUpdates: Record<string, any> = { updatedAt: FieldValue.serverTimestamp() };
-      if (updates.dayOfWeek !== undefined) slotUpdates.dayOfWeek = updates.dayOfWeek;
-      if (updates.startTime) slotUpdates.startTime = updates.startTime;
-      if (updates.durationMinutes) slotUpdates.durationMinutes = updates.durationMinutes;
+      if (d.dayOfWeek !== undefined) slotUpdates.dayOfWeek = d.dayOfWeek;
+      if (d.startTime) slotUpdates.startTime = d.startTime;
+      if (d.durationMinutes) slotUpdates.durationMinutes = d.durationMinutes;
+      if (d.timezone) slotUpdates.timezone = d.timezone;
+      if (d.recurrencePattern) slotUpdates.recurrencePattern = d.recurrencePattern;
+      if (d.weekOfMonth !== undefined) slotUpdates.weekOfMonth = d.weekOfMonth;
+      if (d.sessionType) slotUpdates.sessionType = d.sessionType;
+      if (d.guidancePhase) slotUpdates.guidancePhase = d.guidancePhase;
+      if (d.roomSource) slotUpdates.roomSource = d.roomSource;
+      if (d.coachJoining !== undefined) slotUpdates.coachJoining = d.coachJoining;
+      if (d.hostingMode) slotUpdates.hostingMode = d.hostingMode;
+      if (d.coachExpectedLive !== undefined) slotUpdates.coachExpectedLive = d.coachExpectedLive;
+      if (d.personalZoomRequired !== undefined) slotUpdates.personalZoomRequired = d.personalZoomRequired;
+      if (d.liveCoachingStartMin !== undefined) slotUpdates.liveCoachingStartMin = d.liveCoachingStartMin;
+      if (d.liveCoachingEndMin !== undefined) slotUpdates.liveCoachingEndMin = d.liveCoachingEndMin;
+      if (d.liveCoachingDuration !== undefined) slotUpdates.liveCoachingDuration = d.liveCoachingDuration;
+      if (d.commitToSaveEnabled !== undefined) slotUpdates.commitToSaveEnabled = d.commitToSaveEnabled;
 
       await slotRef.update(slotUpdates);
-      return { success: true };
+
+      // Cancel future scheduled/allocated instances and regenerate
+      const futureInstances = await db.collection('session_instances')
+        .where('recurringSlotId', '==', slotId)
+        .where('status', 'in', ['scheduled', 'allocated'])
+        .get();
+
+      const batch = db.batch();
+      futureInstances.docs.forEach(doc => {
+        batch.update(doc.ref, { status: 'cancelled', updatedAt: FieldValue.serverTimestamp() });
+      });
+      await batch.commit();
+
+      // Regenerate instances with updated slot data
+      const updatedSlotSnap = await slotRef.get();
+      const updatedSlot = updatedSlotSnap.data()!;
+      const newInstances = generateInstancesForSlot(updatedSlot, slotId, 28);
+      for (const inst of newInstances) {
+        const instRef = db.collection('session_instances').doc();
+        await instRef.set({ ...inst, id: instRef.id });
+      }
+
+      await writeAuditLog({
+        coachId: callerUid,
+        action: 'slot_updated',
+        recurringSlotId: slotId,
+        memberId: slot.memberId,
+        details: `Updated recurring slot for ${slot.memberName}. ${futureInstances.size} old instances cancelled, ${newInstances.length} new instances generated.`,
+      });
+
+      return { success: true, updatedInstances: newInstances.length };
     }
 
     throw new HttpsError('invalid-argument', `Unknown action: ${slotAction}`);
