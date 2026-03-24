@@ -29,8 +29,9 @@ import {
 import { useRouter } from 'expo-router';
 import {
   collection, query, where, getDocs, doc, onSnapshot,
-  orderBy, limit, Timestamp,
+  orderBy, limit, Timestamp, updateDoc,
 } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../lib/AuthContext';
 
@@ -129,6 +130,23 @@ interface MemberReferral {
   createdAt: Timestamp;
 }
 
+interface CtsAccountabilityFee {
+  id: string;
+  sessionInstanceId: string;
+  memberId: string;
+  coachId: string;
+  planId: string;
+  scheduledDate: string;
+  scheduledStartTime?: string;
+  feeCents: number;
+  stripeInvoiceId?: string;
+  status: string;
+  waived: boolean;
+  waivedAt?: Timestamp;
+  waivedBy?: string;
+  createdAt: Timestamp;
+}
+
 interface Task {
   id: string;
   priority: 'urgent' | 'normal' | 'info';
@@ -149,8 +167,10 @@ export default function BillingDashboard() {
   const [profitShares, setProfitShares] = useState<ProfitShareRecord[]>([]);
   const [interCoachReferrals, setInterCoachReferrals] = useState<InterCoachReferral[]>([]);
   const [memberReferrals, setMemberReferrals] = useState<MemberReferral[]>([]);
+  const [ctsFees, setCtsFees] = useState<CtsAccountabilityFee[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'tasks' | 'contact' | 'know'>('tasks');
+  const [waivingFeeId, setWaivingFeeId] = useState<string | null>(null);
 
   // ── Load data ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -201,6 +221,16 @@ export default function BillingDashboard() {
         const memRefQ = query(collection(db, 'referrals'), where('referrerId', '==', coachId));
         const memRefSnap = await getDocs(memRefQ);
         setMemberReferrals(memRefSnap.docs.map(d => ({ id: d.id, ...d.data() } as MemberReferral)));
+
+        // CTS accountability fees (last 90 days)
+        const ctsFeesQ = query(
+          collection(db, 'ctsAccountabilityFees'),
+          where('coachId', '==', coachId),
+          orderBy('createdAt', 'desc'),
+          limit(100)
+        );
+        const ctsFeesSnap = await getDocs(ctsFeesQ);
+        setCtsFees(ctsFeesSnap.docs.map(d => ({ id: d.id, ...d.data() } as CtsAccountabilityFee)));
       } catch (err) {
         console.warn('[BillingDashboard] Load error:', err);
       } finally {
@@ -503,6 +533,30 @@ export default function BillingDashboard() {
             )}
           </View>
 
+          {/* ── CTS Accountability Fees ── */}
+          {ctsFees.length > 0 && (
+            <CtsFeesSection
+              fees={ctsFees}
+              waivingFeeId={waivingFeeId}
+              onWaive={async (feeId: string) => {
+                setWaivingFeeId(feeId);
+                try {
+                  const functions = getFunctions();
+                  const waiveFn = httpsCallable<{ feeId: string }, { success: boolean; message?: string }>(functions, 'waiveCtsFee');
+                  const result = await waiveFn({ feeId });
+                  if (result.data.success) {
+                    setCtsFees(prev => prev.map(f => f.id === feeId ? { ...f, waived: true, status: 'waived' } : f));
+                  }
+                } catch (err) {
+                  console.warn('[BillingDashboard] Waive error:', err);
+                } finally {
+                  setWaivingFeeId(null);
+                }
+              }}
+              memberPlans={memberPlans}
+            />
+          )}
+
           {/* ── Member Referrals ── */}
           <View style={s.card}>
             <Text style={s.cardTitle}>Member Referrals</Text>
@@ -699,7 +753,91 @@ function ContactTab({
   );
 }
 
-// ── Things to Know Tab ───────────────────────────────────────────────────────
+// ── CTS Accountability Fees Section ──────────────────────────────────────────────────
+function CtsFeesSection({
+  fees, waivingFeeId, onWaive, memberPlans,
+}: {
+  fees: CtsAccountabilityFee[];
+  waivingFeeId: string | null;
+  onWaive: (feeId: string) => void;
+  memberPlans: MemberPlan[];
+}) {
+  const memberNameMap: Record<string, string> = {};
+  memberPlans.forEach(p => { if (p.memberId) memberNameMap[p.memberId] = p.memberName || 'Unknown'; });
+
+  const charged = fees.filter(f => !f.waived);
+  const waived = fees.filter(f => f.waived);
+  const totalChargedCents = charged.reduce((sum, f) => sum + (f.feeCents || 0), 0);
+  const totalWaivedCents = waived.reduce((sum, f) => sum + (f.feeCents || 0), 0);
+
+  return (
+    <View style={s.card}>
+      <Text style={s.cardTitle}>CTS Accountability Fees</Text>
+      <Text style={{ color: MUTED, fontSize: 11, marginBottom: 10 }}>
+        Missed session fees charged to Commit-to-Save members
+      </Text>
+
+      <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+        <View style={[s.statBox, { flex: 1 }]}>
+          <Text style={[s.statValue, { color: RED }]}>{charged.length}</Text>
+          <Text style={s.statLabel}>Charged</Text>
+          <Text style={[s.statSub, { color: RED }]}>{formatCurrency(totalChargedCents / 100)}</Text>
+        </View>
+        <View style={[s.statBox, { flex: 1 }]}>
+          <Text style={[s.statValue, { color: ACCENT }]}>{waived.length}</Text>
+          <Text style={s.statLabel}>Waived</Text>
+          <Text style={[s.statSub, { color: ACCENT }]}>{formatCurrency(totalWaivedCents / 100)}</Text>
+        </View>
+        <View style={[s.statBox, { flex: 1 }]}>
+          <Text style={[s.statValue, { color: '#FFF' }]}>{fees.length}</Text>
+          <Text style={s.statLabel}>Total</Text>
+        </View>
+      </View>
+
+      {fees.map(fee => (
+        <View key={fee.id} style={{
+          flexDirection: 'row', alignItems: 'center', gap: 10,
+          paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BORDER + '44',
+        }}>
+          <View style={[s.contactAvatar, { backgroundColor: fee.waived ? ACCENT + '22' : RED + '22' }]}>
+            <Text style={{ color: fee.waived ? ACCENT : RED, fontSize: 12, fontWeight: '700' }}>
+              {fee.waived ? '\u2713' : '$'}
+            </Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '600' }}>
+              {memberNameMap[fee.memberId] || 'Member'}
+            </Text>
+            <Text style={{ color: MUTED, fontSize: 11 }}>
+              {fee.scheduledDate}{fee.scheduledStartTime ? ` at ${fee.scheduledStartTime}` : ''}
+              {' \u00B7 '}{formatCurrency(fee.feeCents / 100)}
+              {fee.waived ? ' \u00B7 Waived' : ''}
+            </Text>
+          </View>
+          {!fee.waived && (
+            <Pressable
+              onPress={() => onWaive(fee.id)}
+              disabled={waivingFeeId === fee.id}
+              style={{
+                paddingHorizontal: 12, paddingVertical: 6,
+                backgroundColor: GOLD + '22', borderRadius: 8,
+                borderWidth: 1, borderColor: GOLD + '55',
+                opacity: waivingFeeId === fee.id ? 0.5 : 1,
+              }}
+            >
+              {waivingFeeId === fee.id
+                ? <ActivityIndicator color={GOLD} size="small" />
+                : <Text style={{ color: GOLD, fontSize: 12, fontWeight: '600' }}>Waive</Text>
+              }
+            </Pressable>
+          )}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// ── Things to Know Tab ─────────────────────────────────────────────────────────────
 function KnowTab({ tier, activePayingCount, nextTier, membersToNextTier, gen1Count, gen2Count }: {
   tier: typeof TIERS[0]; activePayingCount: number;
   nextTier: typeof TIERS[0] | null; membersToNextTier: number;

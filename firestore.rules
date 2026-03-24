@@ -632,6 +632,32 @@ service cloud.firestore {
       allow write: if false; // Cloud Functions only (Admin SDK)
     }
 
+    // ─────────────────────────────────────────────
+    // CTS ACCOUNTABILITY FEES
+    // Readable by the member, their coach, or admin.
+    // Writable only by Cloud Functions (Admin SDK).
+    // ─────────────────────────────────────────────
+
+    match /ctsAccountabilityFees/{feeId} {
+      allow read: if isPlatformAdmin()
+                  || isOwnDoc(resource.data.memberId)
+                  || isCoachOrBootstrap(resource.data.coachId);
+      allow write: if false; // Cloud Functions only (Admin SDK)
+    }
+
+    // ─────────────────────────────────────────────
+    // COMMIT TO SAVE CONSENTS
+    // Readable by the member, their coach, or admin.
+    // Writable only by Cloud Functions (Admin SDK).
+    // ─────────────────────────────────────────────
+
+    match /commitToSaveConsents/{consentId} {
+      allow read: if isPlatformAdmin()
+                  || isOwnDoc(resource.data.memberId)
+                  || isCoachOrBootstrap(resource.data.coachId);
+      allow write: if false; // Cloud Functions only (Admin SDK)
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

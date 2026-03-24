@@ -71,7 +71,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
+exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -3409,7 +3409,49 @@ exports.enforceCtsAccountability = (0, scheduler_1.onSchedule)({ schedule: 'ever
                         totalSkipped++;
                         continue;
                     }
-                    // 3. Idempotency check — have we already charged for this instance?
+                    // 3a. Make-up session tracking: check if the member attended any
+                    //     other session within 48 hours of the missed one.
+                    //     If they did, treat it as a make-up and skip the fee.
+                    const missedDateStr = instance.scheduledDate; // e.g. '2026-03-20'
+                    const missedTimeStr = instance.scheduledStartTime || '00:00';
+                    const missedMs = new Date(`${missedDateStr}T${missedTimeStr}:00`).getTime();
+                    const makeUpWindowEnd = missedMs + 48 * 60 * 60 * 1000;
+                    const makeUpWindowEndDate = new Date(makeUpWindowEnd).toISOString().split('T')[0];
+                    // Look for any completed/attended session for this member within the make-up window
+                    const makeUpSnap = await db.collection('session_instances')
+                        .where('memberId', '==', memberId)
+                        .where('coachId', '==', coachId)
+                        .where('scheduledDate', '>=', missedDateStr)
+                        .where('scheduledDate', '<=', makeUpWindowEndDate)
+                        .get();
+                    let hasMakeUp = false;
+                    for (const muDoc of makeUpSnap.docs) {
+                        if (muDoc.id === instanceDoc.id)
+                            continue; // Skip the missed session itself
+                        const muData = muDoc.data();
+                        // Check if this other session was actually attended
+                        const muHasAttendance = muData.attendance && Object.keys(muData.attendance).length > 0;
+                        const muHasActualStart = !!muData.actualStartTime;
+                        const muAttendanceStatus = muData.attendanceStatus;
+                        const muStatus = muData.status;
+                        if (muHasAttendance || muHasActualStart ||
+                            muAttendanceStatus === 'joined' || muAttendanceStatus === 'completed' ||
+                            muStatus === 'completed') {
+                            hasMakeUp = true;
+                            break;
+                        }
+                    }
+                    if (hasMakeUp) {
+                        // Member made up the session — mark it and skip the fee
+                        await db.collection('session_instances').doc(instanceDoc.id).update({
+                            status: 'made_up',
+                            madeUpWithin48h: true,
+                            updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                        });
+                        totalSkipped++;
+                        continue;
+                    }
+                    // 3b. Idempotency check — have we already charged for this instance?
                     const existingFeeSnap = await db.collection('ctsAccountabilityFees')
                         .where('sessionInstanceId', '==', instanceDoc.id)
                         .where('memberId', '==', memberId)
@@ -3588,5 +3630,103 @@ exports.enforceCtsAccountability = (0, scheduler_1.onSchedule)({ schedule: 'ever
     }
     console.log(`[enforceCtsAccountability] Done: ${totalProcessed} sessions checked, ` +
         `${totalCharged} charged, ${totalSkipped} skipped, ${totalFailed} failed`);
+});
+// ─── 27. waiveCtsFee — HTTPS callable: coach waives a CTS missed session fee ──
+/**
+ * Called by the coach from the billing dashboard to waive a specific CTS
+ * accountability fee. Sets waived: true on the ctsAccountabilityFees doc
+ * and issues a full Stripe refund for the invoice.
+ *
+ * Input: { feeId: string }
+ * Auth: caller must be the coach who owns the plan, or a platformAdmin.
+ */
+exports.waiveCtsFee = (0, https_1.onCall)({ region: 'us-central1', secrets: [stripeSecretKey] }, async (request) => {
+    var _a, _b, _c;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const { feeId } = request.data;
+    if (!feeId)
+        throw new https_1.HttpsError('invalid-argument', 'feeId is required');
+    // 1. Look up the fee doc
+    const feeRef = db.collection('ctsAccountabilityFees').doc(feeId);
+    const feeSnap = await feeRef.get();
+    if (!feeSnap.exists)
+        throw new https_1.HttpsError('not-found', 'Fee record not found');
+    const fee = feeSnap.data();
+    // Already waived?
+    if (fee.waived === true) {
+        return { success: true, message: 'Fee was already waived' };
+    }
+    // 2. Auth check: caller must be the coach or a platformAdmin
+    const isPlatformAdmin = ((_c = (_b = request.auth) === null || _b === void 0 ? void 0 : _b.token) === null || _c === void 0 ? void 0 : _c.platformAdmin) === true;
+    if (fee.coachId !== callerUid && !isPlatformAdmin) {
+        throw new https_1.HttpsError('permission-denied', 'Only the coach or a platform admin can waive this fee');
+    }
+    // 3. Issue Stripe refund for the invoice
+    const stripe = getStripe(stripeSecretKey.value());
+    const stripeInvoiceId = fee.stripeInvoiceId;
+    const stripeAccountId = fee.stripeAccountId;
+    if (stripeInvoiceId && stripeAccountId) {
+        try {
+            // Get the invoice to find the payment intent or charge
+            const invoice = await stripe.invoices.retrieve(stripeInvoiceId, { expand: ['payment_intent'] }, { stripeAccount: stripeAccountId });
+            const paymentIntent = invoice.payment_intent;
+            let chargeId;
+            if (typeof paymentIntent === 'object' && (paymentIntent === null || paymentIntent === void 0 ? void 0 : paymentIntent.latest_charge)) {
+                chargeId = typeof paymentIntent.latest_charge === 'string'
+                    ? paymentIntent.latest_charge
+                    : paymentIntent.latest_charge.id;
+            }
+            if (chargeId) {
+                await stripe.refunds.create({ charge: chargeId, reason: 'requested_by_customer' }, { stripeAccount: stripeAccountId });
+                console.log('[waiveCtsFee] Refund issued for charge', chargeId, 'on account', stripeAccountId);
+            }
+            else {
+                // Invoice may not have been paid yet — void it instead
+                if (invoice.status === 'open' || invoice.status === 'draft') {
+                    await stripe.invoices.voidInvoice(stripeInvoiceId, {}, { stripeAccount: stripeAccountId });
+                    console.log('[waiveCtsFee] Invoice voided:', stripeInvoiceId);
+                }
+                else {
+                    console.warn('[waiveCtsFee] No charge found and invoice not voidable. Status:', invoice.status);
+                }
+            }
+        }
+        catch (stripeErr) {
+            console.error('[waiveCtsFee] Stripe refund/void failed:', stripeErr.message || stripeErr);
+            // Still mark as waived in Firestore even if Stripe refund fails
+            // (coach can handle manually via Stripe dashboard)
+        }
+    }
+    // 4. Update the fee doc
+    await feeRef.update({
+        waived: true,
+        waivedAt: firestore_2.FieldValue.serverTimestamp(),
+        waivedBy: callerUid,
+        status: 'waived',
+    });
+    // 5. Record a negative ledger entry for the refund
+    const ledgerRef = db.collection('ledgerEntries').doc();
+    await ledgerRef.set({
+        entryId: ledgerRef.id,
+        billingEventId: `cts_fee_waiver_${feeId}`,
+        memberId: fee.memberId,
+        coachId: fee.coachId,
+        planId: fee.planId,
+        snapshotId: '',
+        phase: 'continuation',
+        grossAmountCents: -(fee.feeCents || 0),
+        coachShareCents: -(fee.coachShareCents || 0),
+        goArriveShareCents: -(fee.goArriveShareCents || 0),
+        tierSnapshot: fee.tierSplit || 0,
+        applicationFeePercent: fee.tierSplit || 0,
+        stripeInvoiceId: stripeInvoiceId || '',
+        type: 'cts_fee_waiver',
+        description: `CTS fee waived — ${fee.scheduledDate || 'unknown date'}`,
+        createdAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    console.log('[waiveCtsFee] Fee', feeId, 'waived by', callerUid);
+    return { success: true, message: 'Fee waived and refund issued' };
 });
 //# sourceMappingURL=index.js.map

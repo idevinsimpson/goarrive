@@ -88,7 +88,7 @@ const copyToClipboard = async (text: string) => {
   }
 };
 
-type AdminTab = 'operations' | 'events' | 'recordings' | 'deadletter' | 'coaches';
+type AdminTab = 'operations' | 'events' | 'recordings' | 'deadletter' | 'cts_billing' | 'coaches';
 
 export default function AdminScreen() {
   const { user, claims, adminCoachOverride, setAdminCoachOverride } = useAuth();
@@ -126,6 +126,11 @@ export default function AdminScreen() {
   const [deadLetterItems, setDeadLetterItems] = useState<DeadLetterItem[]>([]);
   const [loadingDL, setLoadingDL] = useState(false);
   const [retryingDL, setRetryingDL] = useState<string | null>(null);
+
+  // CTS billing monitoring
+  const [allCtsFees, setAllCtsFees] = useState<any[]>([]);
+  const [loadingCts, setLoadingCts] = useState(false);
+  const [ctsDeadLetters, setCtsDeadLetters] = useState<DeadLetterItem[]>([]);
 
   // Coach member drill-down state
   const [expandedCoachId, setExpandedCoachId] = useState<string | null>(null);
@@ -352,11 +357,41 @@ export default function AdminScreen() {
     return () => { unsubRooms(); unsubFailed(); unsubPending(); unsubAllocated(); unsubCompleted(); };
   }, [isAdmin, fetchCoaches, fetchPendingInvites, fetchHealth]);
 
+  // ── Load CTS billing data ──────────────────────────────────────────────
+  const fetchCtsBilling = useCallback(async () => {
+    setLoadingCts(true);
+    try {
+      const dbRef = getFirestore();
+      const feesQ = query(
+        collection(dbRef, 'ctsAccountabilityFees'),
+        orderBy('createdAt', 'desc'),
+        limit(200)
+      );
+      const feesSnap = await getDocs(feesQ);
+      setAllCtsFees(feesSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+      // CTS-related dead letters
+      const dlQ = query(
+        collection(dbRef, 'dead_letter'),
+        where('type', '==', 'cts_accountability_fee'),
+        orderBy('createdAt', 'desc'),
+        limit(50)
+      );
+      const dlSnap = await getDocs(dlQ);
+      setCtsDeadLetters(dlSnap.docs.map(d => ({ id: d.id, ...d.data() } as DeadLetterItem)));
+    } catch (err) {
+      console.warn('[admin] Failed to load CTS billing data', err);
+    } finally {
+      setLoadingCts(false);
+    }
+  }, []);
+
   // Load tab-specific data
   useEffect(() => {
     if (activeTab === 'events') fetchEvents();
     if (activeTab === 'deadletter') fetchDeadLetter();
-  }, [activeTab, fetchEvents, fetchDeadLetter]);
+    if (activeTab === 'cts_billing') fetchCtsBilling();
+  }, [activeTab, fetchEvents, fetchDeadLetter, fetchCtsBilling]);
 
   // ── Coach invite handlers ─────────────────────────────────────────────────
   async function handleGenerateInvite() {
@@ -504,6 +539,7 @@ export default function AdminScreen() {
     { key: 'events', label: 'Event Log', icon: 'list-outline' },
     { key: 'recordings', label: 'Recordings', icon: 'videocam-outline' },
     { key: 'deadletter', label: 'Failures', icon: 'alert-circle-outline' },
+    { key: 'cts_billing', label: 'CTS Billing', icon: 'cash-outline' },
     { key: 'coaches', label: 'Coaches', icon: 'people-outline' },
   ];
 
@@ -981,6 +1017,114 @@ export default function AdminScreen() {
               ))
             )}
           </View>
+        </>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+         TAB: CTS BILLING
+         ══════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'cts_billing' && (
+        <>
+          <View style={s.cardHeader}>
+            <Text style={s.sectionTitle}>CTS Accountability Fees</Text>
+            <TouchableOpacity onPress={fetchCtsBilling} disabled={loadingCts}>
+              {loadingCts ? <ActivityIndicator size="small" color={GOLD} /> :
+                <Icon name="refresh-outline" size={18} color={GOLD} />}
+            </TouchableOpacity>
+          </View>
+          <Text style={s.sectionSub}>All missed session fees across the platform</Text>
+
+          {loadingCts ? (
+            <ActivityIndicator color={GOLD} style={{ marginTop: 20 }} />
+          ) : (
+            <>
+              {/* Summary stats */}
+              <View style={s.statsRow}>
+                <View style={s.statCard}>
+                  <Text style={[s.statValue, { color: RED }]}>
+                    {allCtsFees.filter(f => !f.waived && f.status !== 'waived').length}
+                  </Text>
+                  <Text style={s.statLabel}>Charged</Text>
+                </View>
+                <View style={s.statCard}>
+                  <Text style={[s.statValue, { color: GREEN }]}>
+                    {allCtsFees.filter(f => f.waived || f.status === 'waived').length}
+                  </Text>
+                  <Text style={s.statLabel}>Waived</Text>
+                </View>
+                <View style={s.statCard}>
+                  <Text style={[s.statValue, { color: AMBER }]}>
+                    {ctsDeadLetters.length}
+                  </Text>
+                  <Text style={s.statLabel}>Failed</Text>
+                </View>
+                <View style={s.statCard}>
+                  <Text style={[s.statValue, { color: BLUE }]}>
+                    ${Math.round(allCtsFees.reduce((sum: number, f: any) => sum + (f.feeCents || 0), 0) / 100)}
+                  </Text>
+                  <Text style={s.statLabel}>Total Fees</Text>
+                </View>
+              </View>
+
+              {/* Recent fees list */}
+              <View style={s.card}>
+                <Text style={s.cardTitle}>Recent Fees</Text>
+                {allCtsFees.length === 0 ? (
+                  <Text style={{ color: MUTED, fontSize: 12, marginTop: 8 }}>No CTS accountability fees recorded yet.</Text>
+                ) : (
+                  allCtsFees.slice(0, 50).map((fee: any) => (
+                    <View key={fee.id} style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 10,
+                      paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BORDER + '44',
+                    }}>
+                      <View style={{
+                        width: 8, height: 8, borderRadius: 4,
+                        backgroundColor: fee.waived || fee.status === 'waived' ? GREEN : RED,
+                      }} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: TEXT_CLR, fontSize: 13, fontWeight: '600', fontFamily: FONT_BODY }}>
+                          {fee.memberName || fee.memberId?.slice(0, 8) || 'Unknown'}
+                        </Text>
+                        <Text style={{ color: MUTED, fontSize: 11, fontFamily: FONT_BODY }}>
+                          {fee.scheduledDate || 'N/A'}
+                          {fee.scheduledStartTime ? ` at ${fee.scheduledStartTime}` : ''}
+                          {' \u00B7 $'}{Math.round((fee.feeCents || 0) / 100)}
+                          {fee.waived || fee.status === 'waived' ? ' \u00B7 Waived' : ''}
+                          {fee.stripeInvoiceId ? ` \u00B7 ${fee.stripeInvoiceId.slice(0, 12)}...` : ''}
+                        </Text>
+                      </View>
+                    </View>
+                  ))
+                )}
+              </View>
+
+              {/* CTS Dead Letters */}
+              {ctsDeadLetters.length > 0 && (
+                <View style={s.card}>
+                  <Text style={[s.cardTitle, { color: RED }]}>Failed CTS Charges</Text>
+                  <Text style={{ color: MUTED, fontSize: 11, marginBottom: 8 }}>
+                    These charges failed and were sent to the dead letter queue
+                  </Text>
+                  {ctsDeadLetters.map((dl: any) => (
+                    <View key={dl.id} style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 10,
+                      paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: BORDER + '44',
+                    }}>
+                      <Icon name="alert-circle" size={16} color={RED} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: TEXT_CLR, fontSize: 12, fontFamily: FONT_BODY }}>
+                          {dl.payload?.memberId?.slice(0, 8) || 'Unknown'}
+                        </Text>
+                        <Text style={{ color: MUTED, fontSize: 10, fontFamily: FONT_BODY }}>
+                          {dl.error || 'Unknown error'}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </>
+          )}
         </>
       )}
 

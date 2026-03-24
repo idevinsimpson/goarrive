@@ -49,8 +49,7 @@ const ACCOUNTABILITY_RULES = [
   'Complete all scheduled sessions — no unexplained no-shows.',
   'Log workouts in the app at least 4 days per week.',
   'Respond to coach check-ins within 48 hours.',
-  'If you miss a session without 24-hour notice, a missed-session fee applies.',
-  'If you miss two consecutive sessions, CTS is paused until you re-commit.',
+  'If you miss a session without making it up within 48 hours, a missed-session fee applies.',
 ];
 
 export function CtsOptInModal({
