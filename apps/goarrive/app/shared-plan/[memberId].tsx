@@ -463,9 +463,9 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
   const payInFullSavings = Math.round(monthlyPrice * (plan.contractMonths || 12) - payInFullTotal);
   const payInFullPct = plan.payInFullDiscountPercent || 10;
 
-  // Effective prices after CTS discount and nutrition add-on
-  const effectiveMonthly = monthlyPrice - (ctsActive ? ctsSavings : 0) + (nutActive ? nutCost : 0);
-  const effectivePayInFullTotal = Math.round(effectiveMonthly * (plan.contractMonths || 12) * 0.9);
+  // pricing.displayMonthlyPrice and pricing.payInFullPrice already reflect
+  // CTS discount and nutrition add-on (recalculated on every toggle via
+  // handleLocalChange → calculatePricing). No additional adjustment needed.
 
   const totalSessions = pricing.totalSessions;
   const perSession = pricing.perSessionPrice;
@@ -503,6 +503,9 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
         paymentOption: selected,
         commitToSave: ctsActive,
         nutritionAddOn: nutActive,
+        // Send exact displayed prices so Stripe charges match what the member sees
+        displayedMonthlyPrice: Math.round(monthlyPrice),
+        displayedPayInFullTotal: Math.round(payInFullTotal),
       });
       const { sessionUrl } = result.data as { sessionUrl: string };
       if (sessionUrl) {
@@ -658,9 +661,9 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
         ) : (
           <Text style={ips.ctaBtnText}>
             {selected === 'pay_in_full'
-              ? `Pay ${formatCurrency(effectivePayInFullTotal)} Now`
+              ? `Pay ${formatCurrency(Math.round(payInFullTotal))} Now`
               : selected === 'monthly'
-              ? `Pay ${formatCurrency(effectiveMonthly)}/mo Now`
+              ? `Pay ${formatCurrency(Math.round(monthlyPrice))}/mo Now`
               : 'Select a payment option'}
           </Text>
         )}

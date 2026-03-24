@@ -397,7 +397,7 @@ exports.disconnectStripeAccount = (0, https_1.onCall)({ secrets: [stripeSecretKe
  */
 exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey] }, async (request) => {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t;
-    const { planId, memberId, paymentOption, commitToSave, nutritionAddOn } = request.data;
+    const { planId, memberId, paymentOption, commitToSave, nutritionAddOn, displayedMonthlyPrice: clientMonthly, displayedPayInFullTotal: clientPayInFull } = request.data;
     if (!planId || !memberId || !paymentOption) {
         throw new https_1.HttpsError('invalid-argument', 'planId, memberId, and paymentOption are required');
     }
@@ -440,19 +440,40 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
     const sessionLengthMinutes = plan.sessionLengthMinutes || 60;
     const checkInCallMinutes = plan.checkInCallMinutes || 30;
     const programBuildTimeHours = plan.programBuildTimeHours || 5;
-    // Use stored pricingResult if available, otherwise compute
-    const baseMonthlyPrice = Math.round((_f = (_d = (_c = (_b = plan.pricingResult) === null || _b === void 0 ? void 0 : _b.displayMonthlyPrice) !== null && _c !== void 0 ? _c : plan.monthlyPriceOverride) !== null && _d !== void 0 ? _d : (_e = plan.pricingResult) === null || _e === void 0 ? void 0 : _e.calculatedMonthlyPrice) !== null && _f !== void 0 ? _f : (hourlyRate * (sessionLengthMinutes / 60) * sessionsPerMonth));
-    // ── Apply CTS discount and nutrition add-on ──
+    // ── Pricing: use client-sent displayed prices to avoid rounding mismatches ──
+    // The frontend's calculatePricing() already applies CTS, nutrition, manual
+    // overrides, and pay-in-full discount using the exact same formula the member
+    // sees. We trust those values but validate they are within a sane range of
+    // the server-side estimate.
     const ctsActive = commitToSave === true;
     const nutActive = nutritionAddOn === true;
+    // Server-side fallback calculation (used for validation & snapshot)
+    const serverBaseMonthly = Math.round((_f = (_d = (_c = (_b = plan.pricingResult) === null || _b === void 0 ? void 0 : _b.displayMonthlyPrice) !== null && _c !== void 0 ? _c : plan.monthlyPriceOverride) !== null && _d !== void 0 ? _d : (_e = plan.pricingResult) === null || _e === void 0 ? void 0 : _e.calculatedMonthlyPrice) !== null && _f !== void 0 ? _f : (hourlyRate * (sessionLengthMinutes / 60) * sessionsPerMonth));
     const ctsMonthlySavings = ctsActive
         ? ((_j = (_h = (_g = plan.commitToSave) === null || _g === void 0 ? void 0 : _g.monthlySavings) !== null && _h !== void 0 ? _h : plan.commitToSaveMonthlySavings) !== null && _j !== void 0 ? _j : 100)
         : 0;
     const nutritionMonthlyCost = nutActive
         ? ((_m = (_l = (_k = plan.nutrition) === null || _k === void 0 ? void 0 : _k.monthlyCost) !== null && _l !== void 0 ? _l : plan.nutritionMonthlyCost) !== null && _m !== void 0 ? _m : 100)
         : 0;
-    const displayMonthlyPrice = Math.round(baseMonthlyPrice - ctsMonthlySavings + nutritionMonthlyCost);
-    const payInFullTotal = Math.round(displayMonthlyPrice * contractMonths * 0.9);
+    const serverMonthly = serverBaseMonthly - ctsMonthlySavings + nutritionMonthlyCost;
+    const payInFullDiscountPct = plan.payInFullDiscountPercent || 10;
+    const serverPayInFull = Math.round(serverMonthly * contractMonths * (1 - payInFullDiscountPct / 100));
+    // Use client-sent prices when available; fall back to server calculation
+    const displayMonthlyPrice = (typeof clientMonthly === 'number' && clientMonthly > 0)
+        ? Math.round(clientMonthly)
+        : Math.round(serverMonthly);
+    const payInFullTotal = (typeof clientPayInFull === 'number' && clientPayInFull > 0)
+        ? Math.round(clientPayInFull)
+        : serverPayInFull;
+    // Sanity check: client price must be within $10 of server estimate
+    if (Math.abs(displayMonthlyPrice - Math.round(serverMonthly)) > 10) {
+        console.error(`[createCheckoutSession] Monthly price mismatch: client=${displayMonthlyPrice}, server=${Math.round(serverMonthly)}`);
+        throw new https_1.HttpsError('invalid-argument', 'Price mismatch — please refresh and try again.');
+    }
+    if (paymentOption === 'pay_in_full' && Math.abs(payInFullTotal - serverPayInFull) > 50) {
+        console.error(`[createCheckoutSession] Pay-in-full price mismatch: client=${payInFullTotal}, server=${serverPayInFull}`);
+        throw new https_1.HttpsError('invalid-argument', 'Price mismatch — please refresh and try again.');
+    }
     const payInFullMonthlyEquivalent = Math.round(payInFullTotal / contractMonths);
     // Continuation monthly
     const cp = plan.continuationPricing;
@@ -499,7 +520,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
         continuationMonthlyPrice,
         continuationPayInFullTotal,
         continuationPayInFullMonthlyEquivalent,
-        baseMonthlyPrice,
+        baseMonthlyPrice: serverBaseMonthly,
         ctsActive,
         ctsMonthlySavings: ctsActive ? ctsMonthlySavings : ((_s = (_r = plan.postContract) === null || _r === void 0 ? void 0 : _r.ctsMonthlySavings) !== null && _s !== void 0 ? _s : null),
         nutActive,

@@ -424,12 +424,14 @@ export const disconnectStripeAccount = onCall(
 export const createCheckoutSession = onCall(
   { secrets: [stripeSecretKey] },
   async (request) => {
-    const { planId, memberId, paymentOption, commitToSave, nutritionAddOn } = request.data as {
+    const { planId, memberId, paymentOption, commitToSave, nutritionAddOn, displayedMonthlyPrice: clientMonthly, displayedPayInFullTotal: clientPayInFull } = request.data as {
       planId: string;
       memberId: string;
       paymentOption: 'monthly' | 'pay_in_full';
       commitToSave?: boolean;
       nutritionAddOn?: boolean;
+      displayedMonthlyPrice?: number;
+      displayedPayInFullTotal?: number;
     };
 
     if (!planId || !memberId || !paymentOption) {
@@ -480,26 +482,49 @@ export const createCheckoutSession = onCall(
     const checkInCallMinutes = (plan.checkInCallMinutes as number) || 30;
     const programBuildTimeHours = (plan.programBuildTimeHours as number) || 5;
 
-    // Use stored pricingResult if available, otherwise compute
-    const baseMonthlyPrice = Math.round(
+    // ── Pricing: use client-sent displayed prices to avoid rounding mismatches ──
+    // The frontend's calculatePricing() already applies CTS, nutrition, manual
+    // overrides, and pay-in-full discount using the exact same formula the member
+    // sees. We trust those values but validate they are within a sane range of
+    // the server-side estimate.
+    const ctsActive = commitToSave === true;
+    const nutActive = nutritionAddOn === true;
+
+    // Server-side fallback calculation (used for validation & snapshot)
+    const serverBaseMonthly = Math.round(
       plan.pricingResult?.displayMonthlyPrice ??
       plan.monthlyPriceOverride ??
       plan.pricingResult?.calculatedMonthlyPrice ??
       (hourlyRate * (sessionLengthMinutes / 60) * sessionsPerMonth)
     );
-
-    // ── Apply CTS discount and nutrition add-on ──
-    const ctsActive = commitToSave === true;
-    const nutActive = nutritionAddOn === true;
     const ctsMonthlySavings = ctsActive
       ? ((plan.commitToSave?.monthlySavings as number) ?? (plan.commitToSaveMonthlySavings as number) ?? 100)
       : 0;
     const nutritionMonthlyCost = nutActive
       ? ((plan.nutrition?.monthlyCost as number) ?? (plan.nutritionMonthlyCost as number) ?? 100)
       : 0;
-    const displayMonthlyPrice = Math.round(baseMonthlyPrice - ctsMonthlySavings + nutritionMonthlyCost);
+    const serverMonthly = serverBaseMonthly - ctsMonthlySavings + nutritionMonthlyCost;
+    const payInFullDiscountPct = (plan.payInFullDiscountPercent as number) || 10;
+    const serverPayInFull = Math.round(serverMonthly * contractMonths * (1 - payInFullDiscountPct / 100));
 
-    const payInFullTotal = Math.round(displayMonthlyPrice * contractMonths * 0.9);
+    // Use client-sent prices when available; fall back to server calculation
+    const displayMonthlyPrice = (typeof clientMonthly === 'number' && clientMonthly > 0)
+      ? Math.round(clientMonthly)
+      : Math.round(serverMonthly);
+    const payInFullTotal = (typeof clientPayInFull === 'number' && clientPayInFull > 0)
+      ? Math.round(clientPayInFull)
+      : serverPayInFull;
+
+    // Sanity check: client price must be within $10 of server estimate
+    if (Math.abs(displayMonthlyPrice - Math.round(serverMonthly)) > 10) {
+      console.error(`[createCheckoutSession] Monthly price mismatch: client=${displayMonthlyPrice}, server=${Math.round(serverMonthly)}`);
+      throw new HttpsError('invalid-argument', 'Price mismatch — please refresh and try again.');
+    }
+    if (paymentOption === 'pay_in_full' && Math.abs(payInFullTotal - serverPayInFull) > 50) {
+      console.error(`[createCheckoutSession] Pay-in-full price mismatch: client=${payInFullTotal}, server=${serverPayInFull}`);
+      throw new HttpsError('invalid-argument', 'Price mismatch — please refresh and try again.');
+    }
+
     const payInFullMonthlyEquivalent = Math.round(payInFullTotal / contractMonths);
 
     // Continuation monthly
@@ -550,7 +575,7 @@ export const createCheckoutSession = onCall(
       continuationMonthlyPrice,
       continuationPayInFullTotal,
       continuationPayInFullMonthlyEquivalent,
-      baseMonthlyPrice,
+      baseMonthlyPrice: serverBaseMonthly,
       ctsActive,
       ctsMonthlySavings: ctsActive ? ctsMonthlySavings : (plan.postContract?.ctsMonthlySavings ?? null),
       nutActive,
