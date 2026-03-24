@@ -401,10 +401,9 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
     if (!planId || !memberId || !paymentOption) {
         throw new https_1.HttpsError('invalid-argument', 'planId, memberId, and paymentOption are required');
     }
+    // Auth is optional — shared-plan members are not signed in.
+    // When signed in, we verify the caller is the member or coach.
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
-    if (!callerUid) {
-        throw new https_1.HttpsError('permission-denied', 'Must be signed in');
-    }
     // ── Load plan ──
     const planRef = db.collection('member_plans').doc(planId);
     const planSnap = await planRef.get();
@@ -414,9 +413,13 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
     const coachId = plan.coachId;
     if (!coachId)
         throw new https_1.HttpsError('failed-precondition', 'Plan has no coachId');
-    // Allow the member OR the plan's coach to create a checkout session
-    if (callerUid !== memberId && callerUid !== coachId) {
-        throw new https_1.HttpsError('permission-denied', 'Must be signed in as the member or the plan\'s coach');
+    // If signed in, verify the caller is the member or the plan's coach
+    if (callerUid && callerUid !== memberId && callerUid !== coachId) {
+        throw new https_1.HttpsError('permission-denied', 'Not authorized for this plan');
+    }
+    // Verify the memberId matches the plan (prevents guessing planIds)
+    if (plan.memberId !== memberId) {
+        throw new https_1.HttpsError('permission-denied', 'Member ID does not match this plan');
     }
     // ── Load coach Stripe account ──
     const coachAccountSnap = await db.collection('coachStripeAccounts').doc(coachId).get();
