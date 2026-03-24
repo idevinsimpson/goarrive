@@ -12,6 +12,7 @@ import {
   Platform, Pressable, Image,
 } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
   MemberPlanData, DayPlan, goalConfig, typeColors, phaseColorList,
   formatCurrency, calculatePricing, monthsToWeeks, PricingResult,
@@ -134,8 +135,6 @@ export default function SharedPlanScreen() {
 
   const schedule = getSchedule(plan);
   const contractMonths = getContractMonths(plan);
-  const cts = getCts(plan);
-  const nut = getNutrition(plan);
   const memberAge = plan.memberAge || (plan as any).age;
   const goals = plan.goals || (plan as any).healthGoals || [];
   const firstName = plan.memberName?.split(' ')[0] || '';
@@ -146,7 +145,6 @@ export default function SharedPlanScreen() {
   // Pricing
   let pricing: PricingResult | null = activePlan.pricingResult || null;
   if (!pricing) { try { pricing = calculatePricing(activePlan); } catch { /* ignore */ } }
-  const totalWeeks = monthsToWeeks(contractMonths);
 
   // Local toggle handler (no Firestore writes on shared-plan)
   const handleLocalChange = (updates: Partial<MemberPlanData>) => {
@@ -355,26 +353,24 @@ export default function SharedPlanScreen() {
             <Text style={st.sectionLabel}>How Your Coaching Support Evolves</Text>
             <View style={{ flexDirection: 'row', borderRadius: 12, overflow: 'hidden', height: 8, marginBottom: 6 }}>
               {plan.phases.map((phase, i) => (
-                <View key={phase.id} style={{ flex: phase.weeks, backgroundColor: phaseColorList[i], opacity: 0.85 }} />
+                <View key={phase.id} style={{ flex: phase.weeks, backgroundColor: phaseColorList[i % 3] }} />
               ))}
             </View>
-            <View style={{ flexDirection: 'row', gap: 4, marginBottom: 4 }}>
-              {plan.phases.map((phase, i) => (
-                <View key={phase.id} style={{ flex: 1, alignItems: 'center' }}>
-                  <Text style={{ fontSize: 10, fontWeight: '600', color: phaseColorList[i] }}>{phase.weeks}w</Text>
-                </View>
-              ))}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
+              <Text style={{ color: MUTED, fontSize: 11, fontWeight: '600' }}>WEEK 1</Text>
+              <Text style={{ color: MUTED, fontSize: 11, fontWeight: '600' }}>WEEK {monthsToWeeks(contractMonths)}</Text>
             </View>
-            <Text style={{ color: '#8A95A3', fontSize: 12, textAlign: 'center', marginBottom: 14 }}>
-              Total: {totalWeeks} weeks ({contractMonths} months)
-            </Text>
             {plan.phases.map((phase, i) => (
-              <View key={phase.id} style={[st.darkCard, { borderLeftWidth: 3, borderLeftColor: phaseColorList[i], marginBottom: 10 }]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: phaseColorList[i] }}>{phase.name}: {phase.intensity}</Text>
-                  <Text style={{ fontSize: 12, color: '#8A95A3', marginLeft: 'auto' }}>{phase.weeks} weeks</Text>
+              <View key={phase.id} style={[st.darkCard, { marginBottom: 10, borderLeftWidth: 3, borderLeftColor: phaseColorList[i % 3] }]}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <Text style={{ color: phaseColorList[i % 3], fontSize: 12, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' }}>PHASE {i + 1}</Text>
+                  <View style={[st.badge, { backgroundColor: phaseColorList[i % 3] + '15', borderColor: phaseColorList[i % 3] + '30' }]}>
+                    <Text style={[st.badgeText, { color: phaseColorList[i % 3] }]}>{phase.weeks} weeks</Text>
+                  </View>
                 </View>
-                <Text style={{ fontSize: 13, color: '#C5CDD8', lineHeight: 21 }}>{phase.description}</Text>
+                <Text style={{ color: '#F0F4F8', fontSize: 16, fontWeight: '700', marginBottom: 4 }}>{phase.name}</Text>
+                <Text style={{ color: '#8A95A3', fontSize: 13, fontWeight: '600', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>{phase.intensity}</Text>
+                <Text style={{ color: '#C5CDD8', fontSize: 14, lineHeight: 22 }}>{phase.description}</Text>
               </View>
             ))}
           </View>
@@ -387,17 +383,15 @@ export default function SharedPlanScreen() {
             <View style={st.darkCard}>
               {plan.whatsIncluded.map((item, i) => (
                 <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
-                  <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(110,187,122,0.15)', borderWidth: 1, borderColor: 'rgba(110,187,122,0.3)', justifyContent: 'center', alignItems: 'center', marginTop: 1 }}>
-                    <Text style={{ fontSize: 11, color: '#6EBB7A', fontWeight: '700' }}>{'✓'}</Text>
-                  </View>
-                  <Text style={{ fontSize: 14, color: '#C5CDD8', lineHeight: 22, flex: 1 }}>{item}</Text>
+                  <Text style={{ fontSize: 16 }}>{'\u2705'}</Text>
+                  <Text style={{ color: '#C5CDD8', fontSize: 14, lineHeight: 20, flex: 1 }}>{item}</Text>
                 </View>
               ))}
             </View>
           </View>
         ) : null}
 
-        {/* ── UNIFIED COACHING INVESTMENT (matches coach's Member View) ── */}
+        {/* Coaching Investment */}
         {pricing && (
           (activePlan.showInvestment !== false ||
             (activePlan.commitToSave?.enabled ?? false) ||
@@ -443,6 +437,10 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
   plan: MemberPlanData; pricing: PricingResult;
   onChange: (updates: Partial<MemberPlanData>) => void;
 }) {
+  const [selected, setSelected] = useState<'monthly' | 'pay_in_full' | null>(null);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [error, setError] = useState('');
+
   const pcEnabled = plan.postContract?.enabled ?? false;
   const ctsEnabledCheck = plan.commitToSave?.enabled ?? false;
   const nutEnabledCheck = plan.nutrition?.enabled ?? false;
@@ -488,42 +486,111 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
     });
   };
 
+  const handleProceed = async () => {
+    if (!selected) return;
+    setCheckoutLoading(true);
+    setError('');
+    try {
+      const functions = getFunctions();
+      const createCheckout = httpsCallable(functions, 'createCheckoutSession');
+      const result = await createCheckout({
+        planId: plan.id || plan.memberId,
+        memberId: plan.memberId,
+        paymentOption: selected,
+      });
+      const { sessionUrl } = result.data as { sessionUrl: string };
+      if (sessionUrl) {
+        if (Platform.OS === 'web') {
+          window.location.href = sessionUrl;
+        } else {
+          // Fallback for native
+          import('expo-router').then(({ router }) => {
+            router.push(sessionUrl as any);
+          });
+        }
+      }
+    } catch (err: any) {
+      console.error('[SharedPlan] Checkout error:', err);
+      setError(err.message || 'Could not start checkout. Please try again.');
+    } finally {
+      setCheckoutLoading(false);
+    }
+  };
+
   return (
     <View style={{ marginBottom: 20 }}>
       <Text style={st.sectionLabel}>COACHING INVESTMENT</Text>
 
-      {/* Two pricing cards side by side */}
-      <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
-        <View style={[inv.priceCard, { flex: 1 }]}>
-          <Text style={inv.priceLabel}>MONTHLY</Text>
-          <Text style={inv.priceAmount}>{formatCurrency(monthlyPrice)}<Text style={inv.priceSuffix}> /mo</Text></Text>
-          <Text style={inv.priceDetail}>{formatCurrency(perSession)} per session</Text>
-        </View>
-        <View style={[inv.priceCard, { flex: 1, borderColor: GOLD_BORDER }]}>
-          <Text style={[inv.priceLabel, { color: GOLD }]}>PAY IN FULL</Text>
-          <Text style={inv.priceAmount}>{formatCurrency(payInFullMonthly)}<Text style={inv.priceSuffix}> /mo</Text></Text>
-          <Text style={{ color: MUTED, fontSize: 11, marginTop: 2 }}>{formatCurrency(payInFullTotal)} total</Text>
-          <Text style={{ color: ACCENT, fontSize: 12, fontWeight: '600', marginTop: 2 }}>Save {formatCurrency(payInFullSavings)} ({payInFullPct}% off)</Text>
-        </View>
-      </View>
+      {/* Pricing options selection */}
+      <View style={{ gap: 10, marginBottom: 16 }}>
+        {/* Monthly card */}
+        <Pressable
+          onPress={() => setSelected('monthly')}
+          style={[ips.optionCard, selected === 'monthly' && ips.optionCardSelected]}
+        >
+          <View style={ips.optionHeader}>
+            <View style={ips.optionRadio}>
+              {selected === 'monthly' && <View style={ips.optionRadioDot} />}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={ips.optionTitle}>Monthly</Text>
+              <Text style={ips.optionSubtitle}>Flexible · Cancel after contract ends</Text>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={ips.optionPrice}>{formatCurrency(monthlyPrice)}</Text>
+              <Text style={ips.optionPriceSuffix}>/mo</Text>
+            </View>
+          </View>
+          <View style={ips.optionDetail}>
+            <View style={ips.detailRow}>
+              <Text style={ips.detailLabel}>Contract total</Text>
+              <Text style={ips.detailValue}>{formatCurrency(monthlyPrice * (plan.contractMonths || 12))}</Text>
+            </View>
+            <View style={ips.detailRow}>
+              <Text style={ips.detailLabel}>After contract</Text>
+              <Text style={ips.detailValue}>{formatCurrency(plan.postContract?.monthlyRate || 199)}/mo</Text>
+            </View>
+          </View>
+        </Pressable>
 
-      {/* Stats row */}
-      <View style={[inv.statsRow]}>
-        <View style={{ flex: 1, alignItems: 'center' }}>
-          <Text style={inv.statsLabel}>SESSIONS</Text>
-          <Text style={inv.statsValue}>{totalSessions}</Text>
-          <Text style={inv.statsDetail}>over {plan.contractMonths} months</Text>
-        </View>
-        <View style={{ flex: 1, alignItems: 'center' }}>
-          <Text style={inv.statsLabel}>PER SESSION</Text>
-          <Text style={[inv.statsValue, { color: GOLD }]}>{formatCurrency(perSession)}</Text>
-          <Text style={inv.statsDetail}>effective rate</Text>
-        </View>
-        <View style={{ flex: 1, alignItems: 'center' }}>
-          <Text style={inv.statsLabel}>PROGRAM</Text>
-          <Text style={[inv.statsValue, { color: ACCENT }]}>{formatCurrency(programTotal)}</Text>
-          <Text style={inv.statsDetail}>total value</Text>
-        </View>
+        {/* Pay in Full card */}
+        <Pressable
+          onPress={() => setSelected('pay_in_full')}
+          style={[ips.optionCard, selected === 'pay_in_full' && ips.optionCardSelectedGold]}
+        >
+          <View style={ips.optionHeader}>
+            <View style={[ips.optionRadio, { borderColor: GOLD }]}>
+              {selected === 'pay_in_full' && <View style={[ips.optionRadioDot, { backgroundColor: GOLD }]} />}
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={ips.optionTitle}>Pay in Full</Text>
+                <View style={{ backgroundColor: GOLD_BG, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                  <Text style={{ color: GOLD, fontSize: 10, fontWeight: '700' }}>{payInFullPct}% OFF</Text>
+                </View>
+              </View>
+              <Text style={ips.optionSubtitle}>One payment · Best value</Text>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={[ips.optionPrice, { color: GOLD }]}>{formatCurrency(payInFullMonthly)}</Text>
+              <Text style={ips.optionPriceSuffix}>/mo</Text>
+            </View>
+          </View>
+          <View style={ips.optionDetail}>
+            <View style={ips.detailRow}>
+              <Text style={ips.detailLabel}>One payment today</Text>
+              <Text style={[ips.detailValue, { color: '#FFF', fontWeight: '600' }]}>{formatCurrency(payInFullTotal)}</Text>
+            </View>
+            <View style={ips.detailRow}>
+              <Text style={ips.detailLabel}>You save</Text>
+              <Text style={[ips.detailValue, { color: ACCENT, fontWeight: '600' }]}>{formatCurrency(payInFullSavings)}</Text>
+            </View>
+            <View style={ips.detailRow}>
+              <Text style={ips.detailLabel}>After contract</Text>
+              <Text style={ips.detailValue}>{formatCurrency(plan.postContract?.monthlyRate || 199)}/mo</Text>
+            </View>
+          </View>
+        </Pressable>
       </View>
 
       {ctsEnabled && (
@@ -565,6 +632,37 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
           sessionsPerMonth={Math.round((plan.sessionsPerWeek || 3) * (52 / 12))}
         />
       )}
+
+      {/* Error message */}
+      {error ? (
+        <View style={{ padding: 12, backgroundColor: 'rgba(224,82,82,0.1)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(224,82,82,0.3)', marginTop: 16 }}>
+          <Text style={{ color: '#E05252', fontSize: 13, textAlign: 'center' }}>{error}</Text>
+        </View>
+      ) : null}
+
+      {/* Main Payment CTA */}
+      <Pressable
+        onPress={handleProceed}
+        disabled={!selected || checkoutLoading}
+        style={[ips.ctaBtn, (!selected || checkoutLoading) && { opacity: 0.5 }]}
+      >
+        {checkoutLoading ? (
+          <ActivityIndicator size="small" color="#000" />
+        ) : (
+          <Text style={ips.ctaBtnText}>
+            {selected === 'pay_in_full'
+              ? `Pay ${formatCurrency(payInFullTotal)} Now`
+              : selected === 'monthly'
+              ? `Pay ${formatCurrency(monthlyPrice)} Now`
+              : 'Select a payment option'}
+          </Text>
+        )}
+      </Pressable>
+
+      {/* Fine print */}
+      <Text style={{ color: '#4A5568', fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 12 }}>
+        Payments are processed securely by Stripe. By proceeding you agree to the GoArrive coaching terms. You may cancel month-to-month continuation at any time after your contract ends.
+      </Text>
     </View>
   );
 }
@@ -657,7 +755,7 @@ function NutritionAddOnCard({ plan, isActive, onToggle, monthlyPrice, nutCost, p
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <Text style={{ color: '#FFF', fontSize: 15, fontWeight: '700', fontFamily: FH }}>Nutrition Add-On</Text>
-            <Pressable onPress={onToggle} style={[inv.addBtn, isActive && { borderColor: GREEN_BORDER, backgroundColor: 'rgba(110,187,122,0.1)' }]}>
+            <Pressable onPress={onToggle} style={[inv.addBtn, isActive && { borderColor: GREEN_BORDER, backgroundColor: 'rgba(110,187,122,0.08)' }]}>
               {isActive ? (
                 <Text style={{ color: ACCENT, fontSize: 13, fontWeight: '600' }}>✓ Added</Text>
               ) : (
@@ -800,8 +898,6 @@ function HowWeGotTheseNumbers({ plan, pricing }: { plan: MemberPlanData; pricing
   );
 }
 
-
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // INVESTMENT SECTION STYLES (match [memberId].tsx exactly)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -890,6 +986,47 @@ const inv = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 8,
   },
+});
+
+const ips = StyleSheet.create({
+  optionCard: {
+    backgroundColor: '#161B25',
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: '#2A3347',
+  },
+  optionCardSelected: { borderColor: '#5B9BD5' },
+  optionCardSelectedGold: { borderColor: '#F5A623' },
+  optionHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  optionRadio: {
+    width: 20, height: 20, borderRadius: 10,
+    borderWidth: 2, borderColor: '#5B9BD5',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  optionRadioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#5B9BD5' },
+  optionTitle: { color: '#FFF', fontSize: 15, fontWeight: '700' },
+  optionSubtitle: { color: '#7A8A9A', fontSize: 12, marginTop: 1 },
+  optionPrice: { color: '#FFF', fontSize: 20, fontWeight: '700' },
+  optionPriceSuffix: { color: '#7A8A9A', fontSize: 11 },
+  optionDetail: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#2A3347',
+  },
+  detailRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  detailLabel: { color: '#7A8A9A', fontSize: 12 },
+  detailValue: { color: '#7A8A9A', fontSize: 12 },
+  ctaBtn: {
+    backgroundColor: '#F5A623',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 14,
+  },
+  ctaBtnText: { color: '#000', fontSize: 16, fontWeight: '700' },
 });
 
 // ─── Styles ─────────────────────────────────────────────────────────────────

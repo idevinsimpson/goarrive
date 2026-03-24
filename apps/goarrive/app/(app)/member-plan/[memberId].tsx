@@ -1403,7 +1403,7 @@ function InlinePaymentSection({ plan, pricing, isCoach, onChange, onAccept }: {
 
         <Text style={{ color: '#FFF', fontSize: 20, fontWeight: '700', fontFamily: FH, textAlign: 'center', marginBottom: 4 }}>You're one step away.</Text>
         <Text style={{ color: MUTED, fontSize: 13, textAlign: 'center', lineHeight: 18, marginBottom: 14 }}>
-          {`${contractMonths}-month contract \u00B7 ${plan.sessionsPerWeek || 3}x/week \u00B7 Continues month-to-month after`}
+          {`${contractMonths}-month contract · ${plan.sessionsPerWeek || 3}x/week · Continues month-to-month after`}
         </Text>
 
         {/* Option: Monthly */}
@@ -1417,7 +1417,7 @@ function InlinePaymentSection({ plan, pricing, isCoach, onChange, onAccept }: {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={ips.optionTitle}>Monthly</Text>
-              <Text style={ips.optionSubtitle}>Flexible \u00B7 Cancel after contract ends</Text>
+              <Text style={ips.optionSubtitle}>Flexible · Cancel after contract ends</Text>
             </View>
             <View style={{ alignItems: 'flex-end' }}>
               <Text style={ips.optionPrice}>{formatCurrency(displayMonthlyPrice)}</Text>
@@ -1458,7 +1458,7 @@ function InlinePaymentSection({ plan, pricing, isCoach, onChange, onAccept }: {
                   <Text style={{ color: GOLD, fontSize: 10, fontWeight: '700' }}>10% OFF</Text>
                 </View>
               </View>
-              <Text style={ips.optionSubtitle}>One payment \u00B7 Best value</Text>
+              <Text style={ips.optionSubtitle}>One payment · Best value</Text>
             </View>
             <View style={{ alignItems: 'flex-end' }}>
               <Text style={[ips.optionPrice, { color: GOLD }]}>{formatCurrency(payInFullMonthly)}</Text>
@@ -1487,17 +1487,7 @@ function InlinePaymentSection({ plan, pricing, isCoach, onChange, onAccept }: {
           </View>
         </Pressable>
 
-        {/* CTS callout */}
-        <View style={{ padding: 12, backgroundColor: GOLD_BG, borderRadius: 10, borderWidth: 1, borderColor: GOLD_BORDER, marginTop: 12 }}>
-          <Text style={{ color: GOLD, fontSize: 13, fontWeight: '700', marginBottom: 4 }}>
-            Commit to Save \u2014 available after contract
-          </Text>
-          <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
-            {hasCTS
-              ? `Stay consistent during your continuation period and save ${formatCurrency(ctsSavings)}/mo off your continuation rate. Both Pay in Full and CTS discounts stack.`
-              : 'Stay consistent during your continuation period and unlock savings. Ask your coach about Commit to Save.'}
-          </Text>
-        </View>
+
 
         {/* Error */}
         {error && (
@@ -1525,22 +1515,7 @@ function InlinePaymentSection({ plan, pricing, isCoach, onChange, onAccept }: {
           )}
         </Pressable>
 
-        {/* Coach-only: Copy Payment Link */}
-        {isCoach && (
-          <Pressable
-            onPress={handleCopyPaymentLink}
-            disabled={!selected || copyLinkLoading}
-            style={[ips.copyLinkBtn, (!selected || copyLinkLoading) && { opacity: 0.5 }]}
-          >
-            {copyLinkLoading ? (
-              <ActivityIndicator size="small" color="#5B9BD5" />
-            ) : linkCopied ? (
-              <Text style={ips.copyLinkText}>✓ Payment Link Copied!</Text>
-            ) : (
-              <Text style={ips.copyLinkText}>Copy Payment Link</Text>
-            )}
-          </Pressable>
-        )}
+
 
         {/* Fine print */}
         <Text style={{ color: '#4A5568', fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 10 }}>
