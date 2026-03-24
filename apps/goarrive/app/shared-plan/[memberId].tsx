@@ -600,6 +600,8 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
           onToggle={toggleCommitToSave}
           monthlyPrice={monthlyPrice}
           ctsSavings={ctsSavings}
+          selected={selected}
+          payInFullMonthly={payInFullMonthly}
         />
       )}
 
@@ -666,13 +668,15 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
   );
 }
 
-function CommitToSaveCard({ plan, isActive, onToggle, monthlyPrice, ctsSavings }: {
+function CommitToSaveCard({ plan, isActive, onToggle, monthlyPrice, ctsSavings, selected, payInFullMonthly }: {
   plan: MemberPlanData; isActive: boolean;
   onToggle: () => void; monthlyPrice: number; ctsSavings: number;
+  selected: 'monthly' | 'pay_in_full' | null; payInFullMonthly: number;
 }) {
   const [expanded, setExpanded] = useState(false);
   const cts = plan.commitToSave || getCts(plan);
-  const rateAfter = monthlyPrice;
+  const baseRate = selected === 'pay_in_full' ? payInFullMonthly : monthlyPrice;
+  const rateAfter = baseRate - ctsSavings;
 
   return (
     <View style={[inv.addonCard, isActive && { borderColor: GOLD_BORDER, backgroundColor: GOLD_BG }]}>
