@@ -614,7 +614,6 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
         />
       )}
 
-      {plan.showInvestment !== false && <HowWeGotTheseNumbers plan={plan} pricing={pricing} />}
 
       {plan.showInvestment !== false && (
         <View style={[inv.statsRow, { marginTop: 12, paddingVertical: 14, paddingHorizontal: 16 }]}>
