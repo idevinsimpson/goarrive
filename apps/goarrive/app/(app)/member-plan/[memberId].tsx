@@ -859,6 +859,33 @@ export function PlanView({ plan, isCoach, onChange, onAccept }: {
             </Text>
           )}
 
+          {/* No-show grace period (coach only) */}
+          {isCoach && (
+            <View style={{ marginBottom: 16, padding: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 10 }}>
+              <Text style={{ color: MUTED, fontSize: 12, marginBottom: 8 }}>No-show grace period (minutes)</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                {[10, 15, 20, 30].map(mins => (
+                  <Pressable
+                    key={mins}
+                    onPress={() => onChange({ noShowGraceMinutes: mins })}
+                    style={{
+                      paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6,
+                      backgroundColor: (plan.noShowGraceMinutes || 15) === mins ? ACCENT : 'rgba(255,255,255,0.06)',
+                    }}
+                  >
+                    <Text style={{
+                      color: (plan.noShowGraceMinutes || 15) === mins ? '#000' : MUTED,
+                      fontSize: 13, fontWeight: '600',
+                    }}>{mins} min</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={{ color: '#4A5568', fontSize: 10, marginTop: 6, fontStyle: 'italic' }}>
+                Member marked no-show if they don't join within this window. Overrides coach-level setting for this plan.
+              </Text>
+            </View>
+          )}
+
           {/* Day tiles */}
           <View style={{ flexDirection: 'row', gap: 4, justifyContent: 'space-between', zIndex: openDayIndex !== null ? 9999 : 1 }}>
             {(plan.weeklySchedule || []).map((day, i) => (

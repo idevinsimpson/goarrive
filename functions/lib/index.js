@@ -71,7 +71,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
+exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -79,6 +79,7 @@ const https_1 = require("firebase-functions/v2/https");
 const params_1 = require("firebase-functions/params");
 const firestore_2 = require("firebase-admin/firestore");
 const stripe_1 = __importDefault(require("stripe"));
+const googleapis_1 = require("googleapis");
 const zoom_1 = require("./zoom");
 admin.initializeApp();
 const db = admin.firestore(); // IAM: datastore.user granted 2026-03-22
@@ -96,6 +97,9 @@ const emailApiKey = (0, params_1.defineSecret)('EMAIL_API_KEY');
 const twilioAccountSid = (0, params_1.defineSecret)('TWILIO_ACCOUNT_SID');
 const twilioAuthToken = (0, params_1.defineSecret)('TWILIO_AUTH_TOKEN');
 const twilioFromNumber = (0, params_1.defineSecret)('TWILIO_FROM_NUMBER');
+// ── Google Calendar Secrets ──────────────────────────────────────────────────
+const googleClientId = (0, params_1.defineSecret)('GOOGLE_CLIENT_ID');
+const googleClientSecret = (0, params_1.defineSecret)('GOOGLE_CLIENT_SECRET');
 // ── Tier split config (GoArrive share percent) ────────────────────────────────
 // 40% for coaches with < 5 active paying members
 // 35% for coaches with 5–9 active paying members
@@ -4496,21 +4500,21 @@ exports.requestSkipInstance = (0, https_1.onCall)({ region: 'us-central1' }, asy
         const coachSnap = await db.collection('coaches').doc(inst.coachId).get();
         if (coachSnap.exists) {
             const coachData = coachSnap.data();
-            const autoRules = coachData.skipAutoApproveRules;
-            if (autoRules) {
-                // Auto-approve by category
-                if (autoRules.categories && autoRules.categories.includes(resolvedCategory)) {
+            // Read auto-approval settings (field names match account.tsx UI)
+            const autoCategories = coachData.autoApproveSkipCategories;
+            const autoLeadDays = coachData.autoApproveSkipLeadDays;
+            // Auto-approve by category
+            if (autoCategories && autoCategories.includes(resolvedCategory)) {
+                autoApproved = true;
+            }
+            // Auto-approve if requested far enough in advance (leadDays converted to hours)
+            if (!autoApproved && typeof autoLeadDays === 'number' && autoLeadDays > 0) {
+                const [year, month, day] = inst.scheduledDate.split('-').map(Number);
+                const [h, m] = (inst.scheduledStartTime || inst.startTime || '00:00').split(':').map(Number);
+                const sessionTime = new Date(year, month - 1, day, h, m);
+                const hoursUntil = (sessionTime.getTime() - Date.now()) / (1000 * 60 * 60);
+                if (hoursUntil >= autoLeadDays * 24) {
                     autoApproved = true;
-                }
-                // Auto-approve if requested far enough in advance
-                if (!autoApproved && typeof autoRules.hoursInAdvance === 'number' && autoRules.hoursInAdvance > 0) {
-                    const [year, month, day] = inst.scheduledDate.split('-').map(Number);
-                    const [h, m] = (inst.scheduledStartTime || inst.startTime || '00:00').split(':').map(Number);
-                    const sessionTime = new Date(year, month - 1, day, h, m);
-                    const hoursUntil = (sessionTime.getTime() - Date.now()) / (1000 * 60 * 60);
-                    if (hoursUntil >= autoRules.hoursInAdvance) {
-                        autoApproved = true;
-                    }
                 }
             }
         }
@@ -4537,6 +4541,30 @@ exports.requestSkipInstance = (0, https_1.onCall)({ region: 'us-central1' }, asy
             memberId: callerUid,
             details: `Auto-approved skip for ${inst.scheduledDate} [${resolvedCategory}]${reason ? ': ' + reason : ''}`,
         });
+        // Notify member that skip was auto-approved
+        try {
+            const { sendNotification } = await Promise.resolve().then(() => __importStar(require('./notifications')));
+            const memberSnap = await db.collection('members').doc(callerUid).get();
+            const memberData = memberSnap.exists ? memberSnap.data() : {};
+            await sendNotification({
+                messageType: 'skip_request_resolved',
+                channel: 'push',
+                recipient: {
+                    uid: callerUid,
+                    email: memberData.email,
+                    displayName: memberData.displayName || 'Member',
+                    role: 'member',
+                },
+                subject: 'Skip Request Auto-Approved',
+                body: `Your skip request for ${inst.scheduledDate} [${resolvedCategory}] was automatically approved.`,
+                sessionInstanceId: instanceId,
+                coachId: inst.coachId,
+                memberId: callerUid,
+            });
+        }
+        catch (err) {
+            console.warn(`[requestSkipInstance] Failed to send auto-approval notification: ${err.message}`);
+        }
         return { success: true, autoApproved: true };
     }
     await instRef.update({
@@ -4555,14 +4583,13 @@ exports.requestSkipInstance = (0, https_1.onCall)({ region: 'us-central1' }, asy
         memberId: callerUid,
         details: `Member requested skip for ${inst.scheduledDate} [${resolvedCategory}]${reason ? ': ' + reason : ''}`,
     });
-    // Push notification to coach
+    // Push + email notification to coach
     try {
         const { sendNotification } = await Promise.resolve().then(() => __importStar(require('./notifications')));
         const coachSnap = await db.collection('coaches').doc(inst.coachId).get();
         const coachData = coachSnap.exists ? coachSnap.data() : {};
-        await sendNotification({
+        const notifPayload = {
             messageType: 'skip_request_received',
-            channel: 'push',
             recipient: {
                 uid: inst.coachId,
                 email: coachData.email,
@@ -4570,14 +4597,20 @@ exports.requestSkipInstance = (0, https_1.onCall)({ region: 'us-central1' }, asy
                 role: 'coach',
             },
             subject: 'Skip Request from Member',
-            body: `${inst.memberName || 'A member'} requested to skip their ${inst.scheduledDate} session [${resolvedCategory}].`,
+            body: `${inst.memberName || 'A member'} requested to skip their ${inst.scheduledDate} session [${resolvedCategory}].${reason ? ' Reason: ' + reason : ''}`,
             sessionInstanceId: instanceId,
             coachId: inst.coachId,
             memberId: callerUid,
-        });
+        };
+        // Send push notification
+        await sendNotification(Object.assign(Object.assign({}, notifPayload), { channel: 'push' }));
+        // Send email notification if coach has email
+        if (coachData.email) {
+            await sendNotification(Object.assign(Object.assign({}, notifPayload), { channel: 'email', htmlBody: `<p><strong>${inst.memberName || 'A member'}</strong> requested to skip their <strong>${inst.scheduledDate}</strong> session.</p><p><strong>Category:</strong> ${resolvedCategory}</p>${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ''}<p>Open the app to approve or deny this request.</p>` }));
+        }
     }
     catch (err) {
-        console.warn(`[requestSkipInstance] Failed to send push notification: ${err.message}`);
+        console.warn(`[requestSkipInstance] Failed to send skip request notification: ${err.message}`);
     }
     return { success: true, autoApproved: false };
 });
@@ -4695,6 +4728,24 @@ exports.refreshRecordingUrl = (0, https_1.onCall)({ region: 'us-central1', secre
     if (!zoomMeetingId) {
         throw new https_1.HttpsError('failed-precondition', 'No Zoom meeting associated with this session');
     }
+    // Cache: if recordings were refreshed within the last 4 hours, return cached data
+    const lastRefreshed = inst.recordingRefreshedAt;
+    if (lastRefreshed) {
+        const refreshedMs = typeof lastRefreshed.toMillis === 'function'
+            ? lastRefreshed.toMillis()
+            : typeof lastRefreshed._seconds === 'number'
+                ? lastRefreshed._seconds * 1000
+                : 0;
+        const fourHoursMs = 4 * 60 * 60 * 1000;
+        if (Date.now() - refreshedMs < fourHoursMs) {
+            return {
+                success: true,
+                recordingUrl: inst.zoomRecordingUrl || null,
+                cached: true,
+                message: 'Recording URL was refreshed recently. Using cached version.',
+            };
+        }
+    }
     try {
         const provider = (0, zoom_1.getZoomProvider)({
             accountId: zoomAccountId.value(),
@@ -4734,6 +4785,7 @@ exports.refreshRecordingUrl = (0, https_1.onCall)({ region: 'us-central1', secre
         // Update the instance with fresh URLs
         const updateData = {
             updatedAt: firestore_2.FieldValue.serverTimestamp(),
+            recordingRefreshedAt: firestore_2.FieldValue.serverTimestamp(),
         };
         if (recordingUrl)
             updateData.zoomRecordingUrl = recordingUrl;
@@ -4780,5 +4832,215 @@ exports.regenerateIcalToken = (0, https_1.onCall)({ region: 'us-central1' }, asy
         updatedAt: firestore_2.FieldValue.serverTimestamp(),
     });
     return { success: true, token: newToken };
+});
+// ─── migrateIcalTokens — One-time migration to generate iCal tokens for all coaches ───
+exports.migrateIcalTokens = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+    var _a;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    // Only admins can run this migration
+    const adminSnap = await db.collection('admins').doc(callerUid).get();
+    if (!adminSnap.exists)
+        throw new https_1.HttpsError('permission-denied', 'Only admins can run migrations');
+    const crypto = await Promise.resolve().then(() => __importStar(require('crypto')));
+    const coachesSnap = await db.collection('coaches').get();
+    let migrated = 0;
+    let skipped = 0;
+    const batch = db.batch();
+    for (const doc of coachesSnap.docs) {
+        const data = doc.data();
+        if (data.icalToken) {
+            skipped++;
+            continue;
+        }
+        const newToken = crypto.randomBytes(18).toString('base64url');
+        batch.update(doc.ref, {
+            icalToken: newToken,
+            icalTokenUpdatedAt: firestore_2.FieldValue.serverTimestamp(),
+        });
+        migrated++;
+    }
+    if (migrated > 0) {
+        await batch.commit();
+    }
+    await writeAuditLog({
+        coachId: callerUid,
+        action: 'ical_token_migration',
+        details: `Migrated ${migrated} coaches, skipped ${skipped} (already had tokens)`,
+    });
+    return { success: true, migrated, skipped };
+});
+// ─── Google Calendar Integration ─────────────────────────────────────────────
+function getGoogleOAuth2Client() {
+    const redirectUri = `https://us-central1-goarrive.cloudfunctions.net/googleCalendarCallback`;
+    return new googleapis_1.google.auth.OAuth2(googleClientId.value(), googleClientSecret.value(), redirectUri);
+}
+/**
+ * initGoogleCalendarAuth — Generate OAuth2 consent URL for Google Calendar.
+ * Coach calls this to start the OAuth flow.
+ */
+exports.initGoogleCalendarAuth = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret] }, async (request) => {
+    var _a;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    // Verify caller is a coach
+    const coachDoc = await db.collection('coaches').doc(callerUid).get();
+    if (!coachDoc.exists)
+        throw new https_1.HttpsError('permission-denied', 'Coach only');
+    const oauth2Client = getGoogleOAuth2Client();
+    const scopes = ['https://www.googleapis.com/auth/calendar.events'];
+    const authUrl = oauth2Client.generateAuthUrl({
+        access_type: 'offline',
+        scope: scopes,
+        prompt: 'consent',
+        state: callerUid, // pass coach UID through state
+    });
+    return { authUrl };
+});
+/**
+ * googleCalendarCallback — HTTP endpoint that handles the OAuth2 redirect from Google.
+ * Stores refresh_token on the coach document.
+ */
+exports.googleCalendarCallback = (0, https_1.onRequest)({ secrets: [googleClientId, googleClientSecret] }, async (req, res) => {
+    try {
+        const code = req.query.code;
+        const coachId = req.query.state;
+        if (!code || !coachId) {
+            res.status(400).send('Missing code or state parameter');
+            return;
+        }
+        const oauth2Client = getGoogleOAuth2Client();
+        const { tokens } = await oauth2Client.getToken(code);
+        if (!tokens.refresh_token) {
+            res.status(400).send('No refresh token received. Please revoke access at https://myaccount.google.com/permissions and try again.');
+            return;
+        }
+        // Store tokens on coach document
+        await db.collection('coaches').doc(coachId).update({
+            googleCalendarRefreshToken: tokens.refresh_token,
+            googleCalendarConnectedAt: firestore_2.FieldValue.serverTimestamp(),
+            googleCalendarEmail: tokens.id_token ? 'connected' : 'connected', // We don't decode the ID token
+        });
+        await writeAuditLog({
+            coachId,
+            action: 'google_calendar_connected',
+            details: 'Google Calendar OAuth2 connected successfully',
+        });
+        // Redirect to the app's account page
+        res.redirect('https://goarrive.web.app/account?gcal=connected');
+    }
+    catch (err) {
+        console.error('[googleCalendarCallback] Error:', err);
+        res.status(500).send('Failed to connect Google Calendar: ' + (err.message || 'Unknown error'));
+    }
+});
+/**
+ * syncToGoogleCalendar — Push upcoming sessions to Google Calendar as events.
+ * Coach calls this manually or it can be triggered after slot creation.
+ */
+exports.syncToGoogleCalendar = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret] }, async (request) => {
+    var _a;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const coachDoc = await db.collection('coaches').doc(callerUid).get();
+    if (!coachDoc.exists)
+        throw new https_1.HttpsError('permission-denied', 'Coach only');
+    const coachData = coachDoc.data();
+    const refreshToken = coachData.googleCalendarRefreshToken;
+    if (!refreshToken) {
+        throw new https_1.HttpsError('failed-precondition', 'Google Calendar not connected. Please connect first in Account settings.');
+    }
+    const oauth2Client = getGoogleOAuth2Client();
+    oauth2Client.setCredentials({ refresh_token: refreshToken });
+    const calendar = googleapis_1.google.calendar({ version: 'v3', auth: oauth2Client });
+    // Fetch upcoming instances for this coach (next 30 days)
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const future = new Date();
+    future.setDate(future.getDate() + 30);
+    const futureStr = `${future.getFullYear()}-${String(future.getMonth() + 1).padStart(2, '0')}-${String(future.getDate()).padStart(2, '0')}`;
+    const instSnap = await db.collection('session_instances')
+        .where('coachId', '==', callerUid)
+        .where('scheduledDate', '>=', todayStr)
+        .where('scheduledDate', '<=', futureStr)
+        .where('status', 'in', ['scheduled', 'allocated'])
+        .get();
+    let created = 0;
+    let skipped = 0;
+    for (const doc of instSnap.docs) {
+        const inst = doc.data();
+        // Skip if already synced
+        if (inst.googleCalendarEventId) {
+            skipped++;
+            continue;
+        }
+        try {
+            const startDateTime = `${inst.scheduledDate}T${inst.scheduledTime || '09:00'}:00`;
+            const durationMin = inst.durationMinutes || 30;
+            const endDate = new Date(startDateTime);
+            endDate.setMinutes(endDate.getMinutes() + durationMin);
+            const endDateTime = endDate.toISOString();
+            const event = await calendar.events.insert({
+                calendarId: 'primary',
+                requestBody: {
+                    summary: `GoArrive: ${inst.memberName || 'Session'} (${inst.sessionType || 'coaching'})`,
+                    description: `GoArrive coaching session with ${inst.memberName || 'member'}.\nSession ID: ${doc.id}`,
+                    start: {
+                        dateTime: startDateTime,
+                        timeZone: inst.timezone || 'America/New_York',
+                    },
+                    end: {
+                        dateTime: endDateTime,
+                        timeZone: inst.timezone || 'America/New_York',
+                    },
+                    reminders: {
+                        useDefault: false,
+                        overrides: [{ method: 'popup', minutes: 15 }],
+                    },
+                },
+            });
+            // Store the Google Calendar event ID on the instance
+            await doc.ref.update({
+                googleCalendarEventId: event.data.id,
+                googleCalendarSyncedAt: firestore_2.FieldValue.serverTimestamp(),
+            });
+            created++;
+        }
+        catch (err) {
+            console.error(`[syncToGoogleCalendar] Failed to create event for ${doc.id}:`, err.message);
+        }
+    }
+    await writeAuditLog({
+        coachId: callerUid,
+        action: 'google_calendar_sync',
+        details: `Synced ${created} events, skipped ${skipped} (already synced)`,
+    });
+    return { success: true, created, skipped };
+});
+/**
+ * disconnectGoogleCalendar — Remove Google Calendar OAuth tokens from coach document.
+ */
+exports.disconnectGoogleCalendar = (0, https_1.onCall)(async (request) => {
+    var _a;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const coachDoc = await db.collection('coaches').doc(callerUid).get();
+    if (!coachDoc.exists)
+        throw new https_1.HttpsError('permission-denied', 'Coach only');
+    await db.collection('coaches').doc(callerUid).update({
+        googleCalendarRefreshToken: firestore_2.FieldValue.delete(),
+        googleCalendarConnectedAt: firestore_2.FieldValue.delete(),
+        googleCalendarEmail: firestore_2.FieldValue.delete(),
+    });
+    await writeAuditLog({
+        coachId: callerUid,
+        action: 'google_calendar_disconnected',
+        details: 'Google Calendar OAuth tokens removed',
+    });
+    return { success: true };
 });
 //# sourceMappingURL=index.js.map

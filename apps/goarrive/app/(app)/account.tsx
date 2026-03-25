@@ -16,6 +16,7 @@ import {
   ActivityIndicator,
   TextInput,
   Alert,
+  Linking,
 } from 'react-native';
 import { Icon } from '../../components/Icon';
 import { useAuth } from '../../lib/AuthContext';
@@ -24,6 +25,7 @@ import {
   doc,
   getDoc,
   setDoc,
+  onSnapshot,
   Timestamp,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
@@ -682,12 +684,140 @@ function ICalSyncPanel({ coachId }: { coachId: string }) {
       <Text style={[zs.hint, { marginTop: 6 }]}>
         Paste this URL as a calendar subscription (not a one-time import) so it stays updated. Use the refresh button to regenerate the token if compromised.
       </Text>
-      <View style={{ marginTop: 10, backgroundColor: '#1A1F2B', borderRadius: 6, padding: 8, borderWidth: 1, borderColor: BORDER }}>
-        <Text style={{ fontSize: 10, color: TEXT_MUTED, fontFamily: FONT_HEADING }}>Bidirectional Sync (Coming Soon)</Text>
-        <Text style={{ fontSize: 9, color: TEXT_MUTED, fontFamily: FONT_BODY, marginTop: 2, lineHeight: 14 }}>
-          Currently, this is a one-way feed from GoArrive to your calendar. Bidirectional sync (Google Calendar API) is planned for a future update, which will allow changes in your external calendar to reflect back in GoArrive.
-        </Text>
-      </View>
+      {/* Google Calendar Bidirectional Sync */}
+      <GoogleCalendarSyncSection coachId={user?.uid || ''} />
+    </View>
+  );
+}
+
+function GoogleCalendarSyncSection({ coachId }: { coachId: string }) {
+  const [connected, setConnected] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!coachId) return;
+    const unsub = onSnapshot(doc(db, 'coaches', coachId), (snap) => {
+      const data = snap.data();
+      setConnected(!!data?.googleCalendarRefreshToken);
+    });
+    return unsub;
+  }, [coachId]);
+
+  const handleConnect = async () => {
+    setConnecting(true);
+    try {
+      const fn = httpsCallable(functions, 'initGoogleCalendarAuth');
+      const result = await fn({}) as any;
+      if (result.data?.authUrl) {
+        Linking.openURL(result.data.authUrl);
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to start Google Calendar connection');
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const fn = httpsCallable(functions, 'syncToGoogleCalendar');
+      const result = await fn({}) as any;
+      setSyncResult(`Synced ${result.data?.created || 0} events, ${result.data?.skipped || 0} already synced`);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to sync to Google Calendar');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleDisconnect = () => {
+    Alert.alert(
+      'Disconnect Google Calendar',
+      'This will remove the connection. Events already created in Google Calendar will remain.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: async () => {
+            setDisconnecting(true);
+            try {
+              const fn = httpsCallable(functions, 'disconnectGoogleCalendar');
+              await fn({});
+              setSyncResult(null);
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Failed to disconnect');
+            } finally {
+              setDisconnecting(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  return (
+    <View style={{ marginTop: 10, backgroundColor: '#1A1F2B', borderRadius: 6, padding: 8, borderWidth: 1, borderColor: BORDER }}>
+      <Text style={{ fontSize: 10, color: TEXT_MUTED, fontFamily: FONT_HEADING }}>Google Calendar Sync</Text>
+      {connected ? (
+        <>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#4CAF50' }} />
+            <Text style={{ fontSize: 10, color: '#4CAF50', fontFamily: FONT_BODY }}>Connected</Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
+            <Pressable
+              style={[zs.connectBtn, { flex: 1, backgroundColor: '#1E40AF' }]}
+              onPress={handleSync}
+              disabled={syncing}
+            >
+              {syncing
+                ? <ActivityIndicator size="small" color="#FFF" />
+                : <Icon name="refresh" size={14} color="#FFF" />
+              }
+              <Text style={zs.connectBtnText}>{syncing ? 'Syncing...' : 'Sync Now'}</Text>
+            </Pressable>
+            <Pressable
+              style={[zs.connectBtn, { backgroundColor: '#374151', paddingHorizontal: 10 }]}
+              onPress={handleDisconnect}
+              disabled={disconnecting}
+            >
+              {disconnecting
+                ? <ActivityIndicator size="small" color="#FFF" />
+                : <Text style={{ fontSize: 10, color: '#FFF', fontFamily: FONT_BODY }}>Disconnect</Text>
+              }
+            </Pressable>
+          </View>
+          {syncResult && (
+            <Text style={{ fontSize: 9, color: '#4CAF50', fontFamily: FONT_BODY, marginTop: 4 }}>{syncResult}</Text>
+          )}
+          <Text style={{ fontSize: 9, color: TEXT_MUTED, fontFamily: FONT_BODY, marginTop: 4, lineHeight: 14 }}>
+            Sync pushes your upcoming 30 days of sessions to Google Calendar. Events already synced are skipped.
+          </Text>
+        </>
+      ) : (
+        <>
+          <Text style={{ fontSize: 9, color: TEXT_MUTED, fontFamily: FONT_BODY, marginTop: 4, lineHeight: 14 }}>
+            Connect your Google Calendar to push coaching sessions as calendar events. This enables two-way visibility.
+          </Text>
+          <Pressable
+            style={[zs.connectBtn, { marginTop: 8, backgroundColor: '#1E40AF' }]}
+            onPress={handleConnect}
+            disabled={connecting}
+          >
+            {connecting
+              ? <ActivityIndicator size="small" color="#FFF" />
+              : <Icon name="calendar" size={14} color="#FFF" />
+            }
+            <Text style={zs.connectBtnText}>{connecting ? 'Connecting...' : 'Connect Google Calendar'}</Text>
+          </Pressable>
+        </>
+      )}
     </View>
   );
 }

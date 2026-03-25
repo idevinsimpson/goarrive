@@ -2065,6 +2065,21 @@ export default function MemberDetail({
                                     </TouchableOpacity>
                                   </View>
                                 )}
+                                {/* Transcription link (coaches/admins only) */}
+                                {inst.transcriptionUrl && (
+                                  <View style={{ marginTop: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                    <TouchableOpacity
+                                      onPress={() => Linking.openURL(inst.transcriptionUrl)}
+                                      style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                                    >
+                                      <Icon name="document" size={10} color={BLUE} />
+                                      <Text style={{ fontSize: 9, color: BLUE, fontFamily: FB, textDecorationLine: 'underline' }}>View Transcript</Text>
+                                    </TouchableOpacity>
+                                    {inst.transcriptionStatus && (
+                                      <Text style={{ fontSize: 8, color: MUTED }}>({inst.transcriptionStatus})</Text>
+                                    )}
+                                  </View>
+                                )}
                               </View>
                               );
                             })
@@ -2586,24 +2601,39 @@ export default function MemberDetail({
                         <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB, marginBottom: 6 }}>Set a different day or time for specific members. Leave blank to use the form defaults.</Text>
                         {batchMembers.filter(bm => selectedBatchMembers.has(bm.id)).map((bm: any) => {
                           const ov = batchOverrides[bm.id];
+                          const dayVal = ov?.dayOfWeek ?? '';
+                          const timeVal = ov?.startTime ?? '';
+                          const dayInvalid = dayVal !== '' && (!/^[0-6]$/.test(dayVal));
+                          const timeInvalid = timeVal !== '' && (!/^([01]\d|2[0-3]):[0-5]\d$/.test(timeVal));
                           return (
-                            <View key={bm.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                              <Text style={{ fontSize: 10, color: FG, fontFamily: FB, width: 80 }} numberOfLines={1}>{bm.name || bm.id}</Text>
-                              <TextInput
-                                style={{ flex: 1, backgroundColor: '#0E1117', borderRadius: 4, borderWidth: 1, borderColor: MUTED + '30', color: FG, fontSize: 10, fontFamily: FB, paddingHorizontal: 6, paddingVertical: 3 }}
-                                placeholder="Day (e.g. 1=Mon)"
-                                placeholderTextColor={MUTED}
-                                value={ov?.dayOfWeek ?? ''}
-                                onChangeText={(v) => setBatchOverrides(prev => ({ ...prev, [bm.id]: { ...prev[bm.id], dayOfWeek: v || undefined } }))}
-                                keyboardType="numeric"
-                              />
-                              <TextInput
-                                style={{ flex: 1, backgroundColor: '#0E1117', borderRadius: 4, borderWidth: 1, borderColor: MUTED + '30', color: FG, fontSize: 10, fontFamily: FB, paddingHorizontal: 6, paddingVertical: 3 }}
-                                placeholder="Time (HH:MM)"
-                                placeholderTextColor={MUTED}
-                                value={ov?.startTime ?? ''}
-                                onChangeText={(v) => setBatchOverrides(prev => ({ ...prev, [bm.id]: { ...prev[bm.id], startTime: v || undefined } }))}
-                              />
+                            <View key={bm.id} style={{ marginBottom: 4 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <Text style={{ fontSize: 10, color: FG, fontFamily: FB, width: 80 }} numberOfLines={1}>{bm.name || bm.id}</Text>
+                                <TextInput
+                                  style={{ flex: 1, backgroundColor: '#0E1117', borderRadius: 4, borderWidth: 1, borderColor: dayInvalid ? '#FF5722' : MUTED + '30', color: FG, fontSize: 10, fontFamily: FB, paddingHorizontal: 6, paddingVertical: 3 }}
+                                  placeholder="Day (0=Sun..6=Sat)"
+                                  placeholderTextColor={MUTED}
+                                  value={dayVal}
+                                  onChangeText={(v) => setBatchOverrides(prev => ({ ...prev, [bm.id]: { ...prev[bm.id], dayOfWeek: v || undefined } }))}
+                                  keyboardType="numeric"
+                                  maxLength={1}
+                                />
+                                <TextInput
+                                  style={{ flex: 1, backgroundColor: '#0E1117', borderRadius: 4, borderWidth: 1, borderColor: timeInvalid ? '#FF5722' : MUTED + '30', color: FG, fontSize: 10, fontFamily: FB, paddingHorizontal: 6, paddingVertical: 3 }}
+                                  placeholder="Time (HH:MM)"
+                                  placeholderTextColor={MUTED}
+                                  value={timeVal}
+                                  onChangeText={(v) => setBatchOverrides(prev => ({ ...prev, [bm.id]: { ...prev[bm.id], startTime: v || undefined } }))}
+                                  maxLength={5}
+                                />
+                              </View>
+                              {(dayInvalid || timeInvalid) && (
+                                <Text style={{ fontSize: 8, color: '#FF5722', fontFamily: FB, marginLeft: 86, marginTop: 2 }}>
+                                  {dayInvalid ? 'Day must be 0-6 (0=Sun, 1=Mon, ..., 6=Sat)' : ''}
+                                  {dayInvalid && timeInvalid ? ' · ' : ''}
+                                  {timeInvalid ? 'Time must be HH:MM (e.g. 09:00)' : ''}
+                                </Text>
+                              )}
                             </View>
                           );
                         })}
@@ -2612,9 +2642,23 @@ export default function MemberDetail({
 
                     <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                       <TouchableOpacity
-                        style={{ flex: 1, backgroundColor: BLUE, paddingVertical: 8, borderRadius: 6, alignItems: 'center', opacity: selectedBatchMembers.size === 0 || batchCreating ? 0.5 : 1 }}
+                        style={{ flex: 1, backgroundColor: BLUE, paddingVertical: 8, borderRadius: 6, alignItems: 'center', opacity: selectedBatchMembers.size === 0 || batchCreating || (() => {
+                          for (const bmId of Array.from(selectedBatchMembers)) {
+                            const ov = batchOverrides[bmId];
+                            if (ov?.dayOfWeek && !/^[0-6]$/.test(ov.dayOfWeek)) return true;
+                            if (ov?.startTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(ov.startTime)) return true;
+                          }
+                          return false;
+                        })() ? 0.5 : 1 }}
                         onPress={handleBatchCreate}
-                        disabled={selectedBatchMembers.size === 0 || batchCreating}
+                        disabled={selectedBatchMembers.size === 0 || batchCreating || (() => {
+                          for (const bmId of Array.from(selectedBatchMembers)) {
+                            const ov = batchOverrides[bmId];
+                            if (ov?.dayOfWeek && !/^[0-6]$/.test(ov.dayOfWeek)) return true;
+                            if (ov?.startTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(ov.startTime)) return true;
+                          }
+                          return false;
+                        })()}
                       >
                         <Text style={{ fontSize: 12, color: '#fff', fontFamily: FH }}>
                           {batchCreating ? 'Creating...' : `Create for ${selectedBatchMembers.size} Members`}

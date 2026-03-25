@@ -114,6 +114,8 @@ export default function AdminScreen() {
   const [pendingInstances, setPendingInstances] = useState<SessionInstance[]>([]);
   const [allocatedInstances, setAllocatedInstances] = useState<SessionInstance[]>([]);
   const [completedInstances, setCompletedInstances] = useState<SessionInstance[]>([]);
+  const [skipRequestedInstances, setSkipRequestedInstances] = useState<SessionInstance[]>([]);
+  const [bulkApproving, setBulkApproving] = useState(false);
   const [allocating, setAllocating] = useState(false);
   const [loadingOps, setLoadingOps] = useState(true);
 
@@ -358,7 +360,13 @@ export default function AdminScreen() {
       () => checkOps()
     );
 
-    return () => { unsubRooms(); unsubFailed(); unsubPending(); unsubAllocated(); unsubCompleted(); };
+    const unsubSkipRequested = onSnapshot(
+      query(collection(db, 'session_instances'), where('status', '==', 'skip_requested')),
+      (snap) => { setSkipRequestedInstances(snap.docs.map(d => ({ id: d.id, ...d.data() } as SessionInstance))); },
+      () => {}
+    );
+
+    return () => { unsubRooms(); unsubFailed(); unsubPending(); unsubAllocated(); unsubCompleted(); unsubSkipRequested(); };
   }, [isAdmin, fetchCoaches, fetchPendingInvites, fetchHealth]);
 
   // ── Load CTS billing data ──────────────────────────────────────────────
@@ -826,6 +834,98 @@ export default function AdminScreen() {
               ))}
             </View>
           )}
+
+          {/* ── Pending Skip Requests (Bulk Approval) ── */}
+          {skipRequestedInstances.length > 0 && (
+            <View style={s.card}>
+              <View style={s.cardHeader}>
+                <Text style={s.cardTitle}>Pending Skip Requests ({skipRequestedInstances.length})</Text>
+                <TouchableOpacity
+                  style={[s.retryBtn, { backgroundColor: '#1E40AF', paddingHorizontal: 12 }]}
+                  onPress={async () => {
+                    setBulkApproving(true);
+                    try {
+                      const fn = httpsCallable(functions, 'updateRecurringSlot');
+                      let approved = 0;
+                      for (const inst of skipRequestedInstances) {
+                        try {
+                          await fn({
+                            slotId: inst.recurringSlotId,
+                            action: 'approve_skip_request',
+                            instanceId: inst.id,
+                          });
+                          approved++;
+                        } catch (err) {
+                          console.error(`Failed to approve skip for ${inst.id}:`, err);
+                        }
+                      }
+                      Alert.alert('Bulk Approve', `Approved ${approved} of ${skipRequestedInstances.length} skip requests.`);
+                    } catch (err: any) {
+                      Alert.alert('Error', err.message || 'Bulk approval failed');
+                    } finally {
+                      setBulkApproving(false);
+                    }
+                  }}
+                  disabled={bulkApproving}
+                >
+                  {bulkApproving
+                    ? <ActivityIndicator size="small" color="#FFF" />
+                    : <Text style={[s.retryBtnText, { color: '#FFF' }]}>Approve All</Text>
+                  }
+                </TouchableOpacity>
+              </View>
+              {skipRequestedInstances.map(inst => (
+                <View key={inst.id} style={[s.failRow, { borderLeftColor: '#F59E0B' }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.failId}>{(inst as any).memberName || inst.memberId}</Text>
+                    <Text style={s.failReason}>
+                      {(inst as any).skipCategory ? `[${(inst as any).skipCategory}] ` : ''}
+                      {(inst as any).skipReason || 'No reason given'}
+                    </Text>
+                    <Text style={{ fontSize: 9, color: MUTED, fontFamily: FONT_BODY }}>
+                      {inst.scheduledDate} at {(inst as any).scheduledTime || '—'}
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 4 }}>
+                    <TouchableOpacity
+                      style={[s.retryBtn, { backgroundColor: '#16A34A' }]}
+                      onPress={async () => {
+                        try {
+                          const fn = httpsCallable(functions, 'updateRecurringSlot');
+                          await fn({
+                            slotId: inst.recurringSlotId,
+                            action: 'approve_skip_request',
+                            instanceId: inst.id,
+                          });
+                        } catch (err: any) {
+                          Alert.alert('Error', err.message || 'Failed to approve');
+                        }
+                      }}
+                    >
+                      <Text style={[s.retryBtnText, { color: '#FFF' }]}>Approve</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[s.retryBtn, { backgroundColor: '#DC2626' }]}
+                      onPress={async () => {
+                        try {
+                          const fn = httpsCallable(functions, 'updateRecurringSlot');
+                          await fn({
+                            slotId: inst.recurringSlotId,
+                            action: 'deny_skip_request',
+                            instanceId: inst.id,
+                          });
+                        } catch (err: any) {
+                          Alert.alert('Error', err.message || 'Failed to deny');
+                        }
+                      }}
+                    >
+                      <Text style={[s.retryBtnText, { color: '#FFF' }]}>Deny</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
         </>
       )}
 
@@ -954,6 +1054,14 @@ export default function AdminScreen() {
                     {inst.zoomRecordingUrl && !inst.recordings?.length && (
                       <Pressable onPress={() => Linking.openURL(inst.zoomRecordingUrl!)} style={{ paddingVertical: 2 }}>
                         <Text style={{ fontSize: 10, color: BLUE, fontFamily: FONT_BODY, textDecorationLine: 'underline' }}>View Recording</Text>
+                      </Pressable>
+                    )}
+                    {(inst as any).transcriptionUrl && (
+                      <Pressable onPress={() => Linking.openURL((inst as any).transcriptionUrl)} style={{ paddingVertical: 2, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Text style={{ fontSize: 10, color: BLUE, fontFamily: FONT_BODY, textDecorationLine: 'underline' }}>View Transcript</Text>
+                        {(inst as any).transcriptionStatus && (
+                          <Text style={{ fontSize: 9, color: MUTED, fontFamily: FONT_BODY }}>({(inst as any).transcriptionStatus})</Text>
+                        )}
                       </Pressable>
                     )}
                   </View>
@@ -1391,6 +1499,8 @@ export default function AdminScreen() {
 
 function AnalyticsDashboard() {
   const [loading, setLoading] = useState(true);
+  const [skipAnalyticsRange, setSkipAnalyticsRange] = useState<'30' | '90' | 'month' | 'year'>('90');
+  const [allInstances, setAllInstances] = useState<any[]>([]);
   const [stats, setStats] = useState<{
     totalSessions: number;
     completed: number;
@@ -1492,6 +1602,7 @@ function AnalyticsDashboard() {
         const skipByMember = Object.entries(memberSkipMap).map(([memberId, v]) => ({ memberId, memberName: v.name, count: v.count })).sort((a, b) => b.count - a.count).slice(0, 10);
         const skipByWeekday = dayNames.map(day => ({ day, count: weekdayMap[day] }));
 
+        setAllInstances(instances);
         setStats({ totalSessions, completed, missed, cancelled, rescheduled, skipped, attendanceRate, coachStats, templateUsage, skipByCategory, skipByMember, skipByWeekday });
       } catch (err) {
         console.error('[Analytics] fetch error:', err);
@@ -1560,70 +1671,188 @@ function AnalyticsDashboard() {
       {/* Skip Analytics */}
       {(stats.skipByCategory.length > 0 || stats.skipByMember.length > 0) && (
         <>
-          <Text style={[s.sectionTitle, { fontSize: 16, marginTop: 8 }]}>Skip Analytics</Text>
-          <Text style={{ fontSize: 11, color: MUTED, fontFamily: FB, marginBottom: 8 }}>Patterns from {stats.skipped} skipped sessions (last 90 days)</Text>
-
-          {/* By Category */}
-          {stats.skipByCategory.length > 0 && (
-            <View style={{ backgroundColor: CARD + '80', borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
-              <View style={{ padding: 8, backgroundColor: 'rgba(255,255,255,0.05)' }}>
-                <Text style={{ fontSize: 11, color: MUTED, fontFamily: FH }}>By Category</Text>
-              </View>
-              {stats.skipByCategory.map((c, i) => {
-                const catColors: Record<string, string> = { Holiday: '#4CAF50', Vacation: '#2196F3', Illness: '#FF5722', 'Coach Unavailable': '#FF9800', Other: MUTED };
-                const barColor = catColors[c.category] || MUTED;
-                const maxCount = stats.skipByCategory[0]?.count || 1;
-                return (
-                  <View key={i} style={{ padding: 8, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: 'rgba(255,255,255,0.05)' }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <Text style={{ fontSize: 12, color: FG, fontFamily: FB }}>{c.category}</Text>
-                      <Text style={{ fontSize: 12, color: barColor, fontFamily: FH }}>{c.count}</Text>
-                    </View>
-                    <View style={{ height: 4, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 2 }}>
-                      <View style={{ height: 4, backgroundColor: barColor, borderRadius: 2, width: `${Math.round((c.count / maxCount) * 100)}%` }} />
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          )}
-
-          {/* By Weekday */}
-          <View style={{ backgroundColor: CARD + '80', borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
-            <View style={{ padding: 8, backgroundColor: 'rgba(255,255,255,0.05)' }}>
-              <Text style={{ fontSize: 11, color: MUTED, fontFamily: FH }}>By Weekday</Text>
-            </View>
-            <View style={{ flexDirection: 'row', padding: 8, gap: 4 }}>
-              {stats.skipByWeekday.map((w, i) => {
-                const maxW = Math.max(...stats.skipByWeekday.map(x => x.count), 1);
-                const barH = Math.max(4, Math.round((w.count / maxW) * 40));
-                return (
-                  <View key={i} style={{ flex: 1, alignItems: 'center' }}>
-                    <View style={{ height: 40, justifyContent: 'flex-end', width: '100%', alignItems: 'center' }}>
-                      <View style={{ height: barH, width: '70%', backgroundColor: w.count > 0 ? '#FFC000' : 'rgba(255,255,255,0.05)', borderRadius: 2 }} />
-                    </View>
-                    <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB, marginTop: 4 }}>{w.day}</Text>
-                    <Text style={{ fontSize: 9, color: FG, fontFamily: FH }}>{w.count}</Text>
-                  </View>
-                );
-              })}
-            </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
+            <Text style={[s.sectionTitle, { fontSize: 16 }]}>Skip Analytics</Text>
+            <Pressable
+              onPress={() => {
+                // Build CSV from filtered skip data
+                const now = new Date();
+                let cutoff: string;
+                if (skipAnalyticsRange === '30') {
+                  const d = new Date(); d.setDate(d.getDate() - 30);
+                  cutoff = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                } else if (skipAnalyticsRange === '90') {
+                  const d = new Date(); d.setDate(d.getDate() - 90);
+                  cutoff = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                } else if (skipAnalyticsRange === 'month') {
+                  cutoff = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+                } else {
+                  cutoff = `${now.getFullYear()}-01-01`;
+                }
+                const filtered = allInstances.filter(i => (i.status === 'skipped' || i.status === 'skip_requested') && i.scheduledDate >= cutoff);
+                const csvRows = ['Date,Member,Category,Reason,Status'];
+                for (const si of filtered) {
+                  const date = si.scheduledDate || '';
+                  const member = (si.memberName || si.memberId || '').replace(/,/g, ' ');
+                  const cat = (si.skipCategory || 'Other').replace(/,/g, ' ');
+                  const reason = (si.skipReason || '').replace(/,/g, ' ').replace(/\n/g, ' ');
+                  const status = si.status || '';
+                  csvRows.push(`${date},${member},${cat},${reason},${status}`);
+                }
+                const csvContent = csvRows.join('\n');
+                if (Platform.OS === 'web') {
+                  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `skip-analytics-${skipAnalyticsRange}.csv`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                } else {
+                  Alert.alert('Export', 'CSV export is available on web only.');
+                }
+              }}
+              style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.08)' }}
+            >
+              <Text style={{ fontSize: 10, color: MUTED, fontFamily: FB }}>Export CSV</Text>
+            </Pressable>
           </View>
 
-          {/* Top Skip Members */}
-          {stats.skipByMember.length > 0 && (
-            <View style={{ backgroundColor: CARD + '80', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
-              <View style={{ padding: 8, backgroundColor: 'rgba(255,255,255,0.05)' }}>
-                <Text style={{ fontSize: 11, color: MUTED, fontFamily: FH }}>Top Members by Skip Count</Text>
-              </View>
-              {stats.skipByMember.map((m, i) => (
-                <View key={m.memberId} style={{ flexDirection: 'row', justifyContent: 'space-between', padding: 8, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: 'rgba(255,255,255,0.05)' }}>
-                  <Text style={{ fontSize: 12, color: FG, fontFamily: FB }} numberOfLines={1}>{m.memberName}</Text>
-                  <Text style={{ fontSize: 12, color: m.count >= 5 ? RED : m.count >= 3 ? '#FFC000' : MUTED, fontFamily: FH }}>{m.count} skips</Text>
+          {/* Time filter pills */}
+          <View style={{ flexDirection: 'row', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+            {([['30', 'Last 30 days'], ['90', 'Last 90 days'], ['month', 'This month'], ['year', 'This year']] as const).map(([key, label]) => (
+              <Pressable
+                key={key}
+                onPress={() => setSkipAnalyticsRange(key)}
+                style={{
+                  paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12,
+                  backgroundColor: skipAnalyticsRange === key ? BLUE : 'rgba(255,255,255,0.06)',
+                }}
+              >
+                <Text style={{ fontSize: 10, color: skipAnalyticsRange === key ? '#FFF' : MUTED, fontFamily: FB }}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+
+          <Text style={{ fontSize: 11, color: MUTED, fontFamily: FB, marginBottom: 8 }}>Patterns from {(() => {
+            const now = new Date();
+            let cutoff: string;
+            if (skipAnalyticsRange === '30') {
+              const d = new Date(); d.setDate(d.getDate() - 30);
+              cutoff = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            } else if (skipAnalyticsRange === '90') {
+              const d = new Date(); d.setDate(d.getDate() - 90);
+              cutoff = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            } else if (skipAnalyticsRange === 'month') {
+              cutoff = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+            } else {
+              cutoff = `${now.getFullYear()}-01-01`;
+            }
+            return allInstances.filter(i => (i.status === 'skipped' || i.status === 'skip_requested') && i.scheduledDate >= cutoff).length;
+          })()} skipped sessions</Text>
+
+          {(() => {
+            // Compute filtered skip data based on selected time range
+            const now = new Date();
+            let cutoff: string;
+            if (skipAnalyticsRange === '30') {
+              const d = new Date(); d.setDate(d.getDate() - 30);
+              cutoff = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            } else if (skipAnalyticsRange === '90') {
+              const d = new Date(); d.setDate(d.getDate() - 90);
+              cutoff = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            } else if (skipAnalyticsRange === 'month') {
+              cutoff = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+            } else {
+              cutoff = `${now.getFullYear()}-01-01`;
+            }
+            const filtered = allInstances.filter(i => (i.status === 'skipped' || i.status === 'skip_requested') && i.scheduledDate >= cutoff);
+            const catMap: Record<string, number> = {};
+            const memberMap: Record<string, { name: string; count: number }> = {};
+            const weekdayMap: Record<string, number> = { Sun: 0, Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0 };
+            const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            for (const si of filtered) {
+              const cat = si.skipCategory || 'Other';
+              catMap[cat] = (catMap[cat] || 0) + 1;
+              const mid = si.memberId || 'unknown';
+              if (!memberMap[mid]) memberMap[mid] = { name: si.memberName || mid, count: 0 };
+              memberMap[mid].count++;
+              if (si.scheduledDate) {
+                const [y, m, d] = si.scheduledDate.split('-').map(Number);
+                const dt = new Date(y, m - 1, d);
+                weekdayMap[dayNames[dt.getDay()]] = (weekdayMap[dayNames[dt.getDay()]] || 0) + 1;
+              }
+            }
+            const fCat = Object.entries(catMap).map(([category, count]) => ({ category, count })).sort((a, b) => b.count - a.count);
+            const fMember = Object.entries(memberMap).map(([memberId, v]) => ({ memberId, memberName: v.name, count: v.count })).sort((a, b) => b.count - a.count).slice(0, 10);
+            const fWeekday = dayNames.map(day => ({ day, count: weekdayMap[day] }));
+
+            return (
+              <>
+                {/* By Category */}
+                {fCat.length > 0 && (
+                  <View style={{ backgroundColor: CARD + '80', borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
+                    <View style={{ padding: 8, backgroundColor: 'rgba(255,255,255,0.05)' }}>
+                      <Text style={{ fontSize: 11, color: MUTED, fontFamily: FH }}>By Category</Text>
+                    </View>
+                    {fCat.map((c, i) => {
+                      const catColors: Record<string, string> = { Holiday: '#4CAF50', Vacation: '#2196F3', Illness: '#FF5722', 'Coach Unavailable': '#FF9800', Other: MUTED };
+                      const barColor = catColors[c.category] || MUTED;
+                      const maxCount = fCat[0]?.count || 1;
+                      return (
+                        <View key={i} style={{ padding: 8, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: 'rgba(255,255,255,0.05)' }}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <Text style={{ fontSize: 12, color: FG, fontFamily: FB }}>{c.category}</Text>
+                            <Text style={{ fontSize: 12, color: barColor, fontFamily: FH }}>{c.count}</Text>
+                          </View>
+                          <View style={{ height: 4, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 2 }}>
+                            <View style={{ height: 4, backgroundColor: barColor, borderRadius: 2, width: `${Math.round((c.count / maxCount) * 100)}%` }} />
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+
+                {/* By Weekday */}
+                <View style={{ backgroundColor: CARD + '80', borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
+                  <View style={{ padding: 8, backgroundColor: 'rgba(255,255,255,0.05)' }}>
+                    <Text style={{ fontSize: 11, color: MUTED, fontFamily: FH }}>By Weekday</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', padding: 8, gap: 4 }}>
+                    {fWeekday.map((w, i) => {
+                      const maxW = Math.max(...fWeekday.map(x => x.count), 1);
+                      const barH = Math.max(4, Math.round((w.count / maxW) * 40));
+                      return (
+                        <View key={i} style={{ flex: 1, alignItems: 'center' }}>
+                          <View style={{ height: 40, justifyContent: 'flex-end', width: '100%', alignItems: 'center' }}>
+                            <View style={{ height: barH, width: '70%', backgroundColor: w.count > 0 ? '#FFC000' : 'rgba(255,255,255,0.05)', borderRadius: 2 }} />
+                          </View>
+                          <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB, marginTop: 4 }}>{w.day}</Text>
+                          <Text style={{ fontSize: 9, color: FG, fontFamily: FH }}>{w.count}</Text>
+                        </View>
+                      );
+                    })}
+                  </View>
                 </View>
-              ))}
-            </View>
-          )}
+
+                {/* Top Skip Members */}
+                {fMember.length > 0 && (
+                  <View style={{ backgroundColor: CARD + '80', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
+                    <View style={{ padding: 8, backgroundColor: 'rgba(255,255,255,0.05)' }}>
+                      <Text style={{ fontSize: 11, color: MUTED, fontFamily: FH }}>Top Members by Skip Count</Text>
+                    </View>
+                    {fMember.map((m, i) => (
+                      <View key={m.memberId} style={{ flexDirection: 'row', justifyContent: 'space-between', padding: 8, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: 'rgba(255,255,255,0.05)' }}>
+                        <Text style={{ fontSize: 12, color: FG, fontFamily: FB }} numberOfLines={1}>{m.memberName}</Text>
+                        <Text style={{ fontSize: 12, color: m.count >= 5 ? RED : m.count >= 3 ? '#FFC000' : MUTED, fontFamily: FH }}>{m.count} skips</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </>
+            );
+          })()}
         </>
       )}
 
