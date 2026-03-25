@@ -159,7 +159,8 @@ export default function AccountPanel({ visible, onClose }: Props) {
   }
 
   function handleSettings() {
-    showToast('Settings coming soon — stay tuned!');
+    onClose();
+    setTimeout(() => router.push('/(app)/account'), 240);
   }
 
   function handleHelp() {

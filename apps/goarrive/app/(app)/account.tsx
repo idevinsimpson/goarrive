@@ -6,6 +6,7 @@
  * Prompt 5: Adds coach personal Zoom connection panel.
  */
 import React, { useState, useEffect, useCallback } from 'react';
+import { router } from 'expo-router';
 import {
   View,
   Text,
@@ -68,11 +69,19 @@ export default function AccountScreen({ onClose }: Props) {
   const isCoach = claims?.role === 'coach' || claims?.role === 'admin';
   const coachId = claims?.coachId || user?.uid;
 
+  function handleBack() {
+    if (onClose) {
+      onClose();
+    } else {
+      router.back();
+    }
+  }
+
   return (
     <View style={s.root}>
       {/* Header */}
       <View style={s.header}>
-        <Pressable onPress={onClose} hitSlop={8}>
+        <Pressable onPress={handleBack} hitSlop={8}>
           <Icon name="arrow-left" size={24} color="#8A95A3" />
         </Pressable>
         <Text style={s.headerTitle}>Account</Text>
