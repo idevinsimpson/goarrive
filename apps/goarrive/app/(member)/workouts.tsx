@@ -41,6 +41,7 @@ import { Icon } from '../../components/Icon';
 import WorkoutPlayer from '../../components/WorkoutPlayer';
 import PostWorkoutJournal, { JournalEntry } from '../../components/PostWorkoutJournal';
 import MemberWorkoutHistory from '../../components/MemberWorkoutHistory';
+import WorkoutCalendarStrip from '../../components/WorkoutCalendarStrip';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH =
@@ -59,6 +60,13 @@ interface AssignedWorkout {
   completedAt?: any;
   /** Snapshot of workout data at assignment time (versioning) */
   workoutSnapshot?: any;
+}
+
+/** Lightweight reaction data from workout_logs for completed assignments */
+interface ReactionInfo {
+  coachReaction?: string;
+  coachNote?: string;
+  reviewStatus?: string;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -109,6 +117,10 @@ export default function MemberWorkoutsScreen() {
   const [completedDuration, setCompletedDuration] = useState(0);
   const [completedWorkoutName, setCompletedWorkoutName] = useState('');
   const [historyVisible, setHistoryVisible] = useState(false);
+  const [calendarDate, setCalendarDate] = useState<string | null>(null);
+
+  // Coach reactions for completed assignments
+  const [reactions, setReactions] = useState<Record<string, ReactionInfo>>({});
 
   // Duration tracking
   const workoutStartTime = useRef<number | null>(null);
@@ -298,6 +310,38 @@ export default function MemberWorkoutsScreen() {
     processQueue().catch(() => {});
   }, []);
 
+  // ── Listen for coach reactions on workout_logs ───────────────────────
+  useEffect(() => {
+    if (!memberId) return;
+
+    const q = query(
+      collection(db, 'workout_logs'),
+      where('memberId', '==', memberId),
+      orderBy('completedAt', 'desc'),
+    );
+
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const map: Record<string, ReactionInfo> = {};
+        snap.docs.forEach((d) => {
+          const data = d.data();
+          if (data.assignmentId) {
+            map[data.assignmentId] = {
+              coachReaction: data.coachReaction || '',
+              coachNote: data.coachNote || '',
+              reviewStatus: data.reviewStatus || 'pending',
+            };
+          }
+        });
+        setReactions(map);
+      },
+      (err) => console.error('[MemberWorkouts] Reaction listener error:', err),
+    );
+
+    return () => unsub();
+  }, [memberId]);
+
   // ── Categorize assignments ────────────────────────────────────────────
   const today = todayString();
   const todayWorkouts = assignments.filter(
@@ -368,16 +412,28 @@ export default function MemberWorkoutsScreen() {
         />
       </View>
       <View style={s.assignmentInfo}>
-        <Text style={s.assignmentName} numberOfLines={1}>
-          {item.workoutName}
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Text style={s.assignmentName} numberOfLines={1}>
+            {item.workoutName}
+          </Text>
+          {section === 'completed' && reactions[item.id]?.coachReaction ? (
+            <Text style={s.reactionEmoji}>{reactions[item.id].coachReaction}</Text>
+          ) : null}
+        </View>
         <Text style={s.assignmentMeta}>
           {section === 'completed'
-            ? `Completed · ${formatDate(item.scheduledFor)}`
+            ? reactions[item.id]?.reviewStatus === 'reviewed'
+              ? `Reviewed by coach · ${formatDate(item.scheduledFor)}`
+              : `Completed · ${formatDate(item.scheduledFor)}`
             : section === 'missed'
             ? `Missed · ${formatDate(item.scheduledFor)}`
             : formatDate(item.scheduledFor)}
         </Text>
+        {section === 'completed' && reactions[item.id]?.coachNote ? (
+          <Text style={s.coachNotePreview} numberOfLines={1}>
+            Coach: "{reactions[item.id].coachNote}"
+          </Text>
+        ) : null}
       </View>
       {section === 'upcoming' && (
         <Pressable
@@ -452,6 +508,23 @@ export default function MemberWorkoutsScreen() {
     sections.push({ type: 'empty' });
   }
 
+  // Filter by calendar date selection
+  const displaySections = calendarDate
+    ? sections.filter((si) => {
+        if (si.type === 'header') return true; // keep headers, filter below
+        if (si.type === 'today') return si.item.scheduledFor === calendarDate;
+        if (si.type === 'card') return si.item.scheduledFor === calendarDate;
+        return true;
+      }).filter((si, idx, arr) => {
+        // Remove headers with no following items
+        if (si.type === 'header') {
+          const next = arr[idx + 1];
+          return next && next.type !== 'header';
+        }
+        return true;
+      })
+    : sections;
+
   const renderSectionItem = ({ item: si }: { item: SectionItem }) => {
     switch (si.type) {
       case 'header':
@@ -513,8 +586,15 @@ export default function MemberWorkoutsScreen() {
         </View>
       </View>
 
+      {/* Calendar strip */}
+      <WorkoutCalendarStrip
+        assignments={assignments}
+        selectedDate={calendarDate}
+        onSelectDate={(d) => setCalendarDate(calendarDate === d ? null : d)}
+      />
+
       <FlatList
-        data={sections}
+        data={displaySections}
         renderItem={renderSectionItem}
         keyExtractor={(item, index) => {
           if (item.type === 'today' || item.type === 'card') return item.item.id;
@@ -756,6 +836,18 @@ const s = StyleSheet.create({
     fontWeight: '700',
     color: '#F5A623',
     fontFamily: FH,
+  },
+
+  // Coach reaction display
+  reactionEmoji: {
+    fontSize: 18,
+  },
+  coachNotePreview: {
+    fontSize: 11,
+    color: '#F5A623',
+    fontFamily: FB,
+    fontStyle: 'italic',
+    marginTop: 3,
   },
 
   // Empty state

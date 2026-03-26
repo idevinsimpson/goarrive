@@ -25,6 +25,7 @@ import { db } from '../lib/firebase';
 import { doc, onSnapshot, updateDoc, addDoc, collection, Timestamp } from 'firebase/firestore';
 import { Icon } from './Icon';
 import AssignWorkoutModal from './AssignWorkoutModal';
+import BatchAssignModal from './BatchAssignModal';
 import { useAuth } from '../lib/AuthContext';
 
 const FONT_HEADING =
@@ -72,6 +73,7 @@ export default function WorkoutDetail({
 
   const [currentWorkout, setCurrentWorkout] = useState<WorkoutDetailData>(workout);
   const [showAssignModal, setShowAssignModal] = useState(false);
+  const [showBatchModal, setShowBatchModal] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, 'workouts', workout.id), (snapshot) => {
@@ -381,14 +383,23 @@ export default function WorkoutDetail({
               </TouchableOpacity>
             )}
 
-            {/* Row 2: Assign to Member */}
-            <TouchableOpacity
-              style={styles.assignBtn}
-              onPress={() => setShowAssignModal(true)}
-            >
-              <Icon name="person" size={18} color="#0E1117" />
-              <Text style={styles.assignBtnText}>Assign to Member</Text>
-            </TouchableOpacity>
+            {/* Row 2: Assign buttons */}
+            <View style={styles.actionRow}>
+              <TouchableOpacity
+                style={[styles.assignBtn, { flex: 1 }]}
+                onPress={() => setShowAssignModal(true)}
+              >
+                <Icon name="person" size={18} color="#0E1117" />
+                <Text style={styles.assignBtnText}>Assign</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.assignBtn, { flex: 1, backgroundColor: '#7DD3FC' }]}
+                onPress={() => setShowBatchModal(true)}
+              >
+                <Icon name="people" size={18} color="#0E1117" />
+                <Text style={styles.assignBtnText}>Assign to Multiple</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </View>
@@ -405,6 +416,17 @@ export default function WorkoutDetail({
           await handleAssign(workoutId, workoutName, scheduledFor, memberId ?? '');
           setShowAssignModal(false);
         }}
+      />
+
+      {/* Batch Assign Modal */}
+      <BatchAssignModal
+        visible={showBatchModal}
+        coachId={coachId}
+        workoutId={currentWorkout.id}
+        workoutName={currentWorkout.name}
+        workoutSnapshot={currentWorkout.blocks ? { blocks: currentWorkout.blocks, name: currentWorkout.name } : undefined}
+        onClose={() => setShowBatchModal(false)}
+        onDone={() => setShowBatchModal(false)}
       />
     </Modal>
   );

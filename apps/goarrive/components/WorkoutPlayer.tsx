@@ -59,6 +59,8 @@ interface FlatMovement {
   videoUrl?: string;
   /** Poster/thumbnail image URL */
   thumbnailUrl?: string;
+  /** Coaching cues text from movement library */
+  coachingCues?: string;
 }
 
 type Phase = 'ready' | 'countdown' | 'work' | 'rest' | 'swap' | 'complete';
@@ -137,6 +139,7 @@ export default function WorkoutPlayer({
             reps: mv.reps,
             videoUrl: mv.videoUrl || mv.mediaUrl || '',
             thumbnailUrl: mv.thumbnailUrl || '',
+            coachingCues: mv.coachingCues || '',
           });
         });
       }
@@ -153,6 +156,9 @@ export default function WorkoutPlayer({
   const total = flatMovements.current.length;
   const next =
     currentIndex + 1 < total ? flatMovements.current[currentIndex + 1] : null;
+
+  // Rep-based mode: movement has reps but no meaningful duration (or duration is 0)
+  const isRepBased = !!(current?.reps && (!current.duration || current.duration <= 0));
 
   // ── Timer ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -191,6 +197,8 @@ export default function WorkoutPlayer({
       setTimeLeft(current?.duration ?? 30);
       hapticHeavy();
     } else if (phase === 'work') {
+      // Rep-based movements don't auto-advance on timer
+      if (isRepBased) return;
       // Check swap sides
       if (current?.swapSides && swapSide === 'L') {
         setSwapSide('R');
@@ -244,6 +252,22 @@ export default function WorkoutPlayer({
 
   const handleFinish = () => {
     onComplete();
+  };
+
+  /** Rep-based: member taps Done after completing reps */
+  const handleRepDone = () => {
+    if (!current) return;
+    hapticMedium();
+    if (current.swapSides && swapSide === 'L') {
+      setSwapSide('R');
+      setPhase('swap');
+      setTimeLeft(3);
+    } else if (current.restAfter > 0) {
+      setPhase('rest');
+      setTimeLeft(current.restAfter);
+    } else {
+      advanceToNext();
+    }
   };
 
   // ── Format time ───────────────────────────────────────────────────────
@@ -346,26 +370,46 @@ export default function WorkoutPlayer({
             {current.description ? (
               <Text style={st.cues} numberOfLines={2}>{current.description}</Text>
             ) : null}
+            {current.coachingCues && current.coachingCues !== current.description ? (
+              <View style={st.cuesBox}>
+                <Text style={st.cuesBoxLabel}>COACHING CUES</Text>
+                <Text style={st.cuesBoxText} numberOfLines={3}>{current.coachingCues}</Text>
+              </View>
+            ) : null}
             {current.reps ? (
               <Text style={st.repsText}>{current.reps} reps</Text>
             ) : null}
 
-            {/* Timer ring */}
-            <View style={st.timerRing}>
-              <Text style={st.timerNum}>{formatTime(timeLeft)}</Text>
-              <Text style={st.timerSub}>seconds</Text>
-            </View>
-
-            {/* Controls */}
-            <View style={st.controls}>
-              <TouchableOpacity style={st.controlBtn} onPress={handlePauseResume}>
-                <Icon name={isPaused ? 'play' : 'pause'} size={32} color="#0E1117" />
-              </TouchableOpacity>
-              <TouchableOpacity style={st.skipBtn} onPress={handleSkip}>
-                <Icon name="skip-forward" size={24} color="#F5A623" />
-                <Text style={st.skipText}>Skip</Text>
-              </TouchableOpacity>
-            </View>
+            {isRepBased ? (
+              /* Rep-based mode: large Done button instead of timer */
+              <>
+                <TouchableOpacity style={st.repDoneBtn} onPress={handleRepDone}>
+                  <Icon name="check" size={36} color="#0E1117" />
+                  <Text style={st.repDoneBtnText}>Done</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={st.skipBtn} onPress={handleSkip}>
+                  <Icon name="skip-forward" size={24} color="#F5A623" />
+                  <Text style={st.skipText}>Skip</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              /* Timer-based mode: countdown ring + pause/skip */
+              <>
+                <View style={st.timerRing}>
+                  <Text style={st.timerNum}>{formatTime(timeLeft)}</Text>
+                  <Text style={st.timerSub}>seconds</Text>
+                </View>
+                <View style={st.controls}>
+                  <TouchableOpacity style={st.controlBtn} onPress={handlePauseResume}>
+                    <Icon name={isPaused ? 'play' : 'pause'} size={32} color="#0E1117" />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={st.skipBtn} onPress={handleSkip}>
+                    <Icon name="skip-forward" size={24} color="#F5A623" />
+                    <Text style={st.skipText}>Skip</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
 
             {/* Next up preview */}
             {next && (
@@ -592,6 +636,31 @@ const st = StyleSheet.create({
     marginBottom: 8,
     lineHeight: 20,
   },
+  cuesBox: {
+    backgroundColor: 'rgba(245,166,35,0.08)',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginTop: 4,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.15)',
+    maxWidth: '90%',
+  },
+  cuesBoxLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#F5A623',
+    fontFamily: FH,
+    letterSpacing: 1,
+    marginBottom: 4,
+  },
+  cuesBoxText: {
+    fontSize: 13,
+    color: '#C8CED6',
+    fontFamily: FB,
+    lineHeight: 18,
+  },
   repsText: {
     fontSize: 16,
     fontWeight: '600',
@@ -671,6 +740,23 @@ const st = StyleSheet.create({
     backgroundColor: '#F5A623',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  repDoneBtn: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#6EBB7A',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 24,
+    marginBottom: 16,
+  },
+  repDoneBtnText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0E1117',
+    fontFamily: FH,
+    marginTop: 4,
   },
   skipBtn: {
     flexDirection: 'row',

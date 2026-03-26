@@ -118,6 +118,7 @@ export default function MovementForm({
   const [uploadProgress, setUploadProgress] = useState(0);
   const [regression, setRegression] = useState('');
   const [progression, setProgression] = useState('');
+  const [contraindications, setContraindications] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   // ── Pre-populate on edit ───────────────────────────────────────────────
@@ -137,6 +138,7 @@ export default function MovementForm({
       setThumbnailUrl((editMovement as any).thumbnailUrl || '');
       setRegression((editMovement as any).regression || '');
       setProgression((editMovement as any).progression || '');
+      setContraindications((editMovement as any).contraindications || '');
     } else {
       resetForm();
     }
@@ -159,6 +161,7 @@ export default function MovementForm({
     setUploadProgress(0);
     setRegression('');
     setProgression('');
+    setContraindications('');
   };
 
   // ── Media upload ──────────────────────────────────────────────────────
@@ -262,6 +265,7 @@ export default function MovementForm({
         thumbnailUrl: thumbnailUrl.trim(),
         regression: regression.trim(),
         progression: progression.trim(),
+        contraindications: contraindications.trim(),
         updatedAt: serverTimestamp(),
       };
 
@@ -555,6 +559,18 @@ export default function MovementForm({
               placeholder="e.g. Weighted push-ups, Archer pull-ups..."
               placeholderTextColor="#4A5568"
               autoCapitalize="sentences"
+            />
+
+            <Text style={st.label}>Contraindications</Text>
+            <TextInput
+              style={[st.input, { minHeight: 60 }]}
+              value={contraindications}
+              onChangeText={setContraindications}
+              placeholder="e.g. Avoid with lower back injury, not for post-surgery recovery..."
+              placeholderTextColor="#4A5568"
+              autoCapitalize="sentences"
+              multiline
+              numberOfLines={2}
             />
           </ScrollView>
 

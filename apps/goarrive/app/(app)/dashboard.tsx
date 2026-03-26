@@ -31,6 +31,7 @@ import ListSkeleton from '../../components/ListSkeleton';
 import { Icon } from '../../components/Icon';
 import OnboardingChecklist from '../../components/OnboardingChecklist';
 import { router } from 'expo-router';
+import AdminWorkoutMetrics from '../../components/AdminWorkoutMetrics';
 
 const FONT_HEADING =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -104,6 +105,8 @@ const ADMIN_CARDS: FeatureCard[] = [
 export default function DashboardScreen() {
   const { user, claims } = useAuth();
   const coachId = claims?.coachId ?? user?.uid ?? '';
+  const isAdmin = claims?.role === 'admin' || claims?.role === 'platform_admin';
+  const [showAdminMetrics, setShowAdminMetrics] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -282,6 +285,18 @@ export default function DashboardScreen() {
           </Pressable>
         )}
 
+        {/* Admin: Platform Workout Metrics */}
+        {isAdmin && (
+          <Pressable
+            style={s.adminMetricsBtn}
+            onPress={() => setShowAdminMetrics(true)}
+          >
+            <Icon name="stats" size={18} color="#F5A623" />
+            <Text style={s.adminMetricsBtnText}>Platform Workout Metrics</Text>
+            <Icon name="chevron-right" size={16} color="#F5A623" />
+          </Pressable>
+        )}
+
         {/* Stats grid */}
         <View style={s.statsGrid}>
           <Pressable
@@ -377,6 +392,12 @@ export default function DashboardScreen() {
 
         <View style={s.bottomPad} />
       </ScrollView>
+
+      {/* Admin Workout Metrics Modal */}
+      <AdminWorkoutMetrics
+        visible={showAdminMetrics}
+        onClose={() => setShowAdminMetrics(false)}
+      />
     </View>
   );
 }
@@ -473,6 +494,26 @@ const s = StyleSheet.create({
   reviewBannerText: {
     fontSize: 15,
     color: '#E05252',
+    fontFamily: FONT_BODY,
+    fontWeight: '600',
+  },
+  adminMetricsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(245,166,35,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.15)',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 20,
+    gap: 8,
+  },
+  adminMetricsBtnText: {
+    flex: 1,
+    fontSize: 15,
+    color: '#F5A623',
     fontFamily: FONT_BODY,
     fontWeight: '600',
   },

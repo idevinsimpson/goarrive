@@ -6291,3 +6291,138 @@ export const onWorkoutLogReviewed = onDocumentUpdated(
     }
   },
 );
+
+// ────────────────────────────────────────────────────────────────────────────
+// Movement Media Transcoding Pipeline
+// ────────────────────────────────────────────────────────────────────────────
+// Triggers when a video is uploaded to movements/{coachId}/ in Firebase Storage.
+// Generates a lightweight thumbnail poster (first frame) and updates the
+// movement document with the thumbnailUrl.
+//
+// Requires: sharp (for image extraction from video poster)
+// Note: Full ffmpeg transcoding requires a higher-memory Cloud Function or
+// a dedicated media pipeline. This stub handles thumbnail generation from
+// the uploaded poster/thumbnail, and sets the movement's thumbnailUrl field.
+// ────────────────────────────────────────────────────────────────────────────
+
+import { onObjectFinalized } from 'firebase-functions/v2/storage';
+
+export const onMovementMediaUploaded = onObjectFinalized(
+  { region: 'us-central1', memory: '512MiB', timeoutSeconds: 120 },
+  async (event) => {
+    const filePath = event.data.name;
+    const contentType = event.data.contentType || '';
+
+    // Only process files in the movements/ directory
+    if (!filePath || !filePath.startsWith('movements/')) return;
+
+    // Only process video/image files
+    const isVideo = contentType.startsWith('video/');
+    const isImage = contentType.startsWith('image/');
+    if (!isVideo && !isImage) return;
+
+    // Skip if this is already a thumbnail
+    if (filePath.includes('_thumb')) return;
+
+    const db = admin.firestore();
+    const bucket = admin.storage().bucket(event.data.bucket);
+
+    // Extract coachId from path: movements/{coachId}/{filename}
+    const parts = filePath.split('/');
+    if (parts.length < 3) return;
+    const coachId = parts[1];
+
+    // Get the download URL for the uploaded file
+    const file = bucket.file(filePath);
+    const [signedUrl] = await file.getSignedUrl({
+      action: 'read',
+      expires: '2099-12-31',
+    });
+
+    // For images, generate a resized thumbnail
+    if (isImage) {
+      try {
+        // Download the image
+        const [buffer] = await file.download();
+
+        // Use sharp to create a 320px wide thumbnail
+        let sharp: any;
+        try {
+          sharp = require('sharp');
+        } catch {
+          console.log('[onMovementMediaUploaded] sharp not available, skipping thumbnail generation');
+          return;
+        }
+
+        const thumbBuffer = await sharp(buffer)
+          .resize(320, 320, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 75 })
+          .toBuffer();
+
+        // Upload thumbnail
+        const thumbPath = filePath.replace(/\.[^.]+$/, '_thumb.jpg');
+        const thumbFile = bucket.file(thumbPath);
+        await thumbFile.save(thumbBuffer, {
+          metadata: { contentType: 'image/jpeg' },
+        });
+        await thumbFile.makePublic();
+
+        const thumbUrl = `https://storage.googleapis.com/${event.data.bucket}/${thumbPath}`;
+
+        // Find and update the movement document that references this media
+        const movementsSnap = await db
+          .collection('movements')
+          .where('coachId', '==', coachId)
+          .where('mediaUrl', '==', signedUrl)
+          .limit(1)
+          .get();
+
+        if (!movementsSnap.empty) {
+          await movementsSnap.docs[0].ref.update({
+            thumbnailUrl: thumbUrl,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+
+        console.log(`[onMovementMediaUploaded] Thumbnail generated: ${thumbPath}`);
+      } catch (err) {
+        console.error('[onMovementMediaUploaded] Thumbnail generation error:', err);
+      }
+    }
+
+    // For videos, just log — full ffmpeg transcoding requires additional setup
+    if (isVideo) {
+      console.log(
+        `[onMovementMediaUploaded] Video uploaded: ${filePath}. ` +
+        `Full transcoding pipeline requires ffmpeg. ` +
+        `Consider using Cloud Run or a dedicated media service for H.264 re-encoding.`
+      );
+
+      // Still update the movement doc with the video URL if we can match it
+      try {
+        const movementsSnap = await db
+          .collection('movements')
+          .where('coachId', '==', coachId)
+          .limit(50)
+          .get();
+
+        // Find the movement whose mediaUrl matches the storage path
+        for (const doc of movementsSnap.docs) {
+          const data = doc.data();
+          if (data.mediaUrl && data.mediaUrl.includes(encodeURIComponent(filePath.split('/').pop() || ''))) {
+            // If no thumbnail exists yet, set a placeholder note
+            if (!data.thumbnailUrl) {
+              await doc.ref.update({
+                transcodingStatus: 'pending',
+                updatedAt: FieldValue.serverTimestamp(),
+              });
+            }
+            break;
+          }
+        }
+      } catch (err) {
+        console.error('[onMovementMediaUploaded] Video doc update error:', err);
+      }
+    }
+  },
+);

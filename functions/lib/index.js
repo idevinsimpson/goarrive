@@ -72,7 +72,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
-exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
+exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -5359,5 +5359,169 @@ exports.checkGcalConflicts = (0, https_1.onCall)({ secrets: [googleClientId, goo
         hasConflict: conflictingEvents.length > 0,
         conflictingEvents,
     };
+});
+// ─── Workout Push Notifications ─────────────────────────────────────────────
+/**
+ * Send a push notification to a member when a workout is assigned to them.
+ * Fires on workout_assignments document creation.
+ */
+exports.onWorkoutAssigned = (0, firestore_1.onDocumentCreated)('workout_assignments/{assignmentId}', async (event) => {
+    var _a;
+    const snap = event.data;
+    if (!snap)
+        return;
+    const data = snap.data();
+    const memberId = data.memberId;
+    if (!memberId) {
+        console.warn('[onWorkoutAssigned] No memberId on assignment', snap.id);
+        return;
+    }
+    // Look up member's Expo push tokens
+    const tokensSnap = await db
+        .collection('users')
+        .doc(memberId)
+        .collection('fcmTokens')
+        .get();
+    if (tokensSnap.empty) {
+        console.log('[onWorkoutAssigned] No push tokens for member', memberId);
+        return;
+    }
+    const workoutName = data.workoutName || 'a workout';
+    const scheduledDate = data.scheduledFor
+        ? data.scheduledFor.toDate().toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+        })
+        : 'soon';
+    const title = 'New Workout Assigned';
+    const body = `Your coach assigned "${workoutName}" for ${scheduledDate}. Open GoArrive to get started.`;
+    // Also try legacy fcmToken field on user doc
+    let legacyToken;
+    try {
+        const userDoc = await db.collection('users').doc(memberId).get();
+        legacyToken = (_a = userDoc.data()) === null || _a === void 0 ? void 0 : _a.fcmToken;
+    }
+    catch (_b) { }
+    // Send via FCM to all registered tokens
+    const tokens = [];
+    tokensSnap.docs.forEach((d) => {
+        var _a;
+        const t = (_a = d.data()) === null || _a === void 0 ? void 0 : _a.token;
+        if (t)
+            tokens.push(t);
+    });
+    if (legacyToken && !tokens.includes(legacyToken)) {
+        tokens.push(legacyToken);
+    }
+    for (const token of tokens) {
+        try {
+            await messaging.send({
+                token,
+                notification: { title, body },
+                data: { type: 'workout_assigned', assignmentId: snap.id },
+                webpush: {
+                    notification: { title, body, icon: '/icons/icon-192.png' },
+                    fcmOptions: { link: '/workouts' },
+                },
+                apns: {
+                    payload: { aps: { alert: { title, body }, sound: 'default', badge: 1 } },
+                },
+            });
+            console.log('[onWorkoutAssigned] Push sent to token', token.substring(0, 20) + '...');
+        }
+        catch (err) {
+            const code = (err === null || err === void 0 ? void 0 : err.code) || '';
+            if (code === 'messaging/registration-token-not-registered' ||
+                code === 'messaging/invalid-registration-token') {
+                console.warn('[onWorkoutAssigned] Stale token, removing');
+                // Remove stale token from subcollection
+                const staleDoc = tokensSnap.docs.find((d) => { var _a; return ((_a = d.data()) === null || _a === void 0 ? void 0 : _a.token) === token; });
+                if (staleDoc)
+                    await staleDoc.ref.delete().catch(() => { });
+            }
+            else {
+                console.error('[onWorkoutAssigned] FCM error:', err);
+            }
+        }
+    }
+});
+/**
+ * Send a push notification to a member when their coach reviews a workout log.
+ * Fires on workout_logs document update when coachReaction or coachNote is added.
+ */
+exports.onWorkoutLogReviewed = (0, firestore_1.onDocumentUpdated)('workout_logs/{logId}', async (event) => {
+    var _a, _b, _c, _d, _e;
+    const before = (_b = (_a = event.data) === null || _a === void 0 ? void 0 : _a.before) === null || _b === void 0 ? void 0 : _b.data();
+    const after = (_d = (_c = event.data) === null || _c === void 0 ? void 0 : _c.after) === null || _d === void 0 ? void 0 : _d.data();
+    if (!before || !after)
+        return;
+    // Only fire when review fields change
+    const reactionChanged = before.coachReaction !== after.coachReaction;
+    const noteChanged = before.coachNote !== after.coachNote;
+    if (!reactionChanged && !noteChanged)
+        return;
+    const memberId = after.memberId;
+    if (!memberId)
+        return;
+    // Look up member's push tokens
+    const tokensSnap = await db
+        .collection('users')
+        .doc(memberId)
+        .collection('fcmTokens')
+        .get();
+    let legacyToken;
+    try {
+        const userDoc = await db.collection('users').doc(memberId).get();
+        legacyToken = (_e = userDoc.data()) === null || _e === void 0 ? void 0 : _e.fcmToken;
+    }
+    catch (_f) { }
+    const tokens = [];
+    tokensSnap.docs.forEach((d) => {
+        var _a;
+        const t = (_a = d.data()) === null || _a === void 0 ? void 0 : _a.token;
+        if (t)
+            tokens.push(t);
+    });
+    if (legacyToken && !tokens.includes(legacyToken)) {
+        tokens.push(legacyToken);
+    }
+    if (tokens.length === 0) {
+        console.log('[onWorkoutLogReviewed] No push tokens for member', memberId);
+        return;
+    }
+    const workoutName = after.workoutName || 'your workout';
+    const reaction = after.coachReaction || '';
+    const title = 'Coach Feedback';
+    const body = reaction
+        ? `Your coach reacted ${reaction} to "${workoutName}". ${after.coachNote ? 'They also left a note.' : ''}`
+        : `Your coach left feedback on "${workoutName}".`;
+    for (const token of tokens) {
+        try {
+            await messaging.send({
+                token,
+                notification: { title, body: body.trim() },
+                data: { type: 'workout_reviewed', logId: event.params.logId },
+                webpush: {
+                    notification: { title, body: body.trim(), icon: '/icons/icon-192.png' },
+                    fcmOptions: { link: '/workouts' },
+                },
+                apns: {
+                    payload: { aps: { alert: { title, body: body.trim() }, sound: 'default', badge: 1 } },
+                },
+            });
+        }
+        catch (err) {
+            const code = (err === null || err === void 0 ? void 0 : err.code) || '';
+            if (code === 'messaging/registration-token-not-registered' ||
+                code === 'messaging/invalid-registration-token') {
+                const staleDoc = tokensSnap.docs.find((d) => { var _a; return ((_a = d.data()) === null || _a === void 0 ? void 0 : _a.token) === token; });
+                if (staleDoc)
+                    await staleDoc.ref.delete().catch(() => { });
+            }
+            else {
+                console.error('[onWorkoutLogReviewed] FCM error:', err);
+            }
+        }
+    }
 });
 //# sourceMappingURL=index.js.map

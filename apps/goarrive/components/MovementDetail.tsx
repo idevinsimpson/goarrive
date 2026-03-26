@@ -49,6 +49,7 @@ export interface MovementDetailData {
   createdBy?: string | null;
   regression?: string;
   progression?: string;
+  contraindications?: string;
   [key: string]: any;
 }
 
@@ -166,6 +167,16 @@ export default function MovementDetail({
                   <Text style={s.altValue}>{movement.progression}</Text>
                 </View>
               ) : null}
+            </View>
+          ) : null}
+
+          {/* Contraindications */}
+          {movement.contraindications ? (
+            <View style={s.section}>
+              <Text style={[s.sectionLabel, { color: '#EF4444' }]}>Contraindications</Text>
+              <Text style={[s.descText, { color: '#F0A0A0' }]}>
+                {movement.contraindications}
+              </Text>
             </View>
           ) : null}
 
