@@ -50,6 +50,7 @@ export default function MovementVideoControls({
   showControls = true,
 }: MovementVideoControlsProps) {
   const videoRef = useRef<Video>(null);
+  const containerRef = useRef<View>(null);
   const [isPlaying, setIsPlaying] = useState(autoPlay);
   const [isLooping, setIsLooping] = useState(true);
   const [speed, setSpeed] = useState<number>(1);
@@ -103,22 +104,35 @@ export default function MovementVideoControls({
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const toggleFullscreen = useCallback(async () => {
-    if (!videoRef.current) return;
     try {
       if (Platform.OS === 'web') {
-        // Web: use native Fullscreen API on the video element's parent
-        const el = (videoRef.current as any)?._nativeRef?.current;
-        if (el) {
+        // Web: use Fullscreen API on the container wrapper (not _nativeRef)
+        const containerEl = (containerRef.current as any);
+        // React Native Web exposes the underlying DOM node
+        const domNode =
+          containerEl?._nativeTag ||
+          containerEl?.getNode?.() ||
+          containerEl;
+        if (domNode && typeof domNode.requestFullscreen === 'function') {
           if (!document.fullscreenElement) {
-            await el.requestFullscreen?.();
+            await domNode.requestFullscreen();
             setIsFullscreen(true);
           } else {
             await document.exitFullscreen?.();
             setIsFullscreen(false);
           }
+        } else {
+          // Fallback: try the video element directly
+          const videoEl = (videoRef.current as any)?._nativeRef?.current ||
+            (videoRef.current as any);
+          if (videoEl && typeof videoEl.requestFullscreen === 'function') {
+            await videoEl.requestFullscreen();
+            setIsFullscreen(true);
+          }
         }
       } else {
         // Native: use expo-av's built-in fullscreen
+        if (!videoRef.current) return;
         if (isFullscreen) {
           await videoRef.current.dismissFullscreenPlayer();
         } else {
@@ -131,6 +145,16 @@ export default function MovementVideoControls({
     }
   }, [isFullscreen]);
 
+  // Listen for fullscreen exit via Escape key on web
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const handler = () => {
+      if (!document.fullscreenElement) setIsFullscreen(false);
+    };
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
+
   // ── Format time ──────────────────────────────────────────────────────
   const formatMs = (ms: number): string => {
     const sec = Math.floor(ms / 1000);
@@ -142,7 +166,7 @@ export default function MovementVideoControls({
   const progressPct = duration > 0 ? position / duration : 0;
 
   return (
-    <View style={[st.container, { height }]}>
+    <View ref={containerRef} style={[st.container, { height }]}>
       <TouchableOpacity
         activeOpacity={1}
         onPress={() => setShowOverlay((o) => !o)}

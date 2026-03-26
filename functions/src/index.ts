@@ -6531,10 +6531,20 @@ export const onWorkoutCompleted = onDocumentCreated(
 
     // Check if journal was submitted
     const hasJournal = data.journal && (data.journal.glow || data.journal.grow);
-    const title = 'Workout Completed';
-    const body = hasJournal
-      ? `${memberName} completed "${workoutName}" and left a reflection.`
-      : `${memberName} completed "${workoutName}". Tap to review.`;
+    const swaps = Array.isArray(data.movementSwaps) ? data.movementSwaps : [];
+    const swapCount = swaps.length;
+
+    const title = swapCount > 0 ? 'Workout Completed (with swaps)' : 'Workout Completed';
+    let body: string;
+    if (swapCount > 0 && hasJournal) {
+      body = `${memberName} completed "${workoutName}" with ${swapCount} movement swap${swapCount !== 1 ? 's' : ''} and left a reflection.`;
+    } else if (swapCount > 0) {
+      body = `${memberName} completed "${workoutName}" with ${swapCount} movement swap${swapCount !== 1 ? 's' : ''}. Tap to review.`;
+    } else if (hasJournal) {
+      body = `${memberName} completed "${workoutName}" and left a reflection.`;
+    } else {
+      body = `${memberName} completed "${workoutName}". Tap to review.`;
+    }
 
     for (const token of tokens) {
       try {

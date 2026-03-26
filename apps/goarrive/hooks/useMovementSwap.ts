@@ -9,7 +9,7 @@
  *   const { alternatives, showSwap, openSwap, closeSwap, swapMovement } =
  *     useMovementSwap(flatMovements, currentIndex, setFlatOverride);
  */
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { db } from '../lib/firebase';
 import {
   collection,
@@ -45,6 +45,15 @@ interface FlatMovement {
   roundLabel?: string;
 }
 
+export interface SwapLogEntry {
+  originalName: string;
+  originalId?: string;
+  swappedName: string;
+  swappedId: string;
+  category: string;
+  timestamp: number;
+}
+
 export function useMovementSwap(
   flatMovements: FlatMovement[],
   currentIndex: number,
@@ -53,6 +62,7 @@ export function useMovementSwap(
   const [showSwap, setShowSwap] = useState(false);
   const [alternatives, setAlternatives] = useState<Alternative[]>([]);
   const [loadingAlts, setLoadingAlts] = useState(false);
+  const swapLogRef = useRef<SwapLogEntry[]>([]);
 
   const currentMovement = useMemo(
     () => flatMovements[currentIndex] || null,
@@ -93,6 +103,26 @@ export function useMovementSwap(
         });
       });
 
+      // Fallback: if no same-category alternatives, broaden to all movements
+      if (alts.length === 0) {
+        const fallbackQ = query(
+          collection(db, 'movements'),
+          limit(10),
+        );
+        const fallbackSnap = await getDocs(fallbackQ);
+        fallbackSnap.docs.forEach((doc) => {
+          const d = doc.data();
+          if (d.name === currentMovement.name) return;
+          alts.push({
+            id: doc.id,
+            name: d.name || 'Unknown',
+            category: d.category || 'General',
+            mediaUrl: d.mediaUrl || null,
+            videoUrl: d.videoUrl || null,
+          });
+        });
+      }
+
       setAlternatives(alts);
     } catch (err) {
       console.error('[useMovementSwap] Error loading alternatives:', err);
@@ -114,6 +144,17 @@ export function useMovementSwap(
       // Create updated flat list with the swapped movement
       const updated = [...flatMovements];
       const original = updated[currentIndex];
+
+      // Log the swap
+      swapLogRef.current.push({
+        originalName: original.name,
+        originalId: original.movementId,
+        swappedName: alt.name,
+        swappedId: alt.id,
+        category: alt.category,
+        timestamp: Date.now(),
+      });
+
       updated[currentIndex] = {
         ...original,
         name: alt.name,
@@ -129,6 +170,16 @@ export function useMovementSwap(
     [flatMovements, currentIndex, onSwap, closeSwap],
   );
 
+  /** Get all swaps made during this session */
+  const getSwapLog = useCallback((): SwapLogEntry[] => {
+    return [...swapLogRef.current];
+  }, []);
+
+  /** Reset swap log (e.g. when starting a new workout) */
+  const resetSwapLog = useCallback(() => {
+    swapLogRef.current = [];
+  }, []);
+
   return {
     showSwap,
     alternatives,
@@ -137,5 +188,7 @@ export function useMovementSwap(
     closeSwap,
     swapMovement,
     currentMovement,
+    getSwapLog,
+    resetSwapLog,
   };
 }

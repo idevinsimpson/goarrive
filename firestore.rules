@@ -723,6 +723,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // _system_health: server-only monitoring data (cleanup status, health checks)
+    match /_system_health/{docId} {
+      allow read, write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

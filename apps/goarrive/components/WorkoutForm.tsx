@@ -147,7 +147,10 @@ export default function WorkoutForm({
   const [submitting, setSubmitting] = useState(false);
 
   // ── Template picker state ──────────────────────────────────────────────
-  const { templates, loading: templatesLoading, loadTemplates } = useWorkoutTemplates(coachId);
+  const {
+    templates, loading: templatesLoading, error: templatesError,
+    loadTemplates, renameTemplate, deleteTemplate, toggleShareTemplate,
+  } = useWorkoutTemplates(coachId);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
 
   // ── Movement picker state ──────────────────────────────────────────────
@@ -989,27 +992,81 @@ export default function WorkoutForm({
               {templatesLoading && (
                 <Text style={s.templatePickerHint}>Loading templates...</Text>
               )}
-              {!templatesLoading && templates.length === 0 && (
-                <Text style={s.templatePickerHint}>
-                  No templates found. Save a workout as a template first.
-                </Text>
+              {templatesError && (
+                <View style={{ alignItems: 'center', padding: 20 }}>
+                  <Icon name="alert-circle" size={32} color="#E53E3E" />
+                  <Text style={[s.templatePickerHint, { color: '#E53E3E' }]}>
+                    {templatesError}
+                  </Text>
+                  <TouchableOpacity onPress={loadTemplates} style={{ marginTop: 8 }}>
+                    <Text style={{ color: '#F5A623', fontSize: 14, fontFamily: FB }}>Retry</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              {!templatesLoading && !templatesError && templates.length === 0 && (
+                <View style={{ alignItems: 'center', padding: 30 }}>
+                  <Icon name="file-plus" size={40} color="#4A5568" />
+                  <Text style={[s.templatePickerHint, { marginTop: 12 }]}>
+                    No templates yet
+                  </Text>
+                  <Text style={[s.templatePickerMeta, { textAlign: 'center', marginTop: 4 }]}>
+                    Create a workout and toggle "Save as Template" to build your library.
+                  </Text>
+                </View>
               )}
               {templates.map((t) => (
-                <TouchableOpacity
-                  key={t.id}
-                  style={s.templatePickerItem}
-                  onPress={() => loadFromTemplate(t)}
-                >
-                  <View style={{ flex: 1 }}>
+                <View key={t.id} style={s.templatePickerItem}>
+                  <TouchableOpacity
+                    style={{ flex: 1 }}
+                    onPress={() => loadFromTemplate(t)}
+                  >
                     <Text style={s.templatePickerName}>{t.name}</Text>
                     <Text style={s.templatePickerMeta}>
                       {t.category || 'No category'} · {t.difficulty || 'No difficulty'}
                       {t.blocks?.length ? ` · ${t.blocks.length} block${t.blocks.length !== 1 ? 's' : ''}` : ''}
                       {t.isShared ? ' · Shared' : ''}
                     </Text>
+                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        const newName = Platform.OS === 'web'
+                          ? window.prompt('Rename template:', t.name)
+                          : null;
+                        if (newName) renameTemplate(t.id, newName);
+                        else if (Platform.OS !== 'web') {
+                          Alert.prompt?.('Rename', 'Enter new name:', (name: string) => {
+                            if (name) renameTemplate(t.id, name);
+                          }, 'plain-text', t.name);
+                        }
+                      }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Icon name="edit-2" size={16} color="#8A95A3" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => toggleShareTemplate(t.id, !t.isShared)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Icon name={t.isShared ? 'globe' : 'lock'} size={16} color={t.isShared ? '#F5A623' : '#8A95A3'} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => {
+                        if (Platform.OS === 'web') {
+                          if (window.confirm(`Delete template "${t.name}"?`)) deleteTemplate(t.id);
+                        } else {
+                          Alert.alert('Delete Template', `Delete "${t.name}"?`, [
+                            { text: 'Cancel', style: 'cancel' },
+                            { text: 'Delete', style: 'destructive', onPress: () => deleteTemplate(t.id) },
+                          ]);
+                        }
+                      }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Icon name="trash-2" size={16} color="#E53E3E" />
+                    </TouchableOpacity>
                   </View>
-                  <Icon name="chevron-right" size={18} color="#4A5568" />
-                </TouchableOpacity>
+                </View>
               ))}
             </ScrollView>
           </View>

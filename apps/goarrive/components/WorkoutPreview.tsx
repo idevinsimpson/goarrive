@@ -14,7 +14,7 @@
  *   - onStart: () => void — launches the player
  *   - onClose: () => void — goes back
  */
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   View,
   Text,
@@ -23,8 +23,10 @@ import {
   ScrollView,
   TouchableOpacity,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Icon } from './Icon';
+import { useOfflineVideoCache } from '../hooks/useOfflineVideoCache';
 
 const FH =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -44,6 +46,21 @@ export default function WorkoutPreview({
   onStart,
   onClose,
 }: WorkoutPreviewProps) {
+  const { getCachedUri, cacheVideos, progress, isCaching } = useOfflineVideoCache();
+
+  // Pre-cache all movement videos when preview opens
+  useEffect(() => {
+    if (!visible || !workout) return;
+    const videoUrls: string[] = [];
+    (workout.blocks || []).forEach((block: any) => {
+      (block.movements || []).forEach((mv: any) => {
+        const url = mv.videoUrl || mv.mediaUrl;
+        if (url) videoUrls.push(url);
+      });
+    });
+    if (videoUrls.length > 0) cacheVideos(videoUrls);
+  }, [visible, workout]);
+
   if (!workout) return null;
 
   const blocks = workout.blocks || [];
@@ -179,8 +196,17 @@ export default function WorkoutPreview({
           </View>
         </ScrollView>
 
-        {/* Start button */}
+          {/* Start button */}
         <View style={st.footer}>
+          {/* Video cache progress */}
+          {isCaching && progress.total > 0 && (
+            <View style={st.cacheProgress}>
+              <ActivityIndicator size="small" color="#F5A623" />
+              <Text style={st.cacheText}>
+                Caching videos ({progress.completed}/{progress.total})
+              </Text>
+            </View>
+          )}
           <TouchableOpacity style={st.startBtn} onPress={onStart} activeOpacity={0.8}>
             <Icon name="play" size={20} color="#0E1117" />
             <Text style={st.startBtnText}>Start Workout</Text>
@@ -368,5 +394,17 @@ const st = StyleSheet.create({
     fontWeight: '700',
     color: '#0E1117',
     fontFamily: FH,
+  },
+  cacheProgress: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  cacheText: {
+    fontSize: 12,
+    color: '#8A95A3',
+    fontFamily: FB,
   },
 });

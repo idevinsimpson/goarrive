@@ -53,6 +53,7 @@ interface WorkoutPlayerProps {
   workout: any;
   onClose: () => void;
   onComplete: () => void;
+  onSwapLog?: (swaps: any[]) => void;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -61,6 +62,7 @@ export default function WorkoutPlayer({
   workout,
   onClose,
   onComplete,
+  onSwapLog,
 }: WorkoutPlayerProps) {
   // ── Hooks ────────────────────────────────────────────────────────────
   const flatFromBlocks = useWorkoutFlatten(workout);
@@ -84,7 +86,7 @@ export default function WorkoutPlayer({
   // ── Movement swap (Suggestion 7) ─────────────────────────────
   const {
     showSwap, alternatives, loadingAlts,
-    openSwap, closeSwap, swapMovement,
+    openSwap, closeSwap, swapMovement, getSwapLog,
   } = useMovementSwap(flatMovements, currentIndex, setFlatOverride);
 
   // ── Landscape detection for tablets ─────────────────────────────────
@@ -111,6 +113,11 @@ export default function WorkoutPlayer({
   };
 
   const handleFinish = () => {
+    // Pass swap log to parent before completing
+    if (onSwapLog) {
+      const swaps = getSwapLog();
+      if (swaps.length > 0) onSwapLog(swaps);
+    }
     onComplete();
   };
 

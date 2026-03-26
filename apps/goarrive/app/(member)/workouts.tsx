@@ -45,6 +45,7 @@ import WorkoutCalendarStrip from '../../components/WorkoutCalendarStrip';
 import MemberStreakCard from '../../components/MemberStreakCard';
 import WorkoutPreview from '../../components/WorkoutPreview';
 import WorkoutSessionSummary from '../../components/WorkoutSessionSummary';
+import WorkoutDifficultyTracker from '../../components/WorkoutDifficultyTracker';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH =
@@ -118,6 +119,9 @@ export default function MemberWorkoutsScreen() {
   // Preview state (Suggestion 1: WorkoutPreview before player launch)
   const [previewVisible, setPreviewVisible] = useState(false);
   const [previewWorkout, setPreviewWorkout] = useState<any>(null);
+
+  // Swap log state (S5: track movement swaps for workout_log)
+  const [sessionSwapLog, setSessionSwapLog] = useState<any[]>([]);
 
   // Session summary state (Suggestion 2: summary before journal)
   const [summaryVisible, setSummaryVisible] = useState(false);
@@ -277,6 +281,7 @@ export default function MemberWorkoutsScreen() {
           reviewStatus: 'pending',
           reviewedAt: null,
           coachNote: '',
+          movementSwaps: sessionSwapLog.length > 0 ? sessionSwapLog : null,
         });
       } catch (err) {
         console.error('[MemberWorkouts] Failed to log completion:', err);
@@ -621,6 +626,7 @@ export default function MemberWorkoutsScreen() {
       {/* Streak & consistency card */}
       <View style={{ paddingHorizontal: 20 }}>
         <MemberStreakCard memberId={memberId} />
+        <WorkoutDifficultyTracker memberId={memberId} coachId={assignments[0]?.workoutSnapshot?.coachId ?? ''} />
       </View>
 
       <FlatList
@@ -672,6 +678,7 @@ export default function MemberWorkoutsScreen() {
             workoutStartTime.current = null;
           }}
           onComplete={handlePlayerComplete}
+          onSwapLog={(swaps: any[]) => setSessionSwapLog(swaps)}
         />
       )}
 
