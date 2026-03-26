@@ -40,6 +40,7 @@ import { enqueueWrite, processQueue } from '../../lib/offlineQueue';
 import { Icon } from '../../components/Icon';
 import WorkoutPlayer from '../../components/WorkoutPlayer';
 import PostWorkoutJournal, { JournalEntry } from '../../components/PostWorkoutJournal';
+import MemberWorkoutHistory from '../../components/MemberWorkoutHistory';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH =
@@ -107,6 +108,7 @@ export default function MemberWorkoutsScreen() {
   const [journalVisible, setJournalVisible] = useState(false);
   const [completedDuration, setCompletedDuration] = useState(0);
   const [completedWorkoutName, setCompletedWorkoutName] = useState('');
+  const [historyVisible, setHistoryVisible] = useState(false);
 
   // Duration tracking
   const workoutStartTime = useRef<number | null>(null);
@@ -494,13 +496,21 @@ export default function MemberWorkoutsScreen() {
       {/* Header */}
       <View style={s.header}>
         <Text style={s.headerTitle}>My Workouts</Text>
-        {todayWorkouts.length > 0 && (
-          <View style={s.todayBadge}>
-            <Text style={s.todayBadgeText}>
-              {todayWorkouts.length} today
-            </Text>
-          </View>
-        )}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {todayWorkouts.length > 0 && (
+            <View style={s.todayBadge}>
+              <Text style={s.todayBadgeText}>
+                {todayWorkouts.length} today
+              </Text>
+            </View>
+          )}
+          <Pressable
+            style={s.historyBtn}
+            onPress={() => setHistoryVisible(true)}
+          >
+            <Icon name="time" size={18} color="#8A95A3" />
+          </Pressable>
+        </View>
       </View>
 
       <FlatList
@@ -545,6 +555,13 @@ export default function MemberWorkoutsScreen() {
         durationSeconds={completedDuration}
         onSubmit={handleJournalSubmit}
         onSkip={handleJournalSkip}
+      />
+
+      {/* Workout History */}
+      <MemberWorkoutHistory
+        visible={historyVisible}
+        memberId={memberId}
+        onClose={() => setHistoryVisible(false)}
       />
     </View>
   );
@@ -591,6 +608,14 @@ const s = StyleSheet.create({
     fontWeight: '700',
     color: '#F5A623',
     fontFamily: FH,
+  },
+  historyBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   listContent: {
     padding: 20,

@@ -58,6 +58,7 @@ interface WorkoutLog {
   reviewStatus: string; // pending | reviewed
   reviewedAt: any;
   coachNote: string;
+  coachReaction: string;
 }
 
 interface CoachReviewQueueProps {
@@ -70,6 +71,7 @@ interface CoachReviewQueueProps {
 
 const ENERGY_LABELS = ['Drained', 'Low', 'Steady', 'Strong', 'On Fire'];
 const MOOD_LABELS = ['Rough', 'Meh', 'Okay', 'Good', 'Amazing'];
+const REACTIONS = ['💪', '🔥', '⭐', '👏', '❤️'];
 
 // ── Component ──────────────────────────────────────────────────────────────
 export default function CoachReviewQueue({
@@ -86,6 +88,7 @@ export default function CoachReviewQueue({
   // Review state
   const [activeLog, setActiveLog] = useState<WorkoutLog | null>(null);
   const [coachNote, setCoachNote] = useState('');
+  const [selectedReaction, setSelectedReaction] = useState('');
   const [saving, setSaving] = useState(false);
 
   // ── Real-time listener ────────────────────────────────────────────────
@@ -116,6 +119,7 @@ export default function CoachReviewQueue({
             reviewStatus: data.reviewStatus ?? 'pending',
             reviewedAt: data.reviewedAt,
             coachNote: data.coachNote ?? '',
+            coachReaction: data.coachReaction ?? '',
           };
         });
         setLogs(list);
@@ -139,20 +143,38 @@ export default function CoachReviewQueue({
 
   // ── Mark reviewed ─────────────────────────────────────────────────────
   const handleMarkReviewed = useCallback(
-    async (logId: string, note: string) => {
+    async (logId: string, note: string, reaction: string) => {
       setSaving(true);
       try {
         await updateDoc(doc(db, 'workout_logs', logId), {
           reviewStatus: 'reviewed',
           reviewedAt: serverTimestamp(),
           coachNote: note.trim(),
+          coachReaction: reaction,
         });
         setActiveLog(null);
         setCoachNote('');
+        setSelectedReaction('');
       } catch (err) {
         console.error('[CoachReviewQueue] Failed to mark reviewed:', err);
       }
       setSaving(false);
+    },
+    [],
+  );
+
+  // ── Quick reaction (one-tap from card) ────────────────────────────────
+  const handleQuickReaction = useCallback(
+    async (logId: string, reaction: string) => {
+      try {
+        await updateDoc(doc(db, 'workout_logs', logId), {
+          reviewStatus: 'reviewed',
+          reviewedAt: serverTimestamp(),
+          coachReaction: reaction,
+        });
+      } catch (err) {
+        console.error('[CoachReviewQueue] Quick reaction failed:', err);
+      }
     },
     [],
   );
@@ -202,6 +224,7 @@ export default function CoachReviewQueue({
         onPress={() => {
           setActiveLog(item);
           setCoachNote(item.coachNote || '');
+          setSelectedReaction(item.coachReaction || '');
         }}
         activeOpacity={0.7}
       >
@@ -256,9 +279,23 @@ export default function CoachReviewQueue({
           </View>
         )}
 
-        {/* Quick review button for pending */}
+        {/* Quick reactions + quick review for pending */}
         {isPending && (
           <View style={st.quickActions}>
+            <View style={st.reactionRow}>
+              {REACTIONS.map((emoji) => (
+                <TouchableOpacity
+                  key={emoji}
+                  style={st.reactionBtn}
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    handleQuickReaction(item.id, emoji);
+                  }}
+                >
+                  <Text style={st.reactionEmoji}>{emoji}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
             <TouchableOpacity
               style={st.quickReviewBtn}
               onPress={(e) => {
@@ -271,6 +308,13 @@ export default function CoachReviewQueue({
             </TouchableOpacity>
           </View>
         )}
+
+        {/* Show reaction on reviewed cards */}
+        {!isPending && item.coachReaction ? (
+          <View style={st.reviewedReaction}>
+            <Text style={st.reviewedReactionText}>{item.coachReaction}</Text>
+          </View>
+        ) : null}
       </TouchableOpacity>
     );
   };
@@ -400,6 +444,25 @@ export default function CoachReviewQueue({
                   <Text style={st.noJournalText}>No reflection submitted</Text>
                 )}
 
+                {/* Quick reaction picker */}
+                <Text style={st.coachNoteLabel}>Quick Reaction</Text>
+                <View style={st.reactionRow}>
+                  {REACTIONS.map((emoji) => (
+                    <TouchableOpacity
+                      key={emoji}
+                      style={[
+                        st.reactionBtn,
+                        selectedReaction === emoji && st.reactionBtnActive,
+                      ]}
+                      onPress={() =>
+                        setSelectedReaction((prev) => (prev === emoji ? '' : emoji))
+                      }
+                    >
+                      <Text style={st.reactionEmoji}>{emoji}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
                 {/* Coach note */}
                 <Text style={st.coachNoteLabel}>Coach Note (optional)</Text>
                 <TextInput
@@ -416,7 +479,7 @@ export default function CoachReviewQueue({
                 {/* Actions */}
                 <TouchableOpacity
                   style={[st.reviewBtn, saving && st.reviewBtnDisabled]}
-                  onPress={() => handleMarkReviewed(activeLog.id, coachNote)}
+                  onPress={() => handleMarkReviewed(activeLog.id, coachNote, selectedReaction)}
                   disabled={saving}
                 >
                   {saving ? (
@@ -594,7 +657,37 @@ const st = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.06)',
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  reactionRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  reactionBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  reactionBtnActive: {
+    backgroundColor: 'rgba(245,166,35,0.25)',
+    borderWidth: 2,
+    borderColor: '#F5A623',
+  },
+  reactionEmoji: {
+    fontSize: 18,
+  },
+  reviewedReaction: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+  },
+  reviewedReactionText: {
+    fontSize: 20,
   },
   quickReviewBtn: {
     flexDirection: 'row',
@@ -716,6 +809,7 @@ const st = StyleSheet.create({
     color: '#F0F4F8',
     fontFamily: FH,
     marginBottom: 8,
+    marginTop: 12,
   },
   coachNoteInput: {
     backgroundColor: '#1A1E26',

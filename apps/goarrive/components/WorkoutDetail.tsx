@@ -19,13 +19,13 @@ import {
   TouchableOpacity,
   ScrollView,
   Platform,
+  Alert,
 } from 'react-native';
 import { db } from '../lib/firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, addDoc, collection, Timestamp } from 'firebase/firestore';
 import { Icon } from './Icon';
 import AssignWorkoutModal from './AssignWorkoutModal';
 import { useAuth } from '../lib/AuthContext';
-import { addDoc, collection, Timestamp } from 'firebase/firestore';
 
 const FONT_HEADING =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -45,6 +45,7 @@ export interface WorkoutDetailData {
   coachId?: string;
   tenantId?: string;
   isTemplate?: boolean;
+  isShared?: boolean;
   isArchived?: boolean;
   createdAt?: any;
   updatedAt?: any;
@@ -88,6 +89,7 @@ export default function WorkoutDetail({
           coachId: data.coachId ?? '',
           tenantId: data.tenantId ?? '',
           isTemplate: data.isTemplate ?? false,
+          isShared: data.isShared ?? false,
           isArchived: data.isArchived ?? false,
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
@@ -133,6 +135,8 @@ export default function WorkoutDetail({
   const blockCount = currentWorkout.blocks?.length ?? 0;
   const isArchived = currentWorkout.isArchived ?? false;
   const isTemplate = currentWorkout.isTemplate ?? false;
+  const isShared = currentWorkout.isShared ?? false;
+  const isAdmin = claims?.role === 'platformAdmin' || claims?.admin === true;
   const category = currentWorkout.category ?? '';
   const difficulty = currentWorkout.difficulty ?? '';
   const duration = currentWorkout.estimatedDurationMin;
@@ -164,6 +168,11 @@ export default function WorkoutDetail({
                 {isTemplate && (
                   <View style={styles.templateBadge}>
                     <Text style={styles.templateBadgeText}>TEMPLATE</Text>
+                  </View>
+                )}
+                {isShared && (
+                  <View style={[styles.templateBadge, { backgroundColor: 'rgba(110,187,122,0.15)', borderColor: 'rgba(110,187,122,0.3)' }]}>
+                    <Text style={[styles.templateBadgeText, { color: '#6EBB7A' }]}>SHARED</Text>
                   </View>
                 )}
                 {isArchived && (
@@ -326,6 +335,51 @@ export default function WorkoutDetail({
                 </TouchableOpacity>
               )}
             </View>
+
+            {/* Admin: Share to Marketplace toggle */}
+            {isAdmin && (
+              <TouchableOpacity
+                style={[styles.actionBtn, { marginBottom: 8, alignSelf: 'flex-start' }]}
+                onPress={() => {
+                  const action = isShared ? 'remove from' : 'share to';
+                  Alert.alert(
+                    isShared ? 'Remove from Marketplace' : 'Share to Marketplace',
+                    `Are you sure you want to ${action} the template marketplace?`,
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: isShared ? 'Remove' : 'Share',
+                        style: isShared ? 'destructive' : 'default',
+                        onPress: async () => {
+                          try {
+                            await updateDoc(doc(db, 'workouts', currentWorkout.id), {
+                              isShared: !isShared,
+                            });
+                          } catch (err) {
+                            console.error('[WorkoutDetail] Toggle isShared error:', err);
+                            Alert.alert('Error', 'Failed to update sharing status.');
+                          }
+                        },
+                      },
+                    ],
+                  );
+                }}
+              >
+                <Icon
+                  name={isShared ? 'close' : 'share'}
+                  size={16}
+                  color={isShared ? '#EF4444' : '#6EBB7A'}
+                />
+                <Text
+                  style={[
+                    styles.actionBtnText,
+                    { color: isShared ? '#EF4444' : '#6EBB7A' },
+                  ]}
+                >
+                  {isShared ? 'Remove from Marketplace' : 'Share to Marketplace'}
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {/* Row 2: Assign to Member */}
             <TouchableOpacity

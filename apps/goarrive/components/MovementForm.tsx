@@ -116,6 +116,8 @@ export default function MovementForm({
   const [thumbnailUrl, setThumbnailUrl] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [regression, setRegression] = useState('');
+  const [progression, setProgression] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   // ── Pre-populate on edit ───────────────────────────────────────────────
@@ -133,6 +135,8 @@ export default function MovementForm({
       setSwapSides(editMovement.swapSides ?? false);
       setVideoUrl((editMovement as any).videoUrl || editMovement.mediaUrl || '');
       setThumbnailUrl((editMovement as any).thumbnailUrl || '');
+      setRegression((editMovement as any).regression || '');
+      setProgression((editMovement as any).progression || '');
     } else {
       resetForm();
     }
@@ -153,6 +157,8 @@ export default function MovementForm({
     setThumbnailUrl('');
     setUploading(false);
     setUploadProgress(0);
+    setRegression('');
+    setProgression('');
   };
 
   // ── Media upload ──────────────────────────────────────────────────────
@@ -254,6 +260,8 @@ export default function MovementForm({
         swapWindowSec: 5,
         videoUrl: videoUrl.trim(),
         thumbnailUrl: thumbnailUrl.trim(),
+        regression: regression.trim(),
+        progression: progression.trim(),
         updatedAt: serverTimestamp(),
       };
 
@@ -527,6 +535,27 @@ export default function MovementForm({
                 <Text style={st.mediaAttachedText}>Video attached</Text>
               </View>
             ) : null}
+
+            {/* Regression / Progression chains */}
+            <Text style={st.label}>Regression (Easier Alternative)</Text>
+            <TextInput
+              style={st.input}
+              value={regression}
+              onChangeText={setRegression}
+              placeholder="e.g. Knee push-ups, Assisted pull-ups..."
+              placeholderTextColor="#4A5568"
+              autoCapitalize="sentences"
+            />
+
+            <Text style={st.label}>Progression (Harder Alternative)</Text>
+            <TextInput
+              style={st.input}
+              value={progression}
+              onChangeText={setProgression}
+              placeholder="e.g. Weighted push-ups, Archer pull-ups..."
+              placeholderTextColor="#4A5568"
+              autoCapitalize="sentences"
+            />
           </ScrollView>
 
           {/* Footer buttons */}

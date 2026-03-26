@@ -23,6 +23,7 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from './firebase';
+import { registerForPushNotifications } from './notifications';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -142,6 +143,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.log('[AuthContext] Final claims:', userClaims);
 
           setClaims(userClaims);
+
+          // Register for push notifications (fire-and-forget)
+          registerForPushNotifications(firebaseUser.uid).catch((e) =>
+            console.warn('[AuthContext] Push registration failed:', e),
+          );
         } catch (err) {
           console.error('[AuthContext] Auth error:', err);
           setClaims(null);

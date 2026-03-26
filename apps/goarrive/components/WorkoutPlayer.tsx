@@ -23,7 +23,9 @@ import {
   TouchableOpacity,
   Platform,
   Dimensions,
+  Image,
 } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import { Icon } from './Icon';
 import { playBeep } from '../lib/audioBeep';
 import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess } from '../lib/haptics';
@@ -53,6 +55,10 @@ interface FlatMovement {
   description?: string;
   sets?: number;
   reps?: string;
+  /** MP4/video URL for looping demo */
+  videoUrl?: string;
+  /** Poster/thumbnail image URL */
+  thumbnailUrl?: string;
 }
 
 type Phase = 'ready' | 'countdown' | 'work' | 'rest' | 'swap' | 'complete';
@@ -76,6 +82,28 @@ export default function WorkoutPlayer({
   const [isPaused, setIsPaused] = useState(false);
 
   useWakeLock(phase !== 'ready' && phase !== 'complete');
+
+  // Prefetch next movement media (skill doc: prefetch next 1-3 clips)
+  const prefetchedUrls = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (phase !== 'work' && phase !== 'countdown') return;
+    const upcoming = flatMovements.current.slice(currentIndex + 1, currentIndex + 4);
+    upcoming.forEach((m) => {
+      const url = m.videoUrl || m.thumbnailUrl;
+      if (url && !prefetchedUrls.current.has(url)) {
+        prefetchedUrls.current.add(url);
+        // Trigger browser/native cache by fetching the first bytes
+        if (Platform.OS === 'web') {
+          const link = document.createElement('link');
+          link.rel = 'prefetch';
+          link.href = url;
+          document.head.appendChild(link);
+        } else {
+          Image.prefetch(url).catch(() => {});
+        }
+      }
+    });
+  }, [currentIndex, phase]);
 
   // ── Flatten blocks on mount ───────────────────────────────────────────
   useEffect(() => {
@@ -107,6 +135,8 @@ export default function WorkoutPlayer({
             description: mv.description || mv.coachingCues || '',
             sets: mv.sets,
             reps: mv.reps,
+            videoUrl: mv.videoUrl || mv.mediaUrl || '',
+            thumbnailUrl: mv.thumbnailUrl || '',
           });
         });
       }
@@ -280,6 +310,31 @@ export default function WorkoutPlayer({
         {phase === 'work' && current && (
           <View style={st.centerContent}>
             <Text style={st.blockLabel}>{current.blockName}</Text>
+
+            {/* Movement media — muted looping video or thumbnail */}
+            {current.videoUrl ? (
+              <View style={st.mediaWrap}>
+                <Video
+                  source={{ uri: current.videoUrl }}
+                  style={st.mediaVideo}
+                  resizeMode={ResizeMode.CONTAIN}
+                  shouldPlay={!isPaused}
+                  isLooping
+                  isMuted
+                  posterSource={current.thumbnailUrl ? { uri: current.thumbnailUrl } : undefined}
+                  usePoster={!!current.thumbnailUrl}
+                />
+              </View>
+            ) : current.thumbnailUrl ? (
+              <View style={st.mediaWrap}>
+                <Image
+                  source={{ uri: current.thumbnailUrl }}
+                  style={st.mediaThumbnail}
+                  resizeMode="contain"
+                />
+              </View>
+            ) : null}
+
             <Text style={st.movementName}>{current.name}</Text>
             {current.swapSides && (
               <View style={st.sideBadge}>
@@ -316,7 +371,21 @@ export default function WorkoutPlayer({
             {next && (
               <View style={st.nextUpBar}>
                 <Text style={st.nextUpLabel}>NEXT UP</Text>
-                <Text style={st.nextUpName}>{next.name}</Text>
+                <View style={st.nextUpContent}>
+                  {next.thumbnailUrl ? (
+                    <Image
+                      source={{ uri: next.thumbnailUrl }}
+                      style={st.nextUpThumb}
+                      resizeMode="cover"
+                    />
+                  ) : null}
+                  <View style={st.nextUpInfo}>
+                    <Text style={st.nextUpName} numberOfLines={1}>{next.name}</Text>
+                    <Text style={st.nextUpMeta}>
+                      {next.blockName}{next.duration ? ` \u00b7 ${next.duration}s` : ''}
+                    </Text>
+                  </View>
+                </View>
               </View>
             )}
           </View>
@@ -333,7 +402,21 @@ export default function WorkoutPlayer({
             {next && (
               <View style={st.nextUpBar}>
                 <Text style={st.nextUpLabel}>NEXT UP</Text>
-                <Text style={st.nextUpName}>{next.name}</Text>
+                <View style={st.nextUpContent}>
+                  {next.thumbnailUrl ? (
+                    <Image
+                      source={{ uri: next.thumbnailUrl }}
+                      style={st.nextUpThumb}
+                      resizeMode="cover"
+                    />
+                  ) : null}
+                  <View style={st.nextUpInfo}>
+                    <Text style={st.nextUpName} numberOfLines={1}>{next.name}</Text>
+                    <Text style={st.nextUpMeta}>
+                      {next.blockName}{next.duration ? ` \u00b7 ${next.duration}s` : ''}
+                    </Text>
+                  </View>
+                </View>
               </View>
             )}
 
@@ -476,6 +559,23 @@ const st = StyleSheet.create({
     fontFamily: FB,
     marginBottom: 8,
   },
+  mediaWrap: {
+    width: Math.min(SCREEN_W * 0.6, 240),
+    height: Math.min(SCREEN_W * 0.45, 180),
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    marginBottom: 12,
+    alignSelf: 'center',
+  },
+  mediaVideo: {
+    width: '100%',
+    height: '100%',
+  },
+  mediaThumbnail: {
+    width: '100%',
+    height: '100%',
+  },
   movementName: {
     fontSize: 32,
     fontWeight: '700',
@@ -607,11 +707,32 @@ const st = StyleSheet.create({
     letterSpacing: 1,
     marginBottom: 4,
   },
+  nextUpContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+  },
+  nextUpThumb: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    backgroundColor: '#1A2035',
+  },
+  nextUpInfo: {
+    flex: 1,
+  },
   nextUpName: {
     fontSize: 16,
     fontWeight: '600',
     color: '#F0F4F8',
     fontFamily: FH,
+  },
+  nextUpMeta: {
+    fontSize: 12,
+    color: '#8A95A3',
+    fontFamily: FB,
+    marginTop: 2,
   },
 
   // Complete

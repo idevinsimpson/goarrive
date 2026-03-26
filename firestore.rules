@@ -270,9 +270,14 @@ service cloud.firestore {
     // ─────────────────────────────────────────────
 
     match /workouts/{workoutId} {
-      allow read: if isAuthenticated() && isCoachOrBootstrap(resource.data.coachId);
+      // Coaches can read their own workouts, OR any workout marked isShared (template marketplace)
+      allow read: if isAuthenticated() && (
+        isCoachOrBootstrap(resource.data.coachId)
+        || (resource.data.isShared == true && (isCoach() || isPlatformAdmin()))
+      );
       allow create: if isCoachOrBootstrap(request.resource.data.coachId);
-      allow update: if isCoachOrBootstrap(resource.data.coachId);
+      // Only the owning coach or admin can update (including toggling isShared)
+      allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
       allow delete: if false;
     }
 

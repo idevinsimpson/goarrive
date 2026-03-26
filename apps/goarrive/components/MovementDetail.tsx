@@ -47,6 +47,8 @@ export interface MovementDetailData {
   canvaDesignId?: string | null;
   mirrorSide2?: boolean;
   createdBy?: string | null;
+  regression?: string;
+  progression?: string;
   [key: string]: any;
 }
 
@@ -145,6 +147,25 @@ export default function MovementDetail({
             <View style={s.section}>
               <Text style={s.sectionLabel}>Description</Text>
               <Text style={s.bodyText}>{movement.description}</Text>
+            </View>
+          ) : null}
+
+          {/* Regression / Progression */}
+          {(movement.regression || movement.progression) ? (
+            <View style={s.section}>
+              <Text style={s.sectionLabel}>Alternatives</Text>
+              {movement.regression ? (
+                <View style={s.altRow}>
+                  <Text style={s.altLabel}>Regression:</Text>
+                  <Text style={s.altValue}>{movement.regression}</Text>
+                </View>
+              ) : null}
+              {movement.progression ? (
+                <View style={s.altRow}>
+                  <Text style={s.altLabel}>Progression:</Text>
+                  <Text style={s.altValue}>{movement.progression}</Text>
+                </View>
+              ) : null}
             </View>
           ) : null}
 
@@ -312,6 +333,24 @@ const s = StyleSheet.create({
     color: '#C0C8D4',
     fontFamily: FONT_BODY,
     lineHeight: 20,
+  },
+  altRow: {
+    flexDirection: 'row',
+    gap: 6,
+    alignItems: 'flex-start',
+    marginTop: 2,
+  },
+  altLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8A95A3',
+    fontFamily: FONT_BODY,
+  },
+  altValue: {
+    fontSize: 13,
+    color: '#C0C8D4',
+    fontFamily: FONT_BODY,
+    flex: 1,
   },
   timerRow: {
     flexDirection: 'row',
