@@ -26,6 +26,7 @@ import {
   Platform,
   ActivityIndicator,
   Image,
+  Linking,
 } from 'react-native';
 import { db, storage } from '../lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
@@ -100,6 +101,20 @@ export default function MovementForm({
   editMovement,
 }: MovementFormProps) {
   const isEdit = !!editMovement;
+
+  // ── Camera permission pre-check (Risk 6) ──────────────────────────────
+  // Check camera permission status on mount so we can show a helpful
+  // message with a Settings link if the user previously denied access,
+  // instead of a generic alert at the moment of recording.
+  const [cameraPermStatus, setCameraPermStatus] = useState<'undetermined' | 'granted' | 'denied'>('undetermined');
+
+  useEffect(() => {
+    if (visible && Platform.OS !== 'web') {
+      ImagePicker.getCameraPermissionsAsync().then(({ status }) => {
+        setCameraPermStatus(status === 'granted' ? 'granted' : status === 'denied' ? 'denied' : 'undetermined');
+      });
+    }
+  }, [visible]);
 
   // ── Form state ─────────────────────────────────────────────────────────
   const [name, setName] = useState('');
@@ -228,10 +243,27 @@ export default function MovementForm({
     }
   };
 
-  // ── Camera recording ─────────────────────────────────────────────────
+  // ── Camera recording (Risk 6: enhanced permissions handling) ─────────
   const recordFromCamera = async () => {
     try {
+      // If previously denied, guide user to Settings instead of re-prompting
+      if (cameraPermStatus === 'denied') {
+        Alert.alert(
+          'Camera Access Denied',
+          'You previously denied camera access. To record movement videos, please enable camera permissions in your device Settings.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Open Settings',
+              onPress: () => Linking.openSettings(),
+            },
+          ],
+        );
+        return;
+      }
+
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      setCameraPermStatus(status === 'granted' ? 'granted' : 'denied');
       if (status !== 'granted') {
         Alert.alert('Permission Required', 'Please grant camera access to record videos.');
         return;

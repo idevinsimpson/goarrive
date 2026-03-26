@@ -8,13 +8,18 @@
  * - Swap sides support (L/R indicator)
  * - Progress bar (movements completed / total)
  * - Completion screen before triggering onComplete
- * - Countdown beeps (440Hz at 3-2-1, 880Hz at 0)
+ * - Distinct audio cues per phase transition
  * - Haptic feedback (light countdown, medium transition, heavy start, success complete)
  * - Wake lock to prevent screen sleep
+ * - Landscape tablet layout
+ * - Rep-based mode (Done button instead of timer)
+ * - Media playback (video/image) with prefetching
+ * - Mute toggle
  *
+ * Decomposed into hooks: useWorkoutFlatten, useWorkoutTimer, useMediaPrefetch
  * Follows GoArrive design system: #0E1117 bg, #F5A623 gold accent.
  */
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -28,9 +33,12 @@ import {
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
 import { Icon } from './Icon';
-import { playCue, setAudioMuted, isAudioMuted } from '../lib/audioCues';
-import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess } from '../lib/haptics';
+import { setAudioMuted, isAudioMuted } from '../lib/audioCues';
 import { useWakeLock } from '../lib/useWakeLock';
+import { useWorkoutFlatten } from '../hooks/useWorkoutFlatten';
+import { useWorkoutTimer } from '../hooks/useWorkoutTimer';
+import { useMediaPrefetch } from '../hooks/useMediaPrefetch';
+import { useWorkoutTTS } from '../hooks/useWorkoutTTS';
 
 const FH =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -45,29 +53,6 @@ interface WorkoutPlayerProps {
   onComplete: () => void;
 }
 
-interface FlatMovement {
-  name: string;
-  duration: number; // seconds
-  restAfter: number; // seconds
-  blockName: string;
-  blockIndex: number;
-  movementIndex: number;
-  swapSides: boolean;
-  description?: string;
-  sets?: number;
-  reps?: string;
-  /** MP4/video URL for looping demo */
-  videoUrl?: string;
-  /** Poster/thumbnail image URL */
-  thumbnailUrl?: string;
-  /** Coaching cues text from movement library */
-  coachingCues?: string;
-}
-
-type Phase = 'ready' | 'countdown' | 'work' | 'rest' | 'swap' | 'complete';
-
-const COUNTDOWN_SECONDS = 3;
-
 // ── Component ──────────────────────────────────────────────────────────────
 export default function WorkoutPlayer({
   visible,
@@ -75,206 +60,22 @@ export default function WorkoutPlayer({
   onClose,
   onComplete,
 }: WorkoutPlayerProps) {
-  // Flatten all blocks → movements into a linear sequence
-  const flatMovements = useRef<FlatMovement[]>([]);
+  // ── Hooks ────────────────────────────────────────────────────────────
+  const flatMovements = useWorkoutFlatten(workout);
 
-  const [phase, setPhase] = useState<Phase>('ready');
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(0);
-  const [swapSide, setSwapSide] = useState<'L' | 'R'>('L');
-  const [isPaused, setIsPaused] = useState(false);
+  const timer = useWorkoutTimer({ flatMovements });
+
+  const {
+    phase, currentIndex, timeLeft, swapSide, isPaused,
+    current, next, total, isRepBased, progressPct,
+    handleStart, handlePauseResume, handleSkip, handleRepDone,
+  } = timer;
 
   useWakeLock(phase !== 'ready' && phase !== 'complete');
+  useMediaPrefetch(flatMovements, currentIndex, phase === 'work' || phase === 'countdown');
 
-  // Prefetch next movement media (skill doc: prefetch next 1-3 clips)
-  const prefetchedUrls = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    if (phase !== 'work' && phase !== 'countdown') return;
-    const upcoming = flatMovements.current.slice(currentIndex + 1, currentIndex + 4);
-    upcoming.forEach((m) => {
-      const url = m.videoUrl || m.thumbnailUrl;
-      if (url && !prefetchedUrls.current.has(url)) {
-        prefetchedUrls.current.add(url);
-        // Trigger browser/native cache by fetching the first bytes
-        if (Platform.OS === 'web') {
-          const link = document.createElement('link');
-          link.rel = 'prefetch';
-          link.href = url;
-          document.head.appendChild(link);
-        } else {
-          Image.prefetch(url).catch(() => {});
-        }
-      }
-    });
-  }, [currentIndex, phase]);
-
-  // ── Flatten blocks on mount ───────────────────────────────────────────
-  useEffect(() => {
-    if (!workout?.blocks) {
-      flatMovements.current = [];
-      return;
-    }
-
-    const flat: FlatMovement[] = [];
-    const blocks = workout.blocks || [];
-
-    blocks.forEach((block: any, bi: number) => {
-      const movements = block.movements || [];
-      const blockRest = block.restBetweenSec ?? block.rest ?? 15;
-      const sets = block.sets ?? 1;
-
-      for (let setNum = 0; setNum < sets; setNum++) {
-        movements.forEach((mv: any, mi: number) => {
-          const isLastInBlock =
-            setNum === sets - 1 && mi === movements.length - 1;
-          flat.push({
-            name: mv.name || 'Movement',
-            duration: mv.duration || mv.workSec || 30,
-            restAfter: isLastInBlock ? 0 : mv.restSec ?? blockRest,
-            blockName: block.name || `Block ${bi + 1}`,
-            blockIndex: bi,
-            movementIndex: mi,
-            swapSides: mv.swapSides ?? false,
-            description: mv.description || mv.coachingCues || '',
-            sets: mv.sets,
-            reps: mv.reps,
-            videoUrl: mv.videoUrl || mv.mediaUrl || '',
-            thumbnailUrl: mv.thumbnailUrl || '',
-            coachingCues: mv.coachingCues || '',
-          });
-        });
-      }
-    });
-
-    flatMovements.current = flat;
-    setCurrentIndex(0);
-    setPhase('ready');
-    setIsPaused(false);
-    setSwapSide('L');
-  }, [workout]);
-
-  const current = flatMovements.current[currentIndex];
-  const total = flatMovements.current.length;
-  const next =
-    currentIndex + 1 < total ? flatMovements.current[currentIndex + 1] : null;
-
-  // Rep-based mode: movement has reps but no meaningful duration (or duration is 0)
-  const isRepBased = !!(current?.reps && (!current.duration || current.duration <= 0));
-
-  // ── Timer ─────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (isPaused) return;
-    if (phase !== 'countdown' && phase !== 'work' && phase !== 'rest' && phase !== 'swap')
-      return;
-    if (timeLeft <= 0) return;
-
-    const interval = setInterval(() => {
-      setTimeLeft((prev) => {
-        const next = prev - 1;
-        // Countdown ticks at 3, 2, 1
-        if (next <= 3 && next > 0) {
-          playCue('countdownTick');
-          hapticLight();
-        }
-        // Final tick at 0
-        if (next === 0) {
-          playCue('countdownFinal');
-          hapticMedium();
-        }
-        return next;
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [phase, timeLeft, isPaused]);
-
-  // ── Timer hit zero → transition ───────────────────────────────────────
-  useEffect(() => {
-    if (isPaused || timeLeft > 0) return;
-
-    if (phase === 'countdown') {
-      // Start work phase
-      setPhase('work');
-      setTimeLeft(current?.duration ?? 30);
-      playCue('workStart');
-      hapticHeavy();
-    } else if (phase === 'work') {
-      // Rep-based movements don't auto-advance on timer
-      if (isRepBased) return;
-      // Check swap sides
-      if (current?.swapSides && swapSide === 'L') {
-        setSwapSide('R');
-        setPhase('swap');
-        setTimeLeft(3); // brief transition
-      } else if (current?.restAfter > 0) {
-        setPhase('rest');
-        setTimeLeft(current.restAfter);
-        playCue('restStart');
-      } else {
-        advanceToNext();
-      }
-    } else if (phase === 'swap') {
-      // Do the other side
-      setPhase('work');
-      setTimeLeft(current?.duration ?? 30);
-      playCue('workStart');
-    } else if (phase === 'rest') {
-      advanceToNext();
-    }
-  }, [timeLeft, phase, isPaused]);
-
-  const advanceToNext = useCallback(() => {
-    const nextIdx = currentIndex + 1;
-    if (nextIdx >= total) {
-      setPhase('complete');
-      playCue('workoutComplete');
-      hapticSuccess();
-    } else {
-      setCurrentIndex(nextIdx);
-      setSwapSide('L');
-      setPhase('countdown');
-      setTimeLeft(COUNTDOWN_SECONDS);
-    }
-  }, [currentIndex, total]);
-
-  // ── Controls ──────────────────────────────────────────────────────────
-  const handleStart = () => {
-    if (total === 0) return;
-    setPhase('countdown');
-    setTimeLeft(COUNTDOWN_SECONDS);
-    hapticHeavy();
-  };
-
-  const handlePauseResume = () => {
-    setIsPaused((p) => !p);
-  };
-
-  const handleSkip = () => {
-    if (phase === 'rest' || phase === 'work' || phase === 'swap' || phase === 'countdown') {
-      advanceToNext();
-    }
-  };
-
-  const handleFinish = () => {
-    onComplete();
-  };
-
-  /** Rep-based: member taps Done after completing reps */
-  const handleRepDone = () => {
-    if (!current) return;
-    playCue('repDone');
-    hapticMedium();
-    if (current.swapSides && swapSide === 'L') {
-      setSwapSide('R');
-      setPhase('swap');
-      setTimeLeft(3);
-    } else if (current.restAfter > 0) {
-      setPhase('rest');
-      setTimeLeft(current.restAfter);
-    } else {
-      advanceToNext();
-    }
-  };
+  // ── TTS for movement names (Suggestion 1) ──────────────────────────
+  useWorkoutTTS({ phase, current, next, isMuted: isAudioMuted() });
 
   // ── Landscape detection for tablets ─────────────────────────────────
   const { width: winW, height: winH } = useWindowDimensions();
@@ -284,9 +85,9 @@ export default function WorkoutPlayer({
   // ── Audio mute toggle ─────────────────────────────────────────────────
   const [audioMuted, setAudioMutedState] = useState(isAudioMuted());
   const toggleMute = () => {
-    const next = !audioMuted;
-    setAudioMutedState(next);
-    setAudioMuted(next);
+    const n = !audioMuted;
+    setAudioMutedState(n);
+    setAudioMuted(n);
   };
 
   // ── Format time ───────────────────────────────────────────────────────
@@ -296,8 +97,9 @@ export default function WorkoutPlayer({
     return m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `${s}`;
   };
 
-  // ── Progress ──────────────────────────────────────────────────────────
-  const progressPct = total > 0 ? ((currentIndex) / total) * 100 : 0;
+  const handleFinish = () => {
+    onComplete();
+  };
 
   // ── Render ────────────────────────────────────────────────────────────
   return (
@@ -313,7 +115,7 @@ export default function WorkoutPlayer({
           </Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <TouchableOpacity onPress={toggleMute} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-              <Icon name={audioMuted ? 'volume-x' : 'volume-2'} size={20} color={audioMuted ? '#4A5568' : '#F5A623'} />
+              <Icon name={audioMuted ? 'volume-x' : 'volume-2'} size={22} color="#8A95A3" />
             </TouchableOpacity>
             <Text style={st.progressText}>
               {currentIndex + 1}/{total}

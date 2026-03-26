@@ -254,6 +254,22 @@
         { "fieldPath": "reviewStatus", "order": "ASCENDING" },
         { "fieldPath": "completedAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "workout_assignments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "recurringGroupId", "order": "ASCENDING" },
+        { "fieldPath": "scheduledFor", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "recurring_schedules",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "nextGenerateAfter", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

@@ -12,6 +12,7 @@
  * Slice 1, Week 5 — Workout Assignment
  */
 import React, { useState, useEffect, useCallback } from 'react';
+import { useRecurringSchedule } from '../hooks/useRecurringSchedule';
 import {
   View,
   Text,
@@ -126,10 +127,9 @@ export default function AssignWorkoutModal({
   const [previewBlocks, setPreviewBlocks] = useState<any[]>([]);
   const [previewLoading, setPreviewLoading] = useState(false);
 
-  // Recurring schedule
-  const [isRecurring, setIsRecurring] = useState(false);
-  const [recurringWeeks, setRecurringWeeks] = useState(4);
-  const [recurringDays, setRecurringDays] = useState<number[]>([]); // 0=Mon..6=Sun
+  // Recurring schedule (extracted hook)
+  const recurring = useRecurringSchedule();
+  const { isRecurring, recurringDays, recurringWeeks } = recurring;
 
   // ── Load workouts ─────────────────────────────────────────────────────
 
@@ -175,9 +175,7 @@ export default function AssignWorkoutModal({
       setAssigning(false);
       setLastAssignedName('');
       setSearch('');
-      setIsRecurring(false);
-      setRecurringWeeks(4);
-      setRecurringDays([]);
+      recurring.reset();
       if (preselectedWorkoutId && preselectedWorkoutName) {
         // Workout-first flow: skip picker, go straight to schedule
         setSelectedWorkout({
@@ -257,24 +255,9 @@ export default function AssignWorkoutModal({
     }
     setAssigning(true);
     try {
-      if (isRecurring && recurringDays.length > 0) {
-        // Create assignments for each selected day over N weeks
-        const startDate = new Date(selectedDate);
-        for (let week = 0; week < recurringWeeks; week++) {
-          for (const dayIdx of recurringDays) {
-            const d = new Date(startDate);
-            // dayIdx: 0=Mon..6=Sun → JS: Mon=1..Sun=0
-            const currentJsDay = d.getDay(); // 0=Sun
-            const targetJsDay = dayIdx === 6 ? 0 : dayIdx + 1;
-            let diff = targetJsDay - currentJsDay;
-            if (diff < 0) diff += 7;
-            d.setDate(d.getDate() + diff + week * 7);
-            d.setHours(0, 0, 0, 0);
-            await onAssign(selectedWorkout.id, selectedWorkout.name, d);
-          }
-        }
-      } else {
-        await onAssign(selectedWorkout.id, selectedWorkout.name, selectedDate);
+      const dates = recurring.generateDates(selectedDate);
+      for (const d of dates) {
+        await onAssign(selectedWorkout.id, selectedWorkout.name, d);
       }
       // NEXT-B: Show success step instead of closing
       setLastAssignedName(selectedWorkout.name);
@@ -509,7 +492,7 @@ export default function AssignWorkoutModal({
               <View style={s.recurringSection}>
                 <Pressable
                   style={s.recurringToggle}
-                  onPress={() => setIsRecurring(!isRecurring)}
+                  onPress={recurring.toggleRecurring}
                 >
                   <View style={[s.checkbox, isRecurring && s.checkboxActive]}>
                     {isRecurring && <Icon name="check" size={12} color="#0E1117" />}
@@ -527,11 +510,7 @@ export default function AssignWorkoutModal({
                           <Pressable
                             key={label}
                             style={[s.dayBtn, active && s.dayBtnActive]}
-                            onPress={() => {
-                              setRecurringDays((prev) =>
-                                active ? prev.filter((d) => d !== i) : [...prev, i].sort(),
-                              );
-                            }}
+                            onPress={() => recurring.toggleDay(i)}
                           >
                             <Text style={[s.dayBtnText, active && s.dayBtnTextActive]}>
                               {label.charAt(0)}
@@ -547,7 +526,7 @@ export default function AssignWorkoutModal({
                         <Pressable
                           key={w}
                           style={[s.weekBtn, recurringWeeks === w && s.weekBtnActive]}
-                          onPress={() => setRecurringWeeks(w)}
+                          onPress={() => recurring.setRecurringWeeks(w)}
                         >
                           <Text style={[s.weekBtnText, recurringWeeks === w && s.weekBtnTextActive]}>
                             {w}w

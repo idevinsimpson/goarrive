@@ -6116,6 +6116,10 @@ export const checkGcalConflicts = onCall(
 /**
  * Send a push notification to a member when a workout is assigned to them.
  * Fires on workout_assignments document creation.
+ *
+ * Risk 8: Rate-limited — if a member received an assignment notification
+ * within the last 60 seconds, this trigger skips the push to avoid spam
+ * during batch assignments. Uses a lightweight Firestore cooldown doc.
  */
 export const onWorkoutAssigned = onDocumentCreated(
   'workout_assignments/{assignmentId}',
@@ -6135,6 +6139,29 @@ export const onWorkoutAssigned = onDocumentCreated(
       console.warn('[onWorkoutAssigned] No memberId on assignment', snap.id);
       return;
     }
+
+    // ── Rate-limit check (Risk 8) ──────────────────────────────────────
+    const cooldownRef = db
+      .collection('_notification_cooldowns')
+      .doc(`workout_assigned_${memberId}`);
+    const cooldownSnap = await cooldownRef.get();
+    const cooldownData = cooldownSnap.data();
+    const COOLDOWN_MS = 60_000; // 60 seconds
+
+    if (cooldownData?.lastSentAt) {
+      const lastSent = cooldownData.lastSentAt.toDate
+        ? cooldownData.lastSentAt.toDate()
+        : new Date(cooldownData.lastSentAt);
+      if (Date.now() - lastSent.getTime() < COOLDOWN_MS) {
+        console.log(
+          `[onWorkoutAssigned] Skipping push for ${memberId} — cooldown active (batch assignment).`,
+        );
+        return;
+      }
+    }
+
+    // Set cooldown timestamp before sending
+    await cooldownRef.set({ lastSentAt: FieldValue.serverTimestamp() }, { merge: true });
 
     // Look up member's Expo push tokens
     const tokensSnap = await db
@@ -6453,6 +6480,29 @@ export const onWorkoutCompleted = onDocumentCreated(
       return;
     }
 
+    // ── Rate-limit check (Risk 8) ──────────────────────────────────────
+    // Prevent coach notification spam when multiple members finish at once.
+    const cooldownRef = db
+      .collection('_notification_cooldowns')
+      .doc(`workout_completed_${coachId}`);
+    const cooldownSnap = await cooldownRef.get();
+    const cooldownData = cooldownSnap.data();
+    const COOLDOWN_MS = 30_000; // 30 seconds between coach notifications
+
+    if (cooldownData?.lastSentAt) {
+      const lastSent = cooldownData.lastSentAt.toDate
+        ? cooldownData.lastSentAt.toDate()
+        : new Date(cooldownData.lastSentAt);
+      if (Date.now() - lastSent.getTime() < COOLDOWN_MS) {
+        console.log(
+          `[onWorkoutCompleted] Skipping push for coach ${coachId} — cooldown active.`,
+        );
+        return;
+      }
+    }
+
+    await cooldownRef.set({ lastSentAt: FieldValue.serverTimestamp() }, { merge: true });
+
     // Look up coach's push tokens
     const tokensSnap = await db
       .collection('users')
@@ -6511,5 +6561,99 @@ export const onWorkoutCompleted = onDocumentCreated(
         }
       }
     }
+  },
+);
+
+
+// ── Recurring Assignment Continuation (Risk 3 / Suggestion 7) ──────────────
+// Runs every Sunday at midnight UTC. Finds recurring assignment groups
+// that are still active and generates the next week's assignments.
+export const continueRecurringAssignments = onSchedule(
+  { schedule: '0 0 * * 0', region: 'us-east1', timeoutSeconds: 300 },
+  async () => {
+    const firestore = admin.firestore();
+    const now = new Date();
+
+    // Find all recurring groups that haven't expired
+    const groupsSnap = await firestore
+      .collection('recurring_schedules')
+      .where('isActive', '==', true)
+      .where('nextGenerateAfter', '<=', Timestamp.fromDate(now))
+      .get();
+
+    if (groupsSnap.empty) {
+      console.log('[continueRecurringAssignments] No active recurring schedules to process.');
+      return;
+    }
+
+    const batch = firestore.batch();
+    let assignmentCount = 0;
+
+    for (const scheduleDoc of groupsSnap.docs) {
+      const schedule = scheduleDoc.data();
+      const {
+        coachId,
+        memberId,
+        workoutId,
+        workoutName,
+        workoutSnapshot,
+        recurringDays, // 0=Mon..6=Sun
+        endDate,
+      } = schedule;
+
+      // Check if the schedule has expired
+      const endDateObj = endDate?.toDate ? endDate.toDate() : new Date(endDate);
+      if (endDateObj < now) {
+        batch.update(scheduleDoc.ref, { isActive: false });
+        continue;
+      }
+
+      // Generate assignments for the coming week (next 7 days)
+      const startOfWeek = new Date(now);
+      startOfWeek.setDate(startOfWeek.getDate() + 1); // Start from Monday
+      startOfWeek.setHours(0, 0, 0, 0);
+
+      for (const dayIdx of (recurringDays || [])) {
+        const targetDate = new Date(startOfWeek);
+        // dayIdx: 0=Mon..6=Sun → JS: Mon=1..Sun=0
+        const targetJsDay = dayIdx === 6 ? 0 : dayIdx + 1;
+        const currentJsDay = targetDate.getDay();
+        let diff = targetJsDay - currentJsDay;
+        if (diff < 0) diff += 7;
+        targetDate.setDate(targetDate.getDate() + diff);
+        targetDate.setHours(0, 0, 0, 0);
+
+        // Don't generate past the end date
+        if (targetDate > endDateObj) continue;
+
+        const assignRef = firestore.collection('workout_assignments').doc();
+        batch.set(assignRef, {
+          coachId,
+          memberId,
+          workoutId,
+          workoutName: workoutName || 'Workout',
+          workoutSnapshot: workoutSnapshot || null,
+          scheduledFor: Timestamp.fromDate(targetDate),
+          status: 'scheduled',
+          recurringGroupId: scheduleDoc.id,
+          createdAt: FieldValue.serverTimestamp(),
+        });
+        assignmentCount++;
+      }
+
+      // Update nextGenerateAfter to next Sunday
+      const nextSunday = new Date(now);
+      nextSunday.setDate(nextSunday.getDate() + 7);
+      nextSunday.setHours(0, 0, 0, 0);
+      batch.update(scheduleDoc.ref, {
+        nextGenerateAfter: Timestamp.fromDate(nextSunday),
+        lastGeneratedAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    await batch.commit();
+    console.log(
+      `[continueRecurringAssignments] Generated ${assignmentCount} assignments from ${groupsSnap.size} schedules.`,
+    );
   },
 );

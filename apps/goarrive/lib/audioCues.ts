@@ -11,7 +11,14 @@
  *
  * Uses Web Audio API oscillators — works on web and React Native (via expo-av fallback).
  * All cues are non-blocking and fail silently if audio is unavailable.
+ *
+ * Risk 4 fix: Added haptic fallback via expo-haptics when audio context is
+ * unavailable (iOS silent switch, background mode, denied audio permissions).
+ * Each cue type maps to a distinct haptic pattern so the member can still
+ * follow workout transitions by feel alone.
  */
+
+import * as Haptics from 'expo-haptics';
 
 // ── Shared AudioContext (reuse to avoid creation overhead) ──────────────
 let sharedCtx: AudioContext | null = null;
@@ -30,6 +37,58 @@ function getAudioContext(): AudioContext | null {
     sharedCtx.resume().catch(() => {});
   }
   return sharedCtx;
+}
+
+/** Returns true if audio context is available and running */
+function isAudioAvailable(): boolean {
+  const ctx = getAudioContext();
+  return ctx !== null && ctx.state === 'running';
+}
+
+// ── Haptic fallback patterns ───────────────────────────────────────────
+// Each cue type maps to a distinct haptic pattern so the member can
+// differentiate transitions by feel when audio is unavailable.
+
+async function hapticWorkStart(): Promise<void> {
+  try {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    await new Promise((r) => setTimeout(r, 120));
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+  } catch {}
+}
+
+async function hapticRestStart(): Promise<void> {
+  try {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    await new Promise((r) => setTimeout(r, 120));
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  } catch {}
+}
+
+async function hapticCountdownTick(): Promise<void> {
+  try {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  } catch {}
+}
+
+async function hapticCountdownFinal(): Promise<void> {
+  try {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+  } catch {}
+}
+
+async function hapticWorkoutComplete(): Promise<void> {
+  try {
+    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    await new Promise((r) => setTimeout(r, 200));
+    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  } catch {}
+}
+
+async function hapticRepDone(): Promise<void> {
+  try {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  } catch {}
 }
 
 // ── Low-level tone player ──────────────────────────────────────────────
@@ -115,8 +174,13 @@ export function isAudioMuted(): boolean {
 }
 
 /**
- * Wrapper that respects mute state.
+ * Wrapper that respects mute state and provides haptic fallback.
  * All public cue functions should be called through this.
+ *
+ * When audio context is available and not muted → plays audio tone.
+ * When audio is unavailable (silent switch, background, denied) → fires
+ * haptic pattern as fallback so the member still feels transitions.
+ * When muted → no audio, no haptic (user explicitly silenced cues).
  */
 export function playCue(
   cue:
@@ -129,24 +193,32 @@ export function playCue(
 ): void {
   if (muted) return;
 
+  const audioOk = isAudioAvailable();
+
   switch (cue) {
     case 'workStart':
-      cueWorkStart();
+      if (audioOk) cueWorkStart();
+      else hapticWorkStart();
       break;
     case 'restStart':
-      cueRestStart();
+      if (audioOk) cueRestStart();
+      else hapticRestStart();
       break;
     case 'countdownTick':
-      cueCountdownTick();
+      if (audioOk) cueCountdownTick();
+      else hapticCountdownTick();
       break;
     case 'countdownFinal':
-      cueCountdownFinal();
+      if (audioOk) cueCountdownFinal();
+      else hapticCountdownFinal();
       break;
     case 'workoutComplete':
-      cueWorkoutComplete();
+      if (audioOk) cueWorkoutComplete();
+      else hapticWorkoutComplete();
       break;
     case 'repDone':
-      cueRepDone();
+      if (audioOk) cueRepDone();
+      else hapticRepDone();
       break;
   }
 }

@@ -72,7 +72,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
-exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
+exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -5520,6 +5520,201 @@ exports.onWorkoutLogReviewed = (0, firestore_1.onDocumentUpdated)('workout_logs/
             }
             else {
                 console.error('[onWorkoutLogReviewed] FCM error:', err);
+            }
+        }
+    }
+});
+// ────────────────────────────────────────────────────────────────────────────
+// Movement Media Transcoding Pipeline
+// ────────────────────────────────────────────────────────────────────────────
+// Triggers when a video is uploaded to movements/{coachId}/ in Firebase Storage.
+// Generates a lightweight thumbnail poster (first frame) and updates the
+// movement document with the thumbnailUrl.
+//
+// Requires: sharp (for image extraction from video poster)
+// Note: Full ffmpeg transcoding requires a higher-memory Cloud Function or
+// a dedicated media pipeline. This stub handles thumbnail generation from
+// the uploaded poster/thumbnail, and sets the movement's thumbnailUrl field.
+// ────────────────────────────────────────────────────────────────────────────
+const storage_1 = require("firebase-functions/v2/storage");
+exports.onMovementMediaUploaded = (0, storage_1.onObjectFinalized)({ region: 'us-east1', memory: '512MiB', timeoutSeconds: 120 }, async (event) => {
+    const filePath = event.data.name;
+    const contentType = event.data.contentType || '';
+    // Only process files in the movements/ directory
+    if (!filePath || !filePath.startsWith('movements/'))
+        return;
+    // Only process video/image files
+    const isVideo = contentType.startsWith('video/');
+    const isImage = contentType.startsWith('image/');
+    if (!isVideo && !isImage)
+        return;
+    // Skip if this is already a thumbnail
+    if (filePath.includes('_thumb'))
+        return;
+    const db = admin.firestore();
+    const bucket = admin.storage().bucket(event.data.bucket);
+    // Extract coachId from path: movements/{coachId}/{filename}
+    const parts = filePath.split('/');
+    if (parts.length < 3)
+        return;
+    const coachId = parts[1];
+    // Get the download URL for the uploaded file
+    const file = bucket.file(filePath);
+    const [signedUrl] = await file.getSignedUrl({
+        action: 'read',
+        expires: '2099-12-31',
+    });
+    // For images, generate a resized thumbnail
+    if (isImage) {
+        try {
+            // Download the image
+            const [buffer] = await file.download();
+            // Use sharp to create a 320px wide thumbnail
+            let sharp;
+            try {
+                sharp = require('sharp');
+            }
+            catch (_a) {
+                console.log('[onMovementMediaUploaded] sharp not available, skipping thumbnail generation');
+                return;
+            }
+            const thumbBuffer = await sharp(buffer)
+                .resize(320, 320, { fit: 'inside', withoutEnlargement: true })
+                .jpeg({ quality: 75 })
+                .toBuffer();
+            // Upload thumbnail
+            const thumbPath = filePath.replace(/\.[^.]+$/, '_thumb.jpg');
+            const thumbFile = bucket.file(thumbPath);
+            await thumbFile.save(thumbBuffer, {
+                metadata: { contentType: 'image/jpeg' },
+            });
+            await thumbFile.makePublic();
+            const thumbUrl = `https://storage.googleapis.com/${event.data.bucket}/${thumbPath}`;
+            // Find and update the movement document that references this media
+            const movementsSnap = await db
+                .collection('movements')
+                .where('coachId', '==', coachId)
+                .where('mediaUrl', '==', signedUrl)
+                .limit(1)
+                .get();
+            if (!movementsSnap.empty) {
+                await movementsSnap.docs[0].ref.update({
+                    thumbnailUrl: thumbUrl,
+                    updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                });
+            }
+            console.log(`[onMovementMediaUploaded] Thumbnail generated: ${thumbPath}`);
+        }
+        catch (err) {
+            console.error('[onMovementMediaUploaded] Thumbnail generation error:', err);
+        }
+    }
+    // For videos, just log — full ffmpeg transcoding requires additional setup
+    if (isVideo) {
+        console.log(`[onMovementMediaUploaded] Video uploaded: ${filePath}. ` +
+            `Full transcoding pipeline requires ffmpeg. ` +
+            `Consider using Cloud Run or a dedicated media service for H.264 re-encoding.`);
+        // Still update the movement doc with the video URL if we can match it
+        try {
+            const movementsSnap = await db
+                .collection('movements')
+                .where('coachId', '==', coachId)
+                .limit(50)
+                .get();
+            // Find the movement whose mediaUrl matches the storage path
+            for (const doc of movementsSnap.docs) {
+                const data = doc.data();
+                if (data.mediaUrl && data.mediaUrl.includes(encodeURIComponent(filePath.split('/').pop() || ''))) {
+                    // If no thumbnail exists yet, set a placeholder note
+                    if (!data.thumbnailUrl) {
+                        await doc.ref.update({
+                            transcodingStatus: 'pending',
+                            updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                        });
+                    }
+                    break;
+                }
+            }
+        }
+        catch (err) {
+            console.error('[onMovementMediaUploaded] Video doc update error:', err);
+        }
+    }
+});
+// ═══════════════════════════════════════════════════════════════════════════
+// WORKOUT COMPLETION NOTIFICATION
+// ═══════════════════════════════════════════════════════════════════════════
+/**
+ * onWorkoutCompleted — Firestore onCreate trigger
+ *
+ * Fires when a new workout_log document is created (member completes a workout).
+ * Sends a push notification to the coach so they can review the log.
+ */
+exports.onWorkoutCompleted = (0, firestore_1.onDocumentCreated)('workout_logs/{logId}', async (event) => {
+    const snap = event.data;
+    if (!snap)
+        return;
+    const data = snap.data();
+    const coachId = data.coachId;
+    const memberName = data.memberName || 'A member';
+    const workoutName = data.workoutName || 'a workout';
+    if (!coachId) {
+        console.warn('[onWorkoutCompleted] No coachId on workout_log, skipping.');
+        return;
+    }
+    // Look up coach's push tokens
+    const tokensSnap = await db
+        .collection('users')
+        .doc(coachId)
+        .collection('fcmTokens')
+        .get();
+    // Also check legacy pushToken field
+    const coachDoc = await db.collection('users').doc(coachId).get();
+    const coachData = coachDoc.exists ? coachDoc.data() : undefined;
+    const legacyToken = coachData === null || coachData === void 0 ? void 0 : coachData.pushToken;
+    const tokens = [];
+    tokensSnap.docs.forEach((d) => {
+        var _a;
+        const t = (_a = d.data()) === null || _a === void 0 ? void 0 : _a.token;
+        if (t)
+            tokens.push(t);
+    });
+    if (legacyToken && !tokens.includes(legacyToken)) {
+        tokens.push(legacyToken);
+    }
+    if (tokens.length === 0) {
+        console.log('[onWorkoutCompleted] Coach has no push tokens, skipping.');
+        return;
+    }
+    // Check if journal was submitted
+    const hasJournal = data.journal && (data.journal.glow || data.journal.grow);
+    const title = 'Workout Completed';
+    const body = hasJournal
+        ? `${memberName} completed "${workoutName}" and left a reflection.`
+        : `${memberName} completed "${workoutName}". Tap to review.`;
+    for (const token of tokens) {
+        try {
+            await messaging.send({
+                token,
+                notification: { title, body },
+                data: { type: 'workout_completed', logId: snap.id, memberId: data.memberId || '' },
+                apns: {
+                    payload: { aps: { alert: { title, body }, sound: 'default', badge: 1 } },
+                },
+            });
+            console.log(`[onWorkoutCompleted] Push sent to token ${token.substring(0, 20)}...`);
+        }
+        catch (err) {
+            const code = (err === null || err === void 0 ? void 0 : err.code) || '';
+            if (code === 'messaging/registration-token-not-registered' ||
+                code === 'messaging/invalid-registration-token') {
+                console.warn('[onWorkoutCompleted] Stale token, removing');
+                const staleDoc = tokensSnap.docs.find((d) => { var _a; return ((_a = d.data()) === null || _a === void 0 ? void 0 : _a.token) === token; });
+                if (staleDoc)
+                    await staleDoc.ref.delete().catch(() => { });
+            }
+            else {
+                console.error('[onWorkoutCompleted] FCM error:', err);
             }
         }
     }

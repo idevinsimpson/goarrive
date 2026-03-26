@@ -24,6 +24,7 @@ import {
   where,
   orderBy,
   getDocs,
+  Timestamp,
 } from 'firebase/firestore';
 
 const FH =
@@ -50,10 +51,17 @@ export default function MemberStreakCard({ memberId }: Props) {
 
     (async () => {
       try {
+        // Risk 7: Limit query to last 90 days to avoid expensive full-collection
+        // scans for members with hundreds of completed workouts.
+        const ninetyDaysAgo = new Date();
+        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+        ninetyDaysAgo.setHours(0, 0, 0, 0);
+
         const snap = await getDocs(
           query(
             collection(db, 'workout_logs'),
             where('memberId', '==', memberId),
+            where('completedAt', '>=', Timestamp.fromDate(ninetyDaysAgo)),
             orderBy('completedAt', 'desc'),
           ),
         );
