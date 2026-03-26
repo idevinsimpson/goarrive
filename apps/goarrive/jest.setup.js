@@ -1,8 +1,31 @@
 /**
  * Jest setup — mock native modules and Firebase
  *
+ * R5 DRIFT GUARD:
  * Modules that are not direct dependencies use { virtual: true }
  * so Jest does not attempt to resolve them from node_modules.
+ *
+ * When adding a new native module to the app:
+ *   1. Add its mock here with { virtual: true } if not in package.json
+ *   2. Remove { virtual: true } once the module is added to package.json
+ *   3. Keep the mock API surface in sync with the actual module exports
+ *
+ * Current virtual mocks (not in package.json):
+ *   - expo-speech
+ *   - expo-haptics
+ *   - expo-av
+ *   - expo-camera
+ *   - expo-file-system
+ *   - expo-image-picker
+ *   - expo-screen-orientation
+ *   - @react-native-community/netinfo
+ *   - firebase/storage
+ *
+ * Non-virtual mocks (resolved from node_modules):
+ *   - ./lib/firebase (local)
+ *   - firebase/firestore
+ *
+ * Last audited: 2026-03-26
  */
 
 // Mock expo-speech

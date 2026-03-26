@@ -10,7 +10,7 @@
  * Props:
  *   coachId — the coach's user ID
  */
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, Platform, ActivityIndicator } from 'react-native';
 import {
   collection,
@@ -41,11 +41,20 @@ interface WeekStats {
 export default function CoachWorkoutStatsWidget({
   coachId,
 }: CoachWorkoutStatsWidgetProps) {
-  const [stats, setStats] = useState<WeekStats | null>(null);
+   const [stats, setStats] = useState<WeekStats | null>(null);
   const [loading, setLoading] = useState(true);
-
+  // R2: In-memory cache to reduce Firestore query volume
+  const cacheRef = useRef<{ data: WeekStats; ts: number; coachId: string } | null>(null);
+  const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
   const fetchStats = useCallback(async () => {
     if (!coachId) return;
+    // Check cache first
+    const cached = cacheRef.current;
+    if (cached && cached.coachId === coachId && Date.now() - cached.ts < CACHE_TTL_MS) {
+      setStats(cached.data);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const now = new Date();
@@ -105,12 +114,14 @@ export default function CoachWorkoutStatsWidget({
         }
       }
 
-      setStats({
+      const result: WeekStats = {
         completedCount,
         assignedCount,
         avgDifficulty,
         mostActiveMember,
-      });
+      };
+      cacheRef.current = { data: result, ts: Date.now(), coachId };
+      setStats(result);
     } catch (err) {
       console.error('Error fetching workout stats:', err);
     } finally {

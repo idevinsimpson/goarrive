@@ -8,7 +8,7 @@
  * Usage:
  *   const { templates, loading, loadTemplates } = useWorkoutTemplates(coachId);
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { db } from '../lib/firebase';
 import {
   collection,
@@ -63,12 +63,12 @@ export function useWorkoutTemplates(coachId: string) {
     return Array.from(tags).sort();
   })();
 
-  /** Filtered templates based on current category and tag filters */
-  const filteredTemplates = templates.filter((t) => {
+  /** Filtered templates based on current category and tag filters (R4: memoized) */
+  const filteredTemplates = useMemo(() => templates.filter((t) => {
     if (categoryFilter !== 'All' && t.category !== categoryFilter) return false;
     if (tagFilter && !(t.tags || []).includes(tagFilter)) return false;
     return true;
-  });
+  }), [templates, categoryFilter, tagFilter]);
 
   const loadTemplates = useCallback(async () => {
     if (!coachId || loading) return;

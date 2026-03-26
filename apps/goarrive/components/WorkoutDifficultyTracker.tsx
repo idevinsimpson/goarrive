@@ -152,6 +152,19 @@ export default function WorkoutDifficultyTracker({
 
   const maxCount = Math.max(...Object.values(counts), 1);
 
+  // S9: Auto-progression suggestion
+  const DIFFICULTY_LEVELS = ['beginner', 'intermediate', 'advanced', 'elite'];
+  const recentFive = entries.slice(-5);
+  const currentLevel = recentFive.length > 0
+    ? recentFive[recentFive.length - 1].difficulty
+    : 'beginner';
+  const currentIdx = DIFFICULTY_LEVELS.indexOf(currentLevel);
+  const allSameOrHigher = recentFive.length >= 3 &&
+    recentFive.every((e) => (DIFFICULTY_ORDER[e.difficulty] || 1) >= (DIFFICULTY_ORDER[currentLevel] || 1));
+  const progressionSuggestion = allSameOrHigher && currentIdx < DIFFICULTY_LEVELS.length - 1
+    ? DIFFICULTY_LEVELS[currentIdx + 1]
+    : null;
+
   return (
     <View style={st.container}>
       <View style={st.header}>
@@ -179,6 +192,16 @@ export default function WorkoutDifficultyTracker({
       <Text style={st.subtitle}>
         {entries.length} workout{entries.length !== 1 ? 's' : ''} in the last 30 days
       </Text>
+
+      {/* S9: Auto-progression suggestion */}
+      {progressionSuggestion && (
+        <View style={st.suggestionBanner}>
+          <Icon name="trending-up" size={14} color="#6EBB7A" />
+          <Text style={st.suggestionText}>
+            Ready to progress? Consider assigning {progressionSuggestion.charAt(0).toUpperCase() + progressionSuggestion.slice(1)} workouts.
+          </Text>
+        </View>
+      )}
 
       {/* Difficulty distribution bars */}
       <View style={st.bars}>
@@ -302,6 +325,24 @@ const st = StyleSheet.create({
     color: '#8A95A3',
     fontFamily: FB,
     marginBottom: 16,
+  },
+  suggestionBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(110,187,122,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(110,187,122,0.25)',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+  },
+  suggestionText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#6EBB7A',
+    fontFamily: FB,
   },
   bars: {
     gap: 8,

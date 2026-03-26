@@ -51,6 +51,8 @@ import { defaultHostingMode, defaultCoachExpectedLive } from '../lib/schedulingT
 import AssignWorkoutModal from './AssignWorkoutModal';
 import CoachReviewQueue from './CoachReviewQueue';
 import WorkoutAnalytics from './WorkoutAnalytics';
+import WorkoutLogReview from './WorkoutLogReview';
+import MemberWorkoutHistory from './MemberWorkoutHistory';
 
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
@@ -455,6 +457,8 @@ export default function MemberDetail({
   const [showAssignWorkout, setShowAssignWorkout] = useState(false);
   const [showReviewQueue, setShowReviewQueue] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
+  const [showLogReview, setShowLogReview] = useState(false);
+  const [showWorkoutHistory, setShowWorkoutHistory] = useState(false);
   // Item 7: Session notes per instance
   const [instanceNotes, setInstanceNotes] = useState<Record<string, string>>({});
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -1365,6 +1369,24 @@ export default function MemberDetail({
       bgColor: 'rgba(110,187,122,0.1)',
       live: true,
       onPress: () => setShowReviewQueue(true),
+    },
+    {
+      icon: 'checkmark-circle',
+      label: 'Review Logs',
+      sublabel: 'Review & react to logs',
+      color: '#A78BFA',
+      bgColor: 'rgba(167,139,250,0.1)',
+      live: true,
+      onPress: () => setShowLogReview(true),
+    },
+    {
+      icon: 'time',
+      label: 'Workout History',
+      sublabel: 'Past workouts & trends',
+      color: BLUE,
+      bgColor: 'rgba(125,211,252,0.1)',
+      live: true,
+      onPress: () => setShowWorkoutHistory(true),
     },
     {
       icon: 'lock',
@@ -2768,6 +2790,17 @@ export default function MemberDetail({
         memberName={member.name || member.displayName || 'Member'}
         coachId={claims?.coachId || user?.uid || ''}
         onClose={() => setShowAnalytics(false)}
+      />
+      <WorkoutLogReview
+        visible={showLogReview}
+        coachId={claims?.coachId || user?.uid || ''}
+        onClose={() => setShowLogReview(false)}
+      />
+      <MemberWorkoutHistory
+        visible={showWorkoutHistory}
+        memberId={member.id}
+        memberName={member.name || member.displayName || 'Member'}
+        onClose={() => setShowWorkoutHistory(false)}
       />
     </>
   );

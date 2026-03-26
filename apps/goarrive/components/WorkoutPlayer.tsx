@@ -92,9 +92,12 @@ export default function WorkoutPlayer({
   const [swapReason, setSwapReason] = useState('');
 
   // ── Landscape detection for tablets ─────────────────────────────────
+  // R3: Fallback guard — useWindowDimensions may return 0 on some devices
+  // during initial mount. Default to portrait mode if dimensions are invalid.
   const { width: winW, height: winH } = useWindowDimensions();
-  const isLandscape = winW > winH;
-  const isTablet = Math.min(winW, winH) >= 600;
+  const dimsValid = winW > 0 && winH > 0;
+  const isLandscape = dimsValid ? winW > winH : false;
+  const isTablet = dimsValid ? Math.min(winW, winH) >= 600 : false;
 
     // ── Audio mute toggle ─────────────────────────────────────────────
   const [audioMuted, setAudioMutedState] = useState(isAudioMuted());
@@ -264,8 +267,15 @@ export default function WorkoutPlayer({
                 <Text style={st.cuesBoxText} numberOfLines={3}>{current.coachingCues}</Text>
               </View>
             ) : null}
+            {/* S8: Contraindication warning */}
+            {current.contraindications ? (
+              <View style={st.contraBanner}>
+                <Icon name="alert" size={14} color="#F59E0B" />
+                <Text style={st.contraText} numberOfLines={2}>{current.contraindications}</Text>
+              </View>
+            ) : null}
             {/* Regression / Progression hints */}
-            {(current.regression || current.progression) && (
+            {(current.regression || current.progression) ? (
               <View style={st.regProgRow}>
                 {current.regression ? (
                   <View style={st.regProgChip}>
@@ -282,6 +292,9 @@ export default function WorkoutPlayer({
                   </View>
                 ) : null}
               </View>
+            ) : (
+              /* R6: Empty-state hint when no regression/progression data */
+              <Text style={st.regProgEmpty}>Tap swap to find easier or harder alternatives</Text>
             )}
             {current.reps ? (
               <Text style={st.repsText}>{current.reps} reps</Text>
@@ -810,6 +823,32 @@ const st = StyleSheet.create({
     fontWeight: '600',
   },
   // ── Swap button ─────────────────────────────────────────────────
+  contraBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(245,158,11,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.3)',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginTop: 6,
+  },
+  contraText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#F59E0B',
+    fontFamily: FB,
+  },
+  regProgEmpty: {
+    fontSize: 12,
+    color: '#555D6B',
+    fontFamily: FB,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 4,
+  },
   regProgRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',

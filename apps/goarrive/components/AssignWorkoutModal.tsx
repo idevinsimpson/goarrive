@@ -24,6 +24,7 @@ import {
   Modal,
   ActivityIndicator,
   Alert,
+  Linking,
 } from 'react-native';
 import { Icon } from './Icon';
 import {
@@ -336,6 +337,23 @@ export default function AssignWorkoutModal({
               <Pressable style={s.assignAnotherBtn} onPress={handleAssignAnother}>
                 <Icon name="add" size={20} color="#F5A623" />
                 <Text style={s.assignAnotherText}>Assign Another</Text>
+              </Pressable>
+
+              {/* S7: Add to Google Calendar deep link */}
+              <Pressable
+                style={s.calendarBtn}
+                onPress={() => {
+                  const start = new Date(selectedDate);
+                  start.setHours(9, 0, 0, 0); // Default 9 AM
+                  const end = new Date(start);
+                  end.setHours(10, 0, 0, 0); // 1 hour default
+                  const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+                  const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(lastAssignedName || 'Workout')}&dates=${fmt(start)}/${fmt(end)}&details=${encodeURIComponent('Assigned via GoArrive. Open the app to start your workout.')}`;
+                  Linking.openURL(url).catch(() => {});
+                }}
+              >
+                <Icon name="calendar" size={18} color="#5B9BD5" />
+                <Text style={s.calendarBtnText}>Add to Google Calendar</Text>
               </Pressable>
 
               <Pressable style={s.doneBtn} onPress={onClose}>
@@ -870,6 +888,25 @@ const s = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#F5A623',
+    fontFamily: FONT_HEADING,
+  },
+  calendarBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(91,155,213,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(91,155,213,0.25)',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 14,
+    width: '100%',
+  },
+  calendarBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#5B9BD5',
     fontFamily: FONT_HEADING,
   },
   doneBtn: {

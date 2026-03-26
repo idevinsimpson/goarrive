@@ -1,0 +1,36 @@
+name: GoArrive Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Run Jest Test Suite
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/goarrive
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: apps/goarrive/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npx jest --ci --coverage --maxWorkers=2
+
+      - name: Validate dependencies
+        working-directory: .
+        run: bash scripts/validate-deps.sh
