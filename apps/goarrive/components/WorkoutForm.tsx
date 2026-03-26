@@ -103,6 +103,7 @@ interface WorkoutBlock {
   label: string;
   rounds?: number;
   restBetweenRoundsSec?: number;
+  restBetweenMovementsSec?: number;
   movements: BlockMovement[];
 }
 
@@ -634,7 +635,30 @@ export default function WorkoutForm({
                             <Text style={s.blockIndexText}>{bi + 1}</Text>
                           </View>
                           <View style={s.blockHeaderInfo}>
-                            <Text style={s.blockType}>{block.type}</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <View style={[
+                                s.blockTypeBadge,
+                                block.type === 'Superset' && s.blockTypeBadgeSuperset,
+                                block.type === 'Circuit' && s.blockTypeBadgeCircuit,
+                                block.type === 'AMRAP' && s.blockTypeBadgeCircuit,
+                              ]}>
+                                <Text style={[
+                                  s.blockTypeBadgeText,
+                                  block.type === 'Superset' && { color: '#F59E0B' },
+                                  (block.type === 'Circuit' || block.type === 'AMRAP') && { color: '#34D399' },
+                                ]}>{block.type}</Text>
+                              </View>
+                              {block.type === 'Superset' && block.movements.length >= 2 && (
+                                <Text style={s.blockPatternHint}>
+                                  {block.movements.map((_, i) => `A${i + 1}`).join(' ↔ ')}
+                                </Text>
+                              )}
+                              {block.type === 'Circuit' && block.movements.length >= 2 && (
+                                <Text style={s.blockPatternHint}>
+                                  {block.movements.length} movements → {block.rounds ?? 1}x
+                                </Text>
+                              )}
+                            </View>
                             <TextInput
                               style={s.blockLabelInput}
                               value={block.label}
@@ -685,6 +709,26 @@ export default function WorkoutForm({
                               maxLength={3}
                             />
                           </View>
+                          {(block.type === 'Superset' || block.type === 'Circuit') && (
+                            <View style={s.blockSettingItem}>
+                              <Text style={s.blockSettingLabel}>Transition (sec)</Text>
+                              <TextInput
+                                style={s.blockSettingInput}
+                                value={String(block.restBetweenMovementsSec ?? 0)}
+                                onChangeText={(t) =>
+                                  updateBlockField(
+                                    bi,
+                                    'restBetweenMovementsSec',
+                                    parseInt(t.replace(/[^0-9]/g, ''), 10) || 0,
+                                  )
+                                }
+                                keyboardType="number-pad"
+                                maxLength={3}
+                                placeholder="0"
+                                placeholderTextColor="#4A5568"
+                              />
+                            </View>
+                          )}
                         </View>
 
                         {/* Movements in this block */}
@@ -1146,6 +1190,31 @@ const s = StyleSheet.create({
     fontWeight: '600',
     color: '#7DD3FC',
     fontFamily: FH,
+  },
+  blockTypeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: 'rgba(125,211,252,0.15)',
+  },
+  blockTypeBadgeSuperset: {
+    backgroundColor: 'rgba(245,158,11,0.15)',
+  },
+  blockTypeBadgeCircuit: {
+    backgroundColor: 'rgba(52,211,153,0.15)',
+  },
+  blockTypeBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#7DD3FC',
+    fontFamily: FH,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  blockPatternHint: {
+    fontSize: 11,
+    color: '#94A3B8',
+    fontFamily: FB,
   },
   blockLabelInput: {
     fontSize: 14,

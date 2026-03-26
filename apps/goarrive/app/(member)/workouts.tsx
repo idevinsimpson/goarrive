@@ -43,6 +43,8 @@ import PostWorkoutJournal, { JournalEntry } from '../../components/PostWorkoutJo
 import MemberWorkoutHistory from '../../components/MemberWorkoutHistory';
 import WorkoutCalendarStrip from '../../components/WorkoutCalendarStrip';
 import MemberStreakCard from '../../components/MemberStreakCard';
+import WorkoutPreview from '../../components/WorkoutPreview';
+import WorkoutSessionSummary from '../../components/WorkoutSessionSummary';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH =
@@ -112,6 +114,14 @@ export default function MemberWorkoutsScreen() {
   const [playerWorkout, setPlayerWorkout] = useState<any>(null);
   const [activeAssignmentId, setActiveAssignmentId] = useState<string | null>(null);
   const [loadingWorkout, setLoadingWorkout] = useState<string | null>(null);
+
+  // Preview state (Suggestion 1: WorkoutPreview before player launch)
+  const [previewVisible, setPreviewVisible] = useState(false);
+  const [previewWorkout, setPreviewWorkout] = useState<any>(null);
+
+  // Session summary state (Suggestion 2: summary before journal)
+  const [summaryVisible, setSummaryVisible] = useState(false);
+  const [sessionStats, setSessionStats] = useState<any>(null);
 
   // Journal state
   const [journalVisible, setJournalVisible] = useState(false);
@@ -193,10 +203,10 @@ export default function MemberWorkoutsScreen() {
         if (!workoutData.name) workoutData.name = assignment.workoutName;
         if (!workoutData.blocks) workoutData.blocks = [];
 
-        setPlayerWorkout(workoutData);
+        // Show preview first instead of jumping straight to player
+        setPreviewWorkout(workoutData);
         setActiveAssignmentId(assignment.id);
-        workoutStartTime.current = Date.now();
-        setPlayerVisible(true);
+        setPreviewVisible(true);
       } catch (err) {
         console.error('[MemberWorkouts] Failed to load workout:', err);
         Alert.alert('Error', 'Could not load workout. Please try again.');
@@ -207,16 +217,30 @@ export default function MemberWorkoutsScreen() {
     [],
   );
 
-  // ── Player complete → show journal ────────────────────────────────────
+  // ── Player complete → show session summary → journal ──────────────────
   const handlePlayerComplete = useCallback(() => {
     const durationSec = workoutStartTime.current
       ? Math.round((Date.now() - workoutStartTime.current) / 1000)
       : 0;
 
+    const blocks = playerWorkout?.blocks || [];
+    const totalMovements = blocks.reduce(
+      (sum: number, b: any) => sum + (b.movements?.length ?? 0),
+      0,
+    );
+
     setCompletedDuration(durationSec);
     setCompletedWorkoutName(playerWorkout?.name ?? 'Workout');
+    setSessionStats({
+      totalTimeSec: durationSec,
+      movementsCompleted: totalMovements,
+      totalMovements,
+      movementsSkipped: 0,
+      blocksCompleted: blocks.length,
+      workoutName: playerWorkout?.name ?? 'Workout',
+    });
     setPlayerVisible(false);
-    setJournalVisible(true);
+    setSummaryVisible(true);
   }, [playerWorkout]);
 
   // ── Journal submit → write log ────────────────────────────────────────
@@ -619,6 +643,23 @@ export default function MemberWorkoutsScreen() {
         }
       />
 
+      {/* Workout Preview (Suggestion 1) */}
+      <WorkoutPreview
+        visible={previewVisible}
+        workout={previewWorkout}
+        onStart={() => {
+          setPreviewVisible(false);
+          setPlayerWorkout(previewWorkout);
+          workoutStartTime.current = Date.now();
+          setPlayerVisible(true);
+        }}
+        onClose={() => {
+          setPreviewVisible(false);
+          setPreviewWorkout(null);
+          setActiveAssignmentId(null);
+        }}
+      />
+
       {/* Workout Player */}
       {playerWorkout && playerVisible && (
         <WorkoutPlayer
@@ -631,6 +672,24 @@ export default function MemberWorkoutsScreen() {
             workoutStartTime.current = null;
           }}
           onComplete={handlePlayerComplete}
+        />
+      )}
+
+      {/* Session Summary (Suggestion 2) */}
+      {summaryVisible && sessionStats && (
+        <WorkoutSessionSummary
+          visible={summaryVisible}
+          stats={sessionStats}
+          onContinueToJournal={() => {
+            setSummaryVisible(false);
+            setSessionStats(null);
+            setJournalVisible(true);
+          }}
+          onSkipJournal={() => {
+            setSummaryVisible(false);
+            setSessionStats(null);
+            handleJournalSkip();
+          }}
         />
       )}
 

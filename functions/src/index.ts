@@ -6657,3 +6657,39 @@ export const continueRecurringAssignments = onSchedule(
     );
   },
 );
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Risk 3: Cleanup stale notification cooldown documents
+// Runs daily at 3:15 AM UTC. Deletes cooldown docs older than 24 hours
+// to prevent unbounded growth of the _notification_cooldowns collection.
+// ═══════════════════════════════════════════════════════════════════════════
+export const cleanupNotificationCooldowns = onSchedule(
+  {
+    schedule: '15 3 * * *',
+    timeZone: 'Etc/UTC',
+    retryCount: 1,
+    memory: '256MiB',
+  },
+  async () => {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24h ago
+    const staleSnap = await db
+      .collection('_notification_cooldowns')
+      .where('lastSentAt', '<', Timestamp.fromDate(cutoff))
+      .limit(500)
+      .get();
+
+    if (staleSnap.empty) {
+      console.log('[cleanupNotificationCooldowns] No stale cooldown docs found.');
+      return;
+    }
+
+    const batch = db.batch();
+    staleSnap.docs.forEach((doc) => batch.delete(doc.ref));
+    await batch.commit();
+
+    console.log(
+      `[cleanupNotificationCooldowns] Deleted ${staleSnap.size} stale cooldown docs.`,
+    );
+  },
+);

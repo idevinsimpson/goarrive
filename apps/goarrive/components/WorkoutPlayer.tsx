@@ -32,6 +32,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
+import MovementVideoControls from './MovementVideoControls';
 import { Icon } from './Icon';
 import { setAudioMuted, isAudioMuted } from '../lib/audioCues';
 import { useWakeLock } from '../lib/useWakeLock';
@@ -167,15 +168,12 @@ export default function WorkoutPlayer({
               <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                 {current.videoUrl ? (
                   <View style={[st.mediaWrap, { width: 320, height: 240 }]}>
-                    <Video
-                      source={{ uri: current.videoUrl }}
-                      style={st.mediaVideo}
-                      resizeMode={ResizeMode.CONTAIN}
-                      shouldPlay={!isPaused}
-                      isLooping
-                      isMuted
-                      posterSource={current.thumbnailUrl ? { uri: current.thumbnailUrl } : undefined}
-                      usePoster={!!current.thumbnailUrl}
+                    <MovementVideoControls
+                      uri={current.videoUrl}
+                      posterUri={current.thumbnailUrl || undefined}
+                      height={240}
+                      autoPlay={!isPaused}
+                      showControls={isPaused}
                     />
                   </View>
                 ) : current.thumbnailUrl ? (
@@ -203,15 +201,12 @@ export default function WorkoutPlayer({
             {/* Movement media — muted looping video or thumbnail (portrait only) */}
             {!(isLandscape && isTablet) && (current.videoUrl ? (
               <View style={st.mediaWrap}>
-                <Video
-                  source={{ uri: current.videoUrl }}
-                  style={st.mediaVideo}
-                  resizeMode={ResizeMode.CONTAIN}
-                  shouldPlay={!isPaused}
-                  isLooping
-                  isMuted
-                  posterSource={current.thumbnailUrl ? { uri: current.thumbnailUrl } : undefined}
-                  usePoster={!!current.thumbnailUrl}
+                <MovementVideoControls
+                  uri={current.videoUrl}
+                  posterUri={current.thumbnailUrl || undefined}
+                  height={200}
+                  autoPlay={!isPaused}
+                  showControls={isPaused}
                 />
               </View>
             ) : current.thumbnailUrl ? (

@@ -48,6 +48,12 @@ import MovementDetail, {
 } from '../../components/MovementDetail';
 import MovementForm from '../../components/MovementForm';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import {
+  useMovementFilters,
+  CATEGORY_FILTER_OPTIONS,
+  EQUIPMENT_FILTER_OPTIONS,
+  MUSCLE_GROUP_FILTER_OPTIONS,
+} from '../../hooks/useMovementFilters';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH =
@@ -131,11 +137,19 @@ export default function MovementsScreen() {
   const [movements, setMovements] = useState<MovementDetailData[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [searchText, setSearchText] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All');
-  const [selectedEquipment, setSelectedEquipment] = useState('All');
-  const [selectedMuscleGroup, setSelectedMuscleGroup] = useState('All');
   const [showArchived, setShowArchived] = useState(false);
+
+  // Suggestion 4: Use extracted filter hook instead of inline state
+  const movementFilters = useMovementFilters(
+    movements.filter((m) => (showArchived ? m.isArchived : !m.isArchived)),
+  );
+  const {
+    searchText, setSearchText,
+    categoryFilter: selectedCategory, setCategoryFilter: setSelectedCategory,
+    equipmentFilter: selectedEquipment, setEquipmentFilter: setSelectedEquipment,
+    muscleGroupFilter: selectedMuscleGroup, setMuscleGroupFilter: setSelectedMuscleGroup,
+    filtered,
+  } = movementFilters;
 
   // Detail modal
   const [detailVisible, setDetailVisible] = useState(false);
@@ -243,45 +257,6 @@ export default function MovementsScreen() {
     // Real-time listener will auto-update; just reset the flag after a short delay
     setTimeout(() => setRefreshing(false), 1000);
   }, []);
-
-  // ── Filter logic ───────────────────────────────────────────────────────
-  const filtered = movements.filter((m) => {
-    // Archive filter
-    if (showArchived && !m.isArchived) return false;
-    if (!showArchived && m.isArchived) return false;
-
-    // Search
-    if (
-      searchText &&
-      !m.name.toLowerCase().includes(searchText.toLowerCase())
-    )
-      return false;
-
-    // Category
-    if (
-      selectedCategory !== 'All' &&
-      m.category.toLowerCase() !== selectedCategory.toLowerCase()
-    )
-      return false;
-
-    // Equipment
-    if (
-      selectedEquipment !== 'All' &&
-      m.equipment.toLowerCase() !== selectedEquipment.toLowerCase()
-    )
-      return false;
-
-    // Muscle Group (client-side array-contains check)
-    if (
-      selectedMuscleGroup !== 'All' &&
-      !m.muscleGroups.some(
-        (mg) => mg.toLowerCase() === selectedMuscleGroup.toLowerCase(),
-      )
-    )
-      return false;
-
-    return true;
-  });
 
   // ── Handlers ───────────────────────────────────────────────────────────
   const handleOpenDetail = (m: MovementDetailData) => {
@@ -434,7 +409,7 @@ export default function MovementsScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={s.chipScroll}
         >
-          {CATEGORIES.map((cat) => {
+          {(CATEGORY_FILTER_OPTIONS as readonly string[]).map((cat) => {
             const active = selectedCategory === cat;
             return (
               <Pressable
@@ -458,7 +433,7 @@ export default function MovementsScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={s.chipScroll}
         >
-          {EQUIPMENT.map((eq) => {
+          {(EQUIPMENT_FILTER_OPTIONS as readonly string[]).map((eq) => {
             const active = selectedEquipment === eq;
             return (
               <Pressable
@@ -482,7 +457,7 @@ export default function MovementsScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={s.chipScroll}
         >
-          {MUSCLE_GROUPS.map((mg) => {
+          {(MUSCLE_GROUP_FILTER_OPTIONS as readonly string[]).map((mg) => {
             const active = selectedMuscleGroup === mg;
             return (
               <Pressable

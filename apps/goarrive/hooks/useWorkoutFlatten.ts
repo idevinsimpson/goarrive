@@ -15,6 +15,7 @@
  *   Everything else → linear
  */
 import { useMemo } from 'react';
+import { calculateAdjustedRest } from './useRestAutoAdjust';
 
 export interface FlatMovement {
   name: string;
@@ -36,7 +37,7 @@ export interface FlatMovement {
   blockType?: 'linear' | 'superset' | 'circuit';
 }
 
-function resolveBlockType(blockType: string | undefined): 'linear' | 'superset' | 'circuit' {
+export function resolveBlockType(blockType: string | undefined): 'linear' | 'superset' | 'circuit' {
   const t = (blockType || '').toLowerCase();
   if (t === 'superset') return 'superset';
   if (t === 'circuit' || t === 'amrap') return 'circuit';
@@ -61,6 +62,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
       if (movements.length === 0) return;
 
       const blockRest = block.restBetweenSec ?? block.restBetweenRoundsSec ?? block.rest ?? 15;
+      const workoutDifficulty = workout.difficulty || 'Intermediate';
       const rounds = block.rounds ?? block.sets ?? 1;
       const bType = resolveBlockType(block.type);
 
@@ -83,10 +85,10 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
             } else if (isLastMovementInRound) {
               restAfter = blockRest;
             } else {
-              // For supersets, minimal rest between A1→A2; for circuits, use movement rest
+              // For supersets, minimal rest between A1→A2; for circuits, use auto-adjusted rest
               restAfter = bType === 'superset'
                 ? (mv.restSec ?? 0)
-                : (mv.restSec ?? Math.min(blockRest, 15));
+                : calculateAdjustedRest(mv, block, workoutDifficulty);
             }
 
             flat.push({
@@ -117,7 +119,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
             flat.push({
               name: mv.name || 'Movement',
               duration: mv.duration || mv.workSec || 30,
-              restAfter: isLastInBlock ? 0 : mv.restSec ?? blockRest,
+              restAfter: isLastInBlock ? 0 : calculateAdjustedRest(mv, block, workoutDifficulty),
               blockName: block.name || `Block ${bi + 1}`,
               blockIndex: bi,
               movementIndex: mi,

@@ -58,6 +58,33 @@ export const MUSCLE_GROUP_FILTER_OPTIONS = [
   'Full Body',
 ] as const;
 
+/** Standalone filter function — can be tested without React hooks */
+export function filterMovements(
+  movements: MovementFilterable[],
+  opts: { search?: string; category?: string; equipment?: string; muscleGroup?: string },
+): MovementFilterable[] {
+  let list = movements;
+
+  if (opts.search?.trim()) {
+    const q = opts.search.toLowerCase().trim();
+    list = list.filter((m) => m.name.toLowerCase().includes(q));
+  }
+  if (opts.category && opts.category !== 'All') {
+    list = list.filter((m) => m.category === opts.category);
+  }
+  if (opts.equipment && opts.equipment !== 'All') {
+    list = list.filter((m) => m.equipment === opts.equipment);
+  }
+  if (opts.muscleGroup && opts.muscleGroup !== 'All') {
+    list = list.filter((m) =>
+      (m.muscleGroups || []).some(
+        (mg) => mg.toLowerCase() === opts.muscleGroup!.toLowerCase(),
+      ),
+    );
+  }
+  return list;
+}
+
 export function useMovementFilters(movements: MovementFilterable[]) {
   const [searchText, setSearchText] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All');
@@ -65,34 +92,12 @@ export function useMovementFilters(movements: MovementFilterable[]) {
   const [muscleGroupFilter, setMuscleGroupFilter] = useState('All');
 
   const filtered = useMemo(() => {
-    let list = movements;
-
-    // Text search
-    if (searchText.trim()) {
-      const q = searchText.toLowerCase().trim();
-      list = list.filter((m) => m.name.toLowerCase().includes(q));
-    }
-
-    // Category filter
-    if (categoryFilter !== 'All') {
-      list = list.filter((m) => m.category === categoryFilter);
-    }
-
-    // Equipment filter
-    if (equipmentFilter !== 'All') {
-      list = list.filter((m) => m.equipment === equipmentFilter);
-    }
-
-    // Muscle group filter
-    if (muscleGroupFilter !== 'All') {
-      list = list.filter((m) =>
-        (m.muscleGroups || []).some(
-          (mg) => mg.toLowerCase() === muscleGroupFilter.toLowerCase(),
-        ),
-      );
-    }
-
-    return list;
+    return filterMovements(movements, {
+      search: searchText,
+      category: categoryFilter,
+      equipment: equipmentFilter,
+      muscleGroup: muscleGroupFilter,
+    });
   }, [movements, searchText, categoryFilter, equipmentFilter, muscleGroupFilter]);
 
   const resetFilters = useCallback(() => {

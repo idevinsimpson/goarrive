@@ -187,6 +187,24 @@ export default function MemberStreakCard({ memberId }: Props) {
         </View>
       </View>
 
+      {/* Welcome-back / motivational message (Risk 4) */}
+      {currentStreak === 0 && bestStreak > 0 && (
+        <Text style={st.welcomeBack}>
+          Welcome back! Your best streak was {bestStreak} day{bestStreak !== 1 ? 's' : ''}. Let's build a new one.
+        </Text>
+      )}
+      {currentStreak === 0 && bestStreak === 0 && (
+        <Text style={st.welcomeBack}>
+          Complete your first workout to start your streak!
+        </Text>
+      )}
+      {currentStreak >= 3 && (
+        <Text style={st.streakMotivation}>
+          {currentStreak >= 7 ? 'On fire! ' : 'Nice momentum! '}
+          Keep it going.
+        </Text>
+      )}
+
       {/* Week dots */}
       <View style={st.dotsRow}>
         {DAY_LABELS.map((label, i) => (
@@ -263,6 +281,22 @@ const st = StyleSheet.create({
   dotActive: {
     backgroundColor: '#6EBB7A',
     borderColor: '#6EBB7A',
+  },
+  welcomeBack: {
+    fontSize: 12,
+    color: '#94A3B8',
+    fontFamily: FB,
+    textAlign: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 8,
+  },
+  streakMotivation: {
+    fontSize: 12,
+    color: '#6EBB7A',
+    fontFamily: FB,
+    textAlign: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 8,
   },
   dotLabel: {
     fontSize: 10,

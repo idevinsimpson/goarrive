@@ -1,23 +1,14 @@
 /**
- * Cloud Functions test scaffolding — Notification rate limiting (Suggestion 10)
+ * Cloud Functions tests — Notification rate limiting & recurring scheduling
  *
- * These tests validate the rate-limiting logic used in push notification
- * Cloud Functions. They test the cooldown mechanism in isolation.
+ * Risk 7: Refactored to import actual exported functions from notificationUtils.
  *
  * To run: cd functions && npx jest
  */
+import { shouldSendNotification, getNextWeekDates } from '../notificationUtils';
 
-describe('Notification Rate Limiting Logic', () => {
+describe('shouldSendNotification', () => {
   const COOLDOWN_MS = 60_000;
-
-  function shouldSendNotification(
-    lastSentAt: Date | null,
-    now: Date,
-    cooldownMs: number = COOLDOWN_MS,
-  ): boolean {
-    if (!lastSentAt) return true;
-    return now.getTime() - lastSentAt.getTime() >= cooldownMs;
-  }
 
   test('sends notification when no previous send', () => {
     expect(shouldSendNotification(null, new Date())).toBe(true);
@@ -54,33 +45,11 @@ describe('Notification Rate Limiting Logic', () => {
   });
 });
 
-describe('Recurring Assignment Scheduling Logic', () => {
-  function getNextWeekDates(
-    daysOfWeek: number[],
-    referenceDate: Date,
-  ): Date[] {
-    const dates: Date[] = [];
-    const monday = new Date(referenceDate);
-    const dayOfWeek = monday.getDay();
-    const daysFromMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    monday.setDate(monday.getDate() - daysFromMon + 7); // Next Monday
-    monday.setHours(0, 0, 0, 0);
-
-    daysOfWeek.forEach((dow) => {
-      const d = new Date(monday);
-      const offset = dow === 0 ? 6 : dow - 1; // Convert Sun=0 to Mon=0 index
-      d.setDate(monday.getDate() + offset);
-      dates.push(d);
-    });
-
-    return dates.sort((a, b) => a.getTime() - b.getTime());
-  }
-
+describe('getNextWeekDates', () => {
   test('generates correct dates for Mon/Wed/Fri', () => {
     const ref = new Date('2026-03-26T00:00:00Z'); // Thursday
     const dates = getNextWeekDates([1, 3, 5], ref); // Mon, Wed, Fri
     expect(dates).toHaveLength(3);
-    // Next week starts Mar 30 (Monday)
     expect(dates[0].getDay()).toBe(1); // Monday
     expect(dates[1].getDay()).toBe(3); // Wednesday
     expect(dates[2].getDay()).toBe(5); // Friday
@@ -99,5 +68,11 @@ describe('Recurring Assignment Scheduling Logic', () => {
     const dates = getNextWeekDates([0], ref); // Sunday
     expect(dates).toHaveLength(1);
     expect(dates[0].getDay()).toBe(0);
+  });
+
+  test('returns empty array for empty daysOfWeek', () => {
+    const ref = new Date('2026-03-26T00:00:00Z');
+    const dates = getNextWeekDates([], ref);
+    expect(dates).toHaveLength(0);
   });
 });

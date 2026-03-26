@@ -58,6 +58,7 @@ import type { WorkoutDetailData } from '../../components/WorkoutDetail';
 import WorkoutForm from '../../components/WorkoutForm';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import WorkoutTemplateMarketplace from '../../components/WorkoutTemplateMarketplace';
+import CoachWorkoutCalendar from '../../components/CoachWorkoutCalendar';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH =
@@ -165,6 +166,9 @@ export default function WorkoutsScreen() {
 
   // Template marketplace
   const [showMarketplace, setShowMarketplace] = useState(false);
+
+  // Coach calendar view (Suggestion 3)
+  const [showCalendar, setShowCalendar] = useState(false);
 
   // ── Real-time workout listener ─────────────────────────────────────────
   const mapWorkoutDoc = useCallback((d: any): WorkoutData => {
@@ -456,6 +460,9 @@ export default function WorkoutsScreen() {
             </Pressable>
           )}
         </View>
+        <Pressable style={s.browseBtn} onPress={() => setShowCalendar(true)}>
+          <Icon name="calendar" size={14} color="#F5A623" />
+        </Pressable>
         <Pressable style={s.browseBtn} onPress={() => setShowMarketplace(true)}>
           <Icon name="grid" size={14} color="#F5A623" />
         </Pressable>
@@ -668,6 +675,13 @@ export default function WorkoutsScreen() {
         coachId={coachId}
         tenantId={tenantId}
         onClose={() => setShowMarketplace(false)}
+      />
+
+      {/* Coach Workout Calendar (Suggestion 3) */}
+      <CoachWorkoutCalendar
+        coachId={coachId}
+        visible={showCalendar}
+        onClose={() => setShowCalendar(false)}
       />
 
       {/* Confirm dialog */}

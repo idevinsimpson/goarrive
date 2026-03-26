@@ -39,6 +39,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { Icon } from './Icon';
+import MovementVideoControls from './MovementVideoControls';
 import { MovementDetailData } from './MovementDetail';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -636,9 +637,18 @@ export default function MovementForm({
               keyboardType="url"
             />
             {videoUrl ? (
-              <View style={st.mediaAttached}>
-                <Icon name="checkmark" size={14} color="#6EBB7A" />
-                <Text style={st.mediaAttachedText}>Video attached</Text>
+              <View style={{ marginTop: 8, marginBottom: 8 }}>
+                <MovementVideoControls
+                  uri={videoUrl}
+                  posterUri={thumbnailUrl || undefined}
+                  height={180}
+                  autoPlay={false}
+                  showControls={true}
+                />
+                <View style={st.mediaAttached}>
+                  <Icon name="checkmark" size={14} color="#6EBB7A" />
+                  <Text style={st.mediaAttachedText}>Video attached</Text>
+                </View>
               </View>
             ) : null}
 

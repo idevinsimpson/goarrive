@@ -34,10 +34,30 @@ export function useWorkoutTTS({
 }: UseWorkoutTTSOptions) {
   const lastSpokenRef = useRef<string>('');
 
+  /** Web Speech API fallback for browsers */
+  const speakWeb = useCallback((text: string) => {
+    try {
+      if (typeof window === 'undefined') return;
+      const synth = window.speechSynthesis;
+      if (!synth) return;
+      synth.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'en-US';
+      utterance.rate = 0.95;
+      utterance.pitch = 1.0;
+      synth.speak(utterance);
+    } catch {
+      // Web Speech API unavailable — silent fail
+    }
+  }, []);
+
   const speak = useCallback(
     (text: string) => {
       if (isMuted || ttsDisabled) return;
-      if (Platform.OS === 'web') return; // expo-speech not reliable on web
+      if (Platform.OS === 'web') {
+        speakWeb(text);
+        return;
+      }
       try {
         // Stop any in-progress speech before starting new
         Speech.stop();
@@ -50,7 +70,7 @@ export function useWorkoutTTS({
         // TTS unavailable — silent fail
       }
     },
-    [isMuted, ttsDisabled],
+    [isMuted, ttsDisabled, speakWeb],
   );
 
   useEffect(() => {
@@ -94,7 +114,11 @@ export function useWorkoutTTS({
   useEffect(() => {
     return () => {
       try {
-        Speech.stop();
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          window.speechSynthesis?.cancel();
+        } else {
+          Speech.stop();
+        }
       } catch {}
     };
   }, []);
