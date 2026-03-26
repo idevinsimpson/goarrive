@@ -51,6 +51,7 @@ import MemberForm, {
 } from '../../components/MemberForm';
 import QuickAddMember from '../../components/QuickAddMember';
 import MemberDetail from '../../components/MemberDetail';
+import ErrorBoundary from '../../components/ErrorBoundary';
 type MemberDetailData = any;
 import ConfirmDialog from '../../components/ConfirmDialog';
 import UndoToast from '../../components/UndoToast';
@@ -633,15 +634,17 @@ export default function MembersScreen() {
       />
 
       {showDetail && (
-        <MemberDetail
-          member={selectedMember}
-          onClose={() => {
-            setShowDetail(false);
-            setSelectedMember(null);
-          }}
-          onEdit={openEditForm}
-          onArchive={handleArchiveRequest}
-        />
+        <ErrorBoundary>
+          <MemberDetail
+            member={selectedMember}
+            onClose={() => {
+              setShowDetail(false);
+              setSelectedMember(null);
+            }}
+            onEdit={openEditForm}
+            onArchive={handleArchiveRequest}
+          />
+        </ErrorBoundary>
       )}
 
       <ConfirmDialog

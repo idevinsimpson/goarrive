@@ -48,6 +48,7 @@ import { useAuth } from '../lib/AuthContext';
 import { DAY_LABELS, DAY_SHORT_LABELS, formatTime, addMinutesToTime, type GuidancePhase, type SessionType, type RoomSource } from '../lib/schedulingTypes';
 import { type Phase, type MemberPlanData, type SessionTypeGuidance, type GuidanceLevel, resolvePhaseColor } from '../lib/planTypes';
 import { defaultHostingMode, defaultCoachExpectedLive } from '../lib/schedulingTypes';
+import AssignWorkoutModal from './AssignWorkoutModal';
 
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
@@ -448,6 +449,8 @@ export default function MemberDetail({
   const [batchCreating, setBatchCreating] = useState(false);
   const [batchOverrides, setBatchOverrides] = useState<Record<string, { dayOfWeek?: string; startTime?: string }>>({});
 
+  // Workouts tile — assign workout modal
+  const [showAssignWorkout, setShowAssignWorkout] = useState(false);
   // Item 7: Session notes per instance
   const [instanceNotes, setInstanceNotes] = useState<Record<string, string>>({});
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -1093,13 +1096,13 @@ export default function MemberDetail({
 
   // Item 6: Load batch members (all coach's members except current)
   useEffect(() => {
-    if (!showBatchPicker || !user) return;
-    const q = query(collection(db, 'members'), where('coachId', '==', user.uid));
+    if (!showBatchPicker || !authUser) return;
+    const q = query(collection(db, 'members'), where('coachId', '==', coachId));
     getDocs(q).then(snap => {
       const members = snap.docs.filter(d => d.id !== member.id).map(d => ({ id: d.id, ...d.data() }));
       setBatchMembers(members);
     });
-  }, [showBatchPicker, user, member.id]);
+  }, [showBatchPicker, authUser, member.id]);
 
   // ── Create slots (one per selected day) ─────────────────────────────────────────
   const handleCreateSlots = useCallback(async () => {
@@ -1110,7 +1113,7 @@ export default function MemberDetail({
         for (const entry of selectedDays) {
           try {
             const cResult = await conflictFn({
-              coachId: user?.uid,
+              coachId: claims?.coachId || authUser?.uid,
               dayOfWeek: entry.dayOfWeek,
               startTime: entry.startTime,
               durationMinutes: selectedDuration,
@@ -1278,10 +1281,11 @@ export default function MemberDetail({
     {
       icon: 'fitness',
       label: 'Workouts',
-      sublabel: 'Playlist & rotation',
+      sublabel: 'Assign workout',
       color: GREEN,
       bgColor: 'rgba(110,187,122,0.1)',
-      live: false,
+      live: true,
+      onPress: () => setShowAssignWorkout(true),
     },
     {
       icon: 'activity',
@@ -1428,6 +1432,7 @@ export default function MemberDetail({
   }
 
   return (
+    <>
     <Modal visible={true} animationType="slide" transparent={true}>
       <View style={s.overlay}>
         <View style={s.sheet}>
@@ -2696,11 +2701,38 @@ export default function MemberDetail({
             </ScrollView>
           </View>
         </View>
-      </Modal>
+       </Modal>
     </Modal>
+
+      <AssignWorkoutModal
+        visible={showAssignWorkout}
+        memberName={currentMember.firstName ? `${currentMember.firstName} ${currentMember.lastName ?? ''}`.trim() : currentMember.email ?? ''}
+        coachId={coachId}
+        preselectedWorkoutId=""
+        preselectedWorkoutName=""
+        onClose={() => setShowAssignWorkout(false)}
+        onAssign={async (workoutId, workoutName, scheduledFor, memberId) => {
+          try {
+            const { Timestamp } = await import('firebase/firestore');
+            await addDoc(collection(db, 'workout_assignments'), {
+              memberId: memberId || currentMember.id,
+              coachId,
+              tenantId: claims?.tenantId ?? '',
+              workoutId,
+              workoutName,
+              scheduledFor: Timestamp.fromDate(scheduledFor),
+              status: 'scheduled',
+              createdAt: Timestamp.now(),
+            });
+          } catch (err) {
+            console.error('Failed to assign workout:', err);
+          }
+          setShowAssignWorkout(false);
+        }}
+      />
+    </>
   );
 }
-
 // ── Dual-Handle Slider Styles ───────────────────────────────────────────────
 const sl = StyleSheet.create({
   container: {

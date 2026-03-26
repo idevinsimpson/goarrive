@@ -71,7 +71,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
+exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
+exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -1741,7 +1742,7 @@ exports.manageZoomRoom = (0, https_1.onCall)({ region: 'us-central1' }, async (r
 });
 // ─── 14. createRecurringSlot — Coach assigns a recurring time slot to a member ──
 exports.createRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
-    var _a;
+    var _a, _b;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
         throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
@@ -1785,6 +1786,59 @@ exports.createRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
         if (serverConflicts.length > 0) {
             console.warn(`[createRecurringSlot] Server-side conflict detected: ${serverConflicts.join(', ')}`);
             // Log the conflict but allow creation (coach was already warned client-side)
+        }
+        // ── Google Calendar conflict check ──────────────────────────────────────
+        // Compute the next occurrence of dayOfWeek+startTime to use as the freebusy window
+        try {
+            const coachDocForGcal = await db.collection('coaches').doc(coachId).get();
+            const coachDataForGcal = coachDocForGcal.data();
+            const gcalAccounts = (coachDataForGcal === null || coachDataForGcal === void 0 ? void 0 : coachDataForGcal.gcalConflictAccounts) || [];
+            const accountsWithCalendars = gcalAccounts.filter((a) => (a.selectedCalendarIds || []).length > 0 && !a.tokenExpired);
+            if (accountsWithCalendars.length > 0) {
+                // Find next occurrence of the target day of week
+                const now = new Date();
+                const daysUntil = ((dayOfWeek - now.getUTCDay()) + 7) % 7 || 7;
+                const nextOccurrence = new Date(now);
+                nextOccurrence.setUTCDate(now.getUTCDate() + daysUntil);
+                const [ph2, pm2] = startTime.split(':').map(Number);
+                nextOccurrence.setUTCHours(ph2, pm2, 0, 0);
+                const slotEndTime = new Date(nextOccurrence.getTime() + durationMinutes * 60 * 1000);
+                const startISO = nextOccurrence.toISOString();
+                const endISO = slotEndTime.toISOString();
+                const gcalConflicts = [];
+                for (const account of accountsWithCalendars) {
+                    try {
+                        const oauth2ClientForCheck = getGoogleOAuth2Client();
+                        oauth2ClientForCheck.setCredentials({ refresh_token: account.refreshToken });
+                        const calendarApi = googleapis_1.google.calendar({ version: 'v3', auth: oauth2ClientForCheck });
+                        const freebusyRes = await calendarApi.freebusy.query({
+                            requestBody: {
+                                timeMin: startISO,
+                                timeMax: endISO,
+                                timeZone: timezone || 'UTC',
+                                items: account.selectedCalendarIds.map((id) => ({ id })),
+                            },
+                        });
+                        const calendarsData = freebusyRes.data.calendars || {};
+                        for (const calId of account.selectedCalendarIds) {
+                            const busy = ((_b = calendarsData[calId]) === null || _b === void 0 ? void 0 : _b.busy) || [];
+                            if (busy.length > 0) {
+                                gcalConflicts.push(`${account.email} (${busy.length} event${busy.length > 1 ? 's' : ''})`);
+                            }
+                        }
+                    }
+                    catch (gcalErr) {
+                        console.warn(`[createRecurringSlot] GCal conflict check failed for ${account.email}:`, gcalErr.message);
+                    }
+                }
+                if (gcalConflicts.length > 0) {
+                    console.warn(`[createRecurringSlot] Google Calendar conflicts detected: ${gcalConflicts.join(', ')}`);
+                    // Log but allow creation — coach was warned client-side via checkGcalConflicts
+                }
+            }
+        }
+        catch (gcalCheckErr) {
+            console.warn('[createRecurringSlot] GCal conflict check error (non-blocking):', gcalCheckErr.message);
         }
     }
     const slotRef = db.collection('recurring_slots').doc();
@@ -4872,9 +4926,9 @@ exports.migrateIcalTokens = (0, https_1.onCall)({ region: 'us-central1' }, async
     return { success: true, migrated, skipped };
 });
 // ─── Google Calendar Integration ─────────────────────────────────────────────
-function getGoogleOAuth2Client() {
-    const redirectUri = `https://us-central1-goarrive.cloudfunctions.net/googleCalendarCallback`;
-    return new googleapis_1.google.auth.OAuth2(googleClientId.value(), googleClientSecret.value(), redirectUri);
+function getGoogleOAuth2Client(redirectUri) {
+    const uri = redirectUri !== null && redirectUri !== void 0 ? redirectUri : `https://us-central1-goarrive.cloudfunctions.net/googleCalendarCallback`;
+    return new googleapis_1.google.auth.OAuth2(googleClientId.value().trim(), googleClientSecret.value().trim(), uri);
 }
 /**
  * initGoogleCalendarAuth — Generate OAuth2 consent URL for Google Calendar.
@@ -4917,11 +4971,21 @@ exports.googleCalendarCallback = (0, https_1.onRequest)({ secrets: [googleClient
             res.status(400).send('No refresh token received. Please revoke access at https://myaccount.google.com/permissions and try again.');
             return;
         }
+        // Decode the real email from the id_token JWT payload (base64url middle segment)
+        let googleCalendarEmail = 'connected';
+        if (tokens.id_token) {
+            try {
+                const payload = JSON.parse(Buffer.from(tokens.id_token.split('.')[1], 'base64url').toString('utf8'));
+                if (payload.email)
+                    googleCalendarEmail = payload.email;
+            }
+            catch (_) { /* fallback to 'connected' */ }
+        }
         // Store tokens on coach document
         await db.collection('coaches').doc(coachId).update({
             googleCalendarRefreshToken: tokens.refresh_token,
             googleCalendarConnectedAt: firestore_2.FieldValue.serverTimestamp(),
-            googleCalendarEmail: tokens.id_token ? 'connected' : 'connected', // We don't decode the ID token
+            googleCalendarEmail,
         });
         await writeAuditLog({
             coachId,
@@ -5042,5 +5106,258 @@ exports.disconnectGoogleCalendar = (0, https_1.onCall)(async (request) => {
         details: 'Google Calendar OAuth tokens removed',
     });
     return { success: true };
+});
+// ─── Google Calendar Conflict-Check Accounts ─────────────────────────────────
+/**
+ * initGcalConflictAuth — Generate OAuth2 consent URL for a conflict-check Google account.
+ * The state encodes "coachId:conflict" so the callback knows to store it as a conflict account.
+ */
+exports.initGcalConflictAuth = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret] }, async (request) => {
+    var _a;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const coachDoc = await db.collection('coaches').doc(callerUid).get();
+    if (!coachDoc.exists)
+        throw new https_1.HttpsError('permission-denied', 'Coach only');
+    const conflictRedirectUri = `https://us-central1-goarrive.cloudfunctions.net/gcalConflictCallback`;
+    const oauth2Client = getGoogleOAuth2Client(conflictRedirectUri);
+    // We need calendar.readonly to list calendars and check freebusy
+    const scopes = [
+        'https://www.googleapis.com/auth/calendar.readonly',
+        'https://www.googleapis.com/auth/userinfo.email',
+    ];
+    const authUrl = oauth2Client.generateAuthUrl({
+        access_type: 'offline',
+        scope: scopes,
+        prompt: 'consent',
+        // Encode purpose in state so the callback can distinguish
+        state: `${callerUid}:conflict`,
+    });
+    return { authUrl };
+});
+/**
+ * gcalConflictCallback — HTTP endpoint that handles the OAuth2 redirect for conflict-check accounts.
+ * Adds the new account to coaches/{coachId}.gcalConflictAccounts array.
+ */
+exports.gcalConflictCallback = (0, https_1.onRequest)({ secrets: [googleClientId, googleClientSecret] }, async (req, res) => {
+    try {
+        const code = req.query.code;
+        const rawState = req.query.state;
+        if (!code || !rawState) {
+            res.status(400).send('Missing code or state parameter');
+            return;
+        }
+        // State is "coachId:conflict"
+        const [coachId, purpose] = rawState.split(':');
+        if (!coachId || purpose !== 'conflict') {
+            res.status(400).send('Invalid state parameter');
+            return;
+        }
+        const conflictRedirectUri = `https://us-central1-goarrive.cloudfunctions.net/gcalConflictCallback`;
+        const oauth2Client = getGoogleOAuth2Client(conflictRedirectUri);
+        const { tokens } = await oauth2Client.getToken(code);
+        if (!tokens.refresh_token) {
+            res.status(400).send('No refresh token received. Please revoke access at https://myaccount.google.com/permissions and try again.');
+            return;
+        }
+        // Fetch the email for this account using the access token
+        oauth2Client.setCredentials(tokens);
+        const oauth2 = googleapis_1.google.oauth2({ version: 'v2', auth: oauth2Client });
+        const userInfo = await oauth2.userinfo.get();
+        const email = userInfo.data.email || 'unknown';
+        // Build a stable accountId from the email
+        const accountId = email.replace(/[^a-zA-Z0-9]/g, '_');
+        // Load existing conflict accounts
+        const coachDoc = await db.collection('coaches').doc(coachId).get();
+        if (!coachDoc.exists) {
+            res.status(404).send('Coach not found');
+            return;
+        }
+        const coachData = coachDoc.data();
+        const existingAccounts = coachData.gcalConflictAccounts || [];
+        // Replace if already exists (re-auth), otherwise append
+        const filtered = existingAccounts.filter((a) => a.accountId !== accountId);
+        filtered.push({
+            accountId,
+            email,
+            refreshToken: tokens.refresh_token,
+            connectedAt: new Date().toISOString(),
+            calendars: [], // populated when coach selects sub-calendars
+        });
+        await db.collection('coaches').doc(coachId).update({
+            gcalConflictAccounts: filtered,
+        });
+        await writeAuditLog({
+            coachId,
+            action: 'gcal_conflict_account_connected',
+            details: `Conflict-check Google account connected: ${email}`,
+        });
+        res.redirect(`https://goarrive.web.app/account?gcal=conflict_connected&email=${encodeURIComponent(email)}`);
+    }
+    catch (err) {
+        console.error('[gcalConflictCallback] Error:', err);
+        res.status(500).send('Failed to connect conflict-check Google Calendar: ' + (err.message || 'Unknown error'));
+    }
+});
+/**
+ * listGcalConflictCalendars — List all calendars for a specific conflict-check account.
+ * Returns the calendar list so the coach can pick which sub-calendars to check.
+ */
+exports.listGcalConflictCalendars = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret] }, async (request) => {
+    var _a;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const { accountId } = request.data;
+    if (!accountId)
+        throw new https_1.HttpsError('invalid-argument', 'accountId required');
+    const coachDoc = await db.collection('coaches').doc(callerUid).get();
+    if (!coachDoc.exists)
+        throw new https_1.HttpsError('permission-denied', 'Coach only');
+    const coachData = coachDoc.data();
+    const accounts = coachData.gcalConflictAccounts || [];
+    const account = accounts.find((a) => a.accountId === accountId);
+    if (!account)
+        throw new https_1.HttpsError('not-found', 'Conflict account not found');
+    const oauth2Client = getGoogleOAuth2Client();
+    oauth2Client.setCredentials({ refresh_token: account.refreshToken });
+    const calendar = googleapis_1.google.calendar({ version: 'v3', auth: oauth2Client });
+    const calList = await calendar.calendarList.list({ minAccessRole: 'reader' });
+    const items = (calList.data.items || []).map((c) => ({
+        id: c.id,
+        name: c.summary,
+        primary: c.primary || false,
+    }));
+    return { calendars: items };
+});
+/**
+ * updateGcalConflictCalendars — Save the selected sub-calendar IDs for a conflict-check account.
+ */
+exports.updateGcalConflictCalendars = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret] }, async (request) => {
+    var _a;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const { accountId, selectedCalendarIds } = request.data;
+    if (!accountId)
+        throw new https_1.HttpsError('invalid-argument', 'accountId required');
+    const coachRef = db.collection('coaches').doc(callerUid);
+    const coachDoc = await coachRef.get();
+    if (!coachDoc.exists)
+        throw new https_1.HttpsError('permission-denied', 'Coach only');
+    const coachData = coachDoc.data();
+    const accounts = coachData.gcalConflictAccounts || [];
+    const idx = accounts.findIndex((a) => a.accountId === accountId);
+    if (idx === -1)
+        throw new https_1.HttpsError('not-found', 'Conflict account not found');
+    accounts[idx].selectedCalendarIds = selectedCalendarIds;
+    await coachRef.update({ gcalConflictAccounts: accounts });
+    await writeAuditLog({
+        coachId: callerUid,
+        action: 'gcal_conflict_calendars_updated',
+        details: `Updated selected calendars for ${accounts[idx].email}: ${selectedCalendarIds.join(', ')}`,
+    });
+    return { success: true };
+});
+/**
+ * removeGcalConflictAccount — Remove a conflict-check Google account from the coach's list.
+ */
+exports.removeGcalConflictAccount = (0, https_1.onCall)(async (request) => {
+    var _a;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const { accountId } = request.data;
+    if (!accountId)
+        throw new https_1.HttpsError('invalid-argument', 'accountId required');
+    const coachRef = db.collection('coaches').doc(callerUid);
+    const coachDoc = await coachRef.get();
+    if (!coachDoc.exists)
+        throw new https_1.HttpsError('permission-denied', 'Coach only');
+    const coachData = coachDoc.data();
+    const accounts = coachData.gcalConflictAccounts || [];
+    const filtered = accounts.filter((a) => a.accountId !== accountId);
+    await coachRef.update({ gcalConflictAccounts: filtered });
+    await writeAuditLog({
+        coachId: callerUid,
+        action: 'gcal_conflict_account_removed',
+        details: `Removed conflict-check account: ${accountId}`,
+    });
+    return { success: true };
+});
+/**
+ * checkGcalConflicts — Check if a proposed time slot conflicts with any event in the
+ * coach's selected conflict-check calendars across all connected Google accounts.
+ * Returns { hasConflict: boolean, conflictingEvents: { calendarEmail, summary, start, end }[] }
+ */
+exports.checkGcalConflicts = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret] }, async (request) => {
+    var _a, _b, _c, _d, _e;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const { startDateTime, endDateTime, timezone } = request.data;
+    if (!startDateTime || !endDateTime) {
+        throw new https_1.HttpsError('invalid-argument', 'startDateTime and endDateTime required');
+    }
+    const coachDoc = await db.collection('coaches').doc(callerUid).get();
+    if (!coachDoc.exists)
+        throw new https_1.HttpsError('permission-denied', 'Coach only');
+    const coachData = coachDoc.data();
+    const accounts = coachData.gcalConflictAccounts || [];
+    const conflictingEvents = [];
+    for (const account of accounts) {
+        const selectedIds = account.selectedCalendarIds || [];
+        if (selectedIds.length === 0)
+            continue; // skip if no calendars selected
+        try {
+            const oauth2Client = getGoogleOAuth2Client();
+            oauth2Client.setCredentials({ refresh_token: account.refreshToken });
+            const calendar = googleapis_1.google.calendar({ version: 'v3', auth: oauth2Client });
+            // Use freebusy query for efficiency — one API call per account
+            const freebusyRes = await calendar.freebusy.query({
+                requestBody: {
+                    timeMin: startDateTime,
+                    timeMax: endDateTime,
+                    timeZone: timezone || 'UTC',
+                    items: selectedIds.map((id) => ({ id })),
+                },
+            });
+            const calendars = freebusyRes.data.calendars || {};
+            for (const calId of selectedIds) {
+                const busy = ((_b = calendars[calId]) === null || _b === void 0 ? void 0 : _b.busy) || [];
+                for (const slot of busy) {
+                    conflictingEvents.push({
+                        calendarEmail: account.email,
+                        summary: `Busy on ${account.email}`,
+                        start: slot.start || startDateTime,
+                        end: slot.end || endDateTime,
+                    });
+                }
+            }
+        }
+        catch (err) {
+            console.error(`[checkGcalConflicts] Error checking account ${account.email}:`, err.message);
+            // Detect revoked/expired tokens and mark the account so the UI can prompt re-auth
+            const isTokenError = ((_c = err.message) === null || _c === void 0 ? void 0 : _c.includes('invalid_grant')) || ((_d = err.message) === null || _d === void 0 ? void 0 : _d.includes('Token has been expired or revoked'));
+            if (isTokenError) {
+                try {
+                    const coachDocRef = db.collection('coaches').doc(callerUid);
+                    const freshSnap = await coachDocRef.get();
+                    const freshAccounts = ((_e = freshSnap.data()) === null || _e === void 0 ? void 0 : _e.gcalConflictAccounts) || [];
+                    const updated = freshAccounts.map((a) => a.accountId === account.accountId ? Object.assign(Object.assign({}, a), { tokenExpired: true }) : a);
+                    await coachDocRef.update({ gcalConflictAccounts: updated });
+                }
+                catch (updateErr) {
+                    console.error('[checkGcalConflicts] Failed to mark tokenExpired:', updateErr.message);
+                }
+            }
+            // Don't throw — continue checking other accounts
+        }
+    }
+    return {
+        hasConflict: conflictingEvents.length > 0,
+        conflictingEvents,
+    };
 });
 //# sourceMappingURL=index.js.map

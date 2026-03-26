@@ -608,8 +608,8 @@ const s: any = StyleSheet.create({
     backgroundColor: '#0E1117',
     display: 'flex' as any,
     flexDirection: 'column',
-    minHeight: '100vh' as any,
-    height: '100vh' as any,
+    minHeight: Platform.OS === 'web' ? '100dvh' : '100%' as any,
+    height: Platform.OS === 'web' ? '100dvh' : '100%' as any,
   },
   progressBar: {
     paddingHorizontal: 16,

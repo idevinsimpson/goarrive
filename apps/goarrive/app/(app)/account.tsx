@@ -40,6 +40,7 @@ const FONT_BODY =
 
 const GOLD = '#F5A623';
 const GREEN = '#48BB78';
+const ACCENT = '#48BB78';
 const RED = '#E05252';
 const BORDER = '#2A3347';
 const CARD_BG = '#1A2035';
@@ -66,7 +67,7 @@ export default function AccountScreen({ onClose }: Props) {
     await signOut();
   }
 
-  const isCoach = claims?.role === 'coach' || claims?.role === 'admin';
+  const isCoach = claims?.role === 'coach' || claims?.role === 'admin' || claims?.role === 'platformAdmin' || claims?.admin === true;
   const coachId = claims?.coachId || user?.uid;
 
   function handleBack() {
@@ -99,27 +100,27 @@ export default function AccountScreen({ onClose }: Props) {
         </View>
 
         {/* Stripe Connect — coaches only */}
-        {isCoach && coachId && (
+        {coachId && (
           <StripeConnectPanel coachId={coachId} />
         )}
 
         {/* Personal Zoom Connection — coaches only */}
-        {isCoach && coachId && (
+        {coachId && (
           <CoachZoomPanel coachId={coachId} />
         )}
 
         {/* No-Show Grace Period — coaches only */}
-        {isCoach && coachId && (
+        {coachId && (
           <NoShowGracePanel coachId={coachId} />
         )}
 
         {/* Skip Auto-Approval Rules — coaches only */}
-        {isCoach && coachId && (
+        {coachId && (
           <SkipAutoApprovalPanel coachId={coachId} />
         )}
 
         {/* iCal Subscription URL — coaches only */}
-        {isCoach && coachId && (
+        {coachId && (
           <ICalSyncPanel coachId={coachId} />
         )}
 
@@ -694,35 +695,77 @@ function ICalSyncPanel({ coachId }: { coachId: string }) {
         Paste this URL as a calendar subscription (not a one-time import) so it stays updated. Use the refresh button to regenerate the token if compromised.
       </Text>
       {/* Google Calendar Bidirectional Sync */}
-      <GoogleCalendarSyncSection coachId={user?.uid || ''} />
+      <GoogleCalendarSyncSection coachId={coachId} />
     </View>
   );
 }
 
+// ─── Types for conflict-check accounts ───────────────────────────────────────
+type GcalCalendar = { id: string; name: string; primary: boolean };
+type GcalConflictAccount = {
+  accountId: string;
+  email: string;
+  connectedAt: string;
+  selectedCalendarIds?: string[];
+  tokenExpired?: boolean;
+};
+
 function GoogleCalendarSyncSection({ coachId }: { coachId: string }) {
+  const fns = getFunctions(undefined, 'us-central1');
+
+  // ── Post account state ──────────────────────────────────────────────────────
   const [connected, setConnected] = useState(false);
+  const [postEmail, setPostEmail] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
 
+  // ── Conflict accounts state ─────────────────────────────────────────────────
+  const [conflictAccounts, setConflictAccounts] = useState<GcalConflictAccount[]>([]);
+  const [addingConflict, setAddingConflict] = useState(false);
+  // Per-account calendar list state: { [accountId]: { loading, calendars, error } }
+  const [calendarLists, setCalendarLists] = useState<Record<string, { loading: boolean; calendars: GcalCalendar[]; error?: string }>>({});
+  // Per-account saving state
+  const [savingCalendars, setSavingCalendars] = useState<Record<string, boolean>>({});
+  // Per-account removal state
+  const [removingAccount, setRemovingAccount] = useState<Record<string, boolean>>({});
+  // Per-account selected calendar IDs (local UI state before save)
+  const [selectedCalendarIds, setSelectedCalendarIds] = useState<Record<string, string[]>>({});
+
+  // ── Firestore listener ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!coachId) return;
     const unsub = onSnapshot(doc(db, 'coaches', coachId), (snap) => {
       const data = snap.data();
       setConnected(!!data?.googleCalendarRefreshToken);
+      setPostEmail(data?.googleCalendarEmail || null);
+      const accounts: GcalConflictAccount[] = data?.gcalConflictAccounts || [];
+      setConflictAccounts(accounts);
+      // Initialise selectedCalendarIds from Firestore for each account
+      const init: Record<string, string[]> = {};
+      accounts.forEach((a) => {
+        init[a.accountId] = a.selectedCalendarIds || [];
+      });
+      setSelectedCalendarIds((prev) => {
+        // Merge: keep any unsaved local changes, but seed new accounts from Firestore
+        const merged = { ...init };
+        Object.keys(prev).forEach((k) => {
+          if (k in merged) merged[k] = prev[k];
+        });
+        return merged;
+      });
     });
     return unsub;
   }, [coachId]);
 
+  // ── Post account handlers ───────────────────────────────────────────────────
   const handleConnect = async () => {
     setConnecting(true);
     try {
-      const fn = httpsCallable(functions, 'initGoogleCalendarAuth');
+      const fn = httpsCallable(fns, 'initGoogleCalendarAuth');
       const result = await fn({}) as any;
-      if (result.data?.authUrl) {
-        Linking.openURL(result.data.authUrl);
-      }
+      if (result.data?.authUrl) Linking.openURL(result.data.authUrl);
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to start Google Calendar connection');
     } finally {
@@ -734,7 +777,7 @@ function GoogleCalendarSyncSection({ coachId }: { coachId: string }) {
     setSyncing(true);
     setSyncResult(null);
     try {
-      const fn = httpsCallable(functions, 'syncToGoogleCalendar');
+      const fn = httpsCallable(fns, 'syncToGoogleCalendar');
       const result = await fn({}) as any;
       setSyncResult(`Synced ${result.data?.created || 0} events, ${result.data?.skipped || 0} already synced`);
     } catch (err: any) {
@@ -747,7 +790,7 @@ function GoogleCalendarSyncSection({ coachId }: { coachId: string }) {
   const handleDisconnect = () => {
     Alert.alert(
       'Disconnect Google Calendar',
-      'This will remove the connection. Events already created in Google Calendar will remain.',
+      'This will remove the post-account connection. Events already created will remain.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -756,7 +799,7 @@ function GoogleCalendarSyncSection({ coachId }: { coachId: string }) {
           onPress: async () => {
             setDisconnecting(true);
             try {
-              const fn = httpsCallable(functions, 'disconnectGoogleCalendar');
+              const fn = httpsCallable(fns, 'disconnectGoogleCalendar');
               await fn({});
               setSyncResult(null);
             } catch (err: any) {
@@ -770,25 +813,108 @@ function GoogleCalendarSyncSection({ coachId }: { coachId: string }) {
     );
   };
 
+  // ── Conflict account handlers ───────────────────────────────────────────────
+  const handleAddConflictAccount = async () => {
+    setAddingConflict(true);
+    try {
+      const fn = httpsCallable(fns, 'initGcalConflictAuth');
+      const result = await fn({}) as any;
+      if (result.data?.authUrl) Linking.openURL(result.data.authUrl);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to start conflict account connection');
+    } finally {
+      setAddingConflict(false);
+    }
+  };
+
+  const handleLoadCalendars = async (accountId: string) => {
+    setCalendarLists((prev) => ({ ...prev, [accountId]: { loading: true, calendars: [] } }));
+    try {
+      const fn = httpsCallable(fns, 'listGcalConflictCalendars');
+      const result = await fn({ accountId }) as any;
+      setCalendarLists((prev) => ({
+        ...prev,
+        [accountId]: { loading: false, calendars: result.data?.calendars || [] },
+      }));
+    } catch (err: any) {
+      setCalendarLists((prev) => ({
+        ...prev,
+        [accountId]: { loading: false, calendars: [], error: err.message || 'Failed to load calendars' },
+      }));
+    }
+  };
+
+  const handleToggleCalendar = (accountId: string, calId: string) => {
+    setSelectedCalendarIds((prev) => {
+      const current = prev[accountId] || [];
+      const next = current.includes(calId)
+        ? current.filter((id) => id !== calId)
+        : [...current, calId];
+      return { ...prev, [accountId]: next };
+    });
+  };
+
+  const handleSaveCalendars = async (accountId: string) => {
+    setSavingCalendars((prev) => ({ ...prev, [accountId]: true }));
+    try {
+      const fn = httpsCallable(fns, 'updateGcalConflictCalendars');
+      await fn({ accountId, selectedCalendarIds: selectedCalendarIds[accountId] || [] });
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to save calendar selection');
+    } finally {
+      setSavingCalendars((prev) => ({ ...prev, [accountId]: false }));
+    }
+  };
+
+  const handleRemoveConflictAccount = (accountId: string, email: string) => {
+    Alert.alert(
+      'Remove Conflict Account',
+      `Remove ${email} from conflict checking?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            setRemovingAccount((prev) => ({ ...prev, [accountId]: true }));
+            try {
+              const fn = httpsCallable(fns, 'removeGcalConflictAccount');
+              await fn({ accountId });
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Failed to remove account');
+            } finally {
+              setRemovingAccount((prev) => ({ ...prev, [accountId]: false }));
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <View style={{ marginTop: 10, backgroundColor: '#1A1F2B', borderRadius: 6, padding: 8, borderWidth: 1, borderColor: BORDER }}>
-      <Text style={{ fontSize: 10, color: TEXT_MUTED, fontFamily: FONT_HEADING }}>Google Calendar Sync</Text>
+
+      {/* ── Section: Post Account ── */}
+      <Text style={{ fontSize: 10, color: TEXT_MUTED, fontFamily: FONT_HEADING, marginBottom: 4 }}>Post Account</Text>
+      <Text style={{ fontSize: 9, color: TEXT_MUTED, fontFamily: FONT_BODY, lineHeight: 13, marginBottom: 6 }}>
+        Sessions are written to this Google Calendar.
+      </Text>
       {connected ? (
         <>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
             <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#4CAF50' }} />
-            <Text style={{ fontSize: 10, color: '#4CAF50', fontFamily: FONT_BODY }}>Connected</Text>
+            <Text style={{ fontSize: 10, color: '#4CAF50', fontFamily: FONT_BODY, flex: 1 }} numberOfLines={1}>
+              {postEmail || 'Connected'}
+            </Text>
           </View>
-          <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
+          <View style={{ flexDirection: 'row', gap: 6 }}>
             <Pressable
               style={[zs.connectBtn, { flex: 1, backgroundColor: '#1E40AF' }]}
               onPress={handleSync}
               disabled={syncing}
             >
-              {syncing
-                ? <ActivityIndicator size="small" color="#FFF" />
-                : <Icon name="refresh" size={14} color="#FFF" />
-              }
+              {syncing ? <ActivityIndicator size="small" color="#FFF" /> : <Icon name="refresh" size={14} color="#FFF" />}
               <Text style={zs.connectBtnText}>{syncing ? 'Syncing...' : 'Sync Now'}</Text>
             </Pressable>
             <Pressable
@@ -805,28 +931,121 @@ function GoogleCalendarSyncSection({ coachId }: { coachId: string }) {
           {syncResult && (
             <Text style={{ fontSize: 9, color: '#4CAF50', fontFamily: FONT_BODY, marginTop: 4 }}>{syncResult}</Text>
           )}
-          <Text style={{ fontSize: 9, color: TEXT_MUTED, fontFamily: FONT_BODY, marginTop: 4, lineHeight: 14 }}>
-            Sync pushes your upcoming 30 days of sessions to Google Calendar. Events already synced are skipped.
-          </Text>
         </>
       ) : (
-        <>
-          <Text style={{ fontSize: 9, color: TEXT_MUTED, fontFamily: FONT_BODY, marginTop: 4, lineHeight: 14 }}>
-            Connect your Google Calendar to push coaching sessions as calendar events. This enables two-way visibility.
-          </Text>
-          <Pressable
-            style={[zs.connectBtn, { marginTop: 8, backgroundColor: '#1E40AF' }]}
-            onPress={handleConnect}
-            disabled={connecting}
-          >
-            {connecting
-              ? <ActivityIndicator size="small" color="#FFF" />
-              : <Icon name="calendar" size={14} color="#FFF" />
-            }
-            <Text style={zs.connectBtnText}>{connecting ? 'Connecting...' : 'Connect Google Calendar'}</Text>
-          </Pressable>
-        </>
+        <Pressable
+          style={[zs.connectBtn, { backgroundColor: '#1E40AF' }]}
+          onPress={handleConnect}
+          disabled={connecting}
+        >
+          {connecting ? <ActivityIndicator size="small" color="#FFF" /> : <Icon name="calendar" size={14} color="#FFF" />}
+          <Text style={zs.connectBtnText}>{connecting ? 'Connecting...' : 'Connect Google Calendar'}</Text>
+        </Pressable>
       )}
+
+      {/* ── Divider ── */}
+      <View style={{ height: 1, backgroundColor: BORDER, marginVertical: 10 }} />
+
+      {/* ── Section: Conflict-Check Accounts ── */}
+      <Text style={{ fontSize: 10, color: TEXT_MUTED, fontFamily: FONT_HEADING, marginBottom: 4 }}>Conflict-Check Accounts</Text>
+      <Text style={{ fontSize: 9, color: TEXT_MUTED, fontFamily: FONT_BODY, lineHeight: 13, marginBottom: 6 }}>
+        These accounts are checked for busy times when members request sessions. Add multiple accounts and choose which sub-calendars to check.
+      </Text>
+
+      {conflictAccounts.map((account) => {
+        const calState = calendarLists[account.accountId];
+        const selIds = selectedCalendarIds[account.accountId] || [];
+        const isExpanded = !!calState;
+        return (
+          <View key={account.accountId} style={{ marginBottom: 8, backgroundColor: '#111827', borderRadius: 6, padding: 8, borderWidth: 1, borderColor: BORDER }}>
+            {/* Account header row */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: account.tokenExpired ? '#F87171' : '#4CAF50' }} />
+              <Text style={{ fontSize: 10, color: TEXT_PRIMARY, fontFamily: FONT_BODY, flex: 1 }} numberOfLines={1}>
+                {account.email}{account.tokenExpired ? ' — Re-auth needed' : ''}
+              </Text>
+              <Pressable
+                onPress={() => isExpanded ? setCalendarLists((p) => { const n = { ...p }; delete n[account.accountId]; return n; }) : handleLoadCalendars(account.accountId)}
+                style={{ paddingHorizontal: 6, paddingVertical: 2, backgroundColor: '#1E40AF', borderRadius: 4 }}
+              >
+                <Text style={{ fontSize: 9, color: '#FFF', fontFamily: FONT_BODY }}>
+                  {isExpanded ? 'Hide' : 'Calendars'}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => handleRemoveConflictAccount(account.accountId, account.email)}
+                disabled={!!removingAccount[account.accountId]}
+                style={{ paddingHorizontal: 6, paddingVertical: 2, backgroundColor: '#374151', borderRadius: 4 }}
+              >
+                {removingAccount[account.accountId]
+                  ? <ActivityIndicator size="small" color="#FFF" />
+                  : <Text style={{ fontSize: 9, color: '#F87171', fontFamily: FONT_BODY }}>Remove</Text>
+                }
+              </Pressable>
+            </View>
+
+            {/* Calendar list (expanded) */}
+            {isExpanded && (
+              <View style={{ marginTop: 8 }}>
+                {calState.loading ? (
+                  <ActivityIndicator size="small" color={ACCENT} />
+                ) : calState.error ? (
+                  <Text style={{ fontSize: 9, color: '#F87171', fontFamily: FONT_BODY }}>{calState.error}</Text>
+                ) : calState.calendars.length === 0 ? (
+                  <Text style={{ fontSize: 9, color: TEXT_MUTED, fontFamily: FONT_BODY }}>No calendars found.</Text>
+                ) : (
+                  <>
+                    {calState.calendars.map((cal) => {
+                      const checked = selIds.includes(cal.id);
+                      return (
+                        <Pressable
+                          key={cal.id}
+                          onPress={() => handleToggleCalendar(account.accountId, cal.id)}
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 }}
+                        >
+                          <View style={{
+                            width: 14, height: 14, borderRadius: 3, borderWidth: 1,
+                            borderColor: checked ? ACCENT : BORDER,
+                            backgroundColor: checked ? ACCENT : 'transparent',
+                            alignItems: 'center', justifyContent: 'center',
+                          }}>
+                            {checked && <Icon name="check" size={9} color="#FFF" />}
+                          </View>
+                          <Text style={{ fontSize: 10, color: TEXT_PRIMARY, fontFamily: FONT_BODY, flex: 1 }} numberOfLines={1}>
+                            {cal.name}{cal.primary ? ' (primary)' : ''}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                    <Pressable
+                      style={[zs.connectBtn, { marginTop: 6, backgroundColor: ACCENT }]}
+                      onPress={() => handleSaveCalendars(account.accountId)}
+                      disabled={!!savingCalendars[account.accountId]}
+                    >
+                      {savingCalendars[account.accountId]
+                        ? <ActivityIndicator size="small" color="#FFF" />
+                        : <Icon name="check" size={12} color="#FFF" />
+                      }
+                      <Text style={zs.connectBtnText}>
+                        {savingCalendars[account.accountId] ? 'Saving...' : `Save (${selIds.length} selected)`}
+                      </Text>
+                    </Pressable>
+                  </>
+                )}
+              </View>
+            )}
+          </View>
+        );
+      })}
+
+      <Pressable
+        style={[zs.connectBtn, { backgroundColor: '#374151' }]}
+        onPress={handleAddConflictAccount}
+        disabled={addingConflict}
+      >
+        {addingConflict ? <ActivityIndicator size="small" color="#FFF" /> : <Icon name="add" size={13} color="#FFF" />}
+        <Text style={zs.connectBtnText}>{addingConflict ? 'Opening...' : 'Add Conflict-Check Account'}</Text>
+      </Pressable>
     </View>
   );
 }

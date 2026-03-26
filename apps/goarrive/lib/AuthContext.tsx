@@ -140,6 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
 
           console.log('[AuthContext] Final claims:', userClaims);
+
           setClaims(userClaims);
         } catch (err) {
           console.error('[AuthContext] Auth error:', err);
