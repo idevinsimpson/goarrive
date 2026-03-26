@@ -331,6 +331,31 @@ export default function MovementsScreen() {
     setFormVisible(true);
   };
 
+  // Toggle global flag (admin only)
+  const handleToggleGlobal = (m: MovementDetailData) => {
+    setDetailVisible(false);
+    const action = m.isGlobal ? 'Remove from Global' : 'Make Global';
+    setConfirmTitle(`${action}`);
+    setConfirmMessage(
+      m.isGlobal
+        ? `Remove "${m.name}" from the global library? Coaches will only see it if it belongs to them.`
+        : `Make "${m.name}" available to all coaches in the global library?`,
+    );
+    setConfirmAction(() => async () => {
+      try {
+        await updateDoc(doc(db, 'movements', m.id), {
+          isGlobal: !m.isGlobal,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.error('[Movements] Toggle global error:', err);
+        Alert.alert('Error', `Could not ${action.toLowerCase()} movement.`);
+      }
+      setConfirmVisible(false);
+    });
+    setConfirmVisible(true);
+  };
+
   // ── Render item for FlatList ───────────────────────────────────────────
   const renderItem = ({ item: m }: { item: MovementDetailData }) => (
     <Pressable style={s.card} onPress={() => handleOpenDetail(m)}>
@@ -558,6 +583,8 @@ export default function MovementsScreen() {
         onClose={() => setDetailVisible(false)}
         onEdit={handleEdit}
         onArchive={handleArchiveRequest}
+        isAdmin={isAdmin}
+        onToggleGlobal={handleToggleGlobal}
       />
 
       {/* Movement Form modal (create + edit) */}

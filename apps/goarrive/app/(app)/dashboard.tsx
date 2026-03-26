@@ -113,6 +113,7 @@ export default function DashboardScreen() {
     movements: 0,
     recentCheckins: [] as any[],
     todayAssignments: 0,
+    needsReview: 0,
   });
 
   const fetchData = useCallback(async () => {
@@ -157,6 +158,19 @@ export default function DashboardScreen() {
         return sfDate >= today && sfDate < tomorrow;
       }).length;
 
+      // Needs review — unreviewed workout logs
+      const reviewSnap = await getDocs(
+        query(
+          collection(db, 'workout_logs'),
+          where('coachId', '==', coachId),
+        ),
+      ).catch(() => ({ docs: [] as any[] }));
+
+      const needsReview = reviewSnap.docs.filter((d) => {
+        const data = d.data();
+        return !data.reviewedAt;
+      }).length;
+
       // Recent check-ins
       const checkinsSnap = await getDocs(
         query(
@@ -180,6 +194,7 @@ export default function DashboardScreen() {
         movements: movementsSnap.size,
         recentCheckins,
         todayAssignments,
+        needsReview,
       });
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
@@ -249,6 +264,22 @@ export default function DashboardScreen() {
               {stats.todayAssignments !== 1 ? 's' : ''} scheduled for today
             </Text>
           </View>
+        )}
+
+        {/* Needs Review banner */}
+        {stats.needsReview > 0 && (
+          <Pressable
+            style={s.reviewBanner}
+            onPress={() => router.push('/(app)/members')}
+          >
+            <View style={s.reviewBannerLeft}>
+              <Icon name="document" size={18} color="#E05252" />
+              <Text style={s.reviewBannerText}>
+                {stats.needsReview} workout log{stats.needsReview !== 1 ? 's' : ''} need{stats.needsReview === 1 ? 's' : ''} review
+              </Text>
+            </View>
+            <Icon name="chevron-right" size={16} color="#E05252" />
+          </Pressable>
         )}
 
         {/* Stats grid */}
@@ -418,6 +449,30 @@ const s = StyleSheet.create({
   todayBannerText: {
     fontSize: 15,
     color: '#F5A623',
+    fontFamily: FONT_BODY,
+    fontWeight: '600',
+  },
+  reviewBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(224,82,82,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(224,82,82,0.2)',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 20,
+  },
+  reviewBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  reviewBannerText: {
+    fontSize: 15,
+    color: '#E05252',
     fontFamily: FONT_BODY,
     fontWeight: '600',
   },

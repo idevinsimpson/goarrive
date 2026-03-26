@@ -56,6 +56,10 @@ interface Props {
   onClose: () => void;
   onEdit: (m: MovementDetailData) => void;
   onArchive: (m: MovementDetailData) => void;
+  /** Platform admin only: toggle isGlobal flag */
+  onToggleGlobal?: (m: MovementDetailData) => void;
+  /** Whether the current user is a platform admin */
+  isAdmin?: boolean;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -73,6 +77,8 @@ export default function MovementDetail({
   onClose,
   onEdit,
   onArchive,
+  onToggleGlobal,
+  isAdmin = false,
 }: Props) {
   if (!movement) return null;
 
@@ -111,6 +117,11 @@ export default function MovementDetail({
             {movement.isArchived && (
               <View style={[s.badge, s.archivedBadge]}>
                 <Text style={[s.badgeText, { color: '#E05252' }]}>Archived</Text>
+              </View>
+            )}
+            {movement.isGlobal && (
+              <View style={[s.badge, { backgroundColor: 'rgba(245,166,35,0.12)', borderColor: 'rgba(245,166,35,0.3)' }]}>
+                <Text style={[s.badgeText, { color: '#F5A623' }]}>Global</Text>
               </View>
             )}
           </View>
@@ -189,6 +200,24 @@ export default function MovementDetail({
               {movement.isArchived ? 'Restore' : 'Archive'}
             </Text>
           </Pressable>
+          {isAdmin && onToggleGlobal && (
+            <Pressable
+              style={[
+                s.editBtn,
+                movement.isGlobal && { borderColor: 'rgba(245,166,35,0.3)' },
+              ]}
+              onPress={() => onToggleGlobal(movement)}
+            >
+              <Icon
+                name={movement.isGlobal ? 'close' : 'globe'}
+                size={18}
+                color="#F5A623"
+              />
+              <Text style={s.editText}>
+                {movement.isGlobal ? 'Remove Global' : 'Make Global'}
+              </Text>
+            </Pressable>
+          )}
         </View>
       </View>
     </Modal>

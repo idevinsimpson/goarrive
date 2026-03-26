@@ -13,7 +13,7 @@
  *
  * Firestore collection: movements
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -24,8 +24,12 @@ import {
   ScrollView,
   Alert,
   Platform,
+  ActivityIndicator,
+  Image,
 } from 'react-native';
-import { db } from '../lib/firebase';
+import { db, storage } from '../lib/firebase';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import * as ImagePicker from 'expo-image-picker';
 import {
   collection,
   addDoc,
@@ -109,6 +113,9 @@ export default function MovementForm({
   const [countdownSec, setCountdownSec] = useState('3');
   const [swapSides, setSwapSides] = useState(false);
   const [videoUrl, setVideoUrl] = useState('');
+  const [thumbnailUrl, setThumbnailUrl] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
   // ── Pre-populate on edit ───────────────────────────────────────────────
@@ -125,6 +132,7 @@ export default function MovementForm({
       setCountdownSec(String(editMovement.countdownSec ?? 3));
       setSwapSides(editMovement.swapSides ?? false);
       setVideoUrl((editMovement as any).videoUrl || editMovement.mediaUrl || '');
+      setThumbnailUrl((editMovement as any).thumbnailUrl || '');
     } else {
       resetForm();
     }
@@ -142,6 +150,73 @@ export default function MovementForm({
     setCountdownSec('3');
     setSwapSides(false);
     setVideoUrl('');
+    setThumbnailUrl('');
+    setUploading(false);
+    setUploadProgress(0);
+  };
+
+  // ── Media upload ──────────────────────────────────────────────────────
+  const pickAndUploadMedia = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Please grant media library access to upload videos.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['videos', 'images'],
+        allowsEditing: false,
+        quality: 0.8,
+      });
+
+      if (result.canceled || !result.assets?.[0]) return;
+
+      const asset = result.assets[0];
+      const isVideo = asset.type === 'video';
+      const ext = isVideo ? 'mp4' : 'jpg';
+      const folder = isVideo ? 'videos' : 'thumbnails';
+      const fileName = `movements/${coachId}/${folder}/${Date.now()}.${ext}`;
+
+      setUploading(true);
+      setUploadProgress(0);
+
+      // Fetch the file as a blob
+      const response = await fetch(asset.uri);
+      const blob = await response.blob();
+
+      const storageRef = ref(storage, fileName);
+      const uploadTask = uploadBytesResumable(storageRef, blob, {
+        contentType: isVideo ? 'video/mp4' : 'image/jpeg',
+      });
+
+      uploadTask.on(
+        'state_changed',
+        (snapshot) => {
+          const progress = snapshot.bytesTransferred / snapshot.totalBytes;
+          setUploadProgress(progress);
+        },
+        (error) => {
+          console.error('[MovementForm] Upload error:', error);
+          Alert.alert('Upload Failed', 'Could not upload media. Please try again.');
+          setUploading(false);
+          setUploadProgress(0);
+        },
+        async () => {
+          const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
+          if (isVideo) {
+            setVideoUrl(downloadUrl);
+          } else {
+            setThumbnailUrl(downloadUrl);
+          }
+          setUploading(false);
+          setUploadProgress(0);
+        },
+      );
+    } catch (err) {
+      console.error('[MovementForm] Pick media error:', err);
+      setUploading(false);
+    }
   };
 
   // ── Muscle group toggle ────────────────────────────────────────────────
@@ -178,6 +253,7 @@ export default function MovementForm({
         swapMode: 'split' as const,
         swapWindowSec: 5,
         videoUrl: videoUrl.trim(),
+        thumbnailUrl: thumbnailUrl.trim(),
         updatedAt: serverTimestamp(),
       };
 
@@ -383,7 +459,58 @@ export default function MovementForm({
               </View>
             </Pressable>
 
-            {/* Video URL */}
+            {/* Media Upload */}
+            <Text style={st.sectionTitle}>Media</Text>
+
+            {/* Upload button */}
+            <Pressable
+              style={st.uploadBtn}
+              onPress={pickAndUploadMedia}
+              disabled={uploading}
+            >
+              {uploading ? (
+                <View style={st.uploadProgress}>
+                  <ActivityIndicator size="small" color="#F5A623" />
+                  <Text style={st.uploadProgressText}>
+                    Uploading... {Math.round(uploadProgress * 100)}%
+                  </Text>
+                  <View style={st.progressBar}>
+                    <View
+                      style={[
+                        st.progressFill,
+                        { width: `${Math.round(uploadProgress * 100)}%` },
+                      ]}
+                    />
+                  </View>
+                </View>
+              ) : (
+                <View style={st.uploadBtnInner}>
+                  <Icon name="camera" size={20} color="#F5A623" />
+                  <Text style={st.uploadBtnText}>Upload Video or Image</Text>
+                </View>
+              )}
+            </Pressable>
+
+            {/* Thumbnail preview */}
+            {thumbnailUrl ? (
+              <View style={st.mediaPreview}>
+                <Image
+                  source={{ uri: thumbnailUrl }}
+                  style={st.mediaThumbnail}
+                  resizeMode="cover"
+                />
+                <Pressable
+                  style={st.mediaRemoveBtn}
+                  onPress={() => setThumbnailUrl('')}
+                  hitSlop={8}
+                >
+                  <Icon name="close" size={14} color="#F0F4F8" />
+                </Pressable>
+                <Text style={st.mediaLabel}>Thumbnail</Text>
+              </View>
+            ) : null}
+
+            {/* Video URL — manual fallback */}
             <Text style={st.label}>Video URL (Optional)</Text>
             <TextInput
               style={st.input}
@@ -394,6 +521,12 @@ export default function MovementForm({
               autoCapitalize="none"
               keyboardType="url"
             />
+            {videoUrl ? (
+              <View style={st.mediaAttached}>
+                <Icon name="checkmark" size={14} color="#6EBB7A" />
+                <Text style={st.mediaAttachedText}>Video attached</Text>
+              </View>
+            ) : null}
           </ScrollView>
 
           {/* Footer buttons */}
@@ -634,5 +767,96 @@ const st = StyleSheet.create({
     fontWeight: '700',
     color: '#0E1117',
     fontFamily: FH,
+  },
+
+  // Media upload
+  uploadBtn: {
+    backgroundColor: '#161B22',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2A3347',
+    borderStyle: 'dashed',
+    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  uploadBtnInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  uploadBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#F5A623',
+    fontFamily: FB,
+  },
+  uploadProgress: {
+    alignItems: 'center',
+    gap: 8,
+    width: '100%',
+  },
+  uploadProgressText: {
+    fontSize: 12,
+    color: '#F5A623',
+    fontFamily: FB,
+  },
+  progressBar: {
+    width: '100%',
+    height: 4,
+    backgroundColor: '#2A3347',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#F5A623',
+    borderRadius: 2,
+  },
+  mediaPreview: {
+    position: 'relative',
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#2A3347',
+  },
+  mediaThumbnail: {
+    width: '100%',
+    height: 160,
+    borderRadius: 10,
+  },
+  mediaRemoveBtn: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mediaLabel: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#F0F4F8',
+    fontFamily: FB,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  mediaAttached: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  mediaAttachedText: {
+    fontSize: 12,
+    color: '#6EBB7A',
+    fontFamily: FB,
   },
 });

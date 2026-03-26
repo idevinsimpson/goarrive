@@ -50,6 +50,7 @@ import { type Phase, type MemberPlanData, type SessionTypeGuidance, type Guidanc
 import { defaultHostingMode, defaultCoachExpectedLive } from '../lib/schedulingTypes';
 import AssignWorkoutModal from './AssignWorkoutModal';
 import CoachReviewQueue from './CoachReviewQueue';
+import WorkoutAnalytics from './WorkoutAnalytics';
 
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
@@ -453,6 +454,7 @@ export default function MemberDetail({
   // Workouts tile — assign workout modal
   const [showAssignWorkout, setShowAssignWorkout] = useState(false);
   const [showReviewQueue, setShowReviewQueue] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(false);
   // Item 7: Session notes per instance
   const [instanceNotes, setInstanceNotes] = useState<Record<string, string>>({});
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -1291,11 +1293,12 @@ export default function MemberDetail({
     },
     {
       icon: 'activity',
-      label: 'Sessions & Stats',
-      sublabel: 'Past & upcoming sessions',
+      label: 'Workout Stats',
+      sublabel: 'Completion & trends',
       color: BLUE,
       bgColor: 'rgba(125,211,252,0.1)',
-      live: false,
+      live: true,
+      onPress: () => setShowAnalytics(true),
     },
     {
       icon: 'calendar',
@@ -2758,6 +2761,13 @@ export default function MemberDetail({
         visible={showReviewQueue}
         coachId={claims?.coachId || user?.uid || ''}
         onClose={() => setShowReviewQueue(false)}
+      />
+      <WorkoutAnalytics
+        visible={showAnalytics}
+        memberId={member.id}
+        memberName={member.name || member.displayName || 'Member'}
+        coachId={claims?.coachId || user?.uid || ''}
+        onClose={() => setShowAnalytics(false)}
       />
     </>
   );

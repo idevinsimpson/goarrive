@@ -104,6 +104,16 @@ export default function WorkoutDetail({
     memberId: string,
   ) {
     try {
+      // Snapshot workout data at assignment time for versioning
+      const workoutSnapshot = {
+        name: currentWorkout.name ?? '',
+        description: currentWorkout.description ?? '',
+        category: currentWorkout.category ?? '',
+        difficulty: currentWorkout.difficulty ?? '',
+        estimatedDurationMin: currentWorkout.estimatedDurationMin ?? null,
+        blocks: currentWorkout.blocks ?? [],
+        tags: currentWorkout.tags ?? [],
+      };
       await addDoc(collection(db, 'workout_assignments'), {
         memberId,
         coachId,
@@ -113,6 +123,7 @@ export default function WorkoutDetail({
         scheduledFor: Timestamp.fromDate(scheduledFor),
         status: 'scheduled',
         createdAt: Timestamp.now(),
+        workoutSnapshot,
       });
     } catch (err) {
       console.error('Failed to assign workout:', err);

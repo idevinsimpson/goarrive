@@ -36,6 +36,7 @@ import {
 } from 'firebase/firestore';
 import { useAuth } from '../../lib/AuthContext';
 import { db } from '../../lib/firebase';
+import { enqueueWrite, processQueue } from '../../lib/offlineQueue';
 import { Icon } from '../../components/Icon';
 import WorkoutPlayer from '../../components/WorkoutPlayer';
 import PostWorkoutJournal, { JournalEntry } from '../../components/PostWorkoutJournal';
@@ -211,14 +212,16 @@ export default function MemberWorkoutsScreen() {
       const durationSec = completedDuration;
 
       try {
-        // Update assignment status
-        await updateDoc(doc(db, 'workout_assignments', activeAssignmentId), {
-          status: 'completed',
-          completedAt: serverTimestamp(),
-        });
+        // Update assignment status (offline-tolerant)
+        await enqueueWrite(
+          'update',
+          'workout_assignments',
+          { status: 'completed', completedAt: serverTimestamp() },
+          activeAssignmentId,
+        );
 
-        // Write workout log with journal data
-        await addDoc(collection(db, 'workout_logs'), {
+        // Write workout log with journal data (offline-tolerant)
+        await enqueueWrite('add', 'workout_logs', {
           memberId,
           assignmentId: activeAssignmentId,
           workoutId: playerWorkout?.id ?? '',
@@ -226,15 +229,13 @@ export default function MemberWorkoutsScreen() {
           coachId: playerWorkout?.coachId ?? '',
           completedAt: serverTimestamp(),
           durationSec,
-          // Journal fields
           journal: {
             glow: journal.glow || '',
             grow: journal.grow || '',
             energyRating: journal.energyRating,
             moodRating: journal.moodRating,
           },
-          // Coach review status
-          reviewStatus: 'pending', // pending | reviewed
+          reviewStatus: 'pending',
           reviewedAt: null,
           coachNote: '',
         });
@@ -258,12 +259,16 @@ export default function MemberWorkoutsScreen() {
     const durationSec = completedDuration;
 
     try {
-      await updateDoc(doc(db, 'workout_assignments', activeAssignmentId), {
-        status: 'completed',
-        completedAt: serverTimestamp(),
-      });
+      // Update assignment status (offline-tolerant)
+      await enqueueWrite(
+        'update',
+        'workout_assignments',
+        { status: 'completed', completedAt: serverTimestamp() },
+        activeAssignmentId,
+      );
 
-      await addDoc(collection(db, 'workout_logs'), {
+      // Write workout log without journal (offline-tolerant)
+      await enqueueWrite('add', 'workout_logs', {
         memberId,
         assignmentId: activeAssignmentId,
         workoutId: playerWorkout?.id ?? '',
@@ -285,6 +290,11 @@ export default function MemberWorkoutsScreen() {
     setActiveAssignmentId(null);
     workoutStartTime.current = null;
   }, [activeAssignmentId, memberId, playerWorkout, completedDuration]);
+
+  // ── Process offline queue on mount + refresh ─────────────────────────
+  useEffect(() => {
+    processQueue().catch(() => {});
+  }, []);
 
   // ── Categorize assignments ────────────────────────────────────────────
   const today = todayString();

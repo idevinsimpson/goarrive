@@ -57,6 +57,7 @@ import WorkoutDetail from '../../components/WorkoutDetail';
 import type { WorkoutDetailData } from '../../components/WorkoutDetail';
 import WorkoutForm from '../../components/WorkoutForm';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import WorkoutTemplateMarketplace from '../../components/WorkoutTemplateMarketplace';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH =
@@ -161,6 +162,9 @@ export default function WorkoutsScreen() {
   const [assignmentCounts, setAssignmentCounts] = useState<
     Record<string, number>
   >({});
+
+  // Template marketplace
+  const [showMarketplace, setShowMarketplace] = useState(false);
 
   // ── Real-time workout listener ─────────────────────────────────────────
   const mapWorkoutDoc = useCallback((d: any): WorkoutData => {
@@ -452,6 +456,9 @@ export default function WorkoutsScreen() {
             </Pressable>
           )}
         </View>
+        <Pressable style={s.browseBtn} onPress={() => setShowMarketplace(true)}>
+          <Icon name="grid" size={14} color="#F5A623" />
+        </Pressable>
         <Pressable style={s.createBtn} onPress={handleCreateNew}>
           <Text style={s.createBtnText}>+ New</Text>
         </Pressable>
@@ -655,6 +662,14 @@ export default function WorkoutsScreen() {
         editWorkout={editWorkout}
       />
 
+      {/* Template Marketplace */}
+      <WorkoutTemplateMarketplace
+        visible={showMarketplace}
+        coachId={coachId}
+        tenantId={tenantId}
+        onClose={() => setShowMarketplace(false)}
+      />
+
       {/* Confirm dialog */}
       <ConfirmDialog
         visible={confirmVisible}
@@ -701,6 +716,16 @@ const s = StyleSheet.create({
     color: '#F0F4F8',
     fontFamily: FB,
     padding: 0,
+  },
+  browseBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: '#161B22',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   createBtn: {
     backgroundColor: '#F5A623',
