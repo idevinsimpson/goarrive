@@ -133,6 +133,14 @@ export default function WorkoutSessionSummary({
           </View>
         )}
 
+        {/* Coach acknowledgment */}
+        <View style={st.coachAckRow}>
+          <Icon name="user" size={14} color="#6EBB7A" />
+          <Text style={st.coachAckText}>
+            Your coach will be notified and can review your session.
+          </Text>
+        </View>
+
         {/* Actions */}
         <View style={st.actions}>
           <TouchableOpacity
@@ -267,5 +275,20 @@ const st = StyleSheet.create({
     fontSize: 14,
     color: '#8A95A3',
     fontFamily: FB,
+  },
+  coachAckRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    marginBottom: 8,
+  },
+  coachAckText: {
+    fontSize: 13,
+    color: '#6EBB7A',
+    fontFamily: FB,
+    textAlign: 'center',
   },
 });

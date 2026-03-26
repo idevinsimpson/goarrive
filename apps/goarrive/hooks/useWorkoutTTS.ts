@@ -10,7 +10,7 @@
  *
  * The hook is a no-op on web (expo-speech may not be available).
  */
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import * as Speech from 'expo-speech';
 import { Platform } from 'react-native';
 
@@ -33,6 +33,27 @@ export function useWorkoutTTS({
   ttsDisabled = false,
 }: UseWorkoutTTSOptions) {
   const lastSpokenRef = useRef<string>('');
+  const [isTTSAvailable, setIsTTSAvailable] = useState(true);
+
+  // Check TTS availability on mount
+  useEffect(() => {
+    const check = async () => {
+      try {
+        if (Platform.OS === 'web') {
+          setIsTTSAvailable(
+            typeof window !== 'undefined' && !!window.speechSynthesis,
+          );
+        } else {
+          // expo-speech: check if any voices are available
+          const voices = await Speech.getAvailableVoicesAsync();
+          setIsTTSAvailable(voices.length > 0);
+        }
+      } catch {
+        setIsTTSAvailable(false);
+      }
+    };
+    check();
+  }, []);
 
   /** Web Speech API fallback for browsers */
   const speakWeb = useCallback((text: string) => {
@@ -122,4 +143,6 @@ export function useWorkoutTTS({
       } catch {}
     };
   }, []);
+
+  return { isTTSAvailable };
 }

@@ -41,6 +41,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { Icon } from './Icon';
+import { useWorkoutTemplates, WorkoutTemplate } from '../hooks/useWorkoutTemplates';
 
 const FH =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -144,6 +145,10 @@ export default function WorkoutForm({
   const [isTemplate, setIsTemplate] = useState(false);
   const [blocks, setBlocks] = useState<WorkoutBlock[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // ── Template picker state ──────────────────────────────────────────────
+  const { templates, loading: templatesLoading, loadTemplates } = useWorkoutTemplates(coachId);
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
 
   // ── Movement picker state ──────────────────────────────────────────────
   const [availableMovements, setAvailableMovements] = useState<MovementOption[]>([]);
@@ -253,6 +258,19 @@ export default function WorkoutForm({
     setBlocks([]);
     setAddingMovementToBlock(null);
     setMovementSearch('');
+  };
+
+  // ── Template loader ──────────────────────────────────────────────────
+  const loadFromTemplate = (t: WorkoutTemplate) => {
+    setName(t.name + ' (Copy)');
+    setDescription(t.description);
+    setCategory(t.category);
+    setDifficulty(t.difficulty);
+    setEstimatedDurationMin(t.estimatedDurationMin ? String(t.estimatedDurationMin) : '');
+    setSelectedTags(t.tags || []);
+    setBlocks(t.blocks || []);
+    setIsTemplate(false); // Copy is not a template by default
+    setShowTemplatePicker(false);
   };
 
   // ── Tag helpers ────────────────────────────────────────────────────────
@@ -529,6 +547,20 @@ export default function WorkoutForm({
               keyboardType="number-pad"
               maxLength={3}
             />
+
+            {/* Load from Template button */}
+            {!isEdit && (
+              <TouchableOpacity
+                style={s.loadTemplateBtn}
+                onPress={() => {
+                  loadTemplates();
+                  setShowTemplatePicker(true);
+                }}
+              >
+                <Icon name="copy" size={16} color="#F5A623" />
+                <Text style={s.loadTemplateBtnText}>Load from Template</Text>
+              </TouchableOpacity>
+            )}
 
             {/* Template toggle (suggestion 6) */}
             <View style={s.templateRow}>
@@ -942,6 +974,47 @@ export default function WorkoutForm({
         </View>
       </View>
     </Modal>
+
+      {/* Template picker modal */}
+      <Modal visible={showTemplatePicker} transparent animationType="slide">
+        <View style={s.overlay}>
+          <View style={[s.container, { maxHeight: 500 }]}>
+            <View style={s.header}>
+              <Text style={s.title}>Load from Template</Text>
+              <TouchableOpacity onPress={() => setShowTemplatePicker(false)}>
+                <Icon name="x" size={22} color="#8A95A3" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={{ flex: 1 }}>
+              {templatesLoading && (
+                <Text style={s.templatePickerHint}>Loading templates...</Text>
+              )}
+              {!templatesLoading && templates.length === 0 && (
+                <Text style={s.templatePickerHint}>
+                  No templates found. Save a workout as a template first.
+                </Text>
+              )}
+              {templates.map((t) => (
+                <TouchableOpacity
+                  key={t.id}
+                  style={s.templatePickerItem}
+                  onPress={() => loadFromTemplate(t)}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.templatePickerName}>{t.name}</Text>
+                    <Text style={s.templatePickerMeta}>
+                      {t.category || 'No category'} · {t.difficulty || 'No difficulty'}
+                      {t.blocks?.length ? ` · ${t.blocks.length} block${t.blocks.length !== 1 ? 's' : ''}` : ''}
+                      {t.isShared ? ' · Shared' : ''}
+                    </Text>
+                  </View>
+                  <Icon name="chevron-right" size={18} color="#4A5568" />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
   );
 }
 
@@ -1447,5 +1520,52 @@ const s = StyleSheet.create({
     fontWeight: '700',
     color: '#0E1117',
     fontFamily: FH,
+  },
+  // ── Load from Template button ───────────────────────────────────────
+  loadTemplateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#F5A623',
+    borderStyle: 'dashed',
+    marginBottom: 16,
+  },
+  loadTemplateBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#F5A623',
+    fontFamily: FB,
+  },
+  // ── Template picker modal ─────────────────────────────────────────
+  templatePickerHint: {
+    fontSize: 13,
+    color: '#8A95A3',
+    fontFamily: FB,
+    textAlign: 'center',
+    paddingVertical: 24,
+  },
+  templatePickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E2A3A',
+  },
+  templatePickerName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#E2E8F0',
+    fontFamily: FH,
+  },
+  templatePickerMeta: {
+    fontSize: 11,
+    color: '#8A95A3',
+    fontFamily: FB,
+    marginTop: 2,
   },
 });

@@ -40,6 +40,7 @@ import { useWorkoutFlatten } from '../hooks/useWorkoutFlatten';
 import { useWorkoutTimer } from '../hooks/useWorkoutTimer';
 import { useMediaPrefetch } from '../hooks/useMediaPrefetch';
 import { useWorkoutTTS } from '../hooks/useWorkoutTTS';
+import { useMovementSwap } from '../hooks/useMovementSwap';
 
 const FH =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -62,7 +63,9 @@ export default function WorkoutPlayer({
   onComplete,
 }: WorkoutPlayerProps) {
   // ── Hooks ────────────────────────────────────────────────────────────
-  const flatMovements = useWorkoutFlatten(workout);
+  const flatFromBlocks = useWorkoutFlatten(workout);
+  const [flatOverride, setFlatOverride] = useState<any[] | null>(null);
+  const flatMovements = flatOverride || flatFromBlocks;
 
   const timer = useWorkoutTimer({ flatMovements });
 
@@ -75,21 +78,30 @@ export default function WorkoutPlayer({
   useWakeLock(phase !== 'ready' && phase !== 'complete');
   useMediaPrefetch(flatMovements, currentIndex, phase === 'work' || phase === 'countdown');
 
-  // ── TTS for movement names (Suggestion 1) ──────────────────────────
-  useWorkoutTTS({ phase, current, next, isMuted: isAudioMuted() });
+  //  // ── TTS for movement names (Suggestion 1) ──────────────────────
+  const { isTTSAvailable } = useWorkoutTTS({ phase, current, next, isMuted: isAudioMuted() });
+
+  // ── Movement swap (Suggestion 7) ─────────────────────────────
+  const {
+    showSwap, alternatives, loadingAlts,
+    openSwap, closeSwap, swapMovement,
+  } = useMovementSwap(flatMovements, currentIndex, setFlatOverride);
 
   // ── Landscape detection for tablets ─────────────────────────────────
   const { width: winW, height: winH } = useWindowDimensions();
   const isLandscape = winW > winH;
   const isTablet = Math.min(winW, winH) >= 600;
 
-  // ── Audio mute toggle ─────────────────────────────────────────────────
+    // ── Audio mute toggle ─────────────────────────────────────────────
   const [audioMuted, setAudioMutedState] = useState(isAudioMuted());
   const toggleMute = () => {
     const n = !audioMuted;
     setAudioMutedState(n);
     setAudioMuted(n);
   };
+
+  // TTS unavailable visual indicator (Risk 4)
+  const showTTSWarning = !isTTSAvailable && !audioMuted;
 
   // ── Format time ───────────────────────────────────────────────────────
   const formatTime = (sec: number): string => {
@@ -115,6 +127,12 @@ export default function WorkoutPlayer({
             {workout?.name ?? 'Workout'}
           </Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            {showTTSWarning && (
+              <View style={st.ttsWarning}>
+                <Icon name="alert-triangle" size={12} color="#E06B4F" />
+                <Text style={st.ttsWarningText}>No TTS</Text>
+              </View>
+            )}
             <TouchableOpacity onPress={toggleMute} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
               <Icon name={audioMuted ? 'volume-x' : 'volume-2'} size={22} color="#8A95A3" />
             </TouchableOpacity>
@@ -272,6 +290,14 @@ export default function WorkoutPlayer({
               </>
             )}
 
+            {/* Swap movement button */}
+            {phase === 'work' && (
+              <TouchableOpacity style={st.swapBtn} onPress={openSwap}>
+                <Icon name="refresh-cw" size={16} color="#F5A623" />
+                <Text style={st.swapBtnText}>Swap Movement</Text>
+              </TouchableOpacity>
+            )}
+
             {/* Next up preview */}
             {next && (
               <View style={st.nextUpBar}>
@@ -359,6 +385,36 @@ export default function WorkoutPlayer({
           </View>
         )}
       </View>
+
+      {/* Swap movement modal */}
+      <Modal visible={showSwap} transparent animationType="slide">
+        <View style={st.swapOverlay}>
+          <View style={st.swapSheet}>
+            <View style={st.swapHeader}>
+              <Text style={st.swapTitle}>Swap Movement</Text>
+              <TouchableOpacity onPress={closeSwap}>
+                <Icon name="x" size={22} color="#8A95A3" />
+              </TouchableOpacity>
+            </View>
+            {loadingAlts && (
+              <Text style={st.swapHint}>Loading alternatives...</Text>
+            )}
+            {!loadingAlts && alternatives.length === 0 && (
+              <Text style={st.swapHint}>No alternatives found for this category.</Text>
+            )}
+            {alternatives.map((alt) => (
+              <TouchableOpacity
+                key={alt.id}
+                style={st.swapItem}
+                onPress={() => swapMovement(alt)}
+              >
+                <Text style={st.swapItemName}>{alt.name}</Text>
+                <Text style={st.swapItemCat}>{alt.category}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 }
@@ -697,5 +753,89 @@ const st = StyleSheet.create({
     color: '#8A95A3',
     fontFamily: FB,
     marginTop: 8,
+  },
+  // ── TTS warning ─────────────────────────────────────────────────
+  ttsWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    backgroundColor: 'rgba(224,107,79,0.15)',
+  },
+  ttsWarningText: {
+    fontSize: 10,
+    color: '#E06B4F',
+    fontFamily: FB,
+    fontWeight: '600',
+  },
+  // ── Swap button ─────────────────────────────────────────────────
+  swapBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#2A3347',
+    marginTop: 8,
+  },
+  swapBtnText: {
+    fontSize: 12,
+    color: '#F5A623',
+    fontFamily: FB,
+    fontWeight: '600',
+  },
+  // ── Swap modal ──────────────────────────────────────────────────
+  swapOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+  },
+  swapSheet: {
+    backgroundColor: '#111827',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 20,
+    maxHeight: '60%',
+  },
+  swapHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  swapTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#E2E8F0',
+    fontFamily: FH,
+  },
+  swapHint: {
+    fontSize: 13,
+    color: '#8A95A3',
+    fontFamily: FB,
+    textAlign: 'center',
+    paddingVertical: 20,
+  },
+  swapItem: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E2A3A',
+  },
+  swapItemName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#E2E8F0',
+    fontFamily: FH,
+  },
+  swapItemCat: {
+    fontSize: 12,
+    color: '#8A95A3',
+    fontFamily: FB,
+    marginTop: 2,
   },
 });

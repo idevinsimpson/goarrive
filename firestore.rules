@@ -713,6 +713,16 @@ service cloud.firestore {
       allow write: if false; // Cloud Functions only (Admin SDK)
     }
 
+    // ─────────────────────────────────────────────
+    // NOTIFICATION COOLDOWNS (Cloud Functions only — deny all client access)
+    // Written by rate-limiting logic in onWorkoutAssigned / onWorkoutCompleted.
+    // Cleaned up by cleanupNotificationCooldowns scheduled function.
+    // ─────────────────────────────────────────────
+
+    match /_notification_cooldowns/{docId} {
+      allow read, write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

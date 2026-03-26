@@ -38,6 +38,15 @@ interface Props {
 
 const DAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
+// Configurable messages — extracted for easy customization (Risk 7)
+const STREAK_MESSAGES = {
+  welcomeBackWithHistory: (best: number) =>
+    `Welcome back! Your best streak was ${best} day${best !== 1 ? 's' : ''}. Let's build a new one.`,
+  firstWorkout: 'Complete your first workout to start your streak!',
+  momentum: (streak: number) =>
+    streak >= 7 ? 'On fire! Keep it going.' : 'Nice momentum! Keep it going.',
+} as const;
+
 export default function MemberStreakCard({ memberId }: Props) {
   const [loading, setLoading] = useState(true);
   const [currentStreak, setCurrentStreak] = useState(0);
@@ -187,21 +196,20 @@ export default function MemberStreakCard({ memberId }: Props) {
         </View>
       </View>
 
-      {/* Welcome-back / motivational message (Risk 4) */}
+      {/* Welcome-back / motivational message */}
       {currentStreak === 0 && bestStreak > 0 && (
         <Text style={st.welcomeBack}>
-          Welcome back! Your best streak was {bestStreak} day{bestStreak !== 1 ? 's' : ''}. Let's build a new one.
+          {STREAK_MESSAGES.welcomeBackWithHistory(bestStreak)}
         </Text>
       )}
       {currentStreak === 0 && bestStreak === 0 && (
         <Text style={st.welcomeBack}>
-          Complete your first workout to start your streak!
+          {STREAK_MESSAGES.firstWorkout}
         </Text>
       )}
       {currentStreak >= 3 && (
         <Text style={st.streakMotivation}>
-          {currentStreak >= 7 ? 'On fire! ' : 'Nice momentum! '}
-          Keep it going.
+          {STREAK_MESSAGES.momentum(currentStreak)}
         </Text>
       )}
 

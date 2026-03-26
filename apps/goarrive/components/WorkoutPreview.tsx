@@ -48,19 +48,33 @@ export default function WorkoutPreview({
 
   const blocks = workout.blocks || [];
 
-  // Calculate estimated duration
+  // Calculate estimated duration (accounts for block types)
   const estimatedMin = (() => {
     if (workout.estimatedDurationMin) return workout.estimatedDurationMin;
     let totalSec = 0;
     blocks.forEach((block: any) => {
       const rounds = block.rounds || block.sets || 1;
       const movements = block.movements || [];
-      const blockRest = block.restBetweenRoundsSec ?? block.restBetweenSec ?? 15;
-      movements.forEach((mv: any) => {
-        const work = mv.duration || mv.workSec || 30;
-        const rest = mv.restSec ?? blockRest;
-        totalSec += (work + rest) * rounds;
-      });
+      const blockType = (block.type || 'linear').toLowerCase();
+      const roundRest = block.restBetweenRoundsSec ?? block.restBetweenSec ?? 15;
+      const mvRest = block.restBetweenMovementsSec ?? 10;
+
+      if (blockType === 'superset' || blockType === 'circuit') {
+        // Superset/circuit: all movements per round, short rest between movements
+        let roundSec = 0;
+        movements.forEach((mv: any) => {
+          roundSec += mv.duration || mv.workSec || 30;
+          roundSec += mvRest;
+        });
+        totalSec += (roundSec + roundRest) * rounds;
+      } else {
+        // Linear: each movement × rounds sequentially
+        movements.forEach((mv: any) => {
+          const work = mv.duration || mv.workSec || 30;
+          const rest = mv.restSec ?? roundRest;
+          totalSec += (work + rest) * rounds;
+        });
+      }
     });
     return Math.ceil(totalSec / 60);
   })();

@@ -100,6 +100,37 @@ export default function MovementVideoControls({
     await videoRef.current.setPositionAsync(posMs);
   }, [duration]);
 
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const toggleFullscreen = useCallback(async () => {
+    if (!videoRef.current) return;
+    try {
+      if (Platform.OS === 'web') {
+        // Web: use native Fullscreen API on the video element's parent
+        const el = (videoRef.current as any)?._nativeRef?.current;
+        if (el) {
+          if (!document.fullscreenElement) {
+            await el.requestFullscreen?.();
+            setIsFullscreen(true);
+          } else {
+            await document.exitFullscreen?.();
+            setIsFullscreen(false);
+          }
+        }
+      } else {
+        // Native: use expo-av's built-in fullscreen
+        if (isFullscreen) {
+          await videoRef.current.dismissFullscreenPlayer();
+        } else {
+          await videoRef.current.presentFullscreenPlayer();
+        }
+        setIsFullscreen(!isFullscreen);
+      }
+    } catch {
+      // Fullscreen not supported — silent fail
+    }
+  }, [isFullscreen]);
+
   // ── Format time ──────────────────────────────────────────────────────
   const formatMs = (ms: number): string => {
     const sec = Math.floor(ms / 1000);
@@ -179,6 +210,15 @@ export default function MovementVideoControls({
               name="repeat"
               size={14}
               color={isLooping ? '#F5A623' : '#4A5568'}
+            />
+          </TouchableOpacity>
+
+          {/* Fullscreen */}
+          <TouchableOpacity onPress={toggleFullscreen} style={st.controlBtn}>
+            <Icon
+              name={isFullscreen ? 'minimize' : 'maximize'}
+              size={14}
+              color="#F0F4F8"
             />
           </TouchableOpacity>
         </View>

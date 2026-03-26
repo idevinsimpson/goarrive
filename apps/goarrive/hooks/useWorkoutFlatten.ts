@@ -76,16 +76,21 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
             const isVeryLast = isLastMovementInRound && isLastRound;
 
             // Rest logic:
-            // - Between movements within a round: short rest (movement's restSec or 0 for supersets)
+            // - Between movements within a round: use block.restBetweenMovementsSec if set,
+            //   else movement's restSec, else 0 for supersets / auto-adjusted for circuits
             // - Between rounds: block rest
             // - After last movement of last round: no rest
+            const transitionRest = block.restBetweenMovementsSec;
             let restAfter = 0;
             if (isVeryLast) {
               restAfter = 0;
             } else if (isLastMovementInRound) {
               restAfter = blockRest;
+            } else if (transitionRest != null && transitionRest > 0) {
+              // Coach explicitly set transition rest for this block
+              restAfter = transitionRest;
             } else {
-              // For supersets, minimal rest between A1→A2; for circuits, use auto-adjusted rest
+              // Fallback: supersets get minimal rest, circuits get auto-adjusted
               restAfter = bType === 'superset'
                 ? (mv.restSec ?? 0)
                 : calculateAdjustedRest(mv, block, workoutDifficulty);

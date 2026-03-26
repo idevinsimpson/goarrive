@@ -6668,28 +6668,59 @@ export const cleanupNotificationCooldowns = onSchedule(
   {
     schedule: '15 3 * * *',
     timeZone: 'Etc/UTC',
-    retryCount: 1,
+    retryCount: 3,
     memory: '256MiB',
   },
   async () => {
+    const TAG = '[cleanupNotificationCooldowns]';
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24h ago
-    const staleSnap = await db
-      .collection('_notification_cooldowns')
-      .where('lastSentAt', '<', Timestamp.fromDate(cutoff))
-      .limit(500)
-      .get();
+    let totalDeleted = 0;
+    let hasMore = true;
 
-    if (staleSnap.empty) {
-      console.log('[cleanupNotificationCooldowns] No stale cooldown docs found.');
-      return;
+    try {
+      // Paginate in batches of 500 (Firestore batch limit)
+      while (hasMore) {
+        const staleSnap = await db
+          .collection('_notification_cooldowns')
+          .where('lastSentAt', '<', Timestamp.fromDate(cutoff))
+          .limit(500)
+          .get();
+
+        if (staleSnap.empty) {
+          hasMore = false;
+          break;
+        }
+
+        const batch = db.batch();
+        staleSnap.docs.forEach((doc) => batch.delete(doc.ref));
+        await batch.commit();
+        totalDeleted += staleSnap.size;
+
+        // If we got fewer than 500, we're done
+        if (staleSnap.size < 500) hasMore = false;
+      }
+
+      // Log metrics for monitoring
+      console.log(`${TAG} Completed. Deleted ${totalDeleted} stale cooldown docs.`);
+
+      // Write a health-check doc for monitoring
+      await db.collection('_system_health').doc('cooldown_cleanup').set({
+        lastRunAt: Timestamp.now(),
+        docsDeleted: totalDeleted,
+        status: 'success',
+      });
+    } catch (err) {
+      console.error(`${TAG} Error during cleanup:`, err);
+
+      // Write failure status for monitoring
+      await db.collection('_system_health').doc('cooldown_cleanup').set({
+        lastRunAt: Timestamp.now(),
+        docsDeleted: totalDeleted,
+        status: 'error',
+        error: String(err),
+      }).catch(() => {}); // Don't fail on monitoring write
+
+      throw err; // Re-throw to trigger Cloud Functions retry
     }
-
-    const batch = db.batch();
-    staleSnap.docs.forEach((doc) => batch.delete(doc.ref));
-    await batch.commit();
-
-    console.log(
-      `[cleanupNotificationCooldowns] Deleted ${staleSnap.size} stale cooldown docs.`,
-    );
   },
 );
