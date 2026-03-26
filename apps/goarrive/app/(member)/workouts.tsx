@@ -1,15 +1,16 @@
 /**
- * Member Workouts — Assigned workout list + player launch
+ * Member Workouts — Assigned workout list + player launch + Glow/Grow journal
  *
  * Queries workout_assignments for the current member.
  * Shows today's workouts prominently, upcoming workouts below.
  * Tapping "Start Workout" launches the existing WorkoutPlayer.
- * On completion, updates assignment status and writes a workout_log.
+ * On completion, shows PostWorkoutJournal for Glow/Grow reflection.
+ * Then updates assignment status and writes a workout_log with journal data.
  *
  * Follows GoArrive design system: #0E1117 bg, #F5A623 gold accent,
  * Space Grotesk headings, DM Sans body.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -37,6 +38,7 @@ import { useAuth } from '../../lib/AuthContext';
 import { db } from '../../lib/firebase';
 import { Icon } from '../../components/Icon';
 import WorkoutPlayer from '../../components/WorkoutPlayer';
+import PostWorkoutJournal, { JournalEntry } from '../../components/PostWorkoutJournal';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH =
@@ -53,7 +55,7 @@ interface AssignedWorkout {
   status: string; // scheduled | completed | skipped
   assignedAt: any;
   completedAt?: any;
-  /** Snapshot of workout data at assignment time (suggestion 7 — versioning) */
+  /** Snapshot of workout data at assignment time (versioning) */
   workoutSnapshot?: any;
 }
 
@@ -99,6 +101,14 @@ export default function MemberWorkoutsScreen() {
   const [playerWorkout, setPlayerWorkout] = useState<any>(null);
   const [activeAssignmentId, setActiveAssignmentId] = useState<string | null>(null);
   const [loadingWorkout, setLoadingWorkout] = useState<string | null>(null);
+
+  // Journal state
+  const [journalVisible, setJournalVisible] = useState(false);
+  const [completedDuration, setCompletedDuration] = useState(0);
+  const [completedWorkoutName, setCompletedWorkoutName] = useState('');
+
+  // Duration tracking
+  const workoutStartTime = useRef<number | null>(null);
 
   // ── Real-time listener for assignments ────────────────────────────────
   useEffect(() => {
@@ -169,6 +179,7 @@ export default function MemberWorkoutsScreen() {
 
         setPlayerWorkout(workoutData);
         setActiveAssignmentId(assignment.id);
+        workoutStartTime.current = Date.now();
         setPlayerVisible(true);
       } catch (err) {
         console.error('[MemberWorkouts] Failed to load workout:', err);
@@ -180,35 +191,100 @@ export default function MemberWorkoutsScreen() {
     [],
   );
 
-  // ── Complete workout ──────────────────────────────────────────────────
-  const handleWorkoutComplete = useCallback(async () => {
+  // ── Player complete → show journal ────────────────────────────────────
+  const handlePlayerComplete = useCallback(() => {
+    const durationSec = workoutStartTime.current
+      ? Math.round((Date.now() - workoutStartTime.current) / 1000)
+      : 0;
+
+    setCompletedDuration(durationSec);
+    setCompletedWorkoutName(playerWorkout?.name ?? 'Workout');
+    setPlayerVisible(false);
+    setJournalVisible(true);
+  }, [playerWorkout]);
+
+  // ── Journal submit → write log ────────────────────────────────────────
+  const handleJournalSubmit = useCallback(
+    async (journal: JournalEntry) => {
+      if (!activeAssignmentId || !memberId) return;
+
+      const durationSec = completedDuration;
+
+      try {
+        // Update assignment status
+        await updateDoc(doc(db, 'workout_assignments', activeAssignmentId), {
+          status: 'completed',
+          completedAt: serverTimestamp(),
+        });
+
+        // Write workout log with journal data
+        await addDoc(collection(db, 'workout_logs'), {
+          memberId,
+          assignmentId: activeAssignmentId,
+          workoutId: playerWorkout?.id ?? '',
+          workoutName: playerWorkout?.name ?? '',
+          coachId: playerWorkout?.coachId ?? '',
+          completedAt: serverTimestamp(),
+          durationSec,
+          // Journal fields
+          journal: {
+            glow: journal.glow || '',
+            grow: journal.grow || '',
+            energyRating: journal.energyRating,
+            moodRating: journal.moodRating,
+          },
+          // Coach review status
+          reviewStatus: 'pending', // pending | reviewed
+          reviewedAt: null,
+          coachNote: '',
+        });
+      } catch (err) {
+        console.error('[MemberWorkouts] Failed to log completion:', err);
+      }
+
+      // Clean up
+      setJournalVisible(false);
+      setPlayerWorkout(null);
+      setActiveAssignmentId(null);
+      workoutStartTime.current = null;
+    },
+    [activeAssignmentId, memberId, playerWorkout, completedDuration],
+  );
+
+  // ── Journal skip → write log without journal ──────────────────────────
+  const handleJournalSkip = useCallback(async () => {
     if (!activeAssignmentId || !memberId) return;
 
+    const durationSec = completedDuration;
+
     try {
-      // Update assignment status
       await updateDoc(doc(db, 'workout_assignments', activeAssignmentId), {
         status: 'completed',
         completedAt: serverTimestamp(),
       });
 
-      // Write workout log
       await addDoc(collection(db, 'workout_logs'), {
         memberId,
         assignmentId: activeAssignmentId,
         workoutId: playerWorkout?.id ?? '',
         workoutName: playerWorkout?.name ?? '',
+        coachId: playerWorkout?.coachId ?? '',
         completedAt: serverTimestamp(),
-        durationSec: null, // TODO: track actual duration in player
-        // Journal fields will be added when Glow/Grow journal is built
+        durationSec,
+        journal: null,
+        reviewStatus: 'pending',
+        reviewedAt: null,
+        coachNote: '',
       });
     } catch (err) {
-      console.error('[MemberWorkouts] Failed to log completion:', err);
+      console.error('[MemberWorkouts] Failed to log skip:', err);
     }
 
-    setPlayerVisible(false);
+    setJournalVisible(false);
     setPlayerWorkout(null);
     setActiveAssignmentId(null);
-  }, [activeAssignmentId, memberId, playerWorkout]);
+    workoutStartTime.current = null;
+  }, [activeAssignmentId, memberId, playerWorkout, completedDuration]);
 
   // ── Categorize assignments ────────────────────────────────────────────
   const today = todayString();
@@ -438,7 +514,7 @@ export default function MemberWorkoutsScreen() {
       />
 
       {/* Workout Player */}
-      {playerWorkout && (
+      {playerWorkout && playerVisible && (
         <WorkoutPlayer
           visible={playerVisible}
           workout={playerWorkout}
@@ -446,10 +522,20 @@ export default function MemberWorkoutsScreen() {
             setPlayerVisible(false);
             setPlayerWorkout(null);
             setActiveAssignmentId(null);
+            workoutStartTime.current = null;
           }}
-          onComplete={handleWorkoutComplete}
+          onComplete={handlePlayerComplete}
         />
       )}
+
+      {/* Post-Workout Journal */}
+      <PostWorkoutJournal
+        visible={journalVisible}
+        workoutName={completedWorkoutName}
+        durationSeconds={completedDuration}
+        onSubmit={handleJournalSubmit}
+        onSkip={handleJournalSkip}
+      />
     </View>
   );
 }

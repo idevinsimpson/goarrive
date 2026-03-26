@@ -49,6 +49,7 @@ import { DAY_LABELS, DAY_SHORT_LABELS, formatTime, addMinutesToTime, type Guidan
 import { type Phase, type MemberPlanData, type SessionTypeGuidance, type GuidanceLevel, resolvePhaseColor } from '../lib/planTypes';
 import { defaultHostingMode, defaultCoachExpectedLive } from '../lib/schedulingTypes';
 import AssignWorkoutModal from './AssignWorkoutModal';
+import CoachReviewQueue from './CoachReviewQueue';
 
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
@@ -451,6 +452,7 @@ export default function MemberDetail({
 
   // Workouts tile — assign workout modal
   const [showAssignWorkout, setShowAssignWorkout] = useState(false);
+  const [showReviewQueue, setShowReviewQueue] = useState(false);
   // Item 7: Session notes per instance
   const [instanceNotes, setInstanceNotes] = useState<Record<string, string>>({});
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -1358,7 +1360,8 @@ export default function MemberDetail({
       sublabel: 'Entries & comments',
       color: GREEN,
       bgColor: 'rgba(110,187,122,0.1)',
-      live: false,
+      live: true,
+      onPress: () => setShowReviewQueue(true),
     },
     {
       icon: 'lock',
@@ -2750,6 +2753,11 @@ export default function MemberDetail({
           }
           setShowAssignWorkout(false);
         }}
+      />
+      <CoachReviewQueue
+        visible={showReviewQueue}
+        coachId={claims?.coachId || user?.uid || ''}
+        onClose={() => setShowReviewQueue(false)}
       />
     </>
   );

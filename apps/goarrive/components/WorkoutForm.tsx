@@ -130,7 +130,7 @@ export default function WorkoutForm({
   tenantId,
   editWorkout,
 }: WorkoutFormProps) {
-  const isEdit = !!editWorkout;
+  const isEdit = !!editWorkout && !!editWorkout.id;
 
   // ── Form state ─────────────────────────────────────────────────────────
   const [name, setName] = useState('');
@@ -722,6 +722,52 @@ export default function WorkoutForm({
                                   placeholderTextColor="#4A5568"
                                 />
                               </View>
+                              {/* Duration + Rest row */}
+                              <View style={s.movementFields}>
+                                <TextInput
+                                  style={s.movementFieldInput}
+                                  value={mov.durationSec ? String(mov.durationSec) : ''}
+                                  onChangeText={(t) =>
+                                    updateMovementField(
+                                      bi,
+                                      mi,
+                                      'durationSec',
+                                      parseInt(t.replace(/[^0-9]/g, ''), 10) || undefined,
+                                    )
+                                  }
+                                  placeholder="Dur (s)"
+                                  placeholderTextColor="#4A5568"
+                                  keyboardType="number-pad"
+                                  maxLength={3}
+                                />
+                                <Text style={s.movementFieldSep}>|</Text>
+                                <TextInput
+                                  style={s.movementFieldInput}
+                                  value={mov.restSec ? String(mov.restSec) : ''}
+                                  onChangeText={(t) =>
+                                    updateMovementField(
+                                      bi,
+                                      mi,
+                                      'restSec',
+                                      parseInt(t.replace(/[^0-9]/g, ''), 10) || undefined,
+                                    )
+                                  }
+                                  placeholder="Rest (s)"
+                                  placeholderTextColor="#4A5568"
+                                  keyboardType="number-pad"
+                                  maxLength={3}
+                                />
+                              </View>
+                              {/* Notes */}
+                              <TextInput
+                                style={[s.movementFieldInput, { width: '100%', marginTop: 4 }]}
+                                value={mov.notes ?? ''}
+                                onChangeText={(t) =>
+                                  updateMovementField(bi, mi, 'notes', t)
+                                }
+                                placeholder="Coaching cues..."
+                                placeholderTextColor="#4A5568"
+                              />
                             </View>
                             <Pressable
                               onPress={() => removeMovementFromBlock(bi, mi)}

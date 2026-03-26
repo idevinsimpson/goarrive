@@ -263,6 +263,14 @@ export default function WorkoutsScreen() {
     return true;
   });
 
+  // Apply sort
+  const sorted = [...filtered].sort((a, b) => {
+    if (sortBy === 'alpha') return a.name.localeCompare(b.name);
+    if (sortBy === 'most_used') return (assignmentCounts[b.id] ?? 0) - (assignmentCounts[a.id] ?? 0);
+    // newest (default) — already ordered by createdAt desc from Firestore
+    return 0;
+  });
+
   const archivedCount = workouts.filter((w) => w.isArchived).length;
   const templateCount = workouts.filter(
     (w) => w.isTemplate && !w.isArchived,
@@ -300,7 +308,6 @@ export default function WorkoutsScreen() {
           isArchived: !isArchived,
           updatedAt: serverTimestamp(),
         });
-        loadWorkouts();
       } catch (err) {
         console.error('[Workouts] Archive error:', err);
         Alert.alert('Error', `Could not ${action.toLowerCase()} workout.`);
@@ -310,36 +317,32 @@ export default function WorkoutsScreen() {
     setConfirmVisible(true);
   };
 
-  // ── Duplicate workout (suggestion 5) ──────────────────────────────────
-  const handleDuplicate = async (w: WorkoutDetailData) => {
+  // ── Duplicate-and-tweak (suggestion 5) ─────────────────────────────────
+  const handleDuplicate = (w: WorkoutDetailData) => {
     setDetailVisible(false);
-    try {
-      await addDoc(collection(db, 'workouts'), {
-        name: `${w.name} (Copy)`,
-        description: w.description ?? '',
-        category: w.category ?? '',
-        difficulty: w.difficulty ?? '',
-        estimatedDurationMin: w.estimatedDurationMin ?? null,
-        tags: w.tags ?? [],
-        blocks: w.blocks ?? [],
-        coachId,
-        tenantId,
-        isTemplate: false,
-        isArchived: false,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-      loadWorkouts();
-    } catch (err) {
-      console.error('[Workouts] Duplicate error:', err);
-      Alert.alert('Error', 'Could not duplicate workout.');
-    }
+    // Pre-populate the form with the workout data but as a new workout
+    setEditWorkout({
+      ...w,
+      id: '', // empty id signals "create new" to the form
+      name: `${w.name} (Copy)`,
+      isTemplate: false,
+      isArchived: false,
+    } as WorkoutData);
+    setFormVisible(true);
   };
+
+  // ── Sort options (suggestion 6) ───────────────────────────────────────
+  const [sortBy, setSortBy] = useState<'newest' | 'alpha' | 'most_used'>('newest');
+  const SORT_OPTIONS: { key: 'newest' | 'alpha' | 'most_used'; label: string }[] = [
+    { key: 'newest', label: 'Newest' },
+    { key: 'alpha', label: 'A-Z' },
+    { key: 'most_used', label: 'Most Used' },
+  ];
 
   const handleFormClose = () => {
     setFormVisible(false);
     setEditWorkout(null);
-    loadWorkouts();
+    // onSnapshot handles updates automatically
   };
 
   const handleCreateNew = () => {
@@ -517,10 +520,29 @@ export default function WorkoutsScreen() {
         </View>
       )}
 
+      {/* Sort row */}
+      <View style={s.sortRow}>
+        <Text style={s.sortLabel}>Sort:</Text>
+        {SORT_OPTIONS.map((opt) => {
+          const active = sortBy === opt.key;
+          return (
+            <Pressable
+              key={opt.key}
+              style={[s.sortChip, active && s.sortChipActive]}
+              onPress={() => setSortBy(opt.key)}
+            >
+              <Text style={[s.sortChipText, active && s.sortChipTextActive]}>
+                {opt.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
       {/* Toggle row: count + archive + template toggles */}
       <View style={s.toggleRow}>
         <Text style={s.countText}>
-          {filtered.length} workout{filtered.length !== 1 ? 's' : ''}
+          {sorted.length} workout{sorted.length !== 1 ? 's' : ''}
         </Text>
         <View style={s.toggleGroup}>
           {/* Template toggle (suggestion 6) */}
@@ -592,7 +614,7 @@ export default function WorkoutsScreen() {
         </View>
       ) : (
         <FlatList
-          data={filtered}
+          data={sorted}
           renderItem={renderItem}
           keyExtractor={keyExtractor}
           contentContainerStyle={s.listContent}
@@ -739,6 +761,42 @@ const s = StyleSheet.create({
     fontFamily: FB,
   },
   chipTextActive: {
+    color: '#F5A623',
+    fontWeight: '600',
+  },
+
+  // Sort row
+  sortRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    gap: 8,
+  },
+  sortLabel: {
+    fontSize: 12,
+    color: '#4A5568',
+    fontFamily: FB,
+    marginRight: 2,
+  },
+  sortChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#161B22',
+    borderWidth: 1,
+    borderColor: '#2A3347',
+  },
+  sortChipActive: {
+    backgroundColor: 'rgba(245,166,35,0.12)',
+    borderColor: 'rgba(245,166,35,0.3)',
+  },
+  sortChipText: {
+    fontSize: 11,
+    color: '#8A95A3',
+    fontFamily: FB,
+  },
+  sortChipTextActive: {
     color: '#F5A623',
     fontWeight: '600',
   },

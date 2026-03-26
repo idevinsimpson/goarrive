@@ -342,6 +342,36 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
+    // WORKOUT LOGS (post-workout journal / completion records)
+    // Members create logs for their own completed workouts.
+    // Coaches read logs for their members' workouts.
+    // Members can update their own logs (e.g. edit journal).
+    // ─────────────────────────────────────────────
+
+    match /workout_logs/{logId} {
+      allow read: if isAuthenticated() && (
+        isOwnDoc(resource.data.memberId) ||
+        isCoachOrBootstrap(resource.data.coachId) ||
+        isPlatformAdmin()
+      );
+      allow create: if isAuthenticated()
+                    && request.auth.uid == request.resource.data.memberId
+                    && request.resource.data.keys().hasAll(['memberId', 'coachId', 'assignmentId', 'completedAt']);
+      allow update: if isAuthenticated() && (
+        // Members can update their own log (edit journal entries)
+        (isOwnDoc(resource.data.memberId)
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['journal', 'glow', 'grow', 'rating', 'updatedAt']))
+        // Coaches can add review notes
+        || (isCoachOrBootstrap(resource.data.coachId)
+            && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['coachNotes', 'reviewedAt', 'updatedAt']))
+        || isPlatformAdmin()
+      );
+      allow delete: if false; // never delete workout logs
+    }
+
+    // ─────────────────────────────────────────────
     // REFERRALS (Cloud Functions write via Admin SDK)
     // ─────────────────────────────────────────────
 
