@@ -23,6 +23,7 @@ import {
   query,
   where,
   orderBy,
+  limit,
   getDocs,
   Timestamp,
 } from 'firebase/firestore';
@@ -78,7 +79,8 @@ export default function WorkoutDifficultyTracker({
           where('memberId', '==', memberId),
           where('coachId', '==', coachId),
           where('completedAt', '>=', Timestamp.fromDate(thirtyDaysAgo)),
-          orderBy('completedAt', 'asc'),
+          orderBy('completedAt', 'desc'),
+          limit(30),
         );
 
         const snap = await getDocs(q);
@@ -97,7 +99,8 @@ export default function WorkoutDifficultyTracker({
           });
         });
 
-        setEntries(data);
+        // Reverse to chronological order since query is desc for limit
+        setEntries(data.reverse());
       } catch (err) {
         console.error('[WorkoutDifficultyTracker] Error:', err);
       } finally {
@@ -204,8 +207,45 @@ export default function WorkoutDifficultyTracker({
         })}
       </View>
 
+      {/* Timeline chart — difficulty dots over time */}
+      <Text style={st.recentLabel}>Timeline</Text>
+      <View style={st.timeline}>
+        <View style={st.timelineYAxis}>
+          {['elite', 'advanced', 'intermediate', 'beginner'].map((lvl) => (
+            <Text key={lvl} style={st.timelineYLabel}>
+              {lvl.charAt(0).toUpperCase()}
+            </Text>
+          ))}
+        </View>
+        <View style={st.timelineChart}>
+          {/* Grid lines */}
+          {[4, 3, 2, 1].map((lvl) => (
+            <View key={lvl} style={[st.timelineGridLine, { bottom: `${((lvl - 1) / 3) * 100}%` }]} />
+          ))}
+          {/* Data points */}
+          {entries.map((e, i) => {
+            const level = DIFFICULTY_ORDER[e.difficulty] || 1;
+            const xPct = entries.length > 1 ? (i / (entries.length - 1)) * 100 : 50;
+            const yPct = ((level - 1) / 3) * 100;
+            return (
+              <View
+                key={`dot-${i}`}
+                style={[
+                  st.timelineDot,
+                  {
+                    left: `${xPct}%`,
+                    bottom: `${yPct}%`,
+                    backgroundColor: DIFFICULTY_COLORS[e.difficulty] || '#8A95A3',
+                  },
+                ]}
+              />
+            );
+          })}
+        </View>
+      </View>
+
       {/* Recent entries */}
-      <Text style={st.recentLabel}>Recent</Text>
+      <Text style={[st.recentLabel, { marginTop: 12 }]}>Recent</Text>
       {entries.slice(-5).reverse().map((e, i) => (
         <View key={`${e.date}-${i}`} style={st.recentRow}>
           <View
@@ -326,6 +366,45 @@ const st = StyleSheet.create({
     fontSize: 11,
     color: '#8A95A3',
     fontFamily: FB,
+  },
+  timeline: {
+    flexDirection: 'row',
+    height: 80,
+    marginBottom: 8,
+  },
+  timelineYAxis: {
+    width: 16,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 2,
+  },
+  timelineYLabel: {
+    fontSize: 9,
+    color: '#6B7280',
+    fontFamily: FB,
+  },
+  timelineChart: {
+    flex: 1,
+    position: 'relative',
+    marginLeft: 8,
+    borderLeftWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#252B3B',
+  },
+  timelineGridLine: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 1,
+    backgroundColor: '#1E2A3A',
+  },
+  timelineDot: {
+    position: 'absolute',
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginLeft: -4,
+    marginBottom: -4,
   },
   emptyText: {
     fontSize: 13,

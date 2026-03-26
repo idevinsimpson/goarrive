@@ -129,6 +129,8 @@ function WorkoutsComingSoon() {
 export default function WorkoutsScreen() {
   const { user, claims } = useAuth();
   const isAdmin = claims?.admin === true || claims?.role === 'platformAdmin';
+  const isCoach = claims?.role === 'coach';
+  const canAccessWorkouts = isAdmin || isCoach;
   const coachId = claims?.coachId ?? user?.uid ?? '';
   const tenantId = claims?.tenantId ?? '';
 
@@ -437,7 +439,7 @@ export default function WorkoutsScreen() {
 
   // ── Render ─────────────────────────────────────────────────────────────
   // Non-admin sees Coming Soon
-  if (!isAdmin) return <WorkoutsComingSoon />;
+  if (!canAccessWorkouts) return <WorkoutsComingSoon />;
 
   return (
     <View style={s.root}>

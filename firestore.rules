@@ -278,7 +278,8 @@ service cloud.firestore {
       allow create: if isCoachOrBootstrap(request.resource.data.coachId);
       // Only the owning coach or admin can update (including toggling isShared)
       allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
-      allow delete: if false;
+      // Owning coach or admin can delete their own workouts (e.g., template cleanup)
+      allow delete: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
     }
 
     // ─────────────────────────────────────────────
@@ -289,7 +290,7 @@ service cloud.firestore {
       allow read: if isAuthenticated() && isCoachOrBootstrap(resource.data.coachId);
       allow create: if isCoachOrBootstrap(request.resource.data.coachId);
       allow update: if isCoachOrBootstrap(resource.data.coachId);
-      allow delete: if false;
+      allow delete: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
     }
 
     // ─────────────────────────────────────────────

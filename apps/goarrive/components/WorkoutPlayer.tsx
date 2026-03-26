@@ -29,6 +29,7 @@ import {
   Platform,
   Dimensions,
   Image,
+  TextInput,
   useWindowDimensions,
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
@@ -88,6 +89,7 @@ export default function WorkoutPlayer({
     showSwap, alternatives, loadingAlts,
     openSwap, closeSwap, swapMovement, getSwapLog,
   } = useMovementSwap(flatMovements, currentIndex, setFlatOverride);
+  const [swapReason, setSwapReason] = useState('');
 
   // ── Landscape detection for tablets ─────────────────────────────────
   const { width: winW, height: winH } = useWindowDimensions();
@@ -409,11 +411,22 @@ export default function WorkoutPlayer({
             {!loadingAlts && alternatives.length === 0 && (
               <Text style={st.swapHint}>No alternatives found for this category.</Text>
             )}
+            <TextInput
+              style={st.swapReasonInput}
+              placeholder="Reason for swap (optional)"
+              placeholderTextColor="#6B7280"
+              value={swapReason}
+              onChangeText={setSwapReason}
+              maxLength={100}
+            />
             {alternatives.map((alt) => (
               <TouchableOpacity
                 key={alt.id}
                 style={st.swapItem}
-                onPress={() => swapMovement(alt)}
+                onPress={() => {
+                  swapMovement(alt, swapReason.trim() || undefined);
+                  setSwapReason('');
+                }}
               >
                 <Text style={st.swapItemName}>{alt.name}</Text>
                 <Text style={st.swapItemCat}>{alt.category}</Text>
@@ -844,5 +857,16 @@ const st = StyleSheet.create({
     color: '#8A95A3',
     fontFamily: FB,
     marginTop: 2,
+  },
+  swapReasonInput: {
+    backgroundColor: '#1A1F2E',
+    borderRadius: 8,
+    padding: 10,
+    fontSize: 14,
+    color: '#E2E8F0',
+    fontFamily: FB,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#252B3B',
   },
 });

@@ -40,6 +40,7 @@ interface FlatMovement {
   swapSide?: boolean;
   coachingCues?: string;
   category?: string;
+  muscleGroup?: string;
   movementId?: string;
   blockLabel?: string;
   roundLabel?: string;
@@ -51,6 +52,7 @@ export interface SwapLogEntry {
   swappedName: string;
   swappedId: string;
   category: string;
+  reason?: string;
   timestamp: number;
 }
 
@@ -103,7 +105,28 @@ export function useMovementSwap(
         });
       });
 
-      // Fallback: if no same-category alternatives, broaden to all movements
+      // Fallback 1: if no same-category alternatives, try same muscle group
+      if (alts.length === 0 && currentMovement.muscleGroup) {
+        const muscleQ = query(
+          collection(db, 'movements'),
+          where('muscleGroup', '==', currentMovement.muscleGroup),
+          limit(10),
+        );
+        const muscleSnap = await getDocs(muscleQ);
+        muscleSnap.docs.forEach((doc) => {
+          const d = doc.data();
+          if (d.name === currentMovement.name) return;
+          alts.push({
+            id: doc.id,
+            name: d.name || 'Unknown',
+            category: d.category || 'General',
+            mediaUrl: d.mediaUrl || null,
+            videoUrl: d.videoUrl || null,
+          });
+        });
+      }
+
+      // Fallback 2: if still no alternatives, broaden to all movements
       if (alts.length === 0) {
         const fallbackQ = query(
           collection(db, 'movements'),
@@ -123,6 +146,17 @@ export function useMovementSwap(
         });
       }
 
+      // Sort by relevance: same muscle group first, then same equipment, then alphabetical
+      const curMuscle = (currentMovement.muscleGroup || '').toLowerCase();
+      alts.sort((a, b) => {
+        // Score: higher is more relevant
+        const scoreA = (a.category === (currentMovement.category || '') ? 2 : 0);
+        const scoreB = (b.category === (currentMovement.category || '') ? 2 : 0);
+        if (scoreA !== scoreB) return scoreB - scoreA;
+        // Alphabetical tiebreaker
+        return a.name.localeCompare(b.name);
+      });
+
       setAlternatives(alts);
     } catch (err) {
       console.error('[useMovementSwap] Error loading alternatives:', err);
@@ -138,22 +172,25 @@ export function useMovementSwap(
   }, []);
 
   const swapMovement = useCallback(
-    (alt: Alternative) => {
+    (alt: Alternative, reason?: string) => {
       if (!onSwap || currentIndex < 0 || currentIndex >= flatMovements.length) return;
 
       // Create updated flat list with the swapped movement
       const updated = [...flatMovements];
       const original = updated[currentIndex];
 
-      // Log the swap
-      swapLogRef.current.push({
-        originalName: original.name,
-        originalId: original.movementId,
-        swappedName: alt.name,
-        swappedId: alt.id,
-        category: alt.category,
-        timestamp: Date.now(),
-      });
+      // Log the swap (capped at 50 entries to prevent unbounded growth)
+      if (swapLogRef.current.length < 50) {
+        swapLogRef.current.push({
+          originalName: original.name,
+          originalId: original.movementId,
+          swappedName: alt.name,
+          swappedId: alt.id,
+          category: alt.category,
+          reason: reason || undefined,
+          timestamp: Date.now(),
+        });
+      }
 
       updated[currentIndex] = {
         ...original,

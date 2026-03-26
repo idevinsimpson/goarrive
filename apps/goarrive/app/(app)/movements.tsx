@@ -130,6 +130,8 @@ function MovementsComingSoon() {
 export default function MovementsScreen() {
   const { user, claims } = useAuth();
   const isAdmin = claims?.admin === true || claims?.role === 'platformAdmin';
+  const isCoach = claims?.role === 'coach';
+  const canAccessMovements = isAdmin || isCoach;
   const coachId = claims?.coachId ?? user?.uid ?? '';
   const tenantId = claims?.tenantId ?? '';
 
@@ -374,7 +376,7 @@ export default function MovementsScreen() {
 
   // ── Render ───────────────────────────────────────────────────────────────
   // Non-admin sees Coming Soon
-  if (!isAdmin) return <MovementsComingSoon />;
+  if (!canAccessMovements) return <MovementsComingSoon />;
 
   return (
     <View style={s.root}>

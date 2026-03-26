@@ -14,7 +14,7 @@
  *   - onStart: () => void — launches the player
  *   - onClose: () => void — goes back
  */
-import React, { useEffect } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -38,6 +38,23 @@ interface WorkoutPreviewProps {
   workout: any;
   onStart: () => void;
   onClose: () => void;
+}
+
+/** Equipment checklist item with toggle */
+function EquipmentCheckItem({ name }: { name: string }) {
+  const [checked, setChecked] = useState(false);
+  return (
+    <TouchableOpacity
+      style={st.checkItem}
+      onPress={() => setChecked(!checked)}
+      activeOpacity={0.7}
+    >
+      <View style={[st.checkBox, checked && st.checkBoxChecked]}>
+        {checked && <Icon name="check" size={14} color="#0E1117" />}
+      </View>
+      <Text style={[st.checkLabel, checked && st.checkLabelChecked]}>{name}</Text>
+    </TouchableOpacity>
+  );
 }
 
 export default function WorkoutPreview({
@@ -150,17 +167,13 @@ export default function WorkoutPreview({
             </View>
           </View>
 
-          {/* Equipment needed */}
+          {/* Equipment checklist */}
           {equipment.size > 0 && (
             <View style={st.section}>
-              <Text style={st.sectionTitle}>Equipment Needed</Text>
-              <View style={st.chipRow}>
-                {Array.from(equipment).map((eq) => (
-                  <View key={eq} style={st.chip}>
-                    <Text style={st.chipText}>{eq}</Text>
-                  </View>
-                ))}
-              </View>
+              <Text style={st.sectionTitle}>Equipment Checklist</Text>
+              {Array.from(equipment).map((eq) => (
+                <EquipmentCheckItem key={eq} name={eq} />
+              ))}
             </View>
           )}
 
@@ -324,6 +337,37 @@ const st = StyleSheet.create({
     fontSize: 13,
     color: '#F0F4F8',
     fontFamily: FB,
+  },
+  checkItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E2A3A',
+  },
+  checkBox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#4A5568',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  checkBoxChecked: {
+    backgroundColor: '#F5A623',
+    borderColor: '#F5A623',
+  },
+  checkLabel: {
+    fontSize: 15,
+    color: '#F0F4F8',
+    fontFamily: FB,
+  },
+  checkLabelChecked: {
+    color: '#8A95A3',
+    textDecorationLine: 'line-through',
   },
   blockCard: {
     backgroundColor: '#111827',

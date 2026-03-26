@@ -31,12 +31,44 @@ export interface WorkoutTemplate {
   tags: string[];
   blocks: any[];
   isShared?: boolean;
+  version?: number;
+  lastModifiedAt?: any;
+  changelog?: string[];
 }
 
 export function useWorkoutTemplates(coachId: string) {
   const [templates, setTemplates] = useState<WorkoutTemplate[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState<string>('All');
+  const [tagFilter, setTagFilter] = useState<string>('');
+
+  /** All unique categories across loaded templates */
+  const availableCategories = (() => {
+    const cats = new Set<string>();
+    templates.forEach((t) => {
+      if (t.category) cats.add(t.category);
+    });
+    return ['All', ...Array.from(cats).sort()];
+  })();
+
+  /** All unique tags across loaded templates */
+  const availableTags = (() => {
+    const tags = new Set<string>();
+    templates.forEach((t) => {
+      (t.tags || []).forEach((tag) => {
+        if (tag) tags.add(tag);
+      });
+    });
+    return Array.from(tags).sort();
+  })();
+
+  /** Filtered templates based on current category and tag filters */
+  const filteredTemplates = templates.filter((t) => {
+    if (categoryFilter !== 'All' && t.category !== categoryFilter) return false;
+    if (tagFilter && !(t.tags || []).includes(tagFilter)) return false;
+    return true;
+  });
 
   const loadTemplates = useCallback(async () => {
     if (!coachId || loading) return;
@@ -80,6 +112,9 @@ export function useWorkoutTemplates(coachId: string) {
           tags: d.tags || [],
           blocks: d.blocks || [],
           isShared: false,
+          version: d.version || 1,
+          lastModifiedAt: d.lastModifiedAt || d.createdAt || null,
+          changelog: d.changelog || [],
         });
       });
 
@@ -98,6 +133,9 @@ export function useWorkoutTemplates(coachId: string) {
           tags: d.tags || [],
           blocks: d.blocks || [],
           isShared: true,
+          version: d.version || 1,
+          lastModifiedAt: d.lastModifiedAt || d.createdAt || null,
+          changelog: d.changelog || [],
         });
       });
 
@@ -116,9 +154,22 @@ export function useWorkoutTemplates(coachId: string) {
     async (templateId: string, newName: string) => {
       if (!templateId || !newName.trim()) return;
       try {
-        await updateDoc(doc(db, 'workouts', templateId), { name: newName.trim() });
+        const ref = doc(db, 'workouts', templateId);
+        const current = templates.find((t) => t.id === templateId);
+        const newVersion = (current?.version || 1) + 1;
+        const changeEntry = `v${newVersion}: Renamed to "${newName.trim()}"`;
+        await updateDoc(ref, {
+          name: newName.trim(),
+          version: newVersion,
+          lastModifiedAt: new Date(),
+          changelog: [...(current?.changelog || []), changeEntry],
+        });
         setTemplates((prev) =>
-          prev.map((t) => (t.id === templateId ? { ...t, name: newName.trim() } : t)),
+          prev.map((t) =>
+            t.id === templateId
+              ? { ...t, name: newName.trim(), version: (t.version || 1) + 1, lastModifiedAt: new Date() }
+              : t,
+          ),
         );
       } catch (err) {
         console.error('[useWorkoutTemplates] Rename error:', err);
@@ -128,13 +179,27 @@ export function useWorkoutTemplates(coachId: string) {
     [],
   );
 
-  /** Delete a template */
+  /** Delete a template — checks for active assignments first */
   const deleteTemplate = useCallback(
-    async (templateId: string) => {
-      if (!templateId) return;
+    async (templateId: string, force = false): Promise<{ blocked: boolean; assignmentCount?: number }> => {
+      if (!templateId) return { blocked: false };
       try {
+        // Cascade check: see if any active assignments reference this workout
+        if (!force) {
+          const assignQ = query(
+            collection(db, 'workout_assignments'),
+            where('workoutId', '==', templateId),
+            where('status', 'in', ['assigned', 'in_progress']),
+          );
+          const assignSnap = await getDocs(assignQ);
+          if (!assignSnap.empty) {
+            return { blocked: true, assignmentCount: assignSnap.size };
+          }
+        }
+
         await deleteDoc(doc(db, 'workouts', templateId));
         setTemplates((prev) => prev.filter((t) => t.id !== templateId));
+        return { blocked: false };
       } catch (err) {
         console.error('[useWorkoutTemplates] Delete error:', err);
         throw err;
@@ -162,11 +227,18 @@ export function useWorkoutTemplates(coachId: string) {
 
   return {
     templates,
+    filteredTemplates,
     loading,
     error,
     loadTemplates,
     renameTemplate,
     deleteTemplate,
     toggleShareTemplate,
+    categoryFilter,
+    setCategoryFilter,
+    tagFilter,
+    setTagFilter,
+    availableCategories,
+    availableTags,
   };
 }

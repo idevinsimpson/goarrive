@@ -46,6 +46,7 @@ import MemberStreakCard from '../../components/MemberStreakCard';
 import WorkoutPreview from '../../components/WorkoutPreview';
 import WorkoutSessionSummary from '../../components/WorkoutSessionSummary';
 import WorkoutDifficultyTracker from '../../components/WorkoutDifficultyTracker';
+import WorkoutCelebration from '../../components/WorkoutCelebration';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH =
@@ -125,6 +126,7 @@ export default function MemberWorkoutsScreen() {
 
   // Session summary state (Suggestion 2: summary before journal)
   const [summaryVisible, setSummaryVisible] = useState(false);
+  const [celebrationVisible, setCelebrationVisible] = useState(false);
   const [sessionStats, setSessionStats] = useState<any>(null);
 
   // Journal state
@@ -244,7 +246,7 @@ export default function MemberWorkoutsScreen() {
       workoutName: playerWorkout?.name ?? 'Workout',
     });
     setPlayerVisible(false);
-    setSummaryVisible(true);
+    setCelebrationVisible(true);
   }, [playerWorkout]);
 
   // ── Journal submit → write log ────────────────────────────────────────
@@ -681,6 +683,16 @@ export default function MemberWorkoutsScreen() {
           onSwapLog={(swaps: any[]) => setSessionSwapLog(swaps)}
         />
       )}
+
+      {/* Celebration animation (S10) */}
+      <WorkoutCelebration
+        visible={celebrationVisible}
+        workoutName={playerWorkout?.name}
+        onComplete={() => {
+          setCelebrationVisible(false);
+          setSummaryVisible(true);
+        }}
+      />
 
       {/* Session Summary (Suggestion 2) */}
       {summaryVisible && sessionStats && (

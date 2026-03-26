@@ -1,0 +1,17 @@
+#!/bin/sh
+# GoArrive pre-commit hook
+# Runs dependency validation before allowing commits
+
+SCRIPT_DIR="$(git rev-parse --show-toplevel)/scripts"
+
+# Run dependency validation if the script exists
+if [ -f "$SCRIPT_DIR/validate-deps.sh" ]; then
+  echo "🔍 Running dependency validation..."
+  if ! "$SCRIPT_DIR/validate-deps.sh"; then
+    echo ""
+    echo "❌ Dependency validation failed. Fix the issues above before committing."
+    echo "   To skip this check: git commit --no-verify"
+    exit 1
+  fi
+  echo "✅ Dependency validation passed."
+fi
