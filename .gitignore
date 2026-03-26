@@ -6,3 +6,4 @@ dist/
 .firebase/
 .env
 
+.github/workflows/test.yml
