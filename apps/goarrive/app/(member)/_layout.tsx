@@ -98,6 +98,15 @@ export default function MemberLayout() {
         }}
       />
       <Tabs.Screen
+        name="workouts"
+        options={{
+          title: 'Workouts',
+          tabBarIcon: ({ color }) => (
+            <Icon name="workouts" size={26} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="my-plan"
         options={{
           title: 'My Plan',

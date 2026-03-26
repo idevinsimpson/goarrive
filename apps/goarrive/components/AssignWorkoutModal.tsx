@@ -27,6 +27,8 @@ import { Icon } from './Icon';
 import {
   collection,
   getDocs,
+  getDoc,
+  doc,
   query,
   where,
   orderBy,
@@ -119,6 +121,10 @@ export default function AssignWorkoutModal({
   const [dateInput, setDateInput] = useState(toDateString(new Date()));
   const [assigning, setAssigning] = useState(false);
 
+  // Suggestion 5: Workout preview data
+  const [previewBlocks, setPreviewBlocks] = useState<any[]>([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
   // ── Load workouts ─────────────────────────────────────────────────────
 
   const loadWorkouts = useCallback(async () => {
@@ -182,9 +188,23 @@ export default function AssignWorkoutModal({
 
   // ── Handlers ──────────────────────────────────────────────────────────
 
-  function handleSelectWorkout(w: WorkoutPickerItem) {
+  async function handleSelectWorkout(w: WorkoutPickerItem) {
     setSelectedWorkout(w);
     setStep('schedule');
+    // Suggestion 5: Load workout preview data
+    setPreviewLoading(true);
+    setPreviewBlocks([]);
+    try {
+      const workoutDoc = await getDoc(doc(db, 'workouts', w.id));
+      if (workoutDoc.exists()) {
+        const data = workoutDoc.data();
+        setPreviewBlocks(data.blocks ?? []);
+      }
+    } catch (err) {
+      console.warn('Could not load workout preview:', err);
+    } finally {
+      setPreviewLoading(false);
+    }
   }
 
   function handleBack() {
@@ -384,6 +404,30 @@ export default function AssignWorkoutModal({
                   {selectedWorkout?.name}
                 </Text>
               </View>
+
+              {/* Suggestion 5: Workout preview */}
+              {previewLoading ? (
+                <ActivityIndicator size="small" color="#F5A623" style={{ marginVertical: 8 }} />
+              ) : previewBlocks.length > 0 ? (
+                <View style={s.previewSection}>
+                  <Text style={s.previewTitle}>Workout Preview</Text>
+                  {previewBlocks.map((block: any, bi: number) => (
+                    <View key={bi} style={s.previewBlock}>
+                      <Text style={s.previewBlockLabel}>
+                        {block.label || block.type || `Block ${bi + 1}`}
+                        {block.rounds ? ` · ${block.rounds} rounds` : ''}
+                      </Text>
+                      {Array.isArray(block.movements) && block.movements.map((mv: any, mi: number) => (
+                        <Text key={mi} style={s.previewMovement}>
+                          {'  '}• {mv.movementName || 'Movement'}
+                          {mv.sets ? ` — ${mv.sets} sets` : ''}
+                          {mv.reps ? ` × ${mv.reps}` : ''}
+                        </Text>
+                      ))}
+                    </View>
+                  ))}
+                </View>
+              ) : null}
 
               {/* Quick date buttons */}
               <Text style={s.sectionLabel}>Quick Select</Text>
@@ -678,6 +722,40 @@ const s = StyleSheet.create({
     fontWeight: '700',
     color: '#0E1117',
     fontFamily: FONT_HEADING,
+  },
+  // Suggestion 5: Workout preview styles
+  previewSection: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  previewTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8A95A3',
+    fontFamily: FONT_HEADING,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 10,
+  },
+  previewBlock: {
+    marginBottom: 8,
+  },
+  previewBlockLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#F5A623',
+    fontFamily: FONT_HEADING,
+    marginBottom: 4,
+  },
+  previewMovement: {
+    fontSize: 12,
+    color: '#A0AEC0',
+    fontFamily: FONT_BODY,
+    lineHeight: 18,
   },
   // NEXT-B: Success step styles
   successWrap: {

@@ -43,6 +43,7 @@ import {
   where,
   orderBy,
   getDocs,
+  onSnapshot,
   doc,
   updateDoc,
   addDoc,
@@ -161,80 +162,73 @@ export default function WorkoutsScreen() {
     Record<string, number>
   >({});
 
-  // ── Load workouts ─────────────────────────────────────────────────────
-  const loadWorkouts = useCallback(async () => {
-    if (!coachId) return;
-    try {
-      const q = query(
-        collection(db, 'workouts'),
-        where('coachId', '==', coachId),
-        orderBy('createdAt', 'desc'),
-      );
-      const snap = await getDocs(q);
-
-      const list: WorkoutData[] = snap.docs.map((d) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          name: data.name ?? '',
-          description: data.description ?? '',
-          category: data.category ?? '',
-          difficulty: data.difficulty ?? '',
-          estimatedDurationMin: data.estimatedDurationMin ?? null,
-          tags: data.tags ?? [],
-          blocks: data.blocks ?? [],
-          coachId: data.coachId ?? '',
-          tenantId: data.tenantId ?? '',
-          isTemplate: data.isTemplate ?? false,
-          isArchived: data.isArchived ?? false,
-          createdAt: data.createdAt,
-          updatedAt: data.updatedAt,
-        };
-      });
-
-      setWorkouts(list);
-
-      // Load assignment counts (suggestion 8)
-      loadAssignmentCounts(list.map((w) => w.id));
-    } catch (err) {
-      console.error('[Workouts] Load error:', err);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [coachId]);
-
-  // ── Load assignment counts (suggestion 8) ─────────────────────────────
-  const loadAssignmentCounts = useCallback(
-    async (workoutIds: string[]) => {
-      if (!coachId || workoutIds.length === 0) return;
-      try {
-        const assignQ = query(
-          collection(db, 'workout_assignments'),
-          where('coachId', '==', coachId),
-        );
-        const assignSnap = await getDocs(assignQ);
-        const counts: Record<string, number> = {};
-        assignSnap.docs.forEach((d) => {
-          const wId = d.data().workoutId;
-          if (wId) counts[wId] = (counts[wId] || 0) + 1;
-        });
-        setAssignmentCounts(counts);
-      } catch (err) {
-        console.error('[Workouts] Assignment count error:', err);
-      }
-    },
-    [coachId],
-  );
+  // ── Real-time workout listener ─────────────────────────────────────────
+  const mapWorkoutDoc = useCallback((d: any): WorkoutData => {
+    const data = d.data();
+    return {
+      id: d.id,
+      name: data.name ?? '',
+      description: data.description ?? '',
+      category: data.category ?? '',
+      difficulty: data.difficulty ?? '',
+      estimatedDurationMin: data.estimatedDurationMin ?? null,
+      tags: data.tags ?? [],
+      blocks: data.blocks ?? [],
+      coachId: data.coachId ?? '',
+      tenantId: data.tenantId ?? '',
+      isTemplate: data.isTemplate ?? false,
+      isArchived: data.isArchived ?? false,
+      createdAt: data.createdAt,
+      updatedAt: data.updatedAt,
+    };
+  }, []);
 
   useEffect(() => {
-    if (coachId) loadWorkouts();
-  }, [coachId, loadWorkouts]);
+    if (!coachId) return;
+
+    const q = query(
+      collection(db, 'workouts'),
+      where('coachId', '==', coachId),
+      orderBy('createdAt', 'desc'),
+    );
+
+    const unsub = onSnapshot(q, async (snap) => {
+      const list = snap.docs.map(mapWorkoutDoc);
+      setWorkouts(list);
+      setLoading(false);
+      setRefreshing(false);
+
+      // Load assignment counts (suggestion 8)
+      if (list.length > 0) {
+        try {
+          const assignQ = query(
+            collection(db, 'workout_assignments'),
+            where('coachId', '==', coachId),
+          );
+          const assignSnap = await getDocs(assignQ);
+          const counts: Record<string, number> = {};
+          assignSnap.docs.forEach((d) => {
+            const wId = d.data().workoutId;
+            if (wId) counts[wId] = (counts[wId] || 0) + 1;
+          });
+          setAssignmentCounts(counts);
+        } catch (err) {
+          console.error('[Workouts] Assignment count error:', err);
+        }
+      }
+    }, (err) => {
+      console.error('[Workouts] Listener error:', err);
+      setLoading(false);
+    });
+
+    return () => unsub();
+  }, [coachId, mapWorkoutDoc]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    loadWorkouts();
-  }, [loadWorkouts]);
+    // Real-time listener will auto-update; just reset the flag after a short delay
+    setTimeout(() => setRefreshing(false), 1000);
+  }, []);
 
   // ── Filter logic ───────────────────────────────────────────────────────
   const filtered = workouts.filter((w) => {

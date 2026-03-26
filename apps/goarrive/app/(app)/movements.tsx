@@ -34,6 +34,7 @@ import {
   where,
   orderBy,
   getDocs,
+  onSnapshot,
   doc,
   updateDoc,
   serverTimestamp,
@@ -153,86 +154,95 @@ export default function MovementsScreen() {
   const [confirmMessage, setConfirmMessage] = useState('');
   const [confirmAction, setConfirmAction] = useState<() => void>(() => {});
 
-  // ── Load movements ─────────────────────────────────────────────────────
-  const loadMovements = useCallback(async () => {
-    if (!coachId) return;
-    try {
-      // Query coach-private movements
-      const coachQ = query(
-        collection(db, 'movements'),
-        where('coachId', '==', coachId),
-        orderBy('createdAt', 'desc'),
-      );
-      const coachSnap = await getDocs(coachQ);
-
-      // Query global movements
-      const globalQ = query(
-        collection(db, 'movements'),
-        where('isGlobal', '==', true),
-        orderBy('createdAt', 'desc'),
-      );
-      const globalSnap = await getDocs(globalQ);
-
-      // Merge and deduplicate (a movement could match both queries)
-      const seen = new Set<string>();
-      const merged: MovementDetailData[] = [];
-
-      const mapDoc = (d: any): MovementDetailData => {
-        const data = d.data();
-        return {
-          id: d.id,
-          name: data.name ?? '',
-          category: data.category ?? '',
-          muscleGroups: data.muscleGroups ?? [],
-          equipment: data.equipment ?? '',
-          difficulty: data.difficulty ?? '',
-          description: data.description ?? '',
-          workSec: data.workSec ?? 30,
-          restSec: data.restSec ?? 15,
-          countdownSec: data.countdownSec ?? 3,
-          swapSides: data.swapSides ?? false,
-          swapMode: data.swapMode ?? 'split',
-          swapWindowSec: data.swapWindowSec ?? 5,
-          isGlobal: data.isGlobal ?? false,
-          isArchived: data.isArchived ?? false,
-          coachId: data.coachId ?? '',
-          tenantId: data.tenantId,
-          createdAt: data.createdAt,
-          mediaUrl: data.mediaUrl ?? null,
-          videoUrl: data.videoUrl ?? null,
-        };
-      };
-
-      for (const d of coachSnap.docs) {
-        if (!seen.has(d.id)) {
-          seen.add(d.id);
-          merged.push(mapDoc(d));
-        }
-      }
-      for (const d of globalSnap.docs) {
-        if (!seen.has(d.id)) {
-          seen.add(d.id);
-          merged.push(mapDoc(d));
-        }
-      }
-
-      setMovements(merged);
-    } catch (err) {
-      console.error('[Movements] Load error:', err);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [coachId]);
+  // ── Real-time movement listener ────────────────────────────────────────
+  const mapDoc = useCallback((d: any): MovementDetailData => {
+    const data = d.data();
+    return {
+      id: d.id,
+      name: data.name ?? '',
+      category: data.category ?? '',
+      muscleGroups: data.muscleGroups ?? [],
+      equipment: data.equipment ?? '',
+      difficulty: data.difficulty ?? '',
+      description: data.description ?? '',
+      workSec: data.workSec ?? 30,
+      restSec: data.restSec ?? 15,
+      countdownSec: data.countdownSec ?? 3,
+      swapSides: data.swapSides ?? false,
+      swapMode: data.swapMode ?? 'split',
+      swapWindowSec: data.swapWindowSec ?? 5,
+      isGlobal: data.isGlobal ?? false,
+      isArchived: data.isArchived ?? false,
+      coachId: data.coachId ?? '',
+      tenantId: data.tenantId,
+      createdAt: data.createdAt,
+      mediaUrl: data.mediaUrl ?? null,
+      videoUrl: data.videoUrl ?? null,
+    };
+  }, []);
 
   useEffect(() => {
-    if (coachId) loadMovements();
-  }, [coachId, loadMovements]);
+    if (!coachId) return;
+
+    const coachQ = query(
+      collection(db, 'movements'),
+      where('coachId', '==', coachId),
+      orderBy('createdAt', 'desc'),
+    );
+    const globalQ = query(
+      collection(db, 'movements'),
+      where('isGlobal', '==', true),
+      orderBy('createdAt', 'desc'),
+    );
+
+    let coachDocs: MovementDetailData[] = [];
+    let globalDocs: MovementDetailData[] = [];
+    let firstCoach = true;
+    let firstGlobal = true;
+
+    const merge = () => {
+      const seen = new Set<string>();
+      const merged: MovementDetailData[] = [];
+      for (const m of coachDocs) {
+        if (!seen.has(m.id)) { seen.add(m.id); merged.push(m); }
+      }
+      for (const m of globalDocs) {
+        if (!seen.has(m.id)) { seen.add(m.id); merged.push(m); }
+      }
+      setMovements(merged);
+      setLoading(false);
+      setRefreshing(false);
+    };
+
+    const unsubCoach = onSnapshot(coachQ, (snap) => {
+      coachDocs = snap.docs.map(mapDoc);
+      if (firstCoach) { firstCoach = false; }
+      merge();
+    }, (err) => {
+      console.error('[Movements] Coach listener error:', err);
+      setLoading(false);
+    });
+
+    const unsubGlobal = onSnapshot(globalQ, (snap) => {
+      globalDocs = snap.docs.map(mapDoc);
+      if (firstGlobal) { firstGlobal = false; }
+      merge();
+    }, (err) => {
+      console.error('[Movements] Global listener error:', err);
+      setLoading(false);
+    });
+
+    return () => {
+      unsubCoach();
+      unsubGlobal();
+    };
+  }, [coachId, mapDoc]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    loadMovements();
-  }, [loadMovements]);
+    // Real-time listener will auto-update; just reset the flag after a short delay
+    setTimeout(() => setRefreshing(false), 1000);
+  }, []);
 
   // ── Filter logic ───────────────────────────────────────────────────────
   const filtered = movements.filter((m) => {
@@ -300,7 +310,7 @@ export default function MovementsScreen() {
           isArchived: !m.isArchived,
           updatedAt: serverTimestamp(),
         });
-        loadMovements();
+        // onSnapshot will auto-refresh the list
       } catch (err) {
         console.error('[Movements] Archive error:', err);
         Alert.alert('Error', `Could not ${action.toLowerCase()} movement.`);
@@ -313,7 +323,7 @@ export default function MovementsScreen() {
   const handleFormClose = () => {
     setFormVisible(false);
     setEditMovement(null);
-    loadMovements(); // Refresh after creation or edit
+    // onSnapshot will auto-refresh the list
   };
 
   const handleCreateNew = () => {

@@ -2713,7 +2713,27 @@ export default function MemberDetail({
         onClose={() => setShowAssignWorkout(false)}
         onAssign={async (workoutId, workoutName, scheduledFor, memberId) => {
           try {
-            const { Timestamp } = await import('firebase/firestore');
+            const { Timestamp, getDoc } = await import('firebase/firestore');
+            // Suggestion 7: Snapshot workout data at assignment time for versioning
+            let workoutSnapshot: Record<string, any> | null = null;
+            try {
+              const workoutRef = doc(db, 'workouts', workoutId);
+              const workoutDoc = await getDoc(workoutRef);
+              if (workoutDoc.exists()) {
+                const wd = workoutDoc.data();
+                workoutSnapshot = {
+                  name: wd.name ?? '',
+                  description: wd.description ?? '',
+                  category: wd.category ?? '',
+                  difficulty: wd.difficulty ?? '',
+                  estimatedDurationMin: wd.estimatedDurationMin ?? null,
+                  blocks: wd.blocks ?? [],
+                  tags: wd.tags ?? [],
+                };
+              }
+            } catch (snapErr) {
+              console.warn('Could not snapshot workout for versioning:', snapErr);
+            }
             await addDoc(collection(db, 'workout_assignments'), {
               memberId: memberId || currentMember.id,
               coachId,
@@ -2723,6 +2743,7 @@ export default function MemberDetail({
               scheduledFor: Timestamp.fromDate(scheduledFor),
               status: 'scheduled',
               createdAt: Timestamp.now(),
+              ...(workoutSnapshot ? { workoutSnapshot } : {}),
             });
           } catch (err) {
             console.error('Failed to assign workout:', err);

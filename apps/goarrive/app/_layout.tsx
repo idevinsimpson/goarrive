@@ -7,31 +7,37 @@
  *   - (app): Coach/admin dashboard (authenticated, coach/admin role)
  *   - (member): Member dashboard (authenticated, member role)
  *   - intake: Public intake form (no auth required)
+ *
+ * GestureHandlerRootView is required at the root for react-native-draggable-flatlist
+ * and other gesture-based interactions.
  */
 import React from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider } from '../lib/AuthContext';
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <StatusBar style="light" />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: '#0E1117' },
-        }}
-      >
-        <Stack.Screen name="(auth)" />
-        <Stack.Screen name="(app)" />
-        <Stack.Screen name="(member)" />
-        <Stack.Screen name="intake/index" />
-        <Stack.Screen name="intake/[coachId]" />
-        <Stack.Screen name="coach-signup" />
-        <Stack.Screen name="checkout-success" />
-        <Stack.Screen name="shared-plan/[memberId]" />
-      </Stack>
-    </AuthProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AuthProvider>
+        <StatusBar style="light" />
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: '#0E1117' },
+          }}
+        >
+          <Stack.Screen name="(auth)" />
+          <Stack.Screen name="(app)" />
+          <Stack.Screen name="(member)" />
+          <Stack.Screen name="intake/index" />
+          <Stack.Screen name="intake/[coachId]" />
+          <Stack.Screen name="coach-signup" />
+          <Stack.Screen name="checkout-success" />
+          <Stack.Screen name="shared-plan/[memberId]" />
+        </Stack>
+      </AuthProvider>
+    </GestureHandlerRootView>
   );
 }

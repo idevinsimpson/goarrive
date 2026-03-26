@@ -11,7 +11,7 @@
  * Follows GoArrive design system: #0E1117 bg, #F5A623 gold accent,
  * Space Grotesk headings, DM Sans body.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,10 @@ import {
   Alert,
   Platform,
 } from 'react-native';
+import DraggableFlatList, {
+  ScaleDecorator,
+  RenderItemParams,
+} from 'react-native-draggable-flatlist';
 import { db } from '../lib/firebase';
 import {
   collection,
@@ -106,6 +110,8 @@ interface MovementOption {
   id: string;
   name: string;
   category: string;
+  mediaUrl?: string | null;
+  videoUrl?: string | null;
 }
 
 // ── Props ────────────────────────────────────────────────────────────────────
@@ -172,13 +178,15 @@ export default function WorkoutForm({
       coachSnap.docs.forEach((d) => {
         if (!seen.has(d.id)) {
           seen.add(d.id);
-          list.push({ id: d.id, name: d.data().name ?? '', category: d.data().category ?? '' });
+          const cd = d.data();
+          list.push({ id: d.id, name: cd.name ?? '', category: cd.category ?? '', mediaUrl: cd.mediaUrl ?? null, videoUrl: cd.videoUrl ?? null });
         }
       });
       globalSnap.docs.forEach((d) => {
         if (!seen.has(d.id)) {
           seen.add(d.id);
-          list.push({ id: d.id, name: d.data().name ?? '', category: d.data().category ?? '' });
+          const gd = d.data();
+          list.push({ id: d.id, name: gd.name ?? '', category: gd.category ?? '', mediaUrl: gd.mediaUrl ?? null, videoUrl: gd.videoUrl ?? null });
         }
       });
 
@@ -189,9 +197,12 @@ export default function WorkoutForm({
     }
   }, [coachId, movementsLoaded]);
 
-  useEffect(() => {
-    if (visible) loadMovements();
-  }, [visible, loadMovements]);
+  // Suggestion 9: Lazy-load movements only when user first taps "Add Movement"
+  // (removed eager load on visible — now triggered by handleOpenMovementPicker)
+  const handleOpenMovementPicker = useCallback((blockIndex: number) => {
+    setAddingMovementToBlock(blockIndex);
+    if (!movementsLoaded) loadMovements();
+  }, [movementsLoaded, loadMovements]);
 
   // ── Pre-populate on edit ───────────────────────────────────────────────
   useEffect(() => {
@@ -276,14 +287,8 @@ export default function WorkoutForm({
     setBlocks((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const moveBlock = (index: number, direction: 'up' | 'down') => {
-    setBlocks((prev) => {
-      const next = [...prev];
-      const target = direction === 'up' ? index - 1 : index + 1;
-      if (target < 0 || target >= next.length) return prev;
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
+  const onDragEnd = ({ data }: { data: WorkoutBlock[] }) => {
+    setBlocks(data);
   };
 
   const updateBlockField = (index: number, field: string, value: any) => {
@@ -607,193 +612,203 @@ export default function WorkoutForm({
                 movements from your library.
               </Text>
 
-              {/* Existing blocks */}
-              {blocks.map((block, bi) => (
-                <View key={bi} style={s.blockCard}>
-                  {/* Block header */}
-                  <View style={s.blockHeader}>
-                    <View style={s.blockIndexCircle}>
-                      <Text style={s.blockIndexText}>{bi + 1}</Text>
-                    </View>
-                    <View style={s.blockHeaderInfo}>
-                      <Text style={s.blockType}>{block.type}</Text>
-                      <TextInput
-                        style={s.blockLabelInput}
-                        value={block.label}
-                        onChangeText={(t) => updateBlockField(bi, 'label', t)}
-                        placeholder="Block label..."
-                        placeholderTextColor="#4A5568"
-                      />
-                    </View>
-                    <View style={s.blockActions}>
-                      {bi > 0 && (
-                        <Pressable
-                          onPress={() => moveBlock(bi, 'up')}
-                          hitSlop={6}
-                        >
-                          <Icon name="chevron-up" size={16} color="#8A95A3" />
-                        </Pressable>
-                      )}
-                      {bi < blocks.length - 1 && (
-                        <Pressable
-                          onPress={() => moveBlock(bi, 'down')}
-                          hitSlop={6}
-                        >
-                          <Icon name="chevron-down" size={16} color="#8A95A3" />
-                        </Pressable>
-                      )}
-                      <Pressable
-                        onPress={() => removeBlock(bi)}
-                        hitSlop={6}
-                      >
-                        <Icon name="close" size={16} color="#EF4444" />
-                      </Pressable>
-                    </View>
-                  </View>
-
-                  {/* Block settings row */}
-                  <View style={s.blockSettingsRow}>
-                    <View style={s.blockSettingItem}>
-                      <Text style={s.blockSettingLabel}>Rounds</Text>
-                      <TextInput
-                        style={s.blockSettingInput}
-                        value={String(block.rounds ?? 1)}
-                        onChangeText={(t) =>
-                          updateBlockField(
-                            bi,
-                            'rounds',
-                            parseInt(t.replace(/[^0-9]/g, ''), 10) || 1,
-                          )
-                        }
-                        keyboardType="number-pad"
-                        maxLength={2}
-                      />
-                    </View>
-                    <View style={s.blockSettingItem}>
-                      <Text style={s.blockSettingLabel}>Rest (sec)</Text>
-                      <TextInput
-                        style={s.blockSettingInput}
-                        value={String(block.restBetweenRoundsSec ?? 0)}
-                        onChangeText={(t) =>
-                          updateBlockField(
-                            bi,
-                            'restBetweenRoundsSec',
-                            parseInt(t.replace(/[^0-9]/g, ''), 10) || 0,
-                          )
-                        }
-                        keyboardType="number-pad"
-                        maxLength={3}
-                      />
-                    </View>
-                  </View>
-
-                  {/* Movements in this block */}
-                  {block.movements.map((mov, mi) => (
-                    <View key={mi} style={s.movementRow}>
-                      <View style={s.movementInfo}>
-                        <Text style={s.movementName} numberOfLines={1}>
-                          {mov.movementName}
-                        </Text>
-                        <View style={s.movementFields}>
-                          <TextInput
-                            style={s.movementFieldInput}
-                            value={String(mov.sets ?? '')}
-                            onChangeText={(t) =>
-                              updateMovementField(
-                                bi,
-                                mi,
-                                'sets',
-                                parseInt(t.replace(/[^0-9]/g, ''), 10) || undefined,
-                              )
-                            }
-                            placeholder="Sets"
-                            placeholderTextColor="#4A5568"
-                            keyboardType="number-pad"
-                            maxLength={2}
-                          />
-                          <Text style={s.movementFieldSep}>×</Text>
-                          <TextInput
-                            style={s.movementFieldInput}
-                            value={mov.reps ?? ''}
-                            onChangeText={(t) =>
-                              updateMovementField(bi, mi, 'reps', t)
-                            }
-                            placeholder="Reps"
-                            placeholderTextColor="#4A5568"
-                          />
+              {/* Draggable block list */}
+              <DraggableFlatList
+                data={blocks}
+                keyExtractor={(_, index) => `block-${index}`}
+                onDragEnd={onDragEnd}
+                scrollEnabled={false}
+                containerStyle={{ gap: 12 }}
+                renderItem={({ item: block, drag, isActive, getIndex }: RenderItemParams<WorkoutBlock>) => {
+                  const bi = getIndex() ?? 0;
+                  return (
+                    <ScaleDecorator>
+                      <View style={[s.blockCard, isActive && s.blockCardDragging]}>
+                        {/* Block header */}
+                        <View style={s.blockHeader}>
+                          {/* Drag handle */}
+                          <Pressable onLongPress={drag} style={s.dragHandle}>
+                            <Icon name="more-vertical" size={18} color={isActive ? '#F5A623' : '#4A5568'} />
+                          </Pressable>
+                          <View style={s.blockIndexCircle}>
+                            <Text style={s.blockIndexText}>{bi + 1}</Text>
+                          </View>
+                          <View style={s.blockHeaderInfo}>
+                            <Text style={s.blockType}>{block.type}</Text>
+                            <TextInput
+                              style={s.blockLabelInput}
+                              value={block.label}
+                              onChangeText={(t) => updateBlockField(bi, 'label', t)}
+                              placeholder="Block label..."
+                              placeholderTextColor="#4A5568"
+                            />
+                          </View>
+                          <Pressable
+                            onPress={() => removeBlock(bi)}
+                            hitSlop={6}
+                          >
+                            <Icon name="close" size={16} color="#EF4444" />
+                          </Pressable>
                         </View>
-                      </View>
-                      <Pressable
-                        onPress={() => removeMovementFromBlock(bi, mi)}
-                        hitSlop={6}
-                      >
-                        <Icon name="close" size={14} color="#EF4444" />
-                      </Pressable>
-                    </View>
-                  ))}
 
-                  {/* Add movement to block */}
-                  {addingMovementToBlock === bi ? (
-                    <View style={s.movementPicker}>
-                      <TextInput
-                        style={s.movementSearchInput}
-                        value={movementSearch}
-                        onChangeText={setMovementSearch}
-                        placeholder="Search movements..."
-                        placeholderTextColor="#4A5568"
-                        autoFocus
-                      />
-                      <ScrollView
-                        style={s.movementPickerList}
-                        nestedScrollEnabled
-                        keyboardShouldPersistTaps="handled"
-                      >
-                        {filteredMovements.length === 0 ? (
-                          <Text style={s.movementPickerEmpty}>
-                            {availableMovements.length === 0
-                              ? 'No movements in library. Create movements first.'
-                              : 'No movements match your search.'}
-                          </Text>
-                        ) : (
-                          filteredMovements.slice(0, 20).map((m) => (
-                            <Pressable
-                              key={m.id}
-                              style={s.movementPickerItem}
-                              onPress={() => addMovementToBlock(bi, m)}
-                            >
-                              <Text style={s.movementPickerName}>
-                                {m.name}
+                        {/* Block settings row */}
+                        <View style={s.blockSettingsRow}>
+                          <View style={s.blockSettingItem}>
+                            <Text style={s.blockSettingLabel}>Rounds</Text>
+                            <TextInput
+                              style={s.blockSettingInput}
+                              value={String(block.rounds ?? 1)}
+                              onChangeText={(t) =>
+                                updateBlockField(
+                                  bi,
+                                  'rounds',
+                                  parseInt(t.replace(/[^0-9]/g, ''), 10) || 1,
+                                )
+                              }
+                              keyboardType="number-pad"
+                              maxLength={2}
+                            />
+                          </View>
+                          <View style={s.blockSettingItem}>
+                            <Text style={s.blockSettingLabel}>Rest (sec)</Text>
+                            <TextInput
+                              style={s.blockSettingInput}
+                              value={String(block.restBetweenRoundsSec ?? 0)}
+                              onChangeText={(t) =>
+                                updateBlockField(
+                                  bi,
+                                  'restBetweenRoundsSec',
+                                  parseInt(t.replace(/[^0-9]/g, ''), 10) || 0,
+                                )
+                              }
+                              keyboardType="number-pad"
+                              maxLength={3}
+                            />
+                          </View>
+                        </View>
+
+                        {/* Movements in this block */}
+                        {block.movements.map((mov, mi) => (
+                          <View key={mi} style={s.movementRow}>
+                            <View style={s.movementInfo}>
+                              <Text style={s.movementName} numberOfLines={1}>
+                                {mov.movementName}
                               </Text>
-                              {m.category ? (
-                                <Text style={s.movementPickerCat}>
-                                  {m.category}
-                                </Text>
-                              ) : null}
+                              <View style={s.movementFields}>
+                                <TextInput
+                                  style={s.movementFieldInput}
+                                  value={String(mov.sets ?? '')}
+                                  onChangeText={(t) =>
+                                    updateMovementField(
+                                      bi,
+                                      mi,
+                                      'sets',
+                                      parseInt(t.replace(/[^0-9]/g, ''), 10) || undefined,
+                                    )
+                                  }
+                                  placeholder="Sets"
+                                  placeholderTextColor="#4A5568"
+                                  keyboardType="number-pad"
+                                  maxLength={2}
+                                />
+                                <Text style={s.movementFieldSep}>×</Text>
+                                <TextInput
+                                  style={s.movementFieldInput}
+                                  value={mov.reps ?? ''}
+                                  onChangeText={(t) =>
+                                    updateMovementField(bi, mi, 'reps', t)
+                                  }
+                                  placeholder="Reps"
+                                  placeholderTextColor="#4A5568"
+                                />
+                              </View>
+                            </View>
+                            <Pressable
+                              onPress={() => removeMovementFromBlock(bi, mi)}
+                              hitSlop={6}
+                            >
+                              <Icon name="close" size={14} color="#EF4444" />
                             </Pressable>
-                          ))
+                          </View>
+                        ))}
+
+                        {/* Add movement to block */}
+                        {addingMovementToBlock === bi ? (
+                          <View style={s.movementPicker}>
+                            <TextInput
+                              style={s.movementSearchInput}
+                              value={movementSearch}
+                              onChangeText={setMovementSearch}
+                              placeholder="Search movements..."
+                              placeholderTextColor="#4A5568"
+                              autoFocus
+                            />
+                            <ScrollView
+                              style={s.movementPickerList}
+                              nestedScrollEnabled
+                              keyboardShouldPersistTaps="handled"
+                            >
+                              {filteredMovements.length === 0 ? (
+                                <Text style={s.movementPickerEmpty}>
+                                  {availableMovements.length === 0
+                                    ? 'No movements in library. Create movements first.'
+                                    : 'No movements match your search.'}
+                                </Text>
+                              ) : (
+                                filteredMovements.slice(0, 20).map((m) => (
+                                  <Pressable
+                                    key={m.id}
+                                    style={s.movementPickerItem}
+                                    onPress={() => addMovementToBlock(bi, m)}
+                                  >
+                                    {/* Suggestion 3: Media thumbnail */}
+                                    {(m.mediaUrl || m.videoUrl) ? (
+                                      <View style={s.movementThumb}>
+                                        <Icon name="play" size={14} color="#F5A623" />
+                                      </View>
+                                    ) : (
+                                      <View style={[s.movementThumb, { backgroundColor: '#1A1F2B' }]}>
+                                        <Icon name="activity" size={14} color="#4A5568" />
+                                      </View>
+                                    )}
+                                    <View style={{ flex: 1 }}>
+                                      <Text style={s.movementPickerName}>
+                                        {m.name}
+                                      </Text>
+                                      {m.category ? (
+                                        <Text style={s.movementPickerCat}>
+                                          {m.category}
+                                        </Text>
+                                      ) : null}
+                                    </View>
+                                  </Pressable>
+                                ))
+                              )}
+                            </ScrollView>
+                            <Pressable
+                              style={s.movementPickerCancel}
+                              onPress={() => {
+                                setAddingMovementToBlock(null);
+                                setMovementSearch('');
+                              }}
+                            >
+                              <Text style={s.movementPickerCancelText}>Cancel</Text>
+                            </Pressable>
+                          </View>
+                        ) : (
+                          <Pressable
+                            style={s.addMovementBtn}
+                            onPress={() => handleOpenMovementPicker(bi)}
+                          >
+                            <Icon name="add" size={14} color="#7DD3FC" />
+                            <Text style={s.addMovementBtnText}>Add Movement</Text>
+                          </Pressable>
                         )}
-                      </ScrollView>
-                      <Pressable
-                        style={s.movementPickerCancel}
-                        onPress={() => {
-                          setAddingMovementToBlock(null);
-                          setMovementSearch('');
-                        }}
-                      >
-                        <Text style={s.movementPickerCancelText}>Cancel</Text>
-                      </Pressable>
-                    </View>
-                  ) : (
-                    <Pressable
-                      style={s.addMovementBtn}
-                      onPress={() => setAddingMovementToBlock(bi)}
-                    >
-                      <Icon name="add" size={14} color="#7DD3FC" />
-                      <Text style={s.addMovementBtnText}>Add Movement</Text>
-                    </Pressable>
-                  )}
-                </View>
-              ))}
+                      </View>
+                    </ScaleDecorator>
+                  );
+                }}
+              />
 
               {/* Add block type selector */}
               <Text style={s.addBlockLabel}>Add Block</Text>
@@ -1045,6 +1060,18 @@ const s = StyleSheet.create({
     padding: 14,
     gap: 10,
   },
+  blockCardDragging: {
+    borderColor: 'rgba(245,166,35,0.4)',
+    shadowColor: '#F5A623',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  dragHandle: {
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+  },
   blockHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1207,9 +1234,17 @@ const s = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: 12,
   },
+  movementThumb: {
+    width: 32,
+    height: 32,
+    borderRadius: 6,
+    backgroundColor: 'rgba(245,166,35,0.15)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    marginRight: 10,
+  },
   movementPickerItem: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 10,
     paddingHorizontal: 8,
