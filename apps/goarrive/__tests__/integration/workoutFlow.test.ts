@@ -17,12 +17,12 @@ import { filterMovements } from '../../hooks/useMovementFilters';
 // ── Test data ─────────────────────────────────────────────────────────────
 
 const mockMovements = [
-  { id: '1', name: 'Barbell Squat', category: 'Lower Body', equipment: 'Barbell', muscleGroup: 'Quads' },
-  { id: '2', name: 'Bench Press', category: 'Upper Body', equipment: 'Barbell', muscleGroup: 'Chest' },
-  { id: '3', name: 'Pull Up', category: 'Upper Body', equipment: 'Bodyweight', muscleGroup: 'Back' },
-  { id: '4', name: 'Plank', category: 'Core', equipment: 'Bodyweight', muscleGroup: 'Core' },
-  { id: '5', name: 'Dumbbell Curl', category: 'Upper Body', equipment: 'Dumbbell', muscleGroup: 'Biceps' },
-  { id: '6', name: 'Romanian Deadlift', category: 'Lower Body', equipment: 'Barbell', muscleGroup: 'Hamstrings' },
+  { id: '1', name: 'Barbell Squat', category: 'Lower Body', equipment: 'Barbell', muscleGroups: ['Quads'] },
+  { id: '2', name: 'Bench Press', category: 'Upper Body', equipment: 'Barbell', muscleGroups: ['Chest'] },
+  { id: '3', name: 'Pull Up', category: 'Upper Body', equipment: 'Bodyweight', muscleGroups: ['Back'] },
+  { id: '4', name: 'Plank', category: 'Core', equipment: 'Bodyweight', muscleGroups: ['Core'] },
+  { id: '5', name: 'Dumbbell Curl', category: 'Upper Body', equipment: 'Dumbbell', muscleGroups: ['Biceps'] },
+  { id: '6', name: 'Romanian Deadlift', category: 'Lower Body', equipment: 'Barbell', muscleGroups: ['Hamstrings'] },
 ];
 
 const mockWorkout = {
@@ -134,31 +134,31 @@ describe('Workout Flow Integration', () => {
 
   describe('Movement Library Filtering', () => {
     it('filters by category', () => {
-      const result = filterMovements(mockMovements, '', 'Upper Body', '', '');
+      const result = filterMovements(mockMovements, { category: 'Upper Body' });
       expect(result).toHaveLength(3);
       expect(result.every((m: any) => m.category === 'Upper Body')).toBe(true);
     });
 
     it('filters by equipment', () => {
-      const result = filterMovements(mockMovements, '', '', 'Barbell', '');
+      const result = filterMovements(mockMovements, { equipment: 'Barbell' });
       expect(result).toHaveLength(3);
       expect(result.every((m: any) => m.equipment === 'Barbell')).toBe(true);
     });
 
     it('filters by search text', () => {
-      const result = filterMovements(mockMovements, 'squat', '', '', '');
+      const result = filterMovements(mockMovements, { search: 'squat' });
       expect(result).toHaveLength(1);
       expect(result[0].name).toBe('Barbell Squat');
     });
 
     it('combines multiple filters', () => {
-      const result = filterMovements(mockMovements, '', 'Upper Body', 'Bodyweight', '');
+      const result = filterMovements(mockMovements, { category: 'Upper Body', equipment: 'Bodyweight' });
       expect(result).toHaveLength(1);
       expect(result[0].name).toBe('Pull Up');
     });
 
     it('returns all movements with no filters', () => {
-      const result = filterMovements(mockMovements, '', '', '', '');
+      const result = filterMovements(mockMovements, {});
       expect(result).toHaveLength(6);
     });
   });
@@ -166,7 +166,7 @@ describe('Workout Flow Integration', () => {
   describe('Full Pipeline Simulation', () => {
     it('simulates the complete workout flow from filter to flatten to rest', () => {
       // Step 1: Filter movements for the workout
-      const upperBody = filterMovements(mockMovements, '', 'Upper Body', '', '');
+      const upperBody = filterMovements(mockMovements, { category: 'Upper Body' });
       expect(upperBody.length).toBeGreaterThan(0);
 
       // Step 2: Resolve block types

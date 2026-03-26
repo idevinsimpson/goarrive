@@ -264,6 +264,25 @@ export default function WorkoutPlayer({
                 <Text style={st.cuesBoxText} numberOfLines={3}>{current.coachingCues}</Text>
               </View>
             ) : null}
+            {/* Regression / Progression hints */}
+            {(current.regression || current.progression) && (
+              <View style={st.regProgRow}>
+                {current.regression ? (
+                  <View style={st.regProgChip}>
+                    <Icon name="arrow-down" size={12} color="#34D399" />
+                    <Text style={st.regProgLabel}>Easier: </Text>
+                    <Text style={st.regProgText} numberOfLines={1}>{current.regression}</Text>
+                  </View>
+                ) : null}
+                {current.progression ? (
+                  <View style={st.regProgChip}>
+                    <Icon name="arrow-up" size={12} color="#F5A623" />
+                    <Text style={st.regProgLabel}>Harder: </Text>
+                    <Text style={st.regProgText} numberOfLines={1}>{current.progression}</Text>
+                  </View>
+                ) : null}
+              </View>
+            )}
             {current.reps ? (
               <Text style={st.repsText}>{current.reps} reps</Text>
             ) : null}
@@ -791,6 +810,34 @@ const st = StyleSheet.create({
     fontWeight: '600',
   },
   // ── Swap button ─────────────────────────────────────────────────
+  regProgRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  regProgChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  regProgLabel: {
+    fontFamily: FB,
+    fontSize: 11,
+    color: '#8A95A3',
+    marginLeft: 4,
+  },
+  regProgText: {
+    fontFamily: FB,
+    fontSize: 11,
+    color: '#FFFFFF',
+    maxWidth: 120,
+  },
   swapBtn: {
     flexDirection: 'row',
     alignItems: 'center',

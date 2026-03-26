@@ -148,8 +148,10 @@ export default function WorkoutForm({
 
   // ── Template picker state ──────────────────────────────────────────────
   const {
-    templates, loading: templatesLoading, error: templatesError,
+    templates, filteredTemplates, loading: templatesLoading, error: templatesError,
     loadTemplates, renameTemplate, deleteTemplate, toggleShareTemplate,
+    categoryFilter, setCategoryFilter, tagFilter, setTagFilter,
+    availableCategories, availableTags,
   } = useWorkoutTemplates(coachId);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
 
@@ -453,6 +455,7 @@ export default function WorkoutForm({
 
   // ── Render ─────────────────────────────────────────────────────────────
   return (
+    <>
     <Modal visible={visible} animationType="slide" transparent>
       <View style={s.overlay}>
         <View style={s.sheet}>
@@ -1014,7 +1017,52 @@ export default function WorkoutForm({
                   </Text>
                 </View>
               )}
-              {templates.map((t) => (
+              {/* Category filter chips */}
+              {availableCategories.length > 1 && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8, maxHeight: 36 }}>
+                  {availableCategories.map((cat) => (
+                    <TouchableOpacity
+                      key={cat}
+                      onPress={() => setCategoryFilter(cat)}
+                      style={{
+                        paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14,
+                        backgroundColor: categoryFilter === cat ? '#F5A623' : '#1A1F2E',
+                        marginRight: 6, borderWidth: 1,
+                        borderColor: categoryFilter === cat ? '#F5A623' : '#252B3B',
+                      }}
+                    >
+                      <Text style={{
+                        fontSize: 12, fontFamily: FB,
+                        color: categoryFilter === cat ? '#0E1117' : '#8A95A3',
+                        fontWeight: categoryFilter === cat ? '700' : '400',
+                      }}>{cat}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+              {/* Tag filter chips */}
+              {availableTags.length > 0 && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10, maxHeight: 36 }}>
+                  {availableTags.map((tag) => (
+                    <TouchableOpacity
+                      key={tag}
+                      onPress={() => setTagFilter(tagFilter === tag ? '' : tag)}
+                      style={{
+                        paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12,
+                        backgroundColor: tagFilter === tag ? 'rgba(245,166,35,0.2)' : '#161B26',
+                        marginRight: 6, borderWidth: 1,
+                        borderColor: tagFilter === tag ? '#F5A623' : '#1E2330',
+                      }}
+                    >
+                      <Text style={{
+                        fontSize: 11, fontFamily: FB,
+                        color: tagFilter === tag ? '#F5A623' : '#6B7280',
+                      }}>#{tag}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+              {filteredTemplates.map((t) => (
                 <View key={t.id} style={s.templatePickerItem}>
                   <TouchableOpacity
                     style={{ flex: 1 }}
@@ -1072,6 +1120,7 @@ export default function WorkoutForm({
           </View>
         </View>
       </Modal>
+    </>
   );
 }
 

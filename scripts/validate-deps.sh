@@ -65,7 +65,7 @@ echo ""
 # ── Check for source imports that reference uninstalled packages ──────────────
 echo "📦 Scanning source for unresolved imports..."
 IMPORT_PATTERN="from ['\"]expo-[^'\"]*['\"]"
-IMPORTS=$(grep -roh "$IMPORT_PATTERN" "$APP_DIR" --include="*.ts" --include="*.tsx" 2>/dev/null | sort -u || true)
+IMPORTS=$(grep -roh "$IMPORT_PATTERN" "$APP_DIR" --include="*.ts" --include="*.tsx" --exclude-dir=node_modules --exclude-dir=.expo --exclude-dir=dist 2>/dev/null | sort -u || true)
 
 while IFS= read -r imp; do
   [ -z "$imp" ] && continue

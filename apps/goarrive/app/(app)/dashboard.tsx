@@ -29,6 +29,8 @@ import { AppHeader } from '../../components/AppHeader';
 import CheckInCard from '../../components/CheckInCard';
 import ListSkeleton from '../../components/ListSkeleton';
 import { Icon } from '../../components/Icon';
+import WorkoutLogReview from '../../components/WorkoutLogReview';
+import CoachWorkoutStatsWidget from '../../components/CoachWorkoutStatsWidget';
 import OnboardingChecklist from '../../components/OnboardingChecklist';
 import { router } from 'expo-router';
 import AdminWorkoutMetrics from '../../components/AdminWorkoutMetrics';
@@ -109,6 +111,7 @@ export default function DashboardScreen() {
   const isAdmin = claims?.role === 'admin' || claims?.role === 'platform_admin';
   const [showAdminMetrics, setShowAdminMetrics] = useState(false);
   const [showQuickAssign, setShowQuickAssign] = useState(false);
+  const [showReviewQueue, setShowReviewQueue] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -275,7 +278,7 @@ export default function DashboardScreen() {
         {stats.needsReview > 0 && (
           <Pressable
             style={s.reviewBanner}
-            onPress={() => router.push('/(app)/members')}
+            onPress={() => setShowReviewQueue(true)}
           >
             <View style={s.reviewBannerLeft}>
               <Icon name="document" size={18} color="#E05252" />
@@ -286,6 +289,9 @@ export default function DashboardScreen() {
             <Icon name="chevron-right" size={16} color="#E05252" />
           </Pressable>
         )}
+
+        {/* Workout Stats Widget */}
+        <CoachWorkoutStatsWidget coachId={user?.uid || ''} />
 
         {/* Quick Assign shortcut */}
         <Pressable
@@ -428,6 +434,16 @@ export default function DashboardScreen() {
           setShowQuickAssign(false);
           fetchData();
         }}
+      />
+
+      {/* Workout Log Review Queue */}
+      <WorkoutLogReview
+        visible={showReviewQueue}
+        onClose={() => {
+          setShowReviewQueue(false);
+          fetchData(); // Refresh counts after reviewing
+        }}
+        coachId={coachId}
       />
     </View>
   );

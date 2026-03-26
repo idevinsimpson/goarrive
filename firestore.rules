@@ -278,8 +278,9 @@ service cloud.firestore {
       allow create: if isCoachOrBootstrap(request.resource.data.coachId);
       // Only the owning coach or admin can update (including toggling isShared)
       allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
-      // Owning coach or admin can delete their own workouts (e.g., template cleanup)
-      allow delete: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+      // R5: Only templates can be deleted (assigned workouts should be archived, not deleted)
+      allow delete: if (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin())
+                    && resource.data.isTemplate == true;
     }
 
     // ─────────────────────────────────────────────

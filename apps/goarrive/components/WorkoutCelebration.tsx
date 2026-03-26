@@ -8,15 +8,19 @@
  * Uses Animated API for a lightweight confetti-like burst and
  * motivational message before transitioning to the session summary.
  *
+ * R3: Added "Skip" button so members can bypass the animation.
+ * R7: Reduced confetti dots from 16 → 10 for low-end device perf.
+ *
  * Props:
  *   - visible: boolean
  *   - workoutName: string
- *   - onComplete: () => void — called when animation finishes
+ *   - onComplete: () => void — called when animation finishes or skip pressed
  */
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
+  Pressable,
   StyleSheet,
   Animated,
   Platform,
@@ -29,6 +33,9 @@ const FB =
   Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+
+/** R7: Reduced from 16 to 10 to prevent frame drops on low-end Android */
+const CONFETTI_COUNT = 10;
 
 const CELEBRATION_MESSAGES = [
   'Workout Complete!',
@@ -124,6 +131,7 @@ export default function WorkoutCelebration({
   const fadeIn = useRef(new Animated.Value(0)).current;
   const titleScale = useRef(new Animated.Value(0.5)).current;
   const subOpacity = useRef(new Animated.Value(0)).current;
+  const sequenceRef = useRef<Animated.CompositeAnimation | null>(null);
 
   const mainMsg = useRef(
     CELEBRATION_MESSAGES[Math.floor(Math.random() * CELEBRATION_MESSAGES.length)],
@@ -131,6 +139,15 @@ export default function WorkoutCelebration({
   const subMsg = useRef(
     SUB_MESSAGES[Math.floor(Math.random() * SUB_MESSAGES.length)],
   ).current;
+
+  /** R3: Skip handler — stops animation and immediately completes */
+  const handleSkip = useCallback(() => {
+    if (sequenceRef.current) {
+      sequenceRef.current.stop();
+      sequenceRef.current = null;
+    }
+    onComplete();
+  }, [onComplete]);
 
   useEffect(() => {
     if (!visible) return;
@@ -170,17 +187,22 @@ export default function WorkoutCelebration({
       }),
     ]);
 
+    sequenceRef.current = sequence;
+
     sequence.start(({ finished }) => {
       if (finished) onComplete();
     });
 
-    return () => sequence.stop();
+    return () => {
+      sequence.stop();
+      sequenceRef.current = null;
+    };
   }, [visible]);
 
   if (!visible) return null;
 
-  // Generate confetti dots
-  const confettiDots = Array.from({ length: 16 }, (_, i) => ({
+  // Generate confetti dots (R7: reduced count)
+  const confettiDots = Array.from({ length: CONFETTI_COUNT }, (_, i) => ({
     id: i,
     delay: Math.random() * 400,
     startX: Math.random() * SCREEN_W,
@@ -216,6 +238,16 @@ export default function WorkoutCelebration({
           {subMsg}
         </Animated.Text>
       </View>
+
+      {/* R3: Skip button — always visible so members can move quickly */}
+      <Pressable
+        style={st.skipBtn}
+        onPress={handleSkip}
+        accessibilityLabel="Skip celebration"
+        accessibilityRole="button"
+      >
+        <Text style={st.skipText}>Skip</Text>
+      </Pressable>
     </Animated.View>
   );
 }
@@ -269,5 +301,21 @@ const st = StyleSheet.create({
     fontFamily: FB,
     textAlign: 'center',
     lineHeight: 22,
+  },
+  skipBtn: {
+    position: 'absolute',
+    bottom: 48,
+    alignSelf: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#4A5568',
+  },
+  skipText: {
+    fontSize: 14,
+    color: '#8A95A3',
+    fontFamily: FB,
+    letterSpacing: 0.5,
   },
 });
