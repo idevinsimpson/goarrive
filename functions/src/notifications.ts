@@ -29,7 +29,10 @@ export type MessageType =
   | 'coach_session_reminder'
   | 'admin_alert'
   | 'skip_request_received'
-  | 'skip_request_resolved';
+  | 'skip_request_resolved'
+  | 'workout_assigned'
+  | 'workout_reviewed'
+  | 'workout_completed';
 
 export interface NotificationRecipient {
   uid: string;

@@ -228,6 +228,64 @@ export default function MovementForm({
     }
   };
 
+  // ── Camera recording ─────────────────────────────────────────────────
+  const recordFromCamera = async () => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Please grant camera access to record videos.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['videos'],
+        allowsEditing: false,
+        quality: 0.8,
+        videoMaxDuration: 120, // 2 min max
+      });
+
+      if (result.canceled || !result.assets?.[0]) return;
+
+      const asset = result.assets[0];
+      const ext = 'mp4';
+      const fileName = `movements/${coachId}/videos/${Date.now()}.${ext}`;
+
+      setUploading(true);
+      setUploadProgress(0);
+
+      const response = await fetch(asset.uri);
+      const blob = await response.blob();
+
+      const storageRef = ref(storage, fileName);
+      const uploadTask = uploadBytesResumable(storageRef, blob, {
+        contentType: 'video/mp4',
+      });
+
+      uploadTask.on(
+        'state_changed',
+        (snapshot) => {
+          const progress = snapshot.bytesTransferred / snapshot.totalBytes;
+          setUploadProgress(progress);
+        },
+        (error) => {
+          console.error('[MovementForm] Camera upload error:', error);
+          Alert.alert('Upload Failed', 'Could not upload recorded video. Please try again.');
+          setUploading(false);
+          setUploadProgress(0);
+        },
+        async () => {
+          const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
+          setVideoUrl(downloadUrl);
+          setUploading(false);
+          setUploadProgress(0);
+        },
+      );
+    } catch (err) {
+      console.error('[MovementForm] Camera record error:', err);
+      setUploading(false);
+    }
+  };
+
   // ── Muscle group toggle ────────────────────────────────────────────────
   const toggleMuscleGroup = (mg: string) => {
     setMuscleGroups((prev) =>
@@ -474,13 +532,9 @@ export default function MovementForm({
             {/* Media Upload */}
             <Text style={st.sectionTitle}>Media</Text>
 
-            {/* Upload button */}
-            <Pressable
-              style={st.uploadBtn}
-              onPress={pickAndUploadMedia}
-              disabled={uploading}
-            >
-              {uploading ? (
+            {/* Upload / Record buttons */}
+            {uploading ? (
+              <View style={st.uploadBtn}>
                 <View style={st.uploadProgress}>
                   <ActivityIndicator size="small" color="#F5A623" />
                   <Text style={st.uploadProgressText}>
@@ -495,13 +549,29 @@ export default function MovementForm({
                     />
                   </View>
                 </View>
-              ) : (
-                <View style={st.uploadBtnInner}>
-                  <Icon name="camera" size={20} color="#F5A623" />
-                  <Text style={st.uploadBtnText}>Upload Video or Image</Text>
-                </View>
-              )}
-            </Pressable>
+              </View>
+            ) : (
+              <View style={st.mediaBtnRow}>
+                <Pressable
+                  style={[st.uploadBtn, { flex: 1 }]}
+                  onPress={pickAndUploadMedia}
+                >
+                  <View style={st.uploadBtnInner}>
+                    <Icon name="image" size={20} color="#F5A623" />
+                    <Text style={st.uploadBtnText}>Library</Text>
+                  </View>
+                </Pressable>
+                <Pressable
+                  style={[st.uploadBtn, { flex: 1 }]}
+                  onPress={recordFromCamera}
+                >
+                  <View style={st.uploadBtnInner}>
+                    <Icon name="camera" size={20} color="#F5A623" />
+                    <Text style={st.uploadBtnText}>Record</Text>
+                  </View>
+                </Pressable>
+              </View>
+            )}
 
             {/* Thumbnail preview */}
             {thumbnailUrl ? (
@@ -815,6 +885,10 @@ const st = StyleSheet.create({
   },
 
   // Media upload
+  mediaBtnRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
   uploadBtn: {
     backgroundColor: '#161B22',
     borderRadius: 10,

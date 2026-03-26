@@ -370,7 +370,7 @@ service cloud.firestore {
         // Coaches can add review notes
         || (isCoachOrBootstrap(resource.data.coachId)
             && request.resource.data.diff(resource.data).affectedKeys()
-                .hasOnly(['coachNotes', 'reviewedAt', 'updatedAt']))
+                .hasOnly(['coachNotes', 'coachReaction', 'reviewedAt', 'updatedAt']))
         || isPlatformAdmin()
       );
       allow delete: if false; // never delete workout logs

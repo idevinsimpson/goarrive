@@ -24,10 +24,11 @@ import {
   Platform,
   Dimensions,
   Image,
+  useWindowDimensions,
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
 import { Icon } from './Icon';
-import { playBeep } from '../lib/audioBeep';
+import { playCue, setAudioMuted, isAudioMuted } from '../lib/audioCues';
 import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess } from '../lib/haptics';
 import { useWakeLock } from '../lib/useWakeLock';
 
@@ -170,14 +171,14 @@ export default function WorkoutPlayer({
     const interval = setInterval(() => {
       setTimeLeft((prev) => {
         const next = prev - 1;
-        // Beep at 3, 2, 1
+        // Countdown ticks at 3, 2, 1
         if (next <= 3 && next > 0) {
-          playBeep(440, 0.05);
+          playCue('countdownTick');
           hapticLight();
         }
-        // Beep at 0
+        // Final tick at 0
         if (next === 0) {
-          playBeep(880, 0.1);
+          playCue('countdownFinal');
           hapticMedium();
         }
         return next;
@@ -195,6 +196,7 @@ export default function WorkoutPlayer({
       // Start work phase
       setPhase('work');
       setTimeLeft(current?.duration ?? 30);
+      playCue('workStart');
       hapticHeavy();
     } else if (phase === 'work') {
       // Rep-based movements don't auto-advance on timer
@@ -207,6 +209,7 @@ export default function WorkoutPlayer({
       } else if (current?.restAfter > 0) {
         setPhase('rest');
         setTimeLeft(current.restAfter);
+        playCue('restStart');
       } else {
         advanceToNext();
       }
@@ -214,6 +217,7 @@ export default function WorkoutPlayer({
       // Do the other side
       setPhase('work');
       setTimeLeft(current?.duration ?? 30);
+      playCue('workStart');
     } else if (phase === 'rest') {
       advanceToNext();
     }
@@ -223,6 +227,7 @@ export default function WorkoutPlayer({
     const nextIdx = currentIndex + 1;
     if (nextIdx >= total) {
       setPhase('complete');
+      playCue('workoutComplete');
       hapticSuccess();
     } else {
       setCurrentIndex(nextIdx);
@@ -257,6 +262,7 @@ export default function WorkoutPlayer({
   /** Rep-based: member taps Done after completing reps */
   const handleRepDone = () => {
     if (!current) return;
+    playCue('repDone');
     hapticMedium();
     if (current.swapSides && swapSide === 'L') {
       setSwapSide('R');
@@ -268,6 +274,19 @@ export default function WorkoutPlayer({
     } else {
       advanceToNext();
     }
+  };
+
+  // ── Landscape detection for tablets ─────────────────────────────────
+  const { width: winW, height: winH } = useWindowDimensions();
+  const isLandscape = winW > winH;
+  const isTablet = Math.min(winW, winH) >= 600;
+
+  // ── Audio mute toggle ─────────────────────────────────────────────────
+  const [audioMuted, setAudioMutedState] = useState(isAudioMuted());
+  const toggleMute = () => {
+    const next = !audioMuted;
+    setAudioMutedState(next);
+    setAudioMuted(next);
   };
 
   // ── Format time ───────────────────────────────────────────────────────
@@ -292,9 +311,14 @@ export default function WorkoutPlayer({
           <Text style={st.workoutName} numberOfLines={1}>
             {workout?.name ?? 'Workout'}
           </Text>
-          <Text style={st.progressText}>
-            {currentIndex + 1}/{total}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <TouchableOpacity onPress={toggleMute} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+              <Icon name={audioMuted ? 'volume-x' : 'volume-2'} size={20} color={audioMuted ? '#4A5568' : '#F5A623'} />
+            </TouchableOpacity>
+            <Text style={st.progressText}>
+              {currentIndex + 1}/{total}
+            </Text>
+          </View>
         </View>
 
         {/* Progress bar */}
@@ -330,13 +354,52 @@ export default function WorkoutPlayer({
           </View>
         )}
 
-        {/* ── WORK state ──────────────────────────────────────── */}
+            {/* ── WORK state ──────────────────────────────────── */}
         {phase === 'work' && current && (
-          <View style={st.centerContent}>
+          <View style={[
+            st.centerContent,
+            isLandscape && isTablet && { flexDirection: 'row', alignItems: 'flex-start', paddingTop: 24 },
+          ]}>
+            {/* Left column in landscape: media + cues */}
+            {isLandscape && isTablet ? (
+              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                {current.videoUrl ? (
+                  <View style={[st.mediaWrap, { width: 320, height: 240 }]}>
+                    <Video
+                      source={{ uri: current.videoUrl }}
+                      style={st.mediaVideo}
+                      resizeMode={ResizeMode.CONTAIN}
+                      shouldPlay={!isPaused}
+                      isLooping
+                      isMuted
+                      posterSource={current.thumbnailUrl ? { uri: current.thumbnailUrl } : undefined}
+                      usePoster={!!current.thumbnailUrl}
+                    />
+                  </View>
+                ) : current.thumbnailUrl ? (
+                  <View style={[st.mediaWrap, { width: 320, height: 240 }]}>
+                    <Image
+                      source={{ uri: current.thumbnailUrl }}
+                      style={st.mediaThumbnail}
+                      resizeMode="contain"
+                    />
+                  </View>
+                ) : null}
+                {current.coachingCues && current.coachingCues !== current.description ? (
+                  <View style={[st.cuesBox, { maxWidth: 320 }]}>
+                    <Text style={st.cuesBoxLabel}>COACHING CUES</Text>
+                    <Text style={st.cuesBoxText} numberOfLines={5}>{current.coachingCues}</Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+
+            {/* Right column (or full column in portrait) */}
+            <View style={isLandscape && isTablet ? { flex: 1, alignItems: 'center', justifyContent: 'center' } : undefined}>
             <Text style={st.blockLabel}>{current.blockName}</Text>
 
-            {/* Movement media — muted looping video or thumbnail */}
-            {current.videoUrl ? (
+            {/* Movement media — muted looping video or thumbnail (portrait only) */}
+            {!(isLandscape && isTablet) && (current.videoUrl ? (
               <View style={st.mediaWrap}>
                 <Video
                   source={{ uri: current.videoUrl }}
@@ -357,9 +420,9 @@ export default function WorkoutPlayer({
                   resizeMode="contain"
                 />
               </View>
-            ) : null}
+            ) : null)}
 
-            <Text style={st.movementName}>{current.name}</Text>
+            <Text style={[st.movementName, isLandscape && isTablet && { fontSize: 36 }]}>{current.name}</Text>
             {current.swapSides && (
               <View style={st.sideBadge}>
                 <Text style={st.sideBadgeText}>
@@ -370,7 +433,8 @@ export default function WorkoutPlayer({
             {current.description ? (
               <Text style={st.cues} numberOfLines={2}>{current.description}</Text>
             ) : null}
-            {current.coachingCues && current.coachingCues !== current.description ? (
+            {/* Show coaching cues in portrait only (landscape shows them in left column) */}
+            {!(isLandscape && isTablet) && current.coachingCues && current.coachingCues !== current.description ? (
               <View style={st.cuesBox}>
                 <Text style={st.cuesBoxLabel}>COACHING CUES</Text>
                 <Text style={st.cuesBoxText} numberOfLines={3}>{current.coachingCues}</Text>
@@ -426,12 +490,13 @@ export default function WorkoutPlayer({
                   <View style={st.nextUpInfo}>
                     <Text style={st.nextUpName} numberOfLines={1}>{next.name}</Text>
                     <Text style={st.nextUpMeta}>
-                      {next.blockName}{next.duration ? ` \u00b7 ${next.duration}s` : ''}
+                      {next.blockName}{next.duration ? ` · ${next.duration}s` : ''}
                     </Text>
                   </View>
                 </View>
               </View>
             )}
+            </View>{/* Close portrait/right column wrapper */}
           </View>
         )}
 

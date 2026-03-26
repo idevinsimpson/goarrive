@@ -91,6 +91,10 @@ export default function CoachReviewQueue({
   const [selectedReaction, setSelectedReaction] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Filter & sort state
+  const [filterMember, setFilterMember] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<'date' | 'energy' | 'mood'>('date');
+
   // ── Real-time listener ────────────────────────────────────────────────
   useEffect(() => {
     if (!visible || !coachId) return;
@@ -136,10 +140,38 @@ export default function CoachReviewQueue({
     return () => unsub();
   }, [visible, coachId]);
 
-  // ── Filter logs ───────────────────────────────────────────────────────
+  // ── Filter & sort logs ────────────────────────────────────────────────
   const pendingLogs = logs.filter((l) => l.reviewStatus === 'pending');
   const reviewedLogs = logs.filter((l) => l.reviewStatus === 'reviewed');
-  const displayLogs = showReviewed ? reviewedLogs : pendingLogs;
+  const baseLogs = showReviewed ? reviewedLogs : pendingLogs;
+
+  // Apply member filter
+  const memberFiltered = filterMember === 'all'
+    ? baseLogs
+    : baseLogs.filter((l) => l.memberId === filterMember);
+
+  // Apply sort
+  const displayLogs = [...memberFiltered].sort((a, b) => {
+    if (sortBy === 'energy') {
+      const ae = a.journal?.energyRating ?? 0;
+      const be = b.journal?.energyRating ?? 0;
+      return ae - be; // lowest energy first (needs attention)
+    }
+    if (sortBy === 'mood') {
+      const am = a.journal?.moodRating ?? 0;
+      const bm = b.journal?.moodRating ?? 0;
+      return am - bm; // lowest mood first
+    }
+    // Default: date descending (newest first)
+    const at = a.completedAt?.toDate?.() ?? new Date(0);
+    const bt = b.completedAt?.toDate?.() ?? new Date(0);
+    return bt.getTime() - at.getTime();
+  });
+
+  // Unique member list for filter
+  const uniqueMembers = Array.from(
+    new Map(logs.map((l) => [l.memberId, l.memberName || 'Member'])).entries(),
+  );
 
   // ── Mark reviewed ─────────────────────────────────────────────────────
   const handleMarkReviewed = useCallback(
@@ -352,6 +384,47 @@ export default function CoachReviewQueue({
               Reviewed ({reviewedLogs.length})
             </Text>
           </TouchableOpacity>
+        </View>
+
+        {/* Filter & Sort bar */}
+        <View style={st.filterBar}>
+          {/* Member filter */}
+          <View style={st.filterGroup}>
+            <TouchableOpacity
+              style={[st.filterChip, filterMember === 'all' && st.filterChipActive]}
+              onPress={() => setFilterMember('all')}
+            >
+              <Text style={[st.filterChipText, filterMember === 'all' && st.filterChipTextActive]}>All</Text>
+            </TouchableOpacity>
+            {uniqueMembers.map(([id, name]) => (
+              <TouchableOpacity
+                key={id}
+                style={[st.filterChip, filterMember === id && st.filterChipActive]}
+                onPress={() => setFilterMember(filterMember === id ? 'all' : id)}
+              >
+                <Text
+                  style={[st.filterChipText, filterMember === id && st.filterChipTextActive]}
+                  numberOfLines={1}
+                >
+                  {name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Sort options */}
+          <View style={st.sortGroup}>
+            <Text style={st.sortLabel}>Sort:</Text>
+            {([['date', 'Date'], ['energy', 'Energy'], ['mood', 'Mood']] as const).map(([key, label]) => (
+              <TouchableOpacity
+                key={key}
+                style={[st.sortChip, sortBy === key && st.sortChipActive]}
+                onPress={() => setSortBy(key)}
+              >
+                <Text style={[st.sortChipText, sortBy === key && st.sortChipTextActive]}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
 
         {/* List */}
@@ -838,5 +911,70 @@ const st = StyleSheet.create({
     fontWeight: '700',
     color: '#0E1117',
     fontFamily: FH,
+  },
+
+  // Filter & sort bar
+  filterBar: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.04)',
+  },
+  filterGroup: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  filterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  filterChipActive: {
+    backgroundColor: 'rgba(245,166,35,0.15)',
+    borderColor: 'rgba(245,166,35,0.4)',
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8A95A3',
+    fontFamily: FH,
+    maxWidth: 80,
+  },
+  filterChipTextActive: {
+    color: '#F5A623',
+  },
+  sortGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  sortLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4A5568',
+    fontFamily: FH,
+  },
+  sortChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  sortChipActive: {
+    backgroundColor: 'rgba(245,166,35,0.12)',
+  },
+  sortChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#8A95A3',
+    fontFamily: FH,
+  },
+  sortChipTextActive: {
+    color: '#F5A623',
   },
 });

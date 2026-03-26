@@ -32,6 +32,7 @@ import { Icon } from '../../components/Icon';
 import OnboardingChecklist from '../../components/OnboardingChecklist';
 import { router } from 'expo-router';
 import AdminWorkoutMetrics from '../../components/AdminWorkoutMetrics';
+import AssignWorkoutModal from '../../components/AssignWorkoutModal';
 
 const FONT_HEADING =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -107,6 +108,7 @@ export default function DashboardScreen() {
   const coachId = claims?.coachId ?? user?.uid ?? '';
   const isAdmin = claims?.role === 'admin' || claims?.role === 'platform_admin';
   const [showAdminMetrics, setShowAdminMetrics] = useState(false);
+  const [showQuickAssign, setShowQuickAssign] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -285,6 +287,15 @@ export default function DashboardScreen() {
           </Pressable>
         )}
 
+        {/* Quick Assign shortcut */}
+        <Pressable
+          style={s.quickAssignBtn}
+          onPress={() => setShowQuickAssign(true)}
+        >
+          <Icon name="workouts" size={18} color="#0E1117" />
+          <Text style={s.quickAssignBtnText}>Quick Assign Workout</Text>
+        </Pressable>
+
         {/* Admin: Platform Workout Metrics */}
         {isAdmin && (
           <Pressable
@@ -398,6 +409,26 @@ export default function DashboardScreen() {
         visible={showAdminMetrics}
         onClose={() => setShowAdminMetrics(false)}
       />
+
+      {/* Quick Assign Modal */}
+      <AssignWorkoutModal
+        visible={showQuickAssign}
+        onClose={() => setShowQuickAssign(false)}
+        coachId={coachId}
+        onAssign={async (workoutId, memberId, scheduledFor) => {
+          const { addDoc, collection: col, Timestamp } = await import('firebase/firestore');
+          await addDoc(col(db, 'workout_assignments'), {
+            workoutId,
+            memberId,
+            coachId,
+            scheduledFor: Timestamp.fromDate(scheduledFor),
+            status: 'assigned',
+            createdAt: Timestamp.now(),
+          });
+          setShowQuickAssign(false);
+          fetchData();
+        }}
+      />
     </View>
   );
 }
@@ -496,6 +527,22 @@ const s = StyleSheet.create({
     color: '#E05252',
     fontFamily: FONT_BODY,
     fontWeight: '600',
+  },
+  quickAssignBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: '#F5A623',
+    borderRadius: 12,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  quickAssignBtnText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0E1117',
+    fontFamily: FONT_HEADING,
   },
   adminMetricsBtn: {
     flexDirection: 'row',

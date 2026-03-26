@@ -13,7 +13,12 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { db } from './firebase';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const TOKEN_STORAGE_KEY = 'goarrive_push_token';
+const TOKEN_REFRESH_KEY = 'goarrive_push_token_refreshed_at';
+const TOKEN_REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // Configure how notifications appear when the app is in the foreground
 Notifications.setNotificationHandler({
@@ -87,11 +92,52 @@ export async function registerForPushNotifications(
       });
     }
 
+    // Store token locally for refresh comparison
+    await AsyncStorage.setItem(TOKEN_STORAGE_KEY, token);
+    await AsyncStorage.setItem(TOKEN_REFRESH_KEY, Date.now().toString());
+
     console.log('[Notifications] Registered push token:', token);
     return token;
   } catch (error) {
     console.error('[Notifications] Registration error:', error);
     return null;
+  }
+}
+
+/**
+ * Refresh the push token if it's older than TOKEN_REFRESH_INTERVAL_MS.
+ * Should be called on app foreground / auth state change.
+ */
+export async function refreshPushTokenIfNeeded(
+  uid: string,
+): Promise<void> {
+  try {
+    const lastRefreshed = await AsyncStorage.getItem(TOKEN_REFRESH_KEY);
+    if (lastRefreshed) {
+      const elapsed = Date.now() - parseInt(lastRefreshed, 10);
+      if (elapsed < TOKEN_REFRESH_INTERVAL_MS) return; // Still fresh
+    }
+
+    // Re-register to get a potentially new token
+    const newToken = await registerForPushNotifications(uid);
+    if (!newToken) return;
+
+    // Check if token changed
+    const oldToken = await AsyncStorage.getItem(TOKEN_STORAGE_KEY);
+    if (oldToken && oldToken !== newToken) {
+      console.log('[Notifications] Token rotated, updating Firestore');
+      // Also update the top-level pushToken field on the user doc
+      try {
+        await updateDoc(doc(db, 'users', uid), {
+          pushToken: newToken,
+          pushTokenUpdatedAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.warn('[Notifications] Failed to update user pushToken:', err);
+      }
+    }
+  } catch (err) {
+    console.warn('[Notifications] Token refresh check failed:', err);
   }
 }
 

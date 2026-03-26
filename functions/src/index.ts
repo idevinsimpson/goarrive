@@ -6308,7 +6308,7 @@ export const onWorkoutLogReviewed = onDocumentUpdated(
 import { onObjectFinalized } from 'firebase-functions/v2/storage';
 
 export const onMovementMediaUploaded = onObjectFinalized(
-  { region: 'us-central1', memory: '512MiB', timeoutSeconds: 120 },
+  { region: 'us-east1', memory: '512MiB', timeoutSeconds: 120 },
   async (event) => {
     const filePath = event.data.name;
     const contentType = event.data.contentType || '';
@@ -6422,6 +6422,93 @@ export const onMovementMediaUploaded = onObjectFinalized(
         }
       } catch (err) {
         console.error('[onMovementMediaUploaded] Video doc update error:', err);
+      }
+    }
+  },
+);
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WORKOUT COMPLETION NOTIFICATION
+// ═══════════════════════════════════════════════════════════════════════════
+/**
+ * onWorkoutCompleted — Firestore onCreate trigger
+ *
+ * Fires when a new workout_log document is created (member completes a workout).
+ * Sends a push notification to the coach so they can review the log.
+ */
+export const onWorkoutCompleted = onDocumentCreated(
+  'workout_logs/{logId}',
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+
+    const data = snap.data();
+    const coachId = data.coachId;
+    const memberName = data.memberName || 'A member';
+    const workoutName = data.workoutName || 'a workout';
+
+    if (!coachId) {
+      console.warn('[onWorkoutCompleted] No coachId on workout_log, skipping.');
+      return;
+    }
+
+    // Look up coach's push tokens
+    const tokensSnap = await db
+      .collection('users')
+      .doc(coachId)
+      .collection('fcmTokens')
+      .get();
+
+    // Also check legacy pushToken field
+    const coachDoc = await db.collection('users').doc(coachId).get();
+    const coachData = coachDoc.exists ? coachDoc.data() : undefined;
+    const legacyToken = coachData?.pushToken as string | undefined;
+
+    const tokens: string[] = [];
+    tokensSnap.docs.forEach((d) => {
+      const t = d.data()?.token;
+      if (t) tokens.push(t);
+    });
+    if (legacyToken && !tokens.includes(legacyToken)) {
+      tokens.push(legacyToken);
+    }
+
+    if (tokens.length === 0) {
+      console.log('[onWorkoutCompleted] Coach has no push tokens, skipping.');
+      return;
+    }
+
+    // Check if journal was submitted
+    const hasJournal = data.journal && (data.journal.glow || data.journal.grow);
+    const title = 'Workout Completed';
+    const body = hasJournal
+      ? `${memberName} completed "${workoutName}" and left a reflection.`
+      : `${memberName} completed "${workoutName}". Tap to review.`;
+
+    for (const token of tokens) {
+      try {
+        await messaging.send({
+          token,
+          notification: { title, body },
+          data: { type: 'workout_completed', logId: snap.id, memberId: data.memberId || '' },
+          apns: {
+            payload: { aps: { alert: { title, body }, sound: 'default', badge: 1 } },
+          },
+        });
+        console.log(`[onWorkoutCompleted] Push sent to token ${token.substring(0, 20)}...`);
+      } catch (err: unknown) {
+        const code = (err as { code?: string })?.code || '';
+        if (
+          code === 'messaging/registration-token-not-registered' ||
+          code === 'messaging/invalid-registration-token'
+        ) {
+          console.warn('[onWorkoutCompleted] Stale token, removing');
+          const staleDoc = tokensSnap.docs.find((d) => d.data()?.token === token);
+          if (staleDoc) await staleDoc.ref.delete().catch(() => {});
+        } else {
+          console.error('[onWorkoutCompleted] FCM error:', err);
+        }
       }
     }
   },

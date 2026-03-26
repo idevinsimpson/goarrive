@@ -22,6 +22,7 @@ import {
   Platform,
   Modal,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { Icon } from './Icon';
 import {
@@ -125,6 +126,11 @@ export default function AssignWorkoutModal({
   const [previewBlocks, setPreviewBlocks] = useState<any[]>([]);
   const [previewLoading, setPreviewLoading] = useState(false);
 
+  // Recurring schedule
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurringWeeks, setRecurringWeeks] = useState(4);
+  const [recurringDays, setRecurringDays] = useState<number[]>([]); // 0=Mon..6=Sun
+
   // ── Load workouts ─────────────────────────────────────────────────────
 
   const loadWorkouts = useCallback(async () => {
@@ -169,6 +175,9 @@ export default function AssignWorkoutModal({
       setAssigning(false);
       setLastAssignedName('');
       setSearch('');
+      setIsRecurring(false);
+      setRecurringWeeks(4);
+      setRecurringDays([]);
       if (preselectedWorkoutId && preselectedWorkoutName) {
         // Workout-first flow: skip picker, go straight to schedule
         setSelectedWorkout({
@@ -222,7 +231,10 @@ export default function AssignWorkoutModal({
       const d = parseInt(parts[2], 10);
       if (!isNaN(y) && !isNaN(m) && !isNaN(d) && y > 2000) {
         const parsed = new Date(y, m, d);
-        if (!isNaN(parsed.getTime())) {
+        parsed.setHours(0, 0, 0, 0);
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+        if (!isNaN(parsed.getTime()) && parsed >= now) {
           setSelectedDate(parsed);
         }
       }
@@ -236,9 +248,34 @@ export default function AssignWorkoutModal({
 
   async function handleConfirm() {
     if (!selectedWorkout || assigning) return;
+    // Validate date is not in the past
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    if (selectedDate < now) {
+      Alert.alert('Invalid Date', 'Cannot assign a workout to a past date. Please select today or a future date.');
+      return;
+    }
     setAssigning(true);
     try {
-      await onAssign(selectedWorkout.id, selectedWorkout.name, selectedDate);
+      if (isRecurring && recurringDays.length > 0) {
+        // Create assignments for each selected day over N weeks
+        const startDate = new Date(selectedDate);
+        for (let week = 0; week < recurringWeeks; week++) {
+          for (const dayIdx of recurringDays) {
+            const d = new Date(startDate);
+            // dayIdx: 0=Mon..6=Sun → JS: Mon=1..Sun=0
+            const currentJsDay = d.getDay(); // 0=Sun
+            const targetJsDay = dayIdx === 6 ? 0 : dayIdx + 1;
+            let diff = targetJsDay - currentJsDay;
+            if (diff < 0) diff += 7;
+            d.setDate(d.getDate() + diff + week * 7);
+            d.setHours(0, 0, 0, 0);
+            await onAssign(selectedWorkout.id, selectedWorkout.name, d);
+          }
+        }
+      } else {
+        await onAssign(selectedWorkout.id, selectedWorkout.name, selectedDate);
+      }
       // NEXT-B: Show success step instead of closing
       setLastAssignedName(selectedWorkout.name);
       setStep('success');
@@ -467,6 +504,60 @@ export default function AssignWorkoutModal({
               <Text style={s.datePreview}>
                 {formatDateDisplay(selectedDate)}
               </Text>
+
+              {/* Recurring toggle */}
+              <View style={s.recurringSection}>
+                <Pressable
+                  style={s.recurringToggle}
+                  onPress={() => setIsRecurring(!isRecurring)}
+                >
+                  <View style={[s.checkbox, isRecurring && s.checkboxActive]}>
+                    {isRecurring && <Icon name="check" size={12} color="#0E1117" />}
+                  </View>
+                  <Text style={s.recurringLabel}>Repeat weekly</Text>
+                </Pressable>
+
+                {isRecurring && (
+                  <View style={s.recurringOptions}>
+                    <Text style={s.recurringSubLabel}>Days of the week</Text>
+                    <View style={s.dayRow}>
+                      {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((label, i) => {
+                        const active = recurringDays.includes(i);
+                        return (
+                          <Pressable
+                            key={label}
+                            style={[s.dayBtn, active && s.dayBtnActive]}
+                            onPress={() => {
+                              setRecurringDays((prev) =>
+                                active ? prev.filter((d) => d !== i) : [...prev, i].sort(),
+                              );
+                            }}
+                          >
+                            <Text style={[s.dayBtnText, active && s.dayBtnTextActive]}>
+                              {label.charAt(0)}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+
+                    <Text style={s.recurringSubLabel}>For how many weeks?</Text>
+                    <View style={s.weeksRow}>
+                      {[2, 4, 6, 8].map((w) => (
+                        <Pressable
+                          key={w}
+                          style={[s.weekBtn, recurringWeeks === w && s.weekBtnActive]}
+                          onPress={() => setRecurringWeeks(w)}
+                        >
+                          <Text style={[s.weekBtnText, recurringWeeks === w && s.weekBtnTextActive]}>
+                            {w}w
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                )}
+              </View>
 
               {/* Confirm button */}
               <Pressable
@@ -817,5 +908,98 @@ const s = StyleSheet.create({
     fontWeight: '600',
     color: '#8A95A3',
     fontFamily: FONT_HEADING,
+  },
+  // Recurring schedule styles
+  recurringSection: {
+    marginTop: 20,
+    marginBottom: 16,
+  },
+  recurringToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#4A5568',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxActive: {
+    backgroundColor: '#F5A623',
+    borderColor: '#F5A623',
+  },
+  recurringLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#F0F4F8',
+    fontFamily: FONT_BODY,
+  },
+  recurringOptions: {
+    marginTop: 14,
+    gap: 10,
+  },
+  recurringSubLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8A95A3',
+    fontFamily: FONT_BODY,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  dayRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  dayBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  dayBtnActive: {
+    backgroundColor: '#F5A623',
+    borderColor: '#F5A623',
+  },
+  dayBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#8A95A3',
+    fontFamily: FONT_HEADING,
+  },
+  dayBtnTextActive: {
+    color: '#0E1117',
+  },
+  weeksRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  weekBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  weekBtnActive: {
+    backgroundColor: 'rgba(245,166,35,0.15)',
+    borderColor: 'rgba(245,166,35,0.4)',
+  },
+  weekBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#8A95A3',
+    fontFamily: FONT_HEADING,
+  },
+  weekBtnTextActive: {
+    color: '#F5A623',
   },
 });

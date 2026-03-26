@@ -28,7 +28,8 @@ import {
   getDocs,
   query,
   where,
-  addDoc,
+  doc,
+  writeBatch,
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -166,36 +167,48 @@ export default function BatchAssignModal({
   const handleConfirm = async () => {
     if (selected.size === 0) return;
     setStep('assigning');
-    let count = 0;
 
     const memberIds = Array.from(selected);
-    for (let i = 0; i < memberIds.length; i++) {
-      const memberId = memberIds[i];
-      const member = members.find((m) => m.id === memberId);
-      try {
-        const assignmentData: any = {
-          workoutId,
-          workoutName,
-          memberId,
-          memberName: member?.displayName || '',
-          coachId,
-          scheduledFor: toDateString(selectedDate),
-          status: 'scheduled',
-          assignedAt: serverTimestamp(),
-        };
-        if (workoutSnapshot) {
-          assignmentData.workoutSnapshot = workoutSnapshot;
-        }
-        await addDoc(collection(db, 'workout_assignments'), assignmentData);
-        count++;
-      } catch (err) {
-        console.error(`[BatchAssign] Failed for ${memberId}:`, err);
-      }
-      setProgress(Math.round(((i + 1) / memberIds.length) * 100));
-    }
+    // Firestore writeBatch supports up to 500 operations per batch
+    const BATCH_LIMIT = 500;
+    let totalCount = 0;
 
-    setAssignedCount(count);
-    setStep('done');
+    try {
+      for (let batchStart = 0; batchStart < memberIds.length; batchStart += BATCH_LIMIT) {
+        const chunk = memberIds.slice(batchStart, batchStart + BATCH_LIMIT);
+        const batch = writeBatch(db);
+
+        for (const memberId of chunk) {
+          const member = members.find((m) => m.id === memberId);
+          const ref = doc(collection(db, 'workout_assignments'));
+          const assignmentData: any = {
+            workoutId,
+            workoutName,
+            memberId,
+            memberName: member?.displayName || '',
+            coachId,
+            scheduledFor: toDateString(selectedDate),
+            status: 'scheduled',
+            assignedAt: serverTimestamp(),
+          };
+          if (workoutSnapshot) {
+            assignmentData.workoutSnapshot = workoutSnapshot;
+          }
+          batch.set(ref, assignmentData);
+        }
+
+        await batch.commit();
+        totalCount += chunk.length;
+        setProgress(Math.round((totalCount / memberIds.length) * 100));
+      }
+
+      setAssignedCount(totalCount);
+      setStep('done');
+    } catch (err) {
+      console.error('[BatchAssign] Batch write failed:', err);
+      Alert.alert('Error', 'Failed to assign workouts. Please try again.');
+      setStep('schedule');
+    }
   };
 
   const filtered = members.filter((m) => {

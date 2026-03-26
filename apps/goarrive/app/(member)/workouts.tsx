@@ -42,6 +42,7 @@ import WorkoutPlayer from '../../components/WorkoutPlayer';
 import PostWorkoutJournal, { JournalEntry } from '../../components/PostWorkoutJournal';
 import MemberWorkoutHistory from '../../components/MemberWorkoutHistory';
 import WorkoutCalendarStrip from '../../components/WorkoutCalendarStrip';
+import MemberStreakCard from '../../components/MemberStreakCard';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH =
@@ -592,6 +593,11 @@ export default function MemberWorkoutsScreen() {
         selectedDate={calendarDate}
         onSelectDate={(d) => setCalendarDate(calendarDate === d ? null : d)}
       />
+
+      {/* Streak & consistency card */}
+      <View style={{ paddingHorizontal: 20 }}>
+        <MemberStreakCard memberId={memberId} />
+      </View>
 
       <FlatList
         data={displaySections}
