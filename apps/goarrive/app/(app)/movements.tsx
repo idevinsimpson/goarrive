@@ -27,6 +27,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   Alert,
+  Image,
 } from 'react-native';
 import {
   collection,
@@ -194,6 +195,7 @@ export default function MovementsScreen() {
       createdAt: data.createdAt,
       mediaUrl: data.mediaUrl ?? null,
       videoUrl: data.videoUrl ?? null,
+      thumbnailUrl: data.thumbnailUrl ?? null,
     };
   }, []);
 
@@ -334,8 +336,23 @@ export default function MovementsScreen() {
   };
 
   // ── Render item for FlatList ───────────────────────────────────────────
-  const renderItem = ({ item: m }: { item: MovementDetailData }) => (
+  const renderItem = ({ item: m }: { item: MovementDetailData }) => {
+    const thumb = m.thumbnailUrl || m.mediaUrl || m.videoUrl;
+    return (
     <Pressable style={s.card} onPress={() => handleOpenDetail(m)}>
+      <View style={s.cardRow}>
+        {thumb ? (
+          <Image
+            source={{ uri: thumb }}
+            style={s.cardThumb}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={s.cardThumbPlaceholder}>
+            <Icon name="fitness" size={20} color="#4A5568" />
+          </View>
+        )}
+        <View style={s.cardContent}>
       <View style={s.cardTop}>
         <Text style={s.cardName} numberOfLines={1}>
           {m.name}
@@ -369,8 +386,11 @@ export default function MovementsScreen() {
           {m.muscleGroups.join(' · ')}
         </Text>
       )}
+        </View>
+      </View>
     </Pressable>
-  );
+    );
+  };
 
   const keyExtractor = (item: MovementDetailData) => item.id;
 
@@ -750,6 +770,30 @@ const s = StyleSheet.create({
     borderColor: '#2A3347',
     gap: 8,
     marginBottom: 10,
+  },
+  cardRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  cardThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    backgroundColor: '#1A2035',
+  },
+  cardThumbPlaceholder: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    backgroundColor: '#1A2035',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#2A3347',
+  },
+  cardContent: {
+    flex: 1,
+    gap: 6,
   },
   cardTop: {
     flexDirection: 'row',

@@ -16,8 +16,10 @@ import {
   StyleSheet,
   Platform,
   Modal,
+  Image,
 } from 'react-native';
 import { Icon } from './Icon';
+import MovementVideoControls from './MovementVideoControls';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -41,6 +43,8 @@ export interface MovementDetailData {
   tenantId?: string;
   createdAt?: any;
   mediaUrl?: string | null;
+  videoUrl?: string | null;
+  thumbnailUrl?: string | null;
   mediaFormat?: 'webp' | null;
   clipDurationSec?: number | null;
   fps?: number | null;
@@ -105,6 +109,27 @@ export default function MovementDetail({
         <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent}>
           {/* Name */}
           <Text style={s.name}>{movement.name}</Text>
+
+          {/* Video / Thumbnail */}
+          {(movement.videoUrl || movement.thumbnailUrl || movement.mediaUrl) ? (
+            <View style={s.mediaSection}>
+              {movement.videoUrl ? (
+                <MovementVideoControls
+                  uri={movement.videoUrl}
+                  posterUri={movement.thumbnailUrl || undefined}
+                  height={200}
+                  autoPlay={false}
+                  showControls={true}
+                />
+              ) : (movement.thumbnailUrl || movement.mediaUrl) ? (
+                <Image
+                  source={{ uri: movement.thumbnailUrl || movement.mediaUrl || '' }}
+                  style={s.mediaThumbnail}
+                  resizeMode="cover"
+                />
+              ) : null}
+            </View>
+          ) : null}
 
           {/* Badges */}
           <View style={s.badgeRow}>
@@ -283,6 +308,16 @@ const s = StyleSheet.create({
   scrollContent: {
     padding: 16,
     gap: 16,
+  },
+  mediaSection: {
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: '#1A2035',
+  },
+  mediaThumbnail: {
+    width: '100%',
+    height: 200,
+    borderRadius: 10,
   },
   name: {
     fontSize: 24,
