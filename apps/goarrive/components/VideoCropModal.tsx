@@ -9,8 +9,14 @@
  * that are applied at display time — the original video is never modified.
  *
  * Uses react-native-gesture-handler + react-native-reanimated.
+ *
+ * Video sizing: We manually compute "cover" dimensions instead of relying
+ * on ResizeMode.COVER, because on web (Safari PWA) the resize mode doesn't
+ * work reliably for all video orientations. We detect the video's native
+ * dimensions via onReadyForDisplay, then scale the Video element so its
+ * shorter dimension fills the frame while the longer dimension overflows.
  */
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -20,7 +26,7 @@ import {
   Platform,
   useWindowDimensions,
 } from 'react-native';
-import { Video, ResizeMode } from 'expo-av';
+import { Video, ResizeMode, VideoReadyForDisplayEvent } from 'expo-av';
 import { GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
@@ -50,7 +56,7 @@ interface Props {
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const ASPECT_RATIO = 4 / 5;
+const FRAME_ASPECT = 4 / 5; // width / height = 0.8
 const MIN_SCALE = 1;
 const MAX_SCALE = 3;
 
@@ -71,7 +77,42 @@ export default function VideoCropModal({
   const { width: winWidth } = useWindowDimensions();
   // Frame fills available width minus padding
   const frameWidth = Math.min(winWidth - 32, 500);
-  const frameHeight = frameWidth / ASPECT_RATIO;
+  const frameHeight = frameWidth / FRAME_ASPECT;
+
+  // ── Video natural dimensions ──────────────────────────────────────────
+  // We need to know the video's native aspect ratio to compute "cover" sizing.
+  // Until we know it, we default to filling the frame exactly.
+  const [videoNaturalWidth, setVideoNaturalWidth] = useState<number>(0);
+  const [videoNaturalHeight, setVideoNaturalHeight] = useState<number>(0);
+
+  const onReadyForDisplay = useCallback((event: VideoReadyForDisplayEvent) => {
+    const { width: nw, height: nh } = event.naturalSize;
+    if (nw > 0 && nh > 0) {
+      setVideoNaturalWidth(nw);
+      setVideoNaturalHeight(nh);
+    }
+  }, []);
+
+  // Compute the video element dimensions to achieve "cover" behavior manually.
+  // Cover = scale the video so the shorter dimension fills the frame,
+  // and the longer dimension overflows (available for panning).
+  let videoWidth = frameWidth;
+  let videoHeight = frameHeight;
+
+  if (videoNaturalWidth > 0 && videoNaturalHeight > 0) {
+    const videoAspect = videoNaturalWidth / videoNaturalHeight;
+    const frameAspect = frameWidth / frameHeight;
+
+    if (videoAspect > frameAspect) {
+      // Video is wider than frame → match heights, width overflows
+      videoHeight = frameHeight;
+      videoWidth = frameHeight * videoAspect;
+    } else {
+      // Video is taller than frame → match widths, height overflows
+      videoWidth = frameWidth;
+      videoHeight = frameWidth / videoAspect;
+    }
+  }
 
   // ── Shared values ──────────────────────────────────────────────────────
 
@@ -84,12 +125,14 @@ export default function VideoCropModal({
   const savedTranslateY = useSharedValue(initialCrop?.cropTranslateY ?? 0);
 
   // ── Bounds calculation ─────────────────────────────────────────────────
-  // At scale=1, the video exactly fills the frame (ResizeMode.COVER).
-  // At scale>1, the video is larger than the frame, so we can pan.
-  // Max pan = (scaledDimension - frameDimension) / 2
-  // Since the video fills via COVER, the "base" dimension matches the frame.
-  // So maxPanX = frameWidth * (scale - 1) / 2
-  //    maxPanY = frameHeight * (scale - 1) / 2
+  // The video element is already sized to "cover" the frame.
+  // At scale=1, the overflow is (videoWidth - frameWidth) and (videoHeight - frameHeight).
+  // At scale>1, the overflow increases.
+  // Max pan = (scaledVideoDimension - frameDimension) / 2
+
+  // We need these as shared values for the worklet
+  const baseOverflowX = (videoWidth - frameWidth) / 2;
+  const baseOverflowY = (videoHeight - frameHeight) / 2;
 
   const clampTranslate = (
     tx: number,
@@ -97,8 +140,13 @@ export default function VideoCropModal({
     s: number,
   ): { x: number; y: number } => {
     'worklet';
-    const maxX = (frameWidth * (s - 1)) / 2;
-    const maxY = (frameHeight * (s - 1)) / 2;
+    // At scale s, the video is s× larger. The overflow on each side is:
+    // (videoSize * s - frameSize) / 2
+    // But since videoSize already covers the frame, we simplify:
+    // maxPan = baseOverflow * s + frameSize * (s - 1) / 2
+    // Actually: maxPan = (videoSize * s - frameSize) / 2
+    const maxX = (videoWidth * s - frameWidth) / 2;
+    const maxY = (videoHeight * s - frameHeight) / 2;
     return {
       x: Math.min(Math.max(tx, -maxX), maxX),
       y: Math.min(Math.max(ty, -maxY), maxY),
@@ -223,14 +271,26 @@ export default function VideoCropModal({
             ]}
           >
             <GestureDetector gesture={composedGesture}>
-              <Animated.View style={[s.videoContainer, animatedVideoStyle]}>
+              <Animated.View
+                style={[
+                  {
+                    width: videoWidth,
+                    height: videoHeight,
+                    // Center the oversized video within the frame
+                    marginLeft: -(videoWidth - frameWidth) / 2,
+                    marginTop: -(videoHeight - frameHeight) / 2,
+                  },
+                  animatedVideoStyle,
+                ]}
+              >
                 <Video
                   source={{ uri: videoUri }}
                   resizeMode={ResizeMode.COVER}
                   isLooping
                   shouldPlay
                   isMuted
-                  style={{ width: frameWidth, height: frameHeight }}
+                  onReadyForDisplay={onReadyForDisplay}
+                  style={{ width: videoWidth, height: videoHeight }}
                 />
               </Animated.View>
             </GestureDetector>
@@ -308,9 +368,6 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(245,166,35,0.4)',
     backgroundColor: '#000',
-  },
-  videoContainer: {
-    // The animated view that gets transformed
   },
   corner: {
     position: 'absolute',
