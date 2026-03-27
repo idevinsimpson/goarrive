@@ -142,6 +142,8 @@ export default function MovementForm({
   // ── GIF thumbnail generation state ────────────────────────────────────
   const [generatingGif, setGeneratingGif] = useState(false);
   const [gifProgress, setGifProgress] = useState(0);
+  const gifPromiseRef = useRef<Promise<string | null> | null>(null);
+  const savedDocIdRef = useRef<string | null>(null);
 
   // ── Crop/reframe state ─────────────────────────────────────────────────
   const [showCropModal, setShowCropModal] = useState(false);
@@ -199,10 +201,12 @@ export default function MovementForm({
     setShowCropModal(false);
     setGeneratingGif(false);
     setGifProgress(0);
+    gifPromiseRef.current = null;
+    savedDocIdRef.current = null;
   };
 
   // ── GIF thumbnail generation ─────────────────────────────────────────
-  const generateAndUploadGif = async (
+  const generateAndUploadGif = (
     url: string,
     crop: CropValues,
   ) => {
@@ -211,48 +215,65 @@ export default function MovementForm({
     setGeneratingGif(true);
     setGifProgress(0);
 
-    try {
-      const blob = await generateCroppedGif(url, crop, (p) => {
-        setGifProgress(p);
-      });
+    const promise = (async (): Promise<string | null> => {
+      try {
+        const blob = await generateCroppedGif(url, crop, (p) => {
+          setGifProgress(p);
+        });
 
-      if (!blob) {
-        console.warn('[MovementForm] GIF generation returned null');
+        if (!blob) {
+          console.warn('[MovementForm] GIF generation returned null');
+          setGeneratingGif(false);
+          return null;
+        }
+
+        // Upload the GIF to Firebase Storage
+        const fileName = `movements/${coachId}/thumbnails/${Date.now()}.gif`;
+        const storageRef = ref(storage, fileName);
+        const uploadTask = uploadBytesResumable(storageRef, blob, {
+          contentType: 'image/gif',
+        });
+
+        const downloadUrl = await new Promise<string>((resolve, reject) => {
+          uploadTask.on(
+            'state_changed',
+            (snapshot) => {
+              const uploadPct = snapshot.bytesTransferred / snapshot.totalBytes;
+              setGifProgress(0.9 + uploadPct * 0.1);
+            },
+            (error) => reject(error),
+            async () => {
+              const url = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve(url);
+            },
+          );
+        });
+
+        setThumbnailUrl(downloadUrl);
         setGeneratingGif(false);
-        return;
+        setGifProgress(0);
+
+        // If the form was already saved, auto-patch the Firestore document
+        if (savedDocIdRef.current) {
+          try {
+            await updateDoc(doc(db, 'movements', savedDocIdRef.current), {
+              thumbnailUrl: downloadUrl,
+            });
+          } catch (patchErr) {
+            console.error('[MovementForm] Auto-patch thumbnailUrl error:', patchErr);
+          }
+        }
+
+        return downloadUrl;
+      } catch (err) {
+        console.error('[MovementForm] GIF generation error:', err);
+        setGeneratingGif(false);
+        setGifProgress(0);
+        return null;
       }
+    })();
 
-      // Upload the GIF to Firebase Storage
-      const fileName = `movements/${coachId}/thumbnails/${Date.now()}.gif`;
-      const storageRef = ref(storage, fileName);
-      const uploadTask = uploadBytesResumable(storageRef, blob, {
-        contentType: 'image/gif',
-      });
-
-      uploadTask.on(
-        'state_changed',
-        (snapshot) => {
-          // GIF generation was 0-1, upload progress adds on top
-          const uploadPct = snapshot.bytesTransferred / snapshot.totalBytes;
-          setGifProgress(0.9 + uploadPct * 0.1); // last 10% is upload
-        },
-        (error) => {
-          console.error('[MovementForm] GIF upload error:', error);
-          setGeneratingGif(false);
-          setGifProgress(0);
-        },
-        async () => {
-          const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-          setThumbnailUrl(downloadUrl);
-          setGeneratingGif(false);
-          setGifProgress(0);
-        },
-      );
-    } catch (err) {
-      console.error('[MovementForm] GIF generation error:', err);
-      setGeneratingGif(false);
-      setGifProgress(0);
-    }
+    gifPromiseRef.current = promise;
   };
 
   // ── Media upload ──────────────────────────────────────────────────────
@@ -431,6 +452,20 @@ export default function MovementForm({
 
     setSubmitting(true);
     try {
+      // If GIF is still generating, wait for it to finish before saving
+      let finalThumbnailUrl = thumbnailUrl.trim();
+      if (gifPromiseRef.current) {
+        try {
+          const gifUrl = await gifPromiseRef.current;
+          if (gifUrl) {
+            finalThumbnailUrl = gifUrl;
+          }
+        } catch {
+          // GIF failed — save without it
+        }
+        gifPromiseRef.current = null;
+      }
+
       const data: Record<string, any> = {
         name: name.trim(),
         category,
@@ -445,7 +480,7 @@ export default function MovementForm({
         swapMode: 'split' as const,
         swapWindowSec: 5,
         videoUrl: videoUrl.trim(),
-        thumbnailUrl: thumbnailUrl.trim(),
+        thumbnailUrl: finalThumbnailUrl,
         regression: regression.trim(),
         progression: progression.trim(),
         contraindications: contraindications.trim(),
@@ -455,12 +490,14 @@ export default function MovementForm({
         updatedAt: serverTimestamp(),
       };
 
+      let docId: string;
       if (isEdit && editMovement) {
         // Edit mode — update existing document
-        await updateDoc(doc(db, 'movements', editMovement.id), data);
+        docId = editMovement.id;
+        await updateDoc(doc(db, 'movements', docId), data);
       } else {
         // Create mode — add new document with ownership fields
-        await addDoc(collection(db, 'movements'), {
+        const docRef = await addDoc(collection(db, 'movements'), {
           ...data,
           coachId,
           tenantId,
@@ -468,7 +505,11 @@ export default function MovementForm({
           isArchived: false,
           createdAt: serverTimestamp(),
         });
+        docId = docRef.id;
       }
+
+      // Store doc ID so GIF auto-patch can find it if GIF finishes after save
+      savedDocIdRef.current = docId;
 
       resetForm();
       onClose();
@@ -821,9 +862,11 @@ export default function MovementForm({
             >
               <Text style={st.saveBtnText}>
                 {submitting
-                  ? isEdit
-                    ? 'Saving...'
-                    : 'Creating...'
+                  ? generatingGif
+                    ? 'Finishing thumbnail...'
+                    : isEdit
+                      ? 'Saving...'
+                      : 'Creating...'
                   : isEdit
                   ? 'Save Changes'
                   : 'Create Movement'}
