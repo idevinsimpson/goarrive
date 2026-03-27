@@ -21,6 +21,8 @@ export function useMediaPrefetch(
   currentIndex: number,
   isActive: boolean,
   isResting: boolean = false,
+  isCountdown: boolean = false,
+  isReady: boolean = false,
 ): void {
   const prefetchedUrls = useRef<Set<string>>(new Set());
   const preloadedVideos = useRef<Set<string>>(new Set());
@@ -47,6 +49,46 @@ export function useMediaPrefetch(
       });
     });
   }, [currentIndex, isActive, isResting, movements]);
+
+  // ── Preload CURRENT movement video during countdown ─────────────────
+  // When the countdown screen is showing, the member isn't watching video
+  // yet, so we aggressively preload the current movement's video so it's
+  // fully buffered by the time the work phase begins. This eliminates the
+  // GIF poster flash. Also preloads the first movement during the ready phase.
+  useEffect(() => {
+    if (!isCountdown && !isReady) return;
+
+    // During countdown, preload the current movement; during ready, preload the first
+    const targetIndex = isReady ? 0 : currentIndex;
+    const target = movements[targetIndex];
+    const videoUrl = target?.videoUrl;
+    if (!videoUrl || preloadedVideos.current.has(videoUrl)) return;
+
+    preloadedVideos.current.add(videoUrl);
+
+    if (Platform.OS === 'web') {
+      const video = document.createElement('video');
+      video.preload = 'auto';
+      video.muted = true;
+      video.src = videoUrl;
+      video.style.position = 'absolute';
+      video.style.width = '0';
+      video.style.height = '0';
+      video.style.opacity = '0';
+      video.style.pointerEvents = 'none';
+      document.body.appendChild(video);
+
+      const cleanup = () => {
+        try { document.body.removeChild(video); } catch { /* already removed */ }
+      };
+      video.addEventListener('loadeddata', () => {
+        setTimeout(cleanup, 5000);
+      });
+      setTimeout(cleanup, 30000);
+    } else {
+      fetch(videoUrl, { method: 'GET' }).catch(() => {});
+    }
+  }, [isCountdown, isReady, currentIndex, movements]);
 
   // ── Aggressive video preload during rest periods ─────────────────────
   // During rest, the member isn't watching video, so we use the bandwidth

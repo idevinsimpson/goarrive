@@ -37,6 +37,7 @@ import { useMediaPrefetch } from '../hooks/useMediaPrefetch';
 import { useWorkoutTTS } from '../hooks/useWorkoutTTS';
 import { useMovementSwap } from '../hooks/useMovementSwap';
 import { useMovementHydrate } from '../hooks/useMovementHydrate';
+import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 
 const FH =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -75,7 +76,14 @@ export default function WorkoutPlayer({
   } = timer;
 
   useWakeLock(phase !== 'ready' && phase !== 'complete');
-  useMediaPrefetch(flatMovements, currentIndex, phase === 'work' || phase === 'countdown', phase === 'rest');
+  useMediaPrefetch(
+    flatMovements,
+    currentIndex,
+    phase === 'work' || phase === 'countdown',
+    phase === 'rest',
+    phase === 'countdown',
+    phase === 'ready',
+  );
 
   // ── Audio mute toggle (must be before TTS hook) ───────────────────
   const [audioMuted, setAudioMutedState] = useState(isAudioMuted());
@@ -113,10 +121,32 @@ export default function WorkoutPlayer({
   const isLandscape = dimsValid ? winW > winH : false;
   const isTablet = dimsValid ? Math.min(winW, winH) >= 600 : false;
 
+  // ── Video ref for imperative control ────────────────────────────────
+  const videoRef = useRef<any>(null);
+
+  // Imperatively pause/play video when timer pauses (web reliability fix)
+  useEffect(() => {
+    if (!videoRef.current) return;
+    if (isPaused) {
+      videoRef.current.pauseAsync?.().catch(() => {});
+    } else if (phase === 'work') {
+      videoRef.current.playAsync?.().catch(() => {});
+    }
+  }, [isPaused, phase]);
+
   // ── Tap-to-show controls + header ──────────────────────────────────
   const [showControls, setShowControls] = useState(false);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [videoReady, setVideoReady] = useState(false);
+
+  // ── Playback speed — persists per movement ────────────────────────────
+  const { speed, speedLabel, cycleSpeed } = usePlaybackSpeed(current?.id);
+
+  // Apply playback speed to video whenever it changes
+  useEffect(() => {
+    if (!videoRef.current) return;
+    videoRef.current.setRateAsync?.(speed, true).catch(() => {});
+  }, [speed, currentIndex, videoReady]);
 
   const handleVideoTap = useCallback(() => {
     setShowControls(prev => {
@@ -293,6 +323,7 @@ export default function WorkoutPlayer({
                   {current.videoUrl ? (
                     <>
                       <Video
+                        ref={videoRef}
                         source={{ uri: current.videoUrl }}
                         resizeMode={ResizeMode.COVER}
                         isLooping
@@ -363,6 +394,16 @@ export default function WorkoutPlayer({
                         <Icon name="refresh-cw" size={14} color="#F5A623" />
                         <Text style={st.overlaySwapText}>Swap Movement</Text>
                       </TouchableOpacity>
+                      {/* Playback speed — bottom-right */}
+                      <View style={st.speedRow}>
+                        <TouchableOpacity
+                          style={st.speedBtn}
+                          onPress={cycleSpeed}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <Text style={st.speedBtnText}>{speedLabel}</Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   )}
                 </View>
@@ -789,6 +830,25 @@ const st = StyleSheet.create({
     fontWeight: '600',
   },
 
+  // Playback speed button — floats bottom-right of video area
+  speedRow: {
+    marginTop: 'auto' as any,
+    alignSelf: 'flex-end' as any,
+    paddingRight: 16,
+    paddingBottom: 16,
+  },
+  speedBtn: {
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+  },
+  speedBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700' as any,
+    fontFamily: 'Archivo',
+  },
   // Legacy styles kept for other phases
   movementName: {
     fontSize: 32,
