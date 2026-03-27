@@ -352,14 +352,6 @@ export default function MovementsScreen() {
   // ── Render item for FlatList ───────────────────────────────────────────
   const renderItem = ({ item: m }: { item: MovementDetailData }) => {
     const thumb = m.thumbnailUrl || m.mediaUrl || null;
-    const hasCrop = (m.cropScale ?? 1) !== 1 || (m.cropTranslateX ?? 0) !== 0 || (m.cropTranslateY ?? 0) !== 0;
-    const thumbCropStyle = hasCrop ? {
-      transform: [
-        { scale: m.cropScale ?? 1 },
-        { translateX: m.cropTranslateX ?? 0 },
-        { translateY: m.cropTranslateY ?? 0 },
-      ],
-    } : undefined;
     return (
     <Pressable style={s.card} onPress={() => handleOpenDetail(m)}>
       <View style={s.cardRow}>
@@ -367,7 +359,7 @@ export default function MovementsScreen() {
           <View style={s.cardThumbWrap}>
             <Image
               source={{ uri: thumb }}
-              style={[s.cardThumb, thumbCropStyle]}
+              style={s.cardThumb}
               resizeMode="cover"
             />
           </View>

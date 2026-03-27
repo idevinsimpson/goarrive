@@ -42,6 +42,7 @@ import { Icon } from './Icon';
 import MovementVideoControls from './MovementVideoControls';
 import VideoCropModal, { CropValues } from './VideoCropModal';
 import { MovementDetailData } from './MovementDetail';
+import { generateCroppedGif } from '../utils/generateCroppedGif';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH =
@@ -138,6 +139,10 @@ export default function MovementForm({
   const [contraindications, setContraindications] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // ── GIF thumbnail generation state ────────────────────────────────────
+  const [generatingGif, setGeneratingGif] = useState(false);
+  const [gifProgress, setGifProgress] = useState(0);
+
   // ── Crop/reframe state ─────────────────────────────────────────────────
   const [showCropModal, setShowCropModal] = useState(false);
   const [cropScale, setCropScale] = useState(1);
@@ -192,6 +197,62 @@ export default function MovementForm({
     setCropTranslateX(0);
     setCropTranslateY(0);
     setShowCropModal(false);
+    setGeneratingGif(false);
+    setGifProgress(0);
+  };
+
+  // ── GIF thumbnail generation ─────────────────────────────────────────
+  const generateAndUploadGif = async (
+    url: string,
+    crop: CropValues,
+  ) => {
+    if (Platform.OS !== 'web' || !url) return;
+
+    setGeneratingGif(true);
+    setGifProgress(0);
+
+    try {
+      const blob = await generateCroppedGif(url, crop, (p) => {
+        setGifProgress(p);
+      });
+
+      if (!blob) {
+        console.warn('[MovementForm] GIF generation returned null');
+        setGeneratingGif(false);
+        return;
+      }
+
+      // Upload the GIF to Firebase Storage
+      const fileName = `movements/${coachId}/thumbnails/${Date.now()}.gif`;
+      const storageRef = ref(storage, fileName);
+      const uploadTask = uploadBytesResumable(storageRef, blob, {
+        contentType: 'image/gif',
+      });
+
+      uploadTask.on(
+        'state_changed',
+        (snapshot) => {
+          // GIF generation was 0-1, upload progress adds on top
+          const uploadPct = snapshot.bytesTransferred / snapshot.totalBytes;
+          setGifProgress(0.9 + uploadPct * 0.1); // last 10% is upload
+        },
+        (error) => {
+          console.error('[MovementForm] GIF upload error:', error);
+          setGeneratingGif(false);
+          setGifProgress(0);
+        },
+        async () => {
+          const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
+          setThumbnailUrl(downloadUrl);
+          setGeneratingGif(false);
+          setGifProgress(0);
+        },
+      );
+    } catch (err) {
+      console.error('[MovementForm] GIF generation error:', err);
+      setGeneratingGif(false);
+      setGifProgress(0);
+    }
   };
 
   // ── Media upload ──────────────────────────────────────────────────────
@@ -695,6 +756,22 @@ export default function MovementForm({
                     <Text style={st.reframeBtnText}>Reframe</Text>
                   </Pressable>
                 </View>
+                {generatingGif && (
+                  <View style={st.gifProgress}>
+                    <ActivityIndicator size="small" color="#F5A623" />
+                    <Text style={st.gifProgressText}>
+                      Generating thumbnail... {Math.round(gifProgress * 100)}%
+                    </Text>
+                  </View>
+                )}
+                {!generatingGif && thumbnailUrl ? (
+                  <View style={st.gifProgress}>
+                    <Icon name="checkmark" size={12} color="#6EBB7A" />
+                    <Text style={[st.gifProgressText, { color: '#6EBB7A' }]}>
+                      Thumbnail ready
+                    </Text>
+                  </View>
+                ) : null}
               </View>
             ) : null}
 
@@ -767,6 +844,8 @@ export default function MovementForm({
           setCropTranslateX(crop.cropTranslateX);
           setCropTranslateY(crop.cropTranslateY);
           setShowCropModal(false);
+          // Generate animated GIF thumbnail with the crop applied
+          generateAndUploadGif(videoUrl, crop);
         }}
         onCancel={() => setShowCropModal(false)}
       />
@@ -1098,5 +1177,16 @@ const st = StyleSheet.create({
     fontWeight: '600',
     color: '#F5A623',
     fontFamily: FH,
+  },
+  gifProgress: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+  },
+  gifProgressText: {
+    fontSize: 11,
+    color: '#F5A623',
+    fontFamily: FB,
   },
 });
