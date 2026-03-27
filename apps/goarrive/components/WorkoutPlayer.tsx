@@ -1,25 +1,28 @@
 /**
- * WorkoutPlayer — Full-screen workout execution engine
+ * WorkoutPlayer — Full-screen immersive workout execution engine
  *
  * Enhanced with:
- * - Movement name + coaching cues display
+ * - Full-screen video background during WORK phase
+ * - GoArrive logo at the top
+ * - Movement name + large countdown timer overlay
  * - Next-up preview bar
  * - Rest period handling between movements
  * - Swap sides support (L/R indicator)
  * - Progress bar (movements completed / total)
  * - Completion screen before triggering onComplete
  * - Distinct audio cues per phase transition
- * - Haptic feedback (light countdown, medium transition, heavy start, success complete)
+ * - Haptic feedback
  * - Wake lock to prevent screen sleep
  * - Landscape tablet layout
  * - Rep-based mode (Done button instead of timer)
  * - Media playback (video/image) with prefetching
  * - Mute toggle
+ * - Movement hydration from Firestore (videoUrl, thumbnailUrl)
  *
- * Decomposed into hooks: useWorkoutFlatten, useWorkoutTimer, useMediaPrefetch
+ * Decomposed into hooks: useWorkoutFlatten, useWorkoutTimer, useMediaPrefetch, useMovementHydrate
  * Follows GoArrive design system: #0E1117 bg, #F5A623 gold accent.
  */
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -31,6 +34,7 @@ import {
   Image,
   TextInput,
   useWindowDimensions,
+  ScrollView,
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
 import MovementVideoControls from './MovementVideoControls';
@@ -42,6 +46,7 @@ import { useWorkoutTimer } from '../hooks/useWorkoutTimer';
 import { useMediaPrefetch } from '../hooks/useMediaPrefetch';
 import { useWorkoutTTS } from '../hooks/useWorkoutTTS';
 import { useMovementSwap } from '../hooks/useMovementSwap';
+import { useMovementHydrate } from '../hooks/useMovementHydrate';
 
 const FH =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -67,8 +72,9 @@ export default function WorkoutPlayer({
 }: WorkoutPlayerProps) {
   // ── Hooks ────────────────────────────────────────────────────────────
   const flatFromBlocks = useWorkoutFlatten(workout);
+  const hydratedMovements = useMovementHydrate(flatFromBlocks);
   const [flatOverride, setFlatOverride] = useState<any[] | null>(null);
-  const flatMovements = flatOverride || flatFromBlocks;
+  const flatMovements = flatOverride || hydratedMovements;
 
   const timer = useWorkoutTimer({ flatMovements });
 
@@ -81,10 +87,10 @@ export default function WorkoutPlayer({
   useWakeLock(phase !== 'ready' && phase !== 'complete');
   useMediaPrefetch(flatMovements, currentIndex, phase === 'work' || phase === 'countdown', phase === 'rest');
 
-  //  // ── TTS for movement names (Suggestion 1) ──────────────────────
+  //  // ── TTS for movement names ──────────────────────
   const { isTTSAvailable } = useWorkoutTTS({ phase, current, next, isMuted: isAudioMuted() });
 
-  // ── Movement swap (Suggestion 7) ─────────────────────────────
+  // ── Movement swap ─────────────────────────────
   const {
     showSwap, alternatives, loadingAlts,
     openSwap, closeSwap, swapMovement, getSwapLog,
@@ -92,8 +98,6 @@ export default function WorkoutPlayer({
   const [swapReason, setSwapReason] = useState('');
 
   // ── Landscape detection for tablets ─────────────────────────────────
-  // R3: Fallback guard — useWindowDimensions may return 0 on some devices
-  // during initial mount. Default to portrait mode if dimensions are invalid.
   const { width: winW, height: winH } = useWindowDimensions();
   const dimsValid = winW > 0 && winH > 0;
   const isLandscape = dimsValid ? winW > winH : false;
@@ -107,7 +111,7 @@ export default function WorkoutPlayer({
     setAudioMuted(n);
   };
 
-  // TTS unavailable visual indicator (Risk 4)
+  // TTS unavailable visual indicator
   const showTTSWarning = !isTTSAvailable && !audioMuted;
 
   // ── Format time ───────────────────────────────────────────────────────
@@ -118,7 +122,6 @@ export default function WorkoutPlayer({
   };
 
   const handleFinish = () => {
-    // Pass swap log to parent before completing
     if (onSwapLog) {
       const swaps = getSwapLog();
       if (swaps.length > 0) onSwapLog(swaps);
@@ -162,7 +165,11 @@ export default function WorkoutPlayer({
         {/* ── READY state ─────────────────────────────────────── */}
         {phase === 'ready' && (
           <View style={st.centerContent}>
-            <Icon name="workouts" size={64} color="#F5A623" />
+            <Image
+              source={require('../assets/logo.png')}
+              style={st.readyLogo}
+              resizeMode="contain"
+            />
             <Text style={st.readyTitle}>{workout?.name ?? 'Workout'}</Text>
             <Text style={st.readyMeta}>
               {total} movement{total !== 1 ? 's' : ''} ·{' '}
@@ -187,145 +194,101 @@ export default function WorkoutPlayer({
           </View>
         )}
 
-            {/* ── WORK state ──────────────────────────────────── */}
+        {/* ── WORK state — Immersive full-screen video ──────── */}
         {phase === 'work' && current && (
-          <View style={[
-            st.centerContent,
-            isLandscape && isTablet && { flexDirection: 'row', alignItems: 'flex-start', paddingTop: 24 },
-          ]}>
-            {/* Left column in landscape: media + cues */}
-            {isLandscape && isTablet ? (
-              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-                {current.videoUrl ? (
-                  <View style={[st.mediaWrap, { width: 320, height: 400 }]}>
-                    <MovementVideoControls
-                      uri={current.videoUrl}
-                      posterUri={current.thumbnailUrl || undefined}
-                      aspectRatio={4 / 5}
-                      autoPlay={!isPaused}
-                      showControls={isPaused}
-                      cropScale={current.cropScale ?? 1}
-                      cropTranslateX={current.cropTranslateX ?? 0}
-                      cropTranslateY={current.cropTranslateY ?? 0}
-                    />
-                  </View>
-                ) : current.thumbnailUrl ? (
-                  <View style={[st.mediaWrap, { width: 320, height: 400 }]}>
-                    <Image
-                      source={{ uri: current.thumbnailUrl }}
-                      style={st.mediaThumbnail}
-                      resizeMode="cover"
-                    />
-                  </View>
-                ) : null}
-                {current.coachingCues && current.coachingCues !== current.description ? (
-                  <View style={[st.cuesBox, { maxWidth: 320 }]}>
-                    <Text style={st.cuesBoxLabel}>COACHING CUES</Text>
-                    <Text style={st.cuesBoxText} numberOfLines={5}>{current.coachingCues}</Text>
-                  </View>
-                ) : null}
-              </View>
-            ) : null}
-
-            {/* Right column (or full column in portrait) */}
-            <View style={isLandscape && isTablet ? { flex: 1, alignItems: 'center', justifyContent: 'center' } : undefined}>
-            <Text style={st.blockLabel}>{current.blockName}</Text>
-
-            {/* Movement media — muted looping video or thumbnail (portrait only) */}
-            {!(isLandscape && isTablet) && (current.videoUrl ? (
-              <View style={st.mediaWrap}>
-                <MovementVideoControls
-                  uri={current.videoUrl}
-                  posterUri={current.thumbnailUrl || undefined}
-                  aspectRatio={4 / 5}
-                  autoPlay={!isPaused}
-                  showControls={isPaused}
-                  cropScale={current.cropScale ?? 1}
-                  cropTranslateX={current.cropTranslateX ?? 0}
-                  cropTranslateY={current.cropTranslateY ?? 0}
+          <View style={st.immersiveContainer}>
+            {/* Full-screen video background */}
+            {current.videoUrl ? (
+              <View style={StyleSheet.absoluteFill}>
+                <Video
+                  source={{ uri: current.videoUrl }}
+                  posterSource={current.thumbnailUrl ? { uri: current.thumbnailUrl } : undefined}
+                  usePoster={!!current.thumbnailUrl}
+                  posterStyle={{ resizeMode: 'cover' } as any}
+                  resizeMode={ResizeMode.COVER}
+                  isLooping
+                  shouldPlay={!isPaused}
+                  isMuted
+                  style={[
+                    StyleSheet.absoluteFill,
+                    (current.cropScale && current.cropScale !== 1) || current.cropTranslateX || current.cropTranslateY
+                      ? {
+                          transform: [
+                            { scale: current.cropScale ?? 1 },
+                            { translateX: current.cropTranslateX ?? 0 },
+                            { translateY: current.cropTranslateY ?? 0 },
+                          ],
+                        }
+                      : undefined,
+                  ].filter(Boolean) as any}
+                  videoStyle={
+                    Platform.OS === 'web'
+                      ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
+                      : undefined
+                  }
                 />
               </View>
             ) : current.thumbnailUrl ? (
-              <View style={st.mediaWrap}>
-                <Image
-                  source={{ uri: current.thumbnailUrl }}
-                  style={[st.mediaThumbnail, { aspectRatio: 4 / 5 }]}
-                  resizeMode="cover"
-                />
-              </View>
-            ) : null)}
-
-            <Text style={[st.movementName, isLandscape && isTablet && { fontSize: 36 }]}>{current.name}</Text>
-            {current.swapSides && (
-              <View style={st.sideBadge}>
-                <Text style={st.sideBadgeText}>
-                  {swapSide === 'L' ? 'LEFT SIDE' : 'RIGHT SIDE'}
-                </Text>
-              </View>
-            )}
-            {current.description ? (
-              <Text style={st.cues} numberOfLines={2}>{current.description}</Text>
-            ) : null}
-            {/* Show coaching cues in portrait only (landscape shows them in left column) */}
-            {!(isLandscape && isTablet) && current.coachingCues && current.coachingCues !== current.description ? (
-              <View style={st.cuesBox}>
-                <Text style={st.cuesBoxLabel}>COACHING CUES</Text>
-                <Text style={st.cuesBoxText} numberOfLines={3}>{current.coachingCues}</Text>
-              </View>
-            ) : null}
-            {/* S8: Contraindication warning */}
-            {current.contraindications ? (
-              <View style={st.contraBanner}>
-                <Icon name="alert" size={14} color="#F59E0B" />
-                <Text style={st.contraText} numberOfLines={2}>{current.contraindications}</Text>
-              </View>
-            ) : null}
-            {/* Regression / Progression hints */}
-            {(current.regression || current.progression) ? (
-              <View style={st.regProgRow}>
-                {current.regression ? (
-                  <View style={st.regProgChip}>
-                    <Icon name="arrow-down" size={12} color="#34D399" />
-                    <Text style={st.regProgLabel}>Easier: </Text>
-                    <Text style={st.regProgText} numberOfLines={1}>{current.regression}</Text>
-                  </View>
-                ) : null}
-                {current.progression ? (
-                  <View style={st.regProgChip}>
-                    <Icon name="arrow-up" size={12} color="#F5A623" />
-                    <Text style={st.regProgLabel}>Harder: </Text>
-                    <Text style={st.regProgText} numberOfLines={1}>{current.progression}</Text>
-                  </View>
-                ) : null}
-              </View>
-            ) : (
-              /* R6: Empty-state hint when no regression/progression data */
-              <Text style={st.regProgEmpty}>Tap swap to find easier or harder alternatives</Text>
-            )}
-            {current.reps ? (
-              <Text style={st.repsText}>{current.reps} reps</Text>
+              <Image
+                source={{ uri: current.thumbnailUrl }}
+                style={[StyleSheet.absoluteFill, { opacity: 0.7 }]}
+                resizeMode="cover"
+              />
             ) : null}
 
-            {isRepBased ? (
-              /* Rep-based mode: large Done button instead of timer */
-              <>
-                <TouchableOpacity style={st.repDoneBtn} onPress={handleRepDone}>
-                  <Icon name="check" size={36} color="#0E1117" />
-                  <Text style={st.repDoneBtnText}>Done</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={st.skipBtn} onPress={handleSkip}>
-                  <Icon name="skip-forward" size={24} color="#F5A623" />
-                  <Text style={st.skipText}>Skip</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              /* Timer-based mode: countdown ring + pause/skip */
-              <>
-                <View style={st.timerRing}>
-                  <Text style={st.timerNum}>{formatTime(timeLeft)}</Text>
-                  <Text style={st.timerSub}>seconds</Text>
+            {/* Dark gradient overlay for readability */}
+            <View style={st.videoOverlay} />
+
+            {/* Overlay content */}
+            <View style={st.overlayContent}>
+              {/* GoArrive logo at top */}
+              <Image
+                source={require('../assets/logo.png')}
+                style={st.immersiveLogo}
+                resizeMode="contain"
+              />
+
+              {/* Movement name + timer row */}
+              <View style={st.nameTimerRow}>
+                <View style={st.nameColumn}>
+                  <Text style={st.immersiveMovementName} numberOfLines={2}>
+                    {current.name}
+                  </Text>
+                  {current.reps ? (
+                    <Text style={st.immersiveReps}>{current.reps} reps</Text>
+                  ) : null}
                 </View>
-                <View style={st.controls}>
+                {!isRepBased && (
+                  <Text style={st.immersiveTimer}>{formatTime(timeLeft)}</Text>
+                )}
+              </View>
+
+              {/* Side badge */}
+              {current.swapSides && (
+                <View style={st.sideBadge}>
+                  <Text style={st.sideBadgeText}>
+                    {swapSide === 'L' ? 'LEFT SIDE' : 'RIGHT SIDE'}
+                  </Text>
+                </View>
+              )}
+
+              {/* Video fills the middle — spacer pushes controls to bottom */}
+              <View style={{ flex: 1 }} />
+
+              {/* Controls at bottom */}
+              {isRepBased ? (
+                <View style={st.immersiveControls}>
+                  <TouchableOpacity style={st.repDoneBtn} onPress={handleRepDone}>
+                    <Icon name="check" size={36} color="#0E1117" />
+                    <Text style={st.repDoneBtnText}>Done</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={st.skipBtn} onPress={handleSkip}>
+                    <Icon name="skip-forward" size={24} color="#F5A623" />
+                    <Text style={st.skipText}>Skip</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={st.immersiveControls}>
                   <TouchableOpacity style={st.controlBtn} onPress={handlePauseResume}>
                     <Icon name={isPaused ? 'play' : 'pause'} size={32} color="#0E1117" />
                   </TouchableOpacity>
@@ -334,39 +297,36 @@ export default function WorkoutPlayer({
                     <Text style={st.skipText}>Skip</Text>
                   </TouchableOpacity>
                 </View>
-              </>
-            )}
+              )}
 
-            {/* Swap movement button */}
-            {phase === 'work' && (
+              {/* Swap movement button */}
               <TouchableOpacity style={st.swapBtn} onPress={openSwap}>
                 <Icon name="refresh-cw" size={16} color="#F5A623" />
                 <Text style={st.swapBtnText}>Swap Movement</Text>
               </TouchableOpacity>
-            )}
 
-            {/* Next up preview */}
-            {next && (
-              <View style={st.nextUpBar}>
-                <Text style={st.nextUpLabel}>NEXT UP</Text>
-                <View style={st.nextUpContent}>
-                  {next.thumbnailUrl ? (
-                    <Image
-                      source={{ uri: next.thumbnailUrl }}
-                      style={st.nextUpThumb}
-                      resizeMode="cover"
-                    />
-                  ) : null}
-                  <View style={st.nextUpInfo}>
-                    <Text style={st.nextUpName} numberOfLines={1}>{next.name}</Text>
-                    <Text style={st.nextUpMeta}>
-                      {next.blockName}{next.duration ? ` · ${next.duration}s` : ''}
-                    </Text>
+              {/* Next up preview */}
+              {next && (
+                <View style={st.nextUpBar}>
+                  <Text style={st.nextUpLabel}>NEXT UP</Text>
+                  <View style={st.nextUpContent}>
+                    {next.thumbnailUrl ? (
+                      <Image
+                        source={{ uri: next.thumbnailUrl }}
+                        style={st.nextUpThumb}
+                        resizeMode="cover"
+                      />
+                    ) : null}
+                    <View style={st.nextUpInfo}>
+                      <Text style={st.nextUpName} numberOfLines={1}>{next.name}</Text>
+                      <Text style={st.nextUpMeta}>
+                        {next.blockName}{next.duration ? ` · ${next.duration}s` : ''}
+                      </Text>
+                    </View>
                   </View>
                 </View>
-              </View>
-            )}
-            </View>{/* Close portrait/right column wrapper */}
+              )}
+            </View>
           </View>
         )}
 
@@ -521,7 +481,7 @@ const st = StyleSheet.create({
     borderRadius: 2,
   },
 
-  // Center content area
+  // Center content area (used for ready, countdown, rest, swap, complete)
   centerContent: {
     flex: 1,
     justifyContent: 'center',
@@ -531,6 +491,11 @@ const st = StyleSheet.create({
   },
 
   // Ready
+  readyLogo: {
+    width: 180,
+    height: 60,
+    marginBottom: 16,
+  },
   readyTitle: {
     fontSize: 28,
     fontWeight: '700',
@@ -579,6 +544,76 @@ const st = StyleSheet.create({
     fontFamily: FB,
     marginBottom: 8,
   },
+
+  // ── Immersive WORK phase ────────────────────────────────────────────
+  immersiveContainer: {
+    flex: 1,
+    position: 'relative',
+  },
+  videoOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  overlayContent: {
+    ...StyleSheet.absoluteFillObject,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: Platform.select({ ios: 34, android: 24, web: 24, default: 24 }),
+  },
+  immersiveLogo: {
+    width: 140,
+    height: 44,
+    alignSelf: 'center',
+    marginBottom: 12,
+  },
+  nameTimerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  nameColumn: {
+    flex: 1,
+    marginRight: 16,
+  },
+  immersiveMovementName: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    fontFamily: FH,
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 6,
+  },
+  immersiveReps: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#F5A623',
+    fontFamily: FH,
+    marginTop: 4,
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  immersiveTimer: {
+    fontSize: 72,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    fontFamily: FH,
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 8,
+    lineHeight: 80,
+  },
+  immersiveControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 24,
+    marginBottom: 8,
+  },
+
+  // Legacy media wrap (kept for potential future use)
   mediaWrap: {
     width: Math.min(SCREEN_W * 0.6, 240),
     height: Math.min(SCREEN_W * 0.45, 180),
@@ -652,6 +687,7 @@ const st = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(245,166,35,0.3)',
     marginBottom: 12,
+    alignSelf: 'center',
   },
   sideBadgeText: {
     fontSize: 14,
@@ -750,16 +786,17 @@ const st = StyleSheet.create({
 
   // Next up
   nextUpBar: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 20,
-    marginTop: 20,
+    marginTop: 12,
     alignItems: 'center',
     width: '100%',
     maxWidth: 320,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: 'rgba(255,255,255,0.1)',
+    alignSelf: 'center',
   },
   nextUpLabel: {
     fontSize: 11,
@@ -892,7 +929,7 @@ const st = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#2A3347',
+    borderColor: 'rgba(255,255,255,0.2)',
     marginTop: 8,
   },
   swapBtnText: {

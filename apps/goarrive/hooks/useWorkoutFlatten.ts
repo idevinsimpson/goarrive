@@ -31,6 +31,8 @@ export interface FlatMovement {
   videoUrl?: string;
   thumbnailUrl?: string;
   coachingCues?: string;
+  /** Firestore movement document ID for hydration */
+  movementId?: string;
   /** Label shown in player (e.g., "A1", "A2" for supersets) */
   supersetLabel?: string;
   /** The block pattern type for UI display */
@@ -103,10 +105,10 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
             }
 
             flat.push({
-              name: mv.name || 'Movement',
+              name: mv.movementName || mv.name || 'Movement',
               duration: mv.duration || mv.workSec || 30,
               restAfter,
-              blockName: block.name || `Block ${bi + 1}`,
+              blockName: block.name || block.label || `Block ${bi + 1}`,
               blockIndex: bi,
               movementIndex: mi,
               swapSides: mv.swapSides ?? false,
@@ -116,6 +118,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               videoUrl: mv.videoUrl || mv.mediaUrl || '',
               thumbnailUrl: mv.thumbnailUrl || '',
               coachingCues: mv.coachingCues || '',
+              movementId: mv.movementId || '',
               supersetLabel: makeLabel(bi, mi),
               blockType: bType,
               cropScale: mv.cropScale ?? 1,
@@ -131,10 +134,10 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
             const isLastInBlock =
               setNum === rounds - 1 && mi === movements.length - 1;
             flat.push({
-              name: mv.name || 'Movement',
+              name: mv.movementName || mv.name || 'Movement',
               duration: mv.duration || mv.workSec || 30,
               restAfter: isLastInBlock ? 0 : calculateAdjustedRest(mv, block, workoutDifficulty),
-              blockName: block.name || `Block ${bi + 1}`,
+              blockName: block.name || block.label || `Block ${bi + 1}`,
               blockIndex: bi,
               movementIndex: mi,
               swapSides: mv.swapSides ?? false,
@@ -144,6 +147,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               videoUrl: mv.videoUrl || mv.mediaUrl || '',
               thumbnailUrl: mv.thumbnailUrl || '',
               coachingCues: mv.coachingCues || '',
+              movementId: mv.movementId || '',
               blockType: 'linear',
               cropScale: mv.cropScale ?? 1,
               cropTranslateX: mv.cropTranslateX ?? 0,
