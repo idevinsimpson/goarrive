@@ -1,34 +1,24 @@
 /**
- * WorkoutPlayer — Full-screen immersive workout execution engine
+ * WorkoutPlayer — Coach-in-your-pocket workout execution engine
  *
- * Enhanced with:
- * - Full-screen video background during WORK phase
- * - GoArrive logo at the top
- * - Movement name + large countdown timer overlay
- * - Next-up preview bar
- * - Rest period handling between movements
- * - Swap sides support (L/R indicator)
- * - Progress bar (movements completed / total)
- * - Completion screen before triggering onComplete
- * - Distinct audio cues per phase transition
- * - Haptic feedback
- * - Wake lock to prevent screen sleep
- * - Landscape tablet layout
- * - Rep-based mode (Done button instead of timer)
- * - Media playback (video/image) with prefetching
- * - Mute toggle
- * - Movement hydration from Firestore (videoUrl, thumbnailUrl)
+ * Layout (WORK phase):
+ *   - GoArrive logo centered at top (on black background)
+ *   - Movement name (left) + countdown timer (right) on same row (on black)
+ *   - Video in the middle with small side margins (contained, NOT full-screen)
+ *   - Controls (pause, skip, swap) hidden by default — appear on video tap, auto-hide after 3s
+ *   - NEXT UP bar at the bottom (below video, on black)
  *
  * Decomposed into hooks: useWorkoutFlatten, useWorkoutTimer, useMediaPrefetch, useMovementHydrate
  * Follows GoArrive design system: #0E1117 bg, #F5A623 gold accent.
  */
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Modal,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   Platform,
   Dimensions,
   Image,
@@ -87,7 +77,7 @@ export default function WorkoutPlayer({
   useWakeLock(phase !== 'ready' && phase !== 'complete');
   useMediaPrefetch(flatMovements, currentIndex, phase === 'work' || phase === 'countdown', phase === 'rest');
 
-  //  // ── TTS for movement names ──────────────────────
+  // ── TTS for movement names ──────────────────────
   const { isTTSAvailable } = useWorkoutTTS({ phase, current, next, isMuted: isAudioMuted() });
 
   // ── Movement swap ─────────────────────────────
@@ -103,7 +93,7 @@ export default function WorkoutPlayer({
   const isLandscape = dimsValid ? winW > winH : false;
   const isTablet = dimsValid ? Math.min(winW, winH) >= 600 : false;
 
-    // ── Audio mute toggle ─────────────────────────────────────────────
+  // ── Audio mute toggle ─────────────────────────────────────────────
   const [audioMuted, setAudioMutedState] = useState(isAudioMuted());
   const toggleMute = () => {
     const n = !audioMuted;
@@ -113,6 +103,28 @@ export default function WorkoutPlayer({
 
   // TTS unavailable visual indicator
   const showTTSWarning = !isTTSAvailable && !audioMuted;
+
+  // ── Tap-to-show controls ──────────────────────────────────────────
+  const [showControls, setShowControls] = useState(false);
+  const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleVideoTap = useCallback(() => {
+    setShowControls(true);
+    if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+    controlsTimerRef.current = setTimeout(() => setShowControls(false), 3000);
+  }, []);
+
+  // Hide controls when movement changes
+  useEffect(() => {
+    setShowControls(false);
+  }, [currentIndex]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+    };
+  }, []);
 
   // ── Format time ───────────────────────────────────────────────────────
   const formatTime = (sec: number): string => {
@@ -194,139 +206,140 @@ export default function WorkoutPlayer({
           </View>
         )}
 
-        {/* ── WORK state — Immersive full-screen video ──────── */}
+        {/* ── WORK state — Stacked layout ──────────────────── */}
         {phase === 'work' && current && (
-          <View style={st.immersiveContainer}>
-            {/* Full-screen video background */}
-            {current.videoUrl ? (
-              <View style={StyleSheet.absoluteFill}>
-                <Video
-                  source={{ uri: current.videoUrl }}
-                  posterSource={current.thumbnailUrl ? { uri: current.thumbnailUrl } : undefined}
-                  usePoster={!!current.thumbnailUrl}
-                  posterStyle={{ resizeMode: 'cover' } as any}
-                  resizeMode={ResizeMode.COVER}
-                  isLooping
-                  shouldPlay={!isPaused}
-                  isMuted
-                  style={[
-                    StyleSheet.absoluteFill,
-                    (current.cropScale && current.cropScale !== 1) || current.cropTranslateX || current.cropTranslateY
-                      ? {
-                          transform: [
-                            { scale: current.cropScale ?? 1 },
-                            { translateX: current.cropTranslateX ?? 0 },
-                            { translateY: current.cropTranslateY ?? 0 },
-                          ],
-                        }
-                      : undefined,
-                  ].filter(Boolean) as any}
-                  videoStyle={
-                    Platform.OS === 'web'
-                      ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
-                      : undefined
-                  }
-                />
+          <View style={st.workContainer}>
+            {/* GoArrive logo — centered above video */}
+            <Image
+              source={require('../assets/logo.png')}
+              style={st.workLogo}
+              resizeMode="contain"
+            />
+
+            {/* Movement name (left) + Timer (right) — above video */}
+            <View style={st.nameTimerRow}>
+              <View style={st.nameColumn}>
+                <Text style={st.workMovementName} numberOfLines={2}>
+                  {current.name}
+                </Text>
+                {current.reps ? (
+                  <Text style={st.workReps}>{current.reps} reps</Text>
+                ) : null}
               </View>
-            ) : current.thumbnailUrl ? (
-              <Image
-                source={{ uri: current.thumbnailUrl }}
-                style={[StyleSheet.absoluteFill, { opacity: 0.7 }]}
-                resizeMode="cover"
-              />
-            ) : null}
+              {!isRepBased ? (
+                <Text style={st.workTimer}>{formatTime(timeLeft)}</Text>
+              ) : null}
+            </View>
 
-            {/* Dark gradient overlay for readability */}
-            <View style={st.videoOverlay} />
-
-            {/* Overlay content */}
-            <View style={st.overlayContent}>
-              {/* GoArrive logo at top */}
-              <Image
-                source={require('../assets/logo.png')}
-                style={st.immersiveLogo}
-                resizeMode="contain"
-              />
-
-              {/* Movement name + timer row */}
-              <View style={st.nameTimerRow}>
-                <View style={st.nameColumn}>
-                  <Text style={st.immersiveMovementName} numberOfLines={2}>
-                    {current.name}
-                  </Text>
-                  {current.reps ? (
-                    <Text style={st.immersiveReps}>{current.reps} reps</Text>
-                  ) : null}
-                </View>
-                {!isRepBased && (
-                  <Text style={st.immersiveTimer}>{formatTime(timeLeft)}</Text>
-                )}
-              </View>
-
-              {/* Side badge */}
-              {current.swapSides && (
+            {/* Side badge */}
+            {current.swapSides && (
+              <View style={st.sideBadgeRow}>
                 <View style={st.sideBadge}>
                   <Text style={st.sideBadgeText}>
                     {swapSide === 'L' ? 'LEFT SIDE' : 'RIGHT SIDE'}
                   </Text>
                 </View>
-              )}
+              </View>
+            )}
 
-              {/* Video fills the middle — spacer pushes controls to bottom */}
-              <View style={{ flex: 1 }} />
-
-              {/* Controls at bottom */}
-              {isRepBased ? (
-                <View style={st.immersiveControls}>
-                  <TouchableOpacity style={st.repDoneBtn} onPress={handleRepDone}>
-                    <Icon name="check" size={36} color="#0E1117" />
-                    <Text style={st.repDoneBtnText}>Done</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={st.skipBtn} onPress={handleSkip}>
-                    <Icon name="skip-forward" size={24} color="#F5A623" />
-                    <Text style={st.skipText}>Skip</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <View style={st.immersiveControls}>
-                  <TouchableOpacity style={st.controlBtn} onPress={handlePauseResume}>
-                    <Icon name={isPaused ? 'play' : 'pause'} size={32} color="#0E1117" />
-                  </TouchableOpacity>
-                  <TouchableOpacity style={st.skipBtn} onPress={handleSkip}>
-                    <Icon name="skip-forward" size={24} color="#F5A623" />
-                    <Text style={st.skipText}>Skip</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {/* Swap movement button */}
-              <TouchableOpacity style={st.swapBtn} onPress={openSwap}>
-                <Icon name="refresh-cw" size={16} color="#F5A623" />
-                <Text style={st.swapBtnText}>Swap Movement</Text>
-              </TouchableOpacity>
-
-              {/* Next up preview */}
-              {next && (
-                <View style={st.nextUpBar}>
-                  <Text style={st.nextUpLabel}>NEXT UP</Text>
-                  <View style={st.nextUpContent}>
-                    {next.thumbnailUrl ? (
-                      <Image
-                        source={{ uri: next.thumbnailUrl }}
-                        style={st.nextUpThumb}
-                        resizeMode="cover"
-                      />
-                    ) : null}
-                    <View style={st.nextUpInfo}>
-                      <Text style={st.nextUpName} numberOfLines={1}>{next.name}</Text>
-                      <Text style={st.nextUpMeta}>
-                        {next.blockName}{next.duration ? ` · ${next.duration}s` : ''}
-                      </Text>
+            {/* Video — contained with small side margins */}
+            <View style={st.videoArea}>
+              <TouchableWithoutFeedback onPress={handleVideoTap}>
+                <View style={st.videoInner}>
+                  {current.videoUrl ? (
+                    <Video
+                      source={{ uri: current.videoUrl }}
+                      posterSource={current.thumbnailUrl ? { uri: current.thumbnailUrl } : undefined}
+                      usePoster={!!current.thumbnailUrl}
+                      posterStyle={{ resizeMode: 'cover' } as any}
+                      resizeMode={ResizeMode.CONTAIN}
+                      isLooping
+                      shouldPlay={!isPaused}
+                      isMuted
+                      style={st.videoPlayer}
+                      videoStyle={
+                        Platform.OS === 'web'
+                          ? ({ width: '100%', height: '100%', objectFit: 'contain' } as any)
+                          : undefined
+                      }
+                    />
+                  ) : current.thumbnailUrl ? (
+                    <Image
+                      source={{ uri: current.thumbnailUrl }}
+                      style={st.videoPlayer}
+                      resizeMode="contain"
+                    />
+                  ) : (
+                    <View style={[st.videoPlayer, st.videoPlaceholder]}>
+                      <Icon name="play-circle" size={48} color="#3A4050" />
                     </View>
+                  )}
+
+                  {/* Transparent tap interceptor — catches taps that video element would swallow on web */}
+                  {!showControls && (
+                    <TouchableOpacity
+                      style={st.tapInterceptor}
+                      onPress={handleVideoTap}
+                      activeOpacity={1}
+                    />
+                  )}
+
+                  {/* Controls overlay — only visible on tap */}
+                  {showControls && (
+                    <View style={st.controlsOverlay}>
+                      {isRepBased ? (
+                        <View style={st.overlayControls}>
+                          <TouchableOpacity style={st.overlayDoneBtn} onPress={handleRepDone}>
+                            <Icon name="check" size={28} color="#0E1117" />
+                            <Text style={st.overlayDoneBtnText}>Done</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity style={st.overlaySkipBtn} onPress={handleSkip}>
+                            <Icon name="skip-forward" size={20} color="#F5A623" />
+                            <Text style={st.overlaySkipText}>Skip</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <View style={st.overlayControls}>
+                          <TouchableOpacity style={st.overlayPauseBtn} onPress={handlePauseResume}>
+                            <Icon name={isPaused ? 'play' : 'pause'} size={28} color="#0E1117" />
+                          </TouchableOpacity>
+                          <TouchableOpacity style={st.overlaySkipBtn} onPress={handleSkip}>
+                            <Icon name="skip-forward" size={20} color="#F5A623" />
+                            <Text style={st.overlaySkipText}>Skip</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                      <TouchableOpacity style={st.overlaySwapBtn} onPress={openSwap}>
+                        <Icon name="refresh-cw" size={14} color="#F5A623" />
+                        <Text style={st.overlaySwapText}>Swap Movement</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+
+            {/* NEXT UP bar — below the video */}
+            {next && (
+              <View style={st.nextUpBar}>
+                <Text style={st.nextUpLabel}>NEXT UP</Text>
+                <View style={st.nextUpContent}>
+                  {next.thumbnailUrl ? (
+                    <Image
+                      source={{ uri: next.thumbnailUrl }}
+                      style={st.nextUpThumb}
+                      resizeMode="cover"
+                    />
+                  ) : null}
+                  <View style={st.nextUpInfo}>
+                    <Text style={st.nextUpName} numberOfLines={1}>{next.name}</Text>
+                    <Text style={st.nextUpMeta}>
+                      {next.blockName}{next.duration ? ` · ${next.duration}s` : ''}
+                    </Text>
                   </View>
                 </View>
-              )}
-            </View>
+              </View>
+            )}
           </View>
         )}
 
@@ -545,92 +558,152 @@ const st = StyleSheet.create({
     marginBottom: 8,
   },
 
-  // ── Immersive WORK phase ────────────────────────────────────────────
-  immersiveContainer: {
+  // ── WORK phase — Stacked layout ────────────────────────────────────
+  workContainer: {
     flex: 1,
-    position: 'relative',
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: Platform.select({ ios: 34, android: 16, web: 16, default: 16 }),
   },
-  videoOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  overlayContent: {
-    ...StyleSheet.absoluteFillObject,
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: Platform.select({ ios: 34, android: 24, web: 24, default: 24 }),
-  },
-  immersiveLogo: {
-    width: 140,
-    height: 44,
+  workLogo: {
+    width: 200,
+    height: 56,
     alignSelf: 'center',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   nameTimerRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
+    paddingHorizontal: 4,
     marginBottom: 8,
   },
   nameColumn: {
     flex: 1,
-    marginRight: 16,
+    marginRight: 12,
   },
-  immersiveMovementName: {
-    fontSize: 28,
+  workMovementName: {
+    fontSize: 26,
     fontWeight: '700',
     color: '#FFFFFF',
     fontFamily: FH,
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 6,
   },
-  immersiveReps: {
-    fontSize: 18,
+  workReps: {
+    fontSize: 17,
     fontWeight: '600',
     color: '#F5A623',
     fontFamily: FH,
-    marginTop: 4,
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
+    marginTop: 2,
   },
-  immersiveTimer: {
-    fontSize: 72,
+  workTimer: {
+    fontSize: 80,
     fontWeight: '700',
     color: '#FFFFFF',
     fontFamily: FH,
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 8,
     lineHeight: 80,
   },
-  immersiveControls: {
-    flexDirection: 'row',
+  sideBadgeRow: {
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 24,
-    marginBottom: 8,
+    marginBottom: 4,
   },
 
-  // Legacy media wrap (kept for potential future use)
-  mediaWrap: {
-    width: Math.min(SCREEN_W * 0.6, 240),
-    height: Math.min(SCREEN_W * 0.45, 180),
-    borderRadius: 12,
+  // Video area — contained with margins
+  videoArea: {
+    flex: 1,
+    marginHorizontal: 0,
+    marginTop: 4,
+    borderRadius: 8,
     overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    marginBottom: 12,
-    alignSelf: 'center',
+    backgroundColor: '#000000',
   },
-  mediaVideo: {
+  videoInner: {
+    flex: 1,
+    position: 'relative',
+  },
+  videoPlayer: {
     width: '100%',
     height: '100%',
   },
-  mediaThumbnail: {
-    width: '100%',
-    height: '100%',
+  videoPlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#1A1E26',
   },
+
+  // Transparent tap interceptor
+  tapInterceptor: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'transparent',
+    zIndex: 10,
+  } as any,
+
+  // Controls overlay — appears on video tap
+  controlsOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  overlayControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 24,
+  },
+  overlayPauseBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#F5A623',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  overlayDoneBtn: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#6EBB7A',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  overlayDoneBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0E1117',
+    fontFamily: FH,
+    marginTop: 2,
+  },
+  overlaySkipBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  overlaySkipText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#F5A623',
+    fontFamily: FH,
+  },
+  overlaySwapBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.4)',
+    marginTop: 16,
+  },
+  overlaySwapText: {
+    fontSize: 13,
+    color: '#F5A623',
+    fontFamily: FB,
+    fontWeight: '600',
+  },
+
+  // Legacy styles kept for other phases
   movementName: {
     fontSize: 32,
     fontWeight: '700',
@@ -646,31 +719,6 @@ const st = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 8,
     lineHeight: 20,
-  },
-  cuesBox: {
-    backgroundColor: 'rgba(245,166,35,0.08)',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    marginTop: 4,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(245,166,35,0.15)',
-    maxWidth: '90%',
-  },
-  cuesBoxLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#F5A623',
-    fontFamily: FH,
-    letterSpacing: 1,
-    marginBottom: 4,
-  },
-  cuesBoxText: {
-    fontSize: 13,
-    color: '#C8CED6',
-    fontFamily: FB,
-    lineHeight: 18,
   },
   repsText: {
     fontSize: 16,
@@ -739,7 +787,7 @@ const st = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // Controls
+  // Controls (used in REST phase)
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -788,12 +836,11 @@ const st = StyleSheet.create({
   nextUpBar: {
     backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    marginTop: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginTop: 10,
     alignItems: 'center',
     width: '100%',
-    maxWidth: 320,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
     alignSelf: 'center',
@@ -865,61 +912,7 @@ const st = StyleSheet.create({
     fontFamily: FB,
     fontWeight: '600',
   },
-  // ── Swap button ─────────────────────────────────────────────────
-  contraBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(245,158,11,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(245,158,11,0.3)',
-    borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    marginTop: 6,
-  },
-  contraText: {
-    flex: 1,
-    fontSize: 13,
-    color: '#F59E0B',
-    fontFamily: FB,
-  },
-  regProgEmpty: {
-    fontSize: 12,
-    color: '#555D6B',
-    fontFamily: FB,
-    fontStyle: 'italic',
-    textAlign: 'center',
-    marginTop: 4,
-  },
-  regProgRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 8,
-    marginTop: 6,
-    marginBottom: 4,
-  },
-  regProgChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  regProgLabel: {
-    fontFamily: FB,
-    fontSize: 11,
-    color: '#8A95A3',
-    marginLeft: 4,
-  },
-  regProgText: {
-    fontFamily: FB,
-    fontSize: 11,
-    color: '#FFFFFF',
-    maxWidth: 120,
-  },
+  // ── Swap button (legacy — kept for non-WORK phases) ─────────────
   swapBtn: {
     flexDirection: 'row',
     alignItems: 'center',
