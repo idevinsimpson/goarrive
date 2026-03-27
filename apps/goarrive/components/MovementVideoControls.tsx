@@ -24,6 +24,7 @@ import {
 } from 'react-native';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { Icon } from './Icon';
+import { useSeamlessLoop } from '../hooks/useSeamlessLoop';
 
 const FH =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -68,6 +69,11 @@ export default function MovementVideoControls({
 }: MovementVideoControlsProps) {
   const videoRef = useRef<Video>(null);
   const containerRef = useRef<View>(null);
+
+  // ── Seamless looping (web only) ─────────────────────────────────────
+  // Eliminates the pause/gap at loop transitions by using a dual-video
+  // swap technique. On native platforms, expo-av's built-in loop is fine.
+  useSeamlessLoop(containerRef, uri, cropScale, cropTranslateX, cropTranslateY);
 
   // ── Bulletproof 4:5 sizing via onLayout ──────────────────────────────
   // We measure the container's actual rendered width, then compute
@@ -246,6 +252,11 @@ export default function MovementVideoControls({
             shouldPlay={autoPlay}
             isMuted
             style={[st.video, cropTransform]}
+            videoStyle={
+              Platform.OS === 'web'
+                ? ({ width: '100%', height: '100%' } as any)
+                : undefined
+            }
             onPlaybackStatusUpdate={onPlaybackStatusUpdate}
           />
 
