@@ -379,7 +379,7 @@ export default function WorkoutPlayer({
                           <Icon name={isPaused ? 'play' : 'pause'} size={32} color="#0E1117" />
                         </TouchableOpacity>
                       )}
-                      {/* Secondary actions row — below center button */}
+                      {/* Secondary actions — positioned below center via absolute offset */}
                       <View style={st.overlaySecondaryRow}>
                         <TouchableOpacity style={st.overlaySkipBtn} onPress={handleSkip}>
                           <Icon name="skip-forward" size={18} color="#F5A623" />
@@ -768,18 +768,29 @@ const st = StyleSheet.create({
     zIndex: 15,
   } as any,
   overlayCenterBtn: {
+    position: 'absolute' as any,
+    top: '50%' as any,
+    left: '50%' as any,
     width: 72,
     height: 72,
     borderRadius: 36,
     backgroundColor: '#F5A623',
     justifyContent: 'center',
     alignItems: 'center',
+    marginTop: -36,
+    marginLeft: -36,
+    zIndex: 2,
   },
   overlaySecondaryRow: {
+    position: 'absolute' as any,
+    top: '50%' as any,
+    left: 0,
+    right: 0,
+    marginTop: 48,
     flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
     gap: 16,
-    marginTop: 20,
   },
   overlayDoneBtnText: {
     fontSize: 14,
@@ -820,10 +831,9 @@ const st = StyleSheet.create({
 
   // Playback speed button — floats bottom-right of video area
   speedRow: {
-    marginTop: 'auto' as any,
-    alignSelf: 'flex-end' as any,
-    paddingRight: 16,
-    paddingBottom: 16,
+    position: 'absolute' as any,
+    bottom: 16,
+    right: 16,
   },
   speedBtn: {
     backgroundColor: 'rgba(255,255,255,0.22)',
