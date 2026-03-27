@@ -196,6 +196,9 @@ export default function MovementsScreen() {
       mediaUrl: data.mediaUrl ?? null,
       videoUrl: data.videoUrl ?? null,
       thumbnailUrl: data.thumbnailUrl ?? null,
+      cropScale: data.cropScale ?? 1,
+      cropTranslateX: data.cropTranslateX ?? 0,
+      cropTranslateY: data.cropTranslateY ?? 0,
     };
   }, []);
 
@@ -349,15 +352,25 @@ export default function MovementsScreen() {
   // ── Render item for FlatList ───────────────────────────────────────────
   const renderItem = ({ item: m }: { item: MovementDetailData }) => {
     const thumb = m.thumbnailUrl || m.mediaUrl || null;
+    const hasCrop = (m.cropScale ?? 1) !== 1 || (m.cropTranslateX ?? 0) !== 0 || (m.cropTranslateY ?? 0) !== 0;
+    const thumbCropStyle = hasCrop ? {
+      transform: [
+        { scale: m.cropScale ?? 1 },
+        { translateX: m.cropTranslateX ?? 0 },
+        { translateY: m.cropTranslateY ?? 0 },
+      ],
+    } : undefined;
     return (
     <Pressable style={s.card} onPress={() => handleOpenDetail(m)}>
       <View style={s.cardRow}>
         {thumb ? (
-          <Image
-            source={{ uri: thumb }}
-            style={s.cardThumb}
-            resizeMode="cover"
-          />
+          <View style={s.cardThumbWrap}>
+            <Image
+              source={{ uri: thumb }}
+              style={[s.cardThumb, thumbCropStyle]}
+              resizeMode="cover"
+            />
+          </View>
         ) : (
           <View style={s.cardThumbPlaceholder}>
             <Icon name="fitness" size={20} color="#4A5568" />
@@ -785,6 +798,13 @@ const s = StyleSheet.create({
   cardRow: {
     flexDirection: 'row',
     gap: 12,
+  },
+  cardThumbWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#1A2035',
   },
   cardThumb: {
     width: 56,

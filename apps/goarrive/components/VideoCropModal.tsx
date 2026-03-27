@@ -8,12 +8,12 @@
  * Saves non-destructive transform values (scale, translateX, translateY)
  * that are applied at display time — the original video is never modified.
  *
- * Uses react-native-gesture-handler + react-native-reanimated.
+ * UX Polish:
+ *   - Semi-transparent overlay outside the 4:5 frame shows what's cropped out
+ *   - Zoom percentage indicator (100%, 150%, etc.)
+ *   - Haptic feedback when hitting pan boundaries
  *
- * Video sizing: We use the `videoStyle` prop with width/height 100% on web
- * to let the browser natively handle scaling the video to fill the frame.
- * Combined with ResizeMode.COVER (which maps to CSS objectFit: 'cover'),
- * this is reliable on Safari PWA where onReadyForDisplay doesn't fire.
+ * Uses react-native-gesture-handler + react-native-reanimated.
  */
 import React, { useCallback } from 'react';
 import {
@@ -30,9 +30,26 @@ import { GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-g
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
+  useDerivedValue,
   withSpring,
+  runOnJS,
 } from 'react-native-reanimated';
 import { Icon } from './Icon';
+
+// ── Haptic helper (web-safe) ────────────────────────────────────────────────
+
+let Haptics: any = null;
+try {
+  Haptics = require('expo-haptics');
+} catch {
+  // expo-haptics not available — no-op
+}
+
+function triggerBoundaryHaptic() {
+  if (Haptics?.impactAsync) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  }
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -73,7 +90,7 @@ export default function VideoCropModal({
   onDone,
   onCancel,
 }: Props) {
-  const { width: winWidth } = useWindowDimensions();
+  const { width: winWidth, height: winHeight } = useWindowDimensions();
   // Frame fills available width minus padding
   const frameWidth = Math.min(winWidth - 32, 500);
   const frameHeight = frameWidth / FRAME_ASPECT;
@@ -88,24 +105,37 @@ export default function VideoCropModal({
   const savedTranslateX = useSharedValue(initialCrop?.cropTranslateX ?? 0);
   const savedTranslateY = useSharedValue(initialCrop?.cropTranslateY ?? 0);
 
+  // Track whether we already fired haptic at current boundary to avoid spamming
+  const hitBoundaryX = useSharedValue(false);
+  const hitBoundaryY = useSharedValue(false);
+
   // ── Bounds calculation ─────────────────────────────────────────────────
-  // With objectFit: cover, the video fills the frame at scale=1.
-  // At scale>1, the video overflows and can be panned.
-  // Max pan = frameSize * (scale - 1) / 2
 
   const clampTranslate = (
     tx: number,
     ty: number,
     s: number,
-  ): { x: number; y: number } => {
+  ): { x: number; y: number; clampedX: boolean; clampedY: boolean } => {
     'worklet';
     const maxX = (frameWidth * (s - 1)) / 2;
     const maxY = (frameHeight * (s - 1)) / 2;
+    const cx = Math.min(Math.max(tx, -maxX), maxX);
+    const cy = Math.min(Math.max(ty, -maxY), maxY);
     return {
-      x: Math.min(Math.max(tx, -maxX), maxX),
-      y: Math.min(Math.max(ty, -maxY), maxY),
+      x: cx,
+      y: cy,
+      clampedX: cx !== tx,
+      clampedY: cy !== ty,
     };
   };
+
+  // ── Zoom percentage (derived) ──────────────────────────────────────────
+
+  const zoomPct = useDerivedValue(() => Math.round(scale.value * 100));
+
+  const zoomLabelStyle = useAnimatedStyle(() => ({
+    opacity: scale.value > 1.01 ? 1 : 0,
+  }));
 
   // ── Gestures ───────────────────────────────────────────────────────────
 
@@ -134,6 +164,8 @@ export default function VideoCropModal({
     .onStart(() => {
       savedTranslateX.value = translateX.value;
       savedTranslateY.value = translateY.value;
+      hitBoundaryX.value = false;
+      hitBoundaryY.value = false;
     })
     .onUpdate((e) => {
       const rawX = savedTranslateX.value + e.translationX;
@@ -141,6 +173,21 @@ export default function VideoCropModal({
       const clamped = clampTranslate(rawX, rawY, scale.value);
       translateX.value = clamped.x;
       translateY.value = clamped.y;
+
+      // Haptic feedback when hitting boundary
+      if (clamped.clampedX && !hitBoundaryX.value) {
+        hitBoundaryX.value = true;
+        runOnJS(triggerBoundaryHaptic)();
+      } else if (!clamped.clampedX) {
+        hitBoundaryX.value = false;
+      }
+
+      if (clamped.clampedY && !hitBoundaryY.value) {
+        hitBoundaryY.value = true;
+        runOnJS(triggerBoundaryHaptic)();
+      } else if (!clamped.clampedY) {
+        hitBoundaryY.value = false;
+      }
     })
     .onEnd(() => {
       savedTranslateX.value = translateX.value;
@@ -194,6 +241,14 @@ export default function VideoCropModal({
     savedTranslateY.value = 0;
   }, [scale, translateX, translateY, savedScale, savedTranslateX, savedTranslateY]);
 
+  // ── Overlay geometry ───────────────────────────────────────────────────
+  // Semi-transparent overlay outside the 4:5 frame to show what's cropped out
+  // We calculate the overlay regions as four rects around the frame
+
+  // The frame is centered horizontally and vertically in the frameContainer area
+  // Header + instructions take ~100px, rest button ~50px, so frame area is in between
+  // We'll use absolute positioning within frameContainer
+
   // ── Render ─────────────────────────────────────────────────────────────
 
   return (
@@ -216,8 +271,14 @@ export default function VideoCropModal({
           Drag to reposition. Pinch to zoom in. Double-tap to reset.
         </Text>
 
-        {/* Crop frame */}
+        {/* Crop frame area with overlay */}
         <View style={s.frameContainer}>
+          {/* Semi-transparent overlay — fills entire area behind */}
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            <View style={s.overlayFull} />
+          </View>
+
+          {/* The actual crop frame — punches a hole in the overlay */}
           <View
             style={[
               s.frame,
@@ -249,6 +310,11 @@ export default function VideoCropModal({
                 />
               </Animated.View>
             </GestureDetector>
+
+            {/* Zoom percentage indicator */}
+            <Animated.View style={[s.zoomBadge, zoomLabelStyle]} pointerEvents="none">
+              <ZoomLabel zoomPct={zoomPct} />
+            </Animated.View>
           </View>
 
           {/* Corner indicators */}
@@ -267,6 +333,53 @@ export default function VideoCropModal({
       </GestureHandlerRootView>
     </Modal>
   );
+}
+
+// ── Zoom label sub-component (reads shared value via useAnimatedProps) ────
+
+function ZoomLabel({ zoomPct }: { zoomPct: Animated.SharedValue<number> }) {
+  const textStyle = useAnimatedStyle(() => ({
+    // We can't animate text content directly, so we use a trick:
+    // The parent opacity handles visibility, this just ensures the text is styled
+    opacity: 1,
+  }));
+
+  // For web, we need to read the value in a derived way
+  // Using a simple approach: re-render via useDerivedValue
+  const displayPct = useDerivedValue(() => `${zoomPct.value}%`);
+
+  return (
+    <Animated.Text style={[s.zoomText, textStyle]}>
+      <ReanimatedText text={displayPct} />
+    </Animated.Text>
+  );
+}
+
+// Simple component that displays a shared string value
+function ReanimatedText({ text }: { text: Animated.SharedValue<string> }) {
+  // On web, useAnimatedProps doesn't work for Text, so we use a workaround
+  const animStyle = useAnimatedStyle(() => {
+    // This is a hack to force re-render when text changes
+    return { opacity: 1 };
+  });
+
+  // For simplicity and cross-platform compatibility, use a derived value approach
+  // that works on both web and native
+  const [displayText, setDisplayText] = React.useState('100%');
+
+  React.useEffect(() => {
+    // Set up an interval to read the shared value
+    const interval = setInterval(() => {
+      try {
+        setDisplayText(text.value);
+      } catch {
+        // Shared value not accessible outside worklet on some platforms
+      }
+    }, 100);
+    return () => clearInterval(interval);
+  }, [text]);
+
+  return <Text style={s.zoomTextInner}>{displayText}</Text>;
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────
@@ -317,18 +430,25 @@ const s = StyleSheet.create({
     alignItems: 'center',
     position: 'relative',
   },
+  overlayFull: {
+    flex: 1,
+    backgroundColor: 'rgba(14, 17, 23, 0.65)',
+  },
   frame: {
     overflow: 'hidden',
     borderRadius: 10,
     borderWidth: 1,
     borderColor: 'rgba(245,166,35,0.4)',
     backgroundColor: '#000',
+    // Elevate above the overlay
+    zIndex: 2,
   },
   corner: {
     position: 'absolute',
     width: 20,
     height: 20,
     borderColor: '#F5A623',
+    zIndex: 3,
   },
   cornerTL: {
     top: '50%',
@@ -353,6 +473,28 @@ const s = StyleSheet.create({
     borderBottomWidth: 2,
     borderRightWidth: 2,
     marginBottom: -10,
+  },
+  zoomBadge: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    backgroundColor: 'rgba(14, 17, 23, 0.75)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    zIndex: 10,
+  },
+  zoomText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#F5A623',
+    fontFamily: FH,
+  },
+  zoomTextInner: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#F5A623',
+    fontFamily: FH,
   },
   resetBtn: {
     flexDirection: 'row',

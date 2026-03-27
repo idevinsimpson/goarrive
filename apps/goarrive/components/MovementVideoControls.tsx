@@ -247,6 +247,7 @@ export default function MovementVideoControls({
             source={{ uri }}
             posterSource={posterUri ? { uri: posterUri } : undefined}
             usePoster={!!posterUri}
+            posterStyle={{ resizeMode: 'cover' } as any}
             resizeMode={ResizeMode.COVER}
             isLooping={isLooping}
             shouldPlay={autoPlay}

@@ -35,6 +35,12 @@ export interface FlatMovement {
   supersetLabel?: string;
   /** The block pattern type for UI display */
   blockType?: 'linear' | 'superset' | 'circuit';
+  /** Non-destructive crop: scale factor (1 = no zoom) */
+  cropScale?: number;
+  /** Non-destructive crop: horizontal offset in px */
+  cropTranslateX?: number;
+  /** Non-destructive crop: vertical offset in px */
+  cropTranslateY?: number;
 }
 
 export function resolveBlockType(blockType: string | undefined): 'linear' | 'superset' | 'circuit' {
@@ -112,6 +118,9 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               coachingCues: mv.coachingCues || '',
               supersetLabel: makeLabel(bi, mi),
               blockType: bType,
+              cropScale: mv.cropScale ?? 1,
+              cropTranslateX: mv.cropTranslateX ?? 0,
+              cropTranslateY: mv.cropTranslateY ?? 0,
             });
           });
         }
@@ -136,6 +145,9 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               thumbnailUrl: mv.thumbnailUrl || '',
               coachingCues: mv.coachingCues || '',
               blockType: 'linear',
+              cropScale: mv.cropScale ?? 1,
+              cropTranslateX: mv.cropTranslateX ?? 0,
+              cropTranslateY: mv.cropTranslateY ?? 0,
             });
           });
         }
