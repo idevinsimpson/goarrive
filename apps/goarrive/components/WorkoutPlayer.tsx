@@ -197,21 +197,21 @@ export default function WorkoutPlayer({
             {isLandscape && isTablet ? (
               <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                 {current.videoUrl ? (
-                  <View style={[st.mediaWrap, { width: 320, height: 240 }]}>
+                  <View style={[st.mediaWrap, { width: 320, height: 400 }]}>
                     <MovementVideoControls
                       uri={current.videoUrl}
                       posterUri={current.thumbnailUrl || undefined}
-                      height={240}
+                      aspectRatio={4 / 5}
                       autoPlay={!isPaused}
                       showControls={isPaused}
                     />
                   </View>
                 ) : current.thumbnailUrl ? (
-                  <View style={[st.mediaWrap, { width: 320, height: 240 }]}>
+                  <View style={[st.mediaWrap, { width: 320, height: 400 }]}>
                     <Image
                       source={{ uri: current.thumbnailUrl }}
                       style={st.mediaThumbnail}
-                      resizeMode="contain"
+                      resizeMode="cover"
                     />
                   </View>
                 ) : null}
@@ -234,7 +234,7 @@ export default function WorkoutPlayer({
                 <MovementVideoControls
                   uri={current.videoUrl}
                   posterUri={current.thumbnailUrl || undefined}
-                  height={200}
+                  aspectRatio={4 / 5}
                   autoPlay={!isPaused}
                   showControls={isPaused}
                 />
@@ -243,8 +243,8 @@ export default function WorkoutPlayer({
               <View style={st.mediaWrap}>
                 <Image
                   source={{ uri: current.thumbnailUrl }}
-                  style={st.mediaThumbnail}
-                  resizeMode="contain"
+                  style={[st.mediaThumbnail, { aspectRatio: 4 / 5 }]}
+                  resizeMode="cover"
                 />
               </View>
             ) : null)}

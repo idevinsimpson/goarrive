@@ -19,6 +19,7 @@ import {
   TouchableOpacity,
   Platform,
   Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { Icon } from './Icon';
@@ -34,12 +35,14 @@ interface MovementVideoControlsProps {
   uri: string;
   /** Poster/thumbnail image to show before playback */
   posterUri?: string;
-  /** Height of the video container */
+  /** Height of the video container (ignored when aspectRatio is set) */
   height?: number;
   /** Whether to auto-play on mount */
   autoPlay?: boolean;
   /** Whether to show controls overlay */
   showControls?: boolean;
+  /** Lock the video frame to a specific aspect ratio (e.g. 4/5). Width fills parent; height = width / ratio */
+  aspectRatio?: number;
 }
 
 export default function MovementVideoControls({
@@ -48,7 +51,13 @@ export default function MovementVideoControls({
   height = 240,
   autoPlay = false,
   showControls = true,
+  aspectRatio,
 }: MovementVideoControlsProps) {
+  const { width: winWidth } = useWindowDimensions();
+  // If aspectRatio is provided, compute height from available width (minus 32px padding)
+  const computedHeight = aspectRatio
+    ? Math.round(Math.min(winWidth - 32, 500) / aspectRatio)
+    : height;
   const videoRef = useRef<Video>(null);
   const containerRef = useRef<View>(null);
   const [isPlaying, setIsPlaying] = useState(autoPlay);
@@ -166,7 +175,7 @@ export default function MovementVideoControls({
   const progressPct = duration > 0 ? position / duration : 0;
 
   return (
-    <View ref={containerRef} style={[st.container, { height }]}>
+    <View ref={containerRef} style={[st.container, { height: computedHeight }]}>
       <TouchableOpacity
         activeOpacity={1}
         onPress={() => setShowOverlay((o) => !o)}
@@ -177,7 +186,7 @@ export default function MovementVideoControls({
           source={{ uri }}
           posterSource={posterUri ? { uri: posterUri } : undefined}
           usePoster={!!posterUri}
-          resizeMode={ResizeMode.CONTAIN}
+          resizeMode={ResizeMode.COVER}
           isLooping={isLooping}
           shouldPlay={autoPlay}
           isMuted
@@ -262,7 +271,8 @@ const st = StyleSheet.create({
     position: 'relative',
   },
   video: {
-    flex: 1,
+    width: '100%',
+    height: '100%',
   },
   playOverlay: {
     ...StyleSheet.absoluteFillObject,

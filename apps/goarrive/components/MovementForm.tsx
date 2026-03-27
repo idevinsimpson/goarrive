@@ -193,7 +193,8 @@ export default function MovementForm({
         mediaTypes: ['videos', 'images'],
         allowsEditing: true,
         quality: 0.8,
-        videoMaxDuration: 120, // 2 min max
+        videoMaxDuration: 25, // 25 sec max per G➲A rules
+        aspect: [4, 5] as [number, number],
       });
 
       if (result.canceled || !result.assets?.[0]) return;
@@ -275,7 +276,8 @@ export default function MovementForm({
         mediaTypes: ['videos'],
         allowsEditing: true,
         quality: 0.8,
-        videoMaxDuration: 120, // 2 min max
+        videoMaxDuration: 25, // 25 sec max per G➲A rules
+        aspect: [4, 5] as [number, number],
       });
 
       if (result.canceled || !result.assets?.[0]) return;
@@ -642,7 +644,7 @@ export default function MovementForm({
                 <MovementVideoControls
                   uri={videoUrl}
                   posterUri={thumbnailUrl || undefined}
-                  height={180}
+                  aspectRatio={4 / 5}
                   autoPlay={false}
                   showControls={true}
                 />
@@ -984,7 +986,7 @@ const st = StyleSheet.create({
   },
   mediaThumbnail: {
     width: '100%',
-    height: 160,
+    aspectRatio: 4 / 5,
     borderRadius: 10,
   },
   mediaRemoveBtn: {

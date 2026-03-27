@@ -163,21 +163,28 @@ export default function WorkoutForm({
 
   // ── Load available movements for block builder ─────────────────────────
   const loadMovements = useCallback(async () => {
-    if (movementsLoaded || !coachId) return;
+    if (movementsLoaded || !coachId) {
+      console.log('[WorkoutForm] loadMovements skip — loaded:', movementsLoaded, 'coachId:', coachId);
+      return;
+    }
     try {
-      // Load coach-scoped movements (uses existing coachId+createdAt index)
+      console.log('[WorkoutForm] Loading movements for coachId:', coachId);
+
+      // Single query: fetch all non-archived movements for this coach
       const coachQ = query(
         collection(db, 'movements'),
         where('coachId', '==', coachId),
       );
       const coachSnap = await getDocs(coachQ);
+      console.log('[WorkoutForm] Coach movements raw count:', coachSnap.size);
 
-      // Load global movements (uses existing isGlobal+createdAt index)
+      // Also fetch global movements
       const globalQ = query(
         collection(db, 'movements'),
         where('isGlobal', '==', true),
       );
       const globalSnap = await getDocs(globalQ);
+      console.log('[WorkoutForm] Global movements raw count:', globalSnap.size);
 
       const seen = new Set<string>();
       const list: MovementOption[] = [];
@@ -197,12 +204,18 @@ export default function WorkoutForm({
         }
       });
 
+      console.log('[WorkoutForm] Final movement list count:', list.length);
       // Sort by name client-side (avoids needing composite index)
       list.sort((a, b) => a.name.localeCompare(b.name));
       setAvailableMovements(list);
       setMovementsLoaded(true);
-    } catch (err) {
-      console.error('[WorkoutForm] Load movements error:', err);
+    } catch (err: any) {
+      console.error('[WorkoutForm] Load movements error:', err?.message ?? err);
+      // Show user-visible feedback so the coach knows something went wrong
+      Alert.alert(
+        'Could not load movements',
+        'There was a problem loading your movement library. Please close and try again.',
+      );
     }
   }, [coachId, movementsLoaded]);
 

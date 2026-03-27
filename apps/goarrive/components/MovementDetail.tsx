@@ -117,7 +117,7 @@ export default function MovementDetail({
                 <MovementVideoControls
                   uri={movement.videoUrl}
                   posterUri={movement.thumbnailUrl || undefined}
-                  height={240}
+                  aspectRatio={4 / 5}
                   autoPlay={true}
                   showControls={true}
                 />
@@ -316,7 +316,7 @@ const s = StyleSheet.create({
   },
   mediaThumbnail: {
     width: '100%',
-    height: 200,
+    aspectRatio: 4 / 5,
     borderRadius: 10,
   },
   name: {
