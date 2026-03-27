@@ -53,10 +53,12 @@ export default function MovementVideoControls({
   showControls = true,
   aspectRatio,
 }: MovementVideoControlsProps) {
-  const { width: winWidth } = useWindowDimensions();
+  const { width: winWidth, height: winHeight } = useWindowDimensions();
   // If aspectRatio is provided, compute height from available width (minus 32px padding)
+  // Cap at 50% of screen height so the video never blocks scrolling
+  const maxVideoHeight = Math.round(winHeight * 0.5);
   const computedHeight = aspectRatio
-    ? Math.round(Math.min(winWidth - 32, 500) / aspectRatio)
+    ? Math.min(Math.round(Math.min(winWidth - 32, 500) / aspectRatio), maxVideoHeight)
     : height;
   const videoRef = useRef<Video>(null);
   const containerRef = useRef<View>(null);
