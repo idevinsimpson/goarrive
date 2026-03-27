@@ -77,8 +77,28 @@ export default function WorkoutPlayer({
   useWakeLock(phase !== 'ready' && phase !== 'complete');
   useMediaPrefetch(flatMovements, currentIndex, phase === 'work' || phase === 'countdown', phase === 'rest');
 
-  // ── TTS for movement names ──────────────────────
-  const { isTTSAvailable } = useWorkoutTTS({ phase, current, next, isMuted: isAudioMuted() });
+  // ── Audio mute toggle (must be before TTS hook) ───────────────────
+  const [audioMuted, setAudioMutedState] = useState(isAudioMuted());
+  const toggleMute = () => {
+    const n = !audioMuted;
+    setAudioMutedState(n);
+    setAudioMuted(n);
+  };
+
+  // ── TTS for voice coaching ──────────────────────
+  const { isTTSAvailable } = useWorkoutTTS({
+    phase,
+    current,
+    next,
+    isMuted: audioMuted,
+    currentIndex,
+    total,
+    timeLeft,
+    currentDuration: current?.duration ?? 0,
+  });
+
+  // TTS unavailable visual indicator
+  const showTTSWarning = !isTTSAvailable && !audioMuted;
 
   // ── Movement swap ─────────────────────────────
   const {
@@ -92,17 +112,6 @@ export default function WorkoutPlayer({
   const dimsValid = winW > 0 && winH > 0;
   const isLandscape = dimsValid ? winW > winH : false;
   const isTablet = dimsValid ? Math.min(winW, winH) >= 600 : false;
-
-  // ── Audio mute toggle ─────────────────────────────────────────────
-  const [audioMuted, setAudioMutedState] = useState(isAudioMuted());
-  const toggleMute = () => {
-    const n = !audioMuted;
-    setAudioMutedState(n);
-    setAudioMuted(n);
-  };
-
-  // TTS unavailable visual indicator
-  const showTTSWarning = !isTTSAvailable && !audioMuted;
 
   // ── Tap-to-show controls + header ──────────────────────────────────
   const [showControls, setShowControls] = useState(false);
@@ -156,8 +165,8 @@ export default function WorkoutPlayer({
   return (
     <Modal visible={visible} animationType="fade" transparent={false}>
       <View style={st.container}>
-        {/* Header — hidden during WORK phase unless controls are showing */}
-        {(phase !== 'work' || showControls) && (
+        {/* Header — always visible except during WORK phase; during WORK, overlaid absolutely on tap */}
+        {phase !== 'work' && (
           <View style={st.header}>
             <TouchableOpacity onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
               <Icon name="close" size={28} color="#8A95A3" />
@@ -182,8 +191,8 @@ export default function WorkoutPlayer({
           </View>
         )}
 
-        {/* Progress bar — hidden during WORK phase unless controls are showing */}
-        {(phase !== 'work' || showControls) && (
+        {/* Progress bar — hidden during WORK phase */}
+        {phase !== 'work' && (
           <View style={st.progressBar}>
             <View style={[st.progressFill, { width: `${progressPct}%` }]} />
           </View>
@@ -224,6 +233,26 @@ export default function WorkoutPlayer({
         {/* ── WORK state — Stacked layout ──────────────────── */}
         {phase === 'work' && current && (
           <View style={st.workContainer}>
+            {/* Floating header overlay — appears on tap, absolutely positioned so it doesn't shift layout */}
+            {showControls && (
+              <View style={st.floatingHeader}>
+                <TouchableOpacity onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                  <Icon name="close" size={24} color="#8A95A3" />
+                </TouchableOpacity>
+                <Text style={st.floatingWorkoutName} numberOfLines={1}>
+                  {workout?.name ?? 'Workout'}
+                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <TouchableOpacity onPress={toggleMute} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                    <Icon name={audioMuted ? 'volume-x' : 'volume-2'} size={18} color="#8A95A3" />
+                  </TouchableOpacity>
+                  <Text style={st.floatingProgress}>
+                    {currentIndex + 1}/{total}
+                  </Text>
+                </View>
+              </View>
+            )}
+
             {/* GoArrive logo — centered above video */}
             <Image
               source={require('../assets/logo.png')}
@@ -265,14 +294,14 @@ export default function WorkoutPlayer({
                     <>
                       <Video
                         source={{ uri: current.videoUrl }}
-                        resizeMode={ResizeMode.CONTAIN}
+                        resizeMode={ResizeMode.COVER}
                         isLooping
                         shouldPlay={!isPaused}
                         isMuted
                         style={st.videoPlayer}
                         videoStyle={
                           Platform.OS === 'web'
-                            ? ({ width: '100%', height: '100%', objectFit: 'contain' } as any)
+                            ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
                             : undefined
                         }
                         onReadyForDisplay={() => setVideoReady(true)}
@@ -282,7 +311,7 @@ export default function WorkoutPlayer({
                         <Image
                           source={{ uri: current.thumbnailUrl }}
                           style={st.posterFallback}
-                          resizeMode="contain"
+                          resizeMode="cover"
                         />
                       )}
                     </>
@@ -290,7 +319,7 @@ export default function WorkoutPlayer({
                     <Image
                       source={{ uri: current.thumbnailUrl }}
                       style={st.videoPlayer}
-                      resizeMode="contain"
+                      resizeMode="cover"
                     />
                   ) : (
                     <View style={[st.videoPlayer, st.videoPlaceholder]}>
@@ -579,6 +608,37 @@ const st = StyleSheet.create({
     marginBottom: 8,
   },
 
+  // Floating header — absolutely positioned during WORK phase on tap
+  floatingHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: Platform.select({ ios: 8, android: 4, web: 8, default: 8 }),
+    paddingBottom: 6,
+    backgroundColor: 'rgba(14,17,23,0.85)',
+    zIndex: 50,
+  } as any,
+  floatingWorkoutName: {
+    flex: 1,
+    textAlign: 'center',
+    color: '#8A95A3',
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: FB,
+    marginHorizontal: 8,
+  },
+  floatingProgress: {
+    color: '#F5A623',
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: FH,
+  },
+
   // ── WORK phase — Stacked layout ────────────────────────────────────
   workContainer: {
     flex: 1,
@@ -633,7 +693,7 @@ const st = StyleSheet.create({
     flex: 1,
     marginHorizontal: 0,
     marginTop: 4,
-    borderRadius: 8,
+    borderRadius: 0,
     overflow: 'hidden',
     backgroundColor: '#000000',
   },
@@ -886,8 +946,8 @@ const st = StyleSheet.create({
     width: '100%',
   },
   nextUpThumb: {
-    width: 44,
-    height: 55,
+    width: 60,
+    height: 75,
     borderRadius: 8,
     backgroundColor: '#1A2035',
   },

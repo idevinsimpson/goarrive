@@ -1,14 +1,19 @@
 /**
- * useWorkoutTTS — Text-to-speech hook for the Workout Player (Suggestion 1)
+ * useWorkoutTTS — Text-to-speech hook for the Workout Player
  *
- * Speaks movement names at the start of each WORK phase and announces
- * "Rest" + next movement name during rest phases. Uses expo-speech.
+ * Voice coaching cues:
+ *   - Ready → "Welcome to your GoArrive workout"
+ *   - First WORK movement → "First up, [name]"
+ *   - Subsequent WORK movements → "Next up, [name]"
+ *   - Halfway through movements → "That's halfway"
+ *   - Last 3 seconds of WORK (non-final) → "3... 2... 1... rest"
+ *   - Last 3 seconds of final WORK → "3... 2... 1... rest. Your workout is complete, great job!"
+ *   - REST phase → "Rest. Next up: [name]"
+ *   - SWAP phase → "Switch sides"
+ *   - COMPLETE phase → (handled by countdown voice)
+ *
+ * Uses expo-speech on native, Web Speech API on web.
  * Respects the global audio mute toggle.
- *
- * Usage in WorkoutPlayer:
- *   useWorkoutTTS({ phase, current, next, isMuted });
- *
- * The hook is a no-op on web (expo-speech may not be available).
  */
 import { useEffect, useRef, useCallback, useState } from 'react';
 import * as Speech from 'expo-speech';
@@ -23,6 +28,14 @@ interface UseWorkoutTTSOptions {
   isMuted: boolean;
   /** If true, TTS is disabled entirely (user preference) */
   ttsDisabled?: boolean;
+  /** Current movement index (0-based) */
+  currentIndex: number;
+  /** Total number of movements */
+  total: number;
+  /** Seconds remaining in current phase */
+  timeLeft: number;
+  /** Current movement duration (to detect halfway) */
+  currentDuration: number;
 }
 
 export function useWorkoutTTS({
@@ -31,9 +44,16 @@ export function useWorkoutTTS({
   next,
   isMuted,
   ttsDisabled = false,
+  currentIndex,
+  total,
+  timeLeft,
+  currentDuration,
 }: UseWorkoutTTSOptions) {
   const lastSpokenRef = useRef<string>('');
   const [isTTSAvailable, setIsTTSAvailable] = useState(true);
+  const halfwaySpokenRef = useRef<boolean>(false);
+  const countdownSpokenRef = useRef<number>(-1);
+  const welcomeSpokenRef = useRef<boolean>(false);
 
   // Check TTS availability on mount
   useEffect(() => {
@@ -44,7 +64,6 @@ export function useWorkoutTTS({
             typeof window !== 'undefined' && !!window.speechSynthesis,
           );
         } else {
-          // expo-speech: check if any voices are available
           const voices = await Speech.getAvailableVoicesAsync();
           setIsTTSAvailable(voices.length > 0);
         }
@@ -80,7 +99,6 @@ export function useWorkoutTTS({
         return;
       }
       try {
-        // Stop any in-progress speech before starting new
         Speech.stop();
         Speech.speak(text, {
           language: 'en-US',
@@ -94,20 +112,34 @@ export function useWorkoutTTS({
     [isMuted, ttsDisabled, speakWeb],
   );
 
+  // ── Welcome message on first countdown ──────────────────────────────
+  useEffect(() => {
+    if (phase === 'countdown' && currentIndex === 0 && !welcomeSpokenRef.current) {
+      welcomeSpokenRef.current = true;
+      speak('Welcome to your GoArrive workout');
+    }
+  }, [phase, currentIndex, speak]);
+
+  // ── Movement announcements ──────────────────────────────────────────
   useEffect(() => {
     if (!current) return;
 
     if (phase === 'work') {
-      // Speak movement name when entering WORK phase
-      const key = `work_${current.name}`;
+      const key = `work_${currentIndex}_${current.name}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
-        speak(current.name);
+        halfwaySpokenRef.current = false;
+        countdownSpokenRef.current = -1;
+
+        if (currentIndex === 0) {
+          speak(`First up, ${current.name}`);
+        } else {
+          speak(`Next up, ${current.name}`);
+        }
       }
     } else if (phase === 'rest') {
-      // Announce rest + next movement name
       const nextName = next?.name;
-      const key = `rest_${current.name}`;
+      const key = `rest_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
         const announcement = nextName
@@ -116,20 +148,57 @@ export function useWorkoutTTS({
         speak(announcement);
       }
     } else if (phase === 'swap') {
-      const key = `swap_${current.name}`;
+      const key = `swap_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
         speak('Switch sides');
       }
-    } else if (phase === 'complete') {
-      if (lastSpokenRef.current !== 'complete') {
-        lastSpokenRef.current = 'complete';
-        speak('Workout complete. Great job!');
-      }
     } else if (phase === 'ready') {
       lastSpokenRef.current = '';
+      welcomeSpokenRef.current = false;
+      halfwaySpokenRef.current = false;
+      countdownSpokenRef.current = -1;
     }
-  }, [phase, current?.name, next?.name, speak]);
+  }, [phase, current?.name, currentIndex, next?.name, speak]);
+
+  // ── Halfway announcement ────────────────────────────────────────────
+  useEffect(() => {
+    if (phase !== 'work' || !current) return;
+    if (currentDuration <= 6) return; // Too short for halfway
+    const halfway = Math.floor(currentDuration / 2);
+    if (timeLeft === halfway && !halfwaySpokenRef.current) {
+      halfwaySpokenRef.current = true;
+      speak("That's halfway");
+    }
+  }, [phase, timeLeft, currentDuration, current, speak]);
+
+  // ── Countdown voice: "3... 2... 1... rest" ──────────────────────────
+  // Replaces the beep tones. Speaks the number at 3, 2, 1 seconds remaining.
+  // At 0 (handled by phase transition), the rest/complete announcement fires.
+  useEffect(() => {
+    if (phase !== 'work' || !current) return;
+    // Only speak countdown for timed movements (not rep-based)
+    if (currentDuration <= 0) return;
+
+    if (timeLeft === 3 && countdownSpokenRef.current !== 3) {
+      countdownSpokenRef.current = 3;
+      speak('3');
+    } else if (timeLeft === 2 && countdownSpokenRef.current !== 2) {
+      countdownSpokenRef.current = 2;
+      speak('2');
+    } else if (timeLeft === 1 && countdownSpokenRef.current !== 1) {
+      countdownSpokenRef.current = 1;
+      speak('1');
+    } else if (timeLeft === 0 && countdownSpokenRef.current !== 0) {
+      countdownSpokenRef.current = 0;
+      const isLastMovement = currentIndex >= total - 1;
+      if (isLastMovement) {
+        speak('Rest. Your workout is complete, great job!');
+      } else {
+        speak('Rest');
+      }
+    }
+  }, [phase, timeLeft, current, currentDuration, currentIndex, total, speak]);
 
   // Cleanup: stop speech when unmounting
   useEffect(() => {

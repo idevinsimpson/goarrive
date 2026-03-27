@@ -67,13 +67,25 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     const interval = setInterval(() => {
       setTimeLeft((prev) => {
         const n = prev - 1;
-        if (n <= 3 && n > 0) {
-          playCue('countdownTick');
-          hapticLight();
-        }
-        if (n === 0) {
-          playCue('countdownFinal');
-          hapticMedium();
+        // Only play beep tones during countdown/rest/swap phases.
+        // During WORK phase, TTS handles "3... 2... 1... rest" voice.
+        if (phase !== 'work') {
+          if (n <= 3 && n > 0) {
+            playCue('countdownTick');
+            hapticLight();
+          }
+          if (n === 0) {
+            playCue('countdownFinal');
+            hapticMedium();
+          }
+        } else {
+          // During WORK phase, still provide haptic feedback
+          if (n <= 3 && n > 0) {
+            hapticLight();
+          }
+          if (n === 0) {
+            hapticMedium();
+          }
         }
         return n;
       });
