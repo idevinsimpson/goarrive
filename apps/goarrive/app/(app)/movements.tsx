@@ -357,9 +357,12 @@ export default function MovementsScreen() {
       <View style={s.cardRow}>
         {thumb ? (
           <View style={s.cardThumbWrap}>
+            <View style={s.cardThumbShimmer}>
+              <ActivityIndicator size="small" color="#2A3347" />
+            </View>
             <Image
               source={{ uri: thumb }}
-              style={s.cardThumb}
+              style={[s.cardThumb, { position: 'absolute', top: 0, left: 0 }]}
               resizeMode="cover"
             />
           </View>
@@ -793,27 +796,35 @@ const s = StyleSheet.create({
     gap: 12,
   },
   cardThumbWrap: {
-    width: 56,
-    height: 56,
+    width: 72,
+    height: 90,
     borderRadius: 8,
     overflow: 'hidden',
     backgroundColor: '#1A2035',
   },
   cardThumb: {
-    width: 56,
-    height: 56,
+    width: 72,
+    height: 90,
     borderRadius: 8,
     backgroundColor: '#1A2035',
   },
   cardThumbPlaceholder: {
-    width: 56,
-    height: 56,
+    width: 72,
+    height: 90,
     borderRadius: 8,
     backgroundColor: '#1A2035',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#2A3347',
+  },
+  cardThumbShimmer: {
+    width: 72,
+    height: 90,
+    borderRadius: 8,
+    backgroundColor: '#1A2035',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   cardContent: {
     flex: 1,

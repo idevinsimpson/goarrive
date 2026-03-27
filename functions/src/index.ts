@@ -6734,3 +6734,167 @@ export const cleanupNotificationCooldowns = onSchedule(
     }
   },
 );
+
+
+// ─── Server-side GIF Generation ──────────────────────────────────────────────
+/**
+ * generateMovementGif — Firestore trigger (onDocumentUpdated)
+ *
+ * When a movement document has a videoUrl but no thumbnailUrl (or thumbnailUrl
+ * is empty), this function generates an animated GIF thumbnail server-side
+ * using ffmpeg, uploads it to Firebase Storage, and patches the document.
+ *
+ * This offloads the CPU-intensive GIF generation from the coach's browser.
+ * ffmpeg is available in the Cloud Functions runtime (Node 20 on Cloud Run).
+ *
+ * Trigger conditions:
+ *   - videoUrl is set and non-empty
+ *   - thumbnailUrl is empty or missing
+ *   - The update didn't just set a thumbnailUrl (prevents infinite loop)
+ */
+export const generateMovementGif = onDocumentUpdated(
+  'movements/{movementId}',
+  async (event) => {
+    const TAG = '[generateMovementGif]';
+    const before = event.data?.before?.data();
+    const after = event.data?.after?.data();
+    if (!before || !after) return;
+
+    const videoUrl = after.videoUrl as string | undefined;
+    const thumbnailUrl = after.thumbnailUrl as string | undefined;
+    const coachId = after.coachId as string | undefined;
+
+    // Skip if no video URL
+    if (!videoUrl) return;
+
+    // Skip if thumbnailUrl is already set (non-empty)
+    if (thumbnailUrl && thumbnailUrl.trim().length > 0) return;
+
+    // Skip if the before state already had no thumbnail and no video change
+    // (prevents re-triggering on unrelated field updates)
+    const beforeVideoUrl = before.videoUrl as string | undefined;
+    const beforeThumbnailUrl = before.thumbnailUrl as string | undefined;
+    if (
+      beforeVideoUrl === videoUrl &&
+      (!beforeThumbnailUrl || beforeThumbnailUrl.trim().length === 0)
+    ) {
+      // Video hasn't changed and thumbnail was already empty — skip to avoid
+      // infinite retriggers on unrelated updates
+      return;
+    }
+
+    console.log(`${TAG} Generating GIF for movement ${event.params.movementId}`);
+
+    try {
+      const { execSync } = await import('child_process');
+      const os = await import('os');
+      const path = await import('path');
+      const fs = await import('fs');
+
+      const tmpDir = os.tmpdir();
+      const outputPath = path.join(tmpDir, `${event.params.movementId}.gif`);
+
+      // Use ffmpeg to extract frames and create a GIF
+      // -t 3: first 3 seconds, -vf: scale to 240x300 (4:5), 8fps palette-based GIF
+      const ffmpegCmd = [
+        'ffmpeg', '-y',
+        '-i', `"${videoUrl}"`,
+        '-t', '3',
+        '-vf', '"fps=8,scale=240:300:force_original_aspect_ratio=increase,crop=240:300,split[s0][s1];[s0]palettegen=max_colors=64[p];[s1][p]paletteuse=dither=bayer"',
+        '-loop', '0',
+        `"${outputPath}"`,
+      ].join(' ');
+
+      execSync(ffmpegCmd, { timeout: 30000, stdio: 'pipe' });
+
+      // Check if file was created
+      if (!fs.existsSync(outputPath)) {
+        console.error(`${TAG} ffmpeg did not produce output file`);
+        return;
+      }
+
+      const fileBuffer = fs.readFileSync(outputPath);
+      const bucket = admin.storage().bucket();
+      const storagePath = `movements/${coachId || 'system'}/thumbnails/${event.params.movementId}_${Date.now()}.gif`;
+      const file = bucket.file(storagePath);
+
+      await file.save(fileBuffer, {
+        metadata: { contentType: 'image/gif' },
+        public: true,
+      });
+
+      // Build the public download URL
+      const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media`;
+
+      // Patch the Firestore document
+      await event.data!.after.ref.update({ thumbnailUrl: downloadUrl });
+
+      // Cleanup temp file
+      fs.unlinkSync(outputPath);
+
+      console.log(`${TAG} GIF generated and saved for movement ${event.params.movementId}`);
+    } catch (err) {
+      console.error(`${TAG} Error generating GIF:`, err);
+      // Non-fatal — the client-side fallback still works
+    }
+  },
+);
+
+// ─── Thumbnail Cache Invalidation ────────────────────────────────────────────
+/**
+ * cleanupOldMovementThumbnails — Firestore trigger (onDocumentUpdated)
+ *
+ * When a movement's thumbnailUrl changes (new GIF uploaded), this function
+ * deletes the old GIF file from Firebase Storage to prevent orphaned files.
+ *
+ * Only deletes files that are in the movements/ Storage path and end with .gif.
+ */
+export const cleanupOldMovementThumbnails = onDocumentUpdated(
+  'movements/{movementId}',
+  async (event) => {
+    const TAG = '[cleanupOldThumbnails]';
+    const before = event.data?.before?.data();
+    const after = event.data?.after?.data();
+    if (!before || !after) return;
+
+    const oldUrl = before.thumbnailUrl as string | undefined;
+    const newUrl = after.thumbnailUrl as string | undefined;
+
+    // Only act when thumbnailUrl actually changed and old URL existed
+    if (!oldUrl || oldUrl === newUrl) return;
+    if (!newUrl || newUrl.trim().length === 0) return; // Don't delete if new is empty (clearing)
+
+    // Extract the Storage path from the old Firebase Storage URL
+    // Format: https://firebasestorage.googleapis.com/v0/b/{bucket}/o/{encodedPath}?alt=media&token=...
+    try {
+      const urlObj = new URL(oldUrl);
+      const pathMatch = urlObj.pathname.match(/\/o\/(.+)/);
+      if (!pathMatch) {
+        console.log(`${TAG} Could not extract path from old URL: ${oldUrl}`);
+        return;
+      }
+
+      const storagePath = decodeURIComponent(pathMatch[1]);
+
+      // Safety check: only delete files in the movements/ thumbnails path
+      if (!storagePath.includes('/thumbnails/') || !storagePath.endsWith('.gif')) {
+        console.log(`${TAG} Skipping non-thumbnail path: ${storagePath}`);
+        return;
+      }
+
+      const bucket = admin.storage().bucket();
+      const file = bucket.file(storagePath);
+      const [exists] = await file.exists();
+
+      if (exists) {
+        await file.delete();
+        console.log(`${TAG} Deleted old thumbnail: ${storagePath}`);
+      } else {
+        console.log(`${TAG} Old thumbnail already gone: ${storagePath}`);
+      }
+    } catch (err) {
+      console.error(`${TAG} Error cleaning up old thumbnail:`, err);
+      // Non-fatal — orphaned file is not critical
+    }
+  },
+);

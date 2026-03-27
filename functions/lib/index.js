@@ -72,7 +72,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
-exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
+exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -5364,6 +5364,10 @@ exports.checkGcalConflicts = (0, https_1.onCall)({ secrets: [googleClientId, goo
 /**
  * Send a push notification to a member when a workout is assigned to them.
  * Fires on workout_assignments document creation.
+ *
+ * Risk 8: Rate-limited — if a member received an assignment notification
+ * within the last 60 seconds, this trigger skips the push to avoid spam
+ * during batch assignments. Uses a lightweight Firestore cooldown doc.
  */
 exports.onWorkoutAssigned = (0, firestore_1.onDocumentCreated)('workout_assignments/{assignmentId}', async (event) => {
     var _a;
@@ -5376,6 +5380,24 @@ exports.onWorkoutAssigned = (0, firestore_1.onDocumentCreated)('workout_assignme
         console.warn('[onWorkoutAssigned] No memberId on assignment', snap.id);
         return;
     }
+    // ── Rate-limit check (Risk 8) ──────────────────────────────────────
+    const cooldownRef = db
+        .collection('_notification_cooldowns')
+        .doc(`workout_assigned_${memberId}`);
+    const cooldownSnap = await cooldownRef.get();
+    const cooldownData = cooldownSnap.data();
+    const COOLDOWN_MS = 60000; // 60 seconds
+    if (cooldownData === null || cooldownData === void 0 ? void 0 : cooldownData.lastSentAt) {
+        const lastSent = cooldownData.lastSentAt.toDate
+            ? cooldownData.lastSentAt.toDate()
+            : new Date(cooldownData.lastSentAt);
+        if (Date.now() - lastSent.getTime() < COOLDOWN_MS) {
+            console.log(`[onWorkoutAssigned] Skipping push for ${memberId} — cooldown active (batch assignment).`);
+            return;
+        }
+    }
+    // Set cooldown timestamp before sending
+    await cooldownRef.set({ lastSentAt: firestore_2.FieldValue.serverTimestamp() }, { merge: true });
     // Look up member's Expo push tokens
     const tokensSnap = await db
         .collection('users')
@@ -5662,6 +5684,24 @@ exports.onWorkoutCompleted = (0, firestore_1.onDocumentCreated)('workout_logs/{l
         console.warn('[onWorkoutCompleted] No coachId on workout_log, skipping.');
         return;
     }
+    // ── Rate-limit check (Risk 8) ──────────────────────────────────────
+    // Prevent coach notification spam when multiple members finish at once.
+    const cooldownRef = db
+        .collection('_notification_cooldowns')
+        .doc(`workout_completed_${coachId}`);
+    const cooldownSnap = await cooldownRef.get();
+    const cooldownData = cooldownSnap.data();
+    const COOLDOWN_MS = 30000; // 30 seconds between coach notifications
+    if (cooldownData === null || cooldownData === void 0 ? void 0 : cooldownData.lastSentAt) {
+        const lastSent = cooldownData.lastSentAt.toDate
+            ? cooldownData.lastSentAt.toDate()
+            : new Date(cooldownData.lastSentAt);
+        if (Date.now() - lastSent.getTime() < COOLDOWN_MS) {
+            console.log(`[onWorkoutCompleted] Skipping push for coach ${coachId} — cooldown active.`);
+            return;
+        }
+    }
+    await cooldownRef.set({ lastSentAt: firestore_2.FieldValue.serverTimestamp() }, { merge: true });
     // Look up coach's push tokens
     const tokensSnap = await db
         .collection('users')
@@ -5688,10 +5728,22 @@ exports.onWorkoutCompleted = (0, firestore_1.onDocumentCreated)('workout_logs/{l
     }
     // Check if journal was submitted
     const hasJournal = data.journal && (data.journal.glow || data.journal.grow);
-    const title = 'Workout Completed';
-    const body = hasJournal
-        ? `${memberName} completed "${workoutName}" and left a reflection.`
-        : `${memberName} completed "${workoutName}". Tap to review.`;
+    const swaps = Array.isArray(data.movementSwaps) ? data.movementSwaps : [];
+    const swapCount = swaps.length;
+    const title = swapCount > 0 ? 'Workout Completed (with swaps)' : 'Workout Completed';
+    let body;
+    if (swapCount > 0 && hasJournal) {
+        body = `${memberName} completed "${workoutName}" with ${swapCount} movement swap${swapCount !== 1 ? 's' : ''} and left a reflection.`;
+    }
+    else if (swapCount > 0) {
+        body = `${memberName} completed "${workoutName}" with ${swapCount} movement swap${swapCount !== 1 ? 's' : ''}. Tap to review.`;
+    }
+    else if (hasJournal) {
+        body = `${memberName} completed "${workoutName}" and left a reflection.`;
+    }
+    else {
+        body = `${memberName} completed "${workoutName}". Tap to review.`;
+    }
     for (const token of tokens) {
         try {
             await messaging.send({
@@ -5717,6 +5769,274 @@ exports.onWorkoutCompleted = (0, firestore_1.onDocumentCreated)('workout_logs/{l
                 console.error('[onWorkoutCompleted] FCM error:', err);
             }
         }
+    }
+});
+// ── Recurring Assignment Continuation (Risk 3 / Suggestion 7) ──────────────
+// Runs every Sunday at midnight UTC. Finds recurring assignment groups
+// that are still active and generates the next week's assignments.
+exports.continueRecurringAssignments = (0, scheduler_1.onSchedule)({ schedule: '0 0 * * 0', region: 'us-east1', timeoutSeconds: 300 }, async () => {
+    const firestore = admin.firestore();
+    const now = new Date();
+    // Find all recurring groups that haven't expired
+    const groupsSnap = await firestore
+        .collection('recurring_schedules')
+        .where('isActive', '==', true)
+        .where('nextGenerateAfter', '<=', firestore_2.Timestamp.fromDate(now))
+        .get();
+    if (groupsSnap.empty) {
+        console.log('[continueRecurringAssignments] No active recurring schedules to process.');
+        return;
+    }
+    const batch = firestore.batch();
+    let assignmentCount = 0;
+    for (const scheduleDoc of groupsSnap.docs) {
+        const schedule = scheduleDoc.data();
+        const { coachId, memberId, workoutId, workoutName, workoutSnapshot, recurringDays, // 0=Mon..6=Sun
+        endDate, } = schedule;
+        // Check if the schedule has expired
+        const endDateObj = (endDate === null || endDate === void 0 ? void 0 : endDate.toDate) ? endDate.toDate() : new Date(endDate);
+        if (endDateObj < now) {
+            batch.update(scheduleDoc.ref, { isActive: false });
+            continue;
+        }
+        // Generate assignments for the coming week (next 7 days)
+        const startOfWeek = new Date(now);
+        startOfWeek.setDate(startOfWeek.getDate() + 1); // Start from Monday
+        startOfWeek.setHours(0, 0, 0, 0);
+        for (const dayIdx of (recurringDays || [])) {
+            const targetDate = new Date(startOfWeek);
+            // dayIdx: 0=Mon..6=Sun → JS: Mon=1..Sun=0
+            const targetJsDay = dayIdx === 6 ? 0 : dayIdx + 1;
+            const currentJsDay = targetDate.getDay();
+            let diff = targetJsDay - currentJsDay;
+            if (diff < 0)
+                diff += 7;
+            targetDate.setDate(targetDate.getDate() + diff);
+            targetDate.setHours(0, 0, 0, 0);
+            // Don't generate past the end date
+            if (targetDate > endDateObj)
+                continue;
+            const assignRef = firestore.collection('workout_assignments').doc();
+            batch.set(assignRef, {
+                coachId,
+                memberId,
+                workoutId,
+                workoutName: workoutName || 'Workout',
+                workoutSnapshot: workoutSnapshot || null,
+                scheduledFor: firestore_2.Timestamp.fromDate(targetDate),
+                status: 'scheduled',
+                recurringGroupId: scheduleDoc.id,
+                createdAt: firestore_2.FieldValue.serverTimestamp(),
+            });
+            assignmentCount++;
+        }
+        // Update nextGenerateAfter to next Sunday
+        const nextSunday = new Date(now);
+        nextSunday.setDate(nextSunday.getDate() + 7);
+        nextSunday.setHours(0, 0, 0, 0);
+        batch.update(scheduleDoc.ref, {
+            nextGenerateAfter: firestore_2.Timestamp.fromDate(nextSunday),
+            lastGeneratedAt: firestore_2.FieldValue.serverTimestamp(),
+        });
+    }
+    await batch.commit();
+    console.log(`[continueRecurringAssignments] Generated ${assignmentCount} assignments from ${groupsSnap.size} schedules.`);
+});
+// ═══════════════════════════════════════════════════════════════════════════
+// Risk 3: Cleanup stale notification cooldown documents
+// Runs daily at 3:15 AM UTC. Deletes cooldown docs older than 24 hours
+// to prevent unbounded growth of the _notification_cooldowns collection.
+// ═══════════════════════════════════════════════════════════════════════════
+exports.cleanupNotificationCooldowns = (0, scheduler_1.onSchedule)({
+    schedule: '15 3 * * *',
+    timeZone: 'Etc/UTC',
+    retryCount: 3,
+    memory: '256MiB',
+}, async () => {
+    const TAG = '[cleanupNotificationCooldowns]';
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24h ago
+    let totalDeleted = 0;
+    let hasMore = true;
+    try {
+        // Paginate in batches of 500 (Firestore batch limit)
+        while (hasMore) {
+            const staleSnap = await db
+                .collection('_notification_cooldowns')
+                .where('lastSentAt', '<', firestore_2.Timestamp.fromDate(cutoff))
+                .limit(500)
+                .get();
+            if (staleSnap.empty) {
+                hasMore = false;
+                break;
+            }
+            const batch = db.batch();
+            staleSnap.docs.forEach((doc) => batch.delete(doc.ref));
+            await batch.commit();
+            totalDeleted += staleSnap.size;
+            // If we got fewer than 500, we're done
+            if (staleSnap.size < 500)
+                hasMore = false;
+        }
+        // Log metrics for monitoring
+        console.log(`${TAG} Completed. Deleted ${totalDeleted} stale cooldown docs.`);
+        // Write a health-check doc for monitoring
+        await db.collection('_system_health').doc('cooldown_cleanup').set({
+            lastRunAt: firestore_2.Timestamp.now(),
+            docsDeleted: totalDeleted,
+            status: 'success',
+        });
+    }
+    catch (err) {
+        console.error(`${TAG} Error during cleanup:`, err);
+        // Write failure status for monitoring
+        await db.collection('_system_health').doc('cooldown_cleanup').set({
+            lastRunAt: firestore_2.Timestamp.now(),
+            docsDeleted: totalDeleted,
+            status: 'error',
+            error: String(err),
+        }).catch(() => { }); // Don't fail on monitoring write
+        throw err; // Re-throw to trigger Cloud Functions retry
+    }
+});
+// ─── Server-side GIF Generation ──────────────────────────────────────────────
+/**
+ * generateMovementGif — Firestore trigger (onDocumentUpdated)
+ *
+ * When a movement document has a videoUrl but no thumbnailUrl (or thumbnailUrl
+ * is empty), this function generates an animated GIF thumbnail server-side
+ * using ffmpeg, uploads it to Firebase Storage, and patches the document.
+ *
+ * This offloads the CPU-intensive GIF generation from the coach's browser.
+ * ffmpeg is available in the Cloud Functions runtime (Node 20 on Cloud Run).
+ *
+ * Trigger conditions:
+ *   - videoUrl is set and non-empty
+ *   - thumbnailUrl is empty or missing
+ *   - The update didn't just set a thumbnailUrl (prevents infinite loop)
+ */
+exports.generateMovementGif = (0, firestore_1.onDocumentUpdated)('movements/{movementId}', async (event) => {
+    var _a, _b, _c, _d;
+    const TAG = '[generateMovementGif]';
+    const before = (_b = (_a = event.data) === null || _a === void 0 ? void 0 : _a.before) === null || _b === void 0 ? void 0 : _b.data();
+    const after = (_d = (_c = event.data) === null || _c === void 0 ? void 0 : _c.after) === null || _d === void 0 ? void 0 : _d.data();
+    if (!before || !after)
+        return;
+    const videoUrl = after.videoUrl;
+    const thumbnailUrl = after.thumbnailUrl;
+    const coachId = after.coachId;
+    // Skip if no video URL
+    if (!videoUrl)
+        return;
+    // Skip if thumbnailUrl is already set (non-empty)
+    if (thumbnailUrl && thumbnailUrl.trim().length > 0)
+        return;
+    // Skip if the before state already had no thumbnail and no video change
+    // (prevents re-triggering on unrelated field updates)
+    const beforeVideoUrl = before.videoUrl;
+    const beforeThumbnailUrl = before.thumbnailUrl;
+    if (beforeVideoUrl === videoUrl &&
+        (!beforeThumbnailUrl || beforeThumbnailUrl.trim().length === 0)) {
+        // Video hasn't changed and thumbnail was already empty — skip to avoid
+        // infinite retriggers on unrelated updates
+        return;
+    }
+    console.log(`${TAG} Generating GIF for movement ${event.params.movementId}`);
+    try {
+        const { execSync } = await Promise.resolve().then(() => __importStar(require('child_process')));
+        const os = await Promise.resolve().then(() => __importStar(require('os')));
+        const path = await Promise.resolve().then(() => __importStar(require('path')));
+        const fs = await Promise.resolve().then(() => __importStar(require('fs')));
+        const tmpDir = os.tmpdir();
+        const outputPath = path.join(tmpDir, `${event.params.movementId}.gif`);
+        // Use ffmpeg to extract frames and create a GIF
+        // -t 3: first 3 seconds, -vf: scale to 240x300 (4:5), 8fps palette-based GIF
+        const ffmpegCmd = [
+            'ffmpeg', '-y',
+            '-i', `"${videoUrl}"`,
+            '-t', '3',
+            '-vf', '"fps=8,scale=240:300:force_original_aspect_ratio=increase,crop=240:300,split[s0][s1];[s0]palettegen=max_colors=64[p];[s1][p]paletteuse=dither=bayer"',
+            '-loop', '0',
+            `"${outputPath}"`,
+        ].join(' ');
+        execSync(ffmpegCmd, { timeout: 30000, stdio: 'pipe' });
+        // Check if file was created
+        if (!fs.existsSync(outputPath)) {
+            console.error(`${TAG} ffmpeg did not produce output file`);
+            return;
+        }
+        const fileBuffer = fs.readFileSync(outputPath);
+        const bucket = admin.storage().bucket();
+        const storagePath = `movements/${coachId || 'system'}/thumbnails/${event.params.movementId}_${Date.now()}.gif`;
+        const file = bucket.file(storagePath);
+        await file.save(fileBuffer, {
+            metadata: { contentType: 'image/gif' },
+            public: true,
+        });
+        // Build the public download URL
+        const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media`;
+        // Patch the Firestore document
+        await event.data.after.ref.update({ thumbnailUrl: downloadUrl });
+        // Cleanup temp file
+        fs.unlinkSync(outputPath);
+        console.log(`${TAG} GIF generated and saved for movement ${event.params.movementId}`);
+    }
+    catch (err) {
+        console.error(`${TAG} Error generating GIF:`, err);
+        // Non-fatal — the client-side fallback still works
+    }
+});
+// ─── Thumbnail Cache Invalidation ────────────────────────────────────────────
+/**
+ * cleanupOldMovementThumbnails — Firestore trigger (onDocumentUpdated)
+ *
+ * When a movement's thumbnailUrl changes (new GIF uploaded), this function
+ * deletes the old GIF file from Firebase Storage to prevent orphaned files.
+ *
+ * Only deletes files that are in the movements/ Storage path and end with .gif.
+ */
+exports.cleanupOldMovementThumbnails = (0, firestore_1.onDocumentUpdated)('movements/{movementId}', async (event) => {
+    var _a, _b, _c, _d;
+    const TAG = '[cleanupOldThumbnails]';
+    const before = (_b = (_a = event.data) === null || _a === void 0 ? void 0 : _a.before) === null || _b === void 0 ? void 0 : _b.data();
+    const after = (_d = (_c = event.data) === null || _c === void 0 ? void 0 : _c.after) === null || _d === void 0 ? void 0 : _d.data();
+    if (!before || !after)
+        return;
+    const oldUrl = before.thumbnailUrl;
+    const newUrl = after.thumbnailUrl;
+    // Only act when thumbnailUrl actually changed and old URL existed
+    if (!oldUrl || oldUrl === newUrl)
+        return;
+    if (!newUrl || newUrl.trim().length === 0)
+        return; // Don't delete if new is empty (clearing)
+    // Extract the Storage path from the old Firebase Storage URL
+    // Format: https://firebasestorage.googleapis.com/v0/b/{bucket}/o/{encodedPath}?alt=media&token=...
+    try {
+        const urlObj = new URL(oldUrl);
+        const pathMatch = urlObj.pathname.match(/\/o\/(.+)/);
+        if (!pathMatch) {
+            console.log(`${TAG} Could not extract path from old URL: ${oldUrl}`);
+            return;
+        }
+        const storagePath = decodeURIComponent(pathMatch[1]);
+        // Safety check: only delete files in the movements/ thumbnails path
+        if (!storagePath.includes('/thumbnails/') || !storagePath.endsWith('.gif')) {
+            console.log(`${TAG} Skipping non-thumbnail path: ${storagePath}`);
+            return;
+        }
+        const bucket = admin.storage().bucket();
+        const file = bucket.file(storagePath);
+        const [exists] = await file.exists();
+        if (exists) {
+            await file.delete();
+            console.log(`${TAG} Deleted old thumbnail: ${storagePath}`);
+        }
+        else {
+            console.log(`${TAG} Old thumbnail already gone: ${storagePath}`);
+        }
+    }
+    catch (err) {
+        console.error(`${TAG} Error cleaning up old thumbnail:`, err);
+        // Non-fatal — orphaned file is not critical
     }
 });
 //# sourceMappingURL=index.js.map

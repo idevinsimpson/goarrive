@@ -777,7 +777,7 @@ const st = StyleSheet.create({
   },
   nextUpThumb: {
     width: 44,
-    height: 44,
+    height: 55,
     borderRadius: 8,
     backgroundColor: '#1A2035',
   },

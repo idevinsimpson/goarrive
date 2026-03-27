@@ -8,8 +8,6 @@
 import { shouldSendNotification, getNextWeekDates } from '../notificationUtils';
 
 describe('shouldSendNotification', () => {
-  const COOLDOWN_MS = 60_000;
-
   test('sends notification when no previous send', () => {
     expect(shouldSendNotification(null, new Date())).toBe(true);
   });

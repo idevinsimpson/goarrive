@@ -452,6 +452,21 @@ export default function MovementForm({
 
     setSubmitting(true);
     try {
+      // Auto-generate GIF for URL-only movements that were never reframed
+      const trimmedVideoUrl = videoUrl.trim();
+      if (
+        Platform.OS === 'web' &&
+        trimmedVideoUrl &&
+        !thumbnailUrl.trim() &&
+        !gifPromiseRef.current
+      ) {
+        generateAndUploadGif(trimmedVideoUrl, {
+          cropScale,
+          cropTranslateX,
+          cropTranslateY,
+        });
+      }
+
       // If GIF is still generating, wait for it to finish before saving
       let finalThumbnailUrl = thumbnailUrl.trim();
       if (gifPromiseRef.current) {
