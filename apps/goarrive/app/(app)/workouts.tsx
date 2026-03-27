@@ -59,6 +59,7 @@ import WorkoutForm from '../../components/WorkoutForm';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import WorkoutTemplateMarketplace from '../../components/WorkoutTemplateMarketplace';
 import CoachWorkoutCalendar from '../../components/CoachWorkoutCalendar';
+import WorkoutPlayer from '../../components/WorkoutPlayer';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH =
@@ -171,6 +172,10 @@ export default function WorkoutsScreen() {
 
   // Coach calendar view (Suggestion 3)
   const [showCalendar, setShowCalendar] = useState(false);
+
+  // Preview player state
+  const [previewVisible, setPreviewVisible] = useState(false);
+  const [previewWorkout, setPreviewWorkout] = useState<WorkoutData | null>(null);
 
   // ── Real-time workout listener ─────────────────────────────────────────
   const mapWorkoutDoc = useCallback((d: any): WorkoutData => {
@@ -364,6 +369,12 @@ export default function WorkoutsScreen() {
   const isLegacy = (w: WorkoutData) =>
     !w.category && !w.difficulty && !w.estimatedDurationMin;
 
+  // ── Preview handler ───────────────────────────────────────────────────
+  const handlePreview = (w: WorkoutData) => {
+    setPreviewWorkout(w);
+    setPreviewVisible(true);
+  };
+
   // ── Render item for FlatList ───────────────────────────────────────────
   const renderItem = ({ item: w }: { item: WorkoutData }) => {
     const count = assignmentCounts[w.id] ?? 0;
@@ -387,7 +398,19 @@ export default function WorkoutsScreen() {
               </View>
             )}
           </View>
-          <Icon name="chevron-right" size={18} color="#4A5568" />
+          <View style={s.cardActions}>
+            <Pressable
+              style={s.previewBtn}
+              onPress={(e) => {
+                e.stopPropagation();
+                handlePreview(w);
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Icon name="play" size={14} color="#F5A623" />
+            </Pressable>
+            <Icon name="chevron-right" size={18} color="#4A5568" />
+          </View>
         </View>
         {w.description ? (
           <Text style={s.cardDesc} numberOfLines={2}>
@@ -685,6 +708,22 @@ export default function WorkoutsScreen() {
         visible={showCalendar}
         onClose={() => setShowCalendar(false)}
       />
+
+      {/* Workout Preview Player */}
+      {previewWorkout && previewVisible && (
+        <WorkoutPlayer
+          visible={previewVisible}
+          workout={previewWorkout}
+          onClose={() => {
+            setPreviewVisible(false);
+            setPreviewWorkout(null);
+          }}
+          onComplete={() => {
+            setPreviewVisible(false);
+            setPreviewWorkout(null);
+          }}
+        />
+      )}
 
       {/* Confirm dialog */}
       <ConfirmDialog
@@ -1044,5 +1083,20 @@ const s = StyleSheet.create({
     fontSize: 12,
     color: '#4A5568',
     fontFamily: FB,
+  },
+  cardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  previewBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(245,166,35,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
