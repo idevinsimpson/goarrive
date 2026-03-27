@@ -368,32 +368,28 @@ export default function WorkoutPlayer({
                   {/* Controls overlay — only visible on tap */}
                   {showControls && (
                     <View style={st.controlsOverlay}>
+                      {/* Center pause/play (or Done for reps) — absolutely centered */}
                       {isRepBased ? (
-                        <View style={st.overlayControls}>
-                          <TouchableOpacity style={st.overlayDoneBtn} onPress={handleRepDone}>
-                            <Icon name="check" size={28} color="#0E1117" />
-                            <Text style={st.overlayDoneBtnText}>Done</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity style={st.overlaySkipBtn} onPress={handleSkip}>
-                            <Icon name="skip-forward" size={20} color="#F5A623" />
-                            <Text style={st.overlaySkipText}>Skip</Text>
-                          </TouchableOpacity>
-                        </View>
+                        <TouchableOpacity style={st.overlayCenterBtn} onPress={handleRepDone}>
+                          <Icon name="check" size={32} color="#0E1117" />
+                          <Text style={st.overlayDoneBtnText}>Done</Text>
+                        </TouchableOpacity>
                       ) : (
-                        <View style={st.overlayControls}>
-                          <TouchableOpacity style={st.overlayPauseBtn} onPress={handlePauseResume}>
-                            <Icon name={isPaused ? 'play' : 'pause'} size={28} color="#0E1117" />
-                          </TouchableOpacity>
-                          <TouchableOpacity style={st.overlaySkipBtn} onPress={handleSkip}>
-                            <Icon name="skip-forward" size={20} color="#F5A623" />
-                            <Text style={st.overlaySkipText}>Skip</Text>
-                          </TouchableOpacity>
-                        </View>
+                        <TouchableOpacity style={st.overlayCenterBtn} onPress={handlePauseResume}>
+                          <Icon name={isPaused ? 'play' : 'pause'} size={32} color="#0E1117" />
+                        </TouchableOpacity>
                       )}
-                      <TouchableOpacity style={st.overlaySwapBtn} onPress={openSwap}>
-                        <Icon name="refresh-cw" size={14} color="#F5A623" />
-                        <Text style={st.overlaySwapText}>Swap Movement</Text>
-                      </TouchableOpacity>
+                      {/* Secondary actions row — below center button */}
+                      <View style={st.overlaySecondaryRow}>
+                        <TouchableOpacity style={st.overlaySkipBtn} onPress={handleSkip}>
+                          <Icon name="skip-forward" size={18} color="#F5A623" />
+                          <Text style={st.overlaySkipText}>Skip</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={st.overlaySwapBtn} onPress={openSwap}>
+                          <Icon name="refresh-cw" size={14} color="#F5A623" />
+                          <Text style={st.overlaySwapText}>Swap Movement</Text>
+                        </TouchableOpacity>
+                      </View>
                       {/* Playback speed — bottom-right */}
                       <View style={st.speedRow}>
                         <TouchableOpacity
@@ -771,26 +767,19 @@ const st = StyleSheet.create({
     alignItems: 'center',
     zIndex: 15,
   } as any,
-  overlayControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 24,
-  },
-  overlayPauseBtn: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+  overlayCenterBtn: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     backgroundColor: '#F5A623',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  overlayDoneBtn: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#6EBB7A',
-    justifyContent: 'center',
+  overlaySecondaryRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 16,
+    marginTop: 20,
   },
   overlayDoneBtnText: {
     fontSize: 14,
@@ -821,7 +810,6 @@ const st = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(245,166,35,0.4)',
-    marginTop: 16,
   },
   overlaySwapText: {
     fontSize: 13,
