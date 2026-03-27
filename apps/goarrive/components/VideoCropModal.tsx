@@ -12,10 +12,11 @@
  *   - Semi-transparent overlay outside the 4:5 frame shows what's cropped out
  *   - Zoom percentage indicator (100%, 150%, etc.)
  *   - Haptic feedback when hitting pan boundaries
+ *   - Shared values sync when initialCrop prop changes (e.g. new video upload)
  *
  * Uses react-native-gesture-handler + react-native-reanimated.
  */
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -30,7 +31,6 @@ import { GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-g
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
-  useDerivedValue,
   withSpring,
   runOnJS,
 } from 'react-native-reanimated';
@@ -90,7 +90,7 @@ export default function VideoCropModal({
   onDone,
   onCancel,
 }: Props) {
-  const { width: winWidth, height: winHeight } = useWindowDimensions();
+  const { width: winWidth } = useWindowDimensions();
   // Frame fills available width minus padding
   const frameWidth = Math.min(winWidth - 32, 500);
   const frameHeight = frameWidth / FRAME_ASPECT;
@@ -108,6 +108,30 @@ export default function VideoCropModal({
   // Track whether we already fired haptic at current boundary to avoid spamming
   const hitBoundaryX = useSharedValue(false);
   const hitBoundaryY = useSharedValue(false);
+
+  // ── Sync shared values when initialCrop changes ────────────────────────
+  // useSharedValue only reads its argument on first render. When the parent
+  // resets crop values (e.g. new video upload), we must manually sync.
+  useEffect(() => {
+    const s = initialCrop?.cropScale ?? 1;
+    const tx = initialCrop?.cropTranslateX ?? 0;
+    const ty = initialCrop?.cropTranslateY ?? 0;
+    scale.value = s;
+    savedScale.value = s;
+    translateX.value = tx;
+    translateY.value = ty;
+    savedTranslateX.value = tx;
+    savedTranslateY.value = ty;
+    // Also update the zoom display
+    setZoomDisplay(Math.round(s * 100));
+  }, [initialCrop?.cropScale, initialCrop?.cropTranslateX, initialCrop?.cropTranslateY, visible]);
+
+  // ── Zoom display (React state, updated from gesture worklets) ──────────
+  const [zoomDisplay, setZoomDisplay] = useState(Math.round((initialCrop?.cropScale ?? 1) * 100));
+
+  const updateZoomDisplay = useCallback((pct: number) => {
+    setZoomDisplay(pct);
+  }, []);
 
   // ── Bounds calculation ─────────────────────────────────────────────────
 
@@ -129,14 +153,6 @@ export default function VideoCropModal({
     };
   };
 
-  // ── Zoom percentage (derived) ──────────────────────────────────────────
-
-  const zoomPct = useDerivedValue(() => Math.round(scale.value * 100));
-
-  const zoomLabelStyle = useAnimatedStyle(() => ({
-    opacity: scale.value > 1.01 ? 1 : 0,
-  }));
-
   // ── Gestures ───────────────────────────────────────────────────────────
 
   const pinchGesture = Gesture.Pinch()
@@ -152,6 +168,8 @@ export default function VideoCropModal({
       const clamped = clampTranslate(translateX.value, translateY.value, scale.value);
       translateX.value = clamped.x;
       translateY.value = clamped.y;
+      // Update zoom display
+      runOnJS(updateZoomDisplay)(Math.round(scale.value * 100));
     })
     .onEnd(() => {
       savedScale.value = scale.value;
@@ -204,6 +222,7 @@ export default function VideoCropModal({
       savedScale.value = 1;
       savedTranslateX.value = 0;
       savedTranslateY.value = 0;
+      runOnJS(updateZoomDisplay)(100);
     });
 
   const composedGesture = Gesture.Simultaneous(
@@ -239,15 +258,8 @@ export default function VideoCropModal({
     savedScale.value = 1;
     savedTranslateX.value = 0;
     savedTranslateY.value = 0;
+    setZoomDisplay(100);
   }, [scale, translateX, translateY, savedScale, savedTranslateX, savedTranslateY]);
-
-  // ── Overlay geometry ───────────────────────────────────────────────────
-  // Semi-transparent overlay outside the 4:5 frame to show what's cropped out
-  // We calculate the overlay regions as four rects around the frame
-
-  // The frame is centered horizontally and vertically in the frameContainer area
-  // Header + instructions take ~100px, rest button ~50px, so frame area is in between
-  // We'll use absolute positioning within frameContainer
 
   // ── Render ─────────────────────────────────────────────────────────────
 
@@ -273,7 +285,7 @@ export default function VideoCropModal({
 
         {/* Crop frame area with overlay */}
         <View style={s.frameContainer}>
-          {/* Semi-transparent overlay — fills entire area behind */}
+          {/* Semi-transparent overlay — fills entire area behind the frame */}
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
             <View style={s.overlayFull} />
           </View>
@@ -312,9 +324,11 @@ export default function VideoCropModal({
             </GestureDetector>
 
             {/* Zoom percentage indicator */}
-            <Animated.View style={[s.zoomBadge, zoomLabelStyle]} pointerEvents="none">
-              <ZoomLabel zoomPct={zoomPct} />
-            </Animated.View>
+            {zoomDisplay > 100 && (
+              <View style={s.zoomBadge} pointerEvents="none">
+                <Text style={s.zoomText}>{zoomDisplay}%</Text>
+              </View>
+            )}
           </View>
 
           {/* Corner indicators */}
@@ -333,53 +347,6 @@ export default function VideoCropModal({
       </GestureHandlerRootView>
     </Modal>
   );
-}
-
-// ── Zoom label sub-component (reads shared value via useAnimatedProps) ────
-
-function ZoomLabel({ zoomPct }: { zoomPct: Animated.SharedValue<number> }) {
-  const textStyle = useAnimatedStyle(() => ({
-    // We can't animate text content directly, so we use a trick:
-    // The parent opacity handles visibility, this just ensures the text is styled
-    opacity: 1,
-  }));
-
-  // For web, we need to read the value in a derived way
-  // Using a simple approach: re-render via useDerivedValue
-  const displayPct = useDerivedValue(() => `${zoomPct.value}%`);
-
-  return (
-    <Animated.Text style={[s.zoomText, textStyle]}>
-      <ReanimatedText text={displayPct} />
-    </Animated.Text>
-  );
-}
-
-// Simple component that displays a shared string value
-function ReanimatedText({ text }: { text: Animated.SharedValue<string> }) {
-  // On web, useAnimatedProps doesn't work for Text, so we use a workaround
-  const animStyle = useAnimatedStyle(() => {
-    // This is a hack to force re-render when text changes
-    return { opacity: 1 };
-  });
-
-  // For simplicity and cross-platform compatibility, use a derived value approach
-  // that works on both web and native
-  const [displayText, setDisplayText] = React.useState('100%');
-
-  React.useEffect(() => {
-    // Set up an interval to read the shared value
-    const interval = setInterval(() => {
-      try {
-        setDisplayText(text.value);
-      } catch {
-        // Shared value not accessible outside worklet on some platforms
-      }
-    }, 100);
-    return () => clearInterval(interval);
-  }, [text]);
-
-  return <Text style={s.zoomTextInner}>{displayText}</Text>;
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────
@@ -432,7 +399,10 @@ const s = StyleSheet.create({
   },
   overlayFull: {
     flex: 1,
-    backgroundColor: 'rgba(14, 17, 23, 0.65)',
+    // Use a visibly lighter shade so the overlay is distinguishable
+    // from the root background (#0E1117). This creates the "dimmed area
+    // outside the crop frame" effect.
+    backgroundColor: 'rgba(30, 40, 55, 0.7)',
   },
   frame: {
     overflow: 'hidden',
@@ -485,12 +455,6 @@ const s = StyleSheet.create({
     zIndex: 10,
   },
   zoomText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#F5A623',
-    fontFamily: FH,
-  },
-  zoomTextInner: {
     fontSize: 13,
     fontWeight: '700',
     color: '#F5A623',

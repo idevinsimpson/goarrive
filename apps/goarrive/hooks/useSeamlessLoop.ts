@@ -10,16 +10,16 @@
  *   1. Find the primary `<video>` element inside the container
  *   2. Create a hidden clone pre-loaded and paused at time 0
  *   3. Poll via requestAnimationFrame — when the active video is within
- *      ~100ms of its end, instantly swap: show the clone (already at 0),
+ *      ~80ms of its end, instantly swap: show the clone (already at 0),
  *      hide the active, reset it to 0
  *   4. Alternate back and forth indefinitely
  *
- * The clone is pre-played then immediately paused at time 0 so the browser
- * has already decoded the first frames — this eliminates the async delay
- * that caused the remaining stutter in the previous timeupdate-based approach.
+ * IMPORTANT: This hook is very careful not to break expo-av's rendering:
+ *   - It waits until the primary video has actually started playing
+ *   - It never touches the primary video's opacity until a swap happens
+ *   - On cleanup, it fully restores the primary video's original state
  *
- * On native platforms (iOS/Android), this hook is a no-op — expo-av's
- * built-in loop works fine there.
+ * On native platforms (iOS/Android), this hook is a no-op.
  */
 import { useEffect, RefObject } from 'react';
 import { Platform, View } from 'react-native';
@@ -40,15 +40,18 @@ export function useSeamlessLoop(
 
     let rafId: number | null = null;
     let destroyed = false;
+    let clone: HTMLVideoElement | null = null;
+    let primaryVideo: HTMLVideoElement | null = null;
+    let initialized = false;
 
-    // Wait for the DOM to settle after React render
+    // We delay initialization until the video is actually playing
+    // to avoid interfering with expo-av's initial render
     const initTimeout = setTimeout(() => {
       if (destroyed) return;
 
       const container = containerRef.current as any;
       if (!container) return;
 
-      // Get the underlying DOM node
       const domNode: HTMLElement | null =
         container._nativeTag ||
         container.getNode?.() ||
@@ -56,19 +59,49 @@ export function useSeamlessLoop(
 
       if (!domNode || typeof domNode.querySelector !== 'function') return;
 
-      const primaryVideo = domNode.querySelector('video') as HTMLVideoElement | null;
+      primaryVideo = domNode.querySelector('video') as HTMLVideoElement | null;
       if (!primaryVideo) return;
 
-      // Don't set up if video has no source
+      // Don't set up if video has no source or no duration
       if (!primaryVideo.src && !primaryVideo.querySelector('source')) return;
 
-      // Find the video's immediate parent (expo-av wrapper div)
-      const videoParent = primaryVideo.parentElement;
+      // Wait for the video to actually start playing before setting up the clone
+      // This prevents the hook from interfering with expo-av's initial render
+      const onPlaying = () => {
+        if (destroyed || initialized) return;
+        if (!primaryVideo) return;
+        // Need a valid duration to set up the swap
+        if (!primaryVideo.duration || primaryVideo.duration <= 0) return;
+
+        initialized = true;
+        setupClone(primaryVideo);
+      };
+
+      // If already playing, set up immediately
+      if (!primaryVideo.paused && primaryVideo.duration > 0) {
+        initialized = true;
+        setupClone(primaryVideo);
+      } else {
+        // Wait for the video to start playing
+        primaryVideo.addEventListener('playing', onPlaying);
+        // Cleanup listener if destroyed before playing
+        const cleanupListener = () => {
+          primaryVideo?.removeEventListener('playing', onPlaying);
+        };
+        // Store for cleanup
+        (containerRef as any).__cleanupListener = cleanupListener;
+      }
+    }, 300);
+
+    function setupClone(primary: HTMLVideoElement) {
+      if (destroyed) return;
+
+      const videoParent = primary.parentElement;
       if (!videoParent) return;
 
       // Create the clone video element
-      const clone = document.createElement('video');
-      clone.src = primaryVideo.src || videoUri;
+      clone = document.createElement('video');
+      clone.src = primary.src || videoUri;
       clone.muted = true;
       clone.playsInline = true;
       clone.preload = 'auto';
@@ -82,7 +115,7 @@ export function useSeamlessLoop(
       clone.style.objectFit = 'cover';
       clone.style.opacity = '0';
       clone.style.pointerEvents = 'none';
-      clone.style.zIndex = '2'; // Above primary video but below poster
+      clone.style.zIndex = '2';
 
       // Apply crop transforms to clone to match primary
       const hasCrop = cropScale !== 1 || cropTranslateX !== 0 || cropTranslateY !== 0;
@@ -91,48 +124,46 @@ export function useSeamlessLoop(
       }
 
       // Insert clone into the video parent
-      // expo-av DOM: <div (outer)> → <div (ExponentVideo wrapper)> → <video>
-      // The poster Image is a sibling of ExponentVideo wrapper in the outer div.
-      // We insert the clone INSIDE the ExponentVideo wrapper (videoParent) so it
-      // doesn't interfere with the poster Image's z-stacking.
       videoParent.style.position = 'relative';
       videoParent.appendChild(clone);
 
       // Disable native loop on primary — we handle looping ourselves
-      primaryVideo.loop = false;
+      primary.loop = false;
 
-      // Pre-warm the clone: play briefly then pause at 0
-      // This forces the browser to decode the first frames
+      // IMPORTANT: Do NOT touch primary's opacity here.
+      // It should remain at whatever expo-av set it to (visible).
+
+      // Pre-warm the clone
       const preWarm = () => {
+        if (!clone || destroyed) return;
         clone.currentTime = 0;
         const playPromise = clone.play();
         if (playPromise) {
           playPromise.then(() => {
-            // Immediately pause after the browser starts decoding
+            if (!clone || destroyed) return;
             requestAnimationFrame(() => {
+              if (!clone || destroyed) return;
               clone.pause();
               clone.currentTime = 0;
             });
           }).catch(() => {
             // Autoplay blocked — fall back to native loop
-            primaryVideo.loop = true;
+            if (primary) primary.loop = true;
           });
         }
       };
 
-      // Wait for clone to have enough data before pre-warming
       clone.addEventListener('canplay', preWarm, { once: true });
       clone.load();
 
       let isSwapping = false;
-      let activeVideo = primaryVideo;
+      let activeVideo = primary;
       let standbyVideo = clone;
 
       const swap = () => {
-        if (isSwapping || destroyed) return;
+        if (isSwapping || destroyed || !clone) return;
         isSwapping = true;
 
-        // The standby is already at time 0 with first frames decoded
         const playPromise = standbyVideo.play();
         if (!playPromise) {
           isSwapping = false;
@@ -140,7 +171,7 @@ export function useSeamlessLoop(
         }
 
         playPromise.then(() => {
-          if (destroyed) return;
+          if (destroyed || !clone) return;
 
           // Instant visual swap via opacity
           standbyVideo.style.opacity = '1';
@@ -157,17 +188,17 @@ export function useSeamlessLoop(
 
           isSwapping = false;
         }).catch(() => {
-          // If play fails, fall back to native loop
           isSwapping = false;
-          primaryVideo.loop = true;
+          if (primary) primary.loop = true;
         });
       };
 
-      // RAF polling loop — checks every frame for precise swap timing
+      // RAF polling loop
       const poll = () => {
         if (destroyed) return;
 
         if (
+          activeVideo &&
           activeVideo.duration > 0 &&
           !activeVideo.paused &&
           activeVideo.duration - activeVideo.currentTime <= SWAP_LEAD_SEC &&
@@ -179,36 +210,51 @@ export function useSeamlessLoop(
         rafId = requestAnimationFrame(poll);
       };
 
-      // Also handle 'ended' as a safety net
+      // Safety net: handle 'ended' event
       const onEnded = () => {
         if (!isSwapping && !destroyed) {
           swap();
         }
       };
 
-      primaryVideo.addEventListener('ended', onEnded);
-      clone.addEventListener('ended', onEnded);
+      primary.addEventListener('ended', onEnded);
+      if (clone) clone.addEventListener('ended', onEnded);
 
       // Start polling
       rafId = requestAnimationFrame(poll);
 
-      // Cleanup
-      return () => {
-        destroyed = true;
-        if (rafId !== null) cancelAnimationFrame(rafId);
-        primaryVideo.removeEventListener('ended', onEnded);
-        clone.removeEventListener('ended', onEnded);
-        primaryVideo.loop = true; // Restore native loop
-        primaryVideo.style.opacity = '1';
-        clone.pause();
-        clone.remove();
-      };
-    }, 500); // Wait 500ms for expo-av to fully mount the video element
+      // Store onEnded for cleanup
+      (containerRef as any).__onEnded = onEnded;
+    }
 
+    // Cleanup
     return () => {
       destroyed = true;
-      if (rafId !== null) cancelAnimationFrame(rafId);
       clearTimeout(initTimeout);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+
+      // Clean up playing listener
+      if ((containerRef as any).__cleanupListener) {
+        (containerRef as any).__cleanupListener();
+        delete (containerRef as any).__cleanupListener;
+      }
+
+      const onEnded = (containerRef as any).__onEnded;
+
+      if (primaryVideo) {
+        primaryVideo.loop = true; // Restore native loop
+        primaryVideo.style.opacity = '1'; // Ensure visible
+        if (onEnded) primaryVideo.removeEventListener('ended', onEnded);
+      }
+
+      if (clone) {
+        if (onEnded) clone.removeEventListener('ended', onEnded);
+        clone.pause();
+        clone.remove();
+        clone = null;
+      }
+
+      delete (containerRef as any).__onEnded;
     };
   }, [videoUri, cropScale, cropTranslateX, cropTranslateY]);
 }
