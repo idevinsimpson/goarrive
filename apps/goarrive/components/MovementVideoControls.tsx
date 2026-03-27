@@ -17,9 +17,8 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
+  Pressable,
   Platform,
-  Dimensions,
-  useWindowDimensions,
 } from 'react-native';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { Icon } from './Icon';
@@ -43,6 +42,12 @@ interface MovementVideoControlsProps {
   showControls?: boolean;
   /** Lock the video frame to a specific aspect ratio (e.g. 4/5). Width fills parent; height = width / ratio */
   aspectRatio?: number;
+  /** Non-destructive crop: scale factor (1 = no zoom) */
+  cropScale?: number;
+  /** Non-destructive crop: horizontal offset in px */
+  cropTranslateX?: number;
+  /** Non-destructive crop: vertical offset in px */
+  cropTranslateY?: number;
 }
 
 export default function MovementVideoControls({
@@ -52,14 +57,15 @@ export default function MovementVideoControls({
   autoPlay = false,
   showControls = true,
   aspectRatio,
+  cropScale = 1,
+  cropTranslateX = 0,
+  cropTranslateY = 0,
 }: MovementVideoControlsProps) {
-  const { width: winWidth, height: winHeight } = useWindowDimensions();
-  // If aspectRatio is provided, compute height from available width (minus 32px padding)
-  // Cap at 50% of screen height so the video never blocks scrolling
-  const maxVideoHeight = Math.round(winHeight * 0.5);
-  const computedHeight = aspectRatio
-    ? Math.min(Math.round(Math.min(winWidth - 32, 500) / aspectRatio), maxVideoHeight)
-    : height;
+  // When aspectRatio is set, use RN's native aspectRatio style (no manual height calc).
+  // When not set, fall back to explicit pixel height.
+  const containerStyle = aspectRatio
+    ? { width: '100%' as const, aspectRatio }
+    : { height };
   const videoRef = useRef<Video>(null);
   const containerRef = useRef<View>(null);
   const [isPlaying, setIsPlaying] = useState(autoPlay);
@@ -177,9 +183,8 @@ export default function MovementVideoControls({
   const progressPct = duration > 0 ? position / duration : 0;
 
   return (
-    <View ref={containerRef} style={[st.container, { height: computedHeight }]}>
-      <TouchableOpacity
-        activeOpacity={1}
+    <View ref={containerRef} style={[st.container, containerStyle]}>
+      <Pressable
         onPress={() => setShowOverlay((o) => !o)}
         style={st.videoWrap}
       >
@@ -192,19 +197,30 @@ export default function MovementVideoControls({
           isLooping={isLooping}
           shouldPlay={autoPlay}
           isMuted
-          style={st.video}
+          style={[
+            st.video,
+            (cropScale !== 1 || cropTranslateX !== 0 || cropTranslateY !== 0)
+              ? {
+                  transform: [
+                    { scale: cropScale },
+                    { translateX: cropTranslateX },
+                    { translateY: cropTranslateY },
+                  ],
+                }
+              : undefined,
+          ]}
           onPlaybackStatusUpdate={onPlaybackStatusUpdate}
         />
 
         {/* Play/pause overlay */}
         {showOverlay && (
-          <TouchableOpacity style={st.playOverlay} onPress={togglePlay}>
+          <Pressable style={st.playOverlay} onPress={togglePlay}>
             <View style={st.playCircle}>
               <Icon name={isPlaying ? 'pause' : 'play'} size={28} color="#F0F4F8" />
             </View>
-          </TouchableOpacity>
+          </Pressable>
         )}
-      </TouchableOpacity>
+      </Pressable>
 
       {/* Controls bar */}
       {showControls && (

@@ -200,7 +200,13 @@ export default function MovementsScreen() {
   }, []);
 
   useEffect(() => {
-    if (!coachId) return;
+    if (!coachId) {
+      console.warn('[Movements] No coachId — skipping listener. user.uid:', user?.uid, 'claims:', JSON.stringify(claims));
+      setLoading(false);
+      return;
+    }
+
+    console.log('[Movements] Starting listeners with coachId:', coachId, 'user.uid:', user?.uid);
 
     const coachQ = query(
       collection(db, 'movements'),
@@ -227,26 +233,31 @@ export default function MovementsScreen() {
       for (const m of globalDocs) {
         if (!seen.has(m.id)) { seen.add(m.id); merged.push(m); }
       }
+      console.log('[Movements] Merged:', merged.length, 'coach:', coachDocs.length, 'global:', globalDocs.length);
       setMovements(merged);
       setLoading(false);
       setRefreshing(false);
     };
 
     const unsubCoach = onSnapshot(coachQ, (snap) => {
+      console.log('[Movements] Coach snapshot:', snap.docs.length, 'docs');
       coachDocs = snap.docs.map(mapDoc);
       if (firstCoach) { firstCoach = false; }
       merge();
     }, (err) => {
-      console.error('[Movements] Coach listener error:', err);
+      console.error('[Movements] Coach listener error:', err.code, err.message);
+      Alert.alert('Movement Load Error', `Coach query failed: ${err.code}\n${err.message}\ncoachId: ${coachId}`);
       setLoading(false);
     });
 
     const unsubGlobal = onSnapshot(globalQ, (snap) => {
+      console.log('[Movements] Global snapshot:', snap.docs.length, 'docs');
       globalDocs = snap.docs.map(mapDoc);
       if (firstGlobal) { firstGlobal = false; }
       merge();
     }, (err) => {
-      console.error('[Movements] Global listener error:', err);
+      console.error('[Movements] Global listener error:', err.code, err.message);
+      Alert.alert('Movement Load Error', `Global query failed: ${err.code}\n${err.message}`);
       setLoading(false);
     });
 

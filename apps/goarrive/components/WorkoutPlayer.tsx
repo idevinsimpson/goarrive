@@ -204,6 +204,9 @@ export default function WorkoutPlayer({
                       aspectRatio={4 / 5}
                       autoPlay={!isPaused}
                       showControls={isPaused}
+                      cropScale={current.cropScale ?? 1}
+                      cropTranslateX={current.cropTranslateX ?? 0}
+                      cropTranslateY={current.cropTranslateY ?? 0}
                     />
                   </View>
                 ) : current.thumbnailUrl ? (
@@ -237,6 +240,9 @@ export default function WorkoutPlayer({
                   aspectRatio={4 / 5}
                   autoPlay={!isPaused}
                   showControls={isPaused}
+                  cropScale={current.cropScale ?? 1}
+                  cropTranslateX={current.cropTranslateX ?? 0}
+                  cropTranslateY={current.cropTranslateY ?? 0}
                 />
               </View>
             ) : current.thumbnailUrl ? (

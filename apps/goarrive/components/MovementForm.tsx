@@ -40,6 +40,7 @@ import {
 } from 'firebase/firestore';
 import { Icon } from './Icon';
 import MovementVideoControls from './MovementVideoControls';
+import VideoCropModal, { CropValues } from './VideoCropModal';
 import { MovementDetailData } from './MovementDetail';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -137,6 +138,12 @@ export default function MovementForm({
   const [contraindications, setContraindications] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // ── Crop/reframe state ─────────────────────────────────────────────────
+  const [showCropModal, setShowCropModal] = useState(false);
+  const [cropScale, setCropScale] = useState(1);
+  const [cropTranslateX, setCropTranslateX] = useState(0);
+  const [cropTranslateY, setCropTranslateY] = useState(0);
+
   // ── Pre-populate on edit ───────────────────────────────────────────────
   useEffect(() => {
     if (editMovement) {
@@ -155,6 +162,9 @@ export default function MovementForm({
       setRegression((editMovement as any).regression || '');
       setProgression((editMovement as any).progression || '');
       setContraindications((editMovement as any).contraindications || '');
+      setCropScale((editMovement as any).cropScale ?? 1);
+      setCropTranslateX((editMovement as any).cropTranslateX ?? 0);
+      setCropTranslateY((editMovement as any).cropTranslateY ?? 0);
     } else {
       resetForm();
     }
@@ -178,6 +188,10 @@ export default function MovementForm({
     setRegression('');
     setProgression('');
     setContraindications('');
+    setCropScale(1);
+    setCropTranslateX(0);
+    setCropTranslateY(0);
+    setShowCropModal(false);
   };
 
   // ── Media upload ──────────────────────────────────────────────────────
@@ -233,6 +247,11 @@ export default function MovementForm({
           const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
           if (isVideo) {
             setVideoUrl(downloadUrl);
+            // Auto-open crop modal after video upload
+            setCropScale(1);
+            setCropTranslateX(0);
+            setCropTranslateY(0);
+            setShowCropModal(true);
           } else {
             setThumbnailUrl(downloadUrl);
           }
@@ -312,6 +331,11 @@ export default function MovementForm({
         async () => {
           const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
           setVideoUrl(downloadUrl);
+          // Auto-open crop modal after camera recording upload
+          setCropScale(1);
+          setCropTranslateX(0);
+          setCropTranslateY(0);
+          setShowCropModal(true);
           setUploading(false);
           setUploadProgress(0);
         },
@@ -360,6 +384,9 @@ export default function MovementForm({
         regression: regression.trim(),
         progression: progression.trim(),
         contraindications: contraindications.trim(),
+        cropScale,
+        cropTranslateX,
+        cropTranslateY,
         updatedAt: serverTimestamp(),
       };
 
@@ -647,13 +674,38 @@ export default function MovementForm({
                   aspectRatio={4 / 5}
                   autoPlay={false}
                   showControls={true}
+                  cropScale={cropScale}
+                  cropTranslateX={cropTranslateX}
+                  cropTranslateY={cropTranslateY}
                 />
                 <View style={st.mediaAttached}>
                   <Icon name="checkmark" size={14} color="#6EBB7A" />
                   <Text style={st.mediaAttachedText}>Video attached</Text>
+                  <Pressable
+                    style={st.reframeBtn}
+                    onPress={() => setShowCropModal(true)}
+                    hitSlop={8}
+                  >
+                    <Icon name="crop" size={12} color="#F5A623" />
+                    <Text style={st.reframeBtnText}>Reframe</Text>
+                  </Pressable>
                 </View>
               </View>
             ) : null}
+
+            {/* Crop/Reframe Modal */}
+            <VideoCropModal
+              visible={showCropModal}
+              videoUri={videoUrl}
+              initialCrop={{ cropScale, cropTranslateX, cropTranslateY }}
+              onDone={(crop: CropValues) => {
+                setCropScale(crop.cropScale);
+                setCropTranslateX(crop.cropTranslateX);
+                setCropTranslateY(crop.cropTranslateY);
+                setShowCropModal(false);
+              }}
+              onCancel={() => setShowCropModal(false)}
+            />
 
             {/* Regression / Progression chains */}
             <Text style={st.label}>Regression (Easier Alternative)</Text>
@@ -1022,5 +1074,23 @@ const st = StyleSheet.create({
     fontSize: 12,
     color: '#6EBB7A',
     fontFamily: FB,
+  },
+  reframeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginLeft: 'auto',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: 'rgba(245,166,35,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.3)',
+  },
+  reframeBtnText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#F5A623',
+    fontFamily: FH,
   },
 });

@@ -120,6 +120,9 @@ export default function MovementDetail({
                   aspectRatio={4 / 5}
                   autoPlay={true}
                   showControls={true}
+                  cropScale={movement.cropScale ?? 1}
+                  cropTranslateX={movement.cropTranslateX ?? 0}
+                  cropTranslateY={movement.cropTranslateY ?? 0}
                 />
               ) : (movement.thumbnailUrl || movement.mediaUrl) ? (
                 <Image
