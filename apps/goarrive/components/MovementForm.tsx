@@ -191,8 +191,9 @@ export default function MovementForm({
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['videos', 'images'],
-        allowsEditing: false,
+        allowsEditing: true,
         quality: 0.8,
+        videoMaxDuration: 120, // 2 min max
       });
 
       if (result.canceled || !result.assets?.[0]) return;
@@ -272,7 +273,7 @@ export default function MovementForm({
 
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ['videos'],
-        allowsEditing: false,
+        allowsEditing: true,
         quality: 0.8,
         videoMaxDuration: 120, // 2 min max
       });
@@ -612,7 +613,7 @@ export default function MovementForm({
                 <Image
                   source={{ uri: thumbnailUrl }}
                   style={st.mediaThumbnail}
-                  resizeMode="cover"
+                  resizeMode="contain"
                 />
                 <Pressable
                   style={st.mediaRemoveBtn}

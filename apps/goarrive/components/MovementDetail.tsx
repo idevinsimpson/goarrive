@@ -117,8 +117,8 @@ export default function MovementDetail({
                 <MovementVideoControls
                   uri={movement.videoUrl}
                   posterUri={movement.thumbnailUrl || undefined}
-                  height={200}
-                  autoPlay={false}
+                  height={240}
+                  autoPlay={true}
                   showControls={true}
                 />
               ) : (movement.thumbnailUrl || movement.mediaUrl) ? (

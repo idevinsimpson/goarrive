@@ -337,7 +337,7 @@ export default function MovementsScreen() {
 
   // ── Render item for FlatList ───────────────────────────────────────────
   const renderItem = ({ item: m }: { item: MovementDetailData }) => {
-    const thumb = m.thumbnailUrl || m.mediaUrl || m.videoUrl;
+    const thumb = m.thumbnailUrl || m.mediaUrl || null;
     return (
     <Pressable style={s.card} onPress={() => handleOpenDetail(m)}>
       <View style={s.cardRow}>

@@ -165,21 +165,17 @@ export default function WorkoutForm({
   const loadMovements = useCallback(async () => {
     if (movementsLoaded || !coachId) return;
     try {
-      // Load coach-scoped movements
+      // Load coach-scoped movements (uses existing coachId+createdAt index)
       const coachQ = query(
         collection(db, 'movements'),
         where('coachId', '==', coachId),
-        where('isArchived', '==', false),
-        orderBy('name', 'asc'),
       );
       const coachSnap = await getDocs(coachQ);
 
-      // Load global movements
+      // Load global movements (uses existing isGlobal+createdAt index)
       const globalQ = query(
         collection(db, 'movements'),
         where('isGlobal', '==', true),
-        where('isArchived', '==', false),
-        orderBy('name', 'asc'),
       );
       const globalSnap = await getDocs(globalQ);
 
@@ -187,20 +183,22 @@ export default function WorkoutForm({
       const list: MovementOption[] = [];
 
       coachSnap.docs.forEach((d) => {
-        if (!seen.has(d.id)) {
+        const cd = d.data();
+        if (!seen.has(d.id) && !cd.isArchived) {
           seen.add(d.id);
-          const cd = d.data();
           list.push({ id: d.id, name: cd.name ?? '', category: cd.category ?? '', mediaUrl: cd.mediaUrl ?? null, videoUrl: cd.videoUrl ?? null });
         }
       });
       globalSnap.docs.forEach((d) => {
-        if (!seen.has(d.id)) {
+        const gd = d.data();
+        if (!seen.has(d.id) && !gd.isArchived) {
           seen.add(d.id);
-          const gd = d.data();
           list.push({ id: d.id, name: gd.name ?? '', category: gd.category ?? '', mediaUrl: gd.mediaUrl ?? null, videoUrl: gd.videoUrl ?? null });
         }
       });
 
+      // Sort by name client-side (avoids needing composite index)
+      list.sort((a, b) => a.name.localeCompare(b.name));
       setAvailableMovements(list);
       setMovementsLoaded(true);
     } catch (err) {
@@ -208,8 +206,14 @@ export default function WorkoutForm({
     }
   }, [coachId, movementsLoaded]);
 
-  // Suggestion 9: Lazy-load movements only when user first taps "Add Movement"
-  // (removed eager load on visible — now triggered by handleOpenMovementPicker)
+  // Reset movementsLoaded when form re-opens so fresh data is always fetched
+  useEffect(() => {
+    if (visible) {
+      setMovementsLoaded(false);
+    }
+  }, [visible]);
+
+  // Lazy-load movements only when user first taps "Add Movement"
   const handleOpenMovementPicker = useCallback((blockIndex: number) => {
     setAddingMovementToBlock(blockIndex);
     if (!movementsLoaded) loadMovements();
