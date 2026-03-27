@@ -21,7 +21,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
-import { GestureDetector, Gesture } from 'react-native-gesture-handler';
+import { GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -195,7 +195,8 @@ export default function VideoCropModal({
   // ── Render ─────────────────────────────────────────────────────────────
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+    <Modal visible={visible} animationType="slide" transparent={false}>
+      <GestureHandlerRootView style={{ flex: 1 }}>
       <View style={s.root}>
         {/* Header */}
         <View style={s.header}>
@@ -248,6 +249,7 @@ export default function VideoCropModal({
           <Text style={s.resetText}>Reset</Text>
         </Pressable>
       </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }

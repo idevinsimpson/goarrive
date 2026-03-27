@@ -1,5 +1,5 @@
 /**
- * MovementVideoControls — Enhanced video playback controls (Suggestion 9)
+ * MovementVideoControls — Enhanced video playback controls
  *
  * Wraps expo-av Video with:
  *   - Playback speed selector (0.5x, 1x, 1.5x)
@@ -8,8 +8,9 @@
  *   - Fullscreen toggle
  *   - Play/pause overlay
  *
- * Designed for use in MovementForm preview and the WorkoutPlayer
- * movement detail view. Follows G➲A design system.
+ * The 4:5 frame is enforced via onLayout measurement + explicit pixel height.
+ * This is the most reliable cross-platform approach — RN's aspectRatio style
+ * can be overridden by Video's intrinsic content size on iOS native.
  */
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
@@ -19,6 +20,7 @@ import {
   TouchableOpacity,
   Pressable,
   Platform,
+  LayoutChangeEvent,
 } from 'react-native';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { Icon } from './Icon';
@@ -30,17 +32,20 @@ const FB =
 
 const SPEED_OPTIONS = [0.5, 1, 1.5] as const;
 
+/** 4:5 means for every 4 units wide, 5 units tall → height = width × (5/4) */
+const ASPECT_MULTIPLIER = 5 / 4; // 1.25
+
 interface MovementVideoControlsProps {
   uri: string;
   /** Poster/thumbnail image to show before playback */
   posterUri?: string;
-  /** Height of the video container (ignored when aspectRatio is set) */
+  /** Fallback height when aspectRatio is not set */
   height?: number;
   /** Whether to auto-play on mount */
   autoPlay?: boolean;
   /** Whether to show controls overlay */
   showControls?: boolean;
-  /** Lock the video frame to a specific aspect ratio (e.g. 4/5). Width fills parent; height = width / ratio */
+  /** Lock the video frame to a specific aspect ratio (e.g. 4/5). */
   aspectRatio?: number;
   /** Non-destructive crop: scale factor (1 = no zoom) */
   cropScale?: number;
@@ -61,13 +66,34 @@ export default function MovementVideoControls({
   cropTranslateX = 0,
   cropTranslateY = 0,
 }: MovementVideoControlsProps) {
-  // When aspectRatio is set, use RN's native aspectRatio style (no manual height calc).
-  // When not set, fall back to explicit pixel height.
-  const containerStyle = aspectRatio
-    ? { width: '100%' as const, aspectRatio }
-    : { height };
   const videoRef = useRef<Video>(null);
   const containerRef = useRef<View>(null);
+
+  // ── Bulletproof 4:5 sizing via onLayout ──────────────────────────────
+  // We measure the container's actual rendered width, then compute
+  // height = width × multiplier. This works on every platform because
+  // it uses explicit pixel values, not aspectRatio style.
+  const [measuredHeight, setMeasuredHeight] = useState<number | null>(null);
+
+  const onContainerLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      if (!aspectRatio) return; // only compute when ratio is requested
+      const w = e.nativeEvent.layout.width;
+      if (w > 0) {
+        const multiplier = 1 / aspectRatio; // aspectRatio = w/h → h = w / aspectRatio = w × (1/aspectRatio)
+        const h = Math.round(w * multiplier);
+        setMeasuredHeight(h);
+      }
+    },
+    [aspectRatio],
+  );
+
+  // Determine the video area height
+  const videoAreaHeight = aspectRatio
+    ? measuredHeight ?? 0 // 0 until measured (invisible until first layout)
+    : height;
+
+  // ── Playback state ──────────────────────────────────────────────────
   const [isPlaying, setIsPlaying] = useState(autoPlay);
   const [isLooping, setIsLooping] = useState(true);
   const [speed, setSpeed] = useState<number>(1);
@@ -75,7 +101,6 @@ export default function MovementVideoControls({
   const [duration, setDuration] = useState(0);
   const [showOverlay, setShowOverlay] = useState(!autoPlay);
 
-  // ── Playback status updates ──────────────────────────────────────────
   const onPlaybackStatusUpdate = useCallback((status: AVPlaybackStatus) => {
     if (!status.isLoaded) return;
     setIsPlaying(status.isPlaying);
@@ -103,7 +128,9 @@ export default function MovementVideoControls({
   }, [isLooping]);
 
   const cycleSpeed = useCallback(async () => {
-    const currentIdx = SPEED_OPTIONS.indexOf(speed as typeof SPEED_OPTIONS[number]);
+    const currentIdx = SPEED_OPTIONS.indexOf(
+      speed as (typeof SPEED_OPTIONS)[number],
+    );
     const nextIdx = (currentIdx + 1) % SPEED_OPTIONS.length;
     const newSpeed = SPEED_OPTIONS[nextIdx];
     setSpeed(newSpeed);
@@ -112,24 +139,23 @@ export default function MovementVideoControls({
     }
   }, [speed]);
 
-  const seekTo = useCallback(async (pct: number) => {
-    if (!videoRef.current || duration === 0) return;
-    const posMs = Math.round(pct * duration);
-    await videoRef.current.setPositionAsync(posMs);
-  }, [duration]);
+  const seekTo = useCallback(
+    async (pct: number) => {
+      if (!videoRef.current || duration === 0) return;
+      const posMs = Math.round(pct * duration);
+      await videoRef.current.setPositionAsync(posMs);
+    },
+    [duration],
+  );
 
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const toggleFullscreen = useCallback(async () => {
     try {
       if (Platform.OS === 'web') {
-        // Web: use Fullscreen API on the container wrapper (not _nativeRef)
-        const containerEl = (containerRef.current as any);
-        // React Native Web exposes the underlying DOM node
+        const containerEl = containerRef.current as any;
         const domNode =
-          containerEl?._nativeTag ||
-          containerEl?.getNode?.() ||
-          containerEl;
+          containerEl?._nativeTag || containerEl?.getNode?.() || containerEl;
         if (domNode && typeof domNode.requestFullscreen === 'function') {
           if (!document.fullscreenElement) {
             await domNode.requestFullscreen();
@@ -139,8 +165,8 @@ export default function MovementVideoControls({
             setIsFullscreen(false);
           }
         } else {
-          // Fallback: try the video element directly
-          const videoEl = (videoRef.current as any)?._nativeRef?.current ||
+          const videoEl =
+            (videoRef.current as any)?._nativeRef?.current ||
             (videoRef.current as any);
           if (videoEl && typeof videoEl.requestFullscreen === 'function') {
             await videoEl.requestFullscreen();
@@ -148,7 +174,6 @@ export default function MovementVideoControls({
           }
         }
       } else {
-        // Native: use expo-av's built-in fullscreen
         if (!videoRef.current) return;
         if (isFullscreen) {
           await videoRef.current.dismissFullscreenPlayer();
@@ -162,7 +187,6 @@ export default function MovementVideoControls({
     }
   }, [isFullscreen]);
 
-  // Listen for fullscreen exit via Escape key on web
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     const handler = () => {
@@ -182,52 +206,74 @@ export default function MovementVideoControls({
 
   const progressPct = duration > 0 ? position / duration : 0;
 
-  return (
-    <View ref={containerRef} style={[st.container, containerStyle]}>
-      <Pressable
-        onPress={() => setShowOverlay((o) => !o)}
-        style={st.videoWrap}
-      >
-        <Video
-          ref={videoRef}
-          source={{ uri }}
-          posterSource={posterUri ? { uri: posterUri } : undefined}
-          usePoster={!!posterUri}
-          resizeMode={ResizeMode.COVER}
-          isLooping={isLooping}
-          shouldPlay={autoPlay}
-          isMuted
-          style={[
-            st.video,
-            (cropScale !== 1 || cropTranslateX !== 0 || cropTranslateY !== 0)
-              ? {
-                  transform: [
-                    { scale: cropScale },
-                    { translateX: cropTranslateX },
-                    { translateY: cropTranslateY },
-                  ],
-                }
-              : undefined,
-          ]}
-          onPlaybackStatusUpdate={onPlaybackStatusUpdate}
-        />
+  // Build crop transform if any crop values are set
+  const hasCrop =
+    cropScale !== 1 || cropTranslateX !== 0 || cropTranslateY !== 0;
+  const cropTransform = hasCrop
+    ? {
+        transform: [
+          { scale: cropScale },
+          { translateX: cropTranslateX },
+          { translateY: cropTranslateY },
+        ],
+      }
+    : undefined;
 
-        {/* Play/pause overlay */}
-        {showOverlay && (
-          <Pressable style={st.playOverlay} onPress={togglePlay}>
-            <View style={st.playCircle}>
-              <Icon name={isPlaying ? 'pause' : 'play'} size={28} color="#F0F4F8" />
-            </View>
-          </Pressable>
-        )}
-      </Pressable>
+  return (
+    <View
+      ref={containerRef}
+      onLayout={onContainerLayout}
+      style={[
+        st.container,
+        aspectRatio
+          ? { width: '100%' as const }
+          : { height },
+      ]}
+    >
+      {/* Video area — explicit pixel height enforces 4:5 */}
+      <View style={[st.videoArea, { height: videoAreaHeight }]}>
+        <Pressable
+          onPress={() => setShowOverlay((o) => !o)}
+          style={StyleSheet.absoluteFill}
+        >
+          <Video
+            ref={videoRef}
+            source={{ uri }}
+            posterSource={posterUri ? { uri: posterUri } : undefined}
+            usePoster={!!posterUri}
+            resizeMode={ResizeMode.COVER}
+            isLooping={isLooping}
+            shouldPlay={autoPlay}
+            isMuted
+            style={[st.video, cropTransform]}
+            onPlaybackStatusUpdate={onPlaybackStatusUpdate}
+          />
+
+          {/* Play/pause overlay */}
+          {showOverlay && (
+            <Pressable style={st.playOverlay} onPress={togglePlay}>
+              <View style={st.playCircle}>
+                <Icon
+                  name={isPlaying ? 'pause' : 'play'}
+                  size={28}
+                  color="#F0F4F8"
+                />
+              </View>
+            </Pressable>
+          )}
+        </Pressable>
+      </View>
 
       {/* Controls bar */}
       {showControls && (
         <View style={st.controlsBar}>
           {/* Play/pause */}
           <TouchableOpacity onPress={togglePlay} style={st.controlBtn}>
-            <Icon name={isPlaying ? 'pause' : 'play'} size={16} color="#F0F4F8" />
+            <Icon
+              name={isPlaying ? 'pause' : 'play'}
+              size={16}
+              color="#F0F4F8"
+            />
           </TouchableOpacity>
 
           {/* Progress bar */}
@@ -236,12 +282,17 @@ export default function MovementVideoControls({
             activeOpacity={0.9}
             onPress={(e) => {
               const x = (e.nativeEvent as any).locationX || 0;
-              const width = 180; // approximate
+              const width = 180;
               seekTo(Math.max(0, Math.min(1, x / width)));
             }}
           >
             <View style={st.progressTrack}>
-              <View style={[st.progressFill, { width: `${progressPct * 100}%` }]} />
+              <View
+                style={[
+                  st.progressFill,
+                  { width: `${progressPct * 100}%` },
+                ]}
+              />
             </View>
           </TouchableOpacity>
 
@@ -284,13 +335,13 @@ const st = StyleSheet.create({
     borderRadius: 10,
     overflow: 'hidden',
   },
-  videoWrap: {
-    flex: 1,
-    position: 'relative',
+  videoArea: {
+    width: '100%',
+    overflow: 'hidden',
+    backgroundColor: '#000',
   },
   video: {
-    width: '100%',
-    height: '100%',
+    ...StyleSheet.absoluteFillObject,
   },
   playOverlay: {
     ...StyleSheet.absoluteFillObject,

@@ -248,10 +248,12 @@ export default function MovementForm({
           if (isVideo) {
             setVideoUrl(downloadUrl);
             // Auto-open crop modal after video upload
+            // Use setTimeout to ensure the parent modal re-renders before
+            // opening the crop modal (iOS ignores simultaneous modal opens)
             setCropScale(1);
             setCropTranslateX(0);
             setCropTranslateY(0);
-            setShowCropModal(true);
+            setTimeout(() => setShowCropModal(true), 400);
           } else {
             setThumbnailUrl(downloadUrl);
           }
@@ -332,11 +334,13 @@ export default function MovementForm({
           const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
           setVideoUrl(downloadUrl);
           // Auto-open crop modal after camera recording upload
+          // Use setTimeout to ensure the parent modal re-renders before
+          // opening the crop modal (iOS ignores simultaneous modal opens)
           setCropScale(1);
           setCropTranslateX(0);
           setCropTranslateY(0);
-          setShowCropModal(true);
           setUploading(false);
+          setTimeout(() => setShowCropModal(true), 400);
           setUploadProgress(0);
         },
       );
@@ -417,6 +421,7 @@ export default function MovementForm({
 
   // ── Render ─────────────────────────────────────────────────────────────
   return (
+    <>
     <Modal visible={visible} animationType="slide" transparent={true}>
       <View style={st.overlay}>
         <View style={st.sheet}>
@@ -693,20 +698,6 @@ export default function MovementForm({
               </View>
             ) : null}
 
-            {/* Crop/Reframe Modal */}
-            <VideoCropModal
-              visible={showCropModal}
-              videoUri={videoUrl}
-              initialCrop={{ cropScale, cropTranslateX, cropTranslateY }}
-              onDone={(crop: CropValues) => {
-                setCropScale(crop.cropScale);
-                setCropTranslateX(crop.cropTranslateX);
-                setCropTranslateY(crop.cropTranslateY);
-                setShowCropModal(false);
-              }}
-              onCancel={() => setShowCropModal(false)}
-            />
-
             {/* Regression / Progression chains */}
             <Text style={st.label}>Regression (Easier Alternative)</Text>
             <TextInput
@@ -765,6 +756,21 @@ export default function MovementForm({
         </View>
       </View>
     </Modal>
+
+      {/* Crop/Reframe Modal — rendered OUTSIDE the form Modal so it layers on top on iOS */}
+      <VideoCropModal
+        visible={showCropModal}
+        videoUri={videoUrl}
+        initialCrop={{ cropScale, cropTranslateX, cropTranslateY }}
+        onDone={(crop: CropValues) => {
+          setCropScale(crop.cropScale);
+          setCropTranslateX(crop.cropTranslateX);
+          setCropTranslateY(crop.cropTranslateY);
+          setShowCropModal(false);
+        }}
+        onCancel={() => setShowCropModal(false)}
+      />
+    </>
   );
 }
 
