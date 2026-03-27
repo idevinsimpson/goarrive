@@ -104,15 +104,26 @@ export default function WorkoutPlayer({
   // TTS unavailable visual indicator
   const showTTSWarning = !isTTSAvailable && !audioMuted;
 
-  // ── Tap-to-show controls ──────────────────────────────────────────
+  // ── Tap-to-show controls + header ──────────────────────────────────
   const [showControls, setShowControls] = useState(false);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [videoReady, setVideoReady] = useState(false);
 
   const handleVideoTap = useCallback(() => {
-    setShowControls(true);
-    if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
-    controlsTimerRef.current = setTimeout(() => setShowControls(false), 3000);
+    setShowControls(prev => {
+      const next = !prev;
+      if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+      if (next) {
+        controlsTimerRef.current = setTimeout(() => setShowControls(false), 3000);
+      }
+      return next;
+    });
   }, []);
+
+  // Reset videoReady when movement changes
+  useEffect(() => {
+    setVideoReady(false);
+  }, [currentIndex]);
 
   // Hide controls when movement changes
   useEffect(() => {
@@ -145,34 +156,38 @@ export default function WorkoutPlayer({
   return (
     <Modal visible={visible} animationType="fade" transparent={false}>
       <View style={st.container}>
-        {/* Header */}
-        <View style={st.header}>
-          <TouchableOpacity onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-            <Icon name="close" size={28} color="#8A95A3" />
-          </TouchableOpacity>
-          <Text style={st.workoutName} numberOfLines={1}>
-            {workout?.name ?? 'Workout'}
-          </Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            {showTTSWarning && (
-              <View style={st.ttsWarning}>
-                <Icon name="alert-triangle" size={12} color="#E06B4F" />
-                <Text style={st.ttsWarningText}>No TTS</Text>
-              </View>
-            )}
-            <TouchableOpacity onPress={toggleMute} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-              <Icon name={audioMuted ? 'volume-x' : 'volume-2'} size={22} color="#8A95A3" />
+        {/* Header — hidden during WORK phase unless controls are showing */}
+        {(phase !== 'work' || showControls) && (
+          <View style={st.header}>
+            <TouchableOpacity onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+              <Icon name="close" size={28} color="#8A95A3" />
             </TouchableOpacity>
-            <Text style={st.progressText}>
-              {currentIndex + 1}/{total}
+            <Text style={st.workoutName} numberOfLines={1}>
+              {workout?.name ?? 'Workout'}
             </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              {showTTSWarning && (
+                <View style={st.ttsWarning}>
+                  <Icon name="alert-triangle" size={12} color="#E06B4F" />
+                  <Text style={st.ttsWarningText}>No TTS</Text>
+                </View>
+              )}
+              <TouchableOpacity onPress={toggleMute} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                <Icon name={audioMuted ? 'volume-x' : 'volume-2'} size={22} color="#8A95A3" />
+              </TouchableOpacity>
+              <Text style={st.progressText}>
+                {currentIndex + 1}/{total}
+              </Text>
+            </View>
           </View>
-        </View>
+        )}
 
-        {/* Progress bar */}
-        <View style={st.progressBar}>
-          <View style={[st.progressFill, { width: `${progressPct}%` }]} />
-        </View>
+        {/* Progress bar — hidden during WORK phase unless controls are showing */}
+        {(phase !== 'work' || showControls) && (
+          <View style={st.progressBar}>
+            <View style={[st.progressFill, { width: `${progressPct}%` }]} />
+          </View>
+        )}
 
         {/* ── READY state ─────────────────────────────────────── */}
         {phase === 'ready' && (
@@ -247,22 +262,30 @@ export default function WorkoutPlayer({
               <TouchableWithoutFeedback onPress={handleVideoTap}>
                 <View style={st.videoInner}>
                   {current.videoUrl ? (
-                    <Video
-                      source={{ uri: current.videoUrl }}
-                      posterSource={current.thumbnailUrl ? { uri: current.thumbnailUrl } : undefined}
-                      usePoster={!!current.thumbnailUrl}
-                      posterStyle={{ resizeMode: 'cover' } as any}
-                      resizeMode={ResizeMode.CONTAIN}
-                      isLooping
-                      shouldPlay={!isPaused}
-                      isMuted
-                      style={st.videoPlayer}
-                      videoStyle={
-                        Platform.OS === 'web'
-                          ? ({ width: '100%', height: '100%', objectFit: 'contain' } as any)
-                          : undefined
-                      }
-                    />
+                    <>
+                      <Video
+                        source={{ uri: current.videoUrl }}
+                        resizeMode={ResizeMode.CONTAIN}
+                        isLooping
+                        shouldPlay={!isPaused}
+                        isMuted
+                        style={st.videoPlayer}
+                        videoStyle={
+                          Platform.OS === 'web'
+                            ? ({ width: '100%', height: '100%', objectFit: 'contain' } as any)
+                            : undefined
+                        }
+                        onReadyForDisplay={() => setVideoReady(true)}
+                      />
+                      {/* GIF thumbnail shown until video is ready — prevents ratio jump */}
+                      {!videoReady && current.thumbnailUrl && (
+                        <Image
+                          source={{ uri: current.thumbnailUrl }}
+                          style={st.posterFallback}
+                          resizeMode="contain"
+                        />
+                      )}
+                    </>
                   ) : current.thumbnailUrl ? (
                     <Image
                       source={{ uri: current.thumbnailUrl }}
@@ -275,14 +298,12 @@ export default function WorkoutPlayer({
                     </View>
                   )}
 
-                  {/* Transparent tap interceptor — catches taps that video element would swallow on web */}
-                  {!showControls && (
-                    <TouchableOpacity
-                      style={st.tapInterceptor}
-                      onPress={handleVideoTap}
-                      activeOpacity={1}
-                    />
-                  )}
+                  {/* Transparent tap interceptor — always present, catches taps on web */}
+                  <TouchableOpacity
+                    style={st.tapInterceptor}
+                    onPress={handleVideoTap}
+                    activeOpacity={1}
+                  />
 
                   {/* Controls overlay — only visible on tap */}
                   {showControls && (
@@ -561,15 +582,15 @@ const st = StyleSheet.create({
   // ── WORK phase — Stacked layout ────────────────────────────────────
   workContainer: {
     flex: 1,
-    paddingHorizontal: 12,
+    paddingHorizontal: 4,
     paddingTop: 8,
     paddingBottom: Platform.select({ ios: 34, android: 16, web: 16, default: 16 }),
   },
   workLogo: {
-    width: 200,
-    height: 56,
+    width: 260,
+    height: 72,
     alignSelf: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   nameTimerRow: {
     flexDirection: 'row',
@@ -629,12 +650,16 @@ const st = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#1A1E26',
   },
+  posterFallback: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#000000',
+  } as any,
 
-  // Transparent tap interceptor
+  // Transparent tap interceptor — always present above video
   tapInterceptor: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'transparent',
-    zIndex: 10,
+    zIndex: 5,
   } as any,
 
   // Controls overlay — appears on video tap
@@ -643,7 +668,8 @@ const st = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.55)',
     justifyContent: 'center',
     alignItems: 'center',
-  },
+    zIndex: 15,
+  } as any,
   overlayControls: {
     flexDirection: 'row',
     alignItems: 'center',
