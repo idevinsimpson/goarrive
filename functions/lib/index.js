@@ -72,7 +72,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
-exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
+exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -5924,65 +5924,135 @@ exports.generateMovementGif = (0, firestore_1.onDocumentUpdated)('movements/{mov
     const videoUrl = after.videoUrl;
     const thumbnailUrl = after.thumbnailUrl;
     const coachId = after.coachId;
+    const movementId = event.params.movementId;
     // Skip if no video URL
     if (!videoUrl)
         return;
     // Skip if thumbnailUrl is already set (non-empty)
     if (thumbnailUrl && thumbnailUrl.trim().length > 0)
         return;
+    // Skip if gifGenerationFailed was just set (prevents retry loop from this trigger)
+    const beforeFailed = before.gifGenerationFailed;
+    const afterFailed = after.gifGenerationFailed;
+    if (!beforeFailed && afterFailed)
+        return;
     // Skip if the before state already had no thumbnail and no video change
     // (prevents re-triggering on unrelated field updates)
     const beforeVideoUrl = before.videoUrl;
     const beforeThumbnailUrl = before.thumbnailUrl;
     if (beforeVideoUrl === videoUrl &&
-        (!beforeThumbnailUrl || beforeThumbnailUrl.trim().length === 0)) {
-        // Video hasn't changed and thumbnail was already empty — skip to avoid
-        // infinite retriggers on unrelated updates
+        (!beforeThumbnailUrl || beforeThumbnailUrl.trim().length === 0) &&
+        !before.gifGenerationFailed // Allow retry when gifGenerationFailed is cleared
+    ) {
         return;
     }
-    console.log(`${TAG} Generating GIF for movement ${event.params.movementId}`);
+    console.log(`${TAG} Generating GIF for movement ${movementId}`);
     try {
         const { execSync } = await Promise.resolve().then(() => __importStar(require('child_process')));
         const os = await Promise.resolve().then(() => __importStar(require('os')));
         const path = await Promise.resolve().then(() => __importStar(require('path')));
         const fs = await Promise.resolve().then(() => __importStar(require('fs')));
         const tmpDir = os.tmpdir();
-        const outputPath = path.join(tmpDir, `${event.params.movementId}.gif`);
-        // Use ffmpeg to extract frames and create a GIF
-        // -t 3: first 3 seconds, -vf: scale to 240x300 (4:5), 8fps palette-based GIF
-        const ffmpegCmd = [
-            'ffmpeg', '-y',
-            '-i', `"${videoUrl}"`,
-            '-t', '3',
-            '-vf', '"fps=8,scale=240:300:force_original_aspect_ratio=increase,crop=240:300,split[s0][s1];[s0]palettegen=max_colors=64[p];[s1][p]paletteuse=dither=bayer"',
-            '-loop', '0',
-            `"${outputPath}"`,
-        ].join(' ');
-        execSync(ffmpegCmd, { timeout: 30000, stdio: 'pipe' });
-        // Check if file was created
-        if (!fs.existsSync(outputPath)) {
-            console.error(`${TAG} ffmpeg did not produce output file`);
-            return;
+        // ── Step 1: Check if ffmpeg is available ──────────────────────────
+        let ffmpegAvailable = false;
+        try {
+            execSync('which ffmpeg', { stdio: 'pipe' });
+            ffmpegAvailable = true;
+            console.log(`${TAG} ffmpeg found in runtime`);
         }
-        const fileBuffer = fs.readFileSync(outputPath);
+        catch (_e) {
+            console.warn(`${TAG} ffmpeg NOT found in runtime — using JPEG fallback`);
+        }
+        let fileBuffer;
+        let contentType;
+        let fileExtension;
+        if (ffmpegAvailable) {
+            // ── Primary path: ffmpeg animated GIF ─────────────────────────
+            const outputPath = path.join(tmpDir, `${movementId}.gif`);
+            const ffmpegCmd = [
+                'ffmpeg', '-y',
+                '-i', `"${videoUrl}"`,
+                '-t', '3',
+                '-vf', '"fps=8,scale=240:300:force_original_aspect_ratio=increase,crop=240:300,split[s0][s1];[s0]palettegen=max_colors=64[p];[s1][p]paletteuse=dither=bayer"',
+                '-loop', '0',
+                `"${outputPath}"`,
+            ].join(' ');
+            execSync(ffmpegCmd, { timeout: 30000, stdio: 'pipe' });
+            if (!fs.existsSync(outputPath)) {
+                throw new Error('ffmpeg did not produce output file');
+            }
+            fileBuffer = fs.readFileSync(outputPath);
+            fs.unlinkSync(outputPath);
+            contentType = 'image/gif';
+            fileExtension = 'gif';
+            console.log(`${TAG} GIF generated via ffmpeg (${fileBuffer.length} bytes)`);
+        }
+        else {
+            // ── Fallback path: static JPEG frame via ffmpeg-less approach ──
+            // Download the first bytes of the video and extract a poster frame
+            // using ffmpeg's single-frame mode, or if truly unavailable, download
+            // a frame via HTTP range request.
+            // Since Cloud Run 2nd gen typically has ffmpeg, this is a safety net.
+            // We attempt a single-frame JPEG extraction as a lighter operation.
+            const outputPath = path.join(tmpDir, `${movementId}.jpg`);
+            try {
+                // Try ffprobe/ffmpeg single frame (lighter than full GIF)
+                execSync(`ffmpeg -y -i "${videoUrl}" -vframes 1 -vf "scale=240:300:force_original_aspect_ratio=increase,crop=240:300" "${outputPath}"`, { timeout: 15000, stdio: 'pipe' });
+            }
+            catch (_f) {
+                // If even single-frame fails, download poster via HTTP
+                const https = await Promise.resolve().then(() => __importStar(require('https')));
+                const http = await Promise.resolve().then(() => __importStar(require('http')));
+                const fetcher = videoUrl.startsWith('https') ? https : http;
+                await new Promise((resolve, reject) => {
+                    fetcher.get(videoUrl, { headers: { Range: 'bytes=0-524288' } }, (res) => {
+                        // We can't extract a frame from raw bytes without ffmpeg,
+                        // so mark as failed and let the retry pick it up later
+                        res.resume();
+                        reject(new Error('No ffmpeg available and HTTP range cannot produce a thumbnail'));
+                    }).on('error', reject);
+                });
+            }
+            if (!fs.existsSync(outputPath)) {
+                throw new Error('Fallback did not produce output file');
+            }
+            fileBuffer = fs.readFileSync(outputPath);
+            fs.unlinkSync(outputPath);
+            contentType = 'image/jpeg';
+            fileExtension = 'jpg';
+            console.log(`${TAG} Static JPEG generated as fallback (${fileBuffer.length} bytes)`);
+        }
+        // ── Step 2: Upload to Firebase Storage ───────────────────────────
         const bucket = admin.storage().bucket();
-        const storagePath = `movements/${coachId || 'system'}/thumbnails/${event.params.movementId}_${Date.now()}.gif`;
+        const storagePath = `movements/${coachId || 'system'}/thumbnails/${movementId}_${Date.now()}.${fileExtension}`;
         const file = bucket.file(storagePath);
         await file.save(fileBuffer, {
-            metadata: { contentType: 'image/gif' },
+            metadata: { contentType },
             public: true,
         });
-        // Build the public download URL
         const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media`;
-        // Patch the Firestore document
-        await event.data.after.ref.update({ thumbnailUrl: downloadUrl });
-        // Cleanup temp file
-        fs.unlinkSync(outputPath);
-        console.log(`${TAG} GIF generated and saved for movement ${event.params.movementId}`);
+        // ── Step 3: Patch Firestore with URL and clear any failure flag ──
+        await event.data.after.ref.update({
+            thumbnailUrl: downloadUrl,
+            gifGenerationFailed: firestore_2.FieldValue.delete(),
+            gifGenerationFailedAt: firestore_2.FieldValue.delete(),
+            gifGenerationError: firestore_2.FieldValue.delete(),
+        });
+        console.log(`${TAG} Thumbnail saved for movement ${movementId}`);
     }
     catch (err) {
-        console.error(`${TAG} Error generating GIF:`, err);
-        // Non-fatal — the client-side fallback still works
+        console.error(`${TAG} Error generating thumbnail:`, err);
+        // Mark the document so the retry scheduler can pick it up
+        try {
+            await event.data.after.ref.update({
+                gifGenerationFailed: true,
+                gifGenerationFailedAt: firestore_2.Timestamp.now(),
+                gifGenerationError: String(err).slice(0, 500),
+            });
+        }
+        catch (updateErr) {
+            console.error(`${TAG} Could not mark failure:`, updateErr);
+        }
     }
 });
 // ─── Thumbnail Cache Invalidation ────────────────────────────────────────────
@@ -6037,6 +6107,62 @@ exports.cleanupOldMovementThumbnails = (0, firestore_1.onDocumentUpdated)('movem
     catch (err) {
         console.error(`${TAG} Error cleaning up old thumbnail:`, err);
         // Non-fatal — orphaned file is not critical
+    }
+});
+// ─── Retry Failed GIF Generation (every 6 hours) ────────────────────────────
+/**
+ * retryFailedGifGeneration — Scheduled function
+ *
+ * Runs every 6 hours. Queries movements where gifGenerationFailed === true
+ * and the failure happened more than 30 minutes ago (to avoid hammering
+ * immediately after a transient failure). Clears the failure flag, which
+ * triggers generateMovementGif to re-attempt via the onDocumentUpdated trigger.
+ *
+ * Safety limits:
+ *   - Processes at most 20 documents per run
+ *   - Only retries failures older than 30 minutes
+ *   - Only retries failures newer than 7 days (gives up after that)
+ */
+exports.retryFailedGifGeneration = (0, scheduler_1.onSchedule)({ schedule: '0 */6 * * *', timeZone: 'UTC' }, async () => {
+    const TAG = '[retryFailedGif]';
+    const now = firestore_2.Timestamp.now();
+    const thirtyMinAgo = firestore_2.Timestamp.fromMillis(now.toMillis() - 30 * 60 * 1000);
+    const sevenDaysAgo = firestore_2.Timestamp.fromMillis(now.toMillis() - 7 * 24 * 60 * 60 * 1000);
+    try {
+        const failedSnap = await db
+            .collection('movements')
+            .where('gifGenerationFailed', '==', true)
+            .where('gifGenerationFailedAt', '>', sevenDaysAgo)
+            .where('gifGenerationFailedAt', '<', thirtyMinAgo)
+            .limit(20)
+            .get();
+        if (failedSnap.empty) {
+            console.log(`${TAG} No failed GIF generations to retry.`);
+            return;
+        }
+        console.log(`${TAG} Found ${failedSnap.size} failed movement(s) to retry.`);
+        let retried = 0;
+        for (const doc of failedSnap.docs) {
+            try {
+                // Clear the failure flag — this triggers generateMovementGif
+                // because gifGenerationFailed goes from true to deleted,
+                // and the guard clause allows re-entry when the flag is cleared
+                await doc.ref.update({
+                    gifGenerationFailed: firestore_2.FieldValue.delete(),
+                    gifGenerationFailedAt: firestore_2.FieldValue.delete(),
+                    gifGenerationError: firestore_2.FieldValue.delete(),
+                });
+                retried++;
+                console.log(`${TAG} Cleared failure flag for ${doc.id}`);
+            }
+            catch (err) {
+                console.error(`${TAG} Error clearing flag for ${doc.id}:`, err);
+            }
+        }
+        console.log(`${TAG} Retried ${retried}/${failedSnap.size} movement(s).`);
+    }
+    catch (err) {
+        console.error(`${TAG} Error querying failed movements:`, err);
     }
 });
 //# sourceMappingURL=index.js.map

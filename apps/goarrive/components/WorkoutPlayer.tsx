@@ -79,7 +79,7 @@ export default function WorkoutPlayer({
   } = timer;
 
   useWakeLock(phase !== 'ready' && phase !== 'complete');
-  useMediaPrefetch(flatMovements, currentIndex, phase === 'work' || phase === 'countdown');
+  useMediaPrefetch(flatMovements, currentIndex, phase === 'work' || phase === 'countdown', phase === 'rest');
 
   //  // ── TTS for movement names (Suggestion 1) ──────────────────────
   const { isTTSAvailable } = useWorkoutTTS({ phase, current, next, isMuted: isAudioMuted() });
