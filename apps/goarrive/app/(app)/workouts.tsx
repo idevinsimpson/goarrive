@@ -1,22 +1,18 @@
 /**
  * Workouts screen — Coach Workout Library
  *
- * Admin-gated: platformAdmin sees the full workout library page;
- * non-admins see a Coming Soon placeholder.
+ * Features:
+ *   - Search, expandable filter panel (category/difficulty/tags/type)
+ *   - List/grid view toggle (2-column grid)
+ *   - Grid card auto-thumbnail collage from movement thumbnails
+ *   - Auto-calculated estimated duration from block timings
+ *   - Overflow menu per card (edit/preview/duplicate/archive)
+ *   - Batch operations: multi-select with bulk archive/duplicate/re-categorize
+ *   - Sort picker (Newest, A-Z, Most Used)
  *
- * Lists all workouts for the coach. Supports search by name,
- * expandable filter panel (category/difficulty), list/grid view toggle
- * (2-column grid matching movements page ratio), sorting, overflow menu
- * per card, tap to view details, create/edit/duplicate/archive workouts.
- *
- * Wires in existing components:
- *   - WorkoutDetail — detail modal with edit/archive/duplicate/assign
- *   - WorkoutForm — creation and edit modal with block builder
- *
- * Firestore collection: workouts, workout_assignments
- * Query pattern: coachId-scoped, filtered by isArchived
+ * Firestore collections: workouts, workout_assignments, movements
  */
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -31,6 +27,7 @@ import {
   Alert,
   Modal,
   Dimensions,
+  Image,
 } from 'react-native';
 import {
   collection,
@@ -43,6 +40,7 @@ import {
   updateDoc,
   addDoc,
   serverTimestamp,
+  writeBatch,
 } from 'firebase/firestore';
 import { useAuth } from '../../lib/AuthContext';
 import { db } from '../../lib/firebase';
@@ -98,6 +96,39 @@ interface WorkoutData {
   createdAt: any;
   updatedAt: any;
   assignmentCount?: number;
+}
+
+// ── Helper: auto-calculate duration from blocks ──────────────────────────
+function calcDurationMin(blocks: any[]): number {
+  let totalSec = 0;
+  for (const block of blocks) {
+    const rounds = block.rounds ?? 1;
+    let blockSec = 0;
+    for (const m of block.movements ?? []) {
+      const sets = m.sets ?? 1;
+      const durPerSet = m.durationSec ?? 0;
+      const restPerSet = m.restSec ?? 0;
+      blockSec += sets * (durPerSet + restPerSet);
+    }
+    const restBetween = block.restBetweenRoundsSec ?? 0;
+    totalSec += rounds * blockSec + (rounds > 1 ? (rounds - 1) * restBetween : 0);
+  }
+  return Math.ceil(totalSec / 60);
+}
+
+// ── Helper: extract unique movement IDs from blocks ──────────────────────
+function extractMovementIds(blocks: any[]): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const block of blocks) {
+    for (const m of block.movements ?? []) {
+      if (m.movementId && !seen.has(m.movementId)) {
+        seen.add(m.movementId);
+        ids.push(m.movementId);
+      }
+    }
+  }
+  return ids;
 }
 
 // ── Coming Soon placeholder (non-admin) ──────────────────────────────────
@@ -259,6 +290,86 @@ function SortPicker({
   );
 }
 
+// ── Re-categorize Modal ──────────────────────────────────────────────────
+function RecategorizeModal({
+  visible,
+  onClose,
+  onConfirm,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onConfirm: (category: string) => void;
+}) {
+  if (!visible) return null;
+  return (
+    <Modal transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={s.menuBackdrop} onPress={onClose}>
+        <View style={s.sortModal}>
+          <Text style={s.sortModalTitle}>Set Category</Text>
+          {CATEGORIES.filter((c) => c !== 'All').map((cat) => (
+            <Pressable
+              key={cat}
+              style={s.sortOption}
+              onPress={() => {
+                onConfirm(cat);
+                onClose();
+              }}
+            >
+              <Text style={s.sortOptionText}>{cat}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
+// ── Thumbnail Collage Component ──────────────────────────────────────────
+function ThumbnailCollage({
+  movementIds,
+  thumbMap,
+  width,
+  height,
+}: {
+  movementIds: string[];
+  thumbMap: Record<string, string>;
+  width: number;
+  height: number;
+}) {
+  // Collect available thumbnails (max 16, preserving order)
+  const thumbs = movementIds
+    .filter((id) => thumbMap[id])
+    .map((id) => thumbMap[id])
+    .slice(0, 16);
+
+  if (thumbs.length === 0) {
+    return (
+      <View style={[{ width, height, backgroundColor: '#1A2035' }, s.collageEmpty]}>
+        <Icon name="workouts" size={28} color="#2A3347" />
+      </View>
+    );
+  }
+
+  // Calculate grid: max 4 columns, rows fill based on count
+  const cols = Math.min(thumbs.length, 4);
+  const rows = Math.ceil(thumbs.length / cols);
+  const cellW = width / cols;
+  const cellH = height / rows;
+
+  return (
+    <View style={{ width, height, flexDirection: 'row', flexWrap: 'wrap', overflow: 'hidden' }}>
+      {thumbs.map((uri, i) => (
+        <Image
+          key={`${uri}-${i}`}
+          source={{ uri }}
+          style={{ width: cellW, height: cellH }}
+          resizeMode="cover"
+        />
+      ))}
+    </View>
+  );
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 export default function WorkoutsScreen() {
   const { user, claims } = useAuth();
@@ -275,6 +386,7 @@ export default function WorkoutsScreen() {
   const [searchText, setSearchText] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedDifficulty, setSelectedDifficulty] = useState('All');
+  const [selectedTag, setSelectedTag] = useState('All');
   const [showArchived, setShowArchived] = useState(false);
   const [showTemplatesOnly, setShowTemplatesOnly] = useState(false);
   const [sortBy, setSortBy] = useState<'newest' | 'alpha' | 'most_used'>('newest');
@@ -290,9 +402,7 @@ export default function WorkoutsScreen() {
 
   // Detail modal
   const [detailVisible, setDetailVisible] = useState(false);
-  const [selectedWorkout, setSelectedWorkout] = useState<WorkoutData | null>(
-    null,
-  );
+  const [selectedWorkout, setSelectedWorkout] = useState<WorkoutData | null>(null);
 
   // Create/Edit modal
   const [formVisible, setFormVisible] = useState(false);
@@ -305,9 +415,10 @@ export default function WorkoutsScreen() {
   const [confirmAction, setConfirmAction] = useState<() => void>(() => {});
 
   // Assignment counts for usage analytics
-  const [assignmentCounts, setAssignmentCounts] = useState<
-    Record<string, number>
-  >({});
+  const [assignmentCounts, setAssignmentCounts] = useState<Record<string, number>>({});
+
+  // Movement thumbnail map: movementId → thumbnailUrl
+  const [thumbMap, setThumbMap] = useState<Record<string, string>>({});
 
   // Template marketplace (kept for component but button removed)
   const [showMarketplace, setShowMarketplace] = useState(false);
@@ -318,6 +429,29 @@ export default function WorkoutsScreen() {
   // Preview player state
   const [previewVisible, setPreviewVisible] = useState(false);
   const [previewWorkout, setPreviewWorkout] = useState<WorkoutData | null>(null);
+
+  // ── Batch operations state ─────────────────────────────────────────────
+  const [batchMode, setBatchMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [recategorizeVisible, setRecategorizeVisible] = useState(false);
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    setSelectedIds(new Set(sorted.map((w) => w.id)));
+  };
+
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+    setBatchMode(false);
+  };
 
   // ── Real-time workout listener ─────────────────────────────────────────
   const mapWorkoutDoc = useCallback((d: any): WorkoutData => {
@@ -373,6 +507,36 @@ export default function WorkoutsScreen() {
           console.error('[Workouts] Assignment count error:', err);
         }
       }
+
+      // Load movement thumbnails for all referenced movements
+      const allMoveIds = new Set<string>();
+      list.forEach((w) => {
+        extractMovementIds(w.blocks).forEach((id) => allMoveIds.add(id));
+      });
+
+      if (allMoveIds.size > 0) {
+        try {
+          // Firestore 'in' queries support max 30 items per query
+          const idsArr = Array.from(allMoveIds);
+          const newMap: Record<string, string> = {};
+          for (let i = 0; i < idsArr.length; i += 30) {
+            const batch = idsArr.slice(i, i + 30);
+            const mQ = query(
+              collection(db, 'movements'),
+              where('__name__', 'in', batch),
+            );
+            const mSnap = await getDocs(mQ);
+            mSnap.docs.forEach((md) => {
+              const mData = md.data();
+              const thumb = mData.thumbnailUrl || mData.mediaUrl || null;
+              if (thumb) newMap[md.id] = thumb;
+            });
+          }
+          setThumbMap((prev) => ({ ...prev, ...newMap }));
+        } catch (err) {
+          console.error('[Workouts] Thumbnail load error:', err);
+        }
+      }
     }, (err) => {
       console.error('[Workouts] Listener error:', err);
       setLoading(false);
@@ -386,26 +550,24 @@ export default function WorkoutsScreen() {
     setTimeout(() => setRefreshing(false), 1000);
   }, []);
 
+  // ── Derived: unique tags across all workouts ───────────────────────────
+  const allTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    workouts.forEach((w) => {
+      w.tags.forEach((t) => tagSet.add(t));
+    });
+    return ['All', ...Array.from(tagSet).sort()];
+  }, [workouts]);
+
   // ── Filter logic ───────────────────────────────────────────────────────
   const filtered = workouts.filter((w) => {
     if (showArchived && !w.isArchived) return false;
     if (!showArchived && w.isArchived) return false;
     if (showTemplatesOnly && !w.isTemplate) return false;
-    if (
-      searchText &&
-      !w.name.toLowerCase().includes(searchText.toLowerCase())
-    )
-      return false;
-    if (
-      selectedCategory !== 'All' &&
-      w.category.toLowerCase() !== selectedCategory.toLowerCase()
-    )
-      return false;
-    if (
-      selectedDifficulty !== 'All' &&
-      w.difficulty.toLowerCase() !== selectedDifficulty.toLowerCase()
-    )
-      return false;
+    if (searchText && !w.name.toLowerCase().includes(searchText.toLowerCase())) return false;
+    if (selectedCategory !== 'All' && w.category.toLowerCase() !== selectedCategory.toLowerCase()) return false;
+    if (selectedDifficulty !== 'All' && w.difficulty.toLowerCase() !== selectedDifficulty.toLowerCase()) return false;
+    if (selectedTag !== 'All' && !w.tags.includes(selectedTag)) return false;
     return true;
   });
 
@@ -417,16 +579,19 @@ export default function WorkoutsScreen() {
   });
 
   const archivedCount = workouts.filter((w) => w.isArchived).length;
-  const templateCount = workouts.filter(
-    (w) => w.isTemplate && !w.isArchived,
-  ).length;
+  const templateCount = workouts.filter((w) => w.isTemplate && !w.isArchived).length;
   const activeFilterCount =
     (selectedCategory !== 'All' ? 1 : 0) +
     (selectedDifficulty !== 'All' ? 1 : 0) +
+    (selectedTag !== 'All' ? 1 : 0) +
     (showTemplatesOnly ? 1 : 0);
 
   // ── Handlers ───────────────────────────────────────────────────────────
   const handleOpenDetail = (w: WorkoutData) => {
+    if (batchMode) {
+      toggleSelect(w.id);
+      return;
+    }
     setSelectedWorkout(w);
     setDetailVisible(true);
   };
@@ -501,7 +666,86 @@ export default function WorkoutsScreen() {
   const resetFilters = () => {
     setSelectedCategory('All');
     setSelectedDifficulty('All');
+    setSelectedTag('All');
     setShowTemplatesOnly(false);
+  };
+
+  // ── Batch action handlers ──────────────────────────────────────────────
+  const handleBatchArchive = () => {
+    const count = selectedIds.size;
+    if (count === 0) return;
+    setConfirmTitle(`Archive ${count} Workout${count > 1 ? 's' : ''}`);
+    setConfirmMessage(
+      `Archive ${count} selected workout${count > 1 ? 's' : ''}? They can be restored later.`,
+    );
+    setConfirmAction(() => async () => {
+      try {
+        const batch = writeBatch(db);
+        selectedIds.forEach((id) => {
+          batch.update(doc(db, 'workouts', id), {
+            isArchived: true,
+            updatedAt: serverTimestamp(),
+          });
+        });
+        await batch.commit();
+        clearSelection();
+      } catch (err) {
+        console.error('[Workouts] Batch archive error:', err);
+        Alert.alert('Error', 'Could not archive selected workouts.');
+      }
+      setConfirmVisible(false);
+    });
+    setConfirmVisible(true);
+  };
+
+  const handleBatchDuplicate = async () => {
+    const count = selectedIds.size;
+    if (count === 0) return;
+    try {
+      const toDuplicate = workouts.filter((w) => selectedIds.has(w.id));
+      for (const w of toDuplicate) {
+        await addDoc(collection(db, 'workouts'), {
+          name: `${w.name} (Copy)`,
+          description: w.description,
+          category: w.category,
+          difficulty: w.difficulty,
+          estimatedDurationMin: w.estimatedDurationMin,
+          tags: w.tags,
+          isTemplate: false,
+          blocks: w.blocks,
+          coachId,
+          tenantId,
+          isArchived: false,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+      Alert.alert('Done', `Duplicated ${count} workout${count > 1 ? 's' : ''}.`);
+      clearSelection();
+    } catch (err) {
+      console.error('[Workouts] Batch duplicate error:', err);
+      Alert.alert('Error', 'Could not duplicate selected workouts.');
+    }
+  };
+
+  const handleBatchRecategorize = async (category: string) => {
+    const count = selectedIds.size;
+    if (count === 0) return;
+    try {
+      const batch = writeBatch(db);
+      selectedIds.forEach((id) => {
+        batch.update(doc(db, 'workouts', id), {
+          category,
+          updatedAt: serverTimestamp(),
+        });
+      });
+      await batch.commit();
+      Alert.alert('Done', `Updated ${count} workout${count > 1 ? 's' : ''} to "${category}".`);
+      clearSelection();
+    } catch (err) {
+      console.error('[Workouts] Batch recategorize error:', err);
+      Alert.alert('Error', 'Could not update selected workouts.');
+    }
   };
 
   // Current sort label
@@ -540,15 +784,42 @@ export default function WorkoutsScreen() {
     </View>
   );
 
+  // ── Helper: display duration (auto-calculated or manual) ──────────────
+  const getDisplayDuration = (w: WorkoutData): number | null => {
+    // If blocks have timing data, auto-calculate
+    if (w.blocks.length > 0) {
+      const auto = calcDurationMin(w.blocks);
+      if (auto > 0) return auto;
+    }
+    // Fall back to manually entered value
+    return w.estimatedDurationMin;
+  };
+
   // ── Render item: List view ────────────────────────────────────────────
   const renderListItem = ({ item: w }: { item: WorkoutData }) => {
     const count = assignmentCounts[w.id] ?? 0;
     const legacy = isLegacy(w);
+    const duration = getDisplayDuration(w);
+    const isSelected = selectedIds.has(w.id);
 
     return (
-      <Pressable style={s.card} onPress={() => handleOpenDetail(w)}>
+      <Pressable
+        style={[s.card, isSelected && s.cardSelected]}
+        onPress={() => handleOpenDetail(w)}
+        onLongPress={() => {
+          if (!batchMode) {
+            setBatchMode(true);
+            setSelectedIds(new Set([w.id]));
+          }
+        }}
+      >
         <View style={s.cardTop}>
           <View style={s.cardNameRow}>
+            {batchMode && (
+              <View style={[s.checkbox, isSelected && s.checkboxActive]}>
+                {isSelected && <Icon name="check" size={12} color="#0E1117" />}
+              </View>
+            )}
             <Text style={s.cardName} numberOfLines={1}>
               {w.name}
             </Text>
@@ -563,13 +834,15 @@ export default function WorkoutsScreen() {
               </View>
             )}
           </View>
-          <OverflowMenu
-            workout={w}
-            onEdit={handleEditFromMenu}
-            onArchive={(wk) => handleArchiveRequest(wk)}
-            onDuplicate={(wk) => handleDuplicate(wk)}
-            onPreview={handlePreview}
-          />
+          {!batchMode && (
+            <OverflowMenu
+              workout={w}
+              onEdit={handleEditFromMenu}
+              onArchive={(wk) => handleArchiveRequest(wk)}
+              onDuplicate={(wk) => handleDuplicate(wk)}
+              onPreview={handlePreview}
+            />
+          )}
         </View>
         <View style={s.cardBadgeRow}>
           {w.category ? (
@@ -582,11 +855,9 @@ export default function WorkoutsScreen() {
               <Text style={s.cardBadgeText}>{w.difficulty}</Text>
             </View>
           ) : null}
-          {w.estimatedDurationMin ? (
+          {duration ? (
             <View style={s.cardBadge}>
-              <Text style={s.cardBadgeText}>
-                {w.estimatedDurationMin} min
-              </Text>
+              <Text style={s.cardBadgeText}>{duration} min</Text>
             </View>
           ) : null}
           <View style={s.cardBadge}>
@@ -596,9 +867,7 @@ export default function WorkoutsScreen() {
           </View>
           {count > 0 && (
             <View style={s.assignBadge}>
-              <Text style={s.assignBadgeText}>
-                Assigned {count}×
-              </Text>
+              <Text style={s.assignBadgeText}>Assigned {count}×</Text>
             </View>
           )}
         </View>
@@ -613,32 +882,59 @@ export default function WorkoutsScreen() {
 
   // ── Render item: Grid view ────────────────────────────────────────────
   const renderGridItem = ({ item: w }: { item: WorkoutData }) => {
-    const count = assignmentCounts[w.id] ?? 0;
+    const duration = getDisplayDuration(w);
+    const moveIds = extractMovementIds(w.blocks);
+    const isSelected = selectedIds.has(w.id);
 
     return (
-      <Pressable style={s.gridCard} onPress={() => handleOpenDetail(w)}>
-        {/* Colored header area with block count */}
+      <Pressable
+        style={[s.gridCard, isSelected && s.gridCardSelected]}
+        onPress={() => handleOpenDetail(w)}
+        onLongPress={() => {
+          if (!batchMode) {
+            setBatchMode(true);
+            setSelectedIds(new Set([w.id]));
+          }
+        }}
+      >
+        {/* Thumbnail collage header */}
         <View style={s.gridHeader}>
-          <View style={s.gridBlockBadge}>
-            <Text style={s.gridBlockBadgeText}>
-              {w.blocks.length} block{w.blocks.length !== 1 ? 's' : ''}
-            </Text>
+          <ThumbnailCollage
+            movementIds={moveIds}
+            thumbMap={thumbMap}
+            width={gridItemW}
+            height={gridItemW * 0.65}
+          />
+          {/* Badges overlay */}
+          <View style={s.gridBadgeOverlay}>
+            <View style={s.gridBlockBadge}>
+              <Text style={s.gridBlockBadgeText}>
+                {w.blocks.length} block{w.blocks.length !== 1 ? 's' : ''}
+              </Text>
+            </View>
           </View>
           {w.isTemplate && (
             <View style={s.gridTemplateBadge}>
               <Text style={s.gridTemplateBadgeText}>TPL</Text>
             </View>
           )}
-          {/* Overflow menu overlay */}
-          <View style={s.gridOverflowWrap}>
-            <OverflowMenu
-              workout={w}
-              onEdit={handleEditFromMenu}
-              onArchive={(wk) => handleArchiveRequest(wk)}
-              onDuplicate={(wk) => handleDuplicate(wk)}
-              onPreview={handlePreview}
-            />
-          </View>
+          {batchMode ? (
+            <View style={s.gridCheckboxWrap}>
+              <View style={[s.checkbox, isSelected && s.checkboxActive]}>
+                {isSelected && <Icon name="check" size={12} color="#0E1117" />}
+              </View>
+            </View>
+          ) : (
+            <View style={s.gridOverflowWrap}>
+              <OverflowMenu
+                workout={w}
+                onEdit={handleEditFromMenu}
+                onArchive={(wk) => handleArchiveRequest(wk)}
+                onDuplicate={(wk) => handleDuplicate(wk)}
+                onPreview={handlePreview}
+              />
+            </View>
+          )}
         </View>
         <View style={s.gridBody}>
           <Text style={s.gridName} numberOfLines={2}>
@@ -656,10 +952,8 @@ export default function WorkoutsScreen() {
               </Text>
             ) : null}
           </View>
-          {w.estimatedDurationMin ? (
-            <Text style={s.gridDuration}>
-              {w.estimatedDurationMin} min
-            </Text>
+          {duration ? (
+            <Text style={s.gridDuration}>{duration} min</Text>
           ) : null}
         </View>
       </Pressable>
@@ -675,45 +969,81 @@ export default function WorkoutsScreen() {
     <View style={s.root}>
       <AppHeader />
 
-      {/* ── Toolbar: Search + Filter icon + New button ── */}
-      <View style={s.toolbar}>
-        <View style={s.searchWrap}>
-          <Icon name="search" size={18} color="#4A5568" />
-          <TextInput
-            style={s.searchInput}
-            placeholder="Search workouts..."
-            placeholderTextColor="#4A5568"
-            value={searchText}
-            onChangeText={setSearchText}
-          />
-          {searchText.length > 0 && (
-            <Pressable onPress={() => setSearchText('')} hitSlop={8}>
-              <Icon name="close" size={16} color="#4A5568" />
+      {/* ── Batch action bar ── */}
+      {batchMode && (
+        <View style={s.batchBar}>
+          <View style={s.batchLeft}>
+            <Pressable onPress={clearSelection} hitSlop={8}>
+              <Icon name="close" size={18} color="#F0F4F8" />
             </Pressable>
-          )}
+            <Text style={s.batchCount}>
+              {selectedIds.size} selected
+            </Text>
+            <Pressable onPress={selectAll} hitSlop={8}>
+              <Text style={s.batchSelectAll}>Select All</Text>
+            </Pressable>
+          </View>
+          <View style={s.batchActions}>
+            <Pressable
+              style={s.batchActionBtn}
+              onPress={() => setRecategorizeVisible(true)}
+            >
+              <Icon name="tag" size={14} color="#F5A623" />
+              <Text style={s.batchActionText}>Category</Text>
+            </Pressable>
+            <Pressable style={s.batchActionBtn} onPress={handleBatchDuplicate}>
+              <Icon name="copy" size={14} color="#F5A623" />
+              <Text style={s.batchActionText}>Duplicate</Text>
+            </Pressable>
+            <Pressable style={s.batchActionBtn} onPress={handleBatchArchive}>
+              <Icon name="archive" size={14} color="#F5A623" />
+              <Text style={s.batchActionText}>Archive</Text>
+            </Pressable>
+          </View>
         </View>
-        <Pressable
-          style={[s.iconBtn, filterOpen && s.iconBtnActive]}
-          onPress={() => setFilterOpen(!filterOpen)}
-        >
-          <Icon
-            name="filter"
-            size={20}
-            color={activeFilterCount > 0 ? '#F5A623' : '#8A95A3'}
-          />
-          {activeFilterCount > 0 && (
-            <View style={s.filterBadge}>
-              <Text style={s.filterBadgeText}>{activeFilterCount}</Text>
-            </View>
-          )}
-        </Pressable>
-        <Pressable style={s.newBtn} onPress={handleCreateNew}>
-          <Icon name="plus" size={18} color="#0E1117" />
-        </Pressable>
-      </View>
+      )}
+
+      {/* ── Toolbar: Search + Filter icon + New button ── */}
+      {!batchMode && (
+        <View style={s.toolbar}>
+          <View style={s.searchWrap}>
+            <Icon name="search" size={18} color="#4A5568" />
+            <TextInput
+              style={s.searchInput}
+              placeholder="Search workouts..."
+              placeholderTextColor="#4A5568"
+              value={searchText}
+              onChangeText={setSearchText}
+            />
+            {searchText.length > 0 && (
+              <Pressable onPress={() => setSearchText('')} hitSlop={8}>
+                <Icon name="close" size={16} color="#4A5568" />
+              </Pressable>
+            )}
+          </View>
+          <Pressable
+            style={[s.iconBtn, filterOpen && s.iconBtnActive]}
+            onPress={() => setFilterOpen(!filterOpen)}
+          >
+            <Icon
+              name="filter"
+              size={20}
+              color={activeFilterCount > 0 ? '#F5A623' : '#8A95A3'}
+            />
+            {activeFilterCount > 0 && (
+              <View style={s.filterBadge}>
+                <Text style={s.filterBadgeText}>{activeFilterCount}</Text>
+              </View>
+            )}
+          </Pressable>
+          <Pressable style={s.newBtn} onPress={handleCreateNew}>
+            <Icon name="plus" size={18} color="#0E1117" />
+          </Pressable>
+        </View>
+      )}
 
       {/* ── Expandable Filter Panel ── */}
-      {filterOpen && (
+      {filterOpen && !batchMode && (
         <ScrollView style={s.filterPanelScroll} contentContainerStyle={s.filterPanel}>
           {renderChipRow(
             'Category',
@@ -727,6 +1057,9 @@ export default function WorkoutsScreen() {
             selectedDifficulty,
             setSelectedDifficulty,
           )}
+          {/* Tags filter row — only show if tags exist */}
+          {allTags.length > 1 &&
+            renderChipRow('Tags', allTags, selectedTag, setSelectedTag)}
           {/* Template toggle inside filter panel */}
           {templateCount > 0 && (
             <View style={s.filterGroup}>
@@ -760,53 +1093,55 @@ export default function WorkoutsScreen() {
       )}
 
       {/* ── Controls row: count, archive toggle, sort, view toggle ── */}
-      <View style={s.controlsRow}>
-        <Text style={s.countText}>
-          {sorted.length} workout{sorted.length !== 1 ? 's' : ''}
-        </Text>
+      {!batchMode && (
+        <View style={s.controlsRow}>
+          <Text style={s.countText}>
+            {sorted.length} workout{sorted.length !== 1 ? 's' : ''}
+          </Text>
 
-        <View style={s.controlsRight}>
-          <Pressable
-            style={[s.toggleBtn, showArchived && s.toggleBtnActive]}
-            onPress={() => setShowArchived(!showArchived)}
-          >
-            <Icon
-              name="archive"
-              size={14}
-              color={showArchived ? '#F5A623' : '#4A5568'}
-            />
-            <Text
-              style={[
-                s.toggleBtnText,
-                showArchived && s.toggleBtnTextActive,
-              ]}
+          <View style={s.controlsRight}>
+            <Pressable
+              style={[s.toggleBtn, showArchived && s.toggleBtnActive]}
+              onPress={() => setShowArchived(!showArchived)}
             >
-              {archivedCount}
-            </Text>
-          </Pressable>
+              <Icon
+                name="archive"
+                size={14}
+                color={showArchived ? '#F5A623' : '#4A5568'}
+              />
+              <Text
+                style={[
+                  s.toggleBtnText,
+                  showArchived && s.toggleBtnTextActive,
+                ]}
+              >
+                {archivedCount}
+              </Text>
+            </Pressable>
 
-          <Pressable
-            style={s.sortBtn}
-            onPress={() => setSortPickerOpen(true)}
-          >
-            <Icon name="sort" size={14} color="#8A95A3" />
-            <Text style={s.sortBtnText} numberOfLines={1}>
-              {currentSortLabel}
-            </Text>
-          </Pressable>
+            <Pressable
+              style={s.sortBtn}
+              onPress={() => setSortPickerOpen(true)}
+            >
+              <Icon name="sort" size={14} color="#8A95A3" />
+              <Text style={s.sortBtnText} numberOfLines={1}>
+                {currentSortLabel}
+              </Text>
+            </Pressable>
 
-          <Pressable
-            style={s.viewToggle}
-            onPress={() => setViewMode(viewMode === 'list' ? 'grid' : 'list')}
-          >
-            <Icon
-              name={viewMode === 'list' ? 'grid' : 'list'}
-              size={18}
-              color="#8A95A3"
-            />
-          </Pressable>
+            <Pressable
+              style={s.viewToggle}
+              onPress={() => setViewMode(viewMode === 'list' ? 'grid' : 'list')}
+            >
+              <Icon
+                name={viewMode === 'list' ? 'grid' : 'list'}
+                size={18}
+                color="#8A95A3"
+              />
+            </Pressable>
+          </View>
         </View>
-      </View>
+      )}
 
       {/* ── Workout list / grid ── */}
       {loading ? (
@@ -942,6 +1277,13 @@ export default function WorkoutsScreen() {
         onClose={() => setSortPickerOpen(false)}
       />
 
+      {/* Re-categorize Modal */}
+      <RecategorizeModal
+        visible={recategorizeVisible}
+        onClose={() => setRecategorizeVisible(false)}
+        onConfirm={handleBatchRecategorize}
+      />
+
       {/* Confirm dialog */}
       <ConfirmDialog
         visible={confirmVisible}
@@ -966,6 +1308,72 @@ const s = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#0E1117',
+  },
+
+  // ── Batch bar ──
+  batchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: '#161B22',
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3347',
+  },
+  batchLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  batchCount: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#F0F4F8',
+    fontFamily: FH,
+  },
+  batchSelectAll: {
+    fontSize: 12,
+    color: '#F5A623',
+    fontWeight: '600',
+    fontFamily: FB,
+  },
+  batchActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  batchActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(245,166,35,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.2)',
+  },
+  batchActionText: {
+    fontSize: 11,
+    color: '#F5A623',
+    fontWeight: '600',
+    fontFamily: FB,
+  },
+
+  // ── Checkbox ──
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#4A5568',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxActive: {
+    backgroundColor: '#F5A623',
+    borderColor: '#F5A623',
   },
 
   // ── Toolbar ──
@@ -1038,7 +1446,7 @@ const s = StyleSheet.create({
 
   // ── Filter Panel ──
   filterPanelScroll: {
-    maxHeight: 280,
+    maxHeight: 320,
     borderBottomWidth: 1,
     borderBottomColor: '#2A3347',
   },
@@ -1178,6 +1586,10 @@ const s = StyleSheet.create({
     gap: 8,
     marginBottom: 10,
   },
+  cardSelected: {
+    borderColor: 'rgba(245,166,35,0.5)',
+    backgroundColor: 'rgba(245,166,35,0.04)',
+  },
   cardTop: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1280,22 +1692,31 @@ const s = StyleSheet.create({
     borderColor: '#2A3347',
     overflow: 'hidden',
   },
+  gridCardSelected: {
+    borderColor: 'rgba(245,166,35,0.5)',
+    backgroundColor: 'rgba(245,166,35,0.04)',
+  },
   gridHeader: {
     width: gridItemW,
-    height: gridItemW * 0.55,
+    height: gridItemW * 0.65,
     backgroundColor: '#1A2035',
-    justifyContent: 'flex-end',
-    padding: 8,
     position: 'relative',
+    overflow: 'hidden',
+  },
+  collageEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gridBadgeOverlay: {
+    position: 'absolute',
+    bottom: 6,
+    left: 6,
   },
   gridBlockBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(245,166,35,0.15)',
+    backgroundColor: 'rgba(14,17,23,0.75)',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(245,166,35,0.3)',
   },
   gridBlockBadgeText: {
     fontSize: 10,
@@ -1305,19 +1726,17 @@ const s = StyleSheet.create({
   },
   gridTemplateBadge: {
     position: 'absolute',
-    top: 8,
-    left: 8,
-    backgroundColor: 'rgba(167,139,250,0.15)',
+    top: 6,
+    left: 6,
+    backgroundColor: 'rgba(167,139,250,0.85)',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(167,139,250,0.3)',
   },
   gridTemplateBadgeText: {
     fontSize: 9,
     fontWeight: '700',
-    color: '#A78BFA',
+    color: '#FFF',
     fontFamily: FH,
     letterSpacing: 0.5,
   },
@@ -1327,6 +1746,11 @@ const s = StyleSheet.create({
     right: 4,
     backgroundColor: 'rgba(14,17,23,0.7)',
     borderRadius: 6,
+  },
+  gridCheckboxWrap: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
   },
   gridBody: {
     padding: 10,
