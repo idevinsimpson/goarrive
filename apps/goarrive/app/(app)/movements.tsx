@@ -2,8 +2,9 @@
  * Movements screen — Coach Movement Library
  *
  * Lists all movements for the coach's tenant (coach-private + global).
- * Supports search by name, filter by category/equipment/muscle group,
- * tap to view details, create and edit movements.
+ * Supports search by name, expandable filter panel (category/equipment/
+ * muscle group/difficulty), list/grid view toggle, sorting, overflow menu
+ * per card, tap to view details, create and edit movements.
  *
  * Wires in existing components:
  *   - MovementDetail (349 lines) — detail modal with edit/archive actions
@@ -14,7 +15,7 @@
  *
  * Uses FlatList for virtualized rendering at scale.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -28,6 +29,8 @@ import {
   RefreshControl,
   Alert,
   Image,
+  Modal,
+  Dimensions,
 } from 'react-native';
 import {
   collection,
@@ -54,6 +57,9 @@ import {
   CATEGORY_FILTER_OPTIONS,
   EQUIPMENT_FILTER_OPTIONS,
   MUSCLE_GROUP_FILTER_OPTIONS,
+  DIFFICULTY_FILTER_OPTIONS,
+  SORT_OPTIONS,
+  SortOption,
 } from '../../hooks/useMovementFilters';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -61,46 +67,6 @@ const FH =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB =
   Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
-
-/** Predefined category options for the filter chip row. */
-const CATEGORIES = [
-  'All',
-  'Upper Body Push',
-  'Upper Body Pull',
-  'Lower Body Push',
-  'Lower Body Pull',
-  'Core',
-  'Cardio',
-  'Mobility',
-];
-
-/** Predefined equipment options for the filter chip row. */
-const EQUIPMENT = [
-  'All',
-  'Bodyweight',
-  'Dumbbell',
-  'Barbell',
-  'Kettlebell',
-  'Band',
-  'Cable',
-  'Machine',
-];
-
-/** Predefined muscle group options for the filter chip row. */
-const MUSCLE_GROUPS = [
-  'All',
-  'Chest',
-  'Back',
-  'Shoulders',
-  'Biceps',
-  'Triceps',
-  'Quads',
-  'Hamstrings',
-  'Glutes',
-  'Calves',
-  'Core',
-  'Full Body',
-];
 
 // ── Coming Soon placeholder (non-admin) ──────────────────────────────────
 function MovementsComingSoon() {
@@ -127,6 +93,194 @@ function MovementsComingSoon() {
   );
 }
 
+// ── Overflow Menu Component ──────────────────────────────────────────────
+function OverflowMenu({
+  movement,
+  onEdit,
+  onArchive,
+  onInfo,
+}: {
+  movement: MovementDetailData;
+  onEdit: (m: MovementDetailData) => void;
+  onArchive: (m: MovementDetailData) => void;
+  onInfo: (m: MovementDetailData) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState({ top: 0, right: 16 });
+  const anchorRef = useRef<View>(null);
+
+  const handleOpen = () => {
+    if (anchorRef.current && Platform.OS === 'web') {
+      (anchorRef.current as any).measureInWindow?.(
+        (x: number, y: number, w: number, h: number) => {
+          setMenuPos({ top: y + h + 4, right: Dimensions.get('window').width - x - w });
+          setOpen(true);
+        },
+      );
+    } else {
+      setOpen(true);
+    }
+  };
+
+  return (
+    <>
+      <Pressable
+        ref={anchorRef}
+        onPress={(e) => {
+          e.stopPropagation?.();
+          handleOpen();
+        }}
+        hitSlop={8}
+        style={s.overflowBtn}
+      >
+        <Icon name="more-vertical" size={18} color="#8A95A3" />
+      </Pressable>
+      {open && (
+        <Modal transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+          <Pressable style={s.menuBackdrop} onPress={() => setOpen(false)}>
+            <View style={[s.menuPopup, { top: menuPos.top, right: menuPos.right }]}>
+              <Pressable
+                style={s.menuItem}
+                onPress={() => { setOpen(false); onEdit(movement); }}
+              >
+                <Icon name="edit" size={16} color="#F0F4F8" />
+                <Text style={s.menuItemText}>Edit</Text>
+              </Pressable>
+              <Pressable
+                style={s.menuItem}
+                onPress={() => { setOpen(false); onInfo(movement); }}
+              >
+                <Icon name="info" size={16} color="#F0F4F8" />
+                <Text style={s.menuItemText}>See Info</Text>
+              </Pressable>
+              <Pressable
+                style={s.menuItem}
+                onPress={() => { setOpen(false); onArchive(movement); }}
+              >
+                <Icon name="archive" size={16} color="#F0F4F8" />
+                <Text style={s.menuItemText}>
+                  {movement.isArchived ? 'Restore' : 'Archive'}
+                </Text>
+              </Pressable>
+              <Pressable style={[s.menuItem, { opacity: 0.4 }]} disabled>
+                <Icon name="download" size={16} color="#4A5568" />
+                <Text style={[s.menuItemText, { color: '#4A5568' }]}>
+                  Download
+                </Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+// ── Info Modal Component ─────────────────────────────────────────────────
+function InfoModal({
+  visible,
+  movement,
+  onClose,
+}: {
+  visible: boolean;
+  movement: MovementDetailData | null;
+  onClose: () => void;
+}) {
+  if (!visible || !movement) return null;
+  const createdDate = movement.createdAt?.seconds
+    ? new Date(movement.createdAt.seconds * 1000).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      })
+    : 'Unknown';
+  const updatedDate = (movement as any).updatedAt?.seconds
+    ? new Date((movement as any).updatedAt.seconds * 1000).toLocaleDateString(
+        'en-US',
+        { year: 'numeric', month: 'short', day: 'numeric' },
+      )
+    : null;
+
+  return (
+    <Modal transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={s.menuBackdrop} onPress={onClose}>
+        <View style={s.infoModal}>
+          <Text style={s.infoTitle}>Movement Info</Text>
+          <View style={s.infoRow}>
+            <Text style={s.infoLabel}>Name</Text>
+            <Text style={s.infoValue}>{movement.name}</Text>
+          </View>
+          <View style={s.infoRow}>
+            <Text style={s.infoLabel}>Created</Text>
+            <Text style={s.infoValue}>{createdDate}</Text>
+          </View>
+          {updatedDate && (
+            <View style={s.infoRow}>
+              <Text style={s.infoLabel}>Last Edited</Text>
+              <Text style={s.infoValue}>{updatedDate}</Text>
+            </View>
+          )}
+          <View style={s.infoRow}>
+            <Text style={s.infoLabel}>Ownership</Text>
+            <Text style={s.infoValue}>
+              {movement.isGlobal ? 'Global Library' : 'Coach Private'}
+            </Text>
+          </View>
+          <Pressable style={s.infoCloseBtn} onPress={onClose}>
+            <Text style={s.infoCloseBtnText}>Close</Text>
+          </Pressable>
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
+// ── Sort Picker Modal ────────────────────────────────────────────────────
+function SortPicker({
+  visible,
+  current,
+  onSelect,
+  onClose,
+}: {
+  visible: boolean;
+  current: SortOption;
+  onSelect: (s: SortOption) => void;
+  onClose: () => void;
+}) {
+  if (!visible) return null;
+  return (
+    <Modal transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={s.menuBackdrop} onPress={onClose}>
+        <View style={s.sortModal}>
+          <Text style={s.sortModalTitle}>Sort By</Text>
+          {SORT_OPTIONS.map((opt) => (
+            <Pressable
+              key={opt.value}
+              style={[s.sortOption, current === opt.value && s.sortOptionActive]}
+              onPress={() => {
+                onSelect(opt.value);
+                onClose();
+              }}
+            >
+              <Text
+                style={[
+                  s.sortOptionText,
+                  current === opt.value && s.sortOptionTextActive,
+                ]}
+              >
+                {opt.label}
+              </Text>
+              {current === opt.value && (
+                <Icon name="check" size={16} color="#F5A623" />
+              )}
+            </Pressable>
+          ))}
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 export default function MovementsScreen() {
   const { user, claims } = useAuth();
@@ -142,16 +296,39 @@ export default function MovementsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
 
-  // Suggestion 4: Use extracted filter hook instead of inline state
+  // View mode: list or grid
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
+
+  // Filter panel visibility
+  const [filterOpen, setFilterOpen] = useState(false);
+
+  // Sort picker visibility
+  const [sortPickerOpen, setSortPickerOpen] = useState(false);
+
+  // Info modal
+  const [infoVisible, setInfoVisible] = useState(false);
+  const [infoMovement, setInfoMovement] = useState<MovementDetailData | null>(null);
+
+  // Filters
   const movementFilters = useMovementFilters(
     movements.filter((m) => (showArchived ? m.isArchived : !m.isArchived)),
   );
   const {
-    searchText, setSearchText,
-    categoryFilter: selectedCategory, setCategoryFilter: setSelectedCategory,
-    equipmentFilter: selectedEquipment, setEquipmentFilter: setSelectedEquipment,
-    muscleGroupFilter: selectedMuscleGroup, setMuscleGroupFilter: setSelectedMuscleGroup,
+    searchText,
+    setSearchText,
+    categoryFilter: selectedCategory,
+    setCategoryFilter: setSelectedCategory,
+    equipmentFilter: selectedEquipment,
+    setEquipmentFilter: setSelectedEquipment,
+    muscleGroupFilter: selectedMuscleGroup,
+    setMuscleGroupFilter: setSelectedMuscleGroup,
+    difficultyFilter: selectedDifficulty,
+    setDifficultyFilter: setSelectedDifficulty,
+    sortBy,
+    setSortBy,
     filtered,
+    resetFilters,
+    activeFilterCount,
   } = movementFilters;
 
   // Detail modal
@@ -193,6 +370,7 @@ export default function MovementsScreen() {
       coachId: data.coachId ?? '',
       tenantId: data.tenantId,
       createdAt: data.createdAt,
+      updatedAt: data.updatedAt,
       mediaUrl: data.mediaUrl ?? null,
       videoUrl: data.videoUrl ?? null,
       thumbnailUrl: data.thumbnailUrl ?? null,
@@ -204,12 +382,10 @@ export default function MovementsScreen() {
 
   useEffect(() => {
     if (!coachId) {
-      console.warn('[Movements] No coachId — skipping listener. user.uid:', user?.uid, 'claims:', JSON.stringify(claims));
+      console.warn('[Movements] No coachId — skipping listener.');
       setLoading(false);
       return;
     }
-
-    console.log('[Movements] Starting listeners with coachId:', coachId, 'user.uid:', user?.uid);
 
     const coachQ = query(
       collection(db, 'movements'),
@@ -224,8 +400,6 @@ export default function MovementsScreen() {
 
     let coachDocs: MovementDetailData[] = [];
     let globalDocs: MovementDetailData[] = [];
-    let firstCoach = true;
-    let firstGlobal = true;
 
     const merge = () => {
       const seen = new Set<string>();
@@ -236,31 +410,25 @@ export default function MovementsScreen() {
       for (const m of globalDocs) {
         if (!seen.has(m.id)) { seen.add(m.id); merged.push(m); }
       }
-      console.log('[Movements] Merged:', merged.length, 'coach:', coachDocs.length, 'global:', globalDocs.length);
       setMovements(merged);
       setLoading(false);
       setRefreshing(false);
     };
 
     const unsubCoach = onSnapshot(coachQ, (snap) => {
-      console.log('[Movements] Coach snapshot:', snap.docs.length, 'docs');
       coachDocs = snap.docs.map(mapDoc);
-      if (firstCoach) { firstCoach = false; }
       merge();
     }, (err) => {
       console.error('[Movements] Coach listener error:', err.code, err.message);
-      Alert.alert('Movement Load Error', `Coach query failed: ${err.code}\n${err.message}\ncoachId: ${coachId}`);
+      Alert.alert('Movement Load Error', `Coach query failed: ${err.code}`);
       setLoading(false);
     });
 
     const unsubGlobal = onSnapshot(globalQ, (snap) => {
-      console.log('[Movements] Global snapshot:', snap.docs.length, 'docs');
       globalDocs = snap.docs.map(mapDoc);
-      if (firstGlobal) { firstGlobal = false; }
       merge();
     }, (err) => {
       console.error('[Movements] Global listener error:', err.code, err.message);
-      Alert.alert('Movement Load Error', `Global query failed: ${err.code}\n${err.message}`);
       setLoading(false);
     });
 
@@ -272,7 +440,6 @@ export default function MovementsScreen() {
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    // Real-time listener will auto-update; just reset the flag after a short delay
     setTimeout(() => setRefreshing(false), 1000);
   }, []);
 
@@ -284,6 +451,11 @@ export default function MovementsScreen() {
 
   const handleEdit = (m: MovementDetailData) => {
     setDetailVisible(false);
+    setEditMovement(m);
+    setFormVisible(true);
+  };
+
+  const handleEditFromMenu = (m: MovementDetailData) => {
     setEditMovement(m);
     setFormVisible(true);
   };
@@ -303,7 +475,6 @@ export default function MovementsScreen() {
           isArchived: !m.isArchived,
           updatedAt: serverTimestamp(),
         });
-        // onSnapshot will auto-refresh the list
       } catch (err) {
         console.error('[Movements] Archive error:', err);
         Alert.alert('Error', `Could not ${action.toLowerCase()} movement.`);
@@ -316,7 +487,6 @@ export default function MovementsScreen() {
   const handleFormClose = () => {
     setFormVisible(false);
     setEditMovement(null);
-    // onSnapshot will auto-refresh the list
   };
 
   const handleCreateNew = () => {
@@ -349,79 +519,159 @@ export default function MovementsScreen() {
     setConfirmVisible(true);
   };
 
-  // ── Render item for FlatList ───────────────────────────────────────────
-  const renderItem = ({ item: m }: { item: MovementDetailData }) => {
+  const handleShowInfo = (m: MovementDetailData) => {
+    setInfoMovement(m);
+    setInfoVisible(true);
+  };
+
+  // ── Filter chip row renderer ──────────────────────────────────────────
+  const renderChipRow = (
+    label: string,
+    options: readonly string[],
+    selected: string,
+    onSelect: (v: string) => void,
+  ) => (
+    <View style={s.filterGroup}>
+      <Text style={s.filterGroupLabel}>{label}</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={s.chipScroll}
+      >
+        {options.map((opt) => {
+          const active = selected === opt;
+          return (
+            <Pressable
+              key={opt}
+              style={[s.chip, active && s.chipActive]}
+              onPress={() => onSelect(opt)}
+            >
+              <Text style={[s.chipText, active && s.chipTextActive]}>
+                {opt}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+
+  // ── Render item: List view ────────────────────────────────────────────
+  const renderListItem = ({ item: m }: { item: MovementDetailData }) => {
     const thumb = m.thumbnailUrl || m.mediaUrl || null;
     return (
-    <Pressable style={s.card} onPress={() => handleOpenDetail(m)}>
-      <View style={s.cardRow}>
+      <Pressable style={s.card} onPress={() => handleOpenDetail(m)}>
+        <View style={s.cardRow}>
+          {thumb ? (
+            <View style={s.cardThumbWrap}>
+              <View style={s.cardThumbShimmer}>
+                <ActivityIndicator size="small" color="#2A3347" />
+              </View>
+              <Image
+                source={{ uri: thumb }}
+                style={[s.cardThumb, { position: 'absolute', top: 0, left: 0 }]}
+                resizeMode="cover"
+              />
+            </View>
+          ) : (
+            <View style={s.cardThumbPlaceholder}>
+              <Icon name="play" size={20} color="#4A5568" />
+            </View>
+          )}
+          <View style={s.cardContent}>
+            <View style={s.cardTop}>
+              <Text style={s.cardName} numberOfLines={1}>
+                {m.name}
+              </Text>
+              <OverflowMenu
+                movement={m}
+                onEdit={handleEditFromMenu}
+                onArchive={handleArchiveRequest}
+                onInfo={handleShowInfo}
+              />
+            </View>
+            <View style={s.cardBadgeRow}>
+              {m.category ? (
+                <View style={s.cardBadge}>
+                  <Text style={s.cardBadgeText}>{m.category}</Text>
+                </View>
+              ) : null}
+              {m.equipment ? (
+                <View style={s.cardBadge}>
+                  <Text style={s.cardBadgeText}>{m.equipment}</Text>
+                </View>
+              ) : null}
+              {m.difficulty ? (
+                <View style={s.cardBadge}>
+                  <Text style={s.cardBadgeText}>{m.difficulty}</Text>
+                </View>
+              ) : null}
+              {m.isGlobal && (
+                <View style={[s.cardBadge, s.globalBadge]}>
+                  <Text style={[s.cardBadgeText, { color: '#F5A623' }]}>
+                    Global
+                  </Text>
+                </View>
+              )}
+            </View>
+            {m.muscleGroups.length > 0 && (
+              <Text style={s.cardMuscles} numberOfLines={1}>
+                {m.muscleGroups.join(' · ')}
+              </Text>
+            )}
+          </View>
+        </View>
+      </Pressable>
+    );
+  };
+
+  // ── Render item: Grid view ────────────────────────────────────────────
+  const renderGridItem = ({ item: m }: { item: MovementDetailData }) => {
+    const thumb = m.thumbnailUrl || m.mediaUrl || null;
+    return (
+      <Pressable style={s.gridCard} onPress={() => handleOpenDetail(m)}>
         {thumb ? (
-          <View style={s.cardThumbWrap}>
-            <View style={s.cardThumbShimmer}>
+          <View style={s.gridThumbWrap}>
+            <View style={s.gridThumbShimmer}>
               <ActivityIndicator size="small" color="#2A3347" />
             </View>
             <Image
               source={{ uri: thumb }}
-              style={[s.cardThumb, { position: 'absolute', top: 0, left: 0 }]}
+              style={[s.gridThumb, { position: 'absolute', top: 0, left: 0 }]}
               resizeMode="cover"
             />
           </View>
         ) : (
-          <View style={s.cardThumbPlaceholder}>
-            <Icon name="fitness" size={20} color="#4A5568" />
+          <View style={s.gridThumbPlaceholder}>
+            <Icon name="play" size={24} color="#4A5568" />
           </View>
         )}
-        <View style={s.cardContent}>
-      <View style={s.cardTop}>
-        <Text style={s.cardName} numberOfLines={1}>
+        <Text style={s.gridName} numberOfLines={2}>
           {m.name}
         </Text>
-        <Icon name="chevron-right" size={18} color="#4A5568" />
-      </View>
-      <View style={s.cardBadgeRow}>
-        {m.category ? (
-          <View style={s.cardBadge}>
-            <Text style={s.cardBadgeText}>{m.category}</Text>
-          </View>
-        ) : null}
         {m.equipment ? (
-          <View style={s.cardBadge}>
-            <Text style={s.cardBadgeText}>{m.equipment}</Text>
-          </View>
+          <Text style={s.gridSub} numberOfLines={1}>
+            {m.equipment}
+          </Text>
         ) : null}
-        {m.difficulty ? (
-          <View style={s.cardBadge}>
-            <Text style={s.cardBadgeText}>{m.difficulty}</Text>
-          </View>
-        ) : null}
-        {m.isGlobal && (
-          <View style={[s.cardBadge, s.globalBadge]}>
-            <Text style={[s.cardBadgeText, { color: '#F5A623' }]}>Global</Text>
-          </View>
-        )}
-      </View>
-      {m.muscleGroups.length > 0 && (
-        <Text style={s.cardMuscles} numberOfLines={1}>
-          {m.muscleGroups.join(' · ')}
-        </Text>
-      )}
-        </View>
-      </View>
-    </Pressable>
+      </Pressable>
     );
   };
 
   const keyExtractor = (item: MovementDetailData) => item.id;
 
+  // Current sort label
+  const currentSortLabel =
+    SORT_OPTIONS.find((o) => o.value === sortBy)?.label ?? 'Sort';
+
   // ── Render ───────────────────────────────────────────────────────────────
-  // Non-admin sees Coming Soon
   if (!canAccessMovements) return <MovementsComingSoon />;
 
   return (
     <View style={s.root}>
       <AppHeader />
 
-      {/* Toolbar: Search + Create button */}
+      {/* ── Toolbar: Search + Filter icon + New button ── */}
       <View style={s.toolbar}>
         <View style={s.searchWrap}>
           <Icon name="search" size={18} color="#4A5568" />
@@ -438,109 +688,111 @@ export default function MovementsScreen() {
             </Pressable>
           )}
         </View>
-        <Pressable style={s.createBtn} onPress={handleCreateNew}>
-          <Text style={s.createBtnText}>+ New</Text>
+        <Pressable
+          style={[s.iconBtn, filterOpen && s.iconBtnActive]}
+          onPress={() => setFilterOpen(!filterOpen)}
+        >
+          <Icon
+            name="filter"
+            size={20}
+            color={activeFilterCount > 0 ? '#F5A623' : '#8A95A3'}
+          />
+          {activeFilterCount > 0 && (
+            <View style={s.filterBadge}>
+              <Text style={s.filterBadgeText}>{activeFilterCount}</Text>
+            </View>
+          )}
+        </Pressable>
+        <Pressable style={s.newBtn} onPress={handleCreateNew}>
+          <Icon name="plus" size={18} color="#0E1117" />
         </Pressable>
       </View>
 
-      {/* Filter chips: Category */}
-      <View style={s.filterSection}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={s.chipScroll}
-        >
-          {(CATEGORY_FILTER_OPTIONS as readonly string[]).map((cat) => {
-            const active = selectedCategory === cat;
-            return (
-              <Pressable
-                key={cat}
-                style={[s.chip, active && s.chipActive]}
-                onPress={() => setSelectedCategory(cat)}
-              >
-                <Text style={[s.chipText, active && s.chipTextActive]}>
-                  {cat}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </View>
+      {/* ── Expandable Filter Panel ── */}
+      {filterOpen && (
+        <View style={s.filterPanel}>
+          {renderChipRow(
+            'Category',
+            CATEGORY_FILTER_OPTIONS,
+            selectedCategory,
+            setSelectedCategory,
+          )}
+          {renderChipRow(
+            'Equipment',
+            EQUIPMENT_FILTER_OPTIONS,
+            selectedEquipment,
+            setSelectedEquipment,
+          )}
+          {renderChipRow(
+            'Muscle Group',
+            MUSCLE_GROUP_FILTER_OPTIONS,
+            selectedMuscleGroup,
+            setSelectedMuscleGroup,
+          )}
+          {renderChipRow(
+            'Difficulty',
+            DIFFICULTY_FILTER_OPTIONS,
+            selectedDifficulty,
+            setSelectedDifficulty,
+          )}
+          {activeFilterCount > 0 && (
+            <Pressable style={s.clearFiltersBtn} onPress={resetFilters}>
+              <Text style={s.clearFiltersBtnText}>Clear All Filters</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
 
-      {/* Filter chips: Equipment */}
-      <View style={s.filterSection}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={s.chipScroll}
-        >
-          {(EQUIPMENT_FILTER_OPTIONS as readonly string[]).map((eq) => {
-            const active = selectedEquipment === eq;
-            return (
-              <Pressable
-                key={eq}
-                style={[s.chip, active && s.chipActive]}
-                onPress={() => setSelectedEquipment(eq)}
-              >
-                <Text style={[s.chipText, active && s.chipTextActive]}>
-                  {eq}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </View>
-
-      {/* Filter chips: Muscle Group */}
-      <View style={s.filterSection}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={s.chipScroll}
-        >
-          {(MUSCLE_GROUP_FILTER_OPTIONS as readonly string[]).map((mg) => {
-            const active = selectedMuscleGroup === mg;
-            return (
-              <Pressable
-                key={mg}
-                style={[s.chip, active && s.chipActive]}
-                onPress={() => setSelectedMuscleGroup(mg)}
-              >
-                <Text style={[s.chipText, active && s.chipTextActive]}>
-                  {mg}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </View>
-
-      {/* Archive toggle + count */}
-      <View style={s.toggleRow}>
+      {/* ── Controls row: count, archive toggle, sort, view toggle ── */}
+      <View style={s.controlsRow}>
         <Text style={s.countText}>
           {filtered.length} movement{filtered.length !== 1 ? 's' : ''}
         </Text>
-        <Pressable
-          style={[s.toggleBtn, showArchived && s.toggleBtnActive]}
-          onPress={() => setShowArchived(!showArchived)}
-        >
-          <Icon
-            name="archive"
-            size={14}
-            color={showArchived ? '#F5A623' : '#4A5568'}
-          />
-          <Text
-            style={[
-              s.toggleBtnText,
-              showArchived && s.toggleBtnTextActive,
-            ]}
+
+        <View style={s.controlsRight}>
+          <Pressable
+            style={[s.toggleBtn, showArchived && s.toggleBtnActive]}
+            onPress={() => setShowArchived(!showArchived)}
           >
-            {showArchived ? 'Archived' : 'Show Archived'}
-          </Text>
-        </Pressable>
+            <Icon
+              name="archive"
+              size={14}
+              color={showArchived ? '#F5A623' : '#4A5568'}
+            />
+            <Text
+              style={[
+                s.toggleBtnText,
+                showArchived && s.toggleBtnTextActive,
+              ]}
+            >
+              {showArchived ? 'Archived' : 'Archived'}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={s.sortBtn}
+            onPress={() => setSortPickerOpen(true)}
+          >
+            <Icon name="sort" size={14} color="#8A95A3" />
+            <Text style={s.sortBtnText} numberOfLines={1}>
+              {currentSortLabel}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={s.viewToggle}
+            onPress={() => setViewMode(viewMode === 'list' ? 'grid' : 'list')}
+          >
+            <Icon
+              name={viewMode === 'list' ? 'grid' : 'list'}
+              size={18}
+              color="#8A95A3"
+            />
+          </Pressable>
+        </View>
       </View>
 
-      {/* Movement list (FlatList for virtualization) */}
+      {/* ── Movement list / grid ── */}
       {loading ? (
         <View style={s.centered}>
           <ActivityIndicator size="large" color="#F5A623" />
@@ -553,29 +805,43 @@ export default function MovementsScreen() {
           <Text style={s.emptyTitle}>
             {showArchived
               ? 'No Archived Movements'
-              : searchText ||
-                selectedCategory !== 'All' ||
-                selectedEquipment !== 'All' ||
-                selectedMuscleGroup !== 'All'
+              : searchText || activeFilterCount > 0
               ? 'No Movements Found'
               : 'No Movements Yet'}
           </Text>
           <Text style={s.emptyDesc}>
             {showArchived
               ? 'Archived movements will appear here.'
-              : searchText ||
-                selectedCategory !== 'All' ||
-                selectedEquipment !== 'All' ||
-                selectedMuscleGroup !== 'All'
+              : searchText || activeFilterCount > 0
               ? 'Try adjusting your search or filters.'
-              : 'Tap "+ New" to create your first movement.'}
+              : 'Tap "+" to create your first movement.'}
           </Text>
         </View>
+      ) : viewMode === 'grid' ? (
+        <FlatList
+          style={{ flex: 1 }}
+          data={filtered}
+          renderItem={renderGridItem}
+          keyExtractor={keyExtractor}
+          numColumns={3}
+          columnWrapperStyle={s.gridRow}
+          contentContainerStyle={s.gridContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#F5A623"
+            />
+          }
+          initialNumToRender={18}
+          maxToRenderPerBatch={12}
+          windowSize={5}
+        />
       ) : (
         <FlatList
           style={{ flex: 1 }}
           data={filtered}
-          renderItem={renderItem}
+          renderItem={renderListItem}
           keyExtractor={keyExtractor}
           contentContainerStyle={s.listContent}
           refreshControl={
@@ -623,24 +889,45 @@ export default function MovementsScreen() {
         onConfirm={confirmAction}
         onCancel={() => setConfirmVisible(false)}
       />
+
+      {/* Sort Picker */}
+      <SortPicker
+        visible={sortPickerOpen}
+        current={sortBy}
+        onSelect={setSortBy}
+        onClose={() => setSortPickerOpen(false)}
+      />
+
+      {/* Info Modal */}
+      <InfoModal
+        visible={infoVisible}
+        movement={infoMovement}
+        onClose={() => setInfoVisible(false)}
+      />
     </View>
   );
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────
+const GRID_GAP = 10;
+const GRID_PAD = 16;
+const GRID_COLS = 3;
+const screenW = Dimensions.get('window').width;
+const gridItemW = (screenW - GRID_PAD * 2 - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS;
+
 const s = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#0E1117',
   },
 
-  // Toolbar
+  // ── Toolbar ──
   toolbar: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingTop: 12,
-    gap: 10,
+    gap: 8,
   },
   searchWrap: {
     flex: 1,
@@ -661,28 +948,69 @@ const s = StyleSheet.create({
     fontFamily: FB,
     padding: 0,
   },
-  createBtn: {
-    backgroundColor: '#F5A623',
-    paddingHorizontal: 16,
+  iconBtn: {
+    width: 42,
     height: 42,
     borderRadius: 10,
+    backgroundColor: '#161B22',
+    borderWidth: 1,
+    borderColor: '#2A3347',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  createBtnText: {
-    fontSize: 14,
+  iconBtnActive: {
+    borderColor: 'rgba(245,166,35,0.3)',
+    backgroundColor: 'rgba(245,166,35,0.08)',
+  },
+  filterBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#F5A623',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  filterBadgeText: {
+    fontSize: 10,
     fontWeight: '700',
     color: '#0E1117',
     fontFamily: FH,
   },
+  newBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: '#F5A623',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
-  // Filter chips
-  filterSection: {
-    paddingTop: 10,
+  // ── Filter Panel ──
+  filterPanel: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3347',
+  },
+  filterGroup: {
+    marginBottom: 10,
+  },
+  filterGroupLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#8A95A3',
+    fontFamily: FH,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 6,
   },
   chipScroll: {
-    paddingHorizontal: 16,
-    gap: 8,
+    gap: 6,
   },
   chip: {
     paddingHorizontal: 12,
@@ -705,14 +1033,28 @@ const s = StyleSheet.create({
     color: '#F5A623',
     fontWeight: '600',
   },
+  clearFiltersBtn: {
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    backgroundColor: 'rgba(245,166,35,0.08)',
+    marginTop: 4,
+  },
+  clearFiltersBtnText: {
+    fontSize: 12,
+    color: '#F5A623',
+    fontWeight: '600',
+    fontFamily: FB,
+  },
 
-  // Toggle row
-  toggleRow: {
+  // ── Controls row ──
+  controlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingTop: 10,
     paddingBottom: 4,
   },
   countText: {
@@ -720,11 +1062,16 @@ const s = StyleSheet.create({
     color: '#8A95A3',
     fontFamily: FB,
   },
+  controlsRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   toggleBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
   },
@@ -732,52 +1079,42 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(245,166,35,0.08)',
   },
   toggleBtnText: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#4A5568',
     fontFamily: FB,
   },
   toggleBtnTextActive: {
     color: '#F5A623',
   },
-
-  // Centered states (loading, empty)
-  centered: {
-    flex: 1,
+  sortBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 36,
-    gap: 12,
-  },
-  emptyIconWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 20,
-    backgroundColor: 'rgba(245,166,35,0.1)',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#161B22',
     borderWidth: 1,
-    borderColor: 'rgba(245,166,35,0.25)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
+    borderColor: '#2A3347',
   },
-  emptyIcon: {
-    fontSize: 32,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#F0F4F8',
-    fontFamily: FH,
-    textAlign: 'center',
-  },
-  emptyDesc: {
-    fontSize: 14,
+  sortBtnText: {
+    fontSize: 11,
     color: '#8A95A3',
     fontFamily: FB,
-    textAlign: 'center',
-    lineHeight: 20,
+    maxWidth: 100,
+  },
+  viewToggle: {
+    width: 32,
+    height: 32,
+    borderRadius: 6,
+    backgroundColor: '#161B22',
+    borderWidth: 1,
+    borderColor: '#2A3347',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
-  // Movement list
+  // ── List view ──
   listContent: {
     padding: 16,
     gap: 10,
@@ -788,7 +1125,6 @@ const s = StyleSheet.create({
     padding: 14,
     borderWidth: 1,
     borderColor: '#2A3347',
-    gap: 8,
     marginBottom: 10,
   },
   cardRow: {
@@ -869,6 +1205,228 @@ const s = StyleSheet.create({
     fontSize: 12,
     color: '#4A5568',
     fontFamily: FB,
+  },
+
+  // ── Grid view ──
+  gridContent: {
+    padding: GRID_PAD,
+  },
+  gridRow: {
+    gap: GRID_GAP,
+    marginBottom: GRID_GAP,
+  },
+  gridCard: {
+    width: gridItemW,
+    backgroundColor: '#161B22',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2A3347',
+    overflow: 'hidden',
+  },
+  gridThumbWrap: {
+    width: gridItemW,
+    height: gridItemW * 1.2,
+    backgroundColor: '#1A2035',
+  },
+  gridThumb: {
+    width: gridItemW,
+    height: gridItemW * 1.2,
+    backgroundColor: '#1A2035',
+  },
+  gridThumbPlaceholder: {
+    width: gridItemW,
+    height: gridItemW * 1.2,
+    backgroundColor: '#1A2035',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3347',
+  },
+  gridThumbShimmer: {
+    width: gridItemW,
+    height: gridItemW * 1.2,
+    backgroundColor: '#1A2035',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gridName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#F0F4F8',
+    fontFamily: FH,
+    paddingHorizontal: 8,
+    paddingTop: 8,
+  },
+  gridSub: {
+    fontSize: 10,
+    color: '#8A95A3',
+    fontFamily: FB,
+    paddingHorizontal: 8,
+    paddingTop: 2,
+    paddingBottom: 8,
+  },
+
+  // ── Overflow menu ──
+  overflowBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  menuPopup: {
+    position: 'absolute',
+    backgroundColor: '#1E2530',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2A3347',
+    paddingVertical: 4,
+    minWidth: 160,
+    ...(Platform.OS === 'web' ? { boxShadow: '0 8px 24px rgba(0,0,0,0.4)' } : {}),
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  menuItemText: {
+    fontSize: 14,
+    color: '#F0F4F8',
+    fontFamily: FB,
+  },
+
+  // ── Info modal ──
+  infoModal: {
+    backgroundColor: '#1E2530',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#2A3347',
+    padding: 24,
+    width: 320,
+    maxWidth: '90%' as any,
+  },
+  infoTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FH,
+    marginBottom: 16,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3347',
+  },
+  infoLabel: {
+    fontSize: 13,
+    color: '#8A95A3',
+    fontFamily: FB,
+  },
+  infoValue: {
+    fontSize: 13,
+    color: '#F0F4F8',
+    fontFamily: FB,
+    fontWeight: '600',
+  },
+  infoCloseBtn: {
+    marginTop: 16,
+    alignSelf: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(245,166,35,0.12)',
+  },
+  infoCloseBtnText: {
+    fontSize: 14,
+    color: '#F5A623',
+    fontWeight: '600',
+    fontFamily: FB,
+  },
+
+  // ── Sort picker modal ──
+  sortModal: {
+    backgroundColor: '#1E2530',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#2A3347',
+    padding: 16,
+    width: 260,
+    maxWidth: '90%' as any,
+  },
+  sortModalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FH,
+    marginBottom: 12,
+  },
+  sortOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  sortOptionActive: {
+    backgroundColor: 'rgba(245,166,35,0.08)',
+  },
+  sortOptionText: {
+    fontSize: 14,
+    color: '#8A95A3',
+    fontFamily: FB,
+  },
+  sortOptionTextActive: {
+    color: '#F5A623',
+    fontWeight: '600',
+  },
+
+  // ── Centered states (loading, empty) ──
+  centered: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 36,
+    gap: 12,
+  },
+  emptyIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 20,
+    backgroundColor: 'rgba(245,166,35,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  emptyIcon: {
+    fontSize: 32,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FH,
+    textAlign: 'center',
+  },
+  emptyDesc: {
+    fontSize: 14,
+    color: '#8A95A3',
+    fontFamily: FB,
+    textAlign: 'center',
+    lineHeight: 20,
   },
   comingSoonBadge: {
     backgroundColor: 'rgba(245,166,35,0.12)',

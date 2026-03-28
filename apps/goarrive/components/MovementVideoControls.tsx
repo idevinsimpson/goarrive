@@ -2,15 +2,14 @@
  * MovementVideoControls — Enhanced video playback controls
  *
  * Wraps expo-av Video with:
- *   - Playback speed selector (0.5x, 1x, 1.5x)
- *   - Loop toggle (on by default for movement demos)
+ *   - Playback speed selector (0.5x → 2.0x in 0.1x steps)
  *   - Scrub bar (seek to position)
  *   - Fullscreen toggle
  *   - Play/pause overlay
  *
- * The 4:5 frame is enforced via onLayout measurement + explicit pixel height.
- * This is the most reliable cross-platform approach — RN's aspectRatio style
- * can be overridden by Video's intrinsic content size on iOS native.
+ * Loop is always on for movement demos (no toggle exposed).
+ * The frame aspect ratio is enforced via onLayout measurement + explicit
+ * pixel height.
  */
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
@@ -31,10 +30,9 @@ const FH =
 const FB =
   Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
-const SPEED_OPTIONS = [0.5, 1, 1.5] as const;
-
-/** 4:5 means for every 4 units wide, 5 units tall → height = width × (5/4) */
-const ASPECT_MULTIPLIER = 5 / 4; // 1.25
+// Fine-tuned speed steps: 0.5 → 2.0 in 0.1 increments
+const SPEED_STEPS: number[] = [];
+for (let i = 5; i <= 20; i++) SPEED_STEPS.push(+(i / 10).toFixed(1));
 
 interface MovementVideoControlsProps {
   uri: string;
@@ -46,7 +44,7 @@ interface MovementVideoControlsProps {
   autoPlay?: boolean;
   /** Whether to show controls overlay */
   showControls?: boolean;
-  /** Lock the video frame to a specific aspect ratio (e.g. 4/5). */
+  /** Lock the video frame to a specific aspect ratio (e.g. 16/9). */
   aspectRatio?: number;
   /** Non-destructive crop: scale factor (1 = no zoom) */
   cropScale?: number;
@@ -71,22 +69,17 @@ export default function MovementVideoControls({
   const containerRef = useRef<View>(null);
 
   // ── Seamless looping (web only) ─────────────────────────────────────
-  // Eliminates the pause/gap at loop transitions by using a dual-video
-  // swap technique. On native platforms, expo-av's built-in loop is fine.
   useSeamlessLoop(containerRef, uri, cropScale, cropTranslateX, cropTranslateY);
 
-  // ── Bulletproof 4:5 sizing via onLayout ──────────────────────────────
-  // We measure the container's actual rendered width, then compute
-  // height = width × multiplier. This works on every platform because
-  // it uses explicit pixel values, not aspectRatio style.
+  // ── Aspect-ratio sizing via onLayout ────────────────────────────────
   const [measuredHeight, setMeasuredHeight] = useState<number | null>(null);
 
   const onContainerLayout = useCallback(
     (e: LayoutChangeEvent) => {
-      if (!aspectRatio) return; // only compute when ratio is requested
+      if (!aspectRatio) return;
       const w = e.nativeEvent.layout.width;
       if (w > 0) {
-        const multiplier = 1 / aspectRatio; // aspectRatio = w/h → h = w / aspectRatio = w × (1/aspectRatio)
+        const multiplier = 1 / aspectRatio;
         const h = Math.round(w * multiplier);
         setMeasuredHeight(h);
       }
@@ -94,15 +87,14 @@ export default function MovementVideoControls({
     [aspectRatio],
   );
 
-  // Determine the video area height
   const videoAreaHeight = aspectRatio
-    ? measuredHeight ?? 0 // 0 until measured (invisible until first layout)
+    ? measuredHeight ?? 0
     : height;
 
   // ── Playback state ──────────────────────────────────────────────────
   const [isPlaying, setIsPlaying] = useState(autoPlay);
-  const [isLooping, setIsLooping] = useState(true);
   const [speed, setSpeed] = useState<number>(1);
+  const [speedIdx, setSpeedIdx] = useState(SPEED_STEPS.indexOf(1));
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [showOverlay, setShowOverlay] = useState(!autoPlay);
@@ -125,25 +117,15 @@ export default function MovementVideoControls({
     setShowOverlay(false);
   }, [isPlaying]);
 
-  const toggleLoop = useCallback(async () => {
-    const newLoop = !isLooping;
-    setIsLooping(newLoop);
-    if (videoRef.current) {
-      await videoRef.current.setIsLoopingAsync(newLoop);
-    }
-  }, [isLooping]);
-
   const cycleSpeed = useCallback(async () => {
-    const currentIdx = SPEED_OPTIONS.indexOf(
-      speed as (typeof SPEED_OPTIONS)[number],
-    );
-    const nextIdx = (currentIdx + 1) % SPEED_OPTIONS.length;
-    const newSpeed = SPEED_OPTIONS[nextIdx];
+    const nextIdx = (speedIdx + 1) % SPEED_STEPS.length;
+    const newSpeed = SPEED_STEPS[nextIdx];
+    setSpeedIdx(nextIdx);
     setSpeed(newSpeed);
     if (videoRef.current) {
       await videoRef.current.setRateAsync(newSpeed, true);
     }
-  }, [speed]);
+  }, [speedIdx]);
 
   const seekTo = useCallback(
     async (pct: number) => {
@@ -211,8 +193,9 @@ export default function MovementVideoControls({
   };
 
   const progressPct = duration > 0 ? position / duration : 0;
+  const speedLabel = speed === Math.floor(speed) ? `${speed}.0x` : `${speed}x`;
 
-  // Build crop transform if any crop values are set
+  // Build crop transform
   const hasCrop =
     cropScale !== 1 || cropTranslateX !== 0 || cropTranslateY !== 0;
   const cropTransform = hasCrop
@@ -231,12 +214,10 @@ export default function MovementVideoControls({
       onLayout={onContainerLayout}
       style={[
         st.container,
-        aspectRatio
-          ? { width: '100%' as const }
-          : { height },
+        aspectRatio ? { width: '100%' as const } : { height },
       ]}
     >
-      {/* Video area — explicit pixel height enforces 4:5 */}
+      {/* Video area */}
       <View style={[st.videoArea, { height: videoAreaHeight }]}>
         <Pressable
           onPress={() => setShowOverlay((o) => !o)}
@@ -249,7 +230,7 @@ export default function MovementVideoControls({
             usePoster={!!posterUri}
             posterStyle={{ resizeMode: 'cover' } as any}
             resizeMode={ResizeMode.COVER}
-            isLooping={isLooping}
+            isLooping
             shouldPlay={autoPlay}
             isMuted
             style={[st.video, cropTransform]}
@@ -315,16 +296,7 @@ export default function MovementVideoControls({
 
           {/* Speed */}
           <TouchableOpacity onPress={cycleSpeed} style={st.controlBtn}>
-            <Text style={st.speedText}>{speed}x</Text>
-          </TouchableOpacity>
-
-          {/* Loop */}
-          <TouchableOpacity onPress={toggleLoop} style={st.controlBtn}>
-            <Icon
-              name="repeat"
-              size={14}
-              color={isLooping ? '#F5A623' : '#4A5568'}
-            />
+            <Text style={st.speedText}>{speedLabel}</Text>
           </TouchableOpacity>
 
           {/* Fullscreen */}

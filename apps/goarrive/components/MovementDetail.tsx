@@ -1,13 +1,17 @@
 /**
  * MovementDetail — View movement details in a modal
  *
- * Shows full movement info: name, category, muscle groups, equipment,
- * difficulty, description, timer defaults, swap sides config.
- * Provides Edit and Archive action buttons.
+ * Redesigned layout:
+ *   - Shrunk video (16:9 instead of 4:5)
+ *   - No loop toggle (always loops)
+ *   - No "Make Global" button (admin-only, removed from detail)
+ *   - Tappable metadata badges → opens edit modal
+ *   - Swap-sides toggle + mode selector with inline save
+ *   - Fine-tuned playback speed (0.1x increments)
  *
  * Slice 1, Week 2 — Movement Library
  */
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -17,7 +21,11 @@ import {
   Platform,
   Modal,
   Image,
+  Switch,
+  Alert,
 } from 'react-native';
+import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { Icon } from './Icon';
 import MovementVideoControls from './MovementVideoControls';
 
@@ -42,6 +50,7 @@ export interface MovementDetailData {
   coachId?: string;
   tenantId?: string;
   createdAt?: any;
+  updatedAt?: any;
   mediaUrl?: string | null;
   videoUrl?: string | null;
   thumbnailUrl?: string | null;
@@ -71,10 +80,15 @@ interface Props {
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const FONT_HEADING =
+const FH =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FONT_BODY =
+const FB =
   Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+
+const SWAP_MODES: { value: 'split' | 'duplicate'; label: string; desc: string }[] = [
+  { value: 'split', label: 'Split', desc: 'Half time per side' },
+  { value: 'duplicate', label: 'Duplicate', desc: 'Full time each side' },
+];
 
 // ── Component ──────────────────────────────────────────────────────────────
 
@@ -87,7 +101,54 @@ export default function MovementDetail({
   onToggleGlobal,
   isAdmin = false,
 }: Props) {
+  // Local state for inline swap-sides editing
+  const [swapSides, setSwapSides] = useState(false);
+  const [swapMode, setSwapMode] = useState<'split' | 'duplicate'>('split');
+  const [swapDirty, setSwapDirty] = useState(false);
+
+  // Sync local state when movement changes
+  React.useEffect(() => {
+    if (movement) {
+      setSwapSides(movement.swapSides);
+      setSwapMode(movement.swapMode);
+      setSwapDirty(false);
+    }
+  }, [movement?.id]);
+
+  const handleSwapToggle = useCallback((val: boolean) => {
+    setSwapSides(val);
+    setSwapDirty(true);
+  }, []);
+
+  const handleSwapModeChange = useCallback((mode: 'split' | 'duplicate') => {
+    setSwapMode(mode);
+    setSwapDirty(true);
+  }, []);
+
+  const saveSwapSettings = useCallback(async () => {
+    if (!movement) return;
+    try {
+      await updateDoc(doc(db, 'movements', movement.id), {
+        swapSides,
+        swapMode,
+        updatedAt: serverTimestamp(),
+      });
+      setSwapDirty(false);
+    } catch (err) {
+      console.error('[MovementDetail] Save swap error:', err);
+      Alert.alert('Error', 'Could not save swap settings.');
+    }
+  }, [movement, swapSides, swapMode]);
+
   if (!movement) return null;
+
+  const createdDate = movement.createdAt?.seconds
+    ? new Date(movement.createdAt.seconds * 1000).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      })
+    : null;
 
   return (
     <Modal
@@ -103,21 +164,23 @@ export default function MovementDetail({
             <Icon name="close" size={24} color="#8A95A3" />
           </Pressable>
           <Text style={s.headerTitle}>Movement Details</Text>
-          <View style={{ width: 24 }} />
+          <Pressable onPress={() => onEdit(movement)} hitSlop={8}>
+            <Icon name="edit" size={20} color="#F5A623" />
+          </Pressable>
         </View>
 
         <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent}>
           {/* Name */}
           <Text style={s.name}>{movement.name}</Text>
 
-          {/* Video / Thumbnail */}
+          {/* Video / Thumbnail — shrunk to 16:9 */}
           {(movement.videoUrl || movement.thumbnailUrl || movement.mediaUrl) ? (
             <View style={s.mediaSection}>
               {movement.videoUrl ? (
                 <MovementVideoControls
                   uri={movement.videoUrl}
                   posterUri={movement.thumbnailUrl || undefined}
-                  aspectRatio={4 / 5}
+                  aspectRatio={16 / 9}
                   autoPlay={true}
                   showControls={true}
                   cropScale={movement.cropScale ?? 1}
@@ -134,28 +197,40 @@ export default function MovementDetail({
             </View>
           ) : null}
 
-          {/* Badges */}
-          <View style={s.badgeRow}>
-            <View style={s.badge}>
-              <Text style={s.badgeText}>{movement.category}</Text>
+          {/* Tappable Badges — tap to open full edit */}
+          <Pressable onPress={() => onEdit(movement)}>
+            <View style={s.badgeRow}>
+              {movement.category ? (
+                <View style={s.badge}>
+                  <Text style={s.badgeText}>{movement.category}</Text>
+                  <Icon name="edit" size={10} color="#4A5568" />
+                </View>
+              ) : null}
+              {movement.equipment ? (
+                <View style={s.badge}>
+                  <Text style={s.badgeText}>{movement.equipment}</Text>
+                  <Icon name="edit" size={10} color="#4A5568" />
+                </View>
+              ) : null}
+              {movement.difficulty ? (
+                <View style={s.badge}>
+                  <Text style={s.badgeText}>{movement.difficulty}</Text>
+                  <Icon name="edit" size={10} color="#4A5568" />
+                </View>
+              ) : null}
+              {movement.isArchived && (
+                <View style={[s.badge, s.archivedBadge]}>
+                  <Text style={[s.badgeText, { color: '#E05252' }]}>Archived</Text>
+                </View>
+              )}
+              {movement.isGlobal && (
+                <View style={[s.badge, s.globalBadge]}>
+                  <Text style={[s.badgeText, { color: '#F5A623' }]}>Global</Text>
+                </View>
+              )}
             </View>
-            <View style={s.badge}>
-              <Text style={s.badgeText}>{movement.equipment}</Text>
-            </View>
-            <View style={s.badge}>
-              <Text style={s.badgeText}>{movement.difficulty}</Text>
-            </View>
-            {movement.isArchived && (
-              <View style={[s.badge, s.archivedBadge]}>
-                <Text style={[s.badgeText, { color: '#E05252' }]}>Archived</Text>
-              </View>
-            )}
-            {movement.isGlobal && (
-              <View style={[s.badge, { backgroundColor: 'rgba(245,166,35,0.12)', borderColor: 'rgba(245,166,35,0.3)' }]}>
-                <Text style={[s.badgeText, { color: '#F5A623' }]}>Global</Text>
-              </View>
-            )}
-          </View>
+            <Text style={s.editHint}>Tap badges to edit metadata</Text>
+          </Pressable>
 
           {/* Muscle Groups */}
           {movement.muscleGroups.length > 0 && (
@@ -202,7 +277,7 @@ export default function MovementDetail({
           {movement.contraindications ? (
             <View style={s.section}>
               <Text style={[s.sectionLabel, { color: '#EF4444' }]}>Contraindications</Text>
-              <Text style={[s.descText, { color: '#F0A0A0' }]}>
+              <Text style={[s.bodyText, { color: '#F0A0A0' }]}>
                 {movement.contraindications}
               </Text>
             </View>
@@ -227,18 +302,61 @@ export default function MovementDetail({
             </View>
           </View>
 
-          {/* Swap Sides */}
-          {movement.swapSides && (
+          {/* Swap Sides — inline toggle + mode selector */}
+          <View style={s.section}>
+            <Text style={s.sectionLabel}>Swap Sides</Text>
+            <View style={s.swapRow}>
+              <Text style={s.swapLabel}>Enable swap sides</Text>
+              <Switch
+                value={swapSides}
+                onValueChange={handleSwapToggle}
+                trackColor={{ false: '#2A3347', true: 'rgba(245,166,35,0.4)' }}
+                thumbColor={swapSides ? '#F5A623' : '#4A5568'}
+              />
+            </View>
+            {swapSides && (
+              <View style={s.swapModeRow}>
+                {SWAP_MODES.map((m) => (
+                  <Pressable
+                    key={m.value}
+                    style={[
+                      s.swapModeBtn,
+                      swapMode === m.value && s.swapModeBtnActive,
+                    ]}
+                    onPress={() => handleSwapModeChange(m.value)}
+                  >
+                    <Text
+                      style={[
+                        s.swapModeBtnText,
+                        swapMode === m.value && s.swapModeBtnTextActive,
+                      ]}
+                    >
+                      {m.label}
+                    </Text>
+                    <Text style={s.swapModeDesc}>{m.desc}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+            {swapDirty && (
+              <Pressable style={s.saveSwapBtn} onPress={saveSwapSettings}>
+                <Text style={s.saveSwapBtnText}>Save Swap Settings</Text>
+              </Pressable>
+            )}
+          </View>
+
+          {/* Created info */}
+          {createdDate && (
             <View style={s.section}>
-              <Text style={s.sectionLabel}>Swap Sides</Text>
-              <Text style={s.bodyText}>
-                Mode: {movement.swapMode} · Window: {movement.swapWindowSec}s
+              <Text style={s.metaText}>
+                Created {createdDate}
+                {movement.isGlobal ? ' · Global Library' : ' · Coach Private'}
               </Text>
             </View>
           )}
         </ScrollView>
 
-        {/* Action buttons */}
+        {/* Action buttons — Edit + Archive only */}
         <View style={s.actions}>
           <Pressable
             style={s.editBtn}
@@ -260,24 +378,6 @@ export default function MovementDetail({
               {movement.isArchived ? 'Restore' : 'Archive'}
             </Text>
           </Pressable>
-          {isAdmin && onToggleGlobal && (
-            <Pressable
-              style={[
-                s.editBtn,
-                movement.isGlobal && { borderColor: 'rgba(245,166,35,0.3)' },
-              ]}
-              onPress={() => onToggleGlobal(movement)}
-            >
-              <Icon
-                name={movement.isGlobal ? 'close' : 'globe'}
-                size={18}
-                color="#F5A623"
-              />
-              <Text style={s.editText}>
-                {movement.isGlobal ? 'Remove Global' : 'Make Global'}
-              </Text>
-            </Pressable>
-          )}
         </View>
       </View>
     </Modal>
@@ -303,7 +403,7 @@ const s = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#F0F4F8',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   scroll: {
     flex: 1,
@@ -319,14 +419,14 @@ const s = StyleSheet.create({
   },
   mediaThumbnail: {
     width: '100%',
-    aspectRatio: 4 / 5,
+    aspectRatio: 16 / 9,
     borderRadius: 10,
   },
   name: {
     fontSize: 24,
     fontWeight: '700',
     color: '#F0F4F8',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   badgeRow: {
     flexDirection: 'row',
@@ -334,9 +434,12 @@ const s = StyleSheet.create({
     gap: 8,
   },
   badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     backgroundColor: '#1A2035',
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 5,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#2A3347',
@@ -345,10 +448,20 @@ const s = StyleSheet.create({
     borderColor: 'rgba(224,82,82,0.3)',
     backgroundColor: 'rgba(224,82,82,0.08)',
   },
+  globalBadge: {
+    borderColor: 'rgba(245,166,35,0.3)',
+    backgroundColor: 'rgba(245,166,35,0.08)',
+  },
   badgeText: {
     fontSize: 12,
     color: '#8A95A3',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
+  },
+  editHint: {
+    fontSize: 11,
+    color: '#4A5568',
+    fontFamily: FB,
+    marginTop: 4,
   },
   section: {
     gap: 8,
@@ -357,7 +470,7 @@ const s = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#8A95A3',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -375,12 +488,12 @@ const s = StyleSheet.create({
   chipText: {
     fontSize: 12,
     color: '#F5A623',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   bodyText: {
     fontSize: 14,
     color: '#C0C8D4',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     lineHeight: 20,
   },
   altRow: {
@@ -393,12 +506,12 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#8A95A3',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   altValue: {
     fontSize: 13,
     color: '#C0C8D4',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     flex: 1,
   },
   timerRow: {
@@ -413,13 +526,80 @@ const s = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#F0F4F8',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   timerLabel: {
     fontSize: 11,
     color: '#8A95A3',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
+  // ── Swap Sides ──
+  swapRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  swapLabel: {
+    fontSize: 14,
+    color: '#C0C8D4',
+    fontFamily: FB,
+  },
+  swapModeRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  swapModeBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#161B22',
+    borderWidth: 1,
+    borderColor: '#2A3347',
+    alignItems: 'center',
+    gap: 2,
+  },
+  swapModeBtnActive: {
+    borderColor: 'rgba(245,166,35,0.3)',
+    backgroundColor: 'rgba(245,166,35,0.08)',
+  },
+  swapModeBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8A95A3',
+    fontFamily: FH,
+  },
+  swapModeBtnTextActive: {
+    color: '#F5A623',
+  },
+  swapModeDesc: {
+    fontSize: 10,
+    color: '#4A5568',
+    fontFamily: FB,
+  },
+  saveSwapBtn: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(245,166,35,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.3)',
+    marginTop: 4,
+  },
+  saveSwapBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#F5A623',
+    fontFamily: FB,
+  },
+  metaText: {
+    fontSize: 12,
+    color: '#4A5568',
+    fontFamily: FB,
+  },
+  // ── Actions ──
   actions: {
     flexDirection: 'row',
     gap: 12,
@@ -443,7 +623,7 @@ const s = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#F5A623',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   archiveBtn: {
     flex: 1,
@@ -461,6 +641,6 @@ const s = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#E05252',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
 });
