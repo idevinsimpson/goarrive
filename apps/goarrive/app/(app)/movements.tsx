@@ -819,6 +819,7 @@ export default function MovementsScreen() {
         </View>
       ) : viewMode === 'grid' ? (
         <FlatList
+          key="grid"
           style={{ flex: 1 }}
           data={filtered}
           renderItem={renderGridItem}
@@ -839,6 +840,7 @@ export default function MovementsScreen() {
         />
       ) : (
         <FlatList
+          key="list"
           style={{ flex: 1 }}
           data={filtered}
           renderItem={renderListItem}
