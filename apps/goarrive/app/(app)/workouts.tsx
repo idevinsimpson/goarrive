@@ -5,8 +5,9 @@
  * non-admins see a Coming Soon placeholder.
  *
  * Lists all workouts for the coach. Supports search by name,
- * filter by category/difficulty, template toggle, collapsible filters,
- * tap to view details, create/edit/duplicate/archive workouts.
+ * expandable filter panel (category/difficulty), list/grid view toggle
+ * (2-column grid matching movements page ratio), sorting, overflow menu
+ * per card, tap to view details, create/edit/duplicate/archive workouts.
  *
  * Wires in existing components:
  *   - WorkoutDetail — detail modal with edit/archive/duplicate/assign
@@ -14,16 +15,8 @@
  *
  * Firestore collection: workouts, workout_assignments
  * Query pattern: coachId-scoped, filtered by isArchived
- *
- * Suggestions implemented:
- *   5. Duplicate workout
- *   6. Template marking + filter
- *   7. Collapsible filter section
- *   8. Workout usage analytics (assignment count)
- *   9. Typed WorkoutDetail props (via WorkoutDetailData import)
- *  10. Legacy workout badge for workouts missing key fields
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -36,6 +29,8 @@ import {
   ActivityIndicator,
   RefreshControl,
   Alert,
+  Modal,
+  Dimensions,
 } from 'react-native';
 import {
   collection,
@@ -79,6 +74,12 @@ const CATEGORIES = [
 ];
 
 const DIFFICULTIES = ['All', 'Beginner', 'Intermediate', 'Advanced'];
+
+const SORT_OPTIONS: { key: 'newest' | 'alpha' | 'most_used'; label: string }[] = [
+  { key: 'newest', label: 'Newest' },
+  { key: 'alpha', label: 'A-Z' },
+  { key: 'most_used', label: 'Most Used' },
+];
 
 // ── Workout data type ──────────────────────────────────────────────────────
 interface WorkoutData {
@@ -126,6 +127,138 @@ function WorkoutsComingSoon() {
   );
 }
 
+// ── Overflow Menu Component ──────────────────────────────────────────────
+function OverflowMenu({
+  workout,
+  onEdit,
+  onArchive,
+  onDuplicate,
+  onPreview,
+}: {
+  workout: WorkoutData;
+  onEdit: (w: WorkoutData) => void;
+  onArchive: (w: WorkoutData) => void;
+  onDuplicate: (w: WorkoutData) => void;
+  onPreview: (w: WorkoutData) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState({ top: 0, right: 16 });
+  const anchorRef = useRef<View>(null);
+
+  const handleOpen = () => {
+    if (anchorRef.current && Platform.OS === 'web') {
+      (anchorRef.current as any).measureInWindow?.(
+        (x: number, y: number, w: number, h: number) => {
+          setMenuPos({ top: y + h + 4, right: Dimensions.get('window').width - x - w });
+          setOpen(true);
+        },
+      );
+    } else {
+      setOpen(true);
+    }
+  };
+
+  return (
+    <>
+      <Pressable
+        ref={anchorRef}
+        onPress={(e) => {
+          e.stopPropagation?.();
+          handleOpen();
+        }}
+        hitSlop={8}
+        style={s.overflowBtn}
+      >
+        <Icon name="more-vertical" size={18} color="#8A95A3" />
+      </Pressable>
+      {open && (
+        <Modal transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+          <Pressable style={s.menuBackdrop} onPress={() => setOpen(false)}>
+            <View style={[s.menuPopup, { top: menuPos.top, right: menuPos.right }]}>
+              <Pressable
+                style={s.menuItem}
+                onPress={() => { setOpen(false); onEdit(workout); }}
+              >
+                <Icon name="edit" size={16} color="#F0F4F8" />
+                <Text style={s.menuItemText}>Edit</Text>
+              </Pressable>
+              <Pressable
+                style={s.menuItem}
+                onPress={() => { setOpen(false); onPreview(workout); }}
+              >
+                <Icon name="play" size={16} color="#F0F4F8" />
+                <Text style={s.menuItemText}>Preview</Text>
+              </Pressable>
+              <Pressable
+                style={s.menuItem}
+                onPress={() => { setOpen(false); onDuplicate(workout); }}
+              >
+                <Icon name="copy" size={16} color="#F0F4F8" />
+                <Text style={s.menuItemText}>Duplicate</Text>
+              </Pressable>
+              <Pressable
+                style={s.menuItem}
+                onPress={() => { setOpen(false); onArchive(workout); }}
+              >
+                <Icon name="archive" size={16} color="#F0F4F8" />
+                <Text style={s.menuItemText}>
+                  {workout.isArchived ? 'Restore' : 'Archive'}
+                </Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+// ── Sort Picker Modal ────────────────────────────────────────────────────
+function SortPicker({
+  visible,
+  current,
+  onSelect,
+  onClose,
+}: {
+  visible: boolean;
+  current: string;
+  onSelect: (s: 'newest' | 'alpha' | 'most_used') => void;
+  onClose: () => void;
+}) {
+  if (!visible) return null;
+  return (
+    <Modal transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={s.menuBackdrop} onPress={onClose}>
+        <View style={s.sortModal}>
+          <Text style={s.sortModalTitle}>Sort By</Text>
+          {SORT_OPTIONS.map((opt) => (
+            <Pressable
+              key={opt.key}
+              style={[s.sortOption, current === opt.key && s.sortOptionActive]}
+              onPress={() => {
+                onSelect(opt.key);
+                onClose();
+              }}
+            >
+              <Text
+                style={[
+                  s.sortOptionText,
+                  current === opt.key && s.sortOptionTextActive,
+                ]}
+              >
+                {opt.label}
+              </Text>
+              {current === opt.key && (
+                <Icon name="check" size={16} color="#F5A623" />
+              )}
+            </Pressable>
+          ))}
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 export default function WorkoutsScreen() {
   const { user, claims } = useAuth();
@@ -144,7 +277,16 @@ export default function WorkoutsScreen() {
   const [selectedDifficulty, setSelectedDifficulty] = useState('All');
   const [showArchived, setShowArchived] = useState(false);
   const [showTemplatesOnly, setShowTemplatesOnly] = useState(false);
-  const [filtersExpanded, setFiltersExpanded] = useState(true);
+  const [sortBy, setSortBy] = useState<'newest' | 'alpha' | 'most_used'>('newest');
+
+  // View mode: list or grid
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
+
+  // Filter panel visibility
+  const [filterOpen, setFilterOpen] = useState(false);
+
+  // Sort picker visibility
+  const [sortPickerOpen, setSortPickerOpen] = useState(false);
 
   // Detail modal
   const [detailVisible, setDetailVisible] = useState(false);
@@ -162,15 +304,15 @@ export default function WorkoutsScreen() {
   const [confirmMessage, setConfirmMessage] = useState('');
   const [confirmAction, setConfirmAction] = useState<() => void>(() => {});
 
-  // Assignment counts for usage analytics (suggestion 8)
+  // Assignment counts for usage analytics
   const [assignmentCounts, setAssignmentCounts] = useState<
     Record<string, number>
   >({});
 
-  // Template marketplace
+  // Template marketplace (kept for component but button removed)
   const [showMarketplace, setShowMarketplace] = useState(false);
 
-  // Coach calendar view (Suggestion 3)
+  // Coach calendar view (kept for component but button removed)
   const [showCalendar, setShowCalendar] = useState(false);
 
   // Preview player state
@@ -213,7 +355,7 @@ export default function WorkoutsScreen() {
       setLoading(false);
       setRefreshing(false);
 
-      // Load assignment counts (suggestion 8)
+      // Load assignment counts
       if (list.length > 0) {
         try {
           const assignQ = query(
@@ -241,40 +383,29 @@ export default function WorkoutsScreen() {
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    // Real-time listener will auto-update; just reset the flag after a short delay
     setTimeout(() => setRefreshing(false), 1000);
   }, []);
 
   // ── Filter logic ───────────────────────────────────────────────────────
   const filtered = workouts.filter((w) => {
-    // Archive filter
     if (showArchived && !w.isArchived) return false;
     if (!showArchived && w.isArchived) return false;
-
-    // Template filter (suggestion 6)
     if (showTemplatesOnly && !w.isTemplate) return false;
-
-    // Search
     if (
       searchText &&
       !w.name.toLowerCase().includes(searchText.toLowerCase())
     )
       return false;
-
-    // Category
     if (
       selectedCategory !== 'All' &&
       w.category.toLowerCase() !== selectedCategory.toLowerCase()
     )
       return false;
-
-    // Difficulty
     if (
       selectedDifficulty !== 'All' &&
       w.difficulty.toLowerCase() !== selectedDifficulty.toLowerCase()
     )
       return false;
-
     return true;
   });
 
@@ -282,7 +413,6 @@ export default function WorkoutsScreen() {
   const sorted = [...filtered].sort((a, b) => {
     if (sortBy === 'alpha') return a.name.localeCompare(b.name);
     if (sortBy === 'most_used') return (assignmentCounts[b.id] ?? 0) - (assignmentCounts[a.id] ?? 0);
-    // newest (default) — already ordered by createdAt desc from Firestore
     return 0;
   });
 
@@ -307,7 +437,12 @@ export default function WorkoutsScreen() {
     setFormVisible(true);
   };
 
-  const handleArchiveRequest = (w: WorkoutDetailData) => {
+  const handleEditFromMenu = (w: WorkoutData) => {
+    setEditWorkout(w);
+    setFormVisible(true);
+  };
+
+  const handleArchiveRequest = (w: WorkoutDetailData | WorkoutData) => {
     setDetailVisible(false);
     const isArchived = w.isArchived ?? false;
     const action = isArchived ? 'Restore' : 'Archive';
@@ -332,13 +467,11 @@ export default function WorkoutsScreen() {
     setConfirmVisible(true);
   };
 
-  // ── Duplicate-and-tweak (suggestion 5) ─────────────────────────────────
-  const handleDuplicate = (w: WorkoutDetailData) => {
+  const handleDuplicate = (w: WorkoutDetailData | WorkoutData) => {
     setDetailVisible(false);
-    // Pre-populate the form with the workout data but as a new workout
     setEditWorkout({
       ...w,
-      id: '', // empty id signals "create new" to the form
+      id: '',
       name: `${w.name} (Copy)`,
       isTemplate: false,
       isArchived: false,
@@ -346,18 +479,9 @@ export default function WorkoutsScreen() {
     setFormVisible(true);
   };
 
-  // ── Sort options (suggestion 6) ───────────────────────────────────────
-  const [sortBy, setSortBy] = useState<'newest' | 'alpha' | 'most_used'>('newest');
-  const SORT_OPTIONS: { key: 'newest' | 'alpha' | 'most_used'; label: string }[] = [
-    { key: 'newest', label: 'Newest' },
-    { key: 'alpha', label: 'A-Z' },
-    { key: 'most_used', label: 'Most Used' },
-  ];
-
   const handleFormClose = () => {
     setFormVisible(false);
     setEditWorkout(null);
-    // onSnapshot handles updates automatically
   };
 
   const handleCreateNew = () => {
@@ -365,18 +489,59 @@ export default function WorkoutsScreen() {
     setFormVisible(true);
   };
 
-  // ── Check if workout is legacy (suggestion 10) ────────────────────────
   const isLegacy = (w: WorkoutData) =>
     !w.category && !w.difficulty && !w.estimatedDurationMin;
 
-  // ── Preview handler ───────────────────────────────────────────────────
   const handlePreview = (w: WorkoutData) => {
     setPreviewWorkout(w);
     setPreviewVisible(true);
   };
 
-  // ── Render item for FlatList ───────────────────────────────────────────
-  const renderItem = ({ item: w }: { item: WorkoutData }) => {
+  // Reset all filters
+  const resetFilters = () => {
+    setSelectedCategory('All');
+    setSelectedDifficulty('All');
+    setShowTemplatesOnly(false);
+  };
+
+  // Current sort label
+  const currentSortLabel =
+    SORT_OPTIONS.find((o) => o.key === sortBy)?.label ?? 'Sort';
+
+  // ── Filter chip row renderer ──────────────────────────────────────────
+  const renderChipRow = (
+    label: string,
+    options: readonly string[],
+    selected: string,
+    onSelect: (v: string) => void,
+  ) => (
+    <View style={s.filterGroup}>
+      <Text style={s.filterGroupLabel}>{label}</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={s.chipScroll}
+      >
+        {options.map((opt) => {
+          const active = selected === opt;
+          return (
+            <Pressable
+              key={opt}
+              style={[s.chip, active && s.chipActive]}
+              onPress={() => onSelect(opt)}
+            >
+              <Text style={[s.chipText, active && s.chipTextActive]}>
+                {opt}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+
+  // ── Render item: List view ────────────────────────────────────────────
+  const renderListItem = ({ item: w }: { item: WorkoutData }) => {
     const count = assignmentCounts[w.id] ?? 0;
     const legacy = isLegacy(w);
 
@@ -398,25 +563,14 @@ export default function WorkoutsScreen() {
               </View>
             )}
           </View>
-          <View style={s.cardActions}>
-            <Pressable
-              style={s.previewBtn}
-              onPress={(e) => {
-                e.stopPropagation();
-                handlePreview(w);
-              }}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Icon name="play" size={14} color="#F5A623" />
-            </Pressable>
-            <Icon name="chevron-right" size={18} color="#4A5568" />
-          </View>
+          <OverflowMenu
+            workout={w}
+            onEdit={handleEditFromMenu}
+            onArchive={(wk) => handleArchiveRequest(wk)}
+            onDuplicate={(wk) => handleDuplicate(wk)}
+            onPreview={handlePreview}
+          />
         </View>
-        {w.description ? (
-          <Text style={s.cardDesc} numberOfLines={2}>
-            {w.description}
-          </Text>
-        ) : null}
         <View style={s.cardBadgeRow}>
           {w.category ? (
             <View style={s.cardBadge}>
@@ -440,7 +594,6 @@ export default function WorkoutsScreen() {
               {w.blocks.length} block{w.blocks.length !== 1 ? 's' : ''}
             </Text>
           </View>
-          {/* Usage analytics (suggestion 8) */}
           {count > 0 && (
             <View style={s.assignBadge}>
               <Text style={s.assignBadgeText}>
@@ -458,17 +611,71 @@ export default function WorkoutsScreen() {
     );
   };
 
+  // ── Render item: Grid view ────────────────────────────────────────────
+  const renderGridItem = ({ item: w }: { item: WorkoutData }) => {
+    const count = assignmentCounts[w.id] ?? 0;
+
+    return (
+      <Pressable style={s.gridCard} onPress={() => handleOpenDetail(w)}>
+        {/* Colored header area with block count */}
+        <View style={s.gridHeader}>
+          <View style={s.gridBlockBadge}>
+            <Text style={s.gridBlockBadgeText}>
+              {w.blocks.length} block{w.blocks.length !== 1 ? 's' : ''}
+            </Text>
+          </View>
+          {w.isTemplate && (
+            <View style={s.gridTemplateBadge}>
+              <Text style={s.gridTemplateBadgeText}>TPL</Text>
+            </View>
+          )}
+          {/* Overflow menu overlay */}
+          <View style={s.gridOverflowWrap}>
+            <OverflowMenu
+              workout={w}
+              onEdit={handleEditFromMenu}
+              onArchive={(wk) => handleArchiveRequest(wk)}
+              onDuplicate={(wk) => handleDuplicate(wk)}
+              onPreview={handlePreview}
+            />
+          </View>
+        </View>
+        <View style={s.gridBody}>
+          <Text style={s.gridName} numberOfLines={2}>
+            {w.name}
+          </Text>
+          <View style={s.gridBadgeRow}>
+            {w.category ? (
+              <Text style={s.gridSub} numberOfLines={1}>
+                {w.category}
+              </Text>
+            ) : null}
+            {w.difficulty ? (
+              <Text style={s.gridSub} numberOfLines={1}>
+                {w.difficulty}
+              </Text>
+            ) : null}
+          </View>
+          {w.estimatedDurationMin ? (
+            <Text style={s.gridDuration}>
+              {w.estimatedDurationMin} min
+            </Text>
+          ) : null}
+        </View>
+      </Pressable>
+    );
+  };
+
   const keyExtractor = (item: WorkoutData) => item.id;
 
   // ── Render ─────────────────────────────────────────────────────────────
-  // Non-admin sees Coming Soon
   if (!canAccessWorkouts) return <WorkoutsComingSoon />;
 
   return (
     <View style={s.root}>
       <AppHeader />
 
-      {/* Toolbar: Search + Create button */}
+      {/* ── Toolbar: Search + Filter icon + New button ── */}
       <View style={s.toolbar}>
         <View style={s.searchWrap}>
           <Icon name="search" size={18} color="#4A5568" />
@@ -485,122 +692,80 @@ export default function WorkoutsScreen() {
             </Pressable>
           )}
         </View>
-        <Pressable style={s.browseBtn} onPress={() => setShowCalendar(true)}>
-          <Icon name="calendar" size={14} color="#F5A623" />
+        <Pressable
+          style={[s.iconBtn, filterOpen && s.iconBtnActive]}
+          onPress={() => setFilterOpen(!filterOpen)}
+        >
+          <Icon
+            name="filter"
+            size={20}
+            color={activeFilterCount > 0 ? '#F5A623' : '#8A95A3'}
+          />
+          {activeFilterCount > 0 && (
+            <View style={s.filterBadge}>
+              <Text style={s.filterBadgeText}>{activeFilterCount}</Text>
+            </View>
+          )}
         </Pressable>
-        <Pressable style={s.browseBtn} onPress={() => setShowMarketplace(true)}>
-          <Icon name="grid" size={14} color="#F5A623" />
-        </Pressable>
-        <Pressable style={s.createBtn} onPress={handleCreateNew}>
-          <Text style={s.createBtnText}>+ New</Text>
+        <Pressable style={s.newBtn} onPress={handleCreateNew}>
+          <Icon name="plus" size={18} color="#0E1117" />
         </Pressable>
       </View>
 
-      {/* Collapsible filter section (suggestion 7) */}
-      <Pressable
-        style={s.filterToggleRow}
-        onPress={() => setFiltersExpanded(!filtersExpanded)}
-      >
-        <Text style={s.filterToggleText}>
-          Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
-        </Text>
-        <Icon
-          name={filtersExpanded ? 'chevron-up' : 'chevron-down'}
-          size={16}
-          color="#8A95A3"
-        />
-      </Pressable>
-
-      {filtersExpanded && (
-        <View style={s.filterSection}>
-          {/* Category chips */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={s.chipScroll}
-          >
-            {CATEGORIES.map((cat) => {
-              const active = selectedCategory === cat;
-              return (
+      {/* ── Expandable Filter Panel ── */}
+      {filterOpen && (
+        <ScrollView style={s.filterPanelScroll} contentContainerStyle={s.filterPanel}>
+          {renderChipRow(
+            'Category',
+            CATEGORIES,
+            selectedCategory,
+            setSelectedCategory,
+          )}
+          {renderChipRow(
+            'Difficulty',
+            DIFFICULTIES,
+            selectedDifficulty,
+            setSelectedDifficulty,
+          )}
+          {/* Template toggle inside filter panel */}
+          {templateCount > 0 && (
+            <View style={s.filterGroup}>
+              <Text style={s.filterGroupLabel}>Type</Text>
+              <View style={{ flexDirection: 'row', gap: 6 }}>
                 <Pressable
-                  key={cat}
-                  style={[s.chip, active && s.chipActive]}
-                  onPress={() => setSelectedCategory(cat)}
+                  style={[s.chip, !showTemplatesOnly && s.chipActive]}
+                  onPress={() => setShowTemplatesOnly(false)}
                 >
-                  <Text style={[s.chipText, active && s.chipTextActive]}>
-                    {cat}
+                  <Text style={[s.chipText, !showTemplatesOnly && s.chipTextActive]}>
+                    All
                   </Text>
                 </Pressable>
-              );
-            })}
-          </ScrollView>
-
-          {/* Difficulty chips */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={[s.chipScroll, { marginTop: 8 }]}
-          >
-            {DIFFICULTIES.map((d) => {
-              const active = selectedDifficulty === d;
-              return (
                 <Pressable
-                  key={d}
-                  style={[s.chip, active && s.chipActive]}
-                  onPress={() => setSelectedDifficulty(d)}
+                  style={[s.chip, showTemplatesOnly && s.chipActive]}
+                  onPress={() => setShowTemplatesOnly(true)}
                 >
-                  <Text style={[s.chipText, active && s.chipTextActive]}>
-                    {d}
+                  <Text style={[s.chipText, showTemplatesOnly && s.chipTextActive]}>
+                    Templates ({templateCount})
                   </Text>
                 </Pressable>
-              );
-            })}
-          </ScrollView>
-        </View>
+              </View>
+            </View>
+          )}
+          {activeFilterCount > 0 && (
+            <Pressable style={s.clearFiltersBtn} onPress={resetFilters}>
+              <Text style={s.clearFiltersBtnText}>Clear All Filters</Text>
+            </Pressable>
+          )}
+        </ScrollView>
       )}
 
-      {/* Sort row */}
-      <View style={s.sortRow}>
-        <Text style={s.sortLabel}>Sort:</Text>
-        {SORT_OPTIONS.map((opt) => {
-          const active = sortBy === opt.key;
-          return (
-            <Pressable
-              key={opt.key}
-              style={[s.sortChip, active && s.sortChipActive]}
-              onPress={() => setSortBy(opt.key)}
-            >
-              <Text style={[s.sortChipText, active && s.sortChipTextActive]}>
-                {opt.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      {/* Toggle row: count + archive + template toggles */}
-      <View style={s.toggleRow}>
+      {/* ── Controls row: count, archive toggle, sort, view toggle ── */}
+      <View style={s.controlsRow}>
         <Text style={s.countText}>
           {sorted.length} workout{sorted.length !== 1 ? 's' : ''}
         </Text>
-        <View style={s.toggleGroup}>
-          {/* Template toggle (suggestion 6) */}
-          {templateCount > 0 && (
-            <Pressable
-              style={[s.toggleBtn, showTemplatesOnly && s.toggleBtnActive]}
-              onPress={() => setShowTemplatesOnly(!showTemplatesOnly)}
-            >
-              <Text
-                style={[
-                  s.toggleBtnText,
-                  showTemplatesOnly && s.toggleBtnTextActive,
-                ]}
-              >
-                Templates ({templateCount})
-              </Text>
-            </Pressable>
-          )}
-          {/* Archive toggle */}
+
+        <View style={s.controlsRight}>
           <Pressable
             style={[s.toggleBtn, showArchived && s.toggleBtnActive]}
             onPress={() => setShowArchived(!showArchived)}
@@ -619,15 +784,36 @@ export default function WorkoutsScreen() {
               {archivedCount}
             </Text>
           </Pressable>
+
+          <Pressable
+            style={s.sortBtn}
+            onPress={() => setSortPickerOpen(true)}
+          >
+            <Icon name="sort" size={14} color="#8A95A3" />
+            <Text style={s.sortBtnText} numberOfLines={1}>
+              {currentSortLabel}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={s.viewToggle}
+            onPress={() => setViewMode(viewMode === 'list' ? 'grid' : 'list')}
+          >
+            <Icon
+              name={viewMode === 'list' ? 'grid' : 'list'}
+              size={18}
+              color="#8A95A3"
+            />
+          </Pressable>
         </View>
       </View>
 
-      {/* Loading */}
+      {/* ── Workout list / grid ── */}
       {loading ? (
         <View style={s.centered}>
           <ActivityIndicator size="large" color="#F5A623" />
         </View>
-      ) : filtered.length === 0 ? (
+      ) : sorted.length === 0 ? (
         <View style={s.centered}>
           <View style={s.emptyIconWrap}>
             <Icon name="workouts" size={28} color="#F5A623" />
@@ -637,7 +823,7 @@ export default function WorkoutsScreen() {
               ? 'No Archived Workouts'
               : showTemplatesOnly
               ? 'No Templates'
-              : searchText || selectedCategory !== 'All' || selectedDifficulty !== 'All'
+              : searchText || activeFilterCount > 0
               ? 'No Matching Workouts'
               : 'No Workouts Yet'}
           </Text>
@@ -646,15 +832,38 @@ export default function WorkoutsScreen() {
               ? 'Archived workouts will appear here.'
               : showTemplatesOnly
               ? 'Mark a workout as a template to see it here.'
-              : searchText || selectedCategory !== 'All' || selectedDifficulty !== 'All'
+              : searchText || activeFilterCount > 0
               ? 'Try adjusting your search or filters.'
-              : 'Tap "+ New" to create your first workout.'}
+              : 'Tap "+" to create your first workout.'}
           </Text>
         </View>
+      ) : viewMode === 'grid' ? (
+        <FlatList
+          key="grid"
+          style={{ flex: 1 }}
+          data={sorted}
+          renderItem={renderGridItem}
+          keyExtractor={keyExtractor}
+          numColumns={2}
+          columnWrapperStyle={s.gridRow}
+          contentContainerStyle={s.gridContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#F5A623"
+            />
+          }
+          initialNumToRender={12}
+          maxToRenderPerBatch={8}
+          windowSize={5}
+        />
       ) : (
         <FlatList
+          key="list"
+          style={{ flex: 1 }}
           data={sorted}
-          renderItem={renderItem}
+          renderItem={renderListItem}
           keyExtractor={keyExtractor}
           contentContainerStyle={s.listContent}
           initialNumToRender={15}
@@ -694,7 +903,7 @@ export default function WorkoutsScreen() {
         editWorkout={editWorkout}
       />
 
-      {/* Template Marketplace */}
+      {/* Template Marketplace (component kept, button removed from toolbar) */}
       <WorkoutTemplateMarketplace
         visible={showMarketplace}
         coachId={coachId}
@@ -702,7 +911,7 @@ export default function WorkoutsScreen() {
         onClose={() => setShowMarketplace(false)}
       />
 
-      {/* Coach Workout Calendar (Suggestion 3) */}
+      {/* Coach Workout Calendar (component kept, button removed from toolbar) */}
       <CoachWorkoutCalendar
         coachId={coachId}
         visible={showCalendar}
@@ -725,6 +934,14 @@ export default function WorkoutsScreen() {
         />
       )}
 
+      {/* Sort Picker */}
+      <SortPicker
+        visible={sortPickerOpen}
+        current={sortBy}
+        onSelect={setSortBy}
+        onClose={() => setSortPickerOpen(false)}
+      />
+
       {/* Confirm dialog */}
       <ConfirmDialog
         visible={confirmVisible}
@@ -739,19 +956,25 @@ export default function WorkoutsScreen() {
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────
+const GRID_GAP = 10;
+const GRID_PAD = 16;
+const GRID_COLS = 2;
+const screenW = Dimensions.get('window').width;
+const gridItemW = (screenW - GRID_PAD * 2 - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS;
+
 const s = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#0E1117',
   },
 
-  // Toolbar
+  // ── Toolbar ──
   toolbar: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingTop: 12,
-    gap: 10,
+    gap: 8,
   },
   searchWrap: {
     flex: 1,
@@ -772,56 +995,72 @@ const s = StyleSheet.create({
     fontFamily: FB,
     padding: 0,
   },
-  browseBtn: {
+  iconBtn: {
     width: 42,
     height: 42,
     borderRadius: 10,
     backgroundColor: '#161B22',
     borderWidth: 1,
+    borderColor: '#2A3347',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconBtnActive: {
     borderColor: 'rgba(245,166,35,0.3)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: 'rgba(245,166,35,0.08)',
   },
-  createBtn: {
+  filterBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
     backgroundColor: '#F5A623',
-    paddingHorizontal: 16,
-    height: 42,
-    borderRadius: 10,
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 4,
   },
-  createBtnText: {
-    fontSize: 14,
+  filterBadgeText: {
+    fontSize: 10,
     fontWeight: '700',
     color: '#0E1117',
     fontFamily: FH,
   },
-
-  // Collapsible filter toggle (suggestion 7)
-  filterToggleRow: {
-    flexDirection: 'row',
+  newBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: '#F5A623',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
+  },
+
+  // ── Filter Panel ──
+  filterPanelScroll: {
+    maxHeight: 280,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3347',
+  },
+  filterPanel: {
     paddingHorizontal: 16,
     paddingTop: 12,
-    paddingBottom: 4,
+    paddingBottom: 8,
   },
-  filterToggleText: {
-    fontSize: 12,
+  filterGroup: {
+    marginBottom: 10,
+  },
+  filterGroupLabel: {
+    fontSize: 11,
     fontWeight: '600',
     color: '#8A95A3',
-    fontFamily: FB,
+    fontFamily: FH,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-
-  // Filter chips
-  filterSection: {
-    paddingTop: 4,
+    letterSpacing: 0.8,
+    marginBottom: 6,
   },
   chipScroll: {
-    paddingHorizontal: 16,
-    gap: 8,
+    gap: 6,
   },
   chip: {
     paddingHorizontal: 12,
@@ -844,45 +1083,23 @@ const s = StyleSheet.create({
     color: '#F5A623',
     fontWeight: '600',
   },
-
-  // Sort row
-  sortRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    gap: 8,
-  },
-  sortLabel: {
-    fontSize: 12,
-    color: '#4A5568',
-    fontFamily: FB,
-    marginRight: 2,
-  },
-  sortChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+  clearFiltersBtn: {
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
     borderRadius: 6,
-    backgroundColor: '#161B22',
-    borderWidth: 1,
-    borderColor: '#2A3347',
+    backgroundColor: 'rgba(245,166,35,0.08)',
+    marginTop: 4,
   },
-  sortChipActive: {
-    backgroundColor: 'rgba(245,166,35,0.12)',
-    borderColor: 'rgba(245,166,35,0.3)',
-  },
-  sortChipText: {
-    fontSize: 11,
-    color: '#8A95A3',
-    fontFamily: FB,
-  },
-  sortChipTextActive: {
+  clearFiltersBtnText: {
+    fontSize: 12,
     color: '#F5A623',
     fontWeight: '600',
+    fontFamily: FB,
   },
 
-  // Toggle row
-  toggleRow: {
+  // ── Controls row ──
+  controlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -890,21 +1107,21 @@ const s = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 4,
   },
-  toggleGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
   countText: {
     fontSize: 13,
     color: '#8A95A3',
     fontFamily: FB,
   },
+  controlsRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   toggleBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
   },
@@ -912,74 +1129,42 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(245,166,35,0.08)',
   },
   toggleBtnText: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#4A5568',
     fontFamily: FB,
   },
   toggleBtnTextActive: {
     color: '#F5A623',
   },
-
-  // Centered states (loading, empty)
-  centered: {
-    flex: 1,
+  sortBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 36,
-    gap: 12,
-  },
-  emptyIconWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 20,
-    backgroundColor: 'rgba(245,166,35,0.1)',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#161B22',
     borderWidth: 1,
-    borderColor: 'rgba(245,166,35,0.25)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
+    borderColor: '#2A3347',
   },
-  emptyIcon: {
-    fontSize: 32,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#F0F4F8',
-    fontFamily: FH,
-    textAlign: 'center',
-  },
-  emptyDesc: {
-    fontSize: 14,
+  sortBtnText: {
+    fontSize: 11,
     color: '#8A95A3',
     fontFamily: FB,
-    textAlign: 'center',
-    lineHeight: 20,
+    maxWidth: 100,
   },
-  comingSoonBadge: {
-    backgroundColor: 'rgba(245,166,35,0.12)',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 5,
+  viewToggle: {
+    width: 32,
+    height: 32,
+    borderRadius: 6,
+    backgroundColor: '#161B22',
     borderWidth: 1,
-    borderColor: 'rgba(245,166,35,0.3)',
-  },
-  comingSoonBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#F5A623',
-    fontFamily: FH,
-    letterSpacing: 1.5,
-  },
-  hintText: {
-    fontSize: 13,
-    color: '#4A5568',
-    fontFamily: FB,
-    textAlign: 'center',
-    lineHeight: 20,
+    borderColor: '#2A3347',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
-  // Workout list
+  // ── List view ──
   listContent: {
     padding: 16,
     gap: 10,
@@ -1042,12 +1227,6 @@ const s = StyleSheet.create({
     fontFamily: FH,
     letterSpacing: 0.8,
   },
-  cardDesc: {
-    fontSize: 13,
-    color: '#8A95A3',
-    fontFamily: FB,
-    lineHeight: 18,
-  },
   cardBadgeRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1084,19 +1263,228 @@ const s = StyleSheet.create({
     color: '#4A5568',
     fontFamily: FB,
   },
-  cardActions: {
+
+  // ── Grid view ──
+  gridContent: {
+    padding: GRID_PAD,
+  },
+  gridRow: {
+    gap: GRID_GAP,
+    marginBottom: GRID_GAP,
+  },
+  gridCard: {
+    width: gridItemW,
+    backgroundColor: '#161B22',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2A3347',
+    overflow: 'hidden',
+  },
+  gridHeader: {
+    width: gridItemW,
+    height: gridItemW * 0.55,
+    backgroundColor: '#1A2035',
+    justifyContent: 'flex-end',
+    padding: 8,
+    position: 'relative',
+  },
+  gridBlockBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(245,166,35,0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.3)',
+  },
+  gridBlockBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#F5A623',
+    fontFamily: FB,
+  },
+  gridTemplateBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    backgroundColor: 'rgba(167,139,250,0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(167,139,250,0.3)',
+  },
+  gridTemplateBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#A78BFA',
+    fontFamily: FH,
+    letterSpacing: 0.5,
+  },
+  gridOverflowWrap: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: 'rgba(14,17,23,0.7)',
+    borderRadius: 6,
+  },
+  gridBody: {
+    padding: 10,
+    gap: 4,
+  },
+  gridName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#F0F4F8',
+    fontFamily: FH,
+  },
+  gridBadgeRow: {
+    flexDirection: 'row',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  gridSub: {
+    fontSize: 10,
+    color: '#8A95A3',
+    fontFamily: FB,
+  },
+  gridDuration: {
+    fontSize: 10,
+    color: '#4A5568',
+    fontFamily: FB,
+  },
+
+  // ── Overflow menu ──
+  overflowBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  menuPopup: {
+    position: 'absolute',
+    backgroundColor: '#1E2530',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2A3347',
+    paddingVertical: 4,
+    minWidth: 160,
+    ...(Platform.OS === 'web' ? { boxShadow: '0 8px 24px rgba(0,0,0,0.4)' } : {}),
+  },
+  menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
-  previewBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: 'rgba(245,166,35,0.12)',
+  menuItemText: {
+    fontSize: 14,
+    color: '#F0F4F8',
+    fontFamily: FB,
+  },
+
+  // ── Sort picker modal ──
+  sortModal: {
+    backgroundColor: '#1E2530',
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(245,166,35,0.3)',
+    borderColor: '#2A3347',
+    padding: 16,
+    width: 260,
+    maxWidth: '90%' as any,
+  },
+  sortModalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FH,
+    marginBottom: 12,
+  },
+  sortOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  sortOptionActive: {
+    backgroundColor: 'rgba(245,166,35,0.08)',
+  },
+  sortOptionText: {
+    fontSize: 14,
+    color: '#8A95A3',
+    fontFamily: FB,
+  },
+  sortOptionTextActive: {
+    color: '#F5A623',
+    fontWeight: '600',
+  },
+
+  // ── Centered states (loading, empty) ──
+  centered: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 36,
+    gap: 12,
+  },
+  emptyIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 20,
+    backgroundColor: 'rgba(245,166,35,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  emptyIcon: {
+    fontSize: 32,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FH,
+    textAlign: 'center',
+  },
+  emptyDesc: {
+    fontSize: 14,
+    color: '#8A95A3',
+    fontFamily: FB,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  comingSoonBadge: {
+    backgroundColor: 'rgba(245,166,35,0.12)',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.3)',
+  },
+  comingSoonBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#F5A623',
+    fontFamily: FH,
+    letterSpacing: 1.5,
+  },
+  hintText: {
+    fontSize: 13,
+    color: '#4A5568',
+    fontFamily: FB,
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });
