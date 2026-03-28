@@ -11,7 +11,7 @@
  *
  * Slice 1, Week 2 — Movement Library
  */
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -24,7 +24,7 @@ import {
   Switch,
   Alert,
 } from 'react-native';
-import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Icon } from './Icon';
 import MovementVideoControls from './MovementVideoControls';
@@ -101,44 +101,38 @@ export default function MovementDetail({
   onToggleGlobal,
   isAdmin = false,
 }: Props) {
-  // Local state for inline swap-sides editing
-  const [swapSides, setSwapSides] = useState(false);
-  const [swapMode, setSwapMode] = useState<'split' | 'duplicate'>('split');
-  const [swapDirty, setSwapDirty] = useState(false);
+  // Coach name lookup
+  const [coachName, setCoachName] = useState<string | null>(null);
 
-  // Sync local state when movement changes
-  React.useEffect(() => {
-    if (movement) {
-      setSwapSides(movement.swapSides);
-      setSwapMode(movement.swapMode);
-      setSwapDirty(false);
-    }
-  }, [movement?.id]);
-
-  const handleSwapToggle = useCallback((val: boolean) => {
-    setSwapSides(val);
-    setSwapDirty(true);
-  }, []);
-
-  const handleSwapModeChange = useCallback((mode: 'split' | 'duplicate') => {
-    setSwapMode(mode);
-    setSwapDirty(true);
-  }, []);
-
-  const saveSwapSettings = useCallback(async () => {
-    if (!movement) return;
-    try {
-      await updateDoc(doc(db, 'movements', movement.id), {
-        swapSides,
-        swapMode,
-        updatedAt: serverTimestamp(),
-      });
-      setSwapDirty(false);
-    } catch (err) {
-      console.error('[MovementDetail] Save swap error:', err);
-      Alert.alert('Error', 'Could not save swap settings.');
-    }
-  }, [movement, swapSides, swapMode]);
+  useEffect(() => {
+    if (!movement) { setCoachName(null); return; }
+    const coachUid = movement.coachId || movement.createdBy;
+    if (!coachUid) { setCoachName(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        // Try coaches collection first
+        const coachSnap = await getDoc(doc(db, 'coaches', coachUid));
+        if (!cancelled && coachSnap.exists()) {
+          const d = coachSnap.data();
+          const name = d.displayName || d.name || [d.firstName, d.lastName].filter(Boolean).join(' ');
+          if (name) { setCoachName(name); return; }
+        }
+        // Fallback: users collection
+        const userSnap = await getDoc(doc(db, 'users', coachUid));
+        if (!cancelled && userSnap.exists()) {
+          const d = userSnap.data();
+          const name = d.displayName || d.name || [d.firstName, d.lastName].filter(Boolean).join(' ');
+          if (name) { setCoachName(name); return; }
+        }
+        if (!cancelled) setCoachName(null);
+      } catch (err) {
+        console.warn('[MovementDetail] Coach lookup error:', err);
+        if (!cancelled) setCoachName(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [movement?.id, movement?.coachId, movement?.createdBy]);
 
   if (!movement) return null;
 
@@ -283,74 +277,16 @@ export default function MovementDetail({
             </View>
           ) : null}
 
-          {/* Timer Defaults */}
-          <View style={s.section}>
-            <Text style={s.sectionLabel}>Timer Defaults</Text>
-            <View style={s.timerRow}>
-              <View style={s.timerItem}>
-                <Text style={s.timerValue}>{movement.workSec}s</Text>
-                <Text style={s.timerLabel}>Work</Text>
-              </View>
-              <View style={s.timerItem}>
-                <Text style={s.timerValue}>{movement.restSec}s</Text>
-                <Text style={s.timerLabel}>Rest</Text>
-              </View>
-              <View style={s.timerItem}>
-                <Text style={s.timerValue}>{movement.countdownSec}s</Text>
-                <Text style={s.timerLabel}>Countdown</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Swap Sides — inline toggle + mode selector */}
-          <View style={s.section}>
-            <Text style={s.sectionLabel}>Swap Sides</Text>
-            <View style={s.swapRow}>
-              <Text style={s.swapLabel}>Enable swap sides</Text>
-              <Switch
-                value={swapSides}
-                onValueChange={handleSwapToggle}
-                trackColor={{ false: '#2A3347', true: 'rgba(245,166,35,0.4)' }}
-                thumbColor={swapSides ? '#F5A623' : '#4A5568'}
-              />
-            </View>
-            {swapSides && (
-              <View style={s.swapModeRow}>
-                {SWAP_MODES.map((m) => (
-                  <Pressable
-                    key={m.value}
-                    style={[
-                      s.swapModeBtn,
-                      swapMode === m.value && s.swapModeBtnActive,
-                    ]}
-                    onPress={() => handleSwapModeChange(m.value)}
-                  >
-                    <Text
-                      style={[
-                        s.swapModeBtnText,
-                        swapMode === m.value && s.swapModeBtnTextActive,
-                      ]}
-                    >
-                      {m.label}
-                    </Text>
-                    <Text style={s.swapModeDesc}>{m.desc}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            )}
-            {swapDirty && (
-              <Pressable style={s.saveSwapBtn} onPress={saveSwapSettings}>
-                <Text style={s.saveSwapBtnText}>Save Swap Settings</Text>
-              </Pressable>
-            )}
-          </View>
-
           {/* Created info */}
           {createdDate && (
             <View style={s.section}>
               <Text style={s.metaText}>
                 Created {createdDate}
-                {movement.isGlobal ? ' · Global Library' : ' · Coach Private'}
+                {movement.isGlobal
+                  ? ' · Global Library'
+                  : coachName
+                  ? ` · ${coachName}`
+                  : ' · Coach Private'}
               </Text>
             </View>
           )}

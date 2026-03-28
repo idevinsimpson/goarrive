@@ -9,7 +9,7 @@
  * even when the app tab is not open.
  */
 
-const CACHE_VERSION = '20260328-020616';
+const CACHE_VERSION = '20260328-060000';
 const CACHE_NAME = `goarrive-${CACHE_VERSION}`;
 const STATIC_ASSETS = [
   '/',
@@ -97,7 +97,33 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // For other assets (JS, CSS, images), use network-first strategy to ensure fresh deploys
+  // For JS/CSS bundles, use stale-while-revalidate: serve cache immediately,
+  // then update cache in background so next load gets fresh version.
+  // For images and other assets, use network-first with cache fallback.
+  const isBundle = url.pathname.endsWith('.js') || url.pathname.endsWith('.css');
+
+  if (isBundle) {
+    event.respondWith(
+      caches.open(CACHE_NAME).then((cache) => {
+        return cache.match(request).then((cached) => {
+          const fetchPromise = fetch(request).then((response) => {
+            if (response.ok) {
+              cache.put(request, response.clone());
+            }
+            return response;
+          }).catch(() => {
+            // Network failed, return cached if available
+            return cached;
+          });
+          // Return cached immediately if available, otherwise wait for network
+          return cached || fetchPromise;
+        });
+      })
+    );
+    return;
+  }
+
+  // For other assets (images, fonts, etc.), use network-first strategy
   event.respondWith(
     fetch(request)
       .then((response) => {

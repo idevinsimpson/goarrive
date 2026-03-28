@@ -162,11 +162,28 @@ function OverflowMenu({
                   {movement.isArchived ? 'Restore' : 'Archive'}
                 </Text>
               </Pressable>
-              <Pressable style={[s.menuItem, { opacity: 0.4 }]} disabled>
-                <Icon name="download" size={16} color="#4A5568" />
-                <Text style={[s.menuItemText, { color: '#4A5568' }]}>
-                  Download
-                </Text>
+              <Pressable
+                style={s.menuItem}
+                onPress={() => {
+                  setOpen(false);
+                  if (Platform.OS === 'web' && movement.videoUrl) {
+                    const a = document.createElement('a');
+                    a.href = movement.videoUrl;
+                    a.download = `${movement.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.mp4`;
+                    a.target = '_blank';
+                    a.rel = 'noopener';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                  } else if (!movement.videoUrl) {
+                    Alert.alert('No Video', 'This movement has no video to download.');
+                  } else {
+                    Alert.alert('Download', 'Video download is only available on web.');
+                  }
+                }}
+              >
+                <Icon name="download" size={16} color="#F0F4F8" />
+                <Text style={s.menuItemText}>Download</Text>
               </Pressable>
             </View>
           </Pressable>
@@ -630,22 +647,33 @@ export default function MovementsScreen() {
     const thumb = m.thumbnailUrl || m.mediaUrl || null;
     return (
       <Pressable style={s.gridCard} onPress={() => handleOpenDetail(m)}>
-        {thumb ? (
-          <View style={s.gridThumbWrap}>
-            <View style={s.gridThumbShimmer}>
-              <ActivityIndicator size="small" color="#2A3347" />
+        <View style={{ position: 'relative' }}>
+          {thumb ? (
+            <View style={s.gridThumbWrap}>
+              <View style={s.gridThumbShimmer}>
+                <ActivityIndicator size="small" color="#2A3347" />
+              </View>
+              <Image
+                source={{ uri: thumb }}
+                style={[s.gridThumb, { position: 'absolute', top: 0, left: 0 }]}
+                resizeMode="cover"
+              />
             </View>
-            <Image
-              source={{ uri: thumb }}
-              style={[s.gridThumb, { position: 'absolute', top: 0, left: 0 }]}
-              resizeMode="cover"
+          ) : (
+            <View style={s.gridThumbPlaceholder}>
+              <Icon name="play" size={24} color="#4A5568" />
+            </View>
+          )}
+          {/* Overflow menu overlay on grid thumbnail */}
+          <View style={s.gridOverflowWrap}>
+            <OverflowMenu
+              movement={m}
+              onEdit={handleEditFromMenu}
+              onArchive={handleArchiveRequest}
+              onInfo={handleShowInfo}
             />
           </View>
-        ) : (
-          <View style={s.gridThumbPlaceholder}>
-            <Icon name="play" size={24} color="#4A5568" />
-          </View>
-        )}
+        </View>
         <Text style={s.gridName} numberOfLines={2}>
           {m.name}
         </Text>
@@ -710,7 +738,7 @@ export default function MovementsScreen() {
 
       {/* ── Expandable Filter Panel ── */}
       {filterOpen && (
-        <View style={s.filterPanel}>
+        <ScrollView style={s.filterPanelScroll} contentContainerStyle={s.filterPanel}>
           {renderChipRow(
             'Category',
             CATEGORY_FILTER_OPTIONS,
@@ -740,7 +768,7 @@ export default function MovementsScreen() {
               <Text style={s.clearFiltersBtnText}>Clear All Filters</Text>
             </Pressable>
           )}
-        </View>
+        </ScrollView>
       )}
 
       {/* ── Controls row: count, archive toggle, sort, view toggle ── */}
@@ -992,12 +1020,15 @@ const s = StyleSheet.create({
   },
 
   // ── Filter Panel ──
+  filterPanelScroll: {
+    maxHeight: 280,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3347',
+  },
   filterPanel: {
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#2A3347',
   },
   filterGroup: {
     marginBottom: 10,
@@ -1266,6 +1297,13 @@ const s = StyleSheet.create({
     paddingHorizontal: 8,
     paddingTop: 2,
     paddingBottom: 8,
+  },
+  gridOverflowWrap: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    backgroundColor: 'rgba(14,17,23,0.7)',
+    borderRadius: 6,
   },
 
   // ── Overflow menu ──
