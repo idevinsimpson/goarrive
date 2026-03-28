@@ -96,6 +96,7 @@ interface WorkoutData {
   createdAt: any;
   updatedAt: any;
   assignmentCount?: number;
+  coverThumbs?: string[];
 }
 
 // ── Helper: auto-calculate duration from blocks ──────────────────────────
@@ -328,19 +329,27 @@ function RecategorizeModal({
 function ThumbnailCollage({
   movementIds,
   thumbMap,
+  coverThumbs,
   width,
   height,
 }: {
   movementIds: string[];
   thumbMap: Record<string, string>;
+  coverThumbs?: string[];
   width: number;
   height: number;
 }) {
-  // Collect available thumbnails (max 16, preserving order)
-  const thumbs = movementIds
-    .filter((id) => thumbMap[id])
-    .map((id) => thumbMap[id])
-    .slice(0, 16);
+  // Prefer coverThumbs from Firestore (pre-generated on save), fallback to thumbMap
+  const totalMovements = movementIds.length;
+  let thumbs: string[];
+  if (coverThumbs && coverThumbs.length > 0) {
+    thumbs = coverThumbs.slice(0, 16);
+  } else {
+    thumbs = movementIds
+      .filter((id) => thumbMap[id])
+      .map((id) => thumbMap[id])
+      .slice(0, 16);
+  }
 
   if (thumbs.length === 0) {
     return (
@@ -355,6 +364,7 @@ function ThumbnailCollage({
   const rows = Math.ceil(thumbs.length / cols);
   const cellW = width / cols;
   const cellH = height / rows;
+  const extraCount = totalMovements - thumbs.length;
 
   return (
     <View style={{ width, height, flexDirection: 'row', flexWrap: 'wrap', overflow: 'hidden' }}>
@@ -366,6 +376,11 @@ function ThumbnailCollage({
           resizeMode="cover"
         />
       ))}
+      {extraCount > 0 && (
+        <View style={s.moreOverlay}>
+          <Text style={s.moreOverlayText}>+{extraCount}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -471,8 +486,12 @@ export default function WorkoutsScreen() {
       isArchived: data.isArchived ?? false,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
+      coverThumbs: data.coverThumbs ?? [],
     };
   }, []);
+
+  // Thumbnail cache ref — persists across re-renders and listener fires
+  const thumbCacheRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     if (!coachId) return;
@@ -508,19 +527,23 @@ export default function WorkoutsScreen() {
         }
       }
 
-      // Load movement thumbnails for all referenced movements
+      // Load movement thumbnails — only fetch IDs not already cached
       const allMoveIds = new Set<string>();
       list.forEach((w) => {
         extractMovementIds(w.blocks).forEach((id) => allMoveIds.add(id));
       });
 
-      if (allMoveIds.size > 0) {
+      // Filter out IDs already in cache
+      const uncachedIds = Array.from(allMoveIds).filter(
+        (id) => !thumbCacheRef.current[id],
+      );
+
+      if (uncachedIds.length > 0) {
         try {
           // Firestore 'in' queries support max 30 items per query
-          const idsArr = Array.from(allMoveIds);
           const newMap: Record<string, string> = {};
-          for (let i = 0; i < idsArr.length; i += 30) {
-            const batch = idsArr.slice(i, i + 30);
+          for (let i = 0; i < uncachedIds.length; i += 30) {
+            const batch = uncachedIds.slice(i, i + 30);
             const mQ = query(
               collection(db, 'movements'),
               where('__name__', 'in', batch),
@@ -532,10 +555,15 @@ export default function WorkoutsScreen() {
               if (thumb) newMap[md.id] = thumb;
             });
           }
-          setThumbMap((prev) => ({ ...prev, ...newMap }));
+          // Merge into persistent cache
+          thumbCacheRef.current = { ...thumbCacheRef.current, ...newMap };
+          setThumbMap({ ...thumbCacheRef.current });
         } catch (err) {
           console.error('[Workouts] Thumbnail load error:', err);
         }
+      } else if (allMoveIds.size > 0) {
+        // All cached — just sync state
+        setThumbMap({ ...thumbCacheRef.current });
       }
     }, (err) => {
       console.error('[Workouts] Listener error:', err);
@@ -674,24 +702,27 @@ export default function WorkoutsScreen() {
   const handleBatchArchive = () => {
     const count = selectedIds.size;
     if (count === 0) return;
-    setConfirmTitle(`Archive ${count} Workout${count > 1 ? 's' : ''}`);
+    const action = showArchived ? 'Restore' : 'Archive';
+    setConfirmTitle(`${action} ${count} Workout${count > 1 ? 's' : ''}`);
     setConfirmMessage(
-      `Archive ${count} selected workout${count > 1 ? 's' : ''}? They can be restored later.`,
+      showArchived
+        ? `Restore ${count} selected workout${count > 1 ? 's' : ''} back to your active library?`
+        : `Archive ${count} selected workout${count > 1 ? 's' : ''}? They can be restored later.`,
     );
     setConfirmAction(() => async () => {
       try {
         const batch = writeBatch(db);
         selectedIds.forEach((id) => {
           batch.update(doc(db, 'workouts', id), {
-            isArchived: true,
+            isArchived: !showArchived,
             updatedAt: serverTimestamp(),
           });
         });
         await batch.commit();
         clearSelection();
       } catch (err) {
-        console.error('[Workouts] Batch archive error:', err);
-        Alert.alert('Error', 'Could not archive selected workouts.');
+        console.error('[Workouts] Batch archive/restore error:', err);
+        Alert.alert('Error', `Could not ${action.toLowerCase()} selected workouts.`);
       }
       setConfirmVisible(false);
     });
@@ -902,6 +933,7 @@ export default function WorkoutsScreen() {
           <ThumbnailCollage
             movementIds={moveIds}
             thumbMap={thumbMap}
+            coverThumbs={w.coverThumbs}
             width={gridItemW}
             height={gridItemW * 0.65}
           />
@@ -997,7 +1029,7 @@ export default function WorkoutsScreen() {
             </Pressable>
             <Pressable style={s.batchActionBtn} onPress={handleBatchArchive}>
               <Icon name="archive" size={14} color="#F5A623" />
-              <Text style={s.batchActionText}>Archive</Text>
+              <Text style={s.batchActionText}>{showArchived ? 'Restore' : 'Archive'}</Text>
             </Pressable>
           </View>
         </View>
@@ -1706,6 +1738,21 @@ const s = StyleSheet.create({
   collageEmpty: {
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  moreOverlay: {
+    position: 'absolute',
+    bottom: 6,
+    right: 6,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  moreOverlayText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FH,
   },
   gridBadgeOverlay: {
     position: 'absolute',

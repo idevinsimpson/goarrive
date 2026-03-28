@@ -11,7 +11,7 @@
  * Follows GoArrive design system: #0E1117 bg, #F5A623 gold accent,
  * Space Grotesk headings, DM Sans body.
  */
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -88,6 +88,24 @@ const BLOCK_TYPES = [
   'Rest',
 ];
 
+// ── Helper: auto-calculate duration from blocks ──────────────────────────
+function calcDurationMin(blocks: WorkoutBlock[]): number {
+  let totalSec = 0;
+  for (const block of blocks) {
+    const rounds = block.rounds ?? 1;
+    let blockSec = 0;
+    for (const m of block.movements ?? []) {
+      const sets = m.sets ?? 1;
+      const durPerSet = m.durationSec ?? 0;
+      const restPerSet = m.restSec ?? 0;
+      blockSec += sets * (durPerSet + restPerSet);
+    }
+    const restBetween = block.restBetweenRoundsSec ?? 0;
+    totalSec += rounds * blockSec + (rounds > 1 ? (rounds - 1) * restBetween : 0);
+  }
+  return Math.ceil(totalSec / 60);
+}
+
 // ── Types ────────────────────────────────────────────────────────────────────
 interface BlockMovement {
   movementId: string;
@@ -123,6 +141,8 @@ interface WorkoutFormProps {
   coachId: string;
   tenantId: string;
   editWorkout?: any | null;
+  /** Optional session duration (minutes) from the plan — shown for comparison */
+  sessionDurationMin?: number | null;
 }
 
 export default function WorkoutForm({
@@ -131,6 +151,7 @@ export default function WorkoutForm({
   coachId,
   tenantId,
   editWorkout,
+  sessionDurationMin,
 }: WorkoutFormProps) {
   const isEdit = !!editWorkout && !!editWorkout.id;
 
@@ -282,6 +303,9 @@ export default function WorkoutForm({
     setMovementSearch('');
   };
 
+  // ── Auto-calculated duration from blocks ──────────────────────────────
+  const autoDurationMin = useMemo(() => calcDurationMin(blocks), [blocks]);
+
   // ── Template loader ──────────────────────────────────────────────────
   const loadFromTemplate = (t: WorkoutTemplate) => {
     setName(t.name + ' (Copy)');
@@ -420,6 +444,22 @@ export default function WorkoutForm({
         }),
       }));
 
+      // Build coverThumbs array from movement thumbnails (max 16)
+      const coverThumbs: string[] = [];
+      const seenMoveIds = new Set<string>();
+      for (const b of cleanBlocks) {
+        for (const m of b.movements) {
+          if (m.movementId && !seenMoveIds.has(m.movementId)) {
+            seenMoveIds.add(m.movementId);
+            const mv = availableMovements.find((am) => am.id === m.movementId);
+            const thumb = mv?.mediaUrl || mv?.videoUrl || null;
+            if (thumb) coverThumbs.push(thumb);
+          }
+          if (coverThumbs.length >= 16) break;
+        }
+        if (coverThumbs.length >= 16) break;
+      }
+
       if (isEdit) {
         await updateDoc(doc(db, 'workouts', editWorkout.id), {
           name: name.trim(),
@@ -432,6 +472,7 @@ export default function WorkoutForm({
           tags: selectedTags,
           isTemplate,
           blocks: cleanBlocks,
+          coverThumbs,
           updatedAt: serverTimestamp(),
         });
       } else {
@@ -446,6 +487,7 @@ export default function WorkoutForm({
           tags: selectedTags,
           isTemplate,
           blocks: cleanBlocks,
+          coverThumbs,
           coachId,
           tenantId,
           isArchived: false,
@@ -570,6 +612,35 @@ export default function WorkoutForm({
               keyboardType="number-pad"
               maxLength={3}
             />
+            {/* Auto-duration live preview */}
+            {autoDurationMin > 0 && (
+              <View style={s.autoDurationRow}>
+                <Icon name="clock" size={14} color="#7DD3FC" />
+                <Text style={s.autoDurationText}>
+                  Estimated from blocks: {autoDurationMin} min
+                </Text>
+                {sessionDurationMin != null && sessionDurationMin > 0 && (
+                  <Text
+                    style={[
+                      s.autoDurationCompare,
+                      Math.abs(autoDurationMin - sessionDurationMin) > 10
+                        ? { color: '#F59E0B' }
+                        : { color: '#34D399' },
+                    ]}
+                  >
+                    (Session: {sessionDurationMin} min)
+                  </Text>
+                )}
+              </View>
+            )}
+            {sessionDurationMin != null && sessionDurationMin > 0 && autoDurationMin === 0 && (
+              <View style={s.autoDurationRow}>
+                <Icon name="clock" size={14} color="#4A5568" />
+                <Text style={[s.autoDurationText, { color: '#4A5568' }]}>
+                  Session time: {sessionDurationMin} min
+                </Text>
+              </View>
+            )}
 
             {/* Load from Template button */}
             {!isEdit && (
@@ -1218,6 +1289,28 @@ const s = StyleSheet.create({
   },
   shortInput: {
     width: 120,
+  },
+  autoDurationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(125,211,252,0.06)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(125,211,252,0.12)',
+  },
+  autoDurationText: {
+    fontSize: 12,
+    color: '#7DD3FC',
+    fontFamily: FB,
+  },
+  autoDurationCompare: {
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: FB,
   },
   chipRow: {
     flexDirection: 'row',
