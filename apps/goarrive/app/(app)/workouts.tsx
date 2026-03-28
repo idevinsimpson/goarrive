@@ -362,20 +362,24 @@ function ThumbnailCollage({
   // Calculate grid: max 4 columns, rows fill based on count
   const cols = Math.min(thumbs.length, 4);
   const rows = Math.ceil(thumbs.length / cols);
-  const cellW = width / cols;
-  const cellH = height / rows;
   const extraCount = totalMovements - thumbs.length;
 
+  const GAP = 2;
+  const cellW = (width - GAP * (cols - 1)) / cols;
+  const cellH = (height - GAP * (rows - 1)) / rows;
+
   return (
-    <View style={{ width, height, flexDirection: 'row', flexWrap: 'wrap', overflow: 'hidden' }}>
-      {thumbs.map((uri, i) => (
-        <Image
-          key={`${uri}-${i}`}
-          source={{ uri }}
-          style={{ width: cellW, height: cellH }}
-          resizeMode="cover"
-        />
-      ))}
+    <View style={{ width, height, borderRadius: 10, overflow: 'hidden', backgroundColor: '#1A2035' }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: GAP }}>
+        {thumbs.map((uri, i) => (
+          <Image
+            key={`${uri}-${i}`}
+            source={{ uri }}
+            style={{ width: cellW, height: cellH, borderRadius: 4 }}
+            resizeMode="cover"
+          />
+        ))}
+      </View>
       {extraCount > 0 && (
         <View style={s.moreOverlay}>
           <Text style={s.moreOverlayText}>+{extraCount}</Text>
@@ -1734,6 +1738,7 @@ const s = StyleSheet.create({
     backgroundColor: '#1A2035',
     position: 'relative',
     overflow: 'hidden',
+    borderRadius: 10,
   },
   collageEmpty: {
     alignItems: 'center',
