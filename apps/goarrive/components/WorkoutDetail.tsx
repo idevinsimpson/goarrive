@@ -414,8 +414,7 @@ export default function WorkoutDetail({
         preselectedWorkoutName={currentWorkout.name}
         onClose={() => setShowAssignModal(false)}
         onAssign={async (workoutId, workoutName, scheduledFor, memberId) => {
-          await handleAssign(workoutId, workoutName, scheduledFor, memberId ?? '');
-          setShowAssignModal(false);
+          await handleAssign(workoutId, workoutName, scheduledFor, memberId);
         }}
       />
 

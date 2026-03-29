@@ -316,11 +316,13 @@ export default function MembersScreen() {
     workoutId: string,
     workoutName: string,
     scheduledFor: Date,
+    memberId?: string,
   ) {
-    if (!assignTarget) return;
+    const mid = memberId || assignTarget?.id;
+    if (!mid) return;
     try {
       await addDoc(collection(db, 'workout_assignments'), {
-        memberId: assignTarget.id,
+        memberId: mid,
         coachId,
         tenantId,
         workoutId,
@@ -329,8 +331,6 @@ export default function MembersScreen() {
         status: 'scheduled',
         createdAt: Timestamp.now(),
       });
-      setShowAssignModal(false);
-      setAssignTarget(null);
       // Trigger refresh of AssignedWorkoutsList in MemberDetail
       setAssignmentRefresh((prev) => prev + 1);
     } catch (err) {
@@ -672,6 +672,7 @@ export default function MembersScreen() {
       <AssignWorkoutModal
         visible={showAssignModal}
         memberName={assignTarget?.name ?? ''}
+        memberId={assignTarget?.id ?? ''}
         coachId={coachId}
         onClose={() => {
           setShowAssignModal(false);

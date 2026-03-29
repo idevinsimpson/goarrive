@@ -1,15 +1,13 @@
 /**
  * AssignWorkoutModal — Assign a workout to a member
  *
- * Two-step flow:
- *   1. Pick a workout from the coach's active workouts
- *   2. Pick a date and confirm the assignment
+ * Adaptive multi-step flow:
+ *   A) From Members screen (member known): Pick Workout → Schedule → Confirm
+ *   B) From Build screen (workout known): Pick Member → Schedule → Confirm
+ *   C) Standalone: Pick Workout → Pick Member → Schedule → Confirm
  *
- * Follows the simple Everfit-style model from KB-U:
- *   - One workout → one member → one date
- *   - No batch assignment, no recurring, no sync toggles
- *
- * Slice 1, Week 5 — Workout Assignment
+ * Phase 4: Now includes a member picker step so coaches can assign
+ * workouts from the Build screen without first navigating to Members.
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRecurringSchedule } from '../hooks/useRecurringSchedule';
@@ -47,13 +45,22 @@ export interface WorkoutPickerItem {
   category: string;
 }
 
+interface MemberPickerItem {
+  id: string;
+  name: string;
+  email: string;
+}
+
 interface Props {
   visible: boolean;
+  /** Pre-selected member name (from Members screen). Empty = show member picker. */
   memberName: string;
+  /** Pre-selected member ID (from Members screen). Empty = show member picker. */
+  memberId?: string;
   coachId: string;
   onClose: () => void;
-  onAssign: (workoutId: string, workoutName: string, scheduledFor: Date, memberId?: string) => void;
-  /** When provided, skip the workout-picker step and go straight to member-picker */
+  onAssign: (workoutId: string, workoutName: string, scheduledFor: Date, memberId: string) => void;
+  /** When provided, skip the workout-picker step (Build screen flow) */
   preselectedWorkoutId?: string;
   preselectedWorkoutName?: string;
 }
@@ -102,71 +109,136 @@ function getQuickDates(): Array<{ label: string; date: Date }> {
   ];
 }
 
+function showAlert(title: string, msg: string) {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n\n${msg}`);
+  } else {
+    Alert.alert(title, msg);
+  }
+}
+
+function getInitials(name: string): string {
+  return name
+    .split(' ')
+    .map((w) => w.charAt(0))
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
+
+type Step = 'pickWorkout' | 'pickMember' | 'schedule' | 'success';
 
 export default function AssignWorkoutModal({
   visible,
   memberName,
+  memberId: preselectedMemberId,
   coachId,
   onClose,
   onAssign,
   preselectedWorkoutId,
   preselectedWorkoutName,
 }: Props) {
-  // Step: 'pick' = choose workout, 'schedule' = choose date + confirm, 'success' = done
-  // When preselectedWorkoutId is set, we start at 'schedule' (workout already known)
-  const [step, setStep] = useState<'pick' | 'schedule' | 'success'>('pick');
+  // ── State ────────────────────────────────────────────────────────────
+  const [step, setStep] = useState<Step>('pickWorkout');
   const [workouts, setWorkouts] = useState<WorkoutPickerItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [members, setMembers] = useState<MemberPickerItem[]>([]);
+  const [loadingWorkouts, setLoadingWorkouts] = useState(true);
+  const [loadingMembers, setLoadingMembers] = useState(true);
+  const [workoutSearch, setWorkoutSearch] = useState('');
+  const [memberSearch, setMemberSearch] = useState('');
   const [selectedWorkout, setSelectedWorkout] = useState<WorkoutPickerItem | null>(null);
+  const [selectedMember, setSelectedMember] = useState<MemberPickerItem | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [dateInput, setDateInput] = useState(toDateString(new Date()));
   const [assigning, setAssigning] = useState(false);
 
-  // Suggestion 5: Workout preview data
+  // Workout preview
   const [previewBlocks, setPreviewBlocks] = useState<any[]>([]);
   const [previewLoading, setPreviewLoading] = useState(false);
 
-  // Recurring schedule (extracted hook)
+  // Recurring schedule
   const recurring = useRecurringSchedule();
   const { isRecurring, recurringDays, recurringWeeks } = recurring;
+
+  // Success state
+  const [lastAssignedName, setLastAssignedName] = useState('');
+
+  // Derived: do we need a member picker?
+  const hasMemberPreselected = !!(preselectedMemberId && memberName);
+  // Derived: do we need a workout picker?
+  const hasWorkoutPreselected = !!(preselectedWorkoutId && preselectedWorkoutName);
+
+  // The effective member name for display
+  const effectiveMemberName = selectedMember?.name || memberName || '';
+  const effectiveMemberId = selectedMember?.id || preselectedMemberId || '';
 
   // ── Load workouts ─────────────────────────────────────────────────────
 
   const loadWorkouts = useCallback(async () => {
     if (!coachId) return;
-    setLoading(true);
+    setLoadingWorkouts(true);
     try {
       const q = query(
         collection(db, 'workouts'),
         where('coachId', '==', coachId),
-        where('isArchived', '==', false),
         orderBy('createdAt', 'desc'),
       );
       const snap = await getDocs(q);
       setWorkouts(
-        snap.docs.map((d) => {
-          const data = d.data();
-          return {
-            id: d.id,
-            name: data.name ?? 'Untitled',
-            exerciseCount: Array.isArray(data.exercises) ? data.exercises.length : 0,
-            category: data.category ?? '',
-          };
-        }),
+        snap.docs
+          .filter((d) => !d.data().isArchived)
+          .map((d) => {
+            const data = d.data();
+            return {
+              id: d.id,
+              name: data.name ?? 'Untitled',
+              exerciseCount: Array.isArray(data.exercises) ? data.exercises.length : 0,
+              category: data.category ?? '',
+            };
+          }),
       );
     } catch (err) {
       console.error('Failed to load workouts for assignment:', err);
     } finally {
-      setLoading(false);
+      setLoadingWorkouts(false);
     }
   }, [coachId]);
 
-  // Track last-assigned name for success screen (NEXT-B)
-  const [lastAssignedName, setLastAssignedName] = useState('');
+  // ── Load members ──────────────────────────────────────────────────────
 
-  // Reset state when modal opens/closes
+  const loadMembers = useCallback(async () => {
+    if (!coachId) return;
+    setLoadingMembers(true);
+    try {
+      const q = query(
+        collection(db, 'members'),
+        where('coachId', '==', coachId),
+        orderBy('createdAt', 'desc'),
+      );
+      const snap = await getDocs(q);
+      setMembers(
+        snap.docs
+          .filter((d) => !d.data().isArchived)
+          .map((d) => {
+            const data = d.data();
+            return {
+              id: d.id,
+              name: data.name || data.displayName || (data.firstName ? `${data.firstName} ${data.lastName || ''}`.trim() : '') || 'Unnamed',
+              email: data.email ?? '',
+            };
+          }),
+      );
+    } catch (err) {
+      console.error('Failed to load members for assignment:', err);
+    } finally {
+      setLoadingMembers(false);
+    }
+  }, [coachId]);
+
+  // ── Reset state when modal opens ──────────────────────────────────────
+
   useEffect(() => {
     if (visible) {
       const today = new Date();
@@ -175,54 +247,115 @@ export default function AssignWorkoutModal({
       setDateInput(toDateString(today));
       setAssigning(false);
       setLastAssignedName('');
-      setSearch('');
+      setWorkoutSearch('');
+      setMemberSearch('');
+      setPreviewBlocks([]);
       recurring.reset();
-      if (preselectedWorkoutId && preselectedWorkoutName) {
-        // Workout-first flow: skip picker, go straight to schedule
+
+      if (hasWorkoutPreselected) {
+        // Build screen flow: workout known, need member
         setSelectedWorkout({
-          id: preselectedWorkoutId,
-          name: preselectedWorkoutName,
+          id: preselectedWorkoutId!,
+          name: preselectedWorkoutName!,
           exerciseCount: 0,
           category: '',
         });
-        setStep('schedule');
-      } else {
-        setStep('pick');
+        if (hasMemberPreselected) {
+          // Both known — go straight to schedule
+          setSelectedMember({ id: preselectedMemberId!, name: memberName, email: '' });
+          setStep('schedule');
+        } else {
+          // Need to pick a member
+          setSelectedMember(null);
+          setStep('pickMember');
+          loadMembers();
+        }
+      } else if (hasMemberPreselected) {
+        // Members screen flow: member known, need workout
+        setSelectedMember({ id: preselectedMemberId!, name: memberName, email: '' });
         setSelectedWorkout(null);
+        setStep('pickWorkout');
+        loadWorkouts();
+      } else {
+        // Standalone: need both
+        setSelectedWorkout(null);
+        setSelectedMember(null);
+        setStep('pickWorkout');
         loadWorkouts();
       }
     }
-  }, [visible, loadWorkouts, preselectedWorkoutId, preselectedWorkoutName]);
+  }, [visible, loadWorkouts, loadMembers, preselectedWorkoutId, preselectedWorkoutName, preselectedMemberId, memberName]);
 
   // ── Handlers ──────────────────────────────────────────────────────────
 
   async function handleSelectWorkout(w: WorkoutPickerItem) {
     setSelectedWorkout(w);
-    setStep('schedule');
-    // Suggestion 5: Load workout preview data
+    // Load preview
     setPreviewLoading(true);
     setPreviewBlocks([]);
     try {
       const workoutDoc = await getDoc(doc(db, 'workouts', w.id));
       if (workoutDoc.exists()) {
-        const data = workoutDoc.data();
-        setPreviewBlocks(data.blocks ?? []);
+        setPreviewBlocks(workoutDoc.data().blocks ?? []);
       }
     } catch (err) {
       console.warn('Could not load workout preview:', err);
     } finally {
       setPreviewLoading(false);
     }
+
+    if (hasMemberPreselected || selectedMember) {
+      // Member already known — go to schedule
+      setStep('schedule');
+    } else {
+      // Need to pick a member next
+      setStep('pickMember');
+      loadMembers();
+    }
+  }
+
+  function handleSelectMember(m: MemberPickerItem) {
+    setSelectedMember(m);
+    setStep('schedule');
+    // If workout was preselected, load its preview now
+    if (hasWorkoutPreselected && previewBlocks.length === 0) {
+      setPreviewLoading(true);
+      getDoc(doc(db, 'workouts', preselectedWorkoutId!))
+        .then((snap) => {
+          if (snap.exists()) setPreviewBlocks(snap.data().blocks ?? []);
+        })
+        .catch(() => {})
+        .finally(() => setPreviewLoading(false));
+    }
   }
 
   function handleBack() {
-    setStep('pick');
-    setSelectedWorkout(null);
+    if (step === 'schedule') {
+      if (!hasMemberPreselected && !hasWorkoutPreselected) {
+        // Standalone: go back to member picker
+        setStep('pickMember');
+      } else if (hasWorkoutPreselected && !hasMemberPreselected) {
+        // Build flow: go back to member picker
+        setStep('pickMember');
+      } else {
+        // Members flow: go back to workout picker
+        setStep('pickWorkout');
+        setSelectedWorkout(null);
+      }
+    } else if (step === 'pickMember') {
+      if (!hasWorkoutPreselected) {
+        // Standalone: go back to workout picker
+        setStep('pickWorkout');
+        setSelectedWorkout(null);
+      } else {
+        // Build flow: member picker is first step, close modal
+        onClose();
+      }
+    }
   }
 
   function handleDateInputChange(text: string) {
     setDateInput(text);
-    // Parse YYYY-MM-DD
     const parts = text.split('-');
     if (parts.length === 3) {
       const y = parseInt(parts[0], 10);
@@ -247,20 +380,23 @@ export default function AssignWorkoutModal({
 
   async function handleConfirm() {
     if (!selectedWorkout || assigning) return;
-    // Validate date is not in the past
+    if (!effectiveMemberId) {
+      showAlert('No Member Selected', 'Please select a member to assign this workout to.');
+      return;
+    }
+    // Validate date
     const now = new Date();
     now.setHours(0, 0, 0, 0);
     if (selectedDate < now) {
-      Alert.alert('Invalid Date', 'Cannot assign a workout to a past date. Please select today or a future date.');
+      showAlert('Invalid Date', 'Cannot assign a workout to a past date. Please select today or a future date.');
       return;
     }
     setAssigning(true);
     try {
       const dates = recurring.generateDates(selectedDate);
       for (const d of dates) {
-        await onAssign(selectedWorkout.id, selectedWorkout.name, d);
+        await onAssign(selectedWorkout.id, selectedWorkout.name, d, effectiveMemberId);
       }
-      // NEXT-B: Show success step instead of closing
       setLastAssignedName(selectedWorkout.name);
       setStep('success');
     } finally {
@@ -268,29 +404,54 @@ export default function AssignWorkoutModal({
     }
   }
 
-  /** NEXT-B: Reset to pick step for another assignment */
   function handleAssignAnother() {
-    setSelectedWorkout(null);
-    setSearch('');
+    setSelectedWorkout(hasWorkoutPreselected ? selectedWorkout : null);
+    setSelectedMember(hasMemberPreselected ? selectedMember : null);
+    setWorkoutSearch('');
+    setMemberSearch('');
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     setSelectedDate(today);
     setDateInput(toDateString(today));
-    setStep('pick');
+    recurring.reset();
+    // Go back to the first step that needs selection
+    if (hasWorkoutPreselected && hasMemberPreselected) {
+      setStep('schedule');
+    } else if (hasWorkoutPreselected) {
+      setStep('pickMember');
+    } else {
+      setStep('pickWorkout');
+    }
   }
 
-  // ── Filtered workouts ─────────────────────────────────────────────────
+  // ── Filtered lists ────────────────────────────────────────────────────
 
-  const filtered = workouts.filter((w) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      w.name.toLowerCase().includes(q) ||
-      w.category.toLowerCase().includes(q)
-    );
+  const filteredWorkouts = workouts.filter((w) => {
+    if (!workoutSearch) return true;
+    const q = workoutSearch.toLowerCase();
+    return w.name.toLowerCase().includes(q) || w.category.toLowerCase().includes(q);
+  });
+
+  const filteredMembers = members.filter((m) => {
+    if (!memberSearch) return true;
+    const q = memberSearch.toLowerCase();
+    return m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q);
   });
 
   const quickDates = getQuickDates();
+
+  // ── Header ────────────────────────────────────────────────────────────
+
+  function getHeaderTitle(): string {
+    switch (step) {
+      case 'pickWorkout': return 'Choose Workout';
+      case 'pickMember': return 'Choose Member';
+      case 'schedule': return 'Schedule';
+      case 'success': return 'Assigned!';
+    }
+  }
+
+  const showBackButton = step === 'schedule' || (step === 'pickMember' && !hasWorkoutPreselected);
 
   // ── Render ────────────────────────────────────────────────────────────
 
@@ -300,38 +461,46 @@ export default function AssignWorkoutModal({
         <View style={s.sheet}>
           {/* Header */}
           <View style={s.header}>
-            {step === 'schedule' ? (
+            {step === 'success' ? (
+              <View style={{ width: 24 }} />
+            ) : showBackButton ? (
               <Pressable onPress={handleBack} hitSlop={12}>
                 <Icon name="arrow-left" size={24} color="#8A95A3" />
               </Pressable>
-            ) : step === 'success' ? (
-              <View style={{ width: 24 }} />
             ) : (
               <Pressable onPress={onClose} hitSlop={12}>
                 <Icon name="close" size={24} color="#8A95A3" />
               </Pressable>
             )}
-            <Text style={s.headerTitle}>
-              {step === 'pick' ? 'Assign Workout' : step === 'schedule' ? 'Schedule' : 'Assigned!'}
-            </Text>
+            <Text style={s.headerTitle}>{getHeaderTitle()}</Text>
             <View style={{ width: 24 }} />
           </View>
 
-          {/* Member badge */}
-          <View style={s.memberBadge}>
-            <Icon name="person" size={14} color="#F5A623" />
-            <Text style={s.memberBadgeText}>{memberName}</Text>
+          {/* Context badges — show what's already selected */}
+          <View style={s.badgeRow}>
+            {selectedWorkout && step !== 'pickWorkout' && (
+              <View style={s.contextBadge}>
+                <Icon name="workouts" size={12} color="#F5A623" />
+                <Text style={s.contextBadgeText} numberOfLines={1}>{selectedWorkout.name}</Text>
+              </View>
+            )}
+            {effectiveMemberName && step !== 'pickMember' && (
+              <View style={[s.contextBadge, s.memberContextBadge]}>
+                <Icon name="person" size={12} color="#7DD3FC" />
+                <Text style={[s.contextBadgeText, { color: '#7DD3FC' }]} numberOfLines={1}>{effectiveMemberName}</Text>
+              </View>
+            )}
           </View>
 
+          {/* ── SUCCESS STEP ──────────────────────────────────────── */}
           {step === 'success' ? (
-            /* NEXT-B: Success step with Assign Another */
             <View style={s.successWrap}>
               <View style={s.successIconWrap}>
                 <Icon name="check-circle" size={56} color="#6EBB7A" />
               </View>
               <Text style={s.successTitle}>Workout Assigned!</Text>
               <Text style={s.successSub}>
-                "{lastAssignedName}" has been assigned to {memberName}.
+                "{lastAssignedName}" has been assigned to {effectiveMemberName}.
               </Text>
 
               <Pressable style={s.assignAnotherBtn} onPress={handleAssignAnother}>
@@ -339,14 +508,14 @@ export default function AssignWorkoutModal({
                 <Text style={s.assignAnotherText}>Assign Another</Text>
               </Pressable>
 
-              {/* S7: Add to Google Calendar deep link */}
+              {/* Google Calendar deep link */}
               <Pressable
                 style={s.calendarBtn}
                 onPress={() => {
                   const start = new Date(selectedDate);
-                  start.setHours(9, 0, 0, 0); // Default 9 AM
+                  start.setHours(9, 0, 0, 0);
                   const end = new Date(start);
-                  end.setHours(10, 0, 0, 0); // 1 hour default
+                  end.setHours(10, 0, 0, 0);
                   const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
                   const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(lastAssignedName || 'Workout')}&dates=${fmt(start)}/${fmt(end)}&details=${encodeURIComponent('Assigned via GoArrive. Open the app to start your workout.')}`;
                   Linking.openURL(url).catch(() => {});
@@ -360,39 +529,39 @@ export default function AssignWorkoutModal({
                 <Text style={s.doneBtnText}>Done</Text>
               </Pressable>
             </View>
-          ) : step === 'pick' ? (
+
+          /* ── PICK WORKOUT STEP ──────────────────────────────────── */
+          ) : step === 'pickWorkout' ? (
             <>
-              {/* Search */}
               <View style={s.searchRow}>
                 <View style={s.searchWrap}>
                   <Icon name="search" size={16} color="#4A5568" />
                   <TextInput
                     style={s.searchInput}
-                    value={search}
-                    onChangeText={setSearch}
+                    value={workoutSearch}
+                    onChangeText={setWorkoutSearch}
                     placeholder="Search workouts…"
                     placeholderTextColor="#4A5568"
                     autoCorrect={false}
                     autoCapitalize="none"
                   />
-                  {search.length > 0 && (
-                    <Pressable onPress={() => setSearch('')} hitSlop={8}>
+                  {workoutSearch.length > 0 && (
+                    <Pressable onPress={() => setWorkoutSearch('')} hitSlop={8}>
                       <Icon name="x-circle" size={16} color="#4A5568" />
                     </Pressable>
                   )}
                 </View>
               </View>
 
-              {/* Workout list */}
-              {loading ? (
+              {loadingWorkouts ? (
                 <View style={s.loadingWrap}>
                   <ActivityIndicator size="small" color="#F5A623" />
                 </View>
-              ) : filtered.length === 0 ? (
+              ) : filteredWorkouts.length === 0 ? (
                 <View style={s.emptyWrap}>
                   <Icon name="workouts" size={40} color="#2A3040" />
                   <Text style={s.emptyText}>
-                    {search
+                    {workoutSearch
                       ? 'No workouts match your search.'
                       : 'No active workouts to assign. Create a workout first.'}
                   </Text>
@@ -403,7 +572,7 @@ export default function AssignWorkoutModal({
                   contentContainerStyle={s.listContent}
                   showsVerticalScrollIndicator={false}
                 >
-                  {filtered.map((w) => (
+                  {filteredWorkouts.map((w) => (
                     <Pressable
                       key={w.id}
                       style={s.workoutCard}
@@ -412,11 +581,9 @@ export default function AssignWorkoutModal({
                       <View style={s.workoutIcon}>
                         <Icon name="workouts" size={20} color="#F5A623" />
                       </View>
-                      <View style={s.workoutInfo}>
-                        <Text style={s.workoutName} numberOfLines={1}>
-                          {w.name}
-                        </Text>
-                        <Text style={s.workoutMeta}>
+                      <View style={s.cardInfo}>
+                        <Text style={s.cardName} numberOfLines={1}>{w.name}</Text>
+                        <Text style={s.cardMeta}>
                           {w.exerciseCount} exercise{w.exerciseCount !== 1 ? 's' : ''}
                           {w.category ? ` · ${w.category}` : ''}
                         </Text>
@@ -428,8 +595,74 @@ export default function AssignWorkoutModal({
                 </ScrollView>
               )}
             </>
+
+          /* ── PICK MEMBER STEP ──────────────────────────────────── */
+          ) : step === 'pickMember' ? (
+            <>
+              <View style={s.searchRow}>
+                <View style={s.searchWrap}>
+                  <Icon name="search" size={16} color="#4A5568" />
+                  <TextInput
+                    style={s.searchInput}
+                    value={memberSearch}
+                    onChangeText={setMemberSearch}
+                    placeholder="Search members…"
+                    placeholderTextColor="#4A5568"
+                    autoCorrect={false}
+                    autoCapitalize="none"
+                  />
+                  {memberSearch.length > 0 && (
+                    <Pressable onPress={() => setMemberSearch('')} hitSlop={8}>
+                      <Icon name="x-circle" size={16} color="#4A5568" />
+                    </Pressable>
+                  )}
+                </View>
+              </View>
+
+              {loadingMembers ? (
+                <View style={s.loadingWrap}>
+                  <ActivityIndicator size="small" color="#F5A623" />
+                </View>
+              ) : filteredMembers.length === 0 ? (
+                <View style={s.emptyWrap}>
+                  <Icon name="person" size={40} color="#2A3040" />
+                  <Text style={s.emptyText}>
+                    {memberSearch
+                      ? 'No members match your search.'
+                      : 'No active members. Add a member first.'}
+                  </Text>
+                </View>
+              ) : (
+                <ScrollView
+                  style={s.list}
+                  contentContainerStyle={s.listContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {filteredMembers.map((m) => (
+                    <Pressable
+                      key={m.id}
+                      style={s.memberCard}
+                      onPress={() => handleSelectMember(m)}
+                    >
+                      <View style={s.memberAvatar}>
+                        <Text style={s.memberAvatarText}>{getInitials(m.name)}</Text>
+                      </View>
+                      <View style={s.cardInfo}>
+                        <Text style={s.cardName} numberOfLines={1}>{m.name}</Text>
+                        {m.email ? (
+                          <Text style={s.cardMeta} numberOfLines={1}>{m.email}</Text>
+                        ) : null}
+                      </View>
+                      <Icon name="chevron-right" size={18} color="#4A5568" />
+                    </Pressable>
+                  ))}
+                  <View style={{ height: 40 }} />
+                </ScrollView>
+              )}
+            </>
+
+          /* ── SCHEDULE STEP ──────────────────────────────────────── */
           ) : (
-            /* Schedule step */
             <ScrollView
               style={s.list}
               contentContainerStyle={s.scheduleContent}
@@ -443,7 +676,7 @@ export default function AssignWorkoutModal({
                 </Text>
               </View>
 
-              {/* Suggestion 5: Workout preview */}
+              {/* Workout preview */}
               {previewLoading ? (
                 <ActivityIndicator size="small" color="#F5A623" style={{ marginVertical: 8 }} />
               ) : previewBlocks.length > 0 ? (
@@ -568,7 +801,7 @@ export default function AssignWorkoutModal({
                   <>
                     <Icon name="check" size={20} color="#0E1117" />
                     <Text style={s.confirmBtnText}>
-                      Assign to {memberName}
+                      Assign to {effectiveMemberName}
                     </Text>
                   </>
                 )}
@@ -616,25 +849,35 @@ const s = StyleSheet.create({
     color: '#F0F4F8',
     fontFamily: FONT_HEADING,
   },
-  memberBadge: {
+  badgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  contextBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    alignSelf: 'flex-start',
-    marginLeft: 20,
-    marginTop: 12,
+    gap: 5,
     backgroundColor: 'rgba(245,166,35,0.1)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(245,166,35,0.2)',
   },
-  memberBadgeText: {
-    fontSize: 13,
+  memberContextBadge: {
+    backgroundColor: 'rgba(125,211,252,0.1)',
+    borderColor: 'rgba(125,211,252,0.2)',
+  },
+  contextBadgeText: {
+    fontSize: 12,
     fontWeight: '600',
     color: '#F5A623',
     fontFamily: FONT_HEADING,
+    maxWidth: 140,
   },
   searchRow: {
     paddingHorizontal: 20,
@@ -683,6 +926,7 @@ const s = StyleSheet.create({
     padding: 20,
     paddingTop: 12,
   },
+  // Workout card
   workoutCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -702,21 +946,48 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  workoutInfo: {
+  cardInfo: {
     flex: 1,
   },
-  workoutName: {
+  cardName: {
     fontSize: 15,
     fontWeight: '600',
     color: '#F0F4F8',
     fontFamily: FONT_HEADING,
   },
-  workoutMeta: {
+  cardMeta: {
     fontSize: 12,
     color: '#8A95A3',
     fontFamily: FONT_BODY,
     marginTop: 2,
   },
+  // Member card
+  memberCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    gap: 12,
+  },
+  memberAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(125,211,252,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberAvatarText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#7DD3FC',
+    fontFamily: FONT_HEADING,
+  },
+  // Schedule step
   scheduleContent: {
     padding: 20,
   },
@@ -811,7 +1082,7 @@ const s = StyleSheet.create({
     color: '#0E1117',
     fontFamily: FONT_HEADING,
   },
-  // Suggestion 5: Workout preview styles
+  // Workout preview
   previewSection: {
     backgroundColor: 'rgba(255,255,255,0.03)',
     borderRadius: 12,
@@ -845,7 +1116,7 @@ const s = StyleSheet.create({
     fontFamily: FONT_BODY,
     lineHeight: 18,
   },
-  // NEXT-B: Success step styles
+  // Success step
   successWrap: {
     flex: 1,
     alignItems: 'center',
@@ -925,7 +1196,7 @@ const s = StyleSheet.create({
     color: '#8A95A3',
     fontFamily: FONT_HEADING,
   },
-  // Recurring schedule styles
+  // Recurring schedule
   recurringSection: {
     marginTop: 20,
     marginBottom: 16,

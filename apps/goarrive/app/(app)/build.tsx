@@ -129,75 +129,101 @@ function BuildScreenInner() {
   const tenantId = claims?.tenantId ?? '';
 
   // ── Data Fetching ──────────────────────────────────────────────────────
+  // NOTE: We intentionally do NOT filter isArchived in the Firestore query
+  // to avoid requiring a composite index (coachId + isArchived + createdAt).
+  // Instead we fetch all docs for this coach and filter client-side.
+  // This keeps the query simple (single-field index only) and resilient.
   useEffect(() => {
     if (!coachId) return;
 
     setLoading(true);
+    let movementsLoaded = false;
+    let workoutsLoaded = false;
     
     const movementsQuery = query(
       collection(db, 'movements'),
       where('coachId', '==', coachId),
-      where('isArchived', '==', showArchived),
       orderBy('createdAt', 'desc')
     );
 
     const workoutsQuery = query(
       collection(db, 'workouts'),
       where('coachId', '==', coachId),
-      where('isArchived', '==', showArchived),
       orderBy('createdAt', 'desc')
     );
 
-    const unsubMovements = onSnapshot(movementsQuery, (snap) => {
-      const movementItems: BuildItem[] = snap.docs.map(d => ({
-        id: d.id,
-        ...d.data(),
-        type: 'Movements'
-      } as BuildItem));
-      
-      setItems(prev => {
-        const otherItems = prev.filter(i => i.type !== 'Movements');
-        return [...otherItems, ...movementItems].sort((a, b) => 
-          (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)
-        );
-      });
-      setLoading(false);
-    });
+    const unsubMovements = onSnapshot(
+      movementsQuery,
+      (snap) => {
+        const movementItems: BuildItem[] = snap.docs.map(d => ({
+          id: d.id,
+          ...d.data(),
+          type: 'Movements'
+        } as BuildItem));
+        
+        setItems(prev => {
+          const otherItems = prev.filter(i => i.type !== 'Movements');
+          return [...otherItems, ...movementItems].sort((a, b) => 
+            (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)
+          );
+        });
+        movementsLoaded = true;
+        if (movementsLoaded && workoutsLoaded) setLoading(false);
+        else setLoading(false); // Don't block on the other query
+      },
+      (err) => {
+        console.error('[Build] Movements listener error:', err);
+        movementsLoaded = true;
+        setLoading(false);
+      },
+    );
 
-    const unsubWorkouts = onSnapshot(workoutsQuery, (snap) => {
-      const workoutItems: BuildItem[] = snap.docs.map(d => ({
-        id: d.id,
-        ...d.data(),
-        type: 'Workouts'
-      } as BuildItem));
-      
-      setItems(prev => {
-        const otherItems = prev.filter(i => i.type !== 'Workouts');
-        return [...otherItems, ...workoutItems].sort((a, b) => 
-          (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)
-        );
-      });
-      setLoading(false);
-    });
+    const unsubWorkouts = onSnapshot(
+      workoutsQuery,
+      (snap) => {
+        const workoutItems: BuildItem[] = snap.docs.map(d => ({
+          id: d.id,
+          ...d.data(),
+          type: 'Workouts'
+        } as BuildItem));
+        
+        setItems(prev => {
+          const otherItems = prev.filter(i => i.type !== 'Workouts');
+          return [...otherItems, ...workoutItems].sort((a, b) => 
+            (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)
+          );
+        });
+        workoutsLoaded = true;
+        if (movementsLoaded && workoutsLoaded) setLoading(false);
+        else setLoading(false); // Don't block on the other query
+      },
+      (err) => {
+        console.error('[Build] Workouts listener error:', err);
+        workoutsLoaded = true;
+        setLoading(false);
+      },
+    );
 
     return () => {
       unsubMovements();
       unsubWorkouts();
     };
-  }, [coachId, showArchived]);
+  }, [coachId]);
 
   // ── Filtering ──────────────────────────────────────────────────────────
   const filteredItems = useMemo(() => {
     let list = items;
+    // Client-side archive filter (replaces Firestore compound query)
+    list = list.filter(i => !!i.isArchived === showArchived);
     if (search.trim()) {
       const q = search.toLowerCase();
-      list = list.filter(i => i.name.toLowerCase().includes(q));
+      list = list.filter(i => i.name?.toLowerCase().includes(q));
     }
     if (activeType !== 'All') {
       list = list.filter(i => i.type === activeType);
     }
     return list;
-  }, [items, search, activeType]);
+  }, [items, search, activeType, showArchived]);
 
   // ── Render Helpers ─────────────────────────────────────────────────────
   const renderItem = ({ item }: { item: BuildItem }) => {
