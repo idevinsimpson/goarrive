@@ -26,6 +26,7 @@ import { doc, onSnapshot, updateDoc, addDoc, collection, Timestamp } from 'fireb
 import { Icon } from './Icon';
 import AssignWorkoutModal from './AssignWorkoutModal';
 import BatchAssignModal from './BatchAssignModal';
+import WorkoutPlayer from './WorkoutPlayer';
 import { useAuth } from '../lib/AuthContext';
 
 const FONT_HEADING =
@@ -74,6 +75,7 @@ export default function WorkoutDetail({
   const [currentWorkout, setCurrentWorkout] = useState<WorkoutDetailData>(workout as WorkoutDetailData);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showBatchModal, setShowBatchModal] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
     if (!workout?.id) return;
@@ -295,8 +297,15 @@ export default function WorkoutDetail({
 
           {/* Footer — Action buttons */}
           <View style={styles.footer}>
-            {/* Row 1: Edit + Archive + Duplicate */}
+            {/* Row 1: Preview + Edit + Archive + Duplicate */}
             <View style={styles.actionRow}>
+              <TouchableOpacity
+                style={styles.actionBtn}
+                onPress={() => setShowPreview(true)}
+              >
+                <Icon name="eye" size={16} color="#FBBF24" />
+                <Text style={[styles.actionBtnText, { color: '#FBBF24' }]}>Preview</Text>
+              </TouchableOpacity>
               {onEdit && (
                 <TouchableOpacity
                   style={styles.actionBtn}
@@ -416,6 +425,15 @@ export default function WorkoutDetail({
         onAssign={async (workoutId, workoutName, scheduledFor, memberId) => {
           await handleAssign(workoutId, workoutName, scheduledFor, memberId);
         }}
+      />
+
+      {/* Workout Player Preview */}
+      <WorkoutPlayer
+        visible={showPreview}
+        workout={currentWorkout}
+        onClose={() => setShowPreview(false)}
+        onComplete={() => setShowPreview(false)}
+        isPreview
       />
 
       {/* Batch Assign Modal */}

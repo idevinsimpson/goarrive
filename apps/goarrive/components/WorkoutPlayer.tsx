@@ -59,6 +59,7 @@ interface WorkoutPlayerProps {
   onClose: () => void;
   onComplete: () => void;
   onSwapLog?: (swaps: any[]) => void;
+  isPreview?: boolean;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -68,6 +69,7 @@ export default function WorkoutPlayer({
   onClose,
   onComplete,
   onSwapLog,
+  isPreview = false,
 }: WorkoutPlayerProps) {
   // ── Hooks ────────────────────────────────────────────────────────────
   const flatFromBlocks = useWorkoutFlatten(workout);
@@ -269,6 +271,12 @@ export default function WorkoutPlayer({
           <>
             {renderHeader(false)}
             <View style={st.centerContent}>
+              {isPreview && (
+                <View style={st.previewBadge}>
+                  <Icon name="eye" size={14} color="#F5A623" />
+                  <Text style={st.previewBadgeText}>COACH PREVIEW</Text>
+                </View>
+              )}
               <Image
                 source={require('../assets/logo.png')}
                 style={st.readyLogo}
@@ -281,7 +289,7 @@ export default function WorkoutPlayer({
               </Text>
               <TouchableOpacity style={st.bigStartBtn} onPress={handleStart}>
                 <Icon name="play" size={36} color="#0E1117" />
-                <Text style={st.bigStartText}>Start</Text>
+                <Text style={st.bigStartText}>{isPreview ? 'Start Preview' : 'Start'}</Text>
               </TouchableOpacity>
             </View>
           </>
@@ -631,13 +639,21 @@ export default function WorkoutPlayer({
           <>
             {renderHeader(false)}
             <View style={st.centerContent}>
+              {isPreview && (
+                <View style={st.previewBadge}>
+                  <Icon name="eye" size={14} color="#F5A623" />
+                  <Text style={st.previewBadgeText}>COACH PREVIEW</Text>
+                </View>
+              )}
               <Icon name="check-circle" size={72} color="#F5A623" />
-              <Text style={st.completeTitle}>Workout Complete!</Text>
+              <Text style={st.completeTitle}>
+                {isPreview ? 'Preview Complete' : 'Workout Complete!'}
+              </Text>
               <Text style={st.completeMeta}>
                 {exerciseTotal} movement{exerciseTotal !== 1 ? 's' : ''} finished
               </Text>
-              <TouchableOpacity style={st.bigStartBtn} onPress={handleFinish}>
-                <Text style={st.bigStartText}>Continue</Text>
+              <TouchableOpacity style={st.bigStartBtn} onPress={isPreview ? onClose : handleFinish}>
+                <Text style={st.bigStartText}>{isPreview ? 'End Preview' : 'Continue'}</Text>
               </TouchableOpacity>
             </View>
           </>
@@ -1140,5 +1156,26 @@ const st = StyleSheet.create({
     backgroundColor: '#1A1F2E', borderRadius: 8, padding: 10,
     fontSize: 14, color: '#E2E8F0', fontFamily: FB, marginBottom: 8,
     borderWidth: 1, borderColor: '#252B3B',
+  },
+
+  // Preview badge
+  previewBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(245,166,35,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.3)',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    marginBottom: 16,
+  },
+  previewBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#F5A623',
+    fontFamily: FH,
+    letterSpacing: 1,
   },
 });
