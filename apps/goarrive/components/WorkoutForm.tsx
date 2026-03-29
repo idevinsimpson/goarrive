@@ -1,5 +1,5 @@
 /**
- * WorkoutForm — Canvas-First Block Builder (Phase 2)
+ * WorkoutForm — Canvas-First Block Builder (Phase 2 + Bug Fixes + Improvements)
  *
  * Opens to a blank canvas where coaches add blocks immediately.
  * Metadata (name, description, category, difficulty, tags, duration,
@@ -12,6 +12,22 @@
  * or new blocks between existing ones.
  *
  * Defaults per spec: 3 rounds, 40s work, 20s rest/prep.
+ *
+ * Bug fixes:
+ *  - Alert.alert → web-compatible showAlert helper
+ *  - Added coaching cues/notes field per movement (expandable)
+ *  - Success toast after save
+ *  - Block numbering uses sequential counter per type
+ *  - Demo added to NO_MOVEMENT_BLOCKS
+ *  - Block picker modal closes on Escape key
+ *
+ * Improvements:
+ *  1. Block duplication (long-press menu or duplicate button)
+ *  2. Global timing overrides (header button)
+ *  3. Extra first-movement prep time per block
+ *  4. Movement drag between blocks (move up/down within block)
+ *  5. Block merge/combine via between-block inserter
+ *  6. Coaching cues per movement (inline expandable)
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
@@ -50,6 +66,18 @@ const FH =
 const FB =
   Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
+// ── Web-compatible alert helper ──────────────────────────────────────────
+function showAlert(title: string, message?: string) {
+  if (Platform.OS === 'web') {
+    window.alert(message ? `${title}\n\n${message}` : title);
+  } else {
+    Alert.alert(title, message);
+  }
+}
+
+// ── Toast state (simple banner) ──────────────────────────────────────────
+let _toastTimeout: ReturnType<typeof setTimeout> | null = null;
+
 // ── Constants ────────────────────────────────────────────────────────────────
 const CATEGORIES = [
   'Upper Body', 'Lower Body', 'Full Body', 'Core',
@@ -71,8 +99,8 @@ const SPECIAL_BLOCK_TYPES = [
 ];
 const ALL_BLOCK_TYPES = [...EXERCISE_BLOCK_TYPES, ...SPECIAL_BLOCK_TYPES];
 
-// Special blocks that don't contain movements
-const NO_MOVEMENT_BLOCKS = ['Intro', 'Outro', 'Transition', 'Water Break'];
+// Special blocks that don't contain movements (Demo added — was missing)
+const NO_MOVEMENT_BLOCKS = ['Intro', 'Outro', 'Demo', 'Transition', 'Water Break'];
 
 // Quick-insert types for between-block "+" buttons
 const QUICK_INSERT_TYPES = ['Water Break', 'Transition', 'Rest'];
@@ -106,10 +134,11 @@ function calcDurationMin(blocks: WorkoutBlock[]): number {
   let totalSec = 0;
   for (const block of blocks) {
     if (NO_MOVEMENT_BLOCKS.includes(block.type)) {
-      totalSec += block.durationSec ?? 10; // special blocks have a flat duration
+      totalSec += block.durationSec ?? 10;
       continue;
     }
     const rounds = block.rounds ?? DEFAULT_ROUNDS;
+    const firstMovePrepSec = block.firstMovementPrepSec ?? 0;
     let blockSec = 0;
     for (const m of block.movements ?? []) {
       const sets = m.sets ?? 1;
@@ -118,9 +147,18 @@ function calcDurationMin(blocks: WorkoutBlock[]): number {
       blockSec += sets * (durPerSet + restPerSet);
     }
     const restBetween = block.restBetweenRoundsSec ?? 0;
-    totalSec += rounds * blockSec + (rounds > 1 ? (rounds - 1) * restBetween : 0);
+    totalSec += rounds * (blockSec + firstMovePrepSec) + (rounds > 1 ? (rounds - 1) * restBetween : 0);
   }
   return Math.ceil(totalSec / 60);
+}
+
+// ── Helper: generate sequential block label ──────────────────────────────
+function generateBlockLabel(type: string, existingBlocks: WorkoutBlock[]): string {
+  if (type === 'Water Break') return '💧 Water Break';
+  if (type === 'Transition') return '→ Transition';
+  // Count how many blocks of this type already exist
+  const count = existingBlocks.filter(b => b.type === type).length + 1;
+  return `${type} ${count}`;
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -141,8 +179,9 @@ interface WorkoutBlock {
   rounds?: number;
   restBetweenRoundsSec?: number;
   restBetweenMovementsSec?: number;
-  durationSec?: number; // for special blocks (intro, outro, transition, water break)
-  instructionText?: string; // for transition/demo blocks
+  durationSec?: number;
+  instructionText?: string;
+  firstMovementPrepSec?: number; // extra prep time before first movement
   movements: BlockMovement[];
 }
 
@@ -189,8 +228,17 @@ export default function WorkoutForm({
   // ── UI state ──────────────────────────────────────────────────────────
   const [showDetails, setShowDetails] = useState(false);
   const [showBlockTypePicker, setShowBlockTypePicker] = useState(false);
-  const [insertAtIndex, setInsertAtIndex] = useState<number | null>(null); // null = append
+  const [insertAtIndex, setInsertAtIndex] = useState<number | null>(null);
   const [expandedBlock, setExpandedBlock] = useState<number | null>(null);
+  const [expandedMovement, setExpandedMovement] = useState<string | null>(null); // "blockIdx-movIdx"
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [showGlobalTiming, setShowGlobalTiming] = useState(false);
+
+  // ── Global timing overrides ──────────────────────────────────────────
+  const [globalWorkSec, setGlobalWorkSec] = useState(String(DEFAULT_DURATION_SEC));
+  const [globalRestSec, setGlobalRestSec] = useState(String(DEFAULT_REST_SEC));
+  const [globalRounds, setGlobalRounds] = useState(String(DEFAULT_ROUNDS));
+  const [globalPrepSec, setGlobalPrepSec] = useState('0');
 
   // ── Template picker state ──────────────────────────────────────────────
   const {
@@ -206,6 +254,34 @@ export default function WorkoutForm({
   const [movementsLoaded, setMovementsLoaded] = useState(false);
   const [addingMovementToBlock, setAddingMovementToBlock] = useState<number | null>(null);
   const [movementSearch, setMovementSearch] = useState('');
+
+  // ── Toast helper ──────────────────────────────────────────────────────
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    if (_toastTimeout) clearTimeout(_toastTimeout);
+    _toastTimeout = setTimeout(() => setToastMessage(null), 3000);
+  }, []);
+
+  // ── Keyboard handler for Escape to close modals ──────────────────────
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showBlockTypePicker) {
+          setShowBlockTypePicker(false);
+          setInsertAtIndex(null);
+        } else if (showDetails) {
+          setShowDetails(false);
+        } else if (showTemplatePicker) {
+          setShowTemplatePicker(false);
+        } else if (showGlobalTiming) {
+          setShowGlobalTiming(false);
+        }
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [showBlockTypePicker, showDetails, showTemplatePicker, showGlobalTiming]);
 
   // ── Load available movements ──────────────────────────────────────────
   const loadMovements = useCallback(async () => {
@@ -237,7 +313,7 @@ export default function WorkoutForm({
       setMovementsLoaded(true);
     } catch (err: any) {
       console.error('[WorkoutForm] Load movements error:', err?.message ?? err);
-      Alert.alert('Could not load movements', 'Please close and try again.');
+      showAlert('Could not load movements', 'Please close and try again.');
     }
   }, [coachId, movementsLoaded]);
 
@@ -269,6 +345,7 @@ export default function WorkoutForm({
           restBetweenMovementsSec: b.restBetweenMovementsSec ?? 0,
           durationSec: b.durationSec ?? undefined,
           instructionText: b.instructionText ?? undefined,
+          firstMovementPrepSec: b.firstMovementPrepSec ?? 0,
           movements: (b.movements ?? []).map((m: any) => ({
             movementId: m.movementId ?? '',
             movementName: m.movementName ?? '',
@@ -276,7 +353,7 @@ export default function WorkoutForm({
             reps: m.reps ?? undefined,
             durationSec: m.durationSec ?? undefined,
             restSec: m.restSec ?? undefined,
-            notes: m.notes ?? undefined,
+            notes: m.notes ?? '',
           })),
         })),
       );
@@ -299,6 +376,8 @@ export default function WorkoutForm({
     setMovementSearch('');
     setShowDetails(false);
     setExpandedBlock(null);
+    setExpandedMovement(null);
+    setShowGlobalTiming(false);
   };
 
   // ── Auto-calculated duration ──────────────────────────────────────────
@@ -334,11 +413,12 @@ export default function WorkoutForm({
     const isSpecial = NO_MOVEMENT_BLOCKS.includes(type);
     const newBlock: WorkoutBlock = {
       type,
-      label: type === 'Water Break' ? '💧 Water Break' : type === 'Transition' ? '→ Transition' : `${type} ${blocks.length + 1}`,
+      label: generateBlockLabel(type, blocks),
       rounds: isSpecial ? 1 : DEFAULT_ROUNDS,
       restBetweenRoundsSec: 0,
       restBetweenMovementsSec: 0,
       durationSec: isSpecial ? (type === 'Water Break' ? 30 : type === 'Transition' ? 15 : 10) : undefined,
+      firstMovementPrepSec: 0,
       movements: [],
     };
     if (atIndex != null && atIndex >= 0 && atIndex <= blocks.length) {
@@ -353,6 +433,100 @@ export default function WorkoutForm({
   const removeBlock = (index: number) => {
     setBlocks((prev) => prev.filter((_, i) => i !== index));
     if (expandedBlock === index) setExpandedBlock(null);
+  };
+
+  // ── IMPROVEMENT: Duplicate block ──────────────────────────────────────
+  const duplicateBlock = (index: number) => {
+    setBlocks((prev) => {
+      const original = prev[index];
+      const clone: WorkoutBlock = {
+        ...original,
+        label: generateBlockLabel(original.type, prev),
+        movements: original.movements.map(m => ({ ...m })),
+      };
+      return [...prev.slice(0, index + 1), clone, ...prev.slice(index + 1)];
+    });
+    showToast('Block duplicated');
+  };
+
+  // ── IMPROVEMENT: Merge two adjacent blocks ────────────────────────────
+  const mergeBlocks = (indexA: number, indexB: number) => {
+    setBlocks((prev) => {
+      if (indexA < 0 || indexB >= prev.length) return prev;
+      const a = prev[indexA];
+      const b = prev[indexB];
+      // Can only merge exercise blocks
+      if (NO_MOVEMENT_BLOCKS.includes(a.type) || NO_MOVEMENT_BLOCKS.includes(b.type)) {
+        showAlert('Cannot Merge', 'Special blocks (Water Break, Transition, etc.) cannot be merged.');
+        return prev;
+      }
+      const merged: WorkoutBlock = {
+        ...a,
+        label: `${a.label} + ${b.label}`,
+        movements: [...a.movements, ...b.movements],
+      };
+      const newBlocks = [...prev];
+      newBlocks.splice(indexA, 2, merged);
+      return newBlocks;
+    });
+    showToast('Blocks merged');
+  };
+
+  // ── IMPROVEMENT: Move movement within block (up/down) ─────────────────
+  const moveMovementInBlock = (blockIndex: number, movIndex: number, direction: 'up' | 'down') => {
+    setBlocks((prev) =>
+      prev.map((b, i) => {
+        if (i !== blockIndex) return b;
+        const movs = [...b.movements];
+        const targetIdx = direction === 'up' ? movIndex - 1 : movIndex + 1;
+        if (targetIdx < 0 || targetIdx >= movs.length) return b;
+        [movs[movIndex], movs[targetIdx]] = [movs[targetIdx], movs[movIndex]];
+        return { ...b, movements: movs };
+      }),
+    );
+  };
+
+  // ── IMPROVEMENT: Move movement between blocks ─────────────────────────
+  const moveMovementToBlock = (fromBlock: number, movIndex: number, toBlock: number) => {
+    setBlocks((prev) => {
+      const src = prev[fromBlock];
+      const dst = prev[toBlock];
+      if (!src || !dst || NO_MOVEMENT_BLOCKS.includes(dst.type)) return prev;
+      const movement = src.movements[movIndex];
+      if (!movement) return prev;
+      return prev.map((b, i) => {
+        if (i === fromBlock) return { ...b, movements: b.movements.filter((_, mi) => mi !== movIndex) };
+        if (i === toBlock) return { ...b, movements: [...b.movements, movement] };
+        return b;
+      });
+    });
+    showToast('Movement moved');
+  };
+
+  // ── IMPROVEMENT: Apply global timing to all exercise blocks ───────────
+  const applyGlobalTiming = () => {
+    const work = parseInt(globalWorkSec, 10) || DEFAULT_DURATION_SEC;
+    const rest = parseInt(globalRestSec, 10) || DEFAULT_REST_SEC;
+    const rounds = parseInt(globalRounds, 10) || DEFAULT_ROUNDS;
+    const prep = parseInt(globalPrepSec, 10) || 0;
+
+    setBlocks((prev) =>
+      prev.map((b) => {
+        if (NO_MOVEMENT_BLOCKS.includes(b.type)) return b;
+        return {
+          ...b,
+          rounds,
+          firstMovementPrepSec: prep,
+          movements: b.movements.map((m) => ({
+            ...m,
+            durationSec: work,
+            restSec: rest,
+          })),
+        };
+      }),
+    );
+    setShowGlobalTiming(false);
+    showToast('Global timing applied to all blocks');
   };
 
   const onDragEnd = ({ data }: { data: WorkoutBlock[] }) => setBlocks(data);
@@ -376,6 +550,7 @@ export default function WorkoutForm({
                   reps: '10',
                   durationSec: DEFAULT_DURATION_SEC,
                   restSec: DEFAULT_REST_SEC,
+                  notes: '',
                   thumbnailUrl: movement.mediaUrl || movement.videoUrl || undefined,
                 },
               ],
@@ -410,7 +585,7 @@ export default function WorkoutForm({
   // ── Submit ─────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!name.trim()) {
-      Alert.alert('Name Required', 'Tap the workout name at the top to add a name.');
+      showAlert('Name Required', 'Tap the workout name at the top to add a name.');
       return;
     }
     setSubmitting(true);
@@ -425,6 +600,7 @@ export default function WorkoutForm({
         if (b.restBetweenMovementsSec) clean.restBetweenMovementsSec = b.restBetweenMovementsSec;
         if (b.durationSec) clean.durationSec = b.durationSec;
         if (b.instructionText) clean.instructionText = b.instructionText;
+        if (b.firstMovementPrepSec) clean.firstMovementPrepSec = b.firstMovementPrepSec;
         clean.movements = (b.movements ?? []).map((m) => {
           const cm: any = { movementId: m.movementId, movementName: m.movementName };
           if (m.sets) cm.sets = m.sets;
@@ -477,11 +653,15 @@ export default function WorkoutForm({
           createdAt: serverTimestamp(),
         });
       }
-      resetForm();
-      onClose();
+      showToast(isEdit ? 'Workout saved!' : 'Workout created!');
+      // Small delay so toast is visible before closing
+      setTimeout(() => {
+        resetForm();
+        onClose();
+      }, 600);
     } catch (error) {
       console.error('[WorkoutForm] Save error:', error);
-      Alert.alert('Error', 'Could not save workout. Please try again.');
+      showAlert('Error', 'Could not save workout. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -495,6 +675,23 @@ export default function WorkoutForm({
   // ── Block color helper ────────────────────────────────────────────────
   const blockColor = (type: string) => BLOCK_COLORS[type] || '#7DD3FC';
 
+  // ── Find adjacent exercise blocks for merge ───────────────────────────
+  const canMergeAbove = (bi: number) => {
+    if (bi <= 0) return false;
+    return !NO_MOVEMENT_BLOCKS.includes(blocks[bi].type) && !NO_MOVEMENT_BLOCKS.includes(blocks[bi - 1].type);
+  };
+
+  // ── Find adjacent exercise blocks for movement transfer ───────────────
+  const getAdjacentExerciseBlocks = (bi: number) => {
+    const result: { index: number; label: string }[] = [];
+    for (let i = 0; i < blocks.length; i++) {
+      if (i !== bi && !NO_MOVEMENT_BLOCKS.includes(blocks[i].type)) {
+        result.push({ index: i, label: blocks[i].label });
+      }
+    }
+    return result;
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <>
@@ -506,7 +703,7 @@ export default function WorkoutForm({
 
           {/* Header — Canvas-first: name inline, details behind gear */}
           <View style={s.header}>
-            <View style={{ flex: 1, marginRight: 12 }}>
+            <View style={{ flex: 1, marginRight: 8 }}>
               <TextInput
                 style={s.nameInput}
                 value={name}
@@ -529,6 +726,16 @@ export default function WorkoutForm({
                 <Text style={s.durationHint}>{blocks.length} block{blocks.length !== 1 ? 's' : ''}</Text>
               )}
             </View>
+            {/* Global timing button */}
+            {blocks.length > 0 && (
+              <TouchableOpacity
+                onPress={() => setShowGlobalTiming(true)}
+                style={s.headerBtn}
+                hitSlop={8}
+              >
+                <Icon name="clock" size={18} color="#8A95A3" />
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               onPress={() => setShowDetails(true)}
               style={s.headerBtn}
@@ -608,6 +815,15 @@ export default function WorkoutForm({
                               </Text>
                             </TouchableOpacity>
                           ))}
+                          {/* Merge button if both blocks are exercise blocks */}
+                          {canMergeAbove(bi) && (
+                            <TouchableOpacity
+                              style={s.quickInsertChip}
+                              onPress={() => mergeBlocks(bi - 1, bi)}
+                            >
+                              <Text style={[s.quickInsertText, { color: '#A78BFA' }]}>⊕</Text>
+                            </TouchableOpacity>
+                          )}
                           <View style={s.inserterLine} />
                         </View>
                       )}
@@ -644,7 +860,11 @@ export default function WorkoutForm({
                               </Text>
                             </TouchableOpacity>
                           )}
-                          <Pressable onPress={() => removeBlock(bi)} hitSlop={6}>
+                          {/* Duplicate button */}
+                          <Pressable onPress={() => duplicateBlock(bi)} hitSlop={6} style={{ marginLeft: 4 }}>
+                            <Icon name="copy" size={14} color="#4A5568" />
+                          </Pressable>
+                          <Pressable onPress={() => removeBlock(bi)} hitSlop={6} style={{ marginLeft: 4 }}>
                             <Icon name="close" size={16} color="#EF4444" />
                           </Pressable>
                         </View>
@@ -663,7 +883,7 @@ export default function WorkoutForm({
                               />
                             </View>
                             <View style={s.blockSettingItem}>
-                              <Text style={s.blockSettingLabel}>Rest Between Rounds</Text>
+                              <Text style={s.blockSettingLabel}>Rest Between</Text>
                               <TextInput
                                 style={s.blockSettingInput}
                                 value={String(block.restBetweenRoundsSec ?? 0)}
@@ -688,6 +908,19 @@ export default function WorkoutForm({
                                 />
                               </View>
                             )}
+                            {/* First movement prep time */}
+                            <View style={s.blockSettingItem}>
+                              <Text style={s.blockSettingLabel}>Prep Time</Text>
+                              <TextInput
+                                style={s.blockSettingInput}
+                                value={String(block.firstMovementPrepSec ?? 0)}
+                                onChangeText={(t) => updateBlockField(bi, 'firstMovementPrepSec', parseInt(t.replace(/[^0-9]/g, ''), 10) || 0)}
+                                keyboardType="number-pad"
+                                maxLength={3}
+                                placeholder="sec"
+                                placeholderTextColor="#4A5568"
+                              />
+                            </View>
                           </View>
                         )}
 
@@ -720,63 +953,113 @@ export default function WorkoutForm({
                         {/* Movements in this block (only for exercise blocks) */}
                         {!isSpecial && (
                           <>
-                            {block.movements.map((mov, mi) => (
-                              <View key={mi} style={s.movementRow}>
-                                {mov.thumbnailUrl && (
-                                  <Image
-                                    source={{ uri: mov.thumbnailUrl }}
-                                    style={s.movementThumbImg}
-                                  />
-                                )}
-                                <View style={s.movementInfo}>
-                                  <Text style={s.movementName} numberOfLines={1}>
-                                    {mov.movementName}
-                                  </Text>
-                                  <View style={s.movementFields}>
-                                    <TextInput
-                                      style={s.movementFieldInput}
-                                      value={String(mov.sets ?? '')}
-                                      onChangeText={(t) => updateMovementField(bi, mi, 'sets', parseInt(t.replace(/[^0-9]/g, ''), 10) || undefined)}
-                                      placeholder="Sets"
-                                      placeholderTextColor="#4A5568"
-                                      keyboardType="number-pad"
-                                      maxLength={2}
-                                    />
-                                    <Text style={s.movementFieldSep}>×</Text>
-                                    <TextInput
-                                      style={s.movementFieldInput}
-                                      value={mov.reps ?? ''}
-                                      onChangeText={(t) => updateMovementField(bi, mi, 'reps', t)}
-                                      placeholder="Reps"
-                                      placeholderTextColor="#4A5568"
-                                    />
-                                    <Text style={s.movementFieldSep}>|</Text>
-                                    <TextInput
-                                      style={s.movementFieldInput}
-                                      value={mov.durationSec ? String(mov.durationSec) : ''}
-                                      onChangeText={(t) => updateMovementField(bi, mi, 'durationSec', parseInt(t.replace(/[^0-9]/g, ''), 10) || undefined)}
-                                      placeholder={`${DEFAULT_DURATION_SEC}s`}
-                                      placeholderTextColor="#4A5568"
-                                      keyboardType="number-pad"
-                                      maxLength={3}
-                                    />
-                                    <Text style={s.movementFieldSep}>|</Text>
-                                    <TextInput
-                                      style={s.movementFieldInput}
-                                      value={mov.restSec ? String(mov.restSec) : ''}
-                                      onChangeText={(t) => updateMovementField(bi, mi, 'restSec', parseInt(t.replace(/[^0-9]/g, ''), 10) || undefined)}
-                                      placeholder={`${DEFAULT_REST_SEC}s`}
-                                      placeholderTextColor="#4A5568"
-                                      keyboardType="number-pad"
-                                      maxLength={3}
-                                    />
+                            {block.movements.map((mov, mi) => {
+                              const movKey = `${bi}-${mi}`;
+                              const isMovExpanded = expandedMovement === movKey;
+                              const adjacentBlocks = getAdjacentExerciseBlocks(bi);
+
+                              return (
+                                <View key={mi} style={s.movementRow}>
+                                  <View style={s.movementMainRow}>
+                                    {mov.thumbnailUrl && (
+                                      <Image
+                                        source={{ uri: mov.thumbnailUrl }}
+                                        style={s.movementThumbImg}
+                                      />
+                                    )}
+                                    <View style={s.movementInfo}>
+                                      <Text style={s.movementName} numberOfLines={1}>
+                                        {mov.movementName}
+                                      </Text>
+                                      <View style={s.movementFields}>
+                                        <TextInput
+                                          style={s.movementFieldInput}
+                                          value={String(mov.sets ?? '')}
+                                          onChangeText={(t) => updateMovementField(bi, mi, 'sets', parseInt(t.replace(/[^0-9]/g, ''), 10) || undefined)}
+                                          placeholder="Sets"
+                                          placeholderTextColor="#4A5568"
+                                          keyboardType="number-pad"
+                                          maxLength={2}
+                                        />
+                                        <Text style={s.movementFieldSep}>×</Text>
+                                        <TextInput
+                                          style={s.movementFieldInput}
+                                          value={mov.reps ?? ''}
+                                          onChangeText={(t) => updateMovementField(bi, mi, 'reps', t)}
+                                          placeholder="Reps"
+                                          placeholderTextColor="#4A5568"
+                                        />
+                                        <Text style={s.movementFieldSep}>|</Text>
+                                        <TextInput
+                                          style={s.movementFieldInput}
+                                          value={mov.durationSec ? String(mov.durationSec) : ''}
+                                          onChangeText={(t) => updateMovementField(bi, mi, 'durationSec', parseInt(t.replace(/[^0-9]/g, ''), 10) || undefined)}
+                                          placeholder={`${DEFAULT_DURATION_SEC}s`}
+                                          placeholderTextColor="#4A5568"
+                                          keyboardType="number-pad"
+                                          maxLength={3}
+                                        />
+                                        <Text style={s.movementFieldSep}>|</Text>
+                                        <TextInput
+                                          style={s.movementFieldInput}
+                                          value={mov.restSec ? String(mov.restSec) : ''}
+                                          onChangeText={(t) => updateMovementField(bi, mi, 'restSec', parseInt(t.replace(/[^0-9]/g, ''), 10) || undefined)}
+                                          placeholder={`${DEFAULT_REST_SEC}s`}
+                                          placeholderTextColor="#4A5568"
+                                          keyboardType="number-pad"
+                                          maxLength={3}
+                                        />
+                                      </View>
+                                    </View>
+                                    {/* Movement actions */}
+                                    <View style={s.movementActions}>
+                                      <Pressable onPress={() => setExpandedMovement(isMovExpanded ? null : movKey)} hitSlop={4}>
+                                        <Icon name={isMovExpanded ? 'chevron-up' : 'chevron-down'} size={14} color="#4A5568" />
+                                      </Pressable>
+                                      <Pressable onPress={() => removeMovementFromBlock(bi, mi)} hitSlop={4}>
+                                        <Icon name="close" size={14} color="#EF4444" />
+                                      </Pressable>
+                                    </View>
                                   </View>
+
+                                  {/* Expanded: coaching cues + move controls */}
+                                  {isMovExpanded && (
+                                    <View style={s.movementExpanded}>
+                                      <TextInput
+                                        style={s.coachingCuesInput}
+                                        value={mov.notes ?? ''}
+                                        onChangeText={(t) => updateMovementField(bi, mi, 'notes', t)}
+                                        placeholder="Coaching cues..."
+                                        placeholderTextColor="#4A5568"
+                                        multiline
+                                      />
+                                      <View style={s.movementMoveRow}>
+                                        {mi > 0 && (
+                                          <Pressable style={s.moveMoveBtn} onPress={() => moveMovementInBlock(bi, mi, 'up')}>
+                                            <Icon name="arrow-up" size={12} color="#7DD3FC" />
+                                            <Text style={s.moveMoveBtnText}>Up</Text>
+                                          </Pressable>
+                                        )}
+                                        {mi < block.movements.length - 1 && (
+                                          <Pressable style={s.moveMoveBtn} onPress={() => moveMovementInBlock(bi, mi, 'down')}>
+                                            <Icon name="arrow-down" size={12} color="#7DD3FC" />
+                                            <Text style={s.moveMoveBtnText}>Down</Text>
+                                          </Pressable>
+                                        )}
+                                        {adjacentBlocks.length > 0 && (
+                                          adjacentBlocks.slice(0, 3).map((ab) => (
+                                            <Pressable key={ab.index} style={s.moveMoveBtn} onPress={() => moveMovementToBlock(bi, mi, ab.index)}>
+                                              <Icon name="arrow-right" size={12} color="#A78BFA" />
+                                              <Text style={s.moveMoveBtnText} numberOfLines={1}>→ {ab.label}</Text>
+                                            </Pressable>
+                                          ))
+                                        )}
+                                      </View>
+                                    </View>
+                                  )}
                                 </View>
-                                <Pressable onPress={() => removeMovementFromBlock(bi, mi)} hitSlop={6}>
-                                  <Icon name="close" size={14} color="#EF4444" />
-                                </Pressable>
-                              </View>
-                            ))}
+                              );
+                            })}
 
                             {/* Add movement picker */}
                             {addingMovementToBlock === bi ? (
@@ -879,6 +1162,13 @@ export default function WorkoutForm({
               </Text>
             </TouchableOpacity>
           </View>
+
+          {/* Toast banner */}
+          {toastMessage && (
+            <View style={s.toast}>
+              <Text style={s.toastText}>{toastMessage}</Text>
+            </View>
+          )}
         </View>
       </View>
     </Modal>
@@ -886,7 +1176,7 @@ export default function WorkoutForm({
     {/* ── Block Type Picker Modal ──────────────────────────────────── */}
     <Modal visible={showBlockTypePicker} transparent animationType="fade">
       <Pressable style={s.pickerOverlay} onPress={() => { setShowBlockTypePicker(false); setInsertAtIndex(null); }}>
-        <View style={s.pickerSheet}>
+        <Pressable style={s.pickerSheet} onPress={(e) => e.stopPropagation()}>
           <Text style={s.pickerTitle}>Add Block</Text>
           <Text style={s.pickerSubtitle}>Exercise Blocks</Text>
           <View style={s.pickerGrid}>
@@ -914,7 +1204,64 @@ export default function WorkoutForm({
               </TouchableOpacity>
             ))}
           </View>
-        </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+
+    {/* ── Global Timing Modal ────────────────────────────────────── */}
+    <Modal visible={showGlobalTiming} transparent animationType="fade">
+      <Pressable style={s.pickerOverlay} onPress={() => setShowGlobalTiming(false)}>
+        <Pressable style={s.pickerSheet} onPress={(e) => e.stopPropagation()}>
+          <Text style={s.pickerTitle}>Global Timing</Text>
+          <Text style={[s.pickerSubtitle, { marginTop: 0 }]}>Apply to all exercise blocks</Text>
+
+          <View style={s.globalTimingGrid}>
+            <View style={s.globalTimingItem}>
+              <Text style={s.blockSettingLabel}>Work (sec)</Text>
+              <TextInput
+                style={s.blockSettingInput}
+                value={globalWorkSec}
+                onChangeText={setGlobalWorkSec}
+                keyboardType="number-pad"
+                maxLength={3}
+              />
+            </View>
+            <View style={s.globalTimingItem}>
+              <Text style={s.blockSettingLabel}>Rest (sec)</Text>
+              <TextInput
+                style={s.blockSettingInput}
+                value={globalRestSec}
+                onChangeText={setGlobalRestSec}
+                keyboardType="number-pad"
+                maxLength={3}
+              />
+            </View>
+            <View style={s.globalTimingItem}>
+              <Text style={s.blockSettingLabel}>Rounds</Text>
+              <TextInput
+                style={s.blockSettingInput}
+                value={globalRounds}
+                onChangeText={setGlobalRounds}
+                keyboardType="number-pad"
+                maxLength={2}
+              />
+            </View>
+            <View style={s.globalTimingItem}>
+              <Text style={s.blockSettingLabel}>Prep (sec)</Text>
+              <TextInput
+                style={s.blockSettingInput}
+                value={globalPrepSec}
+                onChangeText={setGlobalPrepSec}
+                keyboardType="number-pad"
+                maxLength={3}
+              />
+            </View>
+          </View>
+
+          <TouchableOpacity style={[s.saveBtn, { marginTop: 16, alignSelf: 'stretch' }]} onPress={applyGlobalTiming}>
+            <Text style={[s.saveBtnText, { textAlign: 'center' }]}>Apply to All Blocks</Text>
+          </TouchableOpacity>
+        </Pressable>
       </Pressable>
     </Modal>
 
@@ -1035,32 +1382,20 @@ export default function WorkoutForm({
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8, maxHeight: 36, paddingHorizontal: 16 }}>
                 {availableCategories.map((cat) => (
                   <TouchableOpacity key={cat} onPress={() => setCategoryFilter(cat)} style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: categoryFilter === cat ? '#F5A623' : '#1A1F2E', marginRight: 6, borderWidth: 1, borderColor: categoryFilter === cat ? '#F5A623' : '#252B3B' }}>
-                    <Text style={{ fontSize: 12, fontFamily: FB, color: categoryFilter === cat ? '#0E1117' : '#8A95A3', fontWeight: categoryFilter === cat ? '700' : '400' }}>{cat}</Text>
+                    <Text style={{ fontSize: 12, fontFamily: FB, color: categoryFilter === cat ? '#0E1117' : '#8A95A3' }}>{cat}</Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
             )}
             {filteredTemplates.map((t) => (
-              <View key={t.id} style={s.templatePickerItem}>
-                <TouchableOpacity style={{ flex: 1 }} onPress={() => loadFromTemplate(t)}>
+              <TouchableOpacity key={t.id} style={s.templatePickerItem} onPress={() => loadFromTemplate(t)}>
+                <View style={{ flex: 1 }}>
                   <Text style={s.templatePickerName}>{t.name}</Text>
                   <Text style={s.templatePickerMeta}>
-                    {t.category || 'No category'} · {t.difficulty || 'No difficulty'}
-                    {t.blocks?.length ? ` · ${t.blocks.length} blocks` : ''}
+                    {t.category || 'No category'} · {t.difficulty || 'Any'} · {t.blocks?.length ?? 0} blocks
                   </Text>
-                </TouchableOpacity>
-                <View style={{ flexDirection: 'row', gap: 6 }}>
-                  <TouchableOpacity onPress={() => { const n = Platform.OS === 'web' ? window.prompt('Rename:', t.name) : null; if (n) renameTemplate(t.id, n); }} hitSlop={8}>
-                    <Icon name="edit-2" size={16} color="#8A95A3" />
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => toggleShareTemplate(t.id, !t.isShared)} hitSlop={8}>
-                    <Icon name={t.isShared ? 'globe' : 'lock'} size={16} color={t.isShared ? '#F5A623' : '#8A95A3'} />
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => { if (Platform.OS === 'web') { if (window.confirm(`Delete "${t.name}"?`)) deleteTemplate(t.id); } else { Alert.alert('Delete', `Delete "${t.name}"?`, [{ text: 'Cancel' }, { text: 'Delete', style: 'destructive', onPress: () => deleteTemplate(t.id) }]); } }} hitSlop={8}>
-                    <Icon name="trash-2" size={16} color="#E53E3E" />
-                  </TouchableOpacity>
                 </View>
-              </View>
+              </TouchableOpacity>
             ))}
           </ScrollView>
         </View>
@@ -1081,19 +1416,19 @@ const s = StyleSheet.create({
     backgroundColor: '#111827',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: '94%',
+    maxHeight: '95%',
+    flex: 1,
     borderWidth: 1,
     borderColor: '#1E2A3A',
     borderBottomWidth: 0,
-    flex: 1,
   },
   handle: {
-    width: 36,
+    width: 40,
     height: 4,
-    backgroundColor: '#2A3347',
     borderRadius: 2,
+    backgroundColor: '#2A3347',
     alignSelf: 'center',
-    marginTop: 12,
+    marginTop: 10,
     marginBottom: 4,
   },
   header: {
@@ -1113,7 +1448,7 @@ const s = StyleSheet.create({
   },
   headerBtn: {
     padding: 6,
-    marginLeft: 8,
+    marginLeft: 6,
   },
   nameInput: {
     fontSize: 20,
@@ -1237,7 +1572,7 @@ const s = StyleSheet.create({
   blockHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   blockTypeBadge: {
     paddingHorizontal: 8,
@@ -1245,7 +1580,7 @@ const s = StyleSheet.create({
     borderRadius: 6,
   },
   blockTypeBadgeText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     fontFamily: FH,
     textTransform: 'uppercase',
@@ -1273,11 +1608,12 @@ const s = StyleSheet.create({
   // ── Block settings ──────────────────────────────────────────────────
   blockSettingsRow: {
     flexDirection: 'row',
-    gap: 16,
+    gap: 12,
     paddingTop: 8,
     paddingBottom: 4,
     borderTopWidth: 1,
     borderTopColor: '#1E2A3A',
+    flexWrap: 'wrap',
   },
   blockSettingItem: {
     gap: 4,
@@ -1285,7 +1621,7 @@ const s = StyleSheet.create({
   blockSettingLabel: {
     fontSize: 10,
     fontWeight: '600',
-    color: '#4A5568',
+    color: '#8A95A3',
     fontFamily: FB,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -1325,14 +1661,17 @@ const s = StyleSheet.create({
 
   // ── Movement rows ───────────────────────────────────────────────────
   movementRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: '#161B22',
     borderRadius: 8,
     padding: 8,
-    gap: 8,
+    gap: 6,
     borderWidth: 1,
     borderColor: '#2A3347',
+  },
+  movementMainRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   movementThumbImg: {
     width: 36,
@@ -1373,6 +1712,51 @@ const s = StyleSheet.create({
     fontSize: 12,
     color: '#4A5568',
     fontFamily: FB,
+  },
+  movementActions: {
+    gap: 8,
+    alignItems: 'center',
+  },
+  movementExpanded: {
+    gap: 8,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#2A3347',
+  },
+  coachingCuesInput: {
+    backgroundColor: '#0E1117',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 12,
+    color: '#F0F4F8',
+    fontFamily: FB,
+    borderWidth: 1,
+    borderColor: '#2A3347',
+    minHeight: 36,
+    textAlignVertical: 'top',
+  },
+  movementMoveRow: {
+    flexDirection: 'row',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  moveMoveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#0E1117',
+    borderWidth: 1,
+    borderColor: '#2A3347',
+  },
+  moveMoveBtnText: {
+    fontSize: 11,
+    color: '#8A95A3',
+    fontFamily: FB,
+    maxWidth: 80,
   },
   addMovementBtn: {
     flexDirection: 'row',
@@ -1540,6 +1924,19 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontFamily: FB,
     fontWeight: '500',
+  },
+
+  // ── Global timing modal ─────────────────────────────────────────────
+  globalTimingGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 16,
+    marginTop: 16,
+    justifyContent: 'center',
+  },
+  globalTimingItem: {
+    alignItems: 'center',
+    gap: 6,
   },
 
   // ── Details sheet ───────────────────────────────────────────────────
@@ -1747,5 +2144,25 @@ const s = StyleSheet.create({
     fontWeight: '700',
     color: '#0E1117',
     fontFamily: FH,
+  },
+
+  // ── Toast ──────────────────────────────────────────────────────────
+  toast: {
+    position: 'absolute',
+    bottom: 80,
+    left: 20,
+    right: 20,
+    backgroundColor: '#34D399',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    zIndex: 999,
+  },
+  toastText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0E1117',
+    fontFamily: FB,
   },
 });
