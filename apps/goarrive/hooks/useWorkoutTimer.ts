@@ -1,14 +1,22 @@
 /**
- * useWorkoutTimer — Extracted timer logic for the Workout Player
+ * useWorkoutTimer — Timer state machine for the Workout Player
  *
- * Manages countdown/work/rest/swap phase timing with audio cues and haptics.
- * Keeps WorkoutPlayer focused on rendering while this hook handles all timing state.
+ * Phase 3 upgrade: Handles special block types as distinct phases:
+ *   - 'intro' / 'outro': full-screen cinematic countdown
+ *   - 'demo': preview of upcoming movements with auto-advance
+ *   - 'transition': instruction display with countdown
+ *   - 'waterBreak': hydration pause with countdown
+ *
+ * Exercise phases remain: ready → countdown → work → rest/swap → next
+ * Special block phases: ready → [special] → next
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { playCue } from '../lib/audioCues';
 import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess } from '../lib/haptics';
+import type { StepType } from './useWorkoutFlatten';
 
-export type Phase = 'ready' | 'countdown' | 'work' | 'rest' | 'swap' | 'complete';
+export type Phase = 'ready' | 'countdown' | 'work' | 'rest' | 'swap' | 'complete'
+  | 'intro' | 'outro' | 'demo' | 'transition' | 'waterBreak';
 
 const COUNTDOWN_SECONDS = 3;
 
@@ -18,12 +26,25 @@ interface FlatMovement {
   restAfter: number;
   swapSides: boolean;
   reps?: string;
+  stepType?: StepType;
   [key: string]: any;
 }
 
 interface UseWorkoutTimerOptions {
   flatMovements: FlatMovement[];
   onComplete?: () => void;
+}
+
+/** Map StepType to Phase */
+function stepTypeToPhase(stepType: StepType | undefined): Phase {
+  switch (stepType) {
+    case 'intro': return 'intro';
+    case 'outro': return 'outro';
+    case 'demo': return 'demo';
+    case 'transition': return 'transition';
+    case 'waterBreak': return 'waterBreak';
+    default: return 'countdown';
+  }
 }
 
 export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOptions) {
@@ -37,12 +58,13 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
   const current = flatMovements[currentIndex] ?? null;
   const next = currentIndex + 1 < total ? flatMovements[currentIndex + 1] : null;
 
-  // Rep-based mode: movement has reps but no meaningful duration
   const isRepBased = !!(current?.reps && (!current.duration || current.duration <= 0));
+  const isSpecialPhase = phase === 'intro' || phase === 'outro' || phase === 'demo'
+    || phase === 'transition' || phase === 'waterBreak';
 
   const progressPct = total > 0 ? (currentIndex / total) * 100 : 0;
 
-  // ── Advance to next movement ─────────────────────────────────────────
+  // ── Advance to next step ────────────────────────────────────────────
   const advanceToNext = useCallback(() => {
     const nextIdx = currentIndex + 1;
     if (nextIdx >= total) {
@@ -52,24 +74,35 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     } else {
       setCurrentIndex(nextIdx);
       setSwapSide('L');
-      setPhase('countdown');
-      setTimeLeft(COUNTDOWN_SECONDS);
-    }
-  }, [currentIndex, total]);
 
-  // ── Timer tick ───────────────────────────────────────────────────────
+      const nextStep = flatMovements[nextIdx];
+      const nextStepType = nextStep?.stepType;
+
+      if (nextStepType && nextStepType !== 'exercise') {
+        // Special block — go directly to its phase
+        const specialPhase = stepTypeToPhase(nextStepType);
+        setPhase(specialPhase);
+        setTimeLeft(nextStep.duration ?? 10);
+      } else {
+        // Exercise — go through countdown
+        setPhase('countdown');
+        setTimeLeft(COUNTDOWN_SECONDS);
+      }
+    }
+  }, [currentIndex, total, flatMovements]);
+
+  // ── Timer tick ──────────────────────────────────────────────────────
   useEffect(() => {
     if (isPaused) return;
-    if (phase !== 'countdown' && phase !== 'work' && phase !== 'rest' && phase !== 'swap')
-      return;
+    if (phase === 'ready' || phase === 'complete') return;
     if (timeLeft <= 0) return;
 
     const interval = setInterval(() => {
       setTimeLeft((prev) => {
         const n = prev - 1;
-        // Only play beep tones during countdown/rest/swap phases.
-        // During WORK phase, TTS handles "3... 2... 1... rest" voice.
-        if (phase !== 'work') {
+
+        // Audio/haptic cues for countdowns
+        if (phase === 'countdown' || phase === 'rest' || phase === 'swap') {
           if (n <= 3 && n > 0) {
             playCue('countdownTick');
             hapticLight();
@@ -78,25 +111,32 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
             playCue('countdownFinal');
             hapticMedium();
           }
-        } else {
-          // During WORK phase, still provide haptic feedback
-          if (n <= 3 && n > 0) {
-            hapticLight();
-          }
-          if (n === 0) {
-            hapticMedium();
-          }
+        } else if (phase === 'work') {
+          if (n <= 3 && n > 0) hapticLight();
+          if (n === 0) hapticMedium();
+        } else if (isSpecialPhase) {
+          // Gentle haptic at 3 seconds remaining for special blocks
+          if (n === 3) hapticLight();
+          if (n === 0) hapticMedium();
         }
+
         return n;
       });
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [phase, timeLeft, isPaused]);
+  }, [phase, timeLeft, isPaused, isSpecialPhase]);
 
-  // ── Timer hit zero → transition ──────────────────────────────────────
+  // ── Timer hit zero → transition ─────────────────────────────────────
   useEffect(() => {
     if (isPaused || timeLeft > 0) return;
+
+    // Special block phases: auto-advance when timer reaches 0
+    if (phase === 'intro' || phase === 'outro' || phase === 'demo'
+        || phase === 'transition' || phase === 'waterBreak') {
+      advanceToNext();
+      return;
+    }
 
     if (phase === 'countdown') {
       setPhase('work');
@@ -125,22 +165,32 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     }
   }, [timeLeft, phase, isPaused]);
 
-  // ── Controls ─────────────────────────────────────────────────────────
+  // ── Controls ────────────────────────────────────────────────────────
   const handleStart = useCallback(() => {
     if (total === 0) return;
-    setPhase('countdown');
-    setTimeLeft(COUNTDOWN_SECONDS);
+
+    const firstStep = flatMovements[0];
+    const firstStepType = firstStep?.stepType;
+
+    if (firstStepType && firstStepType !== 'exercise') {
+      // First step is a special block — go directly to its phase
+      const specialPhase = stepTypeToPhase(firstStepType);
+      setPhase(specialPhase);
+      setTimeLeft(firstStep.duration ?? 10);
+    } else {
+      setPhase('countdown');
+      setTimeLeft(COUNTDOWN_SECONDS);
+    }
     hapticHeavy();
-  }, [total]);
+  }, [total, flatMovements]);
 
   const handlePauseResume = useCallback(() => {
     setIsPaused((p) => !p);
   }, []);
 
   const handleSkip = useCallback(() => {
-    if (phase === 'rest' || phase === 'work' || phase === 'swap' || phase === 'countdown') {
-      advanceToNext();
-    }
+    if (phase === 'ready' || phase === 'complete') return;
+    advanceToNext();
   }, [phase, advanceToNext]);
 
   const handleRepDone = useCallback(() => {
@@ -159,7 +209,6 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     }
   }, [current, swapSide, advanceToNext]);
 
-  // ── Reset on new workout ─────────────────────────────────────────────
   const reset = useCallback(() => {
     setCurrentIndex(0);
     setPhase('ready');
@@ -179,6 +228,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     total,
     isRepBased,
     progressPct,
+    isSpecialPhase,
     handleStart,
     handlePauseResume,
     handleSkip,

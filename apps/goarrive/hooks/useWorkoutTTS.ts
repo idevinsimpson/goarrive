@@ -1,16 +1,20 @@
 /**
  * useWorkoutTTS — Text-to-speech hook for the Workout Player
  *
- * Voice coaching cues:
- *   - Ready → "Welcome to your GoArrive workout"
+ * Phase 3 upgrade: Now handles special block voice cues:
+ *   - Intro: "Welcome to your GoArrive workout"
+ *   - Outro: "Great job! Your workout is complete"
+ *   - Demo: "Here's what's coming up" + movement names
+ *   - Transition: reads instruction text aloud
+ *   - Water Break: "Grab your water, stay hydrated"
+ *
+ * Exercise movement cues (unchanged):
  *   - First WORK movement → "First up, [name]"
  *   - Subsequent WORK movements → "Next up, [name]"
- *   - Halfway through movements → "That's halfway"
- *   - Last 3 seconds of WORK (non-final) → "3... 2... 1... rest"
- *   - Last 3 seconds of final WORK → "3... 2... 1... rest. Your workout is complete, great job!"
+ *   - Halfway → "That's halfway"
+ *   - Last 3 seconds of WORK → "3... 2... 1... rest"
  *   - REST phase → "Rest. Next up: [name]"
  *   - SWAP phase → "Switch sides"
- *   - COMPLETE phase → (handled by countdown voice)
  *
  * Uses expo-speech on native, Web Speech API on web.
  * Respects the global audio mute toggle.
@@ -18,23 +22,20 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import * as Speech from 'expo-speech';
 import { Platform } from 'react-native';
+import type { StepType } from './useWorkoutFlatten';
 
-type Phase = 'ready' | 'countdown' | 'work' | 'rest' | 'swap' | 'complete';
+type Phase = 'ready' | 'countdown' | 'work' | 'rest' | 'swap' | 'complete'
+  | 'intro' | 'outro' | 'demo' | 'transition' | 'waterBreak';
 
 interface UseWorkoutTTSOptions {
   phase: Phase;
-  current: { name: string; [key: string]: any } | null;
+  current: { name: string; stepType?: StepType; instructionText?: string; demoMovements?: { name: string }[]; [key: string]: any } | null;
   next: { name: string; [key: string]: any } | null;
   isMuted: boolean;
-  /** If true, TTS is disabled entirely (user preference) */
   ttsDisabled?: boolean;
-  /** Current movement index (0-based) */
   currentIndex: number;
-  /** Total number of movements */
   total: number;
-  /** Seconds remaining in current phase */
   timeLeft: number;
-  /** Current movement duration (to detect halfway) */
   currentDuration: number;
 }
 
@@ -74,7 +75,6 @@ export function useWorkoutTTS({
     check();
   }, []);
 
-  /** Web Speech API fallback for browsers */
   const speakWeb = useCallback((text: string) => {
     try {
       if (typeof window === 'undefined') return;
@@ -87,7 +87,7 @@ export function useWorkoutTTS({
       utterance.pitch = 1.0;
       synth.speak(utterance);
     } catch {
-      // Web Speech API unavailable — silent fail
+      // Web Speech API unavailable
     }
   }, []);
 
@@ -106,23 +106,93 @@ export function useWorkoutTTS({
           pitch: 1.0,
         });
       } catch {
-        // TTS unavailable — silent fail
+        // TTS unavailable
       }
     },
     [isMuted, ttsDisabled, speakWeb],
   );
 
+  // ── Special block announcements ────────────────────────────────────
+  useEffect(() => {
+    if (!current) return;
+    const stepType = current.stepType;
+
+    // Intro block
+    if (phase === 'intro' || (phase === 'work' && stepType === 'intro')) {
+      const key = `intro_${currentIndex}`;
+      if (lastSpokenRef.current !== key) {
+        lastSpokenRef.current = key;
+        speak('Welcome to your GoArrive workout. Let\'s get started.');
+      }
+      return;
+    }
+
+    // Outro block
+    if (phase === 'outro' || (phase === 'work' && stepType === 'outro')) {
+      const key = `outro_${currentIndex}`;
+      if (lastSpokenRef.current !== key) {
+        lastSpokenRef.current = key;
+        speak('Great job! Your workout is complete. You crushed it.');
+      }
+      return;
+    }
+
+    // Demo block
+    if (phase === 'demo' || (phase === 'work' && stepType === 'demo')) {
+      const key = `demo_${currentIndex}`;
+      if (lastSpokenRef.current !== key) {
+        lastSpokenRef.current = key;
+        const movements = current.demoMovements || [];
+        if (movements.length > 0) {
+          const names = movements.map((m: any) => m.name).join(', then ');
+          speak(`Here's what's coming up: ${names}`);
+        } else {
+          speak("Here's what's coming up");
+        }
+      }
+      return;
+    }
+
+    // Transition block
+    if (phase === 'transition' || (phase === 'work' && stepType === 'transition')) {
+      const key = `transition_${currentIndex}`;
+      if (lastSpokenRef.current !== key) {
+        lastSpokenRef.current = key;
+        const instruction = current.instructionText || current.description || '';
+        if (instruction) {
+          speak(instruction);
+        } else {
+          speak('Transition. Get ready for the next section.');
+        }
+      }
+      return;
+    }
+
+    // Water Break block
+    if (phase === 'waterBreak' || (phase === 'work' && stepType === 'waterBreak')) {
+      const key = `waterBreak_${currentIndex}`;
+      if (lastSpokenRef.current !== key) {
+        lastSpokenRef.current = key;
+        speak('Water break. Grab your water, stay hydrated.');
+      }
+      return;
+    }
+  }, [phase, current?.stepType, currentIndex, speak]);
+
   // ── Welcome message on first countdown ──────────────────────────────
   useEffect(() => {
     if (phase === 'countdown' && currentIndex === 0 && !welcomeSpokenRef.current) {
-      welcomeSpokenRef.current = true;
-      speak('Welcome to your GoArrive workout');
+      // Only speak welcome if the first step is an exercise (intro handles its own)
+      if (current?.stepType === 'exercise') {
+        welcomeSpokenRef.current = true;
+        speak('Welcome to your GoArrive workout');
+      }
     }
-  }, [phase, currentIndex, speak]);
+  }, [phase, currentIndex, current?.stepType, speak]);
 
-  // ── Movement announcements ──────────────────────────────────────────
+  // ── Exercise movement announcements ────────────────────────────────
   useEffect(() => {
-    if (!current) return;
+    if (!current || current.stepType !== 'exercise') return;
 
     if (phase === 'work') {
       const key = `work_${currentIndex}_${current.name}`;
@@ -159,12 +229,12 @@ export function useWorkoutTTS({
       halfwaySpokenRef.current = false;
       countdownSpokenRef.current = -1;
     }
-  }, [phase, current?.name, currentIndex, next?.name, speak]);
+  }, [phase, current?.name, current?.stepType, currentIndex, next?.name, speak]);
 
-  // ── Halfway announcement ────────────────────────────────────────────
+  // ── Halfway announcement (exercise only) ───────────────────────────
   useEffect(() => {
-    if (phase !== 'work' || !current) return;
-    if (currentDuration <= 6) return; // Too short for halfway
+    if (phase !== 'work' || !current || current.stepType !== 'exercise') return;
+    if (currentDuration <= 6) return;
     const halfway = Math.floor(currentDuration / 2);
     if (timeLeft === halfway && !halfwaySpokenRef.current) {
       halfwaySpokenRef.current = true;
@@ -172,12 +242,9 @@ export function useWorkoutTTS({
     }
   }, [phase, timeLeft, currentDuration, current, speak]);
 
-  // ── Countdown voice: "3... 2... 1... rest" ──────────────────────────
-  // Replaces the beep tones. Speaks the number at 3, 2, 1 seconds remaining.
-  // At 0 (handled by phase transition), the rest/complete announcement fires.
+  // ── Countdown voice: "3... 2... 1... rest" (exercise only) ─────────
   useEffect(() => {
-    if (phase !== 'work' || !current) return;
-    // Only speak countdown for timed movements (not rep-based)
+    if (phase !== 'work' || !current || current.stepType !== 'exercise') return;
     if (currentDuration <= 0) return;
 
     if (timeLeft === 3 && countdownSpokenRef.current !== 3) {
@@ -200,7 +267,7 @@ export function useWorkoutTTS({
     }
   }, [phase, timeLeft, current, currentDuration, currentIndex, total, speak]);
 
-  // Cleanup: stop speech when unmounting
+  // Cleanup
   useEffect(() => {
     return () => {
       try {

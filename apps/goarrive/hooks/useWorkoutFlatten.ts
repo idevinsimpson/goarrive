@@ -1,21 +1,35 @@
 /**
- * useWorkoutFlatten — Flattens workout blocks into a linear movement sequence
+ * useWorkoutFlatten — Flattens workout blocks into a linear playback sequence
  *
- * Extracted from WorkoutPlayer to keep the component focused on rendering.
- * Returns a stable array of FlatMovement objects.
+ * Phase 3 upgrade: Now handles ALL block types including special blocks:
+ *   - Intro / Outro: full-screen cinematic moments (~10s default)
+ *   - Demo: previews upcoming multi-movement block's movements
+ *   - Transition: instruction text + duration for equipment/location changes
+ *   - Water Break: hydration pause with media area active
+ *   - Exercise blocks: Warm-Up, Circuit, Superset, Interval, Strength,
+ *     Timed, AMRAP, EMOM, Cool-Down, Rest
  *
- * Suggestion 2: Now supports blockType for superset and circuit patterns:
- *   - "linear" / default: movements run sequentially per set
- *   - "superset": A1→A2→A1→A2 alternating pattern for 2+ movements
- *   - "circuit": A1→A2→A3→A1→A2→A3 rotating pattern for 3+ movements
+ * Special blocks become FlatStep objects with `stepType` set to the block type.
+ * Exercise movements become FlatStep objects with `stepType: 'exercise'`.
  *
- * The block.type field (from WorkoutForm) maps to these patterns:
- *   "Superset" → superset
- *   "Circuit" / "AMRAP" → circuit
- *   Everything else → linear
+ * The player reads `stepType` to decide which render screen to show.
  */
 import { useMemo } from 'react';
 import { calculateAdjustedRest } from './useRestAutoAdjust';
+
+// ── Special block types that don't contain movements ──────────────────
+const SPECIAL_BLOCK_TYPES = new Set([
+  'Intro', 'Outro', 'Demo', 'Transition', 'Water Break',
+]);
+
+// ── Types ─────────────────────────────────────────────────────────────
+export type StepType =
+  | 'exercise'
+  | 'intro'
+  | 'outro'
+  | 'demo'
+  | 'transition'
+  | 'waterBreak';
 
 export interface FlatMovement {
   name: string;
@@ -31,18 +45,24 @@ export interface FlatMovement {
   videoUrl?: string;
   thumbnailUrl?: string;
   coachingCues?: string;
-  /** Firestore movement document ID for hydration */
   movementId?: string;
-  /** Label shown in player (e.g., "A1", "A2" for supersets) */
   supersetLabel?: string;
-  /** The block pattern type for UI display */
   blockType?: 'linear' | 'superset' | 'circuit';
-  /** Non-destructive crop: scale factor (1 = no zoom) */
   cropScale?: number;
-  /** Non-destructive crop: horizontal offset in px */
   cropTranslateX?: number;
-  /** Non-destructive crop: vertical offset in px */
   cropTranslateY?: number;
+
+  // ── Phase 3: Special block fields ───────────────────────────────
+  /** What kind of step this is — determines which player screen renders */
+  stepType: StepType;
+  /** For Demo blocks: array of upcoming movement names to preview */
+  demoMovements?: { name: string; thumbnailUrl?: string; videoUrl?: string; movementId?: string }[];
+  /** For Transition blocks: instruction text from coach */
+  instructionText?: string;
+  /** For Intro/Outro: whether this is full-screen cinematic */
+  isFullScreen?: boolean;
+  /** Original block type string (e.g., 'Warm-Up', 'Circuit') */
+  originalBlockType?: string;
 }
 
 export function resolveBlockType(blockType: string | undefined): 'linear' | 'superset' | 'circuit' {
@@ -52,10 +72,21 @@ export function resolveBlockType(blockType: string | undefined): 'linear' | 'sup
   return 'linear';
 }
 
-/** Generate a superset/circuit label like A1, A2, B1, B2 */
 function makeLabel(blockIndex: number, movementIndex: number): string {
-  const letter = String.fromCharCode(65 + blockIndex); // A, B, C...
+  const letter = String.fromCharCode(65 + blockIndex);
   return `${letter}${movementIndex + 1}`;
+}
+
+/** Map block type string to StepType */
+function toStepType(blockType: string): StepType {
+  switch (blockType) {
+    case 'Intro': return 'intro';
+    case 'Outro': return 'outro';
+    case 'Demo': return 'demo';
+    case 'Transition': return 'transition';
+    case 'Water Break': return 'waterBreak';
+    default: return 'exercise';
+  }
 }
 
 export function useWorkoutFlatten(workout: any): FlatMovement[] {
@@ -66,6 +97,49 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
     const blocks = workout.blocks || [];
 
     blocks.forEach((block: any, bi: number) => {
+      const blockType = block.type || 'Circuit';
+
+      // ── Special blocks ──────────────────────────────────────────────
+      if (SPECIAL_BLOCK_TYPES.has(blockType)) {
+        const stepType = toStepType(blockType);
+        const duration = block.durationSec ?? (blockType === 'Intro' || blockType === 'Outro' ? 10 : 30);
+
+        // For Demo blocks, look ahead to find the next exercise block's movements
+        let demoMovements: FlatMovement['demoMovements'] = undefined;
+        if (blockType === 'Demo') {
+          for (let j = bi + 1; j < blocks.length; j++) {
+            const nextBlock = blocks[j];
+            if (!SPECIAL_BLOCK_TYPES.has(nextBlock.type || 'Circuit') && nextBlock.movements?.length > 1) {
+              demoMovements = (nextBlock.movements || []).map((m: any) => ({
+                name: m.movementName || m.name || 'Movement',
+                thumbnailUrl: m.thumbnailUrl || '',
+                videoUrl: m.videoUrl || m.mediaUrl || '',
+                movementId: m.movementId || '',
+              }));
+              break;
+            }
+          }
+        }
+
+        flat.push({
+          name: block.label || block.name || blockType,
+          duration,
+          restAfter: 0,
+          blockName: block.label || block.name || blockType,
+          blockIndex: bi,
+          movementIndex: 0,
+          swapSides: false,
+          description: block.instructionText || block.description || '',
+          stepType,
+          demoMovements,
+          instructionText: block.instructionText || '',
+          isFullScreen: blockType === 'Intro' || blockType === 'Outro',
+          originalBlockType: blockType,
+        });
+        return;
+      }
+
+      // ── Exercise blocks ─────────────────────────────────────────────
       const movements = block.movements || [];
       if (movements.length === 0) return;
 
@@ -73,21 +147,32 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
       const workoutDifficulty = workout.difficulty || 'Intermediate';
       const rounds = block.rounds ?? block.sets ?? 1;
       const bType = resolveBlockType(block.type);
+      const firstMovePrepSec = block.firstMovementPrepSec ?? 0;
+
+      // If there's a first-movement prep time, insert a prep step before the block
+      if (firstMovePrepSec > 0) {
+        flat.push({
+          name: `Get Ready: ${block.label || block.name || blockType}`,
+          duration: firstMovePrepSec,
+          restAfter: 0,
+          blockName: block.label || block.name || `Block ${bi + 1}`,
+          blockIndex: bi,
+          movementIndex: -1,
+          swapSides: false,
+          description: `Prepare for ${movements[0]?.movementName || movements[0]?.name || 'first movement'}`,
+          stepType: 'transition',
+          instructionText: `Get ready for ${movements[0]?.movementName || movements[0]?.name || 'the first movement'}`,
+          originalBlockType: blockType,
+        });
+      }
 
       if (bType === 'superset' || bType === 'circuit') {
-        // ── Superset / Circuit: alternate movements across rounds ──────
-        // Pattern: round 1 → [A1, A2, A3], round 2 → [A1, A2, A3], ...
         for (let round = 0; round < rounds; round++) {
           movements.forEach((mv: any, mi: number) => {
             const isLastMovementInRound = mi === movements.length - 1;
             const isLastRound = round === rounds - 1;
             const isVeryLast = isLastMovementInRound && isLastRound;
 
-            // Rest logic:
-            // - Between movements within a round: use block.restBetweenMovementsSec if set,
-            //   else movement's restSec, else 0 for supersets / auto-adjusted for circuits
-            // - Between rounds: block rest
-            // - After last movement of last round: no rest
             const transitionRest = block.restBetweenMovementsSec;
             let restAfter = 0;
             if (isVeryLast) {
@@ -95,10 +180,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
             } else if (isLastMovementInRound) {
               restAfter = blockRest;
             } else if (transitionRest != null && transitionRest > 0) {
-              // Coach explicitly set transition rest for this block
               restAfter = transitionRest;
             } else {
-              // Fallback: supersets get minimal rest, circuits get auto-adjusted
               restAfter = bType === 'superset'
                 ? (mv.restSec ?? 0)
                 : calculateAdjustedRest(mv, block, workoutDifficulty);
@@ -106,21 +189,23 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
 
             flat.push({
               name: mv.movementName || mv.name || 'Movement',
-              duration: mv.duration || mv.workSec || 30,
+              duration: mv.duration || mv.durationSec || mv.workSec || 30,
               restAfter,
               blockName: block.name || block.label || `Block ${bi + 1}`,
               blockIndex: bi,
               movementIndex: mi,
               swapSides: mv.swapSides ?? false,
-              description: mv.description || mv.coachingCues || '',
+              description: mv.description || mv.coachingCues || mv.notes || '',
               sets: mv.sets,
               reps: mv.reps,
               videoUrl: mv.videoUrl || mv.mediaUrl || '',
               thumbnailUrl: mv.thumbnailUrl || '',
-              coachingCues: mv.coachingCues || '',
+              coachingCues: mv.coachingCues || mv.notes || '',
               movementId: mv.movementId || '',
               supersetLabel: makeLabel(bi, mi),
               blockType: bType,
+              stepType: 'exercise',
+              originalBlockType: blockType,
               cropScale: mv.cropScale ?? 1,
               cropTranslateX: mv.cropTranslateX ?? 0,
               cropTranslateY: mv.cropTranslateY ?? 0,
@@ -128,27 +213,28 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
           });
         }
       } else {
-        // ── Linear: sequential movements, each repeated for its sets ──
         for (let setNum = 0; setNum < rounds; setNum++) {
           movements.forEach((mv: any, mi: number) => {
             const isLastInBlock =
               setNum === rounds - 1 && mi === movements.length - 1;
             flat.push({
               name: mv.movementName || mv.name || 'Movement',
-              duration: mv.duration || mv.workSec || 30,
+              duration: mv.duration || mv.durationSec || mv.workSec || 30,
               restAfter: isLastInBlock ? 0 : calculateAdjustedRest(mv, block, workoutDifficulty),
               blockName: block.name || block.label || `Block ${bi + 1}`,
               blockIndex: bi,
               movementIndex: mi,
               swapSides: mv.swapSides ?? false,
-              description: mv.description || mv.coachingCues || '',
+              description: mv.description || mv.coachingCues || mv.notes || '',
               sets: mv.sets,
               reps: mv.reps,
               videoUrl: mv.videoUrl || mv.mediaUrl || '',
               thumbnailUrl: mv.thumbnailUrl || '',
-              coachingCues: mv.coachingCues || '',
+              coachingCues: mv.coachingCues || mv.notes || '',
               movementId: mv.movementId || '',
               blockType: 'linear',
+              stepType: 'exercise',
+              originalBlockType: blockType,
               cropScale: mv.cropScale ?? 1,
               cropTranslateX: mv.cropTranslateX ?? 0,
               cropTranslateY: mv.cropTranslateY ?? 0,
