@@ -109,23 +109,25 @@ export default function AppLayout() {
         }}
       />
       <Tabs.Screen
-        name="workouts"
+        name="build"
         options={{
-          title: 'Workouts',
-          tabBarIcon: ({ color }) => (
-            <Icon name="workouts" size={26} color={color} />
+          title: 'Build',
+          tabBarIcon: ({ color, focused }) => (
+            <Icon name={focused ? 'build-filled' : 'build'} size={26} color={color} />
           ),
         }}
       />
       <Tabs.Screen
-        name="movements"
+        name="scheduling"
         options={{
-          title: 'Movements',
+          title: 'Scheduling',
           tabBarIcon: ({ color }) => (
-            <Icon name="movements" size={26} color={color} />
+            <Icon name="calendar" size={26} color={color} />
           ),
         }}
       />
+      <Tabs.Screen name="workouts" options={{ href: null }} />
+      <Tabs.Screen name="movements" options={{ href: null }} />
       {/* Hidden screens — accessible via navigation but not shown in tab bar */}
       <Tabs.Screen name="admin" options={{ href: null }} />
       <Tabs.Screen name="account" options={{ href: null }} />

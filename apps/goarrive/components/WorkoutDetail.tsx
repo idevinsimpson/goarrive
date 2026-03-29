@@ -53,7 +53,7 @@ export interface WorkoutDetailData {
 }
 
 interface WorkoutDetailProps {
-  workout: WorkoutDetailData;
+  workout: WorkoutDetailData | null;
   onClose: () => void;
   onEdit?: (workout: WorkoutDetailData) => void;
   onArchive?: (workout: WorkoutDetailData) => void;
@@ -71,11 +71,12 @@ export default function WorkoutDetail({
   const coachId = claims?.coachId ?? user?.uid ?? '';
   const tenantId = claims?.tenantId ?? '';
 
-  const [currentWorkout, setCurrentWorkout] = useState<WorkoutDetailData>(workout);
+  const [currentWorkout, setCurrentWorkout] = useState<WorkoutDetailData>(workout as WorkoutDetailData);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showBatchModal, setShowBatchModal] = useState(false);
 
   useEffect(() => {
+    if (!workout?.id) return;
     const unsubscribe = onSnapshot(doc(db, 'workouts', workout.id), (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
@@ -99,7 +100,7 @@ export default function WorkoutDetail({
       }
     });
     return () => unsubscribe();
-  }, [workout.id]);
+  }, [workout?.id]);
 
   async function handleAssign(
     _workoutId: string,

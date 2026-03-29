@@ -9,7 +9,7 @@
  * even when the app tab is not open.
  */
 
-const CACHE_VERSION = '20260328-060000';
+const CACHE_VERSION = '20260329-043000';
 const CACHE_NAME = `goarrive-${CACHE_VERSION}`;
 const STATIC_ASSETS = [
   '/',
@@ -31,7 +31,7 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// Activate event: clean up old caches
+// Activate event: clean up old caches and claim all clients immediately
 self.addEventListener('activate', (event) => {
   console.log('[SW] Activating service worker...');
   event.waitUntil(
@@ -44,6 +44,9 @@ self.addEventListener('activate', (event) => {
           }
         })
       );
+    }).then(() => {
+      // Claim all open tabs immediately so they use the new SW
+      return self.clients.claim();
     })
   );
 });
@@ -97,29 +100,52 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // For JS/CSS bundles, use stale-while-revalidate: serve cache immediately,
-  // then update cache in background so next load gets fresh version.
-  // For images and other assets, use network-first with cache fallback.
+  // For JS/CSS entry bundles, use NETWORK-FIRST strategy to prevent stale bundles.
+  // Hashed chunk files (contain a hash in the filename) are immutable and safe to cache-first.
   const isBundle = url.pathname.endsWith('.js') || url.pathname.endsWith('.css');
 
   if (isBundle) {
-    event.respondWith(
-      caches.open(CACHE_NAME).then((cache) => {
-        return cache.match(request).then((cached) => {
-          const fetchPromise = fetch(request).then((response) => {
+    // Entry bundles change on every deploy — always try network first
+    const isEntryBundle = url.pathname.includes('entry-');
+
+    if (isEntryBundle) {
+      // Network-first for entry bundles
+      event.respondWith(
+        fetch(request)
+          .then((response) => {
             if (response.ok) {
-              cache.put(request, response.clone());
+              const responseToCache = response.clone();
+              caches.open(CACHE_NAME).then((cache) => {
+                cache.put(request, responseToCache);
+              });
             }
             return response;
-          }).catch(() => {
-            // Network failed, return cached if available
-            return cached;
+          })
+          .catch(() => {
+            return caches.match(request).then((cached) => {
+              if (cached) {
+                console.log('[SW] Serving entry bundle from cache (offline):', request.url);
+                return cached;
+              }
+            });
+          })
+      );
+    } else {
+      // Cache-first for hashed chunk files (immutable)
+      event.respondWith(
+        caches.open(CACHE_NAME).then((cache) => {
+          return cache.match(request).then((cached) => {
+            if (cached) return cached;
+            return fetch(request).then((response) => {
+              if (response.ok) {
+                cache.put(request, response.clone());
+              }
+              return response;
+            });
           });
-          // Return cached immediately if available, otherwise wait for network
-          return cached || fetchPromise;
-        });
-      })
-    );
+        })
+      );
+    }
     return;
   }
 
