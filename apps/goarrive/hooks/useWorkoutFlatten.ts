@@ -94,7 +94,13 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
     if (!workout?.blocks) return [];
 
     const flat: FlatMovement[] = [];
-    const blocks = workout.blocks || [];
+    const rawBlocks = workout.blocks || [];
+
+    // ── Reorder: Intro first, Outro last, everything else in original order ──
+    const introBlocks = rawBlocks.filter((b: any) => (b.type || '') === 'Intro');
+    const outroBlocks = rawBlocks.filter((b: any) => (b.type || '') === 'Outro');
+    const middleBlocks = rawBlocks.filter((b: any) => (b.type || '') !== 'Intro' && (b.type || '') !== 'Outro');
+    const blocks = [...introBlocks, ...middleBlocks, ...outroBlocks];
 
     blocks.forEach((block: any, bi: number) => {
       const blockType = block.type || 'Circuit';
@@ -243,6 +249,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
         }
       }
     });
+
 
     return flat;
   }, [workout]);
