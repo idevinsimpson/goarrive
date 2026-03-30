@@ -26,8 +26,6 @@ import {
   collection,
   query,
   where,
-  orderBy,
-  limit,
   getDocs,
   doc,
   updateDoc,
@@ -81,13 +79,17 @@ export default function WorkoutLogReview({
         query(
           collection(db, 'workout_logs'),
           where('coachId', '==', coachId),
-          orderBy('completedAt', 'desc'),
-          limit(20),
         ),
       );
       const unreviewedLogs = snap.docs
         .map((d) => ({ id: d.id, ...d.data() } as WorkoutLog))
-        .filter((l) => !l.reviewedAt);
+        .filter((l) => !l.reviewedAt)
+        .sort((a, b) => {
+          const at = a.completedAt?.toDate?.() ?? new Date(0);
+          const bt = b.completedAt?.toDate?.() ?? new Date(0);
+          return bt.getTime() - at.getTime();
+        })
+        .slice(0, 20);
       setLogs(unreviewedLogs);
     } catch (err) {
       console.error('Error fetching workout logs:', err);

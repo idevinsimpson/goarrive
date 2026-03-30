@@ -22,8 +22,6 @@ import {
   query,
   where,
   getDocs,
-  orderBy,
-  limit,
 } from 'firebase/firestore';
 import { AppHeader } from '../../components/AppHeader';
 import CheckInCard from '../../components/CheckInCard';
@@ -155,8 +153,6 @@ export default function DashboardScreen() {
         query(
           collection(db, 'workout_assignments'),
           where('coachId', '==', coachId),
-          orderBy('scheduledFor', 'desc'),
-          limit(20),
         ),
       ).catch(() => ({ docs: [] as any[] }));
 
@@ -184,15 +180,17 @@ export default function DashboardScreen() {
       const checkinsSnap = await getDocs(
         query(
           collection(db, 'checkins'),
-          orderBy('timestamp', 'desc'),
-          limit(5),
         ),
       ).catch(() => ({ docs: [] as any[] }));
 
-      const recentCheckins = checkinsSnap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-      }));
+      const recentCheckins = checkinsSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a: any, b: any) => {
+          const at = a.timestamp?.toDate?.() ?? new Date(0);
+          const bt = b.timestamp?.toDate?.() ?? new Date(0);
+          return bt.getTime() - at.getTime();
+        })
+        .slice(0, 5);
 
       // Filter archived members client-side (no composite index for coachId+isArchived)
       const activeMembers = membersSnap.docs.filter((d) => !d.data().isArchived);

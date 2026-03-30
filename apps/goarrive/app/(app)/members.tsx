@@ -39,7 +39,6 @@ import {
   doc,
   query,
   where,
-  orderBy,
   Timestamp,
   serverTimestamp,
 } from 'firebase/firestore';
@@ -141,7 +140,6 @@ export default function MembersScreen() {
       const q = query(
         collection(db, 'members'),
         where('coachId', '==', coachId),
-        orderBy('createdAt', 'desc'),
       );
       const snap = await getDocs(q);
       const memberList = snap.docs.map((d) => {
@@ -158,6 +156,12 @@ export default function MembersScreen() {
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
         };
+      });
+      // Sort client-side (no composite index needed)
+      memberList.sort((a, b) => {
+        const at = a.createdAt?.toDate?.() ?? new Date(0);
+        const bt = b.createdAt?.toDate?.() ?? new Date(0);
+        return bt.getTime() - at.getTime();
       });
       setMembers(memberList);
 

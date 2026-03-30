@@ -46,6 +46,7 @@ import { useWorkoutTTS } from '../hooks/useWorkoutTTS';
 import { useMovementSwap } from '../hooks/useMovementSwap';
 import { useMovementHydrate } from '../hooks/useMovementHydrate';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
+import { useNetworkStatus } from '../hooks/useNetworkStatus';
 
 const FH =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -116,6 +117,9 @@ export default function WorkoutPlayer({
   });
 
   const showTTSWarning = !isTTSAvailable && !audioMuted;
+
+  // ── Offline resilience ─────────────────────────────
+  const { isOffline, queueSize } = useNetworkStatus();
 
   // ── Movement swap ─────────────────────────────
   const {
@@ -205,6 +209,12 @@ export default function WorkoutPlayer({
           {workout?.name ?? 'Workout'}
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          {isOffline && (
+            <View style={st.offlineBadge}>
+              <Icon name="wifi-off" size={12} color="#F59E0B" />
+              <Text style={st.offlineBadgeText}>Offline{queueSize > 0 ? ` (${queueSize})` : ''}</Text>
+            </View>
+          )}
           {showTTSWarning && (
             <View style={st.ttsWarning}>
               <Icon name="alert-triangle" size={12} color="#E06B4F" />
@@ -1122,6 +1132,14 @@ const st = StyleSheet.create({
   },
   ttsWarningText: {
     fontSize: 10, color: '#E06B4F', fontFamily: FB, fontWeight: '600',
+  },
+  offlineBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8,
+    backgroundColor: 'rgba(245,158,11,0.15)',
+  },
+  offlineBadgeText: {
+    fontSize: 10, color: '#F59E0B', fontFamily: FB, fontWeight: '600',
   },
 
   // Swap modal

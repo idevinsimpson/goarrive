@@ -35,6 +35,8 @@ import {
   onSnapshot,
   doc,
   updateDoc,
+  addDoc,
+  serverTimestamp,
 } from 'firebase/firestore';
 import { useAuth } from '../../lib/AuthContext';
 import { db } from '../../lib/firebase';
@@ -118,6 +120,12 @@ function BuildScreenInner() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [showArchived, setShowArchived] = useState(false);
   
+  // Folders
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [folderStack, setFolderStack] = useState<{ id: string; name: string }[]>([]);
+  const [showFolderCreate, setShowFolderCreate] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+
   // Modals
   const [selectedMovement, setSelectedMovement] = useState<any | null>(null);
   const [editMovement, setEditMovement] = useState<any | null>(null);
@@ -125,6 +133,17 @@ function BuildScreenInner() {
   const [selectedWorkout, setSelectedWorkout] = useState<any | null>(null);
   const [editWorkout, setEditWorkout] = useState<any | null>(null);
   const [isWorkoutFormOpen, setIsWorkoutFormOpen] = useState(false);
+
+  // Plans & Playbooks
+  const [showPlanCreate, setShowPlanCreate] = useState(false);
+  const [newPlanName, setNewPlanName] = useState('');
+  const [newPlanWeeks, setNewPlanWeeks] = useState('4');
+  const [newPlanDesc, setNewPlanDesc] = useState('');
+  const [showPlaybookCreate, setShowPlaybookCreate] = useState(false);
+  const [newPlaybookName, setNewPlaybookName] = useState('');
+  const [newPlaybookDesc, setNewPlaybookDesc] = useState('');
+  const [selectedPlan, setSelectedPlan] = useState<any | null>(null);
+  const [selectedPlaybook, setSelectedPlaybook] = useState<any | null>(null);
 
   const tenantId = claims?.tenantId ?? '';
 
@@ -188,14 +207,14 @@ function BuildScreenInner() {
         } as BuildItem));
         
         setItems(prev => {
-          const otherItems = prev.filter(i => i.type !== 'Workouts');
+          const otherItems = prev.filter(i => i.type !== 'Workouts' && i.type !== 'Folder');
           return [...otherItems, ...workoutItems].sort((a, b) => 
             (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)
           );
         });
         workoutsLoaded = true;
         if (movementsLoaded && workoutsLoaded) setLoading(false);
-        else setLoading(false); // Don't block on the other query
+        else setLoading(false);
       },
       (err) => {
         console.error('[Build] Workouts listener error:', err);
@@ -204,36 +223,236 @@ function BuildScreenInner() {
       },
     );
 
+    // Folders listener
+    const foldersQuery = query(
+      collection(db, 'build_folders'),
+      where('coachId', '==', coachId),
+    );
+    const unsubFolders = onSnapshot(
+      foldersQuery,
+      (snap) => {
+        const folderItems: BuildItem[] = snap.docs.map(d => ({
+          id: d.id,
+          ...d.data(),
+          type: 'Folder' as any,
+          name: d.data().name || 'Untitled Folder',
+          isArchived: false,
+        } as BuildItem));
+        setItems(prev => {
+          const otherItems = prev.filter(i => i.type !== 'Folder');
+          return [...otherItems, ...folderItems].sort((a, b) => 
+            (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)
+          );
+        });
+      },
+      (err) => console.error('[Build] Folders listener error:', err),
+    );
+
+    // Plans listener
+    const plansQuery = query(collection(db, 'plans'), where('coachId', '==', coachId));
+    const unsubPlans = onSnapshot(
+      plansQuery,
+      (snap) => {
+        const planItems: BuildItem[] = snap.docs.map(d => ({
+          id: d.id,
+          ...d.data(),
+          type: 'Plans' as BuildType,
+          name: d.data().name || 'Untitled Plan',
+        } as BuildItem));
+        setItems(prev => {
+          const otherItems = prev.filter(i => i.type !== 'Plans');
+          return [...otherItems, ...planItems].sort((a, b) =>
+            (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)
+          );
+        });
+      },
+      (err) => console.error('[Build] Plans listener error:', err),
+    );
+
+    // Playbooks listener
+    const playbooksQuery = query(collection(db, 'playbooks'), where('coachId', '==', coachId));
+    const unsubPlaybooks = onSnapshot(
+      playbooksQuery,
+      (snap) => {
+        const playbookItems: BuildItem[] = snap.docs.map(d => ({
+          id: d.id,
+          ...d.data(),
+          type: 'Playbooks' as BuildType,
+          name: d.data().name || 'Untitled Playbook',
+        } as BuildItem));
+        setItems(prev => {
+          const otherItems = prev.filter(i => i.type !== 'Playbooks');
+          return [...otherItems, ...playbookItems].sort((a, b) =>
+            (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)
+          );
+        });
+      },
+      (err) => console.error('[Build] Playbooks listener error:', err),
+    );
+
     return () => {
       unsubMovements();
       unsubWorkouts();
+      unsubFolders();
+      unsubPlans();
+      unsubPlaybooks();
     };
   }, [coachId]);
+
+  // ── Folder helpers ─────────────────────────────────────────────────────
+  const enterFolder = useCallback((folder: BuildItem) => {
+    setFolderStack(prev => [...prev, { id: folder.id, name: folder.name }]);
+    setCurrentFolderId(folder.id);
+  }, []);
+
+  const goBackFolder = useCallback(() => {
+    setFolderStack(prev => {
+      const next = prev.slice(0, -1);
+      setCurrentFolderId(next.length > 0 ? next[next.length - 1].id : null);
+      return next;
+    });
+  }, []);
+
+  const createFolder = useCallback(async () => {
+    const name = newFolderName.trim();
+    if (!name) return;
+    try {
+      await addDoc(collection(db, 'build_folders'), {
+        coachId,
+        tenantId,
+        name,
+        parentId: currentFolderId || null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setNewFolderName('');
+      setShowFolderCreate(false);
+    } catch (e) {
+      console.error('[Build] Create folder error:', e);
+    }
+  }, [coachId, tenantId, currentFolderId, newFolderName]);
+
+  // ── Plan & Playbook creation ─────────────────────────────────────────
+  const createPlan = useCallback(async () => {
+    const name = newPlanName.trim();
+    if (!name) return;
+    try {
+      await addDoc(collection(db, 'plans'), {
+        coachId,
+        tenantId,
+        name,
+        description: newPlanDesc.trim(),
+        weeks: parseInt(newPlanWeeks) || 4,
+        workoutIds: [],
+        isArchived: false,
+        parentId: currentFolderId || null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setNewPlanName(''); setNewPlanDesc(''); setNewPlanWeeks('4');
+      setShowPlanCreate(false);
+    } catch (e) { console.error('[Build] Create plan error:', e); }
+  }, [coachId, tenantId, currentFolderId, newPlanName, newPlanDesc, newPlanWeeks]);
+
+  const createPlaybook = useCallback(async () => {
+    const name = newPlaybookName.trim();
+    if (!name) return;
+    try {
+      await addDoc(collection(db, 'playbooks'), {
+        coachId,
+        tenantId,
+        name,
+        description: newPlaybookDesc.trim(),
+        workoutIds: [],
+        isArchived: false,
+        parentId: currentFolderId || null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setNewPlaybookName(''); setNewPlaybookDesc('');
+      setShowPlaybookCreate(false);
+    } catch (e) { console.error('[Build] Create playbook error:', e); }
+  }, [coachId, tenantId, currentFolderId, newPlaybookName, newPlaybookDesc]);
 
   // ── Filtering ──────────────────────────────────────────────────────────
   const filteredItems = useMemo(() => {
     let list = items;
-    // Client-side archive filter (replaces Firestore compound query)
+    // Client-side archive filter
     list = list.filter(i => !!i.isArchived === showArchived);
+    // Folder navigation: show items in current folder
+    if (currentFolderId) {
+      list = list.filter(i => i.parentId === currentFolderId || (i.type === 'Folder' && i.parentId === currentFolderId));
+    } else if (!search.trim()) {
+      // At root: show items without parentId + top-level folders
+      list = list.filter(i => !i.parentId);
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(i => i.name?.toLowerCase().includes(q));
     }
     if (activeType !== 'All') {
-      list = list.filter(i => i.type === activeType);
+      list = list.filter(i => i.type === activeType || i.type === 'Folder');
     }
+    // Sort: folders first, then by date
+    list.sort((a, b) => {
+      if (a.type === 'Folder' && b.type !== 'Folder') return -1;
+      if (a.type !== 'Folder' && b.type === 'Folder') return 1;
+      return (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0);
+    });
     return list;
-  }, [items, search, activeType, showArchived]);
+  }, [items, search, activeType, showArchived, currentFolderId]);
 
   // ── Render Helpers ─────────────────────────────────────────────────────
   const renderItem = ({ item }: { item: BuildItem }) => {
+    // Folder card
+    if (item.type === 'Folder') {
+      if (viewMode === 'grid') {
+        return (
+          <Pressable style={[s.gridCard]} onPress={() => enterFolder(item)}>
+            <View style={[s.cardMedia, { backgroundColor: '#1A2332' }]}>
+              <View style={s.mediaPlaceholder}>
+                <Icon name="folder" size={40} color="#F5A623" />
+              </View>
+              <View style={s.typeBadge}>
+                <Text style={s.typeBadgeText}>Folder</Text>
+              </View>
+            </View>
+            <View style={s.cardInfo}>
+              <Text style={s.cardName} numberOfLines={1}>{item.name}</Text>
+              <Text style={s.cardSub}>Folder</Text>
+            </View>
+          </Pressable>
+        );
+      }
+      return (
+        <Pressable style={s.listItem} onPress={() => enterFolder(item)}>
+          <View style={[s.listMedia, { backgroundColor: '#1A2332' }]}>
+            <View style={s.listPlaceholder}>
+              <Icon name="folder" size={20} color="#F5A623" />
+            </View>
+          </View>
+          <View style={s.listContent}>
+            <Text style={s.listName}>{item.name}</Text>
+            <Text style={s.listSub}>Folder</Text>
+          </View>
+          <Icon name="chevron-right" size={20} color="#4A5568" />
+        </Pressable>
+      );
+    }
+
     if (viewMode === 'grid') {
       const isMovement = item.type === 'Movements';
+      const isPlan = item.type === 'Plans';
+      const isPlaybook = item.type === 'Playbooks';
+      const iconName = isPlan ? 'plan' : isPlaybook ? 'playbook' : isMovement ? 'movements' : 'workouts';
+      const iconColor = isPlan ? '#60A5FA' : isPlaybook ? '#A78BFA' : '#1E2A3A';
       return (
         <Pressable 
           style={[s.gridCard, isMovement ? s.movementCard : s.workoutCard]}
           onPress={() => {
             if (isMovement) setSelectedMovement(item);
+            else if (isPlan) setSelectedPlan(item);
+            else if (isPlaybook) setSelectedPlaybook(item);
             else setSelectedWorkout(item);
           }}
         >
@@ -244,7 +463,7 @@ function BuildScreenInner() {
               <Image source={{ uri: item.coverThumbs[0] }} style={s.cardImage} />
             ) : (
               <View style={s.mediaPlaceholder}>
-                <Icon name={isMovement ? 'movements' : 'workouts'} size={32} color="#1E2A3A" />
+                <Icon name={iconName} size={32} color={iconColor} />
               </View>
             )}
             <View style={s.typeBadge}>
@@ -264,6 +483,8 @@ function BuildScreenInner() {
         style={s.listItem}
         onPress={() => {
           if (item.type === 'Movements') setSelectedMovement(item);
+          else if (item.type === 'Plans') setSelectedPlan(item);
+          else if (item.type === 'Playbooks') setSelectedPlaybook(item);
           else setSelectedWorkout(item);
         }}
       >
@@ -272,7 +493,7 @@ function BuildScreenInner() {
             <Image source={{ uri: item.thumbnailUrl || item.mediaUrl }} style={s.listImage} />
           ) : (
             <View style={s.listPlaceholder}>
-              <Icon name={item.type === 'Movements' ? 'movements' : 'workouts'} size={20} color="#4A5568" />
+              <Icon name={item.type === 'Plans' ? 'plan' : item.type === 'Playbooks' ? 'playbook' : item.type === 'Movements' ? 'movements' : 'workouts'} size={20} color={item.type === 'Plans' ? '#60A5FA' : item.type === 'Playbooks' ? '#A78BFA' : '#4A5568'} />
             </View>
           )}
         </View>
@@ -288,6 +509,33 @@ function BuildScreenInner() {
   return (
     <View style={s.root}>
       <AppHeader />
+
+      {/* Folder breadcrumb */}
+      {folderStack.length > 0 && (
+        <View style={s.breadcrumb}>
+          <Pressable onPress={() => { setCurrentFolderId(null); setFolderStack([]); }}>
+            <Text style={s.breadcrumbText}>Build</Text>
+          </Pressable>
+          {folderStack.map((f, i) => (
+            <React.Fragment key={f.id}>
+              <Text style={s.breadcrumbSep}>/</Text>
+              <Pressable onPress={() => {
+                const next = folderStack.slice(0, i + 1);
+                setFolderStack(next);
+                setCurrentFolderId(f.id);
+              }}>
+                <Text style={[s.breadcrumbText, i === folderStack.length - 1 && { color: '#F5A623' }]}>
+                  {f.name}
+                </Text>
+              </Pressable>
+            </React.Fragment>
+          ))}
+          <Pressable onPress={goBackFolder} style={s.breadcrumbBack}>
+            <Icon name="arrow-left" size={14} color="#8A95A3" />
+            <Text style={s.breadcrumbBackText}>Back</Text>
+          </Pressable>
+        </View>
+      )}
 
       <View style={s.toolbar}>
         <View style={s.searchWrap}>
@@ -440,8 +688,8 @@ function BuildScreenInner() {
         <Pressable style={s.modalBackdrop} onPress={() => setIsPlusOpen(false)}>
           <View style={s.plusMenu}>
             <Text style={s.plusMenuTitle}>Create New</Text>
-            <Pressable style={s.plusMenuItem} onPress={() => setIsPlusOpen(false)}>
-              <Icon name="plan" size={20} color="#F0F4F8" />
+            <Pressable style={s.plusMenuItem} onPress={() => { setIsPlusOpen(false); setShowPlanCreate(true); }}>
+              <Icon name="plan" size={20} color="#60A5FA" />
               <Text style={s.plusMenuItemText}>Plan</Text>
             </Pressable>
             <Pressable 
@@ -466,12 +714,197 @@ function BuildScreenInner() {
               <Icon name="workouts" size={20} color="#F0F4F8" />
               <Text style={s.plusMenuItemText}>Workout</Text>
             </Pressable>
-            <Pressable style={s.plusMenuItem} onPress={() => setIsPlusOpen(false)}>
-              <Icon name="playbook" size={20} color="#F0F4F8" />
+            <Pressable style={s.plusMenuItem} onPress={() => { setIsPlusOpen(false); setShowPlaybookCreate(true); }}>
+              <Icon name="playbook" size={20} color="#A78BFA" />
               <Text style={s.plusMenuItemText}>Playbook</Text>
+            </Pressable>
+            <Pressable 
+              style={s.plusMenuItem} 
+              onPress={() => {
+                setIsPlusOpen(false);
+                setShowFolderCreate(true);
+              }}
+            >
+              <Icon name="folder" size={20} color="#F5A623" />
+              <Text style={s.plusMenuItemText}>Folder</Text>
             </Pressable>
           </View>
         </Pressable>
+      </Modal>
+
+      {/* Folder Create Modal */}
+      <Modal transparent visible={showFolderCreate} animationType="fade" onRequestClose={() => setShowFolderCreate(false)}>
+        <Pressable style={s.modalBackdrop} onPress={() => setShowFolderCreate(false)}>
+          <View style={s.plusMenu} onStartShouldSetResponder={() => true}>
+            <Text style={s.plusMenuTitle}>New Folder</Text>
+            <TextInput
+              style={s.folderInput}
+              placeholder="Folder name..."
+              placeholderTextColor="#4A5568"
+              value={newFolderName}
+              onChangeText={setNewFolderName}
+              autoFocus
+              onSubmitEditing={createFolder}
+            />
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
+              <Pressable
+                style={[s.folderBtn, { backgroundColor: '#1E2A3A' }]}
+                onPress={() => { setShowFolderCreate(false); setNewFolderName(''); }}
+              >
+                <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[s.folderBtn, { backgroundColor: '#F5A623', flex: 1 }]}
+                onPress={createFolder}
+              >
+                <Text style={{ color: '#0E1117', fontWeight: '700', fontFamily: FH }}>Create</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Plan Create Modal */}
+      <Modal transparent visible={showPlanCreate} animationType="fade" onRequestClose={() => setShowPlanCreate(false)}>
+        <Pressable style={s.modalBackdrop} onPress={() => setShowPlanCreate(false)}>
+          <View style={s.plusMenu} onStartShouldSetResponder={() => true}>
+            <Text style={s.plusMenuTitle}>New Plan</Text>
+            <TextInput
+              style={s.folderInput}
+              placeholder="Plan name..."
+              placeholderTextColor="#4A5568"
+              value={newPlanName}
+              onChangeText={setNewPlanName}
+              autoFocus
+            />
+            <TextInput
+              style={[s.folderInput, { marginTop: 10 }]}
+              placeholder="Description (optional)"
+              placeholderTextColor="#4A5568"
+              value={newPlanDesc}
+              onChangeText={setNewPlanDesc}
+              multiline
+            />
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, gap: 8 }}>
+              <Text style={{ color: '#8A95A3', fontSize: 14, fontFamily: FB }}>Weeks:</Text>
+              <TextInput
+                style={[s.folderInput, { flex: 1 }]}
+                placeholder="4"
+                placeholderTextColor="#4A5568"
+                value={newPlanWeeks}
+                onChangeText={setNewPlanWeeks}
+                keyboardType="numeric"
+              />
+            </View>
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
+              <Pressable
+                style={[s.folderBtn, { backgroundColor: '#1E2A3A' }]}
+                onPress={() => { setShowPlanCreate(false); setNewPlanName(''); setNewPlanDesc(''); setNewPlanWeeks('4'); }}
+              >
+                <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[s.folderBtn, { backgroundColor: '#60A5FA', flex: 1 }]}
+                onPress={createPlan}
+              >
+                <Text style={{ color: '#0E1117', fontWeight: '700', fontFamily: FH }}>Create Plan</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Playbook Create Modal */}
+      <Modal transparent visible={showPlaybookCreate} animationType="fade" onRequestClose={() => setShowPlaybookCreate(false)}>
+        <Pressable style={s.modalBackdrop} onPress={() => setShowPlaybookCreate(false)}>
+          <View style={s.plusMenu} onStartShouldSetResponder={() => true}>
+            <Text style={s.plusMenuTitle}>New Playbook</Text>
+            <TextInput
+              style={s.folderInput}
+              placeholder="Playbook name..."
+              placeholderTextColor="#4A5568"
+              value={newPlaybookName}
+              onChangeText={setNewPlaybookName}
+              autoFocus
+            />
+            <TextInput
+              style={[s.folderInput, { marginTop: 10 }]}
+              placeholder="Description (optional)"
+              placeholderTextColor="#4A5568"
+              value={newPlaybookDesc}
+              onChangeText={setNewPlaybookDesc}
+              multiline
+            />
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
+              <Pressable
+                style={[s.folderBtn, { backgroundColor: '#1E2A3A' }]}
+                onPress={() => { setShowPlaybookCreate(false); setNewPlaybookName(''); setNewPlaybookDesc(''); }}
+              >
+                <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[s.folderBtn, { backgroundColor: '#A78BFA', flex: 1 }]}
+                onPress={createPlaybook}
+              >
+                <Text style={{ color: '#0E1117', fontWeight: '700', fontFamily: FH }}>Create Playbook</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Plan Detail Modal */}
+      <Modal transparent visible={!!selectedPlan} animationType="slide" onRequestClose={() => setSelectedPlan(null)}>
+        <View style={s.modalBackdrop}>
+          <View style={[s.plusMenu, { maxHeight: '80%' }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <Text style={[s.plusMenuTitle, { marginBottom: 0, color: '#60A5FA' }]}>{selectedPlan?.name}</Text>
+              <Pressable onPress={() => setSelectedPlan(null)}>
+                <Icon name="close" size={22} color="#8A95A3" />
+              </Pressable>
+            </View>
+            {selectedPlan?.description ? (
+              <Text style={{ color: '#8A95A3', fontSize: 14, fontFamily: FB, marginBottom: 12 }}>{selectedPlan.description}</Text>
+            ) : null}
+            <View style={{ flexDirection: 'row', gap: 16, marginBottom: 16 }}>
+              <View style={{ backgroundColor: '#1E2A3A', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 }}>
+                <Text style={{ color: '#60A5FA', fontSize: 20, fontWeight: '700', fontFamily: FH }}>{selectedPlan?.weeks || 4}</Text>
+                <Text style={{ color: '#4A5568', fontSize: 11, fontFamily: FB }}>Weeks</Text>
+              </View>
+              <View style={{ backgroundColor: '#1E2A3A', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 }}>
+                <Text style={{ color: '#F5A623', fontSize: 20, fontWeight: '700', fontFamily: FH }}>{selectedPlan?.workoutIds?.length || 0}</Text>
+                <Text style={{ color: '#4A5568', fontSize: 11, fontFamily: FB }}>Workouts</Text>
+              </View>
+            </View>
+            <Text style={{ color: '#4A5568', fontSize: 12, fontFamily: FB, textAlign: 'center', marginTop: 8 }}>
+              Drag workouts here to build your plan schedule. Coming soon.
+            </Text>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Playbook Detail Modal */}
+      <Modal transparent visible={!!selectedPlaybook} animationType="slide" onRequestClose={() => setSelectedPlaybook(null)}>
+        <View style={s.modalBackdrop}>
+          <View style={[s.plusMenu, { maxHeight: '80%' }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <Text style={[s.plusMenuTitle, { marginBottom: 0, color: '#A78BFA' }]}>{selectedPlaybook?.name}</Text>
+              <Pressable onPress={() => setSelectedPlaybook(null)}>
+                <Icon name="close" size={22} color="#8A95A3" />
+              </Pressable>
+            </View>
+            {selectedPlaybook?.description ? (
+              <Text style={{ color: '#8A95A3', fontSize: 14, fontFamily: FB, marginBottom: 12 }}>{selectedPlaybook.description}</Text>
+            ) : null}
+            <View style={{ backgroundColor: '#1E2A3A', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, alignSelf: 'flex-start', marginBottom: 16 }}>
+              <Text style={{ color: '#A78BFA', fontSize: 20, fontWeight: '700', fontFamily: FH }}>{selectedPlaybook?.workoutIds?.length || 0}</Text>
+              <Text style={{ color: '#4A5568', fontSize: 11, fontFamily: FB }}>Workouts</Text>
+            </View>
+            <Text style={{ color: '#4A5568', fontSize: 12, fontFamily: FB, textAlign: 'center', marginTop: 8 }}>
+              Add workouts to this playbook to create a reusable template library. Coming soon.
+            </Text>
+          </View>
+        </View>
       </Modal>
     </View>
   );
@@ -711,6 +1144,55 @@ const s = StyleSheet.create({
     fontFamily: FB,
     textAlign: 'center',
     lineHeight: 20,
+  },
+  breadcrumb: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 4,
+    flexWrap: 'wrap',
+    gap: 4,
+  },
+  breadcrumbText: {
+    fontSize: 13,
+    color: '#8A95A3',
+    fontFamily: FB,
+    fontWeight: '600',
+  },
+  breadcrumbSep: {
+    fontSize: 13,
+    color: '#4A5568',
+    fontFamily: FB,
+    marginHorizontal: 2,
+  },
+  breadcrumbBack: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 'auto',
+    gap: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  breadcrumbBackText: {
+    fontSize: 12,
+    color: '#8A95A3',
+    fontFamily: FB,
+    fontWeight: '600',
+  },
+  folderInput: {
+    backgroundColor: '#0E1117',
+    borderRadius: 10,
+    padding: 14,
+    color: '#F0F4F8',
+    fontSize: 16,
+    fontFamily: FB,
+  },
+  folderBtn: {
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   modalBackdrop: {
     flex: 1,

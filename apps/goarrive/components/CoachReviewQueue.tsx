@@ -25,7 +25,6 @@ import {
   collection,
   query,
   where,
-  orderBy,
   onSnapshot,
   doc,
   updateDoc,
@@ -102,7 +101,6 @@ export default function CoachReviewQueue({
     const q = query(
       collection(db, 'workout_logs'),
       where('coachId', '==', coachId),
-      orderBy('completedAt', 'desc'),
     );
 
     const unsub = onSnapshot(

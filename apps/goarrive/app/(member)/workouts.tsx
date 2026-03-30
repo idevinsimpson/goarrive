@@ -37,6 +37,7 @@ import {
 import { useAuth } from '../../lib/AuthContext';
 import { db } from '../../lib/firebase';
 import { enqueueWrite, processQueue } from '../../lib/offlineQueue';
+import { useNetworkStatus } from '../../hooks/useNetworkStatus';
 import { Icon } from '../../components/Icon';
 import WorkoutPlayer from '../../components/WorkoutPlayer';
 import PostWorkoutJournal, { JournalEntry } from '../../components/PostWorkoutJournal';
@@ -337,10 +338,8 @@ export default function MemberWorkoutsScreen() {
     workoutStartTime.current = null;
   }, [activeAssignmentId, memberId, playerWorkout, completedDuration]);
 
-  // ── Process offline queue on mount + refresh ─────────────────────────
-  useEffect(() => {
-    processQueue().catch(() => {});
-  }, []);
+  // ── Offline resilience: auto-flush queue on mount + reconnect ────────
+  const { isOffline: _isOffline } = useNetworkStatus();
 
   // ── Listen for coach reactions on workout_logs ───────────────────────
   useEffect(() => {
@@ -660,6 +659,15 @@ export default function MemberWorkoutsScreen() {
           setPlayerWorkout(previewWorkout);
           workoutStartTime.current = Date.now();
           setPlayerVisible(true);
+          // Mark assignment as in_progress
+          if (activeAssignmentId) {
+            enqueueWrite(
+              'update',
+              'workout_assignments',
+              { status: 'in_progress', startedAt: serverTimestamp() },
+              activeAssignmentId,
+            ).catch(() => {});
+          }
         }}
         onClose={() => {
           setPreviewVisible(false);

@@ -254,6 +254,7 @@ export default function WorkoutForm({
   const [movementsLoaded, setMovementsLoaded] = useState(false);
   const [addingMovementToBlock, setAddingMovementToBlock] = useState<number | null>(null);
   const [movementSearch, setMovementSearch] = useState('');
+  const [movementCategoryFilter, setMovementCategoryFilter] = useState<string | null>(null);
 
   // ── Toast helper ──────────────────────────────────────────────────────
   const showToast = useCallback((msg: string) => {
@@ -410,6 +411,14 @@ export default function WorkoutForm({
 
   // ── Block helpers ──────────────────────────────────────────────────────
   const addBlock = (type: string, atIndex?: number | null) => {
+    // Demo block placement rule: should be placed before a multi-movement exercise block
+    if (type === 'Demo') {
+      const targetIndex = atIndex != null ? atIndex : blocks.length;
+      const nextBlock = blocks[targetIndex];
+      if (!nextBlock || NO_MOVEMENT_BLOCKS.includes(nextBlock.type)) {
+        showAlert('Demo Placement', 'Demo blocks should be placed before an exercise block (Circuit, Superset, etc.) to preview its movements.');
+      }
+    }
     const isSpecial = NO_MOVEMENT_BLOCKS.includes(type);
     const newBlock: WorkoutBlock = {
       type,
@@ -668,9 +677,23 @@ export default function WorkoutForm({
   };
 
   // ── Filtered movements for picker ──────────────────────────────────────
-  const filteredMovements = movementSearch.trim()
-    ? availableMovements.filter((m) => m.name.toLowerCase().includes(movementSearch.toLowerCase()))
-    : availableMovements;
+  const movementCategories = useMemo(() => {
+    const cats = new Set<string>();
+    availableMovements.forEach(m => { if (m.category) cats.add(m.category); });
+    return Array.from(cats).sort();
+  }, [availableMovements]);
+
+  const filteredMovements = useMemo(() => {
+    let list = availableMovements;
+    if (movementCategoryFilter) {
+      list = list.filter(m => m.category === movementCategoryFilter);
+    }
+    if (movementSearch.trim()) {
+      const q = movementSearch.toLowerCase();
+      list = list.filter(m => m.name.toLowerCase().includes(q));
+    }
+    return list;
+  }, [availableMovements, movementSearch, movementCategoryFilter]);
 
   // ── Block color helper ────────────────────────────────────────────────
   const blockColor = (type: string) => BLOCK_COLORS[type] || '#7DD3FC';
@@ -731,7 +754,7 @@ export default function WorkoutForm({
               <TouchableOpacity
                 onPress={() => setShowGlobalTiming(true)}
                 style={s.headerBtn}
-                hitSlop={8}
+                hitSlop={4}
               >
                 <Icon name="clock" size={18} color="#8A95A3" />
               </TouchableOpacity>
@@ -739,11 +762,11 @@ export default function WorkoutForm({
             <TouchableOpacity
               onPress={() => setShowDetails(true)}
               style={s.headerBtn}
-              hitSlop={8}
+              hitSlop={4}
             >
               <Icon name="settings" size={20} color="#8A95A3" />
             </TouchableOpacity>
-            <TouchableOpacity onPress={onClose} style={s.headerBtn} hitSlop={8}>
+            <TouchableOpacity onPress={onClose} style={s.headerBtn} hitSlop={4}>
               <Icon name="close" size={22} color="#8A95A3" />
             </TouchableOpacity>
           </View>
@@ -1072,6 +1095,25 @@ export default function WorkoutForm({
                                   placeholderTextColor="#4A5568"
                                   autoFocus
                                 />
+                                {movementCategories.length > 1 && (
+                                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 34, marginBottom: 6 }}>
+                                    <Pressable
+                                      style={[s.catChip, !movementCategoryFilter && s.catChipActive]}
+                                      onPress={() => setMovementCategoryFilter(null)}
+                                    >
+                                      <Text style={[s.catChipText, !movementCategoryFilter && s.catChipTextActive]}>All</Text>
+                                    </Pressable>
+                                    {movementCategories.map(cat => (
+                                      <Pressable
+                                        key={cat}
+                                        style={[s.catChip, movementCategoryFilter === cat && s.catChipActive]}
+                                        onPress={() => setMovementCategoryFilter(prev => prev === cat ? null : cat)}
+                                      >
+                                        <Text style={[s.catChipText, movementCategoryFilter === cat && s.catChipTextActive]}>{cat}</Text>
+                                      </Pressable>
+                                    ))}
+                                  </ScrollView>
+                                )}
                                 <ScrollView style={s.movementPickerList} nestedScrollEnabled keyboardShouldPersistTaps="handled">
                                   {filteredMovements.length === 0 ? (
                                     <Text style={s.movementPickerEmpty}>
@@ -1447,8 +1489,8 @@ const s = StyleSheet.create({
     flex: 1,
   },
   headerBtn: {
-    padding: 6,
-    marginLeft: 6,
+    padding: 8,
+    marginLeft: 12,
   },
   nameInput: {
     fontSize: 20,
@@ -1777,6 +1819,24 @@ const s = StyleSheet.create({
   },
 
   // ── Movement picker ─────────────────────────────────────────────────
+  catChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#1E2A3A',
+    borderRadius: 14,
+    marginRight: 6,
+  },
+  catChipActive: {
+    backgroundColor: '#F5A623',
+  },
+  catChipText: {
+    fontSize: 11,
+    color: '#8A95A3',
+    fontWeight: '600',
+  },
+  catChipTextActive: {
+    color: '#0E1117',
+  },
   movementPicker: {
     backgroundColor: '#161B22',
     borderRadius: 10,
