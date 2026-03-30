@@ -1,6 +1,16 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    // Platform voice cues — publicly readable (no auth required)
+    match /voice_cache/platform/{fileName} {
+      allow read: if true;
+      allow write: if false;
+    }
+    // Coach voice clones — readable by authenticated users only
+    match /voice_cache/coaches/{coachId}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
     // Movement media — scoped to coach
     match /movements/{coachId}/{allPaths=**} {
       allow read: if request.auth != null;

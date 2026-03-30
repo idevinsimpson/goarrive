@@ -1,22 +1,21 @@
 /**
- * useWorkoutTTS — Text-to-speech hook for the Workout Player
+ * useWorkoutTTS — Voice coaching hook for the Workout Player
  *
- * Phase 3 upgrade: Now handles special block voice cues:
- *   - Intro: "Welcome to your GoArrive workout"
- *   - Outro: "Great job! Your workout is complete"
- *   - Demo: "Here's what's coming up" + movement names
- *   - Transition: reads instruction text aloud
- *   - Water Break: "Grab your water, stay hydrated"
+ * Phase 1 upgrade: Uses pre-generated ElevenLabs "GoArrive Coach" audio files
+ * from Firebase Storage for all static cues. Dynamic cues (movement names)
+ * fall back to Web Speech API until Phase 2 (on-demand ElevenLabs generation).
  *
- * Exercise movement cues (unchanged):
- *   - First WORK movement → "First up, [name]"
- *   - Subsequent WORK movements → "Next up, [name]"
- *   - Halfway → "That's halfway"
- *   - Last 3 seconds of WORK → "3... 2... 1... rest"
- *   - REST phase → "Rest. Next up: [name]"
- *   - SWAP phase → "Switch sides"
+ * Static cues (GoArrive Coach voice — Firebase Storage):
+ *   - Countdowns: countdown_3, countdown_3_rest, countdown_4, countdown_5, countdown_10
+ *   - Phase markers: go, rest, rest_now, halfway, workout_complete, workout_starting
+ *   - Transitions: next_up, get_ready, switch_sides, water_break, warm_up, cool_down
+ *   - Encouragement: you_got_this, keep_pushing, almost_there, last_round, etc.
  *
- * Uses expo-speech on native, Web Speech API on web.
+ * Dynamic cues (movement names via Web Speech API fallback):
+ *   - "Next up, [movement name]"
+ *   - "Next up: [movement name]" (during rest)
+ *
+ * Uses expo-speech on native, Web Audio API + Web Speech on web.
  * Respects the global audio mute toggle.
  */
 import { useEffect, useRef, useCallback, useState } from 'react';
@@ -24,12 +23,103 @@ import * as Speech from 'expo-speech';
 import { Platform } from 'react-native';
 import type { StepType } from './useWorkoutFlatten';
 
+// ── Static cue URL map ──────────────────────────────────────────────
+const BASE_URL =
+  'https://firebasestorage.googleapis.com/v0/b/goarrive.firebasestorage.app/o/voice_cache%2Fplatform%2F';
+const CUE_URL = (name: string) => `${BASE_URL}${name}.mp3?alt=media`;
+
+const CUES = {
+  countdown_3: CUE_URL('countdown_3'),
+  countdown_3_rest: CUE_URL('countdown_3_rest'),
+  countdown_4: CUE_URL('countdown_4'),
+  countdown_5: CUE_URL('countdown_5'),
+  countdown_10: CUE_URL('countdown_10'),
+  five_seconds: CUE_URL('five_seconds'),
+  ten_seconds: CUE_URL('ten_seconds'),
+  go: CUE_URL('go'),
+  begin: CUE_URL('begin'),
+  rest: CUE_URL('rest'),
+  rest_now: CUE_URL('rest_now'),
+  halfway: CUE_URL('halfway'),
+  workout_complete: CUE_URL('workout_complete'),
+  workout_complete_long: CUE_URL('workout_complete_long'),
+  workout_starting: CUE_URL('workout_starting'),
+  start_now: CUE_URL('start_now'),
+  next_up: CUE_URL('next_up'),
+  get_ready: CUE_URL('get_ready'),
+  switch_sides: CUE_URL('switch_sides'),
+  other_side: CUE_URL('other_side'),
+  water_break: CUE_URL('water_break'),
+  warm_up: CUE_URL('warm_up'),
+  cool_down: CUE_URL('cool_down'),
+  stretch: CUE_URL('stretch'),
+  shake_it_out: CUE_URL('shake_it_out'),
+  lets_get_started: CUE_URL('lets_get_started'),
+  lets_go: CUE_URL('lets_go'),
+  breathe: CUE_URL('breathe'),
+  take_a_breath: CUE_URL('take_a_breath'),
+  you_got_this: CUE_URL('you_got_this'),
+  keep_pushing: CUE_URL('keep_pushing'),
+  almost_there: CUE_URL('almost_there'),
+  last_round: CUE_URL('last_round'),
+  last_set: CUE_URL('last_set'),
+  final_rep: CUE_URL('final_rep'),
+  one_more: CUE_URL('one_more'),
+  push_through: CUE_URL('push_through'),
+  dig_deep: CUE_URL('dig_deep'),
+  dont_stop: CUE_URL('dont_stop'),
+  stay_strong: CUE_URL('stay_strong'),
+  looking_good: CUE_URL('looking_good'),
+  nice_form: CUE_URL('nice_form'),
+  great_work: CUE_URL('great_work'),
+  well_done: CUE_URL('well_done'),
+  fantastic_effort: CUE_URL('fantastic_effort'),
+  proud_of_you: CUE_URL('proud_of_you'),
+  nice_work_rest: CUE_URL('nice_work_rest'),
+} as const;
+
+type CueKey = keyof typeof CUES;
+
+// ── Audio pool for pre-loaded cues ──────────────────────────────────
+const audioPool: Record<string, HTMLAudioElement> = {};
+
+function preloadCue(key: CueKey): void {
+  if (Platform.OS !== 'web') return;
+  if (typeof window === 'undefined') return;
+  if (audioPool[key]) return;
+  try {
+    const audio = new (window as any).Audio(CUES[key]);
+    audio.preload = 'auto';
+    audioPool[key] = audio;
+  } catch {
+    // Audio API unavailable
+  }
+}
+
+// Pre-load the most commonly used cues immediately
+const PRIORITY_CUES: CueKey[] = [
+  'countdown_3', 'countdown_3_rest', 'rest', 'halfway',
+  'workout_complete', 'next_up', 'you_got_this', 'keep_pushing',
+  'almost_there', 'workout_starting', 'lets_get_started',
+];
+if (Platform.OS === 'web' && typeof window !== 'undefined') {
+  // Defer preloading slightly to not block initial render
+  setTimeout(() => PRIORITY_CUES.forEach(preloadCue), 2000);
+}
+
+// ── Types ────────────────────────────────────────────────────────────
 type Phase = 'ready' | 'countdown' | 'work' | 'rest' | 'swap' | 'complete'
   | 'intro' | 'outro' | 'demo' | 'transition' | 'waterBreak';
 
 interface UseWorkoutTTSOptions {
   phase: Phase;
-  current: { name: string; stepType?: StepType; instructionText?: string; demoMovements?: { name: string }[]; [key: string]: any } | null;
+  current: {
+    name: string;
+    stepType?: StepType;
+    instructionText?: string;
+    demoMovements?: { name: string }[];
+    [key: string]: any;
+  } | null;
   next: { name: string; [key: string]: any } | null;
   isMuted: boolean;
   ttsDisabled?: boolean;
@@ -55,26 +145,49 @@ export function useWorkoutTTS({
   const halfwaySpokenRef = useRef<boolean>(false);
   const countdownSpokenRef = useRef<number>(-1);
   const welcomeSpokenRef = useRef<boolean>(false);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Check TTS availability on mount
+  // On web, we always have audio (our own files). On native, check expo-speech.
   useEffect(() => {
-    const check = async () => {
-      try {
-        if (Platform.OS === 'web') {
-          setIsTTSAvailable(
-            typeof window !== 'undefined' && !!window.speechSynthesis,
-          );
-        } else {
-          const voices = await Speech.getAvailableVoicesAsync();
-          setIsTTSAvailable(voices.length > 0);
-        }
-      } catch {
-        setIsTTSAvailable(false);
-      }
-    };
-    check();
+    if (Platform.OS === 'web') {
+      setIsTTSAvailable(typeof window !== 'undefined');
+    } else {
+      Speech.getAvailableVoicesAsync()
+        .then((voices) => setIsTTSAvailable(voices.length > 0))
+        .catch(() => setIsTTSAvailable(false));
+    }
   }, []);
 
+  // ── Play a static cue from Firebase Storage ──────────────────────
+  const playCue = useCallback(
+    (key: CueKey) => {
+      if (isMuted || ttsDisabled) return;
+      if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+      try {
+        // Stop any currently playing cue
+        if (currentAudioRef.current) {
+          currentAudioRef.current.pause();
+          currentAudioRef.current.currentTime = 0;
+        }
+        let audio = audioPool[key];
+        if (!audio) {
+          audio = new (window as any).Audio(CUES[key]);
+          audioPool[key] = audio;
+        } else {
+          audio.currentTime = 0;
+        }
+        currentAudioRef.current = audio;
+        audio.play().catch(() => {
+          // Autoplay blocked — silently fail
+        });
+      } catch {
+        // Audio API unavailable
+      }
+    },
+    [isMuted, ttsDisabled],
+  );
+
+  // ── Speak dynamic text (movement names) via Web Speech API ──────
   const speakWeb = useCallback((text: string) => {
     try {
       if (typeof window === 'undefined') return;
@@ -122,7 +235,7 @@ export function useWorkoutTTS({
       const key = `intro_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
-        speak('Welcome to your GoArrive workout. Let\'s get started.');
+        playCue('lets_get_started');
       }
       return;
     }
@@ -132,7 +245,7 @@ export function useWorkoutTTS({
       const key = `outro_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
-        speak('Great job! Your workout is complete. You crushed it.');
+        playCue('workout_complete_long');
       }
       return;
     }
@@ -162,7 +275,7 @@ export function useWorkoutTTS({
         if (instruction) {
           speak(instruction);
         } else {
-          speak('Transition. Get ready for the next section.');
+          playCue('get_ready');
         }
       }
       return;
@@ -173,22 +286,21 @@ export function useWorkoutTTS({
       const key = `waterBreak_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
-        speak('Water break. Grab your water, stay hydrated.');
+        playCue('water_break');
       }
       return;
     }
-  }, [phase, current?.stepType, currentIndex, speak]);
+  }, [phase, current?.stepType, currentIndex, speak, playCue]);
 
   // ── Welcome message on first countdown ──────────────────────────────
   useEffect(() => {
     if (phase === 'countdown' && currentIndex === 0 && !welcomeSpokenRef.current) {
-      // Only speak welcome if the first step is an exercise (intro handles its own)
       if (current?.stepType === 'exercise') {
         welcomeSpokenRef.current = true;
-        speak('Welcome to your GoArrive workout');
+        playCue('workout_starting');
       }
     }
-  }, [phase, currentIndex, current?.stepType, speak]);
+  }, [phase, currentIndex, current?.stepType, playCue]);
 
   // ── Exercise movement announcements ────────────────────────────────
   useEffect(() => {
@@ -200,28 +312,27 @@ export function useWorkoutTTS({
         lastSpokenRef.current = key;
         halfwaySpokenRef.current = false;
         countdownSpokenRef.current = -1;
-
-        if (currentIndex === 0) {
-          speak(`First up, ${current.name}`);
-        } else {
-          speak(`Next up, ${current.name}`);
-        }
+        // Play "Next up" cue, then speak movement name via Web Speech
+        playCue('next_up');
+        setTimeout(() => speak(current.name), 900);
       }
     } else if (phase === 'rest') {
       const nextName = next?.name;
       const key = `rest_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
-        const announcement = nextName
-          ? `Rest. Next up: ${nextName}`
-          : 'Rest';
-        speak(announcement);
+        if (nextName) {
+          playCue('nice_work_rest');
+          setTimeout(() => speak(`Next up: ${nextName}`), 1800);
+        } else {
+          playCue('rest_now');
+        }
       }
     } else if (phase === 'swap') {
       const key = `swap_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
-        speak('Switch sides');
+        playCue('switch_sides');
       }
     } else if (phase === 'ready') {
       lastSpokenRef.current = '';
@@ -229,7 +340,7 @@ export function useWorkoutTTS({
       halfwaySpokenRef.current = false;
       countdownSpokenRef.current = -1;
     }
-  }, [phase, current?.name, current?.stepType, currentIndex, next?.name, speak]);
+  }, [phase, current?.name, current?.stepType, currentIndex, next?.name, speak, playCue]);
 
   // ── Halfway announcement (exercise only) ───────────────────────────
   useEffect(() => {
@@ -238,39 +349,39 @@ export function useWorkoutTTS({
     const halfway = Math.floor(currentDuration / 2);
     if (timeLeft === halfway && !halfwaySpokenRef.current) {
       halfwaySpokenRef.current = true;
-      speak("That's halfway");
+      playCue('halfway');
     }
-  }, [phase, timeLeft, currentDuration, current, speak]);
+  }, [phase, timeLeft, currentDuration, current, playCue]);
 
-  // ── Countdown voice: "3... 2... 1... rest" (exercise only) ─────────
+  // ── Countdown voice (exercise only) ────────────────────────────────
+  // At timeLeft === 3, plays the full pre-timed "3, 2, 1" countdown clip.
+  // At timeLeft === 0, plays rest or workout_complete.
   useEffect(() => {
     if (phase !== 'work' || !current || current.stepType !== 'exercise') return;
     if (currentDuration <= 0) return;
 
     if (timeLeft === 3 && countdownSpokenRef.current !== 3) {
       countdownSpokenRef.current = 3;
-      speak('3');
-    } else if (timeLeft === 2 && countdownSpokenRef.current !== 2) {
-      countdownSpokenRef.current = 2;
-      speak('2');
-    } else if (timeLeft === 1 && countdownSpokenRef.current !== 1) {
-      countdownSpokenRef.current = 1;
-      speak('1');
+      playCue('countdown_3');
     } else if (timeLeft === 0 && countdownSpokenRef.current !== 0) {
       countdownSpokenRef.current = 0;
       const isLastMovement = currentIndex >= total - 1;
       if (isLastMovement) {
-        speak('Rest. Your workout is complete, great job!');
+        playCue('workout_complete');
       } else {
-        speak('Rest');
+        playCue('rest');
       }
     }
-  }, [phase, timeLeft, current, currentDuration, currentIndex, total, speak]);
+  }, [phase, timeLeft, current, currentDuration, currentIndex, total, playCue]);
 
-  // Cleanup
+  // ── Cleanup ─────────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
       try {
+        if (currentAudioRef.current) {
+          currentAudioRef.current.pause();
+          currentAudioRef.current = null;
+        }
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
           window.speechSynthesis?.cancel();
         } else {
