@@ -51,6 +51,8 @@ export interface FlatMovement {
   cropScale?: number;
   cropTranslateX?: number;
   cropTranslateY?: number;
+  /** GoArrive Coach voice clip URL for this movement name (ElevenLabs generated) */
+  voiceUrl?: string;
 
   // ── Phase 3: Special block fields ───────────────────────────────
   /** What kind of step this is — determines which player screen renders */
@@ -215,6 +217,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropScale: mv.cropScale ?? 1,
               cropTranslateX: mv.cropTranslateX ?? 0,
               cropTranslateY: mv.cropTranslateY ?? 0,
+              voiceUrl: mv.voiceUrl || '',
             });
           });
         }
@@ -244,6 +247,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropScale: mv.cropScale ?? 1,
               cropTranslateX: mv.cropTranslateX ?? 0,
               cropTranslateY: mv.cropTranslateY ?? 0,
+              voiceUrl: mv.voiceUrl || '',
             });
           });
         }

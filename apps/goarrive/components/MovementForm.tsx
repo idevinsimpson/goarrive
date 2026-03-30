@@ -43,6 +43,7 @@ import MovementVideoControls from './MovementVideoControls';
 import VideoCropModal, { CropValues } from './VideoCropModal';
 import { MovementDetailData } from './MovementDetail';
 import { generateCroppedGif } from '../utils/generateCroppedGif';
+import { generateMovementVoice } from '../utils/generateMovementVoice';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH =
@@ -525,6 +526,20 @@ export default function MovementForm({
 
       // Store doc ID so GIF auto-patch can find it if GIF finishes after save
       savedDocIdRef.current = docId;
+
+      // Generate GoArrive Coach voice clip for this movement name (async, non-blocking)
+      // Only regenerate if the name changed (edit) or it's a new movement (create)
+      const prevName = editMovement?.name?.trim() ?? null;
+      const newName = name.trim();
+      if (!isEdit || prevName !== newName) {
+        generateMovementVoice(docId, newName)
+          .then((voiceUrl) => {
+            if (voiceUrl) {
+              updateDoc(doc(db, 'movements', docId), { voiceUrl }).catch(() => {});
+            }
+          })
+          .catch(() => {}); // silent fallback — movement saved regardless
+      }
 
       resetForm();
       onClose();

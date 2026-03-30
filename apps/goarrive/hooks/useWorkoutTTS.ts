@@ -158,7 +158,29 @@ export function useWorkoutTTS({
     }
   }, []);
 
-  // ── Play a static cue from Firebase Storage ──────────────────────
+    // ── Play a dynamic audio URL (movement voice clips from Firebase Storage) ──
+  const playVoiceUrl = useCallback(
+    (url: string, onEnded?: () => void) => {
+      if (isMuted || ttsDisabled) return;
+      if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+      if (!url) return;
+      try {
+        if (currentAudioRef.current) {
+          currentAudioRef.current.pause();
+          currentAudioRef.current.currentTime = 0;
+        }
+        const audio = new (window as any).Audio(url);
+        currentAudioRef.current = audio;
+        if (onEnded) audio.addEventListener('ended', onEnded, { once: true });
+        audio.play().catch(() => {});
+      } catch {
+        // Audio API unavailable
+      }
+    },
+    [isMuted, ttsDisabled],
+  );
+
+  // ── Play a static cue from Firebase Storage ────────────────────
   const playCue = useCallback(
     (key: CueKey) => {
       if (isMuted || ttsDisabled) return;
@@ -312,9 +334,14 @@ export function useWorkoutTTS({
         lastSpokenRef.current = key;
         halfwaySpokenRef.current = false;
         countdownSpokenRef.current = -1;
-        // Play "Next up" cue, then speak movement name via Web Speech
+        // Play "Next up" cue, then play movement name via ElevenLabs voice (or Web Speech fallback)
         playCue('next_up');
-        setTimeout(() => speak(current.name), 900);
+        const voiceUrl = current.voiceUrl;
+        if (voiceUrl) {
+          setTimeout(() => playVoiceUrl(voiceUrl), 900);
+        } else {
+          setTimeout(() => speak(current.name), 900);
+        }
       }
     } else if (phase === 'rest') {
       const nextName = next?.name;
@@ -323,7 +350,12 @@ export function useWorkoutTTS({
         lastSpokenRef.current = key;
         if (nextName) {
           playCue('nice_work_rest');
-          setTimeout(() => speak(`Next up: ${nextName}`), 1800);
+          const nextVoiceUrl = next?.voiceUrl;
+          if (nextVoiceUrl) {
+            setTimeout(() => playVoiceUrl(nextVoiceUrl), 1800);
+          } else {
+            setTimeout(() => speak(`Next up: ${nextName}`), 1800);
+          }
         } else {
           playCue('rest_now');
         }
@@ -340,7 +372,7 @@ export function useWorkoutTTS({
       halfwaySpokenRef.current = false;
       countdownSpokenRef.current = -1;
     }
-  }, [phase, current?.name, current?.stepType, currentIndex, next?.name, speak, playCue]);
+  }, [phase, current?.name, current?.stepType, current?.voiceUrl, currentIndex, next?.name, next?.voiceUrl, speak, playCue, playVoiceUrl]);
 
   // ── Halfway announcement (exercise only) ───────────────────────────
   useEffect(() => {
