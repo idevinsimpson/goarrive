@@ -90,6 +90,8 @@ const ADD_BLOCK_OPTIONS = [
 interface BlockMovement {
   movementId: string;
   movementName: string;
+  displayName?: string; // overrides movementName for this block only
+  hidden?: boolean; // hides movement from member workout
   sets?: number;
   reps?: string;
   weight?: string;
@@ -166,6 +168,7 @@ interface WorkoutFolderPageProps {
   coachId: string;
   tenantId: string;
   onBack: () => void;
+  onOpenMovement?: (movement: any) => void;
 }
 
 export default function WorkoutFolderPage({
@@ -173,6 +176,7 @@ export default function WorkoutFolderPage({
   coachId,
   tenantId,
   onBack,
+  onOpenMovement,
 }: WorkoutFolderPageProps) {
   const { width: screenWidth } = useWindowDimensions();
 
@@ -217,6 +221,8 @@ export default function WorkoutFolderPage({
   const [showIntroOutroPage, setShowIntroOutroPage] = useState(false);
   const [showMoveTo, setShowMoveTo] = useState(false);
   const [moveToSearch, setMoveToSearch] = useState('');
+  const [editingNameKey, setEditingNameKey] = useState<string | null>(null);
+  const [editingNameValue, setEditingNameValue] = useState('');
 
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyRef = useRef(false); // prevents onSnapshot from overwriting local edits
@@ -234,6 +240,7 @@ export default function WorkoutFolderPage({
     setExpandedBlockIdx(null);
     setShowAddBlockMenu(false);
     setShowTitleMenu(false);
+    setEditingNameKey(null);
   }, []);
 
   // ── Load workout data ─────────────────────────────────────────────────────
@@ -612,6 +619,19 @@ export default function WorkoutFolderPage({
   const updateMovementWeight = useCallback((blockIdx: number, movIdx: number, weight: string) => {
     const newBlocks = [...blocks];
     newBlocks[blockIdx].movements[movIdx].weight = weight;
+    updateBlocks(newBlocks);
+  }, [blocks, updateBlocks]);
+
+  const updateMovementDisplayName = useCallback((blockIdx: number, movIdx: number, name: string) => {
+    const newBlocks = [...blocks];
+    newBlocks[blockIdx].movements[movIdx].displayName = name || undefined;
+    updateBlocks(newBlocks);
+  }, [blocks, updateBlocks]);
+
+  const toggleMovementVisibility = useCallback((blockIdx: number, movIdx: number) => {
+    const newBlocks = [...blocks];
+    const mov = newBlocks[blockIdx].movements[movIdx];
+    mov.hidden = !mov.hidden;
     updateBlocks(newBlocks);
   }, [blocks, updateBlocks]);
 
@@ -1048,7 +1068,19 @@ export default function WorkoutFolderPage({
                         const thumbUri = mov.thumbnailUrl;
 
                         return (
-                          <View key={movKey} style={{ width: cardWidth }}>
+                          <View key={movKey} style={{ width: cardWidth, position: 'relative' }}>
+                            {/* Red X remove button — hangs off top-right corner */}
+                            {isMovExpanded && (
+                              <Pressable
+                                style={st.removeXBtn}
+                                onPress={(e) => {
+                                  e.stopPropagation();
+                                  removeMovementFromBlock(blockIdx, movIdx);
+                                }}
+                              >
+                                <Icon name="close" size={10} color="#fff" />
+                              </Pressable>
+                            )}
                             <Pressable
                               style={[
                                 st.movCard,
@@ -1057,15 +1089,18 @@ export default function WorkoutFolderPage({
                                   height: cardHeight,
                                   borderColor: isMovExpanded ? '#F5A623' : 'transparent',
                                   borderWidth: isMovExpanded ? 2 : 0,
+                                  opacity: mov.hidden ? 0.4 : 1,
                                 },
                               ]}
                               onPress={(e) => {
                                 e.stopPropagation();
                                 if (isMovExpanded) {
                                   setExpandedMovKey(null);
+                                  setEditingNameKey(null);
                                 } else {
                                   setExpandedMovKey(movKey);
                                   setExpandedBlockIdx(null);
+                                  setEditingNameKey(null);
                                 }
                               }}
                             >
@@ -1082,10 +1117,12 @@ export default function WorkoutFolderPage({
                                 </View>
                               )}
 
-                              {/* Name overlay (hidden when controls are open) */}
+                              {/* Name overlay (shown when controls are closed) */}
                               {!isMovExpanded && (
                                 <View style={st.nameOverlay}>
-                                  <Text style={st.nameText} numberOfLines={1}>{mov.movementName}</Text>
+                                  <Text style={st.nameText} numberOfLines={1}>
+                                    {mov.displayName || mov.movementName}
+                                  </Text>
                                 </View>
                               )}
 
@@ -1125,7 +1162,7 @@ export default function WorkoutFolderPage({
                                       onChangeText={(t) => updateMovementReps(blockIdx, movIdx, t)}
                                       placeholder="—"
                                       placeholderTextColor="#4A5568"
-                                      keyboardType="default"
+                                      keyboardType="numeric"
                                     />
                                     <Text style={st.ovSmLabel}>lbs</Text>
                                     <TextInput
@@ -1134,17 +1171,20 @@ export default function WorkoutFolderPage({
                                       onChangeText={(t) => updateMovementWeight(blockIdx, movIdx, t)}
                                       placeholder="—"
                                       placeholderTextColor="#4A5568"
-                                      keyboardType="default"
+                                      keyboardType="numeric"
                                     />
                                   </View>
 
-                                  {/* Bottom row: three-dots (details) + trash */}
+                                  {/* Bottom row: three-dots (details) + eye toggle (visibility) */}
                                   <View style={st.ovBottomRow}>
                                     <Pressable
                                       style={st.ovIconBtn}
                                       onPress={(e) => {
                                         e.stopPropagation();
-                                        // TODO: Open movement detail from library
+                                        if (onOpenMovement) {
+                                          const movData = availableMovements.find(m => m.id === mov.movementId);
+                                          if (movData) onOpenMovement(movData);
+                                        }
                                       }}
                                     >
                                       <Icon name="more-horizontal" size={12} color="#8A95A3" />
@@ -1153,12 +1193,49 @@ export default function WorkoutFolderPage({
                                       style={st.ovIconBtn}
                                       onPress={(e) => {
                                         e.stopPropagation();
-                                        removeMovementFromBlock(blockIdx, movIdx);
+                                        toggleMovementVisibility(blockIdx, movIdx);
                                       }}
                                     >
-                                      <Icon name="trash-2" size={12} color="#EF4444" />
+                                      <Icon
+                                        name={mov.hidden ? 'eye-off' : 'eye'}
+                                        size={12}
+                                        color={mov.hidden ? '#4A5568' : '#34D399'}
+                                      />
                                     </Pressable>
                                   </View>
+
+                                  {/* Editable name at bottom */}
+                                  {editingNameKey === movKey ? (
+                                    <TextInput
+                                      style={st.ovNameInput}
+                                      value={editingNameValue}
+                                      onChangeText={setEditingNameValue}
+                                      onBlur={() => {
+                                        updateMovementDisplayName(blockIdx, movIdx, editingNameValue);
+                                        setEditingNameKey(null);
+                                      }}
+                                      onSubmitEditing={() => {
+                                        updateMovementDisplayName(blockIdx, movIdx, editingNameValue);
+                                        setEditingNameKey(null);
+                                      }}
+                                      autoFocus
+                                      selectTextOnFocus
+                                      placeholderTextColor="#4A5568"
+                                      placeholder={mov.movementName}
+                                    />
+                                  ) : (
+                                    <Pressable
+                                      onPress={(e) => {
+                                        e.stopPropagation();
+                                        setEditingNameKey(movKey);
+                                        setEditingNameValue(mov.displayName || mov.movementName);
+                                      }}
+                                    >
+                                      <Text style={st.ovNameText} numberOfLines={1}>
+                                        {mov.displayName || mov.movementName}
+                                      </Text>
+                                    </Pressable>
+                                  )}
                                 </View>
                               )}
                             </Pressable>
@@ -1876,6 +1953,40 @@ const st = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.10)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  removeXBtn: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    zIndex: 20,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#EF4444',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  ovNameText: {
+    fontSize: 8,
+    color: '#F0F4F8',
+    fontFamily: FB,
+    fontWeight: '600' as const,
+    textAlign: 'center' as const,
+    paddingHorizontal: 2,
+    marginTop: 1,
+  },
+  ovNameInput: {
+    fontSize: 8,
+    color: '#F0F4F8',
+    fontFamily: FB,
+    fontWeight: '600' as const,
+    textAlign: 'center' as const,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 3,
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+    marginTop: 1,
+    height: 16,
   },
 
   // Block control bar — sits at bottom of block, stretches left when expanded

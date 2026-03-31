@@ -694,6 +694,7 @@ function BuildScreenInner() {
           coachId={coachId}
           tenantId={tenantId}
           onBack={() => setOpenWorkoutId(null)}
+          onOpenMovement={(m: any) => setSelectedMovement(m)}
         />
       </View>
     );
