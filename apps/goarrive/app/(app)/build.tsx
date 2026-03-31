@@ -50,6 +50,7 @@ import MovementDetail from '../../components/MovementDetail';
 import MovementForm from '../../components/MovementForm';
 import WorkoutDetail from '../../components/WorkoutDetail';
 import WorkoutForm from '../../components/WorkoutForm';
+import WorkoutFolderPage from '../../components/WorkoutFolderPage';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -196,6 +197,9 @@ function BuildScreenInner() {
   const [selectedWorkout, setSelectedWorkout] = useState<any | null>(null);
   const [editWorkout, setEditWorkout] = useState<any | null>(null);
   const [isWorkoutFormOpen, setIsWorkoutFormOpen] = useState(false);
+
+  // Workout folder page — replaces the old modal flow
+  const [openWorkoutId, setOpenWorkoutId] = useState<string | null>(null);
 
   // Plans & Playbooks
   const [showPlanCreate, setShowPlanCreate] = useState(false);
@@ -518,8 +522,11 @@ function BuildScreenInner() {
 
       // Determine if this is a workout with multiple movement thumbnails
       const hasMosaic = isWorkout && item.coverThumbs && item.coverThumbs.length > 1;
-      const hasSingleThumb = item.thumbnailUrl || item.mediaUrl || (item.coverThumbs && item.coverThumbs.length === 1);
-      const singleThumbUri = item.thumbnailUrl || item.mediaUrl || (item.coverThumbs && item.coverThumbs.length > 0 ? item.coverThumbs[0] : null);
+      // Prefer thumbnailUrl (GIF) over mediaUrl (video) for static card display
+      const thumbOrGif = item.thumbnailUrl || null;
+      const fallbackMedia = isMovement ? null : item.mediaUrl; // Don't use video as thumbnail for movements
+      const hasSingleThumb = thumbOrGif || fallbackMedia || (item.coverThumbs && item.coverThumbs.length === 1);
+      const singleThumbUri = thumbOrGif || fallbackMedia || (item.coverThumbs && item.coverThumbs.length > 0 ? item.coverThumbs[0] : null);
 
       return (
         <Pressable
@@ -535,7 +542,7 @@ function BuildScreenInner() {
             if (isMovement) setSelectedMovement(item);
             else if (isPlan) setSelectedPlan(item);
             else if (isPlaybook) setSelectedPlaybook(item);
-            else setSelectedWorkout(item);
+            else setOpenWorkoutId(item.id);
           }}
         >
           {/* Media area — fills entire card */}
@@ -573,12 +580,12 @@ function BuildScreenInner() {
           if (item.type === 'Movements') setSelectedMovement(item);
           else if (item.type === 'Plans') setSelectedPlan(item);
           else if (item.type === 'Playbooks') setSelectedPlaybook(item);
-          else setSelectedWorkout(item);
+          else setOpenWorkoutId(item.id);
         }}
       >
         <View style={s.listMedia}>
-          {item.thumbnailUrl || item.mediaUrl ? (
-            <Image source={{ uri: item.thumbnailUrl || item.mediaUrl }} style={s.listImage} />
+          {item.thumbnailUrl ? (
+            <Image source={{ uri: item.thumbnailUrl }} style={s.listImage} />
           ) : (
             <View style={s.listPlaceholder}>
               <Icon name={item.type === 'Plans' ? 'plan' : item.type === 'Playbooks' ? 'playbook' : item.type === 'Movements' ? 'movements' : 'workouts'} size={20} color={item.type === 'Plans' ? '#60A5FA' : item.type === 'Playbooks' ? '#A78BFA' : '#4A5568'} />
@@ -593,6 +600,21 @@ function BuildScreenInner() {
       </Pressable>
     );
   };
+
+  // ── Workout folder page ─────────────────────────────────────────────────
+  if (openWorkoutId) {
+    return (
+      <View style={s.root}>
+        <AppHeader />
+        <WorkoutFolderPage
+          workoutId={openWorkoutId}
+          coachId={coachId}
+          tenantId={tenantId}
+          onBack={() => setOpenWorkoutId(null)}
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={s.root}>
@@ -756,28 +778,7 @@ function BuildScreenInner() {
         editMovement={editMovement}
       />
 
-      {selectedWorkout && (
-        <WorkoutDetail
-          workout={selectedWorkout}
-          onClose={() => setSelectedWorkout(null)}
-          onEdit={(w: any) => {
-            setEditWorkout(w);
-            setSelectedWorkout(null);
-            setIsWorkoutFormOpen(true);
-          }}
-        />
-      )}
-
-      <WorkoutForm
-        visible={isWorkoutFormOpen}
-        onClose={() => {
-          setIsWorkoutFormOpen(false);
-          setEditWorkout(null);
-        }}
-        coachId={coachId}
-        tenantId={tenantId}
-        editWorkout={editWorkout}
-      />
+      {/* WorkoutDetail and WorkoutForm modals removed — replaced by WorkoutFolderPage */}
 
       <Modal transparent visible={isPlusOpen} animationType="fade" onRequestClose={() => setIsPlusOpen(false)}>
         <Pressable style={s.modalBackdrop} onPress={() => setIsPlusOpen(false)}>
@@ -800,10 +801,42 @@ function BuildScreenInner() {
             </Pressable>
             <Pressable 
               style={s.plusMenuItem} 
-              onPress={() => {
+              onPress={async () => {
                 setIsPlusOpen(false);
-                setEditWorkout(null);
-                setIsWorkoutFormOpen(true);
+                try {
+                  // Create an empty workout in Firestore and navigate into it
+                  const newWorkoutRef = await addDoc(collection(db, 'workouts'), {
+                     name: 'Untitled Workout',
+                     description: '',
+                     coachId,
+                     tenantId,
+                     blocks: [
+                       {
+                         type: 'Circuit',
+                         label: 'Circuit',
+                         rounds: 3,
+                         restBetweenRoundsSec: 0,
+                         restBetweenMovementsSec: 0,
+                         firstMovementPrepSec: 20,
+                         showDemo: false,
+                         demoDurationSec: 20,
+                         movements: [],
+                       },
+                     ],
+                     coverThumbs: [],
+                     introVideoUrl: null,
+                     introGifUrl: null,
+                     outroVideoUrl: null,
+                     outroGifUrl: null,
+                     isArchived: false,
+                     isTemplate: false,
+                     createdAt: serverTimestamp(),
+                     updatedAt: serverTimestamp(),
+                   });
+                  setOpenWorkoutId(newWorkoutRef.id);
+                } catch (e) {
+                  console.error('Create workout error:', e);
+                }
               }}
             >
               <Icon name="workouts" size={20} color="#F0F4F8" />
