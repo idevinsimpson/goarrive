@@ -132,39 +132,73 @@ function useGridLayout() {
 }
 
 // ── Workout Mosaic Thumbnail ─────────────────────────────────────────────
-/** Shows a mini-grid of movement GIF thumbnails inside a workout card */
+/** Shows a mini-library grid of movement GIF thumbnails inside a workout card.
+ *  Designed to look like a small library you can glance at from the outside.
+ *  Tight borders, distinct background, top-to-bottom left-to-right layout. */
+const WORKOUT_CARD_BG = '#1A2332'; // Slightly lighter than page bg so cards stand out
+
 function WorkoutMosaic({ thumbs, width, height }: { thumbs: string[]; width: number; height: number }) {
-  if (!thumbs || thumbs.length === 0) return null;
+  const gap = 2; // tight gap between mini GIFs
+  const inset = 6; // small padding inside the card
+  const innerW = width - inset * 2;
+  const innerH = height - inset * 2 - 28; // leave room for name overlay at bottom
 
-  // Calculate mini-grid: aim for ~4-5 across
-  const miniGap = 2;
-  const miniCols = thumbs.length <= 2 ? thumbs.length : thumbs.length <= 4 ? 2 : Math.min(4, Math.ceil(Math.sqrt(thumbs.length)));
-  const miniWidth = (width - miniGap * (miniCols - 1)) / miniCols;
-  const miniHeight = miniWidth / CARD_ASPECT; // keep 4:5
+  if (!thumbs || thumbs.length === 0) {
+    // Empty workout — still show the distinct background with subtle icon
+    return (
+      <View style={{ width, height, backgroundColor: WORKOUT_CARD_BG, justifyContent: 'center', alignItems: 'center' }}>
+        <Icon name="workouts" size={28} color="#2D3B4E" />
+      </View>
+    );
+  }
 
-  return (
-    <View style={{
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: miniGap,
-      padding: miniGap,
-      width,
-      height,
-      overflow: 'hidden',
-      backgroundColor: '#0E1117',
-    }}>
-      {thumbs.slice(0, 16).map((url, i) => (
+  // Single movement — show it centered and larger (like a hero thumbnail)
+  if (thumbs.length === 1) {
+    const singleSize = Math.min(innerW * 0.7, innerH * 0.65);
+    return (
+      <View style={{ width, height, backgroundColor: WORKOUT_CARD_BG, justifyContent: 'center', alignItems: 'center' }}>
         <Image
-          key={i}
-          source={{ uri: url }}
-          style={{
-            width: miniWidth,
-            height: miniHeight,
-            borderRadius: 3,
-          }}
+          source={{ uri: thumbs[0] }}
+          style={{ width: singleSize, height: singleSize, borderRadius: 6 }}
           resizeMode="cover"
         />
-      ))}
+      </View>
+    );
+  }
+
+  // Multiple movements — mini-library grid
+  const count = Math.min(thumbs.length, 9); // max 9 thumbnails (3x3)
+  const cols = count <= 4 ? 2 : 3;
+  const rows = Math.ceil(count / cols);
+  const cellW = (innerW - gap * (cols - 1)) / cols;
+  const cellH = (innerH - gap * (rows - 1)) / rows;
+  // Use the smaller dimension to keep thumbnails proportional
+  const thumbSize = Math.min(cellW, cellH);
+
+  return (
+    <View style={{ width, height, backgroundColor: WORKOUT_CARD_BG }}>
+      <View style={{
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap,
+        padding: inset,
+        paddingTop: inset + 2,
+        width,
+        overflow: 'hidden',
+      }}>
+        {thumbs.slice(0, 9).map((url, i) => (
+          <Image
+            key={i}
+            source={{ uri: url }}
+            style={{
+              width: cellW,
+              height: thumbSize,
+              borderRadius: 4,
+            }}
+            resizeMode="cover"
+          />
+        ))}
+      </View>
     </View>
   );
 }
@@ -267,11 +301,29 @@ function BuildScreenInner() {
     const unsubWorkouts = onSnapshot(
       workoutsQuery,
       (snap) => {
-        const workoutItems: BuildItem[] = snap.docs.map(d => ({
-          id: d.id,
-          ...d.data(),
-          type: 'Workouts'
-        } as BuildItem));
+        const workoutItems: BuildItem[] = snap.docs.map(d => {
+          const data = d.data();
+          // Build coverThumbs from blocks if not already set
+          let coverThumbs = data.coverThumbs ?? [];
+          if ((!coverThumbs || coverThumbs.length === 0) && data.blocks && Array.isArray(data.blocks)) {
+            const thumbs: string[] = [];
+            for (const block of data.blocks) {
+              if (block.movements && Array.isArray(block.movements)) {
+                for (const mov of block.movements) {
+                  const url = mov.thumbnailUrl || mov.gifUrl || null;
+                  if (url && !thumbs.includes(url)) thumbs.push(url);
+                }
+              }
+            }
+            if (thumbs.length > 0) coverThumbs = thumbs;
+          }
+          return {
+            id: d.id,
+            ...data,
+            coverThumbs,
+            type: 'Workouts'
+          } as BuildItem;
+        });
         
         setItems(prev => {
           const otherItems = prev.filter(i => i.type !== 'Workouts' && i.type !== 'Folder');
@@ -439,11 +491,41 @@ function BuildScreenInner() {
       setNewPlaybookName(''); setNewPlaybookDesc('');
       setShowPlaybookCreate(false);
     } catch (e) { console.error('[Build] Create playbook error:', e); }
-  }, [coachId, tenantId, currentFolderId, newPlaybookName, newPlaybookDesc]);
+  }, [coachId, tenantId, currentFolderId, newPlaybookName, newPlaybookDesc]);  // ── Enrich workout coverThumbs from loaded movements ──────────────────
+  // Movements in workout blocks may only store movementId without thumbnailUrl.
+  // After both collections load, cross-reference to build coverThumbs.
+  const enrichedItems = useMemo(() => {
+    const movementMap = new Map<string, string>();
+    for (const item of items) {
+      if (item.type === 'Movements' && (item.thumbnailUrl || item.mediaUrl)) {
+        movementMap.set(item.id, (item.thumbnailUrl || item.mediaUrl) as string);
+      }
+    }
+    if (movementMap.size === 0) return items;
 
-  // ── Filtering ──────────────────────────────────────────────────────────
+    return items.map(item => {
+      if (item.type !== 'Workouts') return item;
+      // Always re-enrich from movement data (don't trust saved coverThumbs — they may be stale)
+      // Try to build coverThumbs from blocks + movement lookup
+      if (!item.blocks || !Array.isArray(item.blocks)) return item;
+      const thumbs: string[] = [];
+      for (const block of item.blocks) {
+        if (block.movements && Array.isArray(block.movements)) {
+          for (const mov of block.movements) {
+            const movId = mov.movementId || mov.id || null;
+            const url = mov.thumbnailUrl || mov.gifUrl || (movId ? movementMap.get(movId) : null);
+            if (url && !thumbs.includes(url)) thumbs.push(url);
+          }
+        }
+      }
+      if (thumbs.length > 0) return { ...item, coverThumbs: thumbs };
+      return item;
+    });
+  }, [items]);
+
+  // ── Filtering ──────────────────────────────────────────────────────────────────
   const filteredItems = useMemo(() => {
-    let list = items;
+    let list = enrichedItems;
     // Client-side archive filter
     list = list.filter(i => !!i.isArchived === showArchived);
     // Folder navigation: show items in current folder
@@ -467,7 +549,7 @@ function BuildScreenInner() {
       return (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0);
     });
     return list;
-  }, [items, search, activeType, showArchived, currentFolderId]);
+  }, [enrichedItems, search, activeType, showArchived, currentFolderId]);
 
   // ── Render Helpers ─────────────────────────────────────────────────────
   const renderItem = ({ item }: { item: BuildItem }) => {
@@ -520,13 +602,13 @@ function BuildScreenInner() {
       const iconName = isPlan ? 'plan' : isPlaybook ? 'playbook' : isMovement ? 'movements' : 'workouts';
       const iconColor = isPlan ? '#60A5FA' : isPlaybook ? '#A78BFA' : '#4A5568';
 
-      // Determine if this is a workout with multiple movement thumbnails
-      const hasMosaic = isWorkout && item.coverThumbs && item.coverThumbs.length > 1;
       // Prefer thumbnailUrl (GIF) over mediaUrl (video) for static card display
       const thumbOrGif = item.thumbnailUrl || null;
       const fallbackMedia = isMovement ? null : item.mediaUrl; // Don't use video as thumbnail for movements
-      const hasSingleThumb = thumbOrGif || fallbackMedia || (item.coverThumbs && item.coverThumbs.length === 1);
-      const singleThumbUri = thumbOrGif || fallbackMedia || (item.coverThumbs && item.coverThumbs.length > 0 ? item.coverThumbs[0] : null);
+      const singleThumbUri = thumbOrGif || fallbackMedia || null;
+
+      // Workout cards always use the mosaic (mini-library) layout
+      const isWorkoutCard = isWorkout;
 
       return (
         <Pressable
@@ -535,7 +617,7 @@ function BuildScreenInner() {
             height: cardHeight,
             borderRadius: 10,
             overflow: 'hidden',
-            backgroundColor: '#0E1117',
+            backgroundColor: isWorkoutCard ? WORKOUT_CARD_BG : '#0E1117',
             marginBottom: GRID_GAP,
           }}
           onPress={() => {
@@ -545,10 +627,11 @@ function BuildScreenInner() {
             else setOpenWorkoutId(item.id);
           }}
         >
-          {/* Media area — fills entire card */}
-          {hasMosaic ? (
+          {/* Media area */}
+          {isWorkoutCard ? (
+            // Workout cards: always show mini-library mosaic
             <WorkoutMosaic
-              thumbs={item.coverThumbs!}
+              thumbs={item.coverThumbs ?? []}
               width={cardWidth}
               height={cardHeight}
             />
@@ -565,7 +648,7 @@ function BuildScreenInner() {
           )}
 
           {/* Name overlay — transparent gradient at bottom */}
-          <View style={styles.nameOverlay}>
+          <View style={[styles.nameOverlay, isWorkoutCard && { backgroundColor: 'rgba(26, 35, 50, 0.92)' }]}>
             <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
           </View>
         </Pressable>
