@@ -1182,7 +1182,6 @@ export default function WorkoutFolderPage({
                                   style={st.ovOverlay}
                                   {...(Platform.OS === 'web' ? {
                                     onClick: (e: any) => { e.stopPropagation(); },
-                                    onPointerDown: (e: any) => { e.stopPropagation(); },
                                   } : {
                                     onStartShouldSetResponder: () => true,
                                     onResponderTerminationRequest: () => false,
