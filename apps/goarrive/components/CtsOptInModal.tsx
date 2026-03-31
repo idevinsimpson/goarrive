@@ -201,6 +201,7 @@ const s = StyleSheet.create({
   sheet: {
     backgroundColor: CARD_BG,
     borderTopLeftRadius: 20,
+    overflow: "hidden" as const,
     borderTopRightRadius: 20,
     padding: 24,
     paddingBottom: 40,

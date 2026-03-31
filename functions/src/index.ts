@@ -7034,3 +7034,114 @@ export const retryFailedGifGeneration = onSchedule(
     }
   },
 );
+
+
+// ─── 27. analyzeMovement — AI-powered movement analysis via GPT-4.1-mini ────
+// Accepts a GIF URL, sends it to GPT-4.1-mini vision, and returns structured
+// movement metadata (name, category, equipment, difficulty, muscleGroups,
+// description, regression, progression, contraindications, workSec, restSec).
+//
+// ME-008: OPENAI_API_KEY must be set as a Firebase secret.
+//         firebase functions:secrets:set OPENAI_API_KEY
+// ─────────────────────────────────────────────────────────────────────────────
+const openaiApiKey = defineSecret('OPENAI_API_KEY');
+
+export const analyzeMovement = onCall(
+  { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60 },
+  async (request) => {
+    const { gifUrl } = request.data as { gifUrl?: string };
+
+    if (!gifUrl || typeof gifUrl !== 'string') {
+      throw new HttpsError('invalid-argument', 'gifUrl is required');
+    }
+
+    const apiKey = openaiApiKey.value();
+    if (!apiKey) {
+      throw new HttpsError('internal', 'OpenAI API key not configured');
+    }
+
+    const systemPrompt = `You are a fitness movement analysis expert. You will be shown an animated GIF of a fitness/exercise movement. Analyze it carefully and return a JSON object with the following fields:
+
+- "name": string — the standard exercise name (e.g. "Barbell Back Squat", "Dumbbell Lateral Raise")
+- "category": string — one of: "Upper Body Push", "Upper Body Pull", "Lower Body Push", "Lower Body Pull", "Core", "Cardio", "Mobility"
+- "equipment": string — one of: "Bodyweight", "Dumbbell", "Barbell", "Kettlebell", "Band", "Cable", "Machine", or "" if unclear
+- "difficulty": string — one of: "Beginner", "Intermediate", "Advanced"
+- "muscleGroups": string[] — array from: "Chest", "Back", "Shoulders", "Biceps", "Triceps", "Quads", "Hamstrings", "Glutes", "Calves", "Core", "Full Body"
+- "description": string — 1-2 sentence coaching cue (form tips, what to focus on)
+- "regression": string — an easier alternative exercise name
+- "progression": string — a harder alternative exercise name
+- "contraindications": string — brief note on who should avoid this (e.g. "Avoid with lower back injury")
+- "workSec": number — recommended work duration in seconds (typically 30-45)
+- "restSec": number — recommended rest duration in seconds (typically 15-30)
+
+Return ONLY valid JSON, no markdown, no explanation.`;
+
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4.1-mini',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'image_url',
+                  image_url: { url: gifUrl, detail: 'high' },
+                },
+                {
+                  type: 'text',
+                  text: 'Analyze this fitness movement and return the JSON metadata.',
+                },
+              ],
+            },
+          ],
+          max_tokens: 500,
+          temperature: 0.3,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[analyzeMovement] OpenAI API error:', response.status, errorText);
+        throw new HttpsError('internal', `OpenAI API error: ${response.status}`);
+      }
+
+      const result = await response.json() as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      const content = result.choices?.[0]?.message?.content?.trim() || '';
+
+      // Parse JSON from the response (strip markdown fences if present)
+      let jsonStr = content;
+      if (jsonStr.startsWith('```')) {
+        jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+      }
+
+      const analysis = JSON.parse(jsonStr);
+
+      return {
+        name: analysis.name || '',
+        category: analysis.category || '',
+        equipment: analysis.equipment || '',
+        difficulty: analysis.difficulty || '',
+        muscleGroups: Array.isArray(analysis.muscleGroups) ? analysis.muscleGroups : [],
+        description: analysis.description || '',
+        regression: analysis.regression || '',
+        progression: analysis.progression || '',
+        contraindications: analysis.contraindications || '',
+        workSec: typeof analysis.workSec === 'number' ? analysis.workSec : 30,
+        restSec: typeof analysis.restSec === 'number' ? analysis.restSec : 15,
+      };
+    } catch (err: any) {
+      if (err instanceof HttpsError) throw err;
+      console.error('[analyzeMovement] Unexpected error:', err);
+      throw new HttpsError('internal', 'Failed to analyze movement');
+    }
+  },
+);

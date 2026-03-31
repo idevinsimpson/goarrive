@@ -459,6 +459,7 @@ const st = StyleSheet.create({
   sheet: {
     backgroundColor: '#151921',
     borderTopLeftRadius: 24,
+    overflow: "hidden" as const,
     borderTopRightRadius: 24,
     maxHeight: '85%',
     paddingBottom: Platform.select({ ios: 34, default: 20 }),

@@ -630,7 +630,7 @@ export default function WorkoutForm({
           if (m.movementId && !seenMoveIds.has(m.movementId)) {
             seenMoveIds.add(m.movementId);
             const mv = availableMovements.find((am) => am.id === m.movementId);
-            const thumb = mv?.mediaUrl || mv?.videoUrl || null;
+            const thumb = mv?.thumbnailUrl || mv?.mediaUrl || mv?.videoUrl || null;
             if (thumb) coverThumbs.push(thumb);
           }
           if (coverThumbs.length >= 16) break;
@@ -1457,6 +1457,7 @@ const s = StyleSheet.create({
   sheet: {
     backgroundColor: '#111827',
     borderTopLeftRadius: 24,
+    overflow: "hidden" as const,
     borderTopRightRadius: 24,
     maxHeight: '95%',
     flex: 1,

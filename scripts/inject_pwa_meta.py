@@ -7,6 +7,7 @@ Injects into dist/index.html:
   3. Google Fonts preconnect + stylesheet links (Space Grotesk, DM Sans)
   4. CSS overrides for fixed header/tab-bar positioning on web
   5. Safari-specific fixes and error handling
+  6. Modal scroll fixes for iOS Safari PWA
 
 Run after `expo export --platform web` and before `firebase deploy`.
 """
@@ -53,7 +54,9 @@ HEAD_INJECT = """
 
     <!-- PWA CSS overrides -->
     <style>
-      /* Safari fix: ensure body and html take full viewport */
+      /* ═══════════════════════════════════════════════════════════════════
+         1. BASE LAYOUT — Safari fix: ensure body and html take full viewport
+         ═══════════════════════════════════════════════════════════════════ */
       html, body { 
         width: 100%; 
         height: 100%; 
@@ -63,31 +66,6 @@ HEAD_INJECT = """
         background: #0E1117;
         -webkit-user-select: none;
         user-select: none;
-      }
-      
-      /* SCROLL FIX (verified in live browser):
-         Expo tab navigator renders each screen in a position:absolute full-viewport
-         container (r-1p0dtai r-1d2f490 r-u8s1d r-zchlnj r-ipm5af).
-         Inside it, React Native Web creates two nested ScrollViews (both r-agouwx):
-           - Outer r-agouwx: must be height-constrained to viewport - tab bar
-           - Inner r-agouwx (direct child of outer): must NOT shrink, must grow to content
-         Without this, both expand to full content height and nothing scrolls. */
-
-      /* Outer ScrollView: constrain to available height (viewport minus ~53px tab bar) */
-      .r-1p0dtai.r-1d2f490.r-u8s1d.r-zchlnj.r-ipm5af .r-agouwx {
-        height: calc(100dvh - 53px) !important;
-        max-height: calc(100dvh - 53px) !important;
-        flex: 0 0 calc(100dvh - 53px) !important;
-        overflow-y: auto !important;
-        -webkit-overflow-scrolling: touch !important;
-      }
-
-      /* Inner ScrollView (direct child of outer): grow to natural content height */
-      .r-1p0dtai.r-1d2f490.r-u8s1d.r-zchlnj.r-ipm5af .r-agouwx > .r-agouwx {
-        flex: 0 0 auto !important;
-        height: auto !important;
-        max-height: none !important;
-        overflow-y: visible !important;
       }
       
       #root { 
@@ -117,6 +95,69 @@ HEAD_INJECT = """
         /* Safari: prevent zooming on input focus */
         font-size: 16px;
       }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         2. TAB SCREEN SCROLL FIX
+         Expo tab navigator renders each screen in a position:absolute
+         full-viewport container (r-1p0dtai r-1d2f490 r-u8s1d r-zchlnj r-ipm5af).
+         Inside it, React Native Web creates ScrollViews (r-agouwx = overflow-y:auto).
+         Without height constraints, they expand to content height and nothing scrolls.
+         
+         NOTE: Modals do NOT have r-u8s1d, so this rule does NOT affect them.
+         ═══════════════════════════════════════════════════════════════════ */
+
+      /* Outer ScrollView: constrain to available height (viewport minus ~53px tab bar) */
+      .r-1p0dtai.r-1d2f490.r-u8s1d.r-zchlnj.r-ipm5af .r-agouwx {
+        height: calc(100dvh - 53px) !important;
+        max-height: calc(100dvh - 53px) !important;
+        flex: 0 0 calc(100dvh - 53px) !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+      }
+
+      /* Inner ScrollView (direct child of outer): grow to natural content height */
+      .r-1p0dtai.r-1d2f490.r-u8s1d.r-zchlnj.r-ipm5af .r-agouwx > .r-agouwx {
+        flex: 0 0 auto !important;
+        height: auto !important;
+        max-height: none !important;
+        overflow-y: visible !important;
+      }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         3. MODAL SCROLL FIX — iOS Safari PWA
+         React Native Web modals use [role="dialog"][aria-modal="true"].
+         Their ScrollViews need:
+           a) -webkit-overflow-scrolling: touch for momentum scrolling
+           b) The sheet container needs overflow:hidden for proper containment
+           c) Undo any height constraints from the tab screen rules above
+         ═══════════════════════════════════════════════════════════════════ */
+
+      /* Modal ScrollViews: ensure iOS momentum scrolling works */
+      [role="dialog"] .r-agouwx,
+      [aria-modal="true"] .r-agouwx {
+        -webkit-overflow-scrolling: touch !important;
+        overflow-y: auto !important;
+        /* Undo any tab-screen height constraints that might leak */
+        height: auto !important;
+        max-height: none !important;
+        flex: 1 1 0% !important;
+      }
+
+      /* Modal sheet containers (the ones with maxHeight %) need overflow:hidden
+         to create a proper scroll containment context on iOS Safari.
+         These are the direct children of the overlay that have border-radius. */
+      [role="dialog"] > div > div > div {
+        overflow: hidden !important;
+      }
+
+      /* Ensure the modal overlay itself fills the viewport properly */
+      [role="dialog"] {
+        -webkit-overflow-scrolling: touch !important;
+      }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         4. TAB BAR FIXES
+         ═══════════════════════════════════════════════════════════════════ */
       
       /* Fix tab bar label clipping: Expo renders label containers with overflow:hidden
          and a fixed height that doesn't account for the full tab item height.
@@ -137,6 +178,10 @@ HEAD_INJECT = """
         padding-top: 6px !important;
         overflow: visible !important;
       }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         5. SAFE AREA & MISC
+         ═══════════════════════════════════════════════════════════════════ */
       
       /* Safari: fix for position:fixed elements with safe-area-inset */
       @supports (padding: max(0px)) {
@@ -248,7 +293,7 @@ def main():
     with open(manifest_path, 'w') as f:
         f.write(MANIFEST)
 
-    print('[inject_pwa_meta] Done — injected PWA meta, fonts, Safari fixes, and error handling.')
+    print('[inject_pwa_meta] Done — injected PWA meta, fonts, Safari fixes, modal scroll fixes, and error handling.')
 
 
 if __name__ == '__main__':

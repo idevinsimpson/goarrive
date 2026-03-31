@@ -330,6 +330,7 @@ const st = StyleSheet.create({
   sheet: {
     backgroundColor: '#0E1117',
     borderTopLeftRadius: 16,
+    overflow: "hidden" as const,
     borderTopRightRadius: 16,
     maxHeight: '85%',
     paddingBottom: 34,

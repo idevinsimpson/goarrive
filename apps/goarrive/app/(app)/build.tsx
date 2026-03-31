@@ -10,6 +10,9 @@
  *   - Multi-action Plus Button
  *   - Grid/List Toggle
  *   - Batch Operations
+ *   - Responsive grid with max card size (~160px) and 4:5 aspect ratio
+ *   - Name overlay on transparent gradient at bottom of card
+ *   - Workout cards show mosaic of movement GIF thumbnails
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo, Component, ErrorInfo } from 'react';
 import {
@@ -26,6 +29,7 @@ import {
   Dimensions,
   Image,
   Modal,
+  useWindowDimensions,
 } from 'react-native';
 import {
   collection,
@@ -53,6 +57,12 @@ const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
 type BuildType = 'Plans' | 'Movements' | 'Workouts' | 'Playbooks';
 const TYPES: BuildType[] = ['Plans', 'Movements', 'Workouts', 'Playbooks'];
+
+// ── Grid layout constants ──────────────────────────────────────────────────
+const GRID_PADDING = 16;       // padding on left/right of the grid
+const GRID_GAP = 12;           // gap between cards
+const MAX_CARD_WIDTH = 160;    // max card width in px
+const CARD_ASPECT = 4 / 5;     // 4:5 width:height ratio → height = width / (4/5) = width * 1.25
 
 interface BuildItem {
   id: string;
@@ -106,9 +116,61 @@ export default function BuildScreenWrapper() {
   );
 }
 
+// ── Responsive grid hook ─────────────────────────────────────────────────
+function useGridLayout() {
+  const { width } = useWindowDimensions();
+  const availableWidth = width - GRID_PADDING * 2;
+  // Calculate how many columns fit with max card width
+  // cols = floor((availableWidth + gap) / (maxCardWidth + gap))
+  const cols = Math.max(2, Math.floor((availableWidth + GRID_GAP) / (MAX_CARD_WIDTH + GRID_GAP)));
+  // Actual card width: distribute evenly
+  const cardWidth = (availableWidth - GRID_GAP * (cols - 1)) / cols;
+  const cardHeight = cardWidth / CARD_ASPECT; // 4:5 → taller than wide
+  return { cols, cardWidth, cardHeight };
+}
+
+// ── Workout Mosaic Thumbnail ─────────────────────────────────────────────
+/** Shows a mini-grid of movement GIF thumbnails inside a workout card */
+function WorkoutMosaic({ thumbs, width, height }: { thumbs: string[]; width: number; height: number }) {
+  if (!thumbs || thumbs.length === 0) return null;
+
+  // Calculate mini-grid: aim for ~4-5 across
+  const miniGap = 2;
+  const miniCols = thumbs.length <= 2 ? thumbs.length : thumbs.length <= 4 ? 2 : Math.min(4, Math.ceil(Math.sqrt(thumbs.length)));
+  const miniWidth = (width - miniGap * (miniCols - 1)) / miniCols;
+  const miniHeight = miniWidth / CARD_ASPECT; // keep 4:5
+
+  return (
+    <View style={{
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: miniGap,
+      padding: miniGap,
+      width,
+      height,
+      overflow: 'hidden',
+      backgroundColor: '#0E1117',
+    }}>
+      {thumbs.slice(0, 16).map((url, i) => (
+        <Image
+          key={i}
+          source={{ uri: url }}
+          style={{
+            width: miniWidth,
+            height: miniHeight,
+            borderRadius: 3,
+          }}
+          resizeMode="cover"
+        />
+      ))}
+    </View>
+  );
+}
+
 function BuildScreenInner() {
   const { user, claims } = useAuth();
   const coachId = claims?.coachId ?? user?.uid ?? '';
+  const { cols, cardWidth, cardHeight } = useGridLayout();
   
   // ── State ──────────────────────────────────────────────────────────────
   const [items, setItems] = useState<BuildItem[]>([]);
@@ -408,18 +470,23 @@ function BuildScreenInner() {
     if (item.type === 'Folder') {
       if (viewMode === 'grid') {
         return (
-          <Pressable style={[s.gridCard]} onPress={() => enterFolder(item)}>
-            <View style={[s.cardMedia, { backgroundColor: '#1A2332' }]}>
-              <View style={s.mediaPlaceholder}>
-                <Icon name="folder" size={40} color="#F5A623" />
-              </View>
-              <View style={s.typeBadge}>
-                <Text style={s.typeBadgeText}>Folder</Text>
-              </View>
+          <Pressable
+            style={{
+              width: cardWidth,
+              height: cardHeight,
+              borderRadius: 10,
+              overflow: 'hidden',
+              backgroundColor: '#1A2332',
+              marginBottom: GRID_GAP,
+            }}
+            onPress={() => enterFolder(item)}
+          >
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+              <Icon name="folder" size={36} color="#F5A623" />
             </View>
-            <View style={s.cardInfo}>
-              <Text style={s.cardName} numberOfLines={1}>{item.name}</Text>
-              <Text style={s.cardSub}>Folder</Text>
+            {/* Name overlay */}
+            <View style={styles.nameOverlay}>
+              <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
             </View>
           </Pressable>
         );
@@ -444,11 +511,25 @@ function BuildScreenInner() {
       const isMovement = item.type === 'Movements';
       const isPlan = item.type === 'Plans';
       const isPlaybook = item.type === 'Playbooks';
+      const isWorkout = item.type === 'Workouts';
       const iconName = isPlan ? 'plan' : isPlaybook ? 'playbook' : isMovement ? 'movements' : 'workouts';
-      const iconColor = isPlan ? '#60A5FA' : isPlaybook ? '#A78BFA' : '#1E2A3A';
+      const iconColor = isPlan ? '#60A5FA' : isPlaybook ? '#A78BFA' : '#4A5568';
+
+      // Determine if this is a workout with multiple movement thumbnails
+      const hasMosaic = isWorkout && item.coverThumbs && item.coverThumbs.length > 1;
+      const hasSingleThumb = item.thumbnailUrl || item.mediaUrl || (item.coverThumbs && item.coverThumbs.length === 1);
+      const singleThumbUri = item.thumbnailUrl || item.mediaUrl || (item.coverThumbs && item.coverThumbs.length > 0 ? item.coverThumbs[0] : null);
+
       return (
-        <Pressable 
-          style={[s.gridCard, isMovement ? s.movementCard : s.workoutCard]}
+        <Pressable
+          style={{
+            width: cardWidth,
+            height: cardHeight,
+            borderRadius: 10,
+            overflow: 'hidden',
+            backgroundColor: '#0E1117',
+            marginBottom: GRID_GAP,
+          }}
           onPress={() => {
             if (isMovement) setSelectedMovement(item);
             else if (isPlan) setSelectedPlan(item);
@@ -456,28 +537,34 @@ function BuildScreenInner() {
             else setSelectedWorkout(item);
           }}
         >
-          <View style={s.cardMedia}>
-            {item.thumbnailUrl || item.mediaUrl ? (
-              <Image source={{ uri: item.thumbnailUrl || item.mediaUrl }} style={s.cardImage} />
-            ) : item.coverThumbs && item.coverThumbs.length > 0 ? (
-              <Image source={{ uri: item.coverThumbs[0] }} style={s.cardImage} />
-            ) : (
-              <View style={s.mediaPlaceholder}>
-                <Icon name={iconName} size={32} color={iconColor} />
-              </View>
-            )}
-            <View style={s.typeBadge}>
-              <Text style={s.typeBadgeText}>{item.type.slice(0, -1)}</Text>
+          {/* Media area — fills entire card */}
+          {hasMosaic ? (
+            <WorkoutMosaic
+              thumbs={item.coverThumbs!}
+              width={cardWidth}
+              height={cardHeight}
+            />
+          ) : singleThumbUri ? (
+            <Image
+              source={{ uri: singleThumbUri }}
+              style={{ width: cardWidth, height: cardHeight }}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+              <Icon name={iconName} size={32} color={iconColor} />
             </View>
-          </View>
-          <View style={s.cardInfo}>
-            <Text style={s.cardName} numberOfLines={1}>{item.name}</Text>
-            <Text style={s.cardSub}>{item.category || 'No Category'}</Text>
+          )}
+
+          {/* Name overlay — transparent gradient at bottom */}
+          <View style={styles.nameOverlay}>
+            <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
           </View>
         </Pressable>
       );
     }
 
+    // List view
     return (
       <Pressable 
         style={s.listItem}
@@ -499,7 +586,7 @@ function BuildScreenInner() {
         </View>
         <View style={s.listContent}>
           <Text style={s.listName}>{item.name}</Text>
-          <Text style={s.listSub}>{item.type} • {item.category || 'Uncategorized'}</Text>
+          <Text style={s.listSub}>{item.type.slice(0, -1)}</Text>
         </View>
         <Icon name="chevron-right" size={20} color="#4A5568" />
       </Pressable>
@@ -615,10 +702,17 @@ function BuildScreenInner() {
           data={filteredItems}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          numColumns={viewMode === 'grid' ? 2 : 1}
-          key={viewMode}
-          contentContainerStyle={s.listPadding}
-          columnWrapperStyle={viewMode === 'grid' ? s.columnWrapper : undefined}
+          numColumns={viewMode === 'grid' ? cols : 1}
+          key={viewMode === 'grid' ? `grid-${cols}` : 'list'}
+          contentContainerStyle={{
+            paddingHorizontal: GRID_PADDING,
+            paddingTop: GRID_PADDING,
+            paddingBottom: 100,
+          }}
+          columnWrapperStyle={viewMode === 'grid' ? {
+            gap: GRID_GAP,
+            marginBottom: 0,
+          } : undefined}
           refreshControl={
             <RefreshControl refreshing={loading} onRefresh={() => setLoading(true)} tintColor="#F5A623" />
           }
@@ -910,6 +1004,25 @@ function BuildScreenInner() {
   );
 }
 
+// ── Name overlay styles (shared across all card types) ───────────────────
+const styles = StyleSheet.create({
+  nameOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(14, 17, 23, 0.65)',
+  },
+  nameText: {
+    color: '#F0F4F8',
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold',
+  },
+});
+
 const s = StyleSheet.create({
   root: {
     flex: 1,
@@ -1021,68 +1134,6 @@ const s = StyleSheet.create({
     color: '#8A95A3',
     fontFamily: FB,
     fontWeight: '600',
-  },
-  listPadding: {
-    padding: 16,
-    paddingBottom: 100,
-  },
-  columnWrapper: {
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  gridCard: {
-    width: (Dimensions.get('window').width - 48) / 2,
-    backgroundColor: '#1E2A3A',
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  cardMedia: {
-    aspectRatio: 1,
-    backgroundColor: '#0E1117',
-    position: 'relative',
-  },
-  movementCard: {
-  },
-  cardImage: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
-  },
-  mediaPlaceholder: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  typeBadge: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
-    backgroundColor: 'rgba(14, 17, 23, 0.8)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  typeBadgeText: {
-    color: '#F5A623',
-    fontSize: 10,
-    fontWeight: '800',
-    fontFamily: FH,
-    textTransform: 'uppercase',
-  },
-  cardInfo: {
-    padding: 12,
-  },
-  cardName: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#F0F4F8',
-    fontFamily: FH,
-    marginBottom: 2,
-  },
-  cardSub: {
-    fontSize: 11,
-    color: '#8A95A3',
-    fontFamily: FB,
   },
   listItem: {
     flexDirection: 'row',

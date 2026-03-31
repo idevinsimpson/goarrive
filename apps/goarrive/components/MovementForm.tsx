@@ -1,19 +1,24 @@
 /**
- * MovementForm — Create or edit a movement
+ * MovementForm — Radically Simplified Movement Creation
  *
- * Full-field form covering all MovementDetailData properties.
- * Supports both create (addDoc) and edit (updateDoc) modes.
+ * NEW CREATE FLOW (crop-first, AI auto-fill):
+ *   Step 1 (upload):  Clean 4:5 frame with a big "+" — coach uploads/records
+ *   Step 2 (crop):    VideoCropModal for reframing within 4:5
+ *   Step 3 (process): Video loops while GIF + AI + voice generate silently
+ *                      → auto-saves → modal closes
+ *
+ * EDIT MODE:
+ *   When editMovement is provided, shows the full metadata form (all fields
+ *   pre-filled by AI) so the coach can tweak anything.
  *
  * Props:
  *   - visible: boolean
- *   - onClose: () => void — called after save or cancel
- *   - coachId: string — required for Firestore writes
- *   - tenantId: string — required for Firestore writes
- *   - editMovement?: MovementDetailData — if provided, opens in edit mode
- *
- * Firestore collection: movements
+ *   - onClose: () => void
+ *   - coachId: string
+ *   - tenantId: string
+ *   - editMovement?: MovementDetailData | null
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -44,6 +49,7 @@ import VideoCropModal, { CropValues } from './VideoCropModal';
 import { MovementDetailData } from './MovementDetail';
 import { generateCroppedGif } from '../utils/generateCroppedGif';
 import { generateMovementVoice } from '../utils/generateMovementVoice';
+import { analyzeMovementMedia } from '../utils/analyzeMovementMedia';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH =
@@ -96,6 +102,8 @@ interface MovementFormProps {
   editMovement?: MovementDetailData | null;
 }
 
+type CreateStep = 'upload' | 'crop' | 'processing';
+
 // ── Component ──────────────────────────────────────────────────────────────
 export default function MovementForm({
   visible,
@@ -106,10 +114,7 @@ export default function MovementForm({
 }: MovementFormProps) {
   const isEdit = !!editMovement;
 
-  // ── Camera permission pre-check (Risk 6) ──────────────────────────────
-  // Check camera permission status on mount so we can show a helpful
-  // message with a Settings link if the user previously denied access,
-  // instead of a generic alert at the moment of recording.
+  // ── Camera permission pre-check ────────────────────────────────────────
   const [cameraPermStatus, setCameraPermStatus] = useState<'undetermined' | 'granted' | 'denied'>('undetermined');
 
   useEffect(() => {
@@ -119,6 +124,11 @@ export default function MovementForm({
       });
     }
   }, [visible]);
+
+  // ── Create-flow step state ─────────────────────────────────────────────
+  const [createStep, setCreateStep] = useState<CreateStep>('upload');
+  const [processingStatus, setProcessingStatus] = useState('');
+  const [processingProgress, setProcessingProgress] = useState(0);
 
   // ── Form state ─────────────────────────────────────────────────────────
   const [name, setName] = useState('');
@@ -179,6 +189,9 @@ export default function MovementForm({
   }, [editMovement, visible]);
 
   const resetForm = () => {
+    setCreateStep('upload');
+    setProcessingStatus('');
+    setProcessingProgress(0);
     setName('');
     setCategory('');
     setEquipment('');
@@ -207,113 +220,96 @@ export default function MovementForm({
   };
 
   // ── GIF thumbnail generation ─────────────────────────────────────────
-  const generateAndUploadGif = (
-    url: string,
-    crop: CropValues,
-  ) => {
-    if (Platform.OS !== 'web' || !url) return;
+  const generateAndUploadGif = useCallback(
+    (url: string, crop: CropValues): Promise<string | null> => {
+      if (Platform.OS !== 'web' || !url) return Promise.resolve(null);
 
-    setGeneratingGif(true);
-    setGifProgress(0);
+      setGeneratingGif(true);
+      setGifProgress(0);
 
-    const promise = (async (): Promise<string | null> => {
-      try {
-        const blob = await generateCroppedGif(url, crop, (p) => {
-          setGifProgress(p);
-        });
+      const promise = (async (): Promise<string | null> => {
+        try {
+          const blob = await generateCroppedGif(url, crop, (p) => {
+            setGifProgress(p);
+          });
 
-        if (!blob) {
-          console.warn('[MovementForm] GIF generation returned null');
+          if (!blob) {
+            console.warn('[MovementForm] GIF generation returned null');
+            setGeneratingGif(false);
+            return null;
+          }
+
+          // Upload the GIF to Firebase Storage
+          const fileName = `movements/${coachId}/thumbnails/${Date.now()}.gif`;
+          const storageRef = ref(storage, fileName);
+          const uploadTask = uploadBytesResumable(storageRef, blob, {
+            contentType: 'image/gif',
+          });
+
+          const downloadUrl = await new Promise<string>((resolve, reject) => {
+            uploadTask.on(
+              'state_changed',
+              (snapshot) => {
+                const uploadPct = snapshot.bytesTransferred / snapshot.totalBytes;
+                setGifProgress(0.9 + uploadPct * 0.1);
+              },
+              (error) => reject(error),
+              async () => {
+                const url = await getDownloadURL(uploadTask.snapshot.ref);
+                resolve(url);
+              },
+            );
+          });
+
+          setThumbnailUrl(downloadUrl);
           setGeneratingGif(false);
+          setGifProgress(0);
+
+          // If the form was already saved, auto-patch the Firestore document
+          if (savedDocIdRef.current) {
+            try {
+              await updateDoc(doc(db, 'movements', savedDocIdRef.current), {
+                thumbnailUrl: downloadUrl,
+              });
+            } catch (patchErr) {
+              console.error('[MovementForm] Auto-patch thumbnailUrl error:', patchErr);
+            }
+          }
+
+          return downloadUrl;
+        } catch (err) {
+          console.error('[MovementForm] GIF generation error:', err);
+          setGeneratingGif(false);
+          setGifProgress(0);
           return null;
         }
+      })();
 
-        // Upload the GIF to Firebase Storage
-        const fileName = `movements/${coachId}/thumbnails/${Date.now()}.gif`;
-        const storageRef = ref(storage, fileName);
-        const uploadTask = uploadBytesResumable(storageRef, blob, {
-          contentType: 'image/gif',
-        });
+      gifPromiseRef.current = promise;
+      return promise;
+    },
+    [coachId],
+  );
 
-        const downloadUrl = await new Promise<string>((resolve, reject) => {
-          uploadTask.on(
-            'state_changed',
-            (snapshot) => {
-              const uploadPct = snapshot.bytesTransferred / snapshot.totalBytes;
-              setGifProgress(0.9 + uploadPct * 0.1);
-            },
-            (error) => reject(error),
-            async () => {
-              const url = await getDownloadURL(uploadTask.snapshot.ref);
-              resolve(url);
-            },
-          );
-        });
+  // ── Media upload (shared by Library and Camera) ──────────────────────
+  const uploadAsset = async (asset: ImagePicker.ImagePickerAsset) => {
+    const isVideo = asset.type === 'video';
+    const ext = isVideo ? 'mp4' : 'jpg';
+    const folder = isVideo ? 'videos' : 'thumbnails';
+    const fileName = `movements/${coachId}/${folder}/${Date.now()}.${ext}`;
 
-        setThumbnailUrl(downloadUrl);
-        setGeneratingGif(false);
-        setGifProgress(0);
+    setUploading(true);
+    setUploadProgress(0);
 
-        // If the form was already saved, auto-patch the Firestore document
-        if (savedDocIdRef.current) {
-          try {
-            await updateDoc(doc(db, 'movements', savedDocIdRef.current), {
-              thumbnailUrl: downloadUrl,
-            });
-          } catch (patchErr) {
-            console.error('[MovementForm] Auto-patch thumbnailUrl error:', patchErr);
-          }
-        }
+    const response = await fetch(asset.uri);
+    const blob = await response.blob();
 
-        return downloadUrl;
-      } catch (err) {
-        console.error('[MovementForm] GIF generation error:', err);
-        setGeneratingGif(false);
-        setGifProgress(0);
-        return null;
-      }
-    })();
+    const storageRef = ref(storage, fileName);
+    const uploadTask = uploadBytesResumable(storageRef, blob, {
+      contentType: isVideo ? 'video/mp4' : 'image/jpeg',
+    });
 
-    gifPromiseRef.current = promise;
-  };
-
-  // ── Media upload ──────────────────────────────────────────────────────
-  const pickAndUploadMedia = async () => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Please grant media library access to upload videos.');
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['videos', 'images'],
-        allowsEditing: true,
-        quality: 0.8,
-        videoMaxDuration: 25, // 25 sec max per G➲A rules
-        aspect: [4, 5] as [number, number],
-      });
-
-      if (result.canceled || !result.assets?.[0]) return;
-
-      const asset = result.assets[0];
-      const isVideo = asset.type === 'video';
-      const ext = isVideo ? 'mp4' : 'jpg';
-      const folder = isVideo ? 'videos' : 'thumbnails';
-      const fileName = `movements/${coachId}/${folder}/${Date.now()}.${ext}`;
-
-      setUploading(true);
-      setUploadProgress(0);
-
-      // Fetch the file as a blob
-      const response = await fetch(asset.uri);
-      const blob = await response.blob();
-
-      const storageRef = ref(storage, fileName);
-      const uploadTask = uploadBytesResumable(storageRef, blob, {
-        contentType: isVideo ? 'video/mp4' : 'image/jpeg',
-      });
-
+    return new Promise<string>((resolve, reject) => {
       uploadTask.on(
         'state_changed',
         (snapshot) => {
@@ -322,48 +318,63 @@ export default function MovementForm({
         },
         (error) => {
           console.error('[MovementForm] Upload error:', error);
-          Alert.alert('Upload Failed', 'Could not upload media. Please try again.');
           setUploading(false);
           setUploadProgress(0);
+          reject(error);
         },
         async () => {
           const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-          if (isVideo) {
-            setVideoUrl(downloadUrl);
-            // Auto-open crop modal after video upload
-            // Use setTimeout to ensure the parent modal re-renders before
-            // opening the crop modal (iOS ignores simultaneous modal opens)
-            setCropScale(1);
-            setCropTranslateX(0);
-            setCropTranslateY(0);
-            setTimeout(() => setShowCropModal(true), 400);
-          } else {
-            setThumbnailUrl(downloadUrl);
-          }
           setUploading(false);
           setUploadProgress(0);
+          resolve(downloadUrl);
         },
       );
+    });
+  };
+
+  // ── Pick from library ────────────────────────────────────────────────
+  const pickFromLibrary = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Please grant media library access to upload videos.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['videos'],
+        allowsEditing: false,
+        quality: 0.8,
+        videoMaxDuration: 25,
+      });
+
+      if (result.canceled || !result.assets?.[0]) return;
+
+      const downloadUrl = await uploadAsset(result.assets[0]);
+      setVideoUrl(downloadUrl);
+
+      // Go to crop step
+      setCropScale(1);
+      setCropTranslateX(0);
+      setCropTranslateY(0);
+      setCreateStep('crop');
+      setTimeout(() => setShowCropModal(true), 300);
     } catch (err) {
       console.error('[MovementForm] Pick media error:', err);
       setUploading(false);
     }
   };
 
-  // ── Camera recording (Risk 6: enhanced permissions handling) ─────────
+  // ── Record from camera ───────────────────────────────────────────────
   const recordFromCamera = async () => {
     try {
-      // If previously denied, guide user to Settings instead of re-prompting
       if (cameraPermStatus === 'denied') {
         Alert.alert(
           'Camera Access Denied',
           'You previously denied camera access. To record movement videos, please enable camera permissions in your device Settings.',
           [
             { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Open Settings',
-              onPress: () => Linking.openSettings(),
-            },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
           ],
         );
         return;
@@ -378,76 +389,151 @@ export default function MovementForm({
 
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ['videos'],
-        allowsEditing: true,
+        allowsEditing: false,
         quality: 0.8,
-        videoMaxDuration: 25, // 25 sec max per G➲A rules
-        aspect: [4, 5] as [number, number],
+        videoMaxDuration: 25,
       });
 
       if (result.canceled || !result.assets?.[0]) return;
 
-      const asset = result.assets[0];
-      const ext = 'mp4';
-      const fileName = `movements/${coachId}/videos/${Date.now()}.${ext}`;
+      const downloadUrl = await uploadAsset(result.assets[0]);
+      setVideoUrl(downloadUrl);
 
-      setUploading(true);
-      setUploadProgress(0);
-
-      const response = await fetch(asset.uri);
-      const blob = await response.blob();
-
-      const storageRef = ref(storage, fileName);
-      const uploadTask = uploadBytesResumable(storageRef, blob, {
-        contentType: 'video/mp4',
-      });
-
-      uploadTask.on(
-        'state_changed',
-        (snapshot) => {
-          const progress = snapshot.bytesTransferred / snapshot.totalBytes;
-          setUploadProgress(progress);
-        },
-        (error) => {
-          console.error('[MovementForm] Camera upload error:', error);
-          Alert.alert('Upload Failed', 'Could not upload recorded video. Please try again.');
-          setUploading(false);
-          setUploadProgress(0);
-        },
-        async () => {
-          const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-          setVideoUrl(downloadUrl);
-          // Auto-open crop modal after camera recording upload
-          // Use setTimeout to ensure the parent modal re-renders before
-          // opening the crop modal (iOS ignores simultaneous modal opens)
-          setCropScale(1);
-          setCropTranslateX(0);
-          setCropTranslateY(0);
-          setUploading(false);
-          setTimeout(() => setShowCropModal(true), 400);
-          setUploadProgress(0);
-        },
-      );
+      // Go to crop step
+      setCropScale(1);
+      setCropTranslateX(0);
+      setCropTranslateY(0);
+      setCreateStep('crop');
+      setTimeout(() => setShowCropModal(true), 300);
     } catch (err) {
       console.error('[MovementForm] Camera record error:', err);
       setUploading(false);
     }
   };
 
-  // ── Muscle group toggle ────────────────────────────────────────────────
+  // ── Process after crop (the magic pipeline) ──────────────────────────
+  const processAfterCrop = async (crop: CropValues) => {
+    setCropScale(crop.cropScale);
+    setCropTranslateX(crop.cropTranslateX);
+    setCropTranslateY(crop.cropTranslateY);
+    setShowCropModal(false);
+    setCreateStep('processing');
+
+    try {
+      // Step 1: Generate GIF thumbnail
+      setProcessingStatus('Creating thumbnail...');
+      setProcessingProgress(0.1);
+
+      const gifUrl = await generateAndUploadGif(videoUrl, crop);
+
+      setProcessingProgress(0.4);
+
+      // Step 2: AI Analysis (runs on the GIF)
+      let aiData: Record<string, any> = {};
+      if (gifUrl) {
+        setProcessingStatus('Analyzing movement...');
+        setProcessingProgress(0.5);
+        try {
+          const analysis = await analyzeMovementMedia(gifUrl);
+          if (analysis) {
+            aiData = {
+              name: analysis.name || '',
+              category: analysis.category || '',
+              equipment: analysis.equipment || '',
+              difficulty: analysis.difficulty || '',
+              muscleGroups: analysis.muscleGroups || [],
+              description: analysis.description || '',
+              regression: analysis.regression || '',
+              progression: analysis.progression || '',
+              contraindications: analysis.contraindications || '',
+              workSec: analysis.workSec || 30,
+              restSec: analysis.restSec || 15,
+            };
+          }
+        } catch (aiErr) {
+          console.warn('[MovementForm] AI analysis failed, saving without:', aiErr);
+        }
+      }
+
+      setProcessingProgress(0.7);
+      setProcessingStatus('Saving movement...');
+
+      // Step 3: Save to Firestore
+      const data: Record<string, any> = {
+        name: aiData.name || 'New Movement',
+        category: aiData.category || '',
+        equipment: aiData.equipment || '',
+        difficulty: aiData.difficulty || '',
+        description: aiData.description || '',
+        muscleGroups: aiData.muscleGroups || [],
+        workSec: aiData.workSec || 30,
+        restSec: aiData.restSec || 15,
+        countdownSec: 3,
+        swapSides: false,
+        swapMode: 'split' as const,
+        swapWindowSec: 5,
+        videoUrl: videoUrl.trim(),
+        thumbnailUrl: gifUrl || '',
+        regression: aiData.regression || '',
+        progression: aiData.progression || '',
+        contraindications: aiData.contraindications || '',
+        cropScale: crop.cropScale,
+        cropTranslateX: crop.cropTranslateX,
+        cropTranslateY: crop.cropTranslateY,
+        coachId,
+        tenantId,
+        isGlobal: false,
+        isArchived: false,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      const docRef = await addDoc(collection(db, 'movements'), data);
+      const docId = docRef.id;
+      savedDocIdRef.current = docId;
+
+      setProcessingProgress(0.85);
+
+      // Step 4: Voice generation (non-blocking)
+      if (aiData.name) {
+        setProcessingStatus('Generating voice...');
+        generateMovementVoice(docId, aiData.name)
+          .then((voiceUrl) => {
+            if (voiceUrl) {
+              updateDoc(doc(db, 'movements', docId), { voiceUrl }).catch(() => {});
+            }
+          })
+          .catch(() => {});
+      }
+
+      setProcessingProgress(1);
+      setProcessingStatus('Done!');
+
+      // Brief pause to show completion, then close
+      setTimeout(() => {
+        resetForm();
+        onClose();
+      }, 600);
+    } catch (err) {
+      console.error('[MovementForm] Processing pipeline error:', err);
+      Alert.alert('Error', 'Something went wrong while creating the movement. Please try again.');
+      setCreateStep('upload');
+      setProcessingStatus('');
+      setProcessingProgress(0);
+    }
+  };
+
+  // ── Muscle group toggle (for edit mode) ───────────────────────────────
   const toggleMuscleGroup = (mg: string) => {
     setMuscleGroups((prev) =>
       prev.includes(mg) ? prev.filter((g) => g !== mg) : [...prev, mg],
     );
   };
 
-  // ── Submit ─────────────────────────────────────────────────────────────
-  const handleSubmit = async () => {
+  // ── Edit mode submit ──────────────────────────────────────────────────
+  const handleEditSubmit = async () => {
     if (!name.trim()) {
       Alert.alert('Error', 'Please enter a movement name.');
-      return;
-    }
-    if (!category) {
-      Alert.alert('Error', 'Please select a category.');
       return;
     }
 
@@ -468,14 +554,12 @@ export default function MovementForm({
         });
       }
 
-      // If GIF is still generating, wait for it to finish before saving
+      // If GIF is still generating, wait for it
       let finalThumbnailUrl = thumbnailUrl.trim();
       if (gifPromiseRef.current) {
         try {
           const gifUrl = await gifPromiseRef.current;
-          if (gifUrl) {
-            finalThumbnailUrl = gifUrl;
-          }
+          if (gifUrl) finalThumbnailUrl = gifUrl;
         } catch {
           // GIF failed — save without it
         }
@@ -506,421 +590,432 @@ export default function MovementForm({
         updatedAt: serverTimestamp(),
       };
 
-      let docId: string;
-      if (isEdit && editMovement) {
-        // Edit mode — update existing document
-        docId = editMovement.id;
-        await updateDoc(doc(db, 'movements', docId), data);
-      } else {
-        // Create mode — add new document with ownership fields
-        const docRef = await addDoc(collection(db, 'movements'), {
-          ...data,
-          coachId,
-          tenantId,
-          isGlobal: false,
-          isArchived: false,
-          createdAt: serverTimestamp(),
-        });
-        docId = docRef.id;
-      }
-
-      // Store doc ID so GIF auto-patch can find it if GIF finishes after save
+      const docId = editMovement!.id;
+      await updateDoc(doc(db, 'movements', docId), data);
       savedDocIdRef.current = docId;
 
-      // Generate GoArrive Coach voice clip for this movement name (async, non-blocking)
-      // Only regenerate if the name changed (edit) or it's a new movement (create)
+      // Regenerate voice if name changed
       const prevName = editMovement?.name?.trim() ?? null;
       const newName = name.trim();
-      if (!isEdit || prevName !== newName) {
+      if (prevName !== newName) {
         generateMovementVoice(docId, newName)
           .then((voiceUrl) => {
             if (voiceUrl) {
               updateDoc(doc(db, 'movements', docId), { voiceUrl }).catch(() => {});
             }
           })
-          .catch(() => {}); // silent fallback — movement saved regardless
+          .catch(() => {});
       }
 
       resetForm();
       onClose();
     } catch (error) {
       console.error('[MovementForm] Save error:', error);
-      Alert.alert('Error', `Could not ${isEdit ? 'update' : 'create'} movement.`);
+      Alert.alert('Error', 'Could not update movement.');
     } finally {
       setSubmitting(false);
     }
   };
 
   // ── Render ─────────────────────────────────────────────────────────────
-  return (
-    <>
-    <Modal visible={visible} animationType="slide" transparent={true}>
-      <View style={st.overlay}>
-        <View style={st.sheet}>
-          {/* Header */}
-          <View style={st.header}>
-            <Text style={st.headerTitle}>
-              {isEdit ? 'Edit Movement' : 'New Movement'}
-            </Text>
-            <Pressable onPress={onClose} hitSlop={8}>
-              <Icon name="close" size={24} color="#8A95A3" />
-            </Pressable>
-          </View>
 
-          <ScrollView
-            style={st.scroll}
-            contentContainerStyle={st.scrollContent}
-            keyboardShouldPersistTaps="handled"
-          >
-            {/* Movement Name */}
-            <Text style={st.label}>Movement Name *</Text>
-            <TextInput
-              style={st.input}
-              value={name}
-              onChangeText={setName}
-              placeholder="e.g. Back Squat"
-              placeholderTextColor="#4A5568"
-            />
-
-            {/* Category — Picker chips */}
-            <Text style={st.label}>Category *</Text>
-            <View style={st.chipRow}>
-              {CATEGORY_OPTIONS.map((opt) => {
-                const active = category === opt;
-                return (
-                  <Pressable
-                    key={opt}
-                    style={[st.chip, active && st.chipActive]}
-                    onPress={() => setCategory(opt)}
-                  >
-                    <Text style={[st.chipText, active && st.chipTextActive]}>
-                      {opt}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            {/* Equipment — Picker chips */}
-            <Text style={st.label}>Equipment</Text>
-            <View style={st.chipRow}>
-              {EQUIPMENT_OPTIONS.map((opt) => {
-                const active = equipment === opt;
-                return (
-                  <Pressable
-                    key={opt}
-                    style={[st.chip, active && st.chipActive]}
-                    onPress={() => setEquipment(active ? '' : opt)}
-                  >
-                    <Text style={[st.chipText, active && st.chipTextActive]}>
-                      {opt}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            {/* Difficulty — Picker chips */}
-            <Text style={st.label}>Difficulty</Text>
-            <View style={st.chipRow}>
-              {DIFFICULTY_OPTIONS.map((opt) => {
-                const active = difficulty === opt;
-                return (
-                  <Pressable
-                    key={opt}
-                    style={[st.chip, active && st.chipActive]}
-                    onPress={() => setDifficulty(active ? '' : opt)}
-                  >
-                    <Text style={[st.chipText, active && st.chipTextActive]}>
-                      {opt}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            {/* Muscle Groups — Multi-select chips */}
-            <Text style={st.label}>Muscle Groups</Text>
-            <View style={st.chipRow}>
-              {MUSCLE_GROUP_OPTIONS.map((mg) => {
-                const active = muscleGroups.includes(mg);
-                return (
-                  <Pressable
-                    key={mg}
-                    style={[st.chip, active && st.chipActive]}
-                    onPress={() => toggleMuscleGroup(mg)}
-                  >
-                    <Text style={[st.chipText, active && st.chipTextActive]}>
-                      {mg}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            {/* Description */}
-            <Text style={st.label}>Description</Text>
-            <TextInput
-              style={[st.input, st.textArea]}
-              value={description}
-              onChangeText={setDescription}
-              placeholder="Coaching cues, notes, or instructions..."
-              placeholderTextColor="#4A5568"
-              multiline
-              numberOfLines={3}
-              textAlignVertical="top"
-            />
-
-            {/* Timer Defaults */}
-            <Text style={st.sectionTitle}>Timer Defaults</Text>
-            <View style={st.timerRow}>
-              <View style={st.timerField}>
-                <Text style={st.timerLabel}>Work (sec)</Text>
-                <TextInput
-                  style={st.timerInput}
-                  value={workSec}
-                  onChangeText={setWorkSec}
-                  keyboardType="numeric"
-                  placeholder="30"
-                  placeholderTextColor="#4A5568"
-                />
+  // ── EDIT MODE: Full metadata form ──────────────────────────────────────
+  if (isEdit) {
+    return (
+      <>
+        <Modal visible={visible} animationType="slide" transparent={true}>
+          <View style={st.overlay}>
+            <View style={st.sheet}>
+              <View style={st.header}>
+                <Text style={st.headerTitle}>Edit Movement</Text>
+                <Pressable onPress={onClose} hitSlop={8}>
+                  <Icon name="close" size={24} color="#8A95A3" />
+                </Pressable>
               </View>
-              <View style={st.timerField}>
-                <Text style={st.timerLabel}>Rest (sec)</Text>
-                <TextInput
-                  style={st.timerInput}
-                  value={restSec}
-                  onChangeText={setRestSec}
-                  keyboardType="numeric"
-                  placeholder="15"
-                  placeholderTextColor="#4A5568"
-                />
-              </View>
-              <View style={st.timerField}>
-                <Text style={st.timerLabel}>Countdown</Text>
-                <TextInput
-                  style={st.timerInput}
-                  value={countdownSec}
-                  onChangeText={setCountdownSec}
-                  keyboardType="numeric"
-                  placeholder="3"
-                  placeholderTextColor="#4A5568"
-                />
-              </View>
-            </View>
 
-            {/* Swap Sides toggle */}
-            <Pressable
-              style={st.toggleRow}
-              onPress={() => setSwapSides(!swapSides)}
-            >
-              <View>
-                <Text style={st.toggleLabel}>Swap Sides</Text>
-                <Text style={st.toggleHint}>
-                  Automatically split work time for left/right sides
-                </Text>
-              </View>
-              <View
-                style={[st.toggleTrack, swapSides && st.toggleTrackActive]}
+              <ScrollView
+                style={st.scroll}
+                contentContainerStyle={st.scrollContent}
+                keyboardShouldPersistTaps="handled"
               >
-                <View
-                  style={[st.toggleThumb, swapSides && st.toggleThumbActive]}
+                {/* Movement Name */}
+                <Text style={st.label}>Movement Name</Text>
+                <TextInput
+                  style={st.input}
+                  value={name}
+                  onChangeText={setName}
+                  placeholder="e.g. Back Squat"
+                  placeholderTextColor="#4A5568"
                 />
-              </View>
-            </Pressable>
 
-            {/* Media Upload */}
-            <Text style={st.sectionTitle}>Media</Text>
+                {/* Category */}
+                <Text style={st.label}>Category</Text>
+                <View style={st.chipRow}>
+                  {CATEGORY_OPTIONS.map((opt) => {
+                    const active = category === opt;
+                    return (
+                      <Pressable
+                        key={opt}
+                        style={[st.chip, active && st.chipActive]}
+                        onPress={() => setCategory(opt)}
+                      >
+                        <Text style={[st.chipText, active && st.chipTextActive]}>{opt}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
 
-            {/* Upload / Record buttons */}
-            {uploading ? (
-              <View style={st.uploadBtn}>
-                <View style={st.uploadProgress}>
-                  <ActivityIndicator size="small" color="#F5A623" />
-                  <Text style={st.uploadProgressText}>
-                    Uploading... {Math.round(uploadProgress * 100)}%
-                  </Text>
-                  <View style={st.progressBar}>
-                    <View
-                      style={[
-                        st.progressFill,
-                        { width: `${Math.round(uploadProgress * 100)}%` },
-                      ]}
+                {/* Equipment */}
+                <Text style={st.label}>Equipment</Text>
+                <View style={st.chipRow}>
+                  {EQUIPMENT_OPTIONS.map((opt) => {
+                    const active = equipment === opt;
+                    return (
+                      <Pressable
+                        key={opt}
+                        style={[st.chip, active && st.chipActive]}
+                        onPress={() => setEquipment(active ? '' : opt)}
+                      >
+                        <Text style={[st.chipText, active && st.chipTextActive]}>{opt}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                {/* Difficulty */}
+                <Text style={st.label}>Difficulty</Text>
+                <View style={st.chipRow}>
+                  {DIFFICULTY_OPTIONS.map((opt) => {
+                    const active = difficulty === opt;
+                    return (
+                      <Pressable
+                        key={opt}
+                        style={[st.chip, active && st.chipActive]}
+                        onPress={() => setDifficulty(active ? '' : opt)}
+                      >
+                        <Text style={[st.chipText, active && st.chipTextActive]}>{opt}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                {/* Muscle Groups */}
+                <Text style={st.label}>Muscle Groups</Text>
+                <View style={st.chipRow}>
+                  {MUSCLE_GROUP_OPTIONS.map((mg) => {
+                    const active = muscleGroups.includes(mg);
+                    return (
+                      <Pressable
+                        key={mg}
+                        style={[st.chip, active && st.chipActive]}
+                        onPress={() => toggleMuscleGroup(mg)}
+                      >
+                        <Text style={[st.chipText, active && st.chipTextActive]}>{mg}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                {/* Description */}
+                <Text style={st.label}>Description / Coaching Cues</Text>
+                <TextInput
+                  style={[st.input, st.textArea]}
+                  value={description}
+                  onChangeText={setDescription}
+                  placeholder="Coaching cues, notes, or instructions..."
+                  placeholderTextColor="#4A5568"
+                  multiline
+                  numberOfLines={3}
+                  textAlignVertical="top"
+                />
+
+                {/* Timer Defaults */}
+                <Text style={st.sectionTitle}>Timer Defaults</Text>
+                <View style={st.timerRow}>
+                  <View style={st.timerField}>
+                    <Text style={st.timerLabel}>Work (sec)</Text>
+                    <TextInput
+                      style={st.timerInput}
+                      value={workSec}
+                      onChangeText={setWorkSec}
+                      keyboardType="numeric"
+                      placeholder="30"
+                      placeholderTextColor="#4A5568"
+                    />
+                  </View>
+                  <View style={st.timerField}>
+                    <Text style={st.timerLabel}>Rest (sec)</Text>
+                    <TextInput
+                      style={st.timerInput}
+                      value={restSec}
+                      onChangeText={setRestSec}
+                      keyboardType="numeric"
+                      placeholder="15"
+                      placeholderTextColor="#4A5568"
+                    />
+                  </View>
+                  <View style={st.timerField}>
+                    <Text style={st.timerLabel}>Countdown</Text>
+                    <TextInput
+                      style={st.timerInput}
+                      value={countdownSec}
+                      onChangeText={setCountdownSec}
+                      keyboardType="numeric"
+                      placeholder="3"
+                      placeholderTextColor="#4A5568"
                     />
                   </View>
                 </View>
+
+                {/* Swap Sides */}
+                <Pressable style={st.toggleRow} onPress={() => setSwapSides(!swapSides)}>
+                  <View>
+                    <Text style={st.toggleLabel}>Swap Sides</Text>
+                    <Text style={st.toggleHint}>Automatically split work time for left/right sides</Text>
+                  </View>
+                  <View style={[st.toggleTrack, swapSides && st.toggleTrackActive]}>
+                    <View style={[st.toggleThumb, swapSides && st.toggleThumbActive]} />
+                  </View>
+                </Pressable>
+
+                {/* Media */}
+                <Text style={st.sectionTitle}>Media</Text>
+                {videoUrl ? (
+                  <View style={{ marginBottom: 8 }}>
+                    <MovementVideoControls
+                      uri={videoUrl}
+                      posterUri={thumbnailUrl || undefined}
+                      aspectRatio={4 / 5}
+                      autoPlay={false}
+                      showControls={true}
+                      cropScale={cropScale}
+                      cropTranslateX={cropTranslateX}
+                      cropTranslateY={cropTranslateY}
+                    />
+                    <View style={st.mediaAttached}>
+                      <Icon name="checkmark" size={14} color="#6EBB7A" />
+                      <Text style={st.mediaAttachedText}>Video attached</Text>
+                      <Pressable
+                        style={st.reframeBtn}
+                        onPress={() => setShowCropModal(true)}
+                        hitSlop={8}
+                      >
+                        <Icon name="crop" size={12} color="#F5A623" />
+                        <Text style={st.reframeBtnText}>Reframe</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : null}
+
+                {/* Regression / Progression */}
+                <Text style={st.label}>Regression (Easier Alternative)</Text>
+                <TextInput
+                  style={st.input}
+                  value={regression}
+                  onChangeText={setRegression}
+                  placeholder="e.g. Knee push-ups, Assisted pull-ups..."
+                  placeholderTextColor="#4A5568"
+                  autoCapitalize="sentences"
+                />
+
+                <Text style={st.label}>Progression (Harder Alternative)</Text>
+                <TextInput
+                  style={st.input}
+                  value={progression}
+                  onChangeText={setProgression}
+                  placeholder="e.g. Weighted push-ups, Archer pull-ups..."
+                  placeholderTextColor="#4A5568"
+                  autoCapitalize="sentences"
+                />
+
+                <Text style={st.label}>Contraindications</Text>
+                <TextInput
+                  style={[st.input, { minHeight: 60 }]}
+                  value={contraindications}
+                  onChangeText={setContraindications}
+                  placeholder="e.g. Avoid with lower back injury..."
+                  placeholderTextColor="#4A5568"
+                  autoCapitalize="sentences"
+                  multiline
+                  numberOfLines={2}
+                />
+              </ScrollView>
+
+              {/* Footer */}
+              <View style={st.footer}>
+                <Pressable style={st.cancelBtn} onPress={onClose}>
+                  <Text style={st.cancelBtnText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[st.saveBtn, submitting && st.saveBtnDisabled]}
+                  onPress={handleEditSubmit}
+                  disabled={submitting}
+                >
+                  <Text style={st.saveBtnText}>
+                    {submitting ? 'Saving...' : 'Save Changes'}
+                  </Text>
+                </Pressable>
               </View>
-            ) : (
-              <View style={st.mediaBtnRow}>
-                <Pressable
-                  style={[st.uploadBtn, { flex: 1 }]}
-                  onPress={pickAndUploadMedia}
-                >
-                  <View style={st.uploadBtnInner}>
-                    <Icon name="image" size={20} color="#F5A623" />
-                    <Text style={st.uploadBtnText}>Library</Text>
-                  </View>
-                </Pressable>
-                <Pressable
-                  style={[st.uploadBtn, { flex: 1 }]}
-                  onPress={recordFromCamera}
-                >
-                  <View style={st.uploadBtnInner}>
-                    <Icon name="camera" size={20} color="#F5A623" />
-                    <Text style={st.uploadBtnText}>Record</Text>
-                  </View>
-                </Pressable>
+            </View>
+          </View>
+        </Modal>
+
+        <VideoCropModal
+          visible={showCropModal}
+          videoUri={videoUrl}
+          initialCrop={{ cropScale, cropTranslateX, cropTranslateY }}
+          onDone={(crop: CropValues) => {
+            setCropScale(crop.cropScale);
+            setCropTranslateX(crop.cropTranslateX);
+            setCropTranslateY(crop.cropTranslateY);
+            setShowCropModal(false);
+            generateAndUploadGif(videoUrl, crop);
+          }}
+          onCancel={() => setShowCropModal(false)}
+        />
+      </>
+    );
+  }
+
+  // ── CREATE MODE: Simplified 3-step flow ────────────────────────────────
+  return (
+    <>
+      <Modal visible={visible} animationType="slide" transparent={true}>
+        <View style={st.overlay}>
+          <View style={st.createSheet}>
+            {/* Close button — always visible */}
+            <Pressable
+              style={st.createCloseBtn}
+              onPress={() => {
+                resetForm();
+                onClose();
+              }}
+              hitSlop={12}
+            >
+              <Icon name="close" size={24} color="#8A95A3" />
+            </Pressable>
+
+            {/* ── STEP 1: Upload ──────────────────────────────────── */}
+            {createStep === 'upload' && (
+              <View style={st.uploadScreen}>
+                {/* 4:5 frame with "+" */}
+                <View style={st.uploadFrame}>
+                  {uploading ? (
+                    <View style={st.uploadingContainer}>
+                      <ActivityIndicator size="large" color="#F5A623" />
+                      <Text style={st.uploadingText}>
+                        Uploading... {Math.round(uploadProgress * 100)}%
+                      </Text>
+                      <View style={st.progressBarSmall}>
+                        <View
+                          style={[
+                            st.progressFillSmall,
+                            { width: `${Math.round(uploadProgress * 100)}%` },
+                          ]}
+                        />
+                      </View>
+                    </View>
+                  ) : (
+                    <>
+                      <View style={st.frameBorder}>
+                        <View style={st.frameCornerTL} />
+                        <View style={st.frameCornerTR} />
+                        <View style={st.frameCornerBL} />
+                        <View style={st.frameCornerBR} />
+                      </View>
+                      <View style={st.uploadActions}>
+                        <Pressable style={st.uploadActionBtn} onPress={pickFromLibrary}>
+                          <View style={st.uploadPlusCircle}>
+                            <Icon name="image" size={28} color="#F5A623" />
+                          </View>
+                          <Text style={st.uploadActionLabel}>Upload</Text>
+                        </Pressable>
+                        <Pressable style={st.uploadActionBtn} onPress={recordFromCamera}>
+                          <View style={st.uploadPlusCircle}>
+                            <Icon name="camera" size={28} color="#F5A623" />
+                          </View>
+                          <Text style={st.uploadActionLabel}>Record</Text>
+                        </Pressable>
+                      </View>
+                    </>
+                  )}
+                </View>
+
+                <Text style={st.uploadHint}>
+                  Upload or record a movement demo (up to 25 sec)
+                </Text>
               </View>
             )}
 
-            {/* Thumbnail preview */}
-            {thumbnailUrl ? (
-              <View style={st.mediaPreview}>
-                <Image
-                  source={{ uri: thumbnailUrl }}
-                  style={st.mediaThumbnail}
-                  resizeMode="contain"
-                />
-                <Pressable
-                  style={st.mediaRemoveBtn}
-                  onPress={() => setThumbnailUrl('')}
-                  hitSlop={8}
-                >
-                  <Icon name="close" size={14} color="#F0F4F8" />
-                </Pressable>
-                <Text style={st.mediaLabel}>Thumbnail</Text>
-              </View>
-            ) : null}
-
-            {/* Video URL — manual fallback */}
-            <Text style={st.label}>Video URL (Optional)</Text>
-            <TextInput
-              style={st.input}
-              value={videoUrl}
-              onChangeText={setVideoUrl}
-              placeholder="Link to movement demo video..."
-              placeholderTextColor="#4A5568"
-              autoCapitalize="none"
-              keyboardType="url"
-            />
-            {videoUrl ? (
-              <View style={{ marginTop: 8, marginBottom: 8 }}>
-                <MovementVideoControls
-                  uri={videoUrl}
-                  posterUri={thumbnailUrl || undefined}
-                  aspectRatio={4 / 5}
-                  autoPlay={false}
-                  showControls={true}
-                  cropScale={cropScale}
-                  cropTranslateX={cropTranslateX}
-                  cropTranslateY={cropTranslateY}
-                />
-                <View style={st.mediaAttached}>
-                  <Icon name="checkmark" size={14} color="#6EBB7A" />
-                  <Text style={st.mediaAttachedText}>Video attached</Text>
-                  <Pressable
-                    style={st.reframeBtn}
-                    onPress={() => setShowCropModal(true)}
-                    hitSlop={8}
-                  >
-                    <Icon name="crop" size={12} color="#F5A623" />
-                    <Text style={st.reframeBtnText}>Reframe</Text>
-                  </Pressable>
+            {/* ── STEP 2: Crop (handled by VideoCropModal) ────────── */}
+            {createStep === 'crop' && !showCropModal && (
+              <View style={st.uploadScreen}>
+                <View style={st.uploadFrame}>
+                  <ActivityIndicator size="large" color="#F5A623" />
+                  <Text style={st.uploadingText}>Preparing crop...</Text>
                 </View>
-                {generatingGif && (
-                  <View style={st.gifProgress}>
-                    <ActivityIndicator size="small" color="#F5A623" />
-                    <Text style={st.gifProgressText}>
-                      Generating thumbnail... {Math.round(gifProgress * 100)}%
-                    </Text>
-                  </View>
-                )}
-                {!generatingGif && thumbnailUrl ? (
-                  <View style={st.gifProgress}>
-                    <Icon name="checkmark" size={12} color="#6EBB7A" />
-                    <Text style={[st.gifProgressText, { color: '#6EBB7A' }]}>
-                      Thumbnail ready
-                    </Text>
-                  </View>
-                ) : null}
               </View>
-            ) : null}
+            )}
 
-            {/* Regression / Progression chains */}
-            <Text style={st.label}>Regression (Easier Alternative)</Text>
-            <TextInput
-              style={st.input}
-              value={regression}
-              onChangeText={setRegression}
-              placeholder="e.g. Knee push-ups, Assisted pull-ups..."
-              placeholderTextColor="#4A5568"
-              autoCapitalize="sentences"
-            />
+            {/* ── STEP 3: Processing ──────────────────────────────── */}
+            {createStep === 'processing' && (
+              <View style={st.processingScreen}>
+                {/* Video loops in 4:5 frame */}
+                <View style={st.processingFrame}>
+                  {videoUrl ? (
+                    <MovementVideoControls
+                      uri={videoUrl}
+                      posterUri={thumbnailUrl || undefined}
+                      aspectRatio={4 / 5}
+                      autoPlay={true}
+                      showControls={false}
+                      cropScale={cropScale}
+                      cropTranslateX={cropTranslateX}
+                      cropTranslateY={cropTranslateY}
+                    />
+                  ) : (
+                    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                      <ActivityIndicator size="large" color="#F5A623" />
+                    </View>
+                  )}
 
-            <Text style={st.label}>Progression (Harder Alternative)</Text>
-            <TextInput
-              style={st.input}
-              value={progression}
-              onChangeText={setProgression}
-              placeholder="e.g. Weighted push-ups, Archer pull-ups..."
-              placeholderTextColor="#4A5568"
-              autoCapitalize="sentences"
-            />
+                  {/* Subtle overlay with progress */}
+                  <View style={st.processingOverlay}>
+                    <View style={st.processingPill}>
+                      <ActivityIndicator size="small" color="#F5A623" />
+                      <Text style={st.processingPillText}>{processingStatus}</Text>
+                    </View>
+                  </View>
+                </View>
 
-            <Text style={st.label}>Contraindications</Text>
-            <TextInput
-              style={[st.input, { minHeight: 60 }]}
-              value={contraindications}
-              onChangeText={setContraindications}
-              placeholder="e.g. Avoid with lower back injury, not for post-surgery recovery..."
-              placeholderTextColor="#4A5568"
-              autoCapitalize="sentences"
-              multiline
-              numberOfLines={2}
-            />
-          </ScrollView>
-
-          {/* Footer buttons */}
-          <View style={st.footer}>
-            <Pressable style={st.cancelBtn} onPress={onClose}>
-              <Text style={st.cancelBtnText}>Cancel</Text>
-            </Pressable>
-            <Pressable
-              style={[st.saveBtn, submitting && st.saveBtnDisabled]}
-              onPress={handleSubmit}
-              disabled={submitting}
-            >
-              <Text style={st.saveBtnText}>
-                {submitting
-                  ? generatingGif
-                    ? 'Finishing thumbnail...'
-                    : isEdit
-                      ? 'Saving...'
-                      : 'Creating...'
-                  : isEdit
-                  ? 'Save Changes'
-                  : 'Create Movement'}
-              </Text>
-            </Pressable>
+                {/* Progress bar */}
+                <View style={st.processingProgressBar}>
+                  <View
+                    style={[
+                      st.processingProgressFill,
+                      { width: `${Math.round(processingProgress * 100)}%` },
+                    ]}
+                  />
+                </View>
+              </View>
+            )}
           </View>
         </View>
-      </View>
-    </Modal>
+      </Modal>
 
-      {/* Crop/Reframe Modal — rendered OUTSIDE the form Modal so it layers on top on iOS */}
+      {/* Crop Modal — rendered OUTSIDE so it layers on top on iOS */}
       <VideoCropModal
         visible={showCropModal}
         videoUri={videoUrl}
         initialCrop={{ cropScale, cropTranslateX, cropTranslateY }}
         onDone={(crop: CropValues) => {
-          setCropScale(crop.cropScale);
-          setCropTranslateX(crop.cropTranslateX);
-          setCropTranslateY(crop.cropTranslateY);
-          setShowCropModal(false);
-          // Generate animated GIF thumbnail with the crop applied
-          generateAndUploadGif(videoUrl, crop);
+          processAfterCrop(crop);
         }}
-        onCancel={() => setShowCropModal(false)}
+        onCancel={() => {
+          setShowCropModal(false);
+          setCreateStep('upload');
+          setVideoUrl('');
+        }}
       />
     </>
   );
@@ -930,12 +1025,15 @@ export default function MovementForm({
 const st = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(0,0,0,0.85)',
     justifyContent: 'flex-end',
   },
+
+  // ── Edit mode sheet (same as before) ─────────────────────────────────
   sheet: {
     backgroundColor: '#0E1117',
     borderTopLeftRadius: 20,
+    overflow: 'hidden' as const,
     borderTopRightRadius: 20,
     height: '90%',
   },
@@ -963,7 +1061,206 @@ const st = StyleSheet.create({
     gap: 16,
   },
 
-  // Labels
+  // ── Create mode sheet ─────────────────────────────────────────────────
+  createSheet: {
+    backgroundColor: '#0E1117',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    height: '92%',
+    overflow: 'hidden' as const,
+  },
+  createCloseBtn: {
+    position: 'absolute',
+    top: Platform.select({ ios: 16, default: 16 }),
+    right: 16,
+    zIndex: 10,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // ── Step 1: Upload screen ─────────────────────────────────────────────
+  uploadScreen: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  uploadFrame: {
+    width: '80%',
+    maxWidth: 320,
+    aspectRatio: 4 / 5,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  frameBorder: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  frameCornerTL: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 32,
+    height: 32,
+    borderTopWidth: 2,
+    borderLeftWidth: 2,
+    borderColor: 'rgba(245,166,35,0.4)',
+    borderTopLeftRadius: 16,
+  },
+  frameCornerTR: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 32,
+    height: 32,
+    borderTopWidth: 2,
+    borderRightWidth: 2,
+    borderColor: 'rgba(245,166,35,0.4)',
+    borderTopRightRadius: 16,
+  },
+  frameCornerBL: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    width: 32,
+    height: 32,
+    borderBottomWidth: 2,
+    borderLeftWidth: 2,
+    borderColor: 'rgba(245,166,35,0.4)',
+    borderBottomLeftRadius: 16,
+  },
+  frameCornerBR: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 32,
+    height: 32,
+    borderBottomWidth: 2,
+    borderRightWidth: 2,
+    borderColor: 'rgba(245,166,35,0.4)',
+    borderBottomRightRadius: 16,
+  },
+  uploadActions: {
+    flexDirection: 'row',
+    gap: 40,
+    alignItems: 'center',
+  },
+  uploadActionBtn: {
+    alignItems: 'center',
+    gap: 10,
+  },
+  uploadPlusCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(245,166,35,0.12)',
+    borderWidth: 2,
+    borderColor: 'rgba(245,166,35,0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  uploadActionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8A95A3',
+    fontFamily: FB,
+  },
+  uploadHint: {
+    fontSize: 14,
+    color: '#4A5568',
+    fontFamily: FB,
+    textAlign: 'center',
+    marginTop: 24,
+  },
+  uploadingContainer: {
+    alignItems: 'center',
+    gap: 12,
+    padding: 20,
+    width: '100%',
+  },
+  uploadingText: {
+    fontSize: 14,
+    color: '#F5A623',
+    fontFamily: FB,
+    fontWeight: '600',
+  },
+  progressBarSmall: {
+    width: '80%',
+    height: 4,
+    backgroundColor: '#2A3347',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressFillSmall: {
+    height: '100%',
+    backgroundColor: '#F5A623',
+    borderRadius: 2,
+  },
+
+  // ── Step 3: Processing screen ─────────────────────────────────────────
+  processingScreen: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  processingFrame: {
+    width: '80%',
+    maxWidth: 320,
+    aspectRatio: 4 / 5,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+    position: 'relative',
+  },
+  processingOverlay: {
+    position: 'absolute',
+    bottom: 16,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  processingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(14,17,23,0.8)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  processingPillText: {
+    fontSize: 13,
+    color: '#F0F4F8',
+    fontFamily: FB,
+    fontWeight: '600',
+  },
+  processingProgressBar: {
+    width: '80%',
+    maxWidth: 320,
+    height: 3,
+    backgroundColor: '#2A3347',
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginTop: 16,
+  },
+  processingProgressFill: {
+    height: '100%',
+    backgroundColor: '#F5A623',
+    borderRadius: 2,
+  },
+
+  // ── Shared form styles (edit mode) ────────────────────────────────────
   label: {
     fontSize: 12,
     fontWeight: '600',
@@ -979,8 +1276,6 @@ const st = StyleSheet.create({
     fontFamily: FH,
     marginTop: 4,
   },
-
-  // Inputs
   input: {
     backgroundColor: '#161B22',
     borderRadius: 10,
@@ -996,8 +1291,6 @@ const st = StyleSheet.create({
     minHeight: 80,
     textAlignVertical: 'top',
   },
-
-  // Chip selectors
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1024,8 +1317,6 @@ const st = StyleSheet.create({
     color: '#F5A623',
     fontWeight: '600',
   },
-
-  // Timer row
   timerRow: {
     flexDirection: 'row',
     gap: 12,
@@ -1052,8 +1343,6 @@ const st = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#2A3347',
   },
-
-  // Toggle
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1097,8 +1386,6 @@ const st = StyleSheet.create({
     backgroundColor: '#F5A623',
     alignSelf: 'flex-end',
   },
-
-  // Footer
   footer: {
     flexDirection: 'row',
     gap: 12,
@@ -1138,95 +1425,11 @@ const st = StyleSheet.create({
     color: '#0E1117',
     fontFamily: FH,
   },
-
-  // Media upload
-  mediaBtnRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  uploadBtn: {
-    backgroundColor: '#161B22',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#2A3347',
-    borderStyle: 'dashed',
-    padding: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  uploadBtnInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  uploadBtnText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#F5A623',
-    fontFamily: FB,
-  },
-  uploadProgress: {
-    alignItems: 'center',
-    gap: 8,
-    width: '100%',
-  },
-  uploadProgressText: {
-    fontSize: 12,
-    color: '#F5A623',
-    fontFamily: FB,
-  },
-  progressBar: {
-    width: '100%',
-    height: 4,
-    backgroundColor: '#2A3347',
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#F5A623',
-    borderRadius: 2,
-  },
-  mediaPreview: {
-    position: 'relative',
-    borderRadius: 10,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#2A3347',
-  },
-  mediaThumbnail: {
-    width: '100%',
-    aspectRatio: 4 / 5,
-    borderRadius: 10,
-  },
-  mediaRemoveBtn: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  mediaLabel: {
-    position: 'absolute',
-    bottom: 8,
-    left: 8,
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#F0F4F8',
-    fontFamily: FB,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
   mediaAttached: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    marginTop: 8,
   },
   mediaAttachedText: {
     fontSize: 12,
@@ -1250,16 +1453,5 @@ const st = StyleSheet.create({
     fontWeight: '600',
     color: '#F5A623',
     fontFamily: FH,
-  },
-  gifProgress: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 6,
-  },
-  gifProgressText: {
-    fontSize: 11,
-    color: '#F5A623',
-    fontFamily: FB,
   },
 });
