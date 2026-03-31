@@ -65,18 +65,29 @@ HEAD_INJECT = """
         user-select: none;
       }
       
-      /* Fix: Expo tab navigator renders each screen in a position:absolute container
-         (classes r-1p0dtai r-1d2f490 r-u8s1d r-zchlnj r-ipm5af) that is 100% of the
-         viewport. Its flex children must be capped at 100% height so the inner
-         ScrollView is constrained and can actually scroll instead of growing freely. */
-      .r-1p0dtai.r-1d2f490.r-u8s1d.r-zchlnj.r-ipm5af > div {
-        max-height: 100% !important;
-        overflow: hidden !important;
-      }
-      /* The ScrollView itself must be allowed to scroll */
+      /* SCROLL FIX (verified in live browser):
+         Expo tab navigator renders each screen in a position:absolute full-viewport
+         container (r-1p0dtai r-1d2f490 r-u8s1d r-zchlnj r-ipm5af).
+         Inside it, React Native Web creates two nested ScrollViews (both r-agouwx):
+           - Outer r-agouwx: must be height-constrained to viewport - tab bar
+           - Inner r-agouwx (direct child of outer): must NOT shrink, must grow to content
+         Without this, both expand to full content height and nothing scrolls. */
+
+      /* Outer ScrollView: constrain to available height (viewport minus ~53px tab bar) */
       .r-1p0dtai.r-1d2f490.r-u8s1d.r-zchlnj.r-ipm5af .r-agouwx {
+        height: calc(100dvh - 53px) !important;
+        max-height: calc(100dvh - 53px) !important;
+        flex: 0 0 calc(100dvh - 53px) !important;
         overflow-y: auto !important;
         -webkit-overflow-scrolling: touch !important;
+      }
+
+      /* Inner ScrollView (direct child of outer): grow to natural content height */
+      .r-1p0dtai.r-1d2f490.r-u8s1d.r-zchlnj.r-ipm5af .r-agouwx > .r-agouwx {
+        flex: 0 0 auto !important;
+        height: auto !important;
+        max-height: none !important;
+        overflow-y: visible !important;
       }
       
       #root { 
