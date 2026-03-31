@@ -1153,11 +1153,20 @@ export default function WorkoutFolderPage({
                                 </View>
                               )}
 
-                              {/* Hidden badge (shown when controls are closed and movement is hidden) */}
+                              {/* Hidden badge (shown when controls are closed and movement is hidden) — tap to unhide */}
                               {!isMovExpanded && mov.hidden && (
-                                <View style={st.hiddenBadge}>
+                                <Pressable
+                                  style={st.hiddenBadge}
+                                  onPress={(e) => {
+                                    e.stopPropagation();
+                                    toggleMovementVisibility(blockIdx, movIdx);
+                                  }}
+                                  {...(Platform.OS === 'web' ? {
+                                    onClick: (e: any) => { e.stopPropagation(); },
+                                  } : {})}
+                                >
                                   <Icon name="eye-off" size={10} color="#fff" />
-                                </View>
+                                </Pressable>
                               )}
 
                               {/* Reorder indicator (shown on picked-up card) */}
