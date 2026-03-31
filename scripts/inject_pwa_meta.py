@@ -59,10 +59,24 @@ HEAD_INJECT = """
         height: 100%; 
         margin: 0; 
         padding: 0; 
-        overflow: auto; 
+        overflow: hidden; 
         background: #0E1117;
         -webkit-user-select: none;
         user-select: none;
+      }
+      
+      /* Fix: Expo tab navigator renders each screen in a position:absolute container
+         (classes r-1p0dtai r-1d2f490 r-u8s1d r-zchlnj r-ipm5af) that is 100% of the
+         viewport. Its flex children must be capped at 100% height so the inner
+         ScrollView is constrained and can actually scroll instead of growing freely. */
+      .r-1p0dtai.r-1d2f490.r-u8s1d.r-zchlnj.r-ipm5af > div {
+        max-height: 100% !important;
+        overflow: hidden !important;
+      }
+      /* The ScrollView itself must be allowed to scroll */
+      .r-1p0dtai.r-1d2f490.r-u8s1d.r-zchlnj.r-ipm5af .r-agouwx {
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch !important;
       }
       
       #root { 
