@@ -76,6 +76,8 @@ interface Props {
   onToggleGlobal?: (m: MovementDetailData) => void;
   /** Whether the current user is a platform admin */
   isAdmin?: boolean;
+  /** Optional label shown as breadcrumb (e.g. "Back to Workout") */
+  backLabel?: string;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -100,6 +102,7 @@ export default function MovementDetail({
   onArchive,
   onToggleGlobal,
   isAdmin = false,
+  backLabel,
 }: Props) {
   // Coach name lookup
   const [coachName, setCoachName] = useState<string | null>(null);
@@ -152,6 +155,13 @@ export default function MovementDetail({
       onRequestClose={onClose}
     >
       <View style={s.root}>
+        {/* Back-to-workout breadcrumb (shown when opened from workout builder) */}
+        {backLabel && (
+          <Pressable style={s.backBreadcrumb} onPress={onClose}>
+            <Icon name="chevron-left" size={16} color="#F5A623" />
+            <Text style={s.backBreadcrumbText}>{backLabel}</Text>
+          </Pressable>
+        )}
         {/* Header */}
         <View style={s.header}>
           <Pressable onPress={onClose} hitSlop={8}>
@@ -325,12 +335,26 @@ const s = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0E1117',
   },
+  backBreadcrumb: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: Platform.select({ ios: 56, web: 12, default: 12 }),
+    paddingBottom: 4,
+    gap: 4,
+  },
+  backBreadcrumbText: {
+    fontSize: 13,
+    color: '#F5A623',
+    fontFamily: FB,
+    fontWeight: '600',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: Platform.select({ ios: 56, web: 16, default: 16 }),
+    paddingTop: Platform.select({ ios: 12, web: 16, default: 16 }),
     paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#2A3347',

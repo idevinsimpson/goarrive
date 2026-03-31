@@ -849,6 +849,7 @@ function BuildScreenInner() {
             setSelectedMovement(null);
           } catch (e) { console.error('Archive movement error:', e); }
         }}
+        backLabel={openWorkoutId ? 'Back to Workout' : undefined}
       />
       
       <MovementForm

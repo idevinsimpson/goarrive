@@ -223,6 +223,8 @@ export default function WorkoutFolderPage({
   const [moveToSearch, setMoveToSearch] = useState('');
   const [editingNameKey, setEditingNameKey] = useState<string | null>(null);
   const [editingNameValue, setEditingNameValue] = useState('');
+  // Reorder: long-press to pick up, tap another slot to drop
+  const [reorderSource, setReorderSource] = useState<{ blockIdx: number; movIdx: number } | null>(null);
 
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyRef = useRef(false); // prevents onSnapshot from overwriting local edits
@@ -241,6 +243,7 @@ export default function WorkoutFolderPage({
     setShowAddBlockMenu(false);
     setShowTitleMenu(false);
     setEditingNameKey(null);
+    setReorderSource(null);
   }, []);
 
   // ── Load workout data ─────────────────────────────────────────────────────
@@ -271,8 +274,11 @@ export default function WorkoutFolderPage({
               movements: (b.movements ?? []).map((m: any) => ({
                 movementId: m.movementId ?? '',
                 movementName: m.movementName ?? '',
+                displayName: m.displayName ?? undefined,
+                hidden: m.hidden ?? undefined,
                 sets: m.sets ?? undefined,
                 reps: m.reps ?? undefined,
+                weight: m.weight ?? undefined,
                 durationSec: m.durationSec ?? undefined,
                 restSec: m.restSec ?? undefined,
                 notes: m.notes ?? '',
@@ -384,8 +390,11 @@ export default function WorkoutFolderPage({
           movements: (b.movements ?? []).map((m) => ({
             movementId: m.movementId,
             movementName: m.movementName,
+            displayName: m.displayName ?? undefined,
+            hidden: m.hidden ?? undefined,
             sets: m.sets ?? undefined,
             reps: m.reps ?? undefined,
+            weight: m.weight ?? undefined,
             durationSec: m.durationSec ?? undefined,
             restSec: m.restSec ?? undefined,
             notes: m.notes ?? '',
@@ -632,6 +641,17 @@ export default function WorkoutFolderPage({
     const newBlocks = [...blocks];
     const mov = newBlocks[blockIdx].movements[movIdx];
     mov.hidden = !mov.hidden;
+    updateBlocks(newBlocks);
+  }, [blocks, updateBlocks]);
+
+  // ── Reorder: move a movement within the same block ──────────────────────
+  const reorderMovement = useCallback((blockIdx: number, fromIdx: number, toIdx: number) => {
+    if (fromIdx === toIdx) return;
+    const newBlocks = [...blocks];
+    const movs = [...newBlocks[blockIdx].movements];
+    const [moved] = movs.splice(fromIdx, 1);
+    movs.splice(toIdx, 0, moved);
+    newBlocks[blockIdx] = { ...newBlocks[blockIdx], movements: movs };
     updateBlocks(newBlocks);
   }, [blocks, updateBlocks]);
 
@@ -1066,11 +1086,13 @@ export default function WorkoutFolderPage({
                         const movKey = `${blockIdx}-${movIdx}`;
                         const isMovExpanded = expandedMovKey === movKey;
                         const thumbUri = mov.thumbnailUrl;
+                        const isReorderSource = reorderSource?.blockIdx === blockIdx && reorderSource?.movIdx === movIdx;
+                        const isReorderTarget = reorderSource !== null && reorderSource.blockIdx === blockIdx && !isReorderSource;
 
                         return (
                           <View key={movKey} style={{ width: cardWidth, position: 'relative' }}>
                             {/* Red X remove button — hangs off top-right corner */}
-                            {isMovExpanded && (
+                            {isMovExpanded && !reorderSource && (
                               <Pressable
                                 style={st.removeXBtn}
                                 onPress={(e) => {
@@ -1087,13 +1109,21 @@ export default function WorkoutFolderPage({
                                 {
                                   width: cardWidth,
                                   height: cardHeight,
-                                  borderColor: isMovExpanded ? '#F5A623' : 'transparent',
-                                  borderWidth: isMovExpanded ? 2 : 0,
-                                  opacity: mov.hidden ? 0.4 : 1,
+                                  borderColor: isReorderSource ? '#38BDF8' : isMovExpanded ? '#F5A623' : isReorderTarget ? 'rgba(56,189,248,0.4)' : 'transparent',
+                                  borderWidth: isReorderSource ? 2 : isMovExpanded ? 2 : isReorderTarget ? 1 : 0,
+                                  opacity: mov.hidden ? 0.4 : isReorderSource ? 0.6 : 1,
                                 },
                               ]}
                               onPress={(e) => {
                                 e.stopPropagation();
+                                // If we're in reorder mode, tap = drop here
+                                if (reorderSource) {
+                                  if (reorderSource.blockIdx === blockIdx) {
+                                    reorderMovement(blockIdx, reorderSource.movIdx, movIdx);
+                                  }
+                                  setReorderSource(null);
+                                  return;
+                                }
                                 if (isMovExpanded) {
                                   setExpandedMovKey(null);
                                   setEditingNameKey(null);
@@ -1102,6 +1132,12 @@ export default function WorkoutFolderPage({
                                   setExpandedBlockIdx(null);
                                   setEditingNameKey(null);
                                 }
+                              }}
+                              onLongPress={(e) => {
+                                e.stopPropagation();
+                                setExpandedMovKey(null);
+                                setEditingNameKey(null);
+                                setReorderSource({ blockIdx, movIdx });
                               }}
                             >
                               {/* GIF thumbnail background */}
@@ -1117,8 +1153,22 @@ export default function WorkoutFolderPage({
                                 </View>
                               )}
 
+                              {/* Hidden badge (shown when controls are closed and movement is hidden) */}
+                              {!isMovExpanded && mov.hidden && (
+                                <View style={st.hiddenBadge}>
+                                  <Icon name="eye-off" size={10} color="#fff" />
+                                </View>
+                              )}
+
+                              {/* Reorder indicator (shown on picked-up card) */}
+                              {isReorderSource && (
+                                <View style={st.reorderIndicator}>
+                                  <Text style={st.reorderText}>Tap to place</Text>
+                                </View>
+                              )}
+
                               {/* Name overlay (shown when controls are closed) */}
-                              {!isMovExpanded && (
+                              {!isMovExpanded && !isReorderSource && (
                                 <View style={st.nameOverlay}>
                                   <Text style={st.nameText} numberOfLines={1}>
                                     {mov.displayName || mov.movementName}
@@ -1965,6 +2015,35 @@ const st = StyleSheet.create({
     backgroundColor: '#EF4444',
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
+  },
+  hiddenBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    zIndex: 10,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  reorderIndicator: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(56, 189, 248, 0.25)',
+    borderRadius: 8,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  reorderText: {
+    fontSize: 9,
+    color: '#38BDF8',
+    fontFamily: FB,
+    fontWeight: '700' as const,
   },
   ovNameText: {
     fontSize: 8,
