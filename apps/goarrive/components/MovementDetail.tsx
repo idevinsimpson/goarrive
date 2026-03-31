@@ -237,11 +237,11 @@ export default function MovementDetail({
           </Pressable>
 
           {/* Muscle Groups */}
-          {movement.muscleGroups.length > 0 && (
+          {(movement.muscleGroups?.length ?? 0) > 0 && (
             <View style={s.section}>
               <Text style={s.sectionLabel}>Muscle Groups</Text>
               <View style={s.chipRow}>
-                {movement.muscleGroups.map((mg) => (
+                {(movement.muscleGroups ?? []).map((mg) => (
                   <View key={mg} style={s.chip}>
                     <Text style={s.chipText}>{mg}</Text>
                   </View>
