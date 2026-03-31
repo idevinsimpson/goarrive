@@ -59,7 +59,7 @@ HEAD_INJECT = """
         height: 100%; 
         margin: 0; 
         padding: 0; 
-        overflow: hidden; 
+        overflow: auto; 
         background: #0E1117;
         -webkit-user-select: none;
         user-select: none;
