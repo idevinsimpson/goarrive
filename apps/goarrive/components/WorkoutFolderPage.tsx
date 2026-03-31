@@ -1178,15 +1178,20 @@ export default function WorkoutFolderPage({
 
                               {/* ── In-card overlay controls ── */}
                               {isMovExpanded && (
-                                <View style={st.ovOverlay} onStartShouldSetResponder={() => true}>
+                                <Pressable
+                                  style={st.ovOverlay}
+                                  onPress={(e) => { e.stopPropagation(); }}
+                                  onStartShouldSetResponder={() => true}
+                                  onResponderTerminationRequest={() => false}
+                                >
                                   {/* Rest/Prep — top row */}
                                   <View style={st.ovRow}>
                                     <Icon name="hourglass" size={10} color="#38BDF8" />
-                                    <Pressable style={st.ovBtn} onPress={() => { updateMovementRest(blockIdx, movIdx, -5); }}>
+                                    <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementRest(blockIdx, movIdx, -5); }}>
                                       <Text style={st.ovBtnText}>−</Text>
                                     </Pressable>
                                     <Text style={st.ovVal}>{mov.restSec ?? DEFAULT_REST_SEC}s</Text>
-                                    <Pressable style={st.ovBtn} onPress={() => { updateMovementRest(blockIdx, movIdx, 5); }}>
+                                    <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementRest(blockIdx, movIdx, 5); }}>
                                       <Text style={st.ovBtnText}>+</Text>
                                     </Pressable>
                                   </View>
@@ -1194,11 +1199,11 @@ export default function WorkoutFolderPage({
                                   {/* Duration — second row */}
                                   <View style={st.ovRow}>
                                     <Icon name="flame" size={10} color="#F59E0B" />
-                                    <Pressable style={st.ovBtn} onPress={() => { updateMovementDuration(blockIdx, movIdx, -5); }}>
+                                    <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementDuration(blockIdx, movIdx, -5); }}>
                                       <Text style={st.ovBtnText}>−</Text>
                                     </Pressable>
                                     <Text style={st.ovVal}>{mov.durationSec ?? DEFAULT_DURATION_SEC}s</Text>
-                                    <Pressable style={st.ovBtn} onPress={() => { updateMovementDuration(blockIdx, movIdx, 5); }}>
+                                    <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementDuration(blockIdx, movIdx, 5); }}>
                                       <Text style={st.ovBtnText}>+</Text>
                                     </Pressable>
                                   </View>
@@ -1286,7 +1291,7 @@ export default function WorkoutFolderPage({
                                       </Text>
                                     </Pressable>
                                   )}
-                                </View>
+                                </Pressable>
                               )}
                             </Pressable>
                           </View>
@@ -1983,11 +1988,11 @@ const st = StyleSheet.create({
     paddingHorizontal: 3,
     paddingVertical: 1,
     color: '#F0F4F8',
-    fontSize: 9,
+    fontSize: Platform.OS === 'web' ? 16 : 9,
     fontFamily: FB,
-    minWidth: 24,
-    textAlign: 'center',
-    height: 18,
+    minWidth: 28,
+    textAlign: 'center' as const,
+    height: 20,
   },
   ovBottomRow: {
     flexDirection: 'row',
