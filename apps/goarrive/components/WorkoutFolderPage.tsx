@@ -1238,7 +1238,13 @@ export default function WorkoutFolderPage({
                                         e.stopPropagation();
                                         if (onOpenMovement) {
                                           const movData = availableMovements.find(m => m.id === mov.movementId);
-                                          if (movData) onOpenMovement(movData);
+                                          onOpenMovement(movData ?? {
+                                            id: mov.movementId,
+                                            name: mov.displayName || mov.movementName,
+                                            category: '',
+                                            thumbnailUrl: mov.thumbnailUrl ?? null,
+                                            mediaUrl: null,
+                                          });
                                         }
                                       }}
                                     >
