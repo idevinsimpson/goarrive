@@ -1253,49 +1253,44 @@ export default function WorkoutFolderPage({
                       <View style={[st.blockControlBar, isBlockExpanded && st.blockControlBarExpanded]}>
                         {isBlockExpanded ? (
                           <>
-                            {/* Red trash icon */}
+                            {/* Trash */}
                             <Pressable
                               style={st.bcTrash}
                               onPress={(e) => { e.stopPropagation(); removeBlock(blockIdx); }}
                             >
-                              <Icon name="trash-2" size={14} color="#EF4444" />
+                              <Icon name="trash-2" size={13} color="#EF4444" />
                             </Pressable>
 
                             <View style={st.bcDivider} />
 
-                            {/* Rounds stepper */}
-                            <Text style={st.bcLabel}>Rounds</Text>
+                            {/* Rounds: − 3× + */}
                             <Pressable style={st.bcBtn} onPress={(e) => { e.stopPropagation(); updateBlockRounds(blockIdx, -1); }}>
                               <Text style={st.bcBtnText}>−</Text>
                             </Pressable>
-                            <Text style={st.bcValue}>{block.rounds ?? DEFAULT_ROUNDS}</Text>
+                            <Text style={st.bcValue}>{block.rounds ?? DEFAULT_ROUNDS}×</Text>
                             <Pressable style={st.bcBtn} onPress={(e) => { e.stopPropagation(); updateBlockRounds(blockIdx, 1); }}>
                               <Text style={st.bcBtnText}>+</Text>
                             </Pressable>
 
                             <View style={st.bcDivider} />
 
-                            {/* Prep time stepper */}
-                            <Text style={st.bcLabel}>Prep</Text>
+                            {/* Prep: − 20s + */}
                             <Pressable style={st.bcBtn} onPress={(e) => { e.stopPropagation(); updateBlockPrepTime(blockIdx, -5); }}>
-                              <Text style={st.bcBtnText}>−5</Text>
+                              <Text style={st.bcBtnText}>−</Text>
                             </Pressable>
                             <Text style={st.bcValue}>{block.firstMovementPrepSec ?? DEFAULT_REST_SEC}s</Text>
                             <Pressable style={st.bcBtn} onPress={(e) => { e.stopPropagation(); updateBlockPrepTime(blockIdx, 5); }}>
-                              <Text style={st.bcBtnText}>+5</Text>
+                              <Text style={st.bcBtnText}>+</Text>
                             </Pressable>
 
                             <View style={st.bcDivider} />
 
-                            {/* Demo toggle */}
+                            {/* Demo toggle — eye icon */}
                             <Pressable
-                              style={st.bcDemoToggle}
+                              style={[st.bcDemoBtn, block.showDemo && st.bcDemoBtnOn]}
                               onPress={(e) => { e.stopPropagation(); toggleBlockDemo(blockIdx); }}
                             >
-                              <View style={[st.bcCheckbox, block.showDemo && st.bcCheckboxOn]}>
-                                {block.showDemo && <Icon name="check" size={10} color="#0E1117" />}
-                              </View>
-                              <Text style={st.bcDemoLabel}>Demo</Text>
+                              <Icon name="eye" size={13} color={block.showDemo ? '#0E1117' : '#4A5568'} />
                             </Pressable>
                           </>
                         ) : (
@@ -1836,10 +1831,10 @@ const st = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    gap: 6,
+    gap: 4,
     marginTop: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
     backgroundColor: 'rgba(30, 42, 58, 0.6)',
     borderRadius: 10,
     alignSelf: 'flex-end',
@@ -1848,8 +1843,8 @@ const st = StyleSheet.create({
     alignSelf: 'stretch',
     justifyContent: 'center',
     backgroundColor: '#1E2A3A',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
   },
   roundsText: {
     fontSize: 13,
@@ -1857,70 +1852,53 @@ const st = StyleSheet.create({
     fontFamily: FH,
   },
   bcTrash: {
-    width: 28,
-    height: 28,
-    borderRadius: 7,
+    width: 26,
+    height: 26,
+    borderRadius: 6,
     backgroundColor: 'rgba(239, 68, 68, 0.15)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   bcDivider: {
     width: 1,
-    height: 20,
+    height: 18,
     backgroundColor: '#2A3544',
-    marginHorizontal: 2,
-  },
-  bcLabel: {
-    fontSize: 11,
-    color: '#8A95A3',
-    fontFamily: FB,
-    fontWeight: '600',
+    marginHorizontal: 1,
   },
   bcBtn: {
     backgroundColor: '#0E1117',
-    borderRadius: 6,
-    width: 28,
-    height: 28,
+    borderRadius: 5,
+    width: 26,
+    height: 26,
     justifyContent: 'center',
     alignItems: 'center',
   },
   bcBtnText: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#F0F4F8',
     fontFamily: FH,
     fontWeight: '700',
   },
   bcValue: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#F5A623',
     fontFamily: FH,
     fontWeight: '700',
-    minWidth: 24,
+    minWidth: 22,
     textAlign: 'center',
   },
-  bcDemoToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  bcCheckbox: {
-    width: 18,
-    height: 18,
-    borderRadius: 4,
+  bcDemoBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
     borderWidth: 2,
     borderColor: '#4A5568',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  bcCheckboxOn: {
+  bcDemoBtnOn: {
     backgroundColor: '#F5A623',
     borderColor: '#F5A623',
-  },
-  bcDemoLabel: {
-    fontSize: 11,
-    color: '#8A95A3',
-    fontFamily: FB,
-    fontWeight: '600',
   },
 
   // Between-block plus
