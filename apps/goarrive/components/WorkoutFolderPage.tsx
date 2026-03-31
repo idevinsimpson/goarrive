@@ -1178,11 +1178,15 @@ export default function WorkoutFolderPage({
 
                               {/* ── In-card overlay controls ── */}
                               {isMovExpanded && (
-                                <Pressable
+                                <View
                                   style={st.ovOverlay}
-                                  onPress={(e) => { e.stopPropagation(); }}
-                                  onStartShouldSetResponder={() => true}
-                                  onResponderTerminationRequest={() => false}
+                                  {...(Platform.OS === 'web' ? {
+                                    onClick: (e: any) => { e.stopPropagation(); },
+                                    onPointerDown: (e: any) => { e.stopPropagation(); },
+                                  } : {
+                                    onStartShouldSetResponder: () => true,
+                                    onResponderTerminationRequest: () => false,
+                                  })}
                                 >
                                   {/* Rest/Prep — top row */}
                                   <View style={st.ovRow}>
@@ -1297,7 +1301,7 @@ export default function WorkoutFolderPage({
                                       </Text>
                                     </Pressable>
                                   )}
-                                </Pressable>
+                                </View>
                               )}
                             </Pressable>
                           </View>
