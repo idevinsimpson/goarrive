@@ -92,6 +92,7 @@ interface BlockMovement {
   movementName: string;
   sets?: number;
   reps?: string;
+  weight?: string;
   durationSec?: number;
   restSec?: number;
   notes?: string;
@@ -608,6 +609,12 @@ export default function WorkoutFolderPage({
     updateBlocks(newBlocks);
   }, [blocks, updateBlocks]);
 
+  const updateMovementWeight = useCallback((blockIdx: number, movIdx: number, weight: string) => {
+    const newBlocks = [...blocks];
+    newBlocks[blockIdx].movements[movIdx].weight = weight;
+    updateBlocks(newBlocks);
+  }, [blocks, updateBlocks]);
+
   // ── Intro/Outro save ─────────────────────────────────────────────────────
   const saveIntroOutro = useCallback(async (updates: {
     introVideoUrl?: string | null;
@@ -812,7 +819,7 @@ export default function WorkoutFolderPage({
   // ── MAIN RENDER ─────────────────────────────────────────────────────────────
   // ════════════════════════════════════════════════════════════════════════════
   return (
-    <Pressable style={st.root} onPress={dismissAll}>
+    <View style={st.root}>
       {/* ── Header / Breadcrumb ──────────────────────────────────────────── */}
       <View style={st.header}>
         <Pressable onPress={async () => { await flushSave(); onBack(); }} style={st.backBtn}>
@@ -942,7 +949,9 @@ export default function WorkoutFolderPage({
         style={st.scrollArea}
         contentContainerStyle={{ paddingHorizontal: GRID_PADDING, paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
+        onScrollBeginDrag={dismissAll}
       >
+        <Pressable onPress={dismissAll} style={{ flex: 1 }}>
         {blocks.length === 0 ? (
           <View style={st.emptyState}>
             <Pressable
@@ -1060,6 +1069,7 @@ export default function WorkoutFolderPage({
                                 }
                               }}
                             >
+                              {/* GIF thumbnail background */}
                               {thumbUri ? (
                                 <Image
                                   source={{ uri: thumbUri }}
@@ -1071,54 +1081,87 @@ export default function WorkoutFolderPage({
                                   <Icon name="movements" size={20} color="#4A5568" />
                                 </View>
                               )}
-                              <View style={st.nameOverlay}>
-                                <Text style={st.nameText} numberOfLines={1}>{mov.movementName}</Text>
-                              </View>
-                            </Pressable>
 
-                            {/* ── Quick controls — rendered BELOW the card, in flow ── */}
-                            {isMovExpanded && (
-                              <View style={st.quickControls} onStartShouldSetResponder={() => true}>
-                                <View style={st.qcRow}>
-                                  <Text style={st.qcLabel}>Duration</Text>
-                                  <Pressable style={st.qcBtn} onPress={() => updateMovementDuration(blockIdx, movIdx, -5)}>
-                                    <Text style={st.qcBtnText}>−5s</Text>
-                                  </Pressable>
-                                  <Text style={st.qcValue}>{mov.durationSec ?? DEFAULT_DURATION_SEC}s</Text>
-                                  <Pressable style={st.qcBtn} onPress={() => updateMovementDuration(blockIdx, movIdx, 5)}>
-                                    <Text style={st.qcBtnText}>+5s</Text>
-                                  </Pressable>
+                              {/* Name overlay (hidden when controls are open) */}
+                              {!isMovExpanded && (
+                                <View style={st.nameOverlay}>
+                                  <Text style={st.nameText} numberOfLines={1}>{mov.movementName}</Text>
                                 </View>
-                                <View style={st.qcRow}>
-                                  <Text style={st.qcLabel}>Rest</Text>
-                                  <Pressable style={st.qcBtn} onPress={() => updateMovementRest(blockIdx, movIdx, -5)}>
-                                    <Text style={st.qcBtnText}>−5s</Text>
-                                  </Pressable>
-                                  <Text style={st.qcValue}>{mov.restSec ?? DEFAULT_REST_SEC}s</Text>
-                                  <Pressable style={st.qcBtn} onPress={() => updateMovementRest(blockIdx, movIdx, 5)}>
-                                    <Text style={st.qcBtnText}>+5s</Text>
-                                  </Pressable>
+                              )}
+
+                              {/* ── In-card overlay controls ── */}
+                              {isMovExpanded && (
+                                <View style={st.ovOverlay} onStartShouldSetResponder={() => true}>
+                                  {/* Rest/Prep — top row */}
+                                  <View style={st.ovRow}>
+                                    <Icon name="hourglass" size={10} color="#38BDF8" />
+                                    <Pressable style={st.ovBtn} onPress={() => { updateMovementRest(blockIdx, movIdx, -5); }}>
+                                      <Text style={st.ovBtnText}>−</Text>
+                                    </Pressable>
+                                    <Text style={st.ovVal}>{mov.restSec ?? DEFAULT_REST_SEC}s</Text>
+                                    <Pressable style={st.ovBtn} onPress={() => { updateMovementRest(blockIdx, movIdx, 5); }}>
+                                      <Text style={st.ovBtnText}>+</Text>
+                                    </Pressable>
+                                  </View>
+
+                                  {/* Duration — second row */}
+                                  <View style={st.ovRow}>
+                                    <Icon name="flame" size={10} color="#F59E0B" />
+                                    <Pressable style={st.ovBtn} onPress={() => { updateMovementDuration(blockIdx, movIdx, -5); }}>
+                                      <Text style={st.ovBtnText}>−</Text>
+                                    </Pressable>
+                                    <Text style={st.ovVal}>{mov.durationSec ?? DEFAULT_DURATION_SEC}s</Text>
+                                    <Pressable style={st.ovBtn} onPress={() => { updateMovementDuration(blockIdx, movIdx, 5); }}>
+                                      <Text style={st.ovBtnText}>+</Text>
+                                    </Pressable>
+                                  </View>
+
+                                  {/* Reps + Weight — third row (optional) */}
+                                  <View style={st.ovRow}>
+                                    <Text style={st.ovSmLabel}>reps</Text>
+                                    <TextInput
+                                      style={st.ovInput}
+                                      value={mov.reps ?? ''}
+                                      onChangeText={(t) => updateMovementReps(blockIdx, movIdx, t)}
+                                      placeholder="—"
+                                      placeholderTextColor="#4A5568"
+                                      keyboardType="default"
+                                    />
+                                    <Text style={st.ovSmLabel}>lbs</Text>
+                                    <TextInput
+                                      style={st.ovInput}
+                                      value={mov.weight ?? ''}
+                                      onChangeText={(t) => updateMovementWeight(blockIdx, movIdx, t)}
+                                      placeholder="—"
+                                      placeholderTextColor="#4A5568"
+                                      keyboardType="default"
+                                    />
+                                  </View>
+
+                                  {/* Bottom row: three-dots (details) + trash */}
+                                  <View style={st.ovBottomRow}>
+                                    <Pressable
+                                      style={st.ovIconBtn}
+                                      onPress={(e) => {
+                                        e.stopPropagation();
+                                        // TODO: Open movement detail from library
+                                      }}
+                                    >
+                                      <Icon name="more-horizontal" size={12} color="#8A95A3" />
+                                    </Pressable>
+                                    <Pressable
+                                      style={st.ovIconBtn}
+                                      onPress={(e) => {
+                                        e.stopPropagation();
+                                        removeMovementFromBlock(blockIdx, movIdx);
+                                      }}
+                                    >
+                                      <Icon name="trash-2" size={12} color="#EF4444" />
+                                    </Pressable>
+                                  </View>
                                 </View>
-                                <View style={st.qcRow}>
-                                  <Text style={st.qcLabel}>Reps</Text>
-                                  <TextInput
-                                    style={st.qcInput}
-                                    value={mov.reps ?? ''}
-                                    onChangeText={(t) => updateMovementReps(blockIdx, movIdx, t)}
-                                    placeholder="—"
-                                    placeholderTextColor="#4A5568"
-                                    keyboardType="default"
-                                  />
-                                </View>
-                                <Pressable
-                                  style={st.qcRemove}
-                                  onPress={() => removeMovementFromBlock(blockIdx, movIdx)}
-                                >
-                                  <Icon name="trash-2" size={12} color="#EF4444" />
-                                  <Text style={st.qcRemoveText}>Remove</Text>
-                                </Pressable>
-                              </View>
-                            )}
+                              )}
+                            </Pressable>
                           </View>
                         );
                       })}
@@ -1174,47 +1217,45 @@ export default function WorkoutFolderPage({
                               <Text style={st.listMovName} numberOfLines={1}>{mov.movementName}</Text>
                             </Pressable>
 
-                            {/* Quick controls in list view */}
+                            {/* Quick controls in list view — compact inline */}
                             {isMovExpanded && (
                               <View style={st.listQuickControls} onStartShouldSetResponder={() => true}>
-                                <View style={st.qcRow}>
-                                  <Text style={st.qcLabel}>Duration</Text>
-                                  <Pressable style={st.qcBtn} onPress={() => updateMovementDuration(blockIdx, movIdx, -5)}>
-                                    <Text style={st.qcBtnText}>−5s</Text>
+                                <View style={st.ovRow}>
+                                  <Icon name="hourglass" size={10} color="#38BDF8" />
+                                  <Pressable style={st.ovBtn} onPress={() => updateMovementRest(blockIdx, movIdx, -5)}>
+                                    <Text style={st.ovBtnText}>−</Text>
                                   </Pressable>
-                                  <Text style={st.qcValue}>{mov.durationSec ?? DEFAULT_DURATION_SEC}s</Text>
-                                  <Pressable style={st.qcBtn} onPress={() => updateMovementDuration(blockIdx, movIdx, 5)}>
-                                    <Text style={st.qcBtnText}>+5s</Text>
+                                  <Text style={st.ovVal}>{mov.restSec ?? DEFAULT_REST_SEC}s</Text>
+                                  <Pressable style={st.ovBtn} onPress={() => updateMovementRest(blockIdx, movIdx, 5)}>
+                                    <Text style={st.ovBtnText}>+</Text>
                                   </Pressable>
-                                </View>
-                                <View style={st.qcRow}>
-                                  <Text style={st.qcLabel}>Rest</Text>
-                                  <Pressable style={st.qcBtn} onPress={() => updateMovementRest(blockIdx, movIdx, -5)}>
-                                    <Text style={st.qcBtnText}>−5s</Text>
+                                  <View style={{ width: 6 }} />
+                                  <Icon name="flame" size={10} color="#F59E0B" />
+                                  <Pressable style={st.ovBtn} onPress={() => updateMovementDuration(blockIdx, movIdx, -5)}>
+                                    <Text style={st.ovBtnText}>−</Text>
                                   </Pressable>
-                                  <Text style={st.qcValue}>{mov.restSec ?? DEFAULT_REST_SEC}s</Text>
-                                  <Pressable style={st.qcBtn} onPress={() => updateMovementRest(blockIdx, movIdx, 5)}>
-                                    <Text style={st.qcBtnText}>+5s</Text>
+                                  <Text style={st.ovVal}>{mov.durationSec ?? DEFAULT_DURATION_SEC}s</Text>
+                                  <Pressable style={st.ovBtn} onPress={() => updateMovementDuration(blockIdx, movIdx, 5)}>
+                                    <Text style={st.ovBtnText}>+</Text>
                                   </Pressable>
-                                </View>
-                                <View style={st.qcRow}>
-                                  <Text style={st.qcLabel}>Reps</Text>
+                                  <View style={{ width: 6 }} />
+                                  <Text style={st.ovSmLabel}>reps</Text>
                                   <TextInput
-                                    style={st.qcInput}
+                                    style={[st.ovInput, { minWidth: 28 }]}
                                     value={mov.reps ?? ''}
                                     onChangeText={(t) => updateMovementReps(blockIdx, movIdx, t)}
                                     placeholder="—"
                                     placeholderTextColor="#4A5568"
                                     keyboardType="default"
                                   />
+                                  <View style={{ width: 6 }} />
+                                  <Pressable style={st.ovIconBtn} onPress={(e) => { e.stopPropagation(); }}>
+                                    <Icon name="more-horizontal" size={12} color="#8A95A3" />
+                                  </Pressable>
+                                  <Pressable style={st.ovIconBtn} onPress={(e) => { e.stopPropagation(); removeMovementFromBlock(blockIdx, movIdx); }}>
+                                    <Icon name="trash-2" size={12} color="#EF4444" />
+                                  </Pressable>
                                 </View>
-                                <Pressable
-                                  style={st.qcRemove}
-                                  onPress={() => removeMovementFromBlock(blockIdx, movIdx)}
-                                >
-                                  <Icon name="trash-2" size={12} color="#EF4444" />
-                                  <Text style={st.qcRemoveText}>Remove</Text>
-                                </Pressable>
                               </View>
                             )}
                           </View>
@@ -1338,6 +1379,7 @@ export default function WorkoutFolderPage({
             <Text style={st.addBlockEndText}>Add Block</Text>
           </Pressable>
         )}
+        </Pressable>
       </ScrollView>
 
 
@@ -1458,7 +1500,7 @@ export default function WorkoutFolderPage({
           </View>
         </Pressable>
       </Modal>
-    </Pressable>
+    </View>
   );
 }
 
@@ -1760,70 +1802,80 @@ const st = StyleSheet.create({
     backgroundColor: 'transparent',
   },
 
-  // Quick controls — rendered IN FLOW below the card (not absolute)
-  quickControls: {
-    backgroundColor: '#1E2A3A',
+  // In-card overlay — absolute positioned over the movement card
+  ovOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(14, 17, 23, 0.82)',
     borderRadius: 8,
-    padding: 8,
-    marginTop: 4,
-    minWidth: 180,
+    padding: 4,
+    justifyContent: 'center',
+    gap: 3,
   },
-  qcRow: {
+  ovRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 4,
+    justifyContent: 'center',
+    gap: 3,
   },
-  qcLabel: {
-    fontSize: 10,
-    color: '#8A95A3',
-    fontFamily: FB,
-    fontWeight: '600',
-    width: 48,
+  ovBtn: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 4,
+    width: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  qcBtn: {
-    backgroundColor: '#0E1117',
-    borderRadius: 5,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-  },
-  qcBtnText: {
-    fontSize: 10,
+  ovBtnText: {
+    fontSize: 11,
     color: '#F0F4F8',
     fontFamily: FB,
     fontWeight: '700',
+    lineHeight: 13,
   },
-  qcValue: {
-    fontSize: 11,
+  ovVal: {
+    fontSize: 10,
     color: '#F5A623',
     fontFamily: FH,
     fontWeight: '700',
-    minWidth: 28,
+    minWidth: 22,
     textAlign: 'center',
   },
-  qcInput: {
-    backgroundColor: '#0E1117',
-    borderRadius: 5,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    color: '#F0F4F8',
-    fontSize: 11,
-    fontFamily: FB,
-    minWidth: 36,
-    textAlign: 'center',
-  },
-  qcRemove: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
-    paddingVertical: 3,
-  },
-  qcRemoveText: {
-    fontSize: 10,
-    color: '#EF4444',
+  ovSmLabel: {
+    fontSize: 8,
+    color: '#8A95A3',
     fontFamily: FB,
     fontWeight: '600',
+  },
+  ovInput: {
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderRadius: 4,
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+    color: '#F0F4F8',
+    fontSize: 9,
+    fontFamily: FB,
+    minWidth: 24,
+    textAlign: 'center',
+    height: 18,
+  },
+  ovBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 1,
+  },
+  ovIconBtn: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   // Block control bar — sits at bottom of block, stretches left when expanded
