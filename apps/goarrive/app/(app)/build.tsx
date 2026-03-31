@@ -61,7 +61,7 @@ const TYPES: BuildType[] = ['Plans', 'Movements', 'Workouts', 'Playbooks'];
 // ── Grid layout constants ──────────────────────────────────────────────────
 const GRID_PADDING = 16;       // padding on left/right of the grid
 const GRID_GAP = 12;           // gap between cards
-const MAX_CARD_WIDTH = 160;    // max card width in px
+const MAX_CARD_WIDTH = 240;    // max card width in px — gives 4 cols on iPad, 2 on phone
 const CARD_ASPECT = 4 / 5;     // 4:5 width:height ratio → height = width / (4/5) = width * 1.25
 
 interface BuildItem {
@@ -123,8 +123,9 @@ function useGridLayout() {
   // Calculate how many columns fit with max card width
   // cols = floor((availableWidth + gap) / (maxCardWidth + gap))
   const cols = Math.max(2, Math.floor((availableWidth + GRID_GAP) / (MAX_CARD_WIDTH + GRID_GAP)));
-  // Actual card width: distribute evenly
-  const cardWidth = (availableWidth - GRID_GAP * (cols - 1)) / cols;
+  // Actual card width: distribute evenly, but never exceed MAX_CARD_WIDTH
+  const rawCardWidth = (availableWidth - GRID_GAP * (cols - 1)) / cols;
+  const cardWidth = Math.min(rawCardWidth, MAX_CARD_WIDTH);
   const cardHeight = cardWidth / CARD_ASPECT; // 4:5 → taller than wide
   return { cols, cardWidth, cardHeight };
 }
