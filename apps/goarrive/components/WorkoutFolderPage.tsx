@@ -1240,15 +1240,19 @@ export default function WorkoutFolderPage({
                                       style={st.ovIconBtn}
                                       onPress={(e) => {
                                         e.stopPropagation();
+                                        console.log('[3dots] pressed, onOpenMovement:', !!onOpenMovement, 'movId:', mov.movementId);
                                         if (onOpenMovement) {
                                           const movData = availableMovements.find(m => m.id === mov.movementId);
-                                          onOpenMovement(movData ?? {
+                                          console.log('[3dots] movData found:', !!movData, 'availableMovements count:', availableMovements.length);
+                                          const payload = movData ?? {
                                             id: mov.movementId,
                                             name: mov.displayName || mov.movementName,
                                             category: '',
                                             thumbnailUrl: mov.thumbnailUrl ?? null,
                                             mediaUrl: null,
-                                          });
+                                          };
+                                          console.log('[3dots] calling onOpenMovement with:', payload.name);
+                                          onOpenMovement(payload);
                                         }
                                       }}
                                     >

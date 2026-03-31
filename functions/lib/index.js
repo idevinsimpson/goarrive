@@ -72,7 +72,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
-exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
+exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -6163,6 +6163,103 @@ exports.retryFailedGifGeneration = (0, scheduler_1.onSchedule)({ schedule: '0 */
     }
     catch (err) {
         console.error(`${TAG} Error querying failed movements:`, err);
+    }
+});
+// ─── 27. analyzeMovement — AI-powered movement analysis via GPT-4.1-mini ────
+// Accepts a GIF URL, sends it to GPT-4.1-mini vision, and returns structured
+// movement metadata (name, category, equipment, difficulty, muscleGroups,
+// description, regression, progression, contraindications, workSec, restSec).
+//
+// ME-008: OPENAI_API_KEY must be set as a Firebase secret.
+//         firebase functions:secrets:set OPENAI_API_KEY
+// ─────────────────────────────────────────────────────────────────────────────
+const openaiApiKey = (0, params_1.defineSecret)('OPENAI_API_KEY');
+exports.analyzeMovement = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60 }, async (request) => {
+    var _a, _b, _c, _d;
+    const { gifUrl } = request.data;
+    if (!gifUrl || typeof gifUrl !== 'string') {
+        throw new https_1.HttpsError('invalid-argument', 'gifUrl is required');
+    }
+    const apiKey = openaiApiKey.value();
+    if (!apiKey) {
+        throw new https_1.HttpsError('internal', 'OpenAI API key not configured');
+    }
+    const systemPrompt = `You are a fitness movement analysis expert. You will be shown an animated GIF of a fitness/exercise movement. Analyze it carefully and return a JSON object with the following fields:
+
+- "name": string — the standard exercise name (e.g. "Barbell Back Squat", "Dumbbell Lateral Raise")
+- "category": string — one of: "Upper Body Push", "Upper Body Pull", "Lower Body Push", "Lower Body Pull", "Core", "Cardio", "Mobility"
+- "equipment": string — one of: "Bodyweight", "Dumbbell", "Barbell", "Kettlebell", "Band", "Cable", "Machine", or "" if unclear
+- "difficulty": string — one of: "Beginner", "Intermediate", "Advanced"
+- "muscleGroups": string[] — array from: "Chest", "Back", "Shoulders", "Biceps", "Triceps", "Quads", "Hamstrings", "Glutes", "Calves", "Core", "Full Body"
+- "description": string — 1-2 sentence coaching cue (form tips, what to focus on)
+- "regression": string — an easier alternative exercise name
+- "progression": string — a harder alternative exercise name
+- "contraindications": string — brief note on who should avoid this (e.g. "Avoid with lower back injury")
+- "workSec": number — recommended work duration in seconds (typically 30-45)
+- "restSec": number — recommended rest duration in seconds (typically 15-30)
+
+Return ONLY valid JSON, no markdown, no explanation.`;
+    try {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: 'gpt-4.1-mini',
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    {
+                        role: 'user',
+                        content: [
+                            {
+                                type: 'image_url',
+                                image_url: { url: gifUrl, detail: 'high' },
+                            },
+                            {
+                                type: 'text',
+                                text: 'Analyze this fitness movement and return the JSON metadata.',
+                            },
+                        ],
+                    },
+                ],
+                max_tokens: 500,
+                temperature: 0.3,
+            }),
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[analyzeMovement] OpenAI API error:', response.status, errorText);
+            throw new https_1.HttpsError('internal', `OpenAI API error: ${response.status}`);
+        }
+        const result = await response.json();
+        const content = ((_d = (_c = (_b = (_a = result.choices) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.message) === null || _c === void 0 ? void 0 : _c.content) === null || _d === void 0 ? void 0 : _d.trim()) || '';
+        // Parse JSON from the response (strip markdown fences if present)
+        let jsonStr = content;
+        if (jsonStr.startsWith('```')) {
+            jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+        }
+        const analysis = JSON.parse(jsonStr);
+        return {
+            name: analysis.name || '',
+            category: analysis.category || '',
+            equipment: analysis.equipment || '',
+            difficulty: analysis.difficulty || '',
+            muscleGroups: Array.isArray(analysis.muscleGroups) ? analysis.muscleGroups : [],
+            description: analysis.description || '',
+            regression: analysis.regression || '',
+            progression: analysis.progression || '',
+            contraindications: analysis.contraindications || '',
+            workSec: typeof analysis.workSec === 'number' ? analysis.workSec : 30,
+            restSec: typeof analysis.restSec === 'number' ? analysis.restSec : 15,
+        };
+    }
+    catch (err) {
+        if (err instanceof https_1.HttpsError)
+            throw err;
+        console.error('[analyzeMovement] Unexpected error:', err);
+        throw new https_1.HttpsError('internal', 'Failed to analyze movement');
     }
 });
 //# sourceMappingURL=index.js.map

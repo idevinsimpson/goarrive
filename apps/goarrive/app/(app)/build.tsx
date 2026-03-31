@@ -696,6 +696,23 @@ function BuildScreenInner() {
           onBack={() => setOpenWorkoutId(null)}
           onOpenMovement={(m: any) => setSelectedMovement(m)}
         />
+        <MovementDetail
+          visible={!!selectedMovement}
+          movement={selectedMovement}
+          onClose={() => setSelectedMovement(null)}
+          onEdit={(m: any) => {
+            setEditMovement(m);
+            setSelectedMovement(null);
+            setIsMovementFormOpen(true);
+          }}
+          onArchive={async (m: any) => {
+            try {
+              await updateDoc(doc(db, 'movements', m.id), { isArchived: !m.isArchived });
+              setSelectedMovement(null);
+            } catch (e) { console.error('Archive movement error:', e); }
+          }}
+          backLabel="Back to Workout"
+        />
       </View>
     );
   }
