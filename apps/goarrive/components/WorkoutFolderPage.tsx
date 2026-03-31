@@ -1268,6 +1268,10 @@ export default function WorkoutFolderPage({
                                       onPress={(e) => {
                                         e.stopPropagation();
                                         toggleMovementVisibility(blockIdx, movIdx);
+                                        if (!mov.hidden) {
+                                          setExpandedMovKey(null);
+                                          setEditingNameKey(null);
+                                        }
                                       }}
                                     >
                                       <Icon
