@@ -7189,9 +7189,9 @@ export const reconcileConnectedAccountPayments = onCall(
     // Admin-only guard
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be logged in');
-    const callerSnap = await db.collection('users').doc(callerUid).get();
+    const callerSnap = await db.collection('coaches').doc(callerUid).get();
     const callerRole = callerSnap.data()?.role;
-    if (callerRole !== 'admin') throw new HttpsError('permission-denied', 'Admin only');
+    if (callerRole !== 'platformAdmin') throw new HttpsError('permission-denied', 'Admin only');
 
     const stripe = getStripe(stripeSecretKey.value());
     const results: Array<{
@@ -7210,8 +7210,8 @@ export const reconcileConnectedAccountPayments = onCall(
       const stripeAccountId = doc.data().stripeAccountId as string;
       if (!stripeAccountId) continue;
 
-      const coachSnap = await db.collection('users').doc(coachId).get();
-      const coachName = coachSnap.data()?.displayName ?? coachId;
+      const coachSnap = await db.collection('coaches').doc(coachId).get();
+      const coachName = coachSnap.data()?.name ?? coachSnap.data()?.displayName ?? coachId;
 
       const result = {
         coachId,
@@ -7318,6 +7318,72 @@ export const reconcileConnectedAccountPayments = onCall(
           console.log(`[reconcile] Reconciled checkout session ${session.id} for plan ${planId}`);
         }
 
+        // ── 1b. Reconcile active subscriptions (create memberSubscription if missing) ──
+        const subscriptions = await stripe.subscriptions.list(
+          { limit: 100, status: 'active' },
+          { stripeAccount: stripeAccountId }
+        );
+
+        for (const sub of subscriptions.data) {
+          const subId = sub.id;
+          const existingSubSnap = await db.collection('memberSubscriptions').doc(subId).get();
+          if (existingSubSnap.exists) continue; // Already tracked
+
+          // Get metadata from the subscription
+          const planId = sub.metadata?.planId;
+          const memberId = sub.metadata?.memberId;
+          const snapshotId = sub.metadata?.snapshotId;
+          const tierSplit = parseInt(sub.metadata?.tierSplit ?? '40', 10) as 40 | 35 | 30;
+          const paymentOption = sub.metadata?.paymentOption ?? 'monthly';
+          const contractMonths = parseInt(sub.metadata?.contractMonths ?? '12', 10);
+
+          if (!planId || !memberId) continue; // Can't reconcile without plan/member info
+
+          const subCreatedAt = Timestamp.fromMillis(sub.created * 1000);
+          const contractEndAt = Timestamp.fromMillis(
+            subCreatedAt.toMillis() + contractMonths * 30.44 * 24 * 60 * 60 * 1000
+          );
+
+          await db.collection('memberSubscriptions').doc(subId).set({
+            subscriptionId: subId,
+            memberId,
+            coachId,
+            planId,
+            snapshotId: snapshotId ?? '',
+            stripeAccountId,
+            stripeCustomerId: typeof sub.customer === 'string' ? sub.customer : (sub.customer as any)?.id ?? '',
+            paymentOption,
+            phase: 'contract',
+            contractStartAt: subCreatedAt,
+            contractEndAt,
+            status: 'active',
+            tierSnapshot: tierSplit,
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+            reconciledAt: FieldValue.serverTimestamp(),
+          });
+
+          // Also update the member_plan if not already paid
+          const planSnap = await db.collection('member_plans').doc(planId).get();
+          if (planSnap.exists) {
+            const planData = planSnap.data()!;
+            if (planData.checkoutStatus !== 'paid' && planData.checkoutStatus !== 'pay_in_full_paid') {
+              await db.collection('member_plans').doc(planId).update({
+                status: 'active',
+                checkoutStatus: paymentOption === 'pay_in_full' ? 'pay_in_full_paid' : 'paid',
+                stripeSubscriptionId: subId,
+                stripeCustomerId: typeof sub.customer === 'string' ? sub.customer : (sub.customer as any)?.id ?? '',
+                updatedAt: FieldValue.serverTimestamp(),
+                reconciledAt: FieldValue.serverTimestamp(),
+                reconciledFrom: 'reconcileConnectedAccountPayments',
+              });
+            }
+          }
+
+          result.sessionsReconciled++;
+          console.log(`[reconcile] Reconciled subscription ${subId} for plan ${planId}`);
+        }
+
         // ── 2. Reconcile invoices (create missing ledger entries) ──
         const invoices = await stripe.invoices.list(
           { limit: 100, status: 'paid' },
@@ -7336,15 +7402,12 @@ export const reconcileConnectedAccountPayments = onCall(
 
           if (!existingLedger.empty) continue; // Already has ledger entry
 
-          // Find the memberSubscription
-          const subSnap = await db.collection('memberSubscriptions')
-            .where('subscriptionId', '==', subId)
-            .limit(1)
-            .get();
+          // Find the memberSubscription (doc ID = subscription ID)
+          const subDoc = await db.collection('memberSubscriptions').doc(subId).get();
 
-          if (subSnap.empty) continue;
+          if (!subDoc.exists) continue;
 
-          const subData = subSnap.docs[0].data();
+          const subData = subDoc.data()!;
           const contractEndAt = subData.contractEndAt as Timestamp | null;
           const invoiceCreatedAt = Timestamp.fromMillis((invoice.created ?? Date.now() / 1000) * 1000);
           const phase: 'contract' | 'continuation' =
@@ -7411,9 +7474,9 @@ export const setProfitShareStartDate = onCall(
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be logged in');
-    const callerSnap = await db.collection('users').doc(callerUid).get();
+    const callerSnap = await db.collection('coaches').doc(callerUid).get();
     const callerRole = callerSnap.data()?.role;
-    if (callerRole !== 'admin') throw new HttpsError('permission-denied', 'Admin only');
+    if (callerRole !== 'platformAdmin') throw new HttpsError('permission-denied', 'Admin only');
 
     const { coachId, startDate } = request.data as { coachId: string; startDate: string };
     if (!coachId || !startDate) {
@@ -7431,7 +7494,7 @@ export const setProfitShareStartDate = onCall(
       throw new HttpsError('invalid-argument', 'Invalid date');
     }
 
-    await db.collection('users').doc(coachId).update({
+    await db.collection('coaches').doc(coachId).update({
       profitShareStartDate: Timestamp.fromMillis(dateMs),
       updatedAt: FieldValue.serverTimestamp(),
     });
@@ -7460,9 +7523,9 @@ export const getConnectedAccountData = onCall(
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be logged in');
-    const callerSnap = await db.collection('users').doc(callerUid).get();
+    const callerSnap = await db.collection('coaches').doc(callerUid).get();
     const callerRole = callerSnap.data()?.role;
-    if (callerRole !== 'admin') throw new HttpsError('permission-denied', 'Admin only');
+    if (callerRole !== 'platformAdmin') throw new HttpsError('permission-denied', 'Admin only');
 
     const { coachId } = request.data as { coachId: string };
     if (!coachId) throw new HttpsError('invalid-argument', 'coachId is required');
@@ -7530,5 +7593,117 @@ export const getConnectedAccountData = onCall(
         pending: balance.pending,
       },
     };
+  }
+);
+
+// ─── createMissingLedgerEntry ────────────────────────────────────────────────
+/**
+ * Admin-only callable: creates a ledger entry for a specific invoice
+ * on a coach's connected Stripe account. Used for manual reconciliation
+ * when the webhook didn't fire.
+ */
+export const createMissingLedgerEntry = onCall(
+  { secrets: [stripeSecretKey] },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be logged in');
+    const callerSnap = await db.collection('coaches').doc(callerUid).get();
+    const callerRole = callerSnap.data()?.role;
+    if (callerRole !== 'platformAdmin') throw new HttpsError('permission-denied', 'Admin only');
+
+    const { coachId } = request.data as { coachId: string };
+    if (!coachId) throw new HttpsError('invalid-argument', 'coachId is required');
+
+    // Get coach's connected Stripe account
+    const coachAccountSnap = await db.collection('coachStripeAccounts').doc(coachId).get();
+    const stripeAccountId = coachAccountSnap.data()?.stripeAccountId as string | undefined;
+    if (!stripeAccountId) throw new HttpsError('not-found', 'Coach has no connected Stripe account');
+
+    const stripe = getStripe(stripeSecretKey.value());
+
+    // Get all paid invoices from connected account
+    const invoices = await stripe.invoices.list(
+      { limit: 100, status: 'paid' },
+      { stripeAccount: stripeAccountId }
+    );
+
+    let created = 0;
+    const entries: Array<{ invoiceId: string; amount: number; coachShare: number; goArriveShare: number }> = [];
+
+    for (const invoice of invoices.data) {
+      const subId = (invoice as any).subscription as string | null;
+      if (!subId) continue;
+
+      // Check if ledger entry already exists
+      const existingSnap = await db.collection('ledgerEntries')
+        .where('stripeInvoiceId', '==', invoice.id)
+        .limit(1)
+        .get();
+
+      if (!existingSnap.empty) {
+        console.log(`[createMissingLedgerEntry] Ledger entry already exists for invoice ${invoice.id}`);
+        continue;
+      }
+
+      // Get memberSubscription
+      const subDoc = await db.collection('memberSubscriptions').doc(subId).get();
+      if (!subDoc.exists) {
+        console.log(`[createMissingLedgerEntry] No memberSubscription for ${subId}, skipping`);
+        continue;
+      }
+
+      const subData = subDoc.data()!;
+      const contractEndAt = subData.contractEndAt as Timestamp | null;
+      const invoiceCreatedAt = Timestamp.fromMillis((invoice.created ?? Date.now() / 1000) * 1000);
+      const phase: 'contract' | 'continuation' =
+        contractEndAt && invoiceCreatedAt.toMillis() > contractEndAt.toMillis()
+          ? 'continuation' : 'contract';
+
+      const grossAmountCents = invoice.amount_paid;
+      const tierSnapshot = (subData.tierSnapshot ?? 40) as 40 | 35 | 30;
+      const applicationFeePercent = tierSnapshot;
+      const goArriveShareCents = Math.round(grossAmountCents * applicationFeePercent / 100);
+      const coachShareCents = grossAmountCents - goArriveShareCents;
+
+      const ledgerRef = db.collection('ledgerEntries').doc();
+      await ledgerRef.set({
+        entryId: ledgerRef.id,
+        billingEventId: `manual_reconcile_${invoice.id}`,
+        memberId: subData.memberId,
+        coachId: subData.coachId,
+        planId: subData.planId,
+        snapshotId: subData.snapshotId,
+        phase,
+        grossAmountCents,
+        coachShareCents,
+        goArriveShareCents,
+        tierSnapshot,
+        applicationFeePercent,
+        stripeInvoiceId: invoice.id,
+        stripeChargeId: (invoice as any).charge as string | null,
+        contractStartAt: subData.contractStartAt ?? null,
+        contractEndAt: subData.contractEndAt ?? null,
+        pricingSnapshotId: subData.snapshotId ?? '',
+        ruleSnapshot: {
+          tierSplit: tierSnapshot,
+          applicationFeePercent,
+          resolvedAt: invoiceCreatedAt.toDate().toISOString(),
+        },
+        createdAt: FieldValue.serverTimestamp(),
+        reconciledAt: FieldValue.serverTimestamp(),
+        reconciledFrom: 'createMissingLedgerEntry',
+      });
+
+      created++;
+      entries.push({
+        invoiceId: invoice.id,
+        amount: grossAmountCents,
+        coachShare: coachShareCents,
+        goArriveShare: goArriveShareCents,
+      });
+      console.log(`[createMissingLedgerEntry] Created ledger entry for invoice ${invoice.id}`);
+    }
+
+    return { created, entries };
   }
 );
