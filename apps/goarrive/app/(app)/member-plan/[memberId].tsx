@@ -2246,7 +2246,11 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
   return (
     <Modal transparent animationType="slide" visible={visible} onRequestClose={onClose}>
       <Pressable style={em.overlay} onPress={onClose}>
-        <Pressable style={[em.sheet, { maxHeight: SCREEN_H * 0.85 }]} onPress={e => e.stopPropagation()}>
+        <View
+          style={[em.sheet, { maxHeight: SCREEN_H * 0.85 }]}
+          onStartShouldSetResponder={() => true}
+          {...(Platform.OS === 'web' ? { onClick: (e: any) => e.stopPropagation() } as any : {})}
+        >
           <ScrollView
             style={{ maxHeight: SCREEN_H * 0.85 - 40 }}
             showsVerticalScrollIndicator
@@ -2733,7 +2737,7 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
 
             <View style={{ height: 20 }} />
           </ScrollView>
-        </Pressable>
+        </View>
       </Pressable>
     </Modal>
   );
