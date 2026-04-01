@@ -7522,6 +7522,48 @@ export const setProfitShareStartDate = onCall(
   }
 );
 
+// ─── setYearlyEarningsCap ───────────────────────────────────────────────────────
+/**
+ * Admin-only callable: sets the yearly earnings cap for a coach.
+ *
+ * Stores in coaches/{coachId}.yearlyCapsCents as a map: { '2027': 5000000 }
+ * If no cap is set for a year, the previous year's cap carries over.
+ * Cap resets January 1 each year.
+ */
+export const setYearlyEarningsCap = onCall(
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be logged in');
+    const callerSnap = await db.collection('coaches').doc(callerUid).get();
+    const callerData = callerSnap.data();
+    const isAdmin = callerData?.role === 'platformAdmin' || callerData?.admin === true;
+    if (!isAdmin) throw new HttpsError('permission-denied', 'Admin only');
+
+    const { coachId, year, capDollars } = request.data as { coachId: string; year: number; capDollars: number };
+    if (!coachId || !year || !capDollars) {
+      throw new HttpsError('invalid-argument', 'coachId, year, and capDollars are required');
+    }
+
+    if (year < 2024 || year > 2100) {
+      throw new HttpsError('invalid-argument', 'Year must be between 2024 and 2100');
+    }
+
+    if (capDollars <= 0 || capDollars > 10_000_000) {
+      throw new HttpsError('invalid-argument', 'Cap must be between $1 and $10,000,000');
+    }
+
+    const capCents = Math.round(capDollars * 100);
+
+    await db.collection('coaches').doc(coachId).update({
+      [`yearlyCapsCents.${year}`]: capCents,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    console.log(`[setYearlyEarningsCap] Coach ${coachId} cap for ${year} set to $${capDollars} (${capCents} cents)`);
+    return { success: true, coachId, year, capCents };
+  }
+);
+
 // ─── getConnectedAccountData ────────────────────────────────────────────────
 /**
  * Admin-only callable: retrieves payment data from a coach's connected

@@ -105,8 +105,9 @@ const ADMIN_CARDS: FeatureCard[] = [
 
 export default function DashboardScreen() {
   const { user, claims, effectiveUid, adminCoachOverride } = useAuth();
-  const coachId = claims?.coachId ?? user?.uid ?? '';
-  const isAdmin = claims?.role === 'admin' || claims?.role === 'platform_admin';
+  // Use effectiveUid for all queries — when admin override is active, this is the impersonated coach's UID
+  const coachId = effectiveUid || claims?.coachId || user?.uid || '';
+  const isAdmin = claims?.role === 'admin' || claims?.role === 'platform_admin' || claims?.role === 'platformAdmin' || claims?.admin === true;
   const [showAdminMetrics, setShowAdminMetrics] = useState(false);
   const [showQuickAssign, setShowQuickAssign] = useState(false);
   const [showReviewQueue, setShowReviewQueue] = useState(false);

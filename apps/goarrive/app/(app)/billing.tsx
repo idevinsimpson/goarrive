@@ -28,7 +28,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
-  collection, query, where, getDocs, doc, onSnapshot,
+  collection, query, where, getDocs, getDoc, doc, onSnapshot,
   orderBy, limit, Timestamp, updateDoc,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
@@ -57,7 +57,46 @@ const TIERS = [
   { min: 7, max: Infinity, platformPct: 30, coachPct: 70, label: 'Tier 3' },
 ];
 
-const ANNUAL_CAP = 40_000_00; // $40,000 in cents
+const DEFAULT_ANNUAL_CAP_CENTS = 40_000_00; // $40,000 in cents
+
+/**
+ * Calculate the effective earnings cap for the current year.
+ *
+ * Rules:
+ * - First year: prorated from profitShareStartDate to Dec 31
+ * - Subsequent years: use admin-configured cap for that year;
+ *   if none set, carry over the previous year's cap
+ * - Cap resets January 1 each year
+ */
+function computeEffectiveCap(
+  profitShareStartDate: Date | null,
+  yearlyCapsCents: Record<string, number>, // { '2026': 4000000, '2027': 5000000, ... }
+): { capCents: number; isProrated: boolean; proratedDays: number; totalDays: number } {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+
+  // Determine the base cap for the current year
+  // Walk backwards from current year to find the most recent configured cap
+  let baseCap = DEFAULT_ANNUAL_CAP_CENTS;
+  for (let y = currentYear; y >= currentYear - 10; y--) {
+    if (yearlyCapsCents[String(y)] != null) {
+      baseCap = yearlyCapsCents[String(y)];
+      break;
+    }
+  }
+
+  // Check if this is the coach's first year (profitShareStartDate is in the current year)
+  if (profitShareStartDate && profitShareStartDate.getFullYear() === currentYear) {
+    const startOfYear = new Date(currentYear, 0, 1);
+    const endOfYear = new Date(currentYear, 11, 31);
+    const totalDays = Math.ceil((endOfYear.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const remainingDays = Math.ceil((endOfYear.getTime() - profitShareStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const proratedCap = Math.round(baseCap * (remainingDays / totalDays));
+    return { capCents: proratedCap, isProrated: true, proratedDays: remainingDays, totalDays };
+  }
+
+  return { capCents: baseCap, isProrated: false, proratedDays: 0, totalDays: 365 };
+}
 
 function getTier(activeCount: number) {
   return TIERS.find(t => activeCount >= t.min && activeCount <= t.max) ?? TIERS[0];
@@ -158,8 +197,9 @@ interface Task {
 
 export default function BillingDashboard() {
   const router = useRouter();
-  const { claims } = useAuth();
-  const coachId = claims?.coachId as string | undefined;
+  const { claims, effectiveUid } = useAuth();
+  // Use effectiveUid to respect admin override (View as Coach)
+  const coachId = effectiveUid || (claims?.coachId as string | undefined);
 
   const [stripeAccount, setStripeAccount] = useState<StripeAccount | null>(null);
   const [memberPlans, setMemberPlans] = useState<MemberPlan[]>([]);
@@ -171,6 +211,8 @@ export default function BillingDashboard() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'tasks' | 'contact' | 'know'>('tasks');
   const [waivingFeeId, setWaivingFeeId] = useState<string | null>(null);
+  const [profitShareStartDate, setProfitShareStartDate] = useState<Date | null>(null);
+  const [yearlyCapsCents, setYearlyCapsCents] = useState<Record<string, number>>({});
 
   // ── Load data ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -186,6 +228,25 @@ export default function BillingDashboard() {
         setStripeAccount(snap.exists() ? (snap.data() as StripeAccount) : null);
       },
       () => setStripeAccount(null)
+    );
+
+    // Load coach document for profitShareStartDate and yearly caps
+    const coachUnsub = onSnapshot(
+      doc(db, 'coaches', coachId),
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.profitShareStartDate?.seconds) {
+            setProfitShareStartDate(new Date(data.profitShareStartDate.seconds * 1000));
+          } else if (data.profitShareStartDate instanceof Date) {
+            setProfitShareStartDate(data.profitShareStartDate);
+          }
+          if (data.yearlyCapsCents && typeof data.yearlyCapsCents === 'object') {
+            setYearlyCapsCents(data.yearlyCapsCents);
+          }
+        }
+      },
+      () => { /* ignore errors */ }
     );
 
     const loadAll = async () => {
@@ -239,7 +300,10 @@ export default function BillingDashboard() {
     };
 
     loadAll();
-    return () => accountUnsub();
+    return () => {
+      accountUnsub();
+      coachUnsub();
+    };
   }, [coachId]);
 
   // ── Derived data ──────────────────────────────────────────────────────────
@@ -257,8 +321,14 @@ export default function BillingDashboard() {
   // Earnings (90 days)
   const totalCoachEarnings90d = ledger.reduce((sum, e) => sum + (e.coachShareCents || 0), 0);
 
-  // Cap progress (this year's ledger — approximate from 90-day window)
-  const capProgressPct = Math.min(100, Math.round((totalCoachEarnings90d / ANNUAL_CAP) * 100));
+  // Compute effective cap (prorated for first year)
+  const { capCents: effectiveCapCents, isProrated, proratedDays, totalDays } = computeEffectiveCap(
+    profitShareStartDate,
+    yearlyCapsCents,
+  );
+  const capProgressPct = effectiveCapCents > 0
+    ? Math.min(100, Math.round((totalCoachEarnings90d / effectiveCapCents) * 100))
+    : 0;
 
   // Profit share
   const gen1Records = profitShares.filter(r => r.generation === 1);
@@ -418,7 +488,9 @@ export default function BillingDashboard() {
           <View style={s.card}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={s.cardTitle}>Earnings Cap</Text>
-              <Text style={{ color: MUTED, fontSize: 11 }}>$40,000/year</Text>
+              <Text style={{ color: MUTED, fontSize: 11 }}>
+                {formatCurrency(effectiveCapCents / 100)}/year{isProrated ? ' (prorated)' : ''}
+              </Text>
             </View>
             <View style={s.capBarBg}>
               <View style={[s.capBarFill, { width: `${capProgressPct}%` as any }]} />
@@ -427,7 +499,12 @@ export default function BillingDashboard() {
               <Text style={{ color: MUTED, fontSize: 11 }}>{formatCurrency(totalCoachEarnings90d / 100)} earned</Text>
               <Text style={{ color: MUTED, fontSize: 11 }}>{capProgressPct}% of cap</Text>
             </View>
-            <Text style={{ color: MUTED, fontSize: 10, marginTop: 6, lineHeight: 15 }}>
+            {isProrated && profitShareStartDate ? (
+              <Text style={{ color: GOLD, fontSize: 10, marginTop: 6, lineHeight: 15 }}>
+                Prorated from {profitShareStartDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} ({proratedDays} of {totalDays} days). Full annual cap: {formatCurrency(DEFAULT_ANNUAL_CAP_CENTS / 100)}.
+              </Text>
+            ) : null}
+            <Text style={{ color: MUTED, fontSize: 10, marginTop: isProrated ? 2 : 6, lineHeight: 15 }}>
               After reaching the cap, you keep 100% of additional new-business earnings minus the admin tech fee. Cap resets January 1.
             </Text>
           </View>

@@ -72,7 +72,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
-exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
+exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -6584,6 +6584,42 @@ exports.setProfitShareStartDate = (0, https_1.onCall)(async (request) => {
     });
     console.log(`[setProfitShareStartDate] Coach ${coachId} profitShareStartDate set to ${startDate}`);
     return { success: true, coachId, startDate };
+});
+// ─── setYearlyEarningsCap ───────────────────────────────────────────────────────
+/**
+ * Admin-only callable: sets the yearly earnings cap for a coach.
+ *
+ * Stores in coaches/{coachId}.yearlyCapsCents as a map: { '2027': 5000000 }
+ * If no cap is set for a year, the previous year's cap carries over.
+ * Cap resets January 1 each year.
+ */
+exports.setYearlyEarningsCap = (0, https_1.onCall)(async (request) => {
+    var _a;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be logged in');
+    const callerSnap = await db.collection('coaches').doc(callerUid).get();
+    const callerData = callerSnap.data();
+    const isAdmin = (callerData === null || callerData === void 0 ? void 0 : callerData.role) === 'platformAdmin' || (callerData === null || callerData === void 0 ? void 0 : callerData.admin) === true;
+    if (!isAdmin)
+        throw new https_1.HttpsError('permission-denied', 'Admin only');
+    const { coachId, year, capDollars } = request.data;
+    if (!coachId || !year || !capDollars) {
+        throw new https_1.HttpsError('invalid-argument', 'coachId, year, and capDollars are required');
+    }
+    if (year < 2024 || year > 2100) {
+        throw new https_1.HttpsError('invalid-argument', 'Year must be between 2024 and 2100');
+    }
+    if (capDollars <= 0 || capDollars > 10000000) {
+        throw new https_1.HttpsError('invalid-argument', 'Cap must be between $1 and $10,000,000');
+    }
+    const capCents = Math.round(capDollars * 100);
+    await db.collection('coaches').doc(coachId).update({
+        [`yearlyCapsCents.${year}`]: capCents,
+        updatedAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    console.log(`[setYearlyEarningsCap] Coach ${coachId} cap for ${year} set to $${capDollars} (${capCents} cents)`);
+    return { success: true, coachId, year, capCents };
 });
 // ─── getConnectedAccountData ────────────────────────────────────────────────
 /**

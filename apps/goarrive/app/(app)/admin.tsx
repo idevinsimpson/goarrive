@@ -151,6 +151,7 @@ export default function AdminScreen() {
   const [stripeData, setStripeData] = useState<any>(null);
   const [loadingStripe, setLoadingStripe] = useState(false);
   const [settingProfitShare, setSettingProfitShare] = useState(false);
+  const [settingYearlyCap, setSettingYearlyCap] = useState(false);
   const [reconciling, setReconciling] = useState(false);
   const [reconcileResults, setReconcileResults] = useState<any>(null);
 
@@ -262,6 +263,42 @@ export default function AdminScreen() {
       setStripeData({ error: err.message });
     } finally {
       setLoadingStripe(false);
+    }
+  }, []);
+
+  // ── Set Yearly Earnings Cap ──────────────────────────────────────────────
+  const handleSetYearlyCap = useCallback(async (coachId: string, coachName: string) => {
+    const nextYear = new Date().getFullYear() + 1;
+    const input = Platform.OS === 'web'
+      ? window.prompt(
+          `Set earnings cap for ${coachName} for ${nextYear}.\n\n` +
+          `Enter dollar amount (e.g. 40000 for $40,000).\n` +
+          `Leave blank to keep current cap (carries over from previous year).`
+        )
+      : null;
+    if (input === null) return; // cancelled
+    if (input.trim() === '') {
+      if (Platform.OS === 'web') alert(`No change — ${coachName}'s cap will carry over from the current year.`);
+      return;
+    }
+    const amount = parseFloat(input.trim());
+    if (isNaN(amount) || amount <= 0) {
+      if (Platform.OS === 'web') alert('Please enter a valid dollar amount greater than 0.');
+      return;
+    }
+    setSettingYearlyCap(true);
+    try {
+      const fn = httpsCallable(getFunctions(), 'setYearlyEarningsCap');
+      await fn({ coachId, year: nextYear, capDollars: amount });
+      if (Platform.OS === 'web') {
+        alert(`Earnings cap for ${coachName} set to $${amount.toLocaleString()} for ${nextYear}.`);
+      }
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to set yearly cap';
+      if (Platform.OS === 'web') alert(msg);
+      else Alert.alert('Error', msg);
+    } finally {
+      setSettingYearlyCap(false);
     }
   }, []);
 
@@ -1442,6 +1479,18 @@ export default function AdminScreen() {
                           <Icon name="card-outline" size={14} color={GREEN} />
                           <Text style={[s.viewAsCoachBtnText, { color: GREEN }]}>
                             {loadingStripe ? 'Loading...' : 'View Stripe Data'}
+                          </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[s.viewAsCoachBtn, { backgroundColor: GOLD + '20' }]}
+                          onPress={() => handleSetYearlyCap(c.uid, c.name)}
+                          disabled={settingYearlyCap}
+                          activeOpacity={0.7}
+                        >
+                          <Icon name="trending-up-outline" size={14} color={GOLD} />
+                          <Text style={[s.viewAsCoachBtnText, { color: GOLD }]}>
+                            {settingYearlyCap ? 'Setting...' : 'Set Yearly Cap'}
                           </Text>
                         </TouchableOpacity>
                       </View>

@@ -81,8 +81,9 @@ interface MemberAssignmentMeta {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function MembersScreen() {
-  const { user, claims } = useAuth();
-  const coachId = claims?.coachId ?? user?.uid ?? '';
+  const { user, claims, effectiveUid } = useAuth();
+  // Use effectiveUid to respect admin override (View as Coach)
+  const coachId = effectiveUid || claims?.coachId || user?.uid || '';
   const tenantId = claims?.tenantId ?? '';
 
   // ── State ────────────────────────────────────────────────────────────
@@ -220,11 +221,31 @@ export default function MembersScreen() {
         updatedAt: Timestamp.now(),
       });
     } else {
+      // Duplicate check: prevent adding a member with the same email
+      const emailNorm = data.email.trim().toLowerCase();
+      if (emailNorm) {
+        const dupQ = query(
+          collection(db, 'members'),
+          where('coachId', '==', coachId),
+          where('email', '==', emailNorm),
+        );
+        const dupSnap = await getDocs(dupQ);
+        const activeDups = dupSnap.docs.filter(d => !d.data().isArchived);
+        if (activeDups.length > 0) {
+          const existingName = activeDups[0].data().name || activeDups[0].data().displayName || 'Unknown';
+          if (Platform.OS === 'web') {
+            window.alert(`A member with email "${emailNorm}" already exists (${existingName}). Please edit the existing member instead.`);
+          } else {
+            Alert.alert('Duplicate Member', `A member with email "${emailNorm}" already exists (${existingName}). Please edit the existing member instead.`);
+          }
+          return;
+        }
+      }
       await addDoc(collection(db, 'members'), {
         coachId,
         tenantId,
         name: data.name.trim(),
-        email: data.email.trim().toLowerCase(),
+        email: emailNorm,
         phone: data.phone.trim(),
         notes: data.notes.trim(),
         isArchived: false,

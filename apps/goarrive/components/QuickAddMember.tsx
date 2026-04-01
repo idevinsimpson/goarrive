@@ -25,6 +25,9 @@ import {
   addDoc,
   doc,
   setDoc,
+  getDocs,
+  query,
+  where,
   Timestamp,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -194,6 +197,25 @@ export default function QuickAddMember({
     setSubmitting(true);
     try {
       const displayName = `${formData.firstName.trim()} ${formData.lastName.trim()}`;
+      const emailNorm = formData.email.trim().toLowerCase();
+
+      // Duplicate check: if email is provided, check for existing member with same email under this coach
+      if (emailNorm) {
+        const dupQ = query(
+          collection(db, 'members'),
+          where('coachId', '==', coachId),
+          where('email', '==', emailNorm),
+        );
+        const dupSnap = await getDocs(dupQ);
+        const activeDups = dupSnap.docs.filter(d => !d.data().isArchived);
+        if (activeDups.length > 0) {
+          const existingName = activeDups[0].data().name || activeDups[0].data().displayName || 'Unknown';
+          setErrors({ submit: `A member with email "${emailNorm}" already exists (${existingName}). Please edit the existing member instead.` });
+          setSubmitting(false);
+          return;
+        }
+      }
+
       const memberRef = await addDoc(collection(db, 'members'), {
         coachId,
         tenantId,
