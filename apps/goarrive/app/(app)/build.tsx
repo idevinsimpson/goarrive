@@ -51,6 +51,7 @@ import MovementForm from '../../components/MovementForm';
 import WorkoutDetail from '../../components/WorkoutDetail';
 import WorkoutForm from '../../components/WorkoutForm';
 import WorkoutFolderPage from '../../components/WorkoutFolderPage';
+import BulkMovementUpload from '../../components/BulkMovementUpload';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -234,6 +235,7 @@ function BuildScreenInner() {
   const [selectedMovement, setSelectedMovement] = useState<any | null>(null);
   const [editMovement, setEditMovement] = useState<any | null>(null);
   const [isMovementFormOpen, setIsMovementFormOpen] = useState(false);
+  const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
   const [selectedWorkout, setSelectedWorkout] = useState<any | null>(null);
   const [editWorkout, setEditWorkout] = useState<any | null>(null);
   const [isWorkoutFormOpen, setIsWorkoutFormOpen] = useState(false);
@@ -895,6 +897,13 @@ function BuildScreenInner() {
         editMovement={editMovement}
       />
 
+      <BulkMovementUpload
+        visible={isBulkUploadOpen}
+        onClose={() => setIsBulkUploadOpen(false)}
+        coachId={coachId}
+        tenantId={tenantId}
+      />
+
       {/* WorkoutDetail and WorkoutForm modals removed — replaced by WorkoutFolderPage */}
 
       <Modal transparent visible={isPlusOpen} animationType="fade" onRequestClose={() => setIsPlusOpen(false)}>
@@ -915,6 +924,16 @@ function BuildScreenInner() {
             >
               <Icon name="movements" size={20} color="#F0F4F8" />
               <Text style={s.plusMenuItemText}>Movement</Text>
+            </Pressable>
+            <Pressable 
+              style={s.plusMenuItem} 
+              onPress={() => {
+                setIsPlusOpen(false);
+                setIsBulkUploadOpen(true);
+              }}
+            >
+              <Icon name="movements" size={20} color="#22C55E" />
+              <Text style={s.plusMenuItemText}>Bulk Upload Movements</Text>
             </Pressable>
             <Pressable 
               style={s.plusMenuItem} 
