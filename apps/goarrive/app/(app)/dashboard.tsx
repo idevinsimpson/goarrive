@@ -44,7 +44,7 @@ interface FeatureCard {
   description: string;
   week: string;
   color: string;
-  route: '/(app)/movements' | '/(app)/workouts' | '/(app)/members' | '/(app)/admin' | '/(app)/billing' | '/(app)/scheduling';
+  route: '/(app)/movements' | '/(app)/workouts' | '/(app)/members' | '/(app)/admin' | '/(app)/billing' | '/(app)/scheduling' | '/(app)/build';
 }
 
 const FEATURE_CARDS: FeatureCard[] = [
@@ -56,18 +56,11 @@ const FEATURE_CARDS: FeatureCard[] = [
     route: '/(app)/members',
   },
   {
-    title: 'Movement Library',
-    description: 'Browse and manage exercises with video demos and muscle-group tags.',
-    week: '',
-    color: '#7DD3FC',
-    route: '/(app)/movements',
-  },
-  {
-    title: 'Workout Builder',
-    description: 'Compose structured workouts and assign them to members.',
+    title: 'Build',
+    description: 'Create movements, design workouts, and organize your coaching library.',
     week: '',
     color: '#86EFAC',
-    route: '/(app)/workouts',
+    route: '/(app)/build',
   },
   {
     title: 'Member List',
