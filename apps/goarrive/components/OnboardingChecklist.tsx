@@ -61,7 +61,7 @@ export default function OnboardingChecklist() {
     try {
       const checks = await Promise.all([
         getDocs(query(collection(db, 'movements'), where('coachId', '==', coachId), limit(1))),
-        getDocs(query(collection(db, 'workout_templates'), where('coachId', '==', coachId), limit(1))),
+        getDocs(query(collection(db, 'workouts'), where('coachId', '==', coachId), limit(1))),
         getDocs(query(collection(db, 'members'), where('coachId', '==', coachId), limit(1))),
         getDocs(query(collection(db, 'workout_assignments'), where('coachId', '==', coachId), limit(1))),
       ]);
