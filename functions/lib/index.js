@@ -3713,7 +3713,7 @@ exports.setAdminRole = (0, https_1.onCall)({ region: 'us-central1' }, async (req
  * Output: { members: Array<{ id, name, email, phone, isArchived, planId, planStatus, checkoutStatus, contractMonths, displayMonthlyPrice }> }
  */
 exports.adminGetCoachData = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
-    var _a, _b;
+    var _a, _b, _c;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
         throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
@@ -3735,7 +3735,7 @@ exports.adminGetCoachData = (0, https_1.onCall)({ region: 'us-central1' }, async
         const mid = (_a = data.memberId) !== null && _a !== void 0 ? _a : d.id;
         planMap[mid] = Object.assign({ id: d.id }, data);
     });
-    const members = mSnap.docs.map(d => {
+    const rawMembers = mSnap.docs.map(d => {
         var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
         const data = d.data();
         const plan = planMap[d.id];
@@ -3752,6 +3752,24 @@ exports.adminGetCoachData = (0, https_1.onCall)({ region: 'us-central1' }, async
             displayMonthlyPrice: (_l = (_k = plan === null || plan === void 0 ? void 0 : plan.pricingResult) === null || _k === void 0 ? void 0 : _k.displayMonthlyPrice) !== null && _l !== void 0 ? _l : null,
         };
     });
+    // Deduplicate by email — keep the entry with a plan (or the most recent one)
+    const seenEmails = new Map();
+    for (const m of rawMembers) {
+        const key = ((_c = m.email) === null || _c === void 0 ? void 0 : _c.toLowerCase()) || m.id;
+        const existing = seenEmails.get(key);
+        if (!existing) {
+            seenEmails.set(key, m);
+        }
+        else {
+            // Prefer the entry that has a plan or checkoutStatus
+            const existingHasPlan = !!existing.planId || !!existing.checkoutStatus;
+            const newHasPlan = !!m.planId || !!m.checkoutStatus;
+            if (newHasPlan && !existingHasPlan) {
+                seenEmails.set(key, m);
+            }
+        }
+    }
+    const members = Array.from(seenEmails.values());
     return { members };
 });
 // ─── 26. enforceCtsAccountability — Scheduled: auto-charge missed session fees ──

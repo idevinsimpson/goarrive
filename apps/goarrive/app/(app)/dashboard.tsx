@@ -105,7 +105,7 @@ const ADMIN_CARDS: FeatureCard[] = [
 ];
 
 export default function DashboardScreen() {
-  const { user, claims } = useAuth();
+  const { user, claims, effectiveUid, adminCoachOverride } = useAuth();
   const coachId = claims?.coachId ?? user?.uid ?? '';
   const isAdmin = claims?.role === 'admin' || claims?.role === 'platform_admin';
   const [showAdminMetrics, setShowAdminMetrics] = useState(false);
@@ -220,7 +220,7 @@ export default function DashboardScreen() {
     fetchData();
   }, [fetchData]);
 
-  const coachName = user?.displayName ?? user?.email?.split('@')[0] ?? 'Coach';
+  const coachName = adminCoachOverride ? adminCoachOverride.coachName : (user?.displayName ?? user?.email?.split('@')[0] ?? 'Coach');
   const role = claims?.role ?? 'coach';
   const roleLabel =
     role === 'platformAdmin'
@@ -291,7 +291,7 @@ export default function DashboardScreen() {
 
         {/* Workout Stats Widget (R7: lazy-loaded) */}
         <Suspense fallback={<View style={{ padding: 24, alignItems: 'center' }}><Text style={{ color: '#8A95A3' }}>Loading stats...</Text></View>}>
-          <CoachWorkoutStatsWidget coachId={user?.uid || ''} />
+          <CoachWorkoutStatsWidget coachId={effectiveUid || coachId} />
         </Suspense>
 
         {/* Quick Assign shortcut */}

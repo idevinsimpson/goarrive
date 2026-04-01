@@ -4248,7 +4248,7 @@ export const adminGetCoachData = onCall(
       planMap[mid] = { id: d.id, ...data };
     });
 
-    const members = mSnap.docs.map(d => {
+    const rawMembers = mSnap.docs.map(d => {
       const data = d.data();
       const plan = planMap[d.id];
       return {
@@ -4264,6 +4264,24 @@ export const adminGetCoachData = onCall(
         displayMonthlyPrice: plan?.pricingResult?.displayMonthlyPrice ?? null,
       };
     });
+
+    // Deduplicate by email — keep the entry with a plan (or the most recent one)
+    const seenEmails = new Map<string, typeof rawMembers[0]>();
+    for (const m of rawMembers) {
+      const key = m.email?.toLowerCase() || m.id;
+      const existing = seenEmails.get(key);
+      if (!existing) {
+        seenEmails.set(key, m);
+      } else {
+        // Prefer the entry that has a plan or checkoutStatus
+        const existingHasPlan = !!existing.planId || !!existing.checkoutStatus;
+        const newHasPlan = !!m.planId || !!m.checkoutStatus;
+        if (newHasPlan && !existingHasPlan) {
+          seenEmails.set(key, m);
+        }
+      }
+    }
+    const members = Array.from(seenEmails.values());
 
     return { members };
   }

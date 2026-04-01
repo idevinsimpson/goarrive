@@ -1412,7 +1412,7 @@ export default function AdminScreen() {
                         <TouchableOpacity
                           style={s.viewAsCoachBtn}
                           onPress={() => {
-                            setAdminCoachOverride(c.uid);
+                            setAdminCoachOverride(c.uid, c.name);
                             router.push('/(app)/dashboard');
                           }}
                           activeOpacity={0.7}

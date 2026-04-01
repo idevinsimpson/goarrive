@@ -40,7 +40,7 @@ export default function AppLayout() {
       {adminCoachOverride && (
         <View style={styles.overrideBanner}>
           <Text style={styles.overrideText}>
-            Viewing as coach: {adminCoachOverride.slice(0, 8)}...
+            Viewing as coach: {adminCoachOverride.coachName}
           </Text>
           <TouchableOpacity
             style={styles.overrideExitBtn}

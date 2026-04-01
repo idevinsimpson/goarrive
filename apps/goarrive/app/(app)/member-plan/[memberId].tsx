@@ -2925,7 +2925,8 @@ function QRowEdit({ label, value, onEdit }: { label: string; value?: string | nu
 export default function MemberPlanScreen() {
   const { memberId } = useLocalSearchParams<{ memberId: string }>();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, effectiveUid } = useAuth();
+  const coachUid = effectiveUid || user?.uid || '';
 
   const [loading, setLoading] = useState(true);
   const [plan, setPlan] = useState<MemberPlanData | null>(null);
@@ -2990,7 +2991,7 @@ export default function MemberPlanScreen() {
     // ── Step 2b: Load coach's preferred pricing defaults ────────────────
     let coachPricingDefaults: { hourlyRate?: number; sessionLengthMinutes?: number; checkInCallMinutes?: number; programBuildTimeHours?: number } = {};
     try {
-      const brandDoc = await getDoc(doc(db, 'coach_brands', user.uid));
+      const brandDoc = await getDoc(doc(db, 'coach_brands', coachUid));
       if (brandDoc.exists()) {
         const brandData = brandDoc.data();
         if (brandData.defaultPricing) {
@@ -3012,7 +3013,7 @@ export default function MemberPlanScreen() {
       if (planDoc.exists()) {
         console.log('[loadData] Found plan at key:', memberId);
         const existingPlan = planDoc.data() as MemberPlanData;
-        const defaultPlan = createDefaultPlan(name, memberId, user.uid);
+        const defaultPlan = createDefaultPlan(name, memberId, coachUid);
         finalPlan = {
           ...defaultPlan,
           ...existingPlan,
@@ -3030,7 +3031,7 @@ export default function MemberPlanScreen() {
         if (planDoc2.exists()) {
           console.log('[loadData] Found plan at uid key:', memberUid);
           const existingPlan = planDoc2.data() as MemberPlanData;
-          const defaultPlan = createDefaultPlan(name, memberUid, user.uid);
+          const defaultPlan = createDefaultPlan(name, memberUid, coachUid);
           finalPlan = {
             ...defaultPlan,
             ...existingPlan,
@@ -3080,7 +3081,7 @@ export default function MemberPlanScreen() {
     // ── Step 4: Create plan from scratch if none found ───────────────────
     if (!finalPlan) {
       console.log('[loadData] No plan found, creating default plan for:', name);
-      const defaultPlan = createDefaultPlan(name, planKey, user.uid);
+      const defaultPlan = createDefaultPlan(name, planKey, coachUid);
       // Apply coach's preferred pricing defaults (overrides hardcoded defaults)
       if (coachPricingDefaults.hourlyRate != null) defaultPlan.hourlyRate = coachPricingDefaults.hourlyRate;
       if (coachPricingDefaults.sessionLengthMinutes != null) defaultPlan.sessionLengthMinutes = coachPricingDefaults.sessionLengthMinutes;
@@ -3176,7 +3177,7 @@ export default function MemberPlanScreen() {
           const pricingKeys: (keyof MemberPlanData)[] = ['hourlyRate', 'sessionLengthMinutes', 'checkInCallMinutes', 'programBuildTimeHours'];
           const hasPricingChange = pricingKeys.some(k => k in updates);
           if (hasPricingChange && user) {
-            const coachDocId = user.uid;
+            const coachDocId = coachUid;
             const pricingDefaults: Record<string, number> = {};
             if (updated.hourlyRate != null) pricingDefaults.hourlyRate = updated.hourlyRate;
             if (updated.sessionLengthMinutes != null) pricingDefaults.sessionLengthMinutes = updated.sessionLengthMinutes;
@@ -3266,7 +3267,7 @@ export default function MemberPlanScreen() {
           type: 'plan_shared',
           title: 'Your plan has been updated',
           body: `${user?.displayName || 'Your coach'} has shared your fitness plan with you.`,
-          coachId: user?.uid || '',
+          coachId: coachUid,
           planId: memberUid,
           read: false,
           createdAt: serverTimestamp(),

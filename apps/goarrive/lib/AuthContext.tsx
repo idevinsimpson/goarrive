@@ -35,14 +35,21 @@ export interface CustomClaims {
   [key: string]: any;
 }
 
+interface AdminOverride {
+  coachId: string;
+  coachName: string;
+}
+
 interface AuthContextValue {
   user: User | null;
   claims: CustomClaims | null;
   loading: boolean;
   signOut: () => Promise<void>;
   /** Admin-only: override coachId to view another coach's data */
-  adminCoachOverride: string | null;
-  setAdminCoachOverride: (coachId: string | null) => void;
+  adminCoachOverride: AdminOverride | null;
+  setAdminCoachOverride: (coachId: string | null, coachName?: string) => void;
+  /** The effective UID — uses override coachId when impersonating, otherwise user.uid */
+  effectiveUid: string;
 }
 
 // ── Context ────────────────────────────────────────────────────────────────
@@ -54,6 +61,7 @@ const AuthContext = createContext<AuthContextValue>({
   signOut: async () => {},
   adminCoachOverride: null,
   setAdminCoachOverride: () => {},
+  effectiveUid: '',
 });
 
 // ── Provider ───────────────────────────────────────────────────────────────
@@ -62,11 +70,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [claims, setClaims] = useState<CustomClaims | null>(null);
   const [loading, setLoading] = useState(true);
-  const [adminCoachOverride, _setAdminCoachOverride] = useState<string | null>(null);
+  const [adminCoachOverride, _setAdminCoachOverride] = useState<AdminOverride | null>(null);
 
   // Wrap setAdminCoachOverride to log audit events
-  const setAdminCoachOverride = React.useCallback((coachId: string | null) => {
-    _setAdminCoachOverride(coachId);
+  const setAdminCoachOverride = React.useCallback((coachId: string | null, coachName?: string) => {
+    if (coachId) {
+      _setAdminCoachOverride({ coachId, coachName: coachName || coachId.slice(0, 8) });
+    } else {
+      _setAdminCoachOverride(null);
+    }
     // Fire-and-forget audit log
     if (user) {
       const eventType = coachId ? 'admin_impersonate_start' : 'admin_impersonate_end';
@@ -75,6 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         adminUid: user.uid,
         adminEmail: user.email ?? '',
         targetCoachId: coachId ?? 'exited',
+        targetCoachName: coachName ?? 'exited',
         timestamp: serverTimestamp(),
       }).catch(err => console.warn('[AuthContext] Audit log failed:', err));
     }
@@ -179,12 +192,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const effectiveClaims = React.useMemo(() => {
     if (!claims || !adminCoachOverride) return claims;
     if (claims.role !== 'platformAdmin' && claims.admin !== true) return claims;
-    return { ...claims, coachId: adminCoachOverride };
+    return { ...claims, coachId: adminCoachOverride.coachId };
   }, [claims, adminCoachOverride]);
+
+  // effectiveUid: when impersonating, use the override coachId; otherwise use user.uid
+  const effectiveUid = React.useMemo(() => {
+    if (adminCoachOverride && (claims?.role === 'platformAdmin' || claims?.admin === true)) {
+      return adminCoachOverride.coachId;
+    }
+    return user?.uid ?? '';
+  }, [adminCoachOverride, claims, user]);
 
   return (
     <AuthContext.Provider
-      value={{ user, claims: effectiveClaims, loading, signOut: handleSignOut, adminCoachOverride, setAdminCoachOverride }}
+      value={{ user, claims: effectiveClaims, loading, signOut: handleSignOut, adminCoachOverride, setAdminCoachOverride, effectiveUid }}
     >
       {children}
     </AuthContext.Provider>

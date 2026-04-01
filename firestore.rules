@@ -730,6 +730,22 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ─────────────────────────────────────────────
+    // ACCEPTED PLAN SNAPSHOTS (Cloud Functions only — immutable)
+    // Created at checkout time by createCheckoutSession. Contains locked-in
+    // pricing, tier split, and contract terms. MUST NOT be modified after
+    // creation — all revenue calculations reference this snapshot.
+    // ─────────────────────────────────────────────
+    match /acceptedPlanSnapshots/{snapshotId} {
+      // Coaches and admins can read their own snapshots for auditing
+      allow read: if isAuthenticated() && (
+        isPlatformAdmin() ||
+        isCoachByUid(resource.data.coachId)
+      );
+      // No client writes — only Cloud Functions (Admin SDK) can create
+      allow create, update, delete: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
