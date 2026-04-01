@@ -16,11 +16,32 @@
         "destination": "/manifest.json"
       },
       {
+        "source": "!/_expo/**",
+        "destination": "/index.html"
+      },
+      {
+        "source": "!/assets/**",
+        "destination": "/index.html"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }
     ],
     "headers": [
+      {
+        "source": "/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=0, must-revalidate"
+          },
+          {
+            "key": "X-Content-Type-Options",
+            "value": "nosniff"
+          }
+        ]
+      },
       {
         "source": "/index.html",
         "headers": [
@@ -35,19 +56,6 @@
           {
             "key": "X-Content-Type-Options",
             "value": "nosniff"
-          }
-        ]
-      },
-      {
-        "source": "/test.html",
-        "headers": [
-          {
-            "key": "Cache-Control",
-            "value": "public, max-age=0, must-revalidate"
-          },
-          {
-            "key": "Content-Type",
-            "value": "text/html; charset=utf-8"
           }
         ]
       },
@@ -78,11 +86,15 @@
         ]
       },
       {
-        "source": "/**",
+        "source": "/_expo/static/js/**/*.js",
         "headers": [
           {
-            "key": "X-Content-Type-Options",
-            "value": "nosniff"
+            "key": "Cache-Control",
+            "value": "public, max-age=31536000, immutable"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/javascript; charset=utf-8"
           }
         ]
       }

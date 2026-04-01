@@ -9,7 +9,7 @@
  * even when the app tab is not open.
  */
 
-const CACHE_VERSION = '20260329-120000';
+const CACHE_VERSION = '20260401-141500';
 const CACHE_NAME = `goarrive-${CACHE_VERSION}`;
 const STATIC_ASSETS = [
   '/',
@@ -132,10 +132,24 @@ self.addEventListener('fetch', (event) => {
       );
     } else {
       // Cache-first for hashed chunk files (immutable)
+      // Validate content-type to avoid caching HTML error pages as JS
       event.respondWith(
         caches.open(CACHE_NAME).then((cache) => {
           return cache.match(request).then((cached) => {
-            if (cached) return cached;
+            if (cached) {
+              // Validate that cached response has correct content-type
+              const ct = cached.headers.get('content-type') || '';
+              if (url.pathname.endsWith('.js') && !ct.includes('javascript')) {
+                // Cached response is wrong type (e.g. HTML error page), refetch
+                return fetch(request).then((response) => {
+                  if (response.ok) {
+                    cache.put(request, response.clone());
+                  }
+                  return response;
+                });
+              }
+              return cached;
+            }
             return fetch(request).then((response) => {
               if (response.ok) {
                 cache.put(request, response.clone());

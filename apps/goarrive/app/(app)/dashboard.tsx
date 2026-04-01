@@ -5,7 +5,7 @@
  * stats grid, onboarding checklist, coaching tools feature cards,
  * and recent activity.
  */
-import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -28,8 +28,7 @@ import CheckInCard from '../../components/CheckInCard';
 import ListSkeleton from '../../components/ListSkeleton';
 import { Icon } from '../../components/Icon';
 import WorkoutLogReview from '../../components/WorkoutLogReview';
-// R7: Lazy-load CoachWorkoutStatsWidget to reduce initial dashboard bundle
-const CoachWorkoutStatsWidget = lazy(() => import('../../components/CoachWorkoutStatsWidget'));
+import CoachWorkoutStatsWidget from '../../components/CoachWorkoutStatsWidget';
 import OnboardingChecklist from '../../components/OnboardingChecklist';
 import { router } from 'expo-router';
 import AdminWorkoutMetrics from '../../components/AdminWorkoutMetrics';
@@ -289,10 +288,8 @@ export default function DashboardScreen() {
           </Pressable>
         )}
 
-        {/* Workout Stats Widget (R7: lazy-loaded) */}
-        <Suspense fallback={<View style={{ padding: 24, alignItems: 'center' }}><Text style={{ color: '#8A95A3' }}>Loading stats...</Text></View>}>
-          <CoachWorkoutStatsWidget coachId={effectiveUid || coachId} />
-        </Suspense>
+        {/* Workout Stats Widget */}
+        <CoachWorkoutStatsWidget coachId={effectiveUid || coachId} />
 
         {/* Quick Assign shortcut */}
         <Pressable

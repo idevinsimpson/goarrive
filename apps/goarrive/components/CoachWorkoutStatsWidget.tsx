@@ -1,5 +1,6 @@
 /**
  * CoachWorkoutStatsWidget — Dashboard widget showing workout stats at a glance
+ * @version 2026-04-01 — cache-bust after hosting rewrite fix
  *
  * Displays:
  *   - Total workouts completed this week
@@ -37,6 +38,9 @@ interface WeekStats {
   avgDifficulty: number | null;
   mostActiveMember: string | null;
 }
+
+// Build version marker to bust stale chunk caches
+const _CHUNK_VERSION = '20260401';
 
 export default function CoachWorkoutStatsWidget({
   coachId,
