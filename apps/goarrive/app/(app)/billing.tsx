@@ -243,8 +243,11 @@ export default function BillingDashboard() {
   }, [coachId]);
 
   // ── Derived data ──────────────────────────────────────────────────────────
+  // Count members with completed payment OR active status
+  // Include 'paid', 'pay_in_full_paid', and also plans with status 'active'
+  // (which may have been set by reconciliation or direct Firestore update)
   const activePayingCount = memberPlans.filter(
-    p => p.checkoutStatus === 'paid' || p.checkoutStatus === 'pay_in_full_paid'
+    p => p.checkoutStatus === 'paid' || p.checkoutStatus === 'pay_in_full_paid' || p.status === 'active'
   ).length;
 
   const tier = getTier(activePayingCount);
@@ -392,7 +395,7 @@ export default function BillingDashboard() {
               <View style={s.summaryItem}>
                 <Text style={s.summaryLabel}>TIER</Text>
                 <Text style={[s.summaryValue, { color: ACCENT }]}>{tier.label}</Text>
-                <Text style={s.summarySubtext}>{tier.coachPct}/{tier.platformPct} split</Text>
+                <Text style={s.summarySubtext}>You keep {tier.coachPct}%</Text>
               </View>
               <View style={s.summaryDivider} />
               <View style={s.summaryItem}>

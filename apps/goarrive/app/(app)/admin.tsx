@@ -147,6 +147,13 @@ export default function AdminScreen() {
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [loadingInvites, setLoadingInvites] = useState(false);
 
+  // Stripe connected account data
+  const [stripeData, setStripeData] = useState<any>(null);
+  const [loadingStripe, setLoadingStripe] = useState(false);
+  const [settingProfitShare, setSettingProfitShare] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
+  const [reconcileResults, setReconcileResults] = useState<any>(null);
+
   const isAdmin = claims?.admin === true || claims?.role === 'platformAdmin';
 
   // ── Load coaches ──────────────────────────────────────────────────────────
@@ -239,6 +246,61 @@ export default function AdminScreen() {
       }
     } finally {
       setLoadingMembers(false);
+    }
+  }, []);
+
+  // ── Fetch Stripe connected account data ──────────────────────────────────
+  const fetchStripeData = useCallback(async (coachUid: string) => {
+    setLoadingStripe(true);
+    setStripeData(null);
+    try {
+      const fn = httpsCallable(getFunctions(), 'getConnectedAccountData');
+      const result = await fn({ coachId: coachUid });
+      setStripeData(result.data);
+    } catch (err: any) {
+      console.warn('[admin] Stripe data fetch failed:', err.message);
+      setStripeData({ error: err.message });
+    } finally {
+      setLoadingStripe(false);
+    }
+  }, []);
+
+  // ── Set Profit Share Start Date ──────────────────────────────────────────
+  const handleSetProfitShareStart = useCallback(async (coachId: string, coachName: string) => {
+    const dateStr = Platform.OS === 'web'
+      ? window.prompt(`Set profit share start date for ${coachName} (YYYY-MM-DD):`)
+      : null;
+    if (!dateStr) return;
+    setSettingProfitShare(true);
+    try {
+      const fn = httpsCallable(getFunctions(), 'setProfitShareStartDate');
+      await fn({ coachId, startDate: dateStr });
+      if (Platform.OS === 'web') {
+        alert(`Profit share start date set to ${dateStr} for ${coachName}`);
+      }
+    } catch (err: any) {
+      const msg = err.message || 'Failed to set profit share start date';
+      if (Platform.OS === 'web') alert(msg);
+      else Alert.alert('Error', msg);
+    } finally {
+      setSettingProfitShare(false);
+    }
+  }, []);
+
+  // ── Reconcile connected account payments ─────────────────────────────────
+  const handleReconcile = useCallback(async () => {
+    if (!confirm('Run payment reconciliation? This will check all connected accounts for missed webhook events.')) return;
+    setReconciling(true);
+    setReconcileResults(null);
+    try {
+      const fn = httpsCallable(getFunctions(), 'reconcileConnectedAccountPayments');
+      const result = await fn({});
+      setReconcileResults(result.data);
+      alert('Reconciliation complete. Check results below.');
+    } catch (err: any) {
+      alert('Reconciliation failed: ' + (err.message || 'Unknown error'));
+    } finally {
+      setReconciling(false);
     }
   }, []);
 
@@ -1274,8 +1336,40 @@ export default function AdminScreen() {
          ══════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'coaches' && (
         <>
-          <Text style={s.sectionTitle}>Registered Coaches</Text>
-          <Text style={s.sectionSub}>All coaches on the platform.</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <View>
+              <Text style={s.sectionTitle}>Registered Coaches</Text>
+              <Text style={s.sectionSub}>All coaches on the platform.</Text>
+            </View>
+            <TouchableOpacity
+              style={[s.viewAsCoachBtn, { backgroundColor: RED + '20' }]}
+              onPress={handleReconcile}
+              disabled={reconciling}
+              activeOpacity={0.7}
+            >
+              <Icon name="sync-outline" size={14} color={RED} />
+              <Text style={[s.viewAsCoachBtnText, { color: RED }]}>
+                {reconciling ? 'Reconciling...' : 'Reconcile Payments'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Reconciliation Results */}
+          {reconcileResults && (
+            <View style={{ backgroundColor: '#0E1117', borderRadius: 8, padding: 12, marginBottom: 12 }}>
+              <Text style={{ color: GOLD, fontSize: 13, fontWeight: '700', marginBottom: 8 }}>Reconciliation Results</Text>
+              {reconcileResults.results?.map((r: any, i: number) => (
+                <View key={i} style={{ marginBottom: 6 }}>
+                  <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '600' }}>{r.coachName}</Text>
+                  <Text style={{ color: GREEN, fontSize: 11 }}>Sessions reconciled: {r.sessionsReconciled}</Text>
+                  <Text style={{ color: GREEN, fontSize: 11 }}>Invoices reconciled: {r.invoicesReconciled}</Text>
+                  {r.errors?.length > 0 && (
+                    <Text style={{ color: RED, fontSize: 11 }}>Errors: {r.errors.join(', ')}</Text>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
 
           {loadingCoaches ? (
             <ActivityIndicator color={GOLD} style={{ marginVertical: 16 }} />
@@ -1313,18 +1407,105 @@ export default function AdminScreen() {
                   {/* Expanded member list */}
                   {expandedCoachId === c.uid && (
                     <View style={s.memberSection}>
-                      {/* View as Coach button */}
-                      <TouchableOpacity
-                        style={s.viewAsCoachBtn}
-                        onPress={() => {
-                          setAdminCoachOverride(c.uid);
-                          router.push('/(app)/dashboard');
-                        }}
-                        activeOpacity={0.7}
-                      >
-                        <Icon name="eye-outline" size={14} color={GOLD} />
-                        <Text style={s.viewAsCoachBtnText}>View as {c.name.split(' ')[0]}</Text>
-                      </TouchableOpacity>
+                      {/* Action buttons row */}
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 16, paddingVertical: 8 }}>
+                        <TouchableOpacity
+                          style={s.viewAsCoachBtn}
+                          onPress={() => {
+                            setAdminCoachOverride(c.uid);
+                            router.push('/(app)/dashboard');
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <Icon name="eye-outline" size={14} color={GOLD} />
+                          <Text style={s.viewAsCoachBtnText}>View as {c.name.split(' ')[0]}</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[s.viewAsCoachBtn, { backgroundColor: '#5B9BD5' + '20' }]}
+                          onPress={() => handleSetProfitShareStart(c.uid, c.name)}
+                          disabled={settingProfitShare}
+                          activeOpacity={0.7}
+                        >
+                          <Icon name="calendar-outline" size={14} color="#5B9BD5" />
+                          <Text style={[s.viewAsCoachBtnText, { color: '#5B9BD5' }]}>
+                            {settingProfitShare ? 'Setting...' : 'Set Profit Share Start'}
+                          </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[s.viewAsCoachBtn, { backgroundColor: GREEN + '20' }]}
+                          onPress={() => fetchStripeData(c.uid)}
+                          disabled={loadingStripe}
+                          activeOpacity={0.7}
+                        >
+                          <Icon name="card-outline" size={14} color={GREEN} />
+                          <Text style={[s.viewAsCoachBtnText, { color: GREEN }]}>
+                            {loadingStripe ? 'Loading...' : 'View Stripe Data'}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Stripe Data Panel */}
+                      {stripeData && expandedCoachId === c.uid && (
+                        <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+                          {stripeData.error ? (
+                            <Text style={{ color: RED, fontSize: 12 }}>Error: {stripeData.error}</Text>
+                          ) : (
+                            <View style={{ backgroundColor: '#0E1117', borderRadius: 8, padding: 12 }}>
+                              <Text style={{ color: GOLD, fontSize: 13, fontWeight: '700', marginBottom: 8 }}>Stripe Connected Account</Text>
+                              <Text style={{ color: MUTED, fontSize: 11, marginBottom: 4 }}>Account: {stripeData.stripeAccountId}</Text>
+                              
+                              {/* Balance */}
+                              <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '600', marginTop: 8, marginBottom: 4 }}>Balance</Text>
+                              {stripeData.balance?.available?.map((b: any, i: number) => (
+                                <Text key={i} style={{ color: GREEN, fontSize: 11 }}>Available: ${(b.amount / 100).toFixed(2)} {b.currency?.toUpperCase()}</Text>
+                              ))}
+                              {stripeData.balance?.pending?.map((b: any, i: number) => (
+                                <Text key={i} style={{ color: MUTED, fontSize: 11 }}>Pending: ${(b.amount / 100).toFixed(2)} {b.currency?.toUpperCase()}</Text>
+                              ))}
+
+                              {/* Customers */}
+                              <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '600', marginTop: 10, marginBottom: 4 }}>Customers ({stripeData.customers?.length ?? 0})</Text>
+                              {stripeData.customers?.map((cust: any) => (
+                                <Text key={cust.id} style={{ color: MUTED, fontSize: 11 }}>{cust.name} — {cust.email}</Text>
+                              ))}
+
+                              {/* Subscriptions */}
+                              <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '600', marginTop: 10, marginBottom: 4 }}>Subscriptions ({stripeData.subscriptions?.length ?? 0})</Text>
+                              {stripeData.subscriptions?.map((sub: any) => (
+                                <View key={sub.id} style={{ marginBottom: 4 }}>
+                                  <Text style={{ color: MUTED, fontSize: 11 }}>
+                                    {sub.id} — {sub.status} — ${sub.items?.[0]?.amount ? (sub.items[0].amount / 100).toFixed(2) : '?'}/{sub.items?.[0]?.interval ?? 'month'}
+                                  </Text>
+                                  <Text style={{ color: MUTED, fontSize: 10 }}>Customer: {sub.customer}</Text>
+                                </View>
+                              ))}
+
+                              {/* Recent Invoices */}
+                              <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '600', marginTop: 10, marginBottom: 4 }}>Recent Invoices ({stripeData.invoices?.length ?? 0})</Text>
+                              {stripeData.invoices?.map((inv: any) => (
+                                <Text key={inv.id} style={{ color: MUTED, fontSize: 11 }}>
+                                  {inv.id} — ${(inv.amountPaid / 100).toFixed(2)} — {inv.status} — {new Date(inv.created * 1000).toLocaleDateString()}
+                                </Text>
+                              ))}
+
+                              {/* Recent Charges */}
+                              <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '600', marginTop: 10, marginBottom: 4 }}>Recent Charges ({stripeData.charges?.length ?? 0})</Text>
+                              {stripeData.charges?.map((ch: any) => (
+                                <View key={ch.id} style={{ marginBottom: 2 }}>
+                                  <Text style={{ color: MUTED, fontSize: 11 }}>
+                                    ${(ch.amount / 100).toFixed(2)} — {ch.status}{ch.refunded ? ' (REFUNDED)' : ''} — {new Date(ch.created * 1000).toLocaleDateString()}
+                                  </Text>
+                                  {ch.applicationFeeAmount != null && (
+                                    <Text style={{ color: GOLD, fontSize: 10 }}>G➲A Fee: ${(ch.applicationFeeAmount / 100).toFixed(2)}</Text>
+                                  )}
+                                </View>
+                              ))}
+                            </View>
+                          )}
+                        </View>
+                      )}
                       {loadingMembers ? (
                         <ActivityIndicator color={GOLD} style={{ marginVertical: 12 }} />
                       ) : coachMembers.length === 0 ? (
