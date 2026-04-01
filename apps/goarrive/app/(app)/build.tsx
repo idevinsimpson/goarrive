@@ -154,26 +154,32 @@ function WorkoutMosaic({ thumbs, width, height }: { thumbs: string[]; width: num
 
   // Single movement — show it centered and larger (like a hero thumbnail)
   if (thumbs.length === 1) {
-    const singleSize = Math.min(innerW * 0.7, innerH * 0.65);
+    const singleW = innerW * 0.6;
+    const singleH = singleW * (5 / 4); // 4:5 aspect ratio
+    const clampedH = Math.min(singleH, innerH * 0.75);
+    const clampedW = clampedH * (4 / 5);
     return (
       <View style={{ width, height, backgroundColor: WORKOUT_CARD_BG, justifyContent: 'center', alignItems: 'center' }}>
         <Image
           source={{ uri: thumbs[0] }}
-          style={{ width: singleSize, height: singleSize, borderRadius: 6 }}
+          style={{ width: clampedW, height: clampedH, borderRadius: 6 }}
           resizeMode="cover"
         />
       </View>
     );
   }
 
-  // Multiple movements — mini-library grid
-  const count = Math.min(thumbs.length, 9); // max 9 thumbnails (3x3)
-  const cols = count <= 4 ? 2 : 3;
-  const rows = Math.ceil(count / cols);
+  // Multiple movements — dynamic grid: 2x2 → 3x3 → 4x4 (max 16)
+  const maxShow = Math.min(thumbs.length, 16);
+  const cols = maxShow <= 4 ? 2 : maxShow <= 9 ? 3 : 4;
+  const rows = Math.ceil(maxShow / cols);
   const cellW = (innerW - gap * (cols - 1)) / cols;
-  const cellH = (innerH - gap * (rows - 1)) / rows;
-  // Use the smaller dimension to keep thumbnails proportional
-  const thumbSize = Math.min(cellW, cellH);
+  // 4:5 aspect ratio for each thumbnail (height = width * 5/4)
+  const cellH = cellW * (5 / 4);
+  // Clamp cell height so rows don't overflow the available inner height
+  const maxCellH = (innerH - gap * (rows - 1)) / rows;
+  const finalCellH = Math.min(cellH, maxCellH);
+  const finalCellW = Math.min(cellW, finalCellH * (4 / 5)); // maintain 4:5 if clamped
 
   return (
     <View style={{ width, height, backgroundColor: WORKOUT_CARD_BG }}>
@@ -186,14 +192,14 @@ function WorkoutMosaic({ thumbs, width, height }: { thumbs: string[]; width: num
         width,
         overflow: 'hidden',
       }}>
-        {thumbs.slice(0, 9).map((url, i) => (
+        {thumbs.slice(0, maxShow).map((url, i) => (
           <Image
             key={i}
             source={{ uri: url }}
             style={{
-              width: cellW,
-              height: thumbSize,
-              borderRadius: 4,
+              width: finalCellW,
+              height: finalCellH,
+              borderRadius: 3,
             }}
             resizeMode="cover"
           />
@@ -568,9 +574,17 @@ function BuildScreenInner() {
             }}
             onPress={() => enterFolder(item)}
           >
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-              <Icon name="folder" size={36} color="#F5A623" />
-            </View>
+            {item.coverThumbs && item.coverThumbs.length > 0 ? (
+              <WorkoutMosaic
+                thumbs={item.coverThumbs}
+                width={cardWidth}
+                height={cardHeight}
+              />
+            ) : (
+              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                <Icon name="folder" size={36} color="#F5A623" />
+              </View>
+            )}
             {/* Name overlay */}
             <View style={styles.nameOverlay}>
               <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
@@ -607,8 +621,9 @@ function BuildScreenInner() {
       const fallbackMedia = isMovement ? null : item.mediaUrl; // Don't use video as thumbnail for movements
       const singleThumbUri = thumbOrGif || fallbackMedia || null;
 
-      // Workout cards always use the mosaic (mini-library) layout
+      // Workout and playbook cards use the mosaic (mini-library) layout when they have coverThumbs
       const isWorkoutCard = isWorkout;
+      const hasMosaic = (isWorkoutCard || isPlaybook) && (item.coverThumbs ?? []).length > 0;
 
       return (
         <Pressable
@@ -617,7 +632,7 @@ function BuildScreenInner() {
             height: cardHeight,
             borderRadius: 10,
             overflow: 'hidden',
-            backgroundColor: isWorkoutCard ? WORKOUT_CARD_BG : '#0E1117',
+            backgroundColor: (isWorkoutCard || hasMosaic) ? WORKOUT_CARD_BG : '#0E1117',
             marginBottom: GRID_GAP,
           }}
           onPress={() => {
@@ -628,8 +643,8 @@ function BuildScreenInner() {
           }}
         >
           {/* Media area */}
-          {isWorkoutCard ? (
-            // Workout cards: always show mini-library mosaic
+          {(isWorkoutCard || hasMosaic) ? (
+            // Workout/playbook cards: show mini-library mosaic
             <WorkoutMosaic
               thumbs={item.coverThumbs ?? []}
               width={cardWidth}
