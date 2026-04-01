@@ -58,6 +58,7 @@ const messaging = admin.messaging();
 // ── Secrets (live mode: STRIPE_SECRET_KEY v8, STRIPE_WEBHOOK_SECRET v4) ─────────
 const stripeSecretKey = defineSecret('STRIPE_SECRET_KEY');
 const stripeWebhookSecret = defineSecret('STRIPE_WEBHOOK_SECRET');
+const stripeWebhookSecretConnect = defineSecret('STRIPE_WEBHOOK_SECRET_CONNECT');
 
 // ── Zoom Secrets ─────────────────────────────────────────────────────────────
 const zoomAccountId = defineSecret('ZOOM_ACCOUNT_ID');
@@ -805,7 +806,7 @@ export const createCheckoutSession = onCall(
  *   The ledger entry records the refund amount and marks the entry as refunded.
  */
 export const stripeWebhook = onRequest(
-  { secrets: [stripeSecretKey, stripeWebhookSecret] },
+  { secrets: [stripeSecretKey, stripeWebhookSecret, stripeWebhookSecretConnect] },
   async (req, res) => {
     const sig = req.headers['stripe-signature'] as string;
     if (!sig) {
@@ -814,18 +815,35 @@ export const stripeWebhook = onRequest(
     }
 
     const stripe = getStripe(stripeSecretKey.value());
-    let event: Stripe.Event;
+    let event!: Stripe.Event;
 
-    try {
-      event = stripe.webhooks.constructEvent(
-        req.rawBody,
-        sig,
-        stripeWebhookSecret.value()
-      );
-    } catch (err: any) {
-      console.error('[stripeWebhook] Signature verification failed:', err.message);
-      res.status(400).send(`Webhook signature error: ${err.message}`);
+    // Try platform webhook secret first, then connected account secret
+    const secrets = [
+      stripeWebhookSecret.value(),
+      stripeWebhookSecretConnect.value(),
+    ].filter(Boolean);
+
+    let verified = false;
+    for (const secret of secrets) {
+      try {
+        event = stripe.webhooks.constructEvent(req.rawBody, sig, secret);
+        verified = true;
+        break;
+      } catch (_err) {
+        // Try next secret
+      }
+    }
+
+    if (!verified) {
+      console.error('[stripeWebhook] Signature verification failed with all secrets');
+      res.status(400).send('Webhook signature error: verification failed');
       return;
+    }
+
+    // Log connected account info if present
+    const connectedAccountId = (event as any).account;
+    if (connectedAccountId) {
+      console.log(`[stripeWebhook] Connected account event from: ${connectedAccountId}`);
     }
 
     // ── Idempotency: check if already processed ──

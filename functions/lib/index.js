@@ -72,7 +72,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
-exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
+exports.getConnectedAccountData = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -88,6 +88,7 @@ const messaging = admin.messaging();
 // ── Secrets (live mode: STRIPE_SECRET_KEY v8, STRIPE_WEBHOOK_SECRET v4) ─────────
 const stripeSecretKey = (0, params_1.defineSecret)('STRIPE_SECRET_KEY');
 const stripeWebhookSecret = (0, params_1.defineSecret)('STRIPE_WEBHOOK_SECRET');
+const stripeWebhookSecretConnect = (0, params_1.defineSecret)('STRIPE_WEBHOOK_SECRET_CONNECT');
 // ── Zoom Secrets ─────────────────────────────────────────────────────────────
 const zoomAccountId = (0, params_1.defineSecret)('ZOOM_ACCOUNT_ID');
 const zoomClientId = (0, params_1.defineSecret)('ZOOM_CLIENT_ID');
@@ -726,7 +727,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
  *   coaches are not harmed by refunds on the platform fee portion.
  *   The ledger entry records the refund amount and marks the entry as refunded.
  */
-exports.stripeWebhook = (0, https_1.onRequest)({ secrets: [stripeSecretKey, stripeWebhookSecret] }, async (req, res) => {
+exports.stripeWebhook = (0, https_1.onRequest)({ secrets: [stripeSecretKey, stripeWebhookSecret, stripeWebhookSecretConnect] }, async (req, res) => {
     const sig = req.headers['stripe-signature'];
     if (!sig) {
         res.status(400).send('Missing stripe-signature header');
@@ -734,13 +735,31 @@ exports.stripeWebhook = (0, https_1.onRequest)({ secrets: [stripeSecretKey, stri
     }
     const stripe = getStripe(stripeSecretKey.value());
     let event;
-    try {
-        event = stripe.webhooks.constructEvent(req.rawBody, sig, stripeWebhookSecret.value());
+    // Try platform webhook secret first, then connected account secret
+    const secrets = [
+        stripeWebhookSecret.value(),
+        stripeWebhookSecretConnect.value(),
+    ].filter(Boolean);
+    let verified = false;
+    for (const secret of secrets) {
+        try {
+            event = stripe.webhooks.constructEvent(req.rawBody, sig, secret);
+            verified = true;
+            break;
+        }
+        catch (_err) {
+            // Try next secret
+        }
     }
-    catch (err) {
-        console.error('[stripeWebhook] Signature verification failed:', err.message);
-        res.status(400).send(`Webhook signature error: ${err.message}`);
+    if (!verified) {
+        console.error('[stripeWebhook] Signature verification failed with all secrets');
+        res.status(400).send('Webhook signature error: verification failed');
         return;
+    }
+    // Log connected account info if present
+    const connectedAccountId = event.account;
+    if (connectedAccountId) {
+        console.log(`[stripeWebhook] Connected account event from: ${connectedAccountId}`);
     }
     // ── Idempotency: check if already processed ──
     const eventRef = db.collection('billingEvents').doc(event.id);
@@ -6261,5 +6280,329 @@ Return ONLY valid JSON, no markdown, no explanation.`;
         console.error('[analyzeMovement] Unexpected error:', err);
         throw new https_1.HttpsError('internal', 'Failed to analyze movement');
     }
+});
+// ─── reconcileConnectedAccountPayments ──────────────────────────────────────
+/**
+ * Admin-only callable: reconciles missed webhook events from connected accounts.
+ *
+ * For each coach with a connected Stripe account, queries checkout sessions
+ * and invoices on the connected account, cross-references with Firestore,
+ * and retroactively:
+ *   1. Updates member_plans.checkoutStatus for completed checkouts
+ *   2. Creates missing memberSubscription records
+ *   3. Creates missing ledgerEntries for paid invoices
+ *
+ * This function exists because the webhook endpoint may not have been
+ * configured to listen for connected account events. After fixing the
+ * webhook configuration, this function should be run once to backfill
+ * any missed events, then can be used periodically as an audit tool.
+ *
+ * ME-001: Requires STRIPE_SECRET_KEY secret.
+ */
+exports.reconcileConnectedAccountPayments = (0, https_1.onCall)({ secrets: [stripeSecretKey], timeoutSeconds: 540 }, async (request) => {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v;
+    // Admin-only guard
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be logged in');
+    const callerSnap = await db.collection('users').doc(callerUid).get();
+    const callerRole = (_b = callerSnap.data()) === null || _b === void 0 ? void 0 : _b.role;
+    if (callerRole !== 'admin')
+        throw new https_1.HttpsError('permission-denied', 'Admin only');
+    const stripe = getStripe(stripeSecretKey.value());
+    const results = [];
+    // Get all coach Stripe accounts
+    const coachAccountsSnap = await db.collection('coachStripeAccounts').get();
+    for (const doc of coachAccountsSnap.docs) {
+        const coachId = doc.id;
+        const stripeAccountId = doc.data().stripeAccountId;
+        if (!stripeAccountId)
+            continue;
+        const coachSnap = await db.collection('users').doc(coachId).get();
+        const coachName = (_d = (_c = coachSnap.data()) === null || _c === void 0 ? void 0 : _c.displayName) !== null && _d !== void 0 ? _d : coachId;
+        const result = {
+            coachId,
+            coachName,
+            sessionsReconciled: 0,
+            invoicesReconciled: 0,
+            errors: [],
+        };
+        try {
+            // ── 1. Reconcile checkout sessions ──
+            const sessions = await stripe.checkout.sessions.list({ limit: 100, expand: ['data.subscription'] }, { stripeAccount: stripeAccountId });
+            for (const session of sessions.data) {
+                if (session.payment_status !== 'paid')
+                    continue;
+                const planId = (_e = session.metadata) === null || _e === void 0 ? void 0 : _e.planId;
+                if (!planId)
+                    continue;
+                // Check if this plan's checkoutStatus is already 'paid'
+                const planSnap = await db.collection('member_plans').doc(planId).get();
+                if (!planSnap.exists)
+                    continue;
+                const planData = planSnap.data();
+                if (planData.checkoutStatus === 'paid' || planData.checkoutStatus === 'pay_in_full_paid') {
+                    continue; // Already reconciled
+                }
+                // This session was paid but the plan wasn't updated — reconcile it
+                const paymentOption = (_g = (_f = session.metadata) === null || _f === void 0 ? void 0 : _f.paymentOption) !== null && _g !== void 0 ? _g : 'monthly';
+                const snapshotId = (_h = session.metadata) === null || _h === void 0 ? void 0 : _h.snapshotId;
+                const memberId = (_j = session.metadata) === null || _j === void 0 ? void 0 : _j.memberId;
+                const intentId = (_k = session.metadata) === null || _k === void 0 ? void 0 : _k.intentId;
+                const snapshotSnap = snapshotId
+                    ? await db.collection('acceptedPlanSnapshots').doc(snapshotId).get()
+                    : null;
+                const snapshot = snapshotSnap === null || snapshotSnap === void 0 ? void 0 : snapshotSnap.data();
+                const contractMonths = (_l = snapshot === null || snapshot === void 0 ? void 0 : snapshot.contractLengthMonths) !== null && _l !== void 0 ? _l : 12;
+                // Use session creation time as the contract start
+                const sessionCreatedAt = firestore_2.Timestamp.fromMillis(((_m = session.created) !== null && _m !== void 0 ? _m : Date.now() / 1000) * 1000);
+                const contractEndAt = firestore_2.Timestamp.fromMillis(sessionCreatedAt.toMillis() + contractMonths * 30.44 * 24 * 60 * 60 * 1000);
+                await db.collection('member_plans').doc(planId).update({
+                    status: 'active',
+                    checkoutStatus: paymentOption === 'pay_in_full' ? 'pay_in_full_paid' : 'paid',
+                    acceptedAt: sessionCreatedAt,
+                    contractStartAt: sessionCreatedAt,
+                    contractEndAt,
+                    acceptedSnapshotId: snapshotId !== null && snapshotId !== void 0 ? snapshotId : null,
+                    updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                    reconciledAt: firestore_2.FieldValue.serverTimestamp(),
+                    reconciledFrom: 'reconcileConnectedAccountPayments',
+                });
+                // Update checkoutIntent if exists
+                if (intentId) {
+                    const intentRef = db.collection('checkoutIntents').doc(intentId);
+                    const intentSnap = await intentRef.get();
+                    if (intentSnap.exists) {
+                        await intentRef.update({
+                            status: 'completed',
+                            updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                        });
+                    }
+                }
+                // Create memberSubscription if subscription exists
+                if (session.subscription) {
+                    const subId = typeof session.subscription === 'string'
+                        ? session.subscription
+                        : session.subscription.id;
+                    const existingSubSnap = await db.collection('memberSubscriptions').doc(subId).get();
+                    if (!existingSubSnap.exists) {
+                        const tierSplit = parseInt((_p = (_o = session.metadata) === null || _o === void 0 ? void 0 : _o.tierSplit) !== null && _p !== void 0 ? _p : '40', 10);
+                        await db.collection('memberSubscriptions').doc(subId).set({
+                            subscriptionId: subId,
+                            memberId: memberId !== null && memberId !== void 0 ? memberId : '',
+                            coachId,
+                            planId,
+                            snapshotId: snapshotId !== null && snapshotId !== void 0 ? snapshotId : '',
+                            stripeAccountId,
+                            stripeCustomerId: session.customer,
+                            paymentOption,
+                            phase: 'contract',
+                            contractStartAt: sessionCreatedAt,
+                            contractEndAt,
+                            status: 'active',
+                            tierSnapshot: tierSplit,
+                            createdAt: firestore_2.FieldValue.serverTimestamp(),
+                            updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                            reconciledAt: firestore_2.FieldValue.serverTimestamp(),
+                        });
+                    }
+                }
+                result.sessionsReconciled++;
+                console.log(`[reconcile] Reconciled checkout session ${session.id} for plan ${planId}`);
+            }
+            // ── 2. Reconcile invoices (create missing ledger entries) ──
+            const invoices = await stripe.invoices.list({ limit: 100, status: 'paid' }, { stripeAccount: stripeAccountId });
+            for (const invoice of invoices.data) {
+                const subId = invoice.subscription;
+                if (!subId)
+                    continue;
+                // Check if ledger entry already exists for this invoice
+                const existingLedger = await db.collection('ledgerEntries')
+                    .where('stripeInvoiceId', '==', invoice.id)
+                    .limit(1)
+                    .get();
+                if (!existingLedger.empty)
+                    continue; // Already has ledger entry
+                // Find the memberSubscription
+                const subSnap = await db.collection('memberSubscriptions')
+                    .where('subscriptionId', '==', subId)
+                    .limit(1)
+                    .get();
+                if (subSnap.empty)
+                    continue;
+                const subData = subSnap.docs[0].data();
+                const contractEndAt = subData.contractEndAt;
+                const invoiceCreatedAt = firestore_2.Timestamp.fromMillis(((_q = invoice.created) !== null && _q !== void 0 ? _q : Date.now() / 1000) * 1000);
+                const phase = contractEndAt && invoiceCreatedAt.toMillis() > contractEndAt.toMillis()
+                    ? 'continuation' : 'contract';
+                const grossAmountCents = invoice.amount_paid;
+                const tierSnapshot = ((_r = subData.tierSnapshot) !== null && _r !== void 0 ? _r : 40);
+                const applicationFeePercent = tierSnapshot;
+                const goArriveShareCents = Math.round(grossAmountCents * applicationFeePercent / 100);
+                const coachShareCents = grossAmountCents - goArriveShareCents;
+                const ledgerRef = db.collection('ledgerEntries').doc();
+                await ledgerRef.set({
+                    entryId: ledgerRef.id,
+                    billingEventId: `reconcile_${invoice.id}`,
+                    memberId: subData.memberId,
+                    coachId: subData.coachId,
+                    planId: subData.planId,
+                    snapshotId: subData.snapshotId,
+                    phase,
+                    grossAmountCents,
+                    coachShareCents,
+                    goArriveShareCents,
+                    tierSnapshot,
+                    applicationFeePercent,
+                    stripeInvoiceId: invoice.id,
+                    stripeChargeId: invoice.charge,
+                    contractStartAt: (_s = subData.contractStartAt) !== null && _s !== void 0 ? _s : null,
+                    contractEndAt: (_t = subData.contractEndAt) !== null && _t !== void 0 ? _t : null,
+                    pricingSnapshotId: (_u = subData.snapshotId) !== null && _u !== void 0 ? _u : '',
+                    ruleSnapshot: {
+                        tierSplit: tierSnapshot,
+                        applicationFeePercent,
+                        resolvedAt: invoiceCreatedAt.toDate().toISOString(),
+                    },
+                    createdAt: firestore_2.FieldValue.serverTimestamp(),
+                    reconciledAt: firestore_2.FieldValue.serverTimestamp(),
+                    reconciledFrom: 'reconcileConnectedAccountPayments',
+                });
+                result.invoicesReconciled++;
+                console.log(`[reconcile] Created ledger entry for invoice ${invoice.id}`);
+            }
+        }
+        catch (err) {
+            result.errors.push((_v = err.message) !== null && _v !== void 0 ? _v : String(err));
+            console.error(`[reconcile] Error processing coach ${coachId}:`, err);
+        }
+        results.push(result);
+    }
+    return { results };
+});
+// ─── setProfitShareStartDate ────────────────────────────────────────────────
+/**
+ * Admin-only callable: sets the profitShareStartDate for a coach.
+ * This date determines when the coach's profit share earnings begin
+ * to be calculated and pro-rated.
+ */
+exports.setProfitShareStartDate = (0, https_1.onCall)(async (request) => {
+    var _a, _b;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be logged in');
+    const callerSnap = await db.collection('users').doc(callerUid).get();
+    const callerRole = (_b = callerSnap.data()) === null || _b === void 0 ? void 0 : _b.role;
+    if (callerRole !== 'admin')
+        throw new https_1.HttpsError('permission-denied', 'Admin only');
+    const { coachId, startDate } = request.data;
+    if (!coachId || !startDate) {
+        throw new https_1.HttpsError('invalid-argument', 'coachId and startDate (YYYY-MM-DD) are required');
+    }
+    // Validate date format
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(startDate)) {
+        throw new https_1.HttpsError('invalid-argument', 'startDate must be in YYYY-MM-DD format');
+    }
+    const dateMs = new Date(startDate + 'T00:00:00Z').getTime();
+    if (isNaN(dateMs)) {
+        throw new https_1.HttpsError('invalid-argument', 'Invalid date');
+    }
+    await db.collection('users').doc(coachId).update({
+        profitShareStartDate: firestore_2.Timestamp.fromMillis(dateMs),
+        updatedAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    console.log(`[setProfitShareStartDate] Coach ${coachId} profitShareStartDate set to ${startDate}`);
+    return { success: true, coachId, startDate };
+});
+// ─── getConnectedAccountData ────────────────────────────────────────────────
+/**
+ * Admin-only callable: retrieves payment data from a coach's connected
+ * Stripe account for the admin dashboard.
+ *
+ * Returns:
+ *   - customers: list of customers on the connected account
+ *   - subscriptions: list of subscriptions on the connected account
+ *   - recentInvoices: recent paid invoices
+ *   - recentCharges: recent charges
+ *   - balance: connected account balance
+ *
+ * ME-001: Requires STRIPE_SECRET_KEY secret.
+ */
+exports.getConnectedAccountData = (0, https_1.onCall)({ secrets: [stripeSecretKey] }, async (request) => {
+    var _a, _b, _c;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be logged in');
+    const callerSnap = await db.collection('users').doc(callerUid).get();
+    const callerRole = (_b = callerSnap.data()) === null || _b === void 0 ? void 0 : _b.role;
+    if (callerRole !== 'admin')
+        throw new https_1.HttpsError('permission-denied', 'Admin only');
+    const { coachId } = request.data;
+    if (!coachId)
+        throw new https_1.HttpsError('invalid-argument', 'coachId is required');
+    // Get the coach's connected Stripe account
+    const coachAccountSnap = await db.collection('coachStripeAccounts').doc(coachId).get();
+    const stripeAccountId = (_c = coachAccountSnap.data()) === null || _c === void 0 ? void 0 : _c.stripeAccountId;
+    if (!stripeAccountId) {
+        throw new https_1.HttpsError('not-found', 'Coach has no connected Stripe account');
+    }
+    const stripe = getStripe(stripeSecretKey.value());
+    // Fetch data from connected account
+    const [customers, subscriptions, invoices, charges, balance] = await Promise.all([
+        stripe.customers.list({ limit: 50 }, { stripeAccount: stripeAccountId }),
+        stripe.subscriptions.list({ limit: 50 }, { stripeAccount: stripeAccountId }),
+        stripe.invoices.list({ limit: 20, status: 'paid' }, { stripeAccount: stripeAccountId }),
+        stripe.charges.list({ limit: 20 }, { stripeAccount: stripeAccountId }),
+        stripe.balance.retrieve({ stripeAccount: stripeAccountId }),
+    ]);
+    return {
+        stripeAccountId,
+        customers: customers.data.map(c => ({
+            id: c.id,
+            name: c.name,
+            email: c.email,
+            created: c.created,
+        })),
+        subscriptions: subscriptions.data.map(s => ({
+            id: s.id,
+            customer: s.customer,
+            status: s.status,
+            currentPeriodEnd: s.current_period_end,
+            metadata: s.metadata,
+            items: s.items.data.map(i => {
+                var _a;
+                return ({
+                    id: i.id,
+                    priceId: typeof i.price === 'string' ? i.price : i.price.id,
+                    amount: typeof i.price === 'string' ? null : i.price.unit_amount,
+                    interval: typeof i.price === 'string' ? null : (_a = i.price.recurring) === null || _a === void 0 ? void 0 : _a.interval,
+                });
+            }),
+        })),
+        invoices: invoices.data.map(i => ({
+            id: i.id,
+            customer: i.customer,
+            status: i.status,
+            amountPaid: i.amount_paid,
+            created: i.created,
+            periodStart: i.period_start,
+            periodEnd: i.period_end,
+        })),
+        charges: charges.data.map(c => ({
+            id: c.id,
+            amount: c.amount,
+            status: c.status,
+            customer: c.customer,
+            created: c.created,
+            refunded: c.refunded,
+            amountRefunded: c.amount_refunded,
+            applicationFeeAmount: c.application_fee_amount,
+        })),
+        balance: {
+            available: balance.available,
+            pending: balance.pending,
+        },
+    };
 });
 //# sourceMappingURL=index.js.map
