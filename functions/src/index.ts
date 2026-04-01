@@ -4086,7 +4086,7 @@ export const getSharedPlan = onRequest(
       }
 
       const planData = planSnap.data()!;
-      const allowedStatuses = ['presented', 'accepted', 'active'];
+      const allowedStatuses = ['presented', 'accepted', 'active', 'pending'];
       if (!allowedStatuses.includes(planData.status || '')) {
         res.status(403).json({ error: 'This plan is still being built. Check back soon!' });
         return;

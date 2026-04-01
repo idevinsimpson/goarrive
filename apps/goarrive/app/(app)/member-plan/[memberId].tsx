@@ -2246,10 +2246,12 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
   return (
     <Modal transparent animationType="slide" visible={visible} onRequestClose={onClose}>
       <Pressable style={em.overlay} onPress={onClose}>
-        <Pressable style={[em.sheet, { maxHeight: SCREEN_H * 0.85, overflow: 'hidden' }]} onPress={e => e.stopPropagation()}>
+        <Pressable style={[em.sheet, { maxHeight: SCREEN_H * 0.85 }]} onPress={e => e.stopPropagation()}>
           <ScrollView
-            showsVerticalScrollIndicator={false}
+            style={{ maxHeight: SCREEN_H * 0.85 - 40 }}
+            showsVerticalScrollIndicator
             bounces={false}
+            nestedScrollEnabled
             contentContainerStyle={{ paddingBottom: 32 }}
           >
             {/* Header */}
@@ -2508,14 +2510,14 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
             {/* Present Plan */}
             {plan.status === 'draft' && (
               <Pressable
-                onPress={() => onChange({ status: 'pending' })}
+                onPress={() => onChange({ status: 'presented' })}
                 style={{ backgroundColor: PRIMARY, paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginTop: 20 }}
               >
                 <Text style={{ color: '#FFF', fontSize: 16, fontWeight: '700' }}>Present Plan to Member</Text>
               </Pressable>
             )}
 
-            {plan.status === 'pending' && (
+            {plan.status === 'presented' && (
               <View style={{ marginTop: 20, padding: 12, backgroundColor: 'rgba(91,155,213,0.08)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(91,155,213,0.25)' }}>
                 <Text style={{ color: PRIMARY, fontSize: 14, fontWeight: '600', marginBottom: 4 }}>Plan Presented</Text>
                 <Text style={{ color: MUTED, fontSize: 13 }}>The plan has been presented to the member. They will see an option to accept it on their end.</Text>
@@ -3242,6 +3244,10 @@ export default function MemberPlanScreen() {
   const handleShare = async () => {
     const url = `https://goarrive.web.app/shared-plan/${memberId}`;
     try {
+      // Auto-set status to 'presented' when sharing if still draft
+      if (plan && (!plan.status || plan.status === 'draft')) {
+        handlePlanChange({ status: 'presented' } as any);
+      }
       if (Platform.OS === 'web' && navigator.clipboard) {
         await navigator.clipboard.writeText(url);
       }
