@@ -56,7 +56,7 @@ import {
   SessionsPerWeek, ContractLength,
 } from '../../../lib/planTypes';
 
-const { width: SCREEN_W } = Dimensions.get('window');
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const ACCENT = '#6EBB7A';
 const PRIMARY = '#5B9BD5';
 const SECONDARY = '#F5A623';
@@ -2246,7 +2246,7 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
   return (
     <Modal transparent animationType="slide" visible={visible} onRequestClose={onClose}>
       <Pressable style={em.overlay} onPress={onClose}>
-        <Pressable style={[em.sheet, { maxHeight: '85%' }]} onPress={e => e.stopPropagation()}>
+        <Pressable style={[em.sheet, { maxHeight: SCREEN_H * 0.85, overflow: 'hidden' }]} onPress={e => e.stopPropagation()}>
           <ScrollView
             showsVerticalScrollIndicator={false}
             bounces={false}
@@ -3341,7 +3341,7 @@ export default function MemberPlanScreen() {
           onSaved={(updated) => setQuestionnaire(updated)}
         />
       ) : plan ? (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 120 }}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 200 }}>
           <PlanView plan={plan} isCoach={isCoachMode} onChange={handlePlanChange} />
         </ScrollView>
       ) : (
