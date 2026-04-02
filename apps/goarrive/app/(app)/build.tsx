@@ -292,7 +292,7 @@ function BuildScreenInner() {
         setItems(prev => {
           const otherItems = prev.filter(i => i.type !== 'Movements');
           return [...otherItems, ...movementItems].sort((a, b) => 
-            (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)
+            (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0)
           );
         });
         movementsLoaded = true;
@@ -336,7 +336,7 @@ function BuildScreenInner() {
         setItems(prev => {
           const otherItems = prev.filter(i => i.type !== 'Workouts' && i.type !== 'Folder');
           return [...otherItems, ...workoutItems].sort((a, b) => 
-            (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)
+            (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0)
           );
         });
         workoutsLoaded = true;
@@ -368,7 +368,7 @@ function BuildScreenInner() {
         setItems(prev => {
           const otherItems = prev.filter(i => i.type !== 'Folder');
           return [...otherItems, ...folderItems].sort((a, b) => 
-            (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)
+            (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0)
           );
         });
       },
@@ -389,7 +389,7 @@ function BuildScreenInner() {
         setItems(prev => {
           const otherItems = prev.filter(i => i.type !== 'Plans');
           return [...otherItems, ...planItems].sort((a, b) =>
-            (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)
+            (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0)
           );
         });
       },
@@ -410,7 +410,7 @@ function BuildScreenInner() {
         setItems(prev => {
           const otherItems = prev.filter(i => i.type !== 'Playbooks');
           return [...otherItems, ...playbookItems].sort((a, b) =>
-            (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)
+            (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0)
           );
         });
       },
@@ -554,7 +554,7 @@ function BuildScreenInner() {
     list.sort((a, b) => {
       if (a.type === 'Folder' && b.type !== 'Folder') return -1;
       if (a.type !== 'Folder' && b.type === 'Folder') return 1;
-      return (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0);
+      return (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0);
     });
     return list;
   }, [enrichedItems, search, activeType, showArchived, currentFolderId]);
