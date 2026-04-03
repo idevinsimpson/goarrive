@@ -102,3 +102,4 @@ For deep dives, see the `.claude/` directory:
 - `testing-policy.md` — Testing strategy and execution
 - `deployment-and-build.md` — Build process and Firebase Hosting config
 - `multi-agent-workflow-guide.md` — Staging-first protocol and agent coordination
+- `task-routing.md` — **Mandatory.** Code vs Browser vs Hybrid task routing between Maia (repo) and Manus (browser)

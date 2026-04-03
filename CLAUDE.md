@@ -55,6 +55,7 @@ For deep dives into specific areas, consult the files in the `.claude/` director
 | `.claude/known-issues-and-lessons.md` | Resolved bugs, performance risks, and architectural decisions to preserve. |
 | `.claude/testing-and-quality.md` | Testing infrastructure, quality checklist, and deployment verification. |
 | `.claude/existing-docs-index.md` | Index of all existing documentation files with relevance ratings. |
+| `.claude/task-routing.md` | **Mandatory.** Task routing protocol — Code vs Browser vs Hybrid workflow split between Maia and Manus. |
 
 ## Recent Context
 Recent development has focused heavily on enhancing the coach and admin experience. Key updates include fixing admin impersonation for lazy-loaded components and implementing prorated earnings caps with yearly admin configuration. The team also built a bulk movement upload feature utilizing AI auto-analysis and enhanced the workout thumbnail grid with dynamic scaling (4:5 aspect ratio). Additionally, sorting logic across all libraries was updated to prioritize the most recently edited items.
