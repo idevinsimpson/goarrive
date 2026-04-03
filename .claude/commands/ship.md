@@ -32,9 +32,12 @@ cd apps/goarrive && npx expo export --platform web
 
 If the build fails, fix the errors and re-run until it succeeds.
 
-## Step 4: Deploy to Staging
+## Step 4: Verify Credentials & Deploy to Staging
 
-Deploy the verified build to the staging environment so Devin can review it visually:
+Before deploying, ensure you have the Firebase Service Account credential configured.
+Run `firebase projects:list` to verify you can see the GoArrive project.
+
+If verified, deploy the build to the staging environment so Devin can review it visually:
 
 ```bash
 cd apps/goarrive && npm run deploy:staging

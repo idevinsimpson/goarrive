@@ -57,8 +57,12 @@ cd apps/goarrive && npm run deploy
 - The Build tab is a unified creative workspace replacing separate Workouts and Movements tabs.
 - Movements use 4:5 aspect ratio.
 
+### Agent Commands
+- `/setup`: Run this first to verify your GitHub and Firebase credentials.
+- `/ship`: Run this to automatically type-check, test, build, deploy to staging, and open a PR.
+
 ### Deployment
-- Always deploy to staging first (`goarrive--staging.web.app`).
+- Always use the `/ship` command to deploy to staging (`goarrive--staging.web.app`).
 - Never deploy to production (`goarrive.fit`) without explicit approval.
 
 ### Do Not Build
