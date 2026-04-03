@@ -50,6 +50,8 @@ For deep dives into specific areas, consult the files in the `.claude/` director
 | `.claude/scheduling-and-integrations.md` | Scheduling system, Zoom, Google Calendar, notifications, and AI/voice integrations. |
 | `.claude/design-system.md` | Brand colors, typography, layout conventions, and UX principles. |
 | `.claude/deployment-and-build.md` | Build process, deployment workflow, and Firebase Hosting configuration. |
+| `.claude/multi-agent-workflow-guide.md` | Staging-first protocol and agent coordination. |
+| `.claude/agent-task-routing.md` | Official workflow split between @maia (Slack/code) and Manus (browser/dashboard). |
 | `.claude/current-state-and-roadmap.md` | What is built, what is missing, and the build priority order. |
 | `.claude/do-not-build.md` | Features and technologies explicitly rejected from the roadmap. |
 | `.claude/known-issues-and-lessons.md` | Resolved bugs, performance risks, and architectural decisions to preserve. |
