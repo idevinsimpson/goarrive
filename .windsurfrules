@@ -1,0 +1,39 @@
+# GoArrive — Windsurf Rules
+
+## Project
+GoArrive is an online fitness coaching platform. React Native + Expo + Expo Router + Firebase. Single codebase for web, iOS, Android. Multi-tenant, three roles: platformAdmin, coach, member.
+
+## Stack
+React Native, Expo, Expo Router, TypeScript (strict), Cloud Firestore, Firebase Auth, Cloud Functions Gen 2, Firebase Hosting, Stripe Connect, Zoom API, Google Calendar API.
+NO MySQL, TiDB, Drizzle, Fastify, or S3.
+
+## Critical Auth Pattern
+Always use `effectiveUid` or `claims.coachId` from `useAuth()` — never `user.uid`.
+All coach-scoped queries must include `where('coachId', '==', coachId)`.
+This is required for admin impersonation to work.
+
+## Code Style
+- camelCase: Firestore documents, TypeScript interfaces, props, state
+- "coach" not trainer, "member" not client, "movement" not exercise, "Command Center" not dashboard
+- FlatList for lists > 500 items
+- thumbnailUrl for initial media loads
+- Soft deletes via isArchived, never hard deletes
+
+## Roles
+Three roles only: platformAdmin, coach, member. No fourth role.
+
+## Build Tab
+Workout creation starts on a blank block canvas, not a form.
+Movements use 4:5 aspect ratio.
+
+## Testing & Deployment
+- Vitest: `cd apps/goarrive && npm run test:vitest`
+- Playwright: `npm run test:e2e`
+- Always deploy to staging first: `cd apps/goarrive && npm run deploy:staging`
+- Never deploy to production without explicit approval
+
+## Do Not Build
+MySQL, TiDB, Drizzle, S3, Fastify, JotForm, Calendly, Zoom Embedded SDK, additional roles, white-label.
+
+## Knowledge Base
+See .claude/ directory for 17 detailed docs covering architecture, data model, coding patterns, cloud functions, design system, billing rules, and more.

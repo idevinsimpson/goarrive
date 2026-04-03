@@ -1,0 +1,42 @@
+# GoArrive — Cline Rules
+
+## Project
+GoArrive is an online fitness coaching platform. React Native + Expo + Expo Router + Firebase. Single codebase for web, iOS, Android. Multi-tenant, three roles: platformAdmin, coach, member.
+
+## Stack
+React Native, Expo, Expo Router, TypeScript (strict), Cloud Firestore, Firebase Auth, Cloud Functions Gen 2, Firebase Hosting, Stripe Connect, Zoom API, Google Calendar API.
+NO MySQL, TiDB, Drizzle, Fastify, or S3.
+
+## Critical Auth Pattern
+Always use `effectiveUid` or `claims.coachId` from `useAuth()` — never `user.uid`.
+All coach-scoped queries must include `where('coachId', '==', coachId)`.
+Admin impersonation breaks if this pattern is violated.
+
+## Code Conventions
+- camelCase everywhere: Firestore docs, TS interfaces, props, state
+- Product language: "coach" not trainer, "member" not client, "movement" not exercise, "Command Center" not dashboard
+- FlatList for lists > 500 items
+- thumbnailUrl for initial media loads, never full video on first render
+- Soft deletes with isArchived flag, never hard delete
+
+## Three Roles Only
+platformAdmin, coach, member. No CoachAssistant, Encourager, or any fourth role.
+
+## Build Tab & Workouts
+Workout creation starts on a blank block canvas, NOT a metadata form.
+Movements use 4:5 aspect ratio.
+Build tab is unified workspace (replaces separate Workouts and Movements tabs).
+
+## Testing
+- Vitest for logic: `cd apps/goarrive && npm run test:vitest`
+- Playwright for E2E: `npm run test:e2e`
+
+## Deployment
+- Always staging first: `cd apps/goarrive && npm run deploy:staging`
+- Never production without explicit approval
+
+## Do Not Build
+MySQL, TiDB, Drizzle, S3, Fastify, JotForm, Calendly, Zoom Embedded SDK, additional roles, white-label, custom domains.
+
+## Deep Knowledge
+See .claude/ directory for 17 detailed knowledge base documents covering every aspect of the platform.
