@@ -1,6 +1,10 @@
 # GoArrive Development Guidelines
 
-Welcome to the GoArrive repository. This document serves as the central hub for AI agents (like Claude Code) to understand the project's architecture, rules, and institutional knowledge.
+Welcome to the GoArrive repository. 
+
+**CRITICAL INSTRUCTION FOR CLAUDE:** Strictly follow the rules defined in `./AGENTS.md`. That file is the universal source of truth for all AI coding agents working on this project.
+
+This document (`CLAUDE.md`) serves as the central hub to understand the project's architecture, rules, and institutional knowledge.
 
 ## Project Overview
 GoArrive (G➲A) is an online fitness coaching platform and coach operating system. It provides a business-in-a-box for independent coaches and a premium, personalized experience for their members. The platform uses a multi-tenant, role-based architecture.
