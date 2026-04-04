@@ -24,11 +24,7 @@ import {
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { Icon } from './Icon';
 import { useSeamlessLoop } from '../hooks/useSeamlessLoop';
-
-const FH =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FB =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+import { FB, FH } from '../lib/theme';
 
 // Fine-tuned speed steps: 0.5 → 2.0 in 0.1 increments
 const SPEED_STEPS: number[] = [];

@@ -60,11 +60,7 @@ import {
 } from 'firebase/firestore';
 import { Icon } from './Icon';
 import { useWorkoutTemplates, WorkoutTemplate } from '../hooks/useWorkoutTemplates';
-
-const FH =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FB =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+import { FB, FH } from '../lib/theme';
 
 // ── Web-compatible alert helper ──────────────────────────────────────────
 function showAlert(title: string, message?: string) {

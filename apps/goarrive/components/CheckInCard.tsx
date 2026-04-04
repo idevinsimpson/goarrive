@@ -10,7 +10,6 @@ import {
   Text,
   Pressable,
   StyleSheet,
-  Platform,
   ActivityIndicator,
 } from 'react-native';
 import { Icon } from './Icon';
@@ -24,11 +23,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
-
-const FONT_HEADING =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FONT_BODY =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+import { FB, FH } from '../lib/theme';
 
 function todayStr(): string {
   const d = new Date();
@@ -143,12 +138,12 @@ const s = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#F0F4F8',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   subtitle: {
     fontSize: 13,
     color: '#8A95A3',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   btn: {
     width: 48,

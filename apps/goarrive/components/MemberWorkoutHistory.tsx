@@ -28,11 +28,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Icon } from './Icon';
-
-const FH =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FB =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+import { FB, FH } from '../lib/theme';
 
 interface HistoryLog {
   id: string;

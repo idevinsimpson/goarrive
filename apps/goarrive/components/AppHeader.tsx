@@ -11,9 +11,7 @@ import { View, Text, Pressable, StyleSheet, Platform, Image } from 'react-native
 import { useAuth } from '../lib/AuthContext';
 import { useRouter } from 'expo-router';
 import AccountPanel from './AccountPanel';
-
-const FONT_HEADING =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
+import { FH } from '../lib/theme';
 
 export function AppHeader() {
   const { user } = useAuth();
@@ -110,6 +108,6 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#F5A623',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
 });

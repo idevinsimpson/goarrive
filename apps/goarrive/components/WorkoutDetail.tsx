@@ -18,7 +18,6 @@ import {
   Modal,
   TouchableOpacity,
   ScrollView,
-  Platform,
   Alert,
 } from 'react-native';
 import { db } from '../lib/firebase';
@@ -28,11 +27,7 @@ import AssignWorkoutModal from './AssignWorkoutModal';
 import BatchAssignModal from './BatchAssignModal';
 import WorkoutPlayer from './WorkoutPlayer';
 import { useAuth } from '../lib/AuthContext';
-
-const FONT_HEADING =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FONT_BODY =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+import { FB, FH } from '../lib/theme';
 
 // ── Typed workout data interface (suggestion 9) ─────────────────────────────
 export interface WorkoutDetailData {
@@ -506,12 +501,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#F0F4F8',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   subtitle: {
     fontSize: 12,
     color: '#4A5568',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   templateBadge: {
     backgroundColor: 'rgba(167,139,250,0.12)',
@@ -525,7 +520,7 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '700',
     color: '#A78BFA',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
     letterSpacing: 0.8,
   },
   archivedBadge: {
@@ -540,7 +535,7 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '700',
     color: '#8A95A3',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
     letterSpacing: 0.8,
   },
   legacyBadge: {
@@ -555,7 +550,7 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '700',
     color: '#F5A623',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
     letterSpacing: 0.8,
   },
   body: {
@@ -575,7 +570,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#4A5568',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -595,7 +590,7 @@ const styles = StyleSheet.create({
   metaBadgeText: {
     fontSize: 12,
     color: '#C0C8D4',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     fontWeight: '500',
   },
   tagRow: {
@@ -614,12 +609,12 @@ const styles = StyleSheet.create({
   tagChipText: {
     fontSize: 11,
     color: '#7DD3FC',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   descText: {
     fontSize: 14,
     color: '#C0C8D4',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     lineHeight: 20,
   },
   legacyNotice: {
@@ -636,7 +631,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     color: '#F5A623',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     lineHeight: 18,
   },
   blockCard: {
@@ -661,7 +656,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#7DD3FC',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   blockInfo: {
     flex: 1,
@@ -671,12 +666,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#F0F4F8',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   blockSub: {
     fontSize: 12,
     color: '#4A5568',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   emptyBlocks: {
     paddingVertical: 20,
@@ -689,7 +684,7 @@ const styles = StyleSheet.create({
   emptyBlocksText: {
     fontSize: 13,
     color: '#4A5568',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   footer: {
     paddingHorizontal: 20,
@@ -718,7 +713,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#F5A623',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   assignBtn: {
     flexDirection: 'row',
@@ -733,6 +728,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: '#0E1117',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
 });

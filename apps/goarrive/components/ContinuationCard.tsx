@@ -10,15 +10,14 @@ import React, { useState } from 'react';
 import { View, Text, Pressable } from 'react-native';
 import type { MemberPlanData } from '../lib/planTypes';
 import { CtsOptInModal } from './CtsOptInModal';
+import { BORDER, GOLD, MUTED } from '../lib/theme';
+
 
 // ── Design tokens (duplicated from parent file to keep component self-contained)
-const MUTED = '#7A8A9A';
 const PRIMARY = '#5B9BD5';
 const ACCENT = '#6EBB7A';
-const GOLD = '#F5A623';
 const GOLD_BG = 'rgba(245,166,35,0.08)';
 const GOLD_BORDER = 'rgba(245,166,35,0.3)';
-const BORDER = '#2A3347';
 const FH = 'System';
 
 function formatCurrency(n: number): string {

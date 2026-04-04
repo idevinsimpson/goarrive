@@ -17,14 +17,12 @@ import {
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../lib/firebase';
+import { BG, BORDER, GOLD, MUTED } from '../lib/theme';
 
-const BG = '#0E1117';
+
 const CARD_BG = '#141B24';
-const BORDER = 'rgba(255,255,255,0.08)';
-const GOLD = '#F5A623';
 const GOLD_BG = 'rgba(245,166,35,0.08)';
 const GOLD_BORDER = 'rgba(245,166,35,0.3)';
-const MUTED = '#8A9BB0';
 const WHITE = '#FFFFFF';
 const FH = 'DM Sans';
 

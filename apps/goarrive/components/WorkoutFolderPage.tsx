@@ -38,10 +38,10 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Icon } from './Icon';
+import { FB, FH } from '../lib/theme';
+
 
 // ── Fonts ───────────────────────────────────────────────────────────────────
-const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
 // ── Grid constants ─────────────────────────────────────────────────────────
 const GRID_PADDING = 16;
@@ -983,7 +983,6 @@ export default function WorkoutFolderPage({
         </Pressable>
       )}
 
-
       {/* ── Main content: blocks ─────────────────────────────────────────── */}
       <ScrollView
         style={st.scrollArea}
@@ -1536,7 +1535,6 @@ export default function WorkoutFolderPage({
         )}
         </Pressable>
       </ScrollView>
-
 
       {/* ── Add Block Menu (modal) — only 2 options: Movement, Water Break ── */}
       <Modal transparent visible={showAddBlockMenu} animationType="fade" onRequestClose={() => setShowAddBlockMenu(false)}>

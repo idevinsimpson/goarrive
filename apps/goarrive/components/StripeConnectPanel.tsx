@@ -22,14 +22,12 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../lib/firebase';
 import type { CoachStripeAccount } from '../lib/planTypes';
+import { BG, BORDER, GOLD, MUTED } from '../lib/theme';
 
-const MUTED = '#7A8A9A';
+
 const PRIMARY = '#5B9BD5';
 const ACCENT = '#6EBB7A';
-const GOLD = '#F5A623';
 const DANGER = '#E05252';
-const BORDER = '#2A3347';
-const BG = '#0E1117';
 const CARD_BG = '#161B25';
 
 interface Props {

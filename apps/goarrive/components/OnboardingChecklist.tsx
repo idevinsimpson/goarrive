@@ -16,18 +16,13 @@ import {
   Text,
   Pressable,
   StyleSheet,
-  Platform,
   ActivityIndicator,
 } from 'react-native';
 import { Icon } from './Icon';
 import { collection, getDocs, query, where, limit } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
-
-const FONT_HEADING =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FONT_BODY =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+import { FB, FH } from '../lib/theme';
 
 interface Step {
   label: string;
@@ -161,7 +156,7 @@ const s = StyleSheet.create({
   loadingText: {
     fontSize: 13,
     color: '#8A95A3',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   headerRow: {
     flexDirection: 'row',
@@ -178,12 +173,12 @@ const s = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: '#F0F4F8',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   subtitle: {
     fontSize: 12,
     color: '#8A95A3',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   dismissBtn: {
     padding: 4,
@@ -236,7 +231,7 @@ const s = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: '#5A6478',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   stepText: {
     flex: 1,
@@ -246,7 +241,7 @@ const s = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: '#D0D8E4',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   stepLabelDone: {
     color: '#5A6478',
@@ -255,13 +250,13 @@ const s = StyleSheet.create({
   stepSublabel: {
     fontSize: 11,
     color: '#4A5568',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   doneTag: {
     fontSize: 11,
     fontWeight: '600',
     color: '#6EBB7A',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     backgroundColor: 'rgba(110,187,122,0.1)',
     paddingHorizontal: 8,
     paddingVertical: 3,

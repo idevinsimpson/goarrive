@@ -23,14 +23,9 @@ import {
   Pressable,
   StyleSheet,
   Animated,
-  Platform,
   Dimensions,
 } from 'react-native';
-
-const FH =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FB =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+import { FB, FH } from '../lib/theme';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 

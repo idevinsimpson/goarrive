@@ -20,7 +20,6 @@ import {
   TextInput,
   ActivityIndicator,
   StyleSheet,
-  Platform,
 } from 'react-native';
 import {
   collection,
@@ -34,11 +33,7 @@ import {
 import { db } from '../lib/firebase';
 import { Icon } from './Icon';
 import SwapLogDisplay from './SwapLogDisplay';
-
-const FH =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FB =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+import { FB, FH } from '../lib/theme';
 
 interface WorkoutLog {
   id: string;

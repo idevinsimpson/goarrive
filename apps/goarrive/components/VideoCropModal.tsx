@@ -35,6 +35,7 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import { Icon } from './Icon';
+import { FB, FH } from '../lib/theme';
 
 // ── Haptic helper (web-safe) ────────────────────────────────────────────────
 
@@ -75,11 +76,6 @@ interface Props {
 const FRAME_ASPECT = 4 / 5; // width / height = 0.8
 const MIN_SCALE = 1;
 const MAX_SCALE = 3;
-
-const FH =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FB =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
 // ── Component ──────────────────────────────────────────────────────────────
 

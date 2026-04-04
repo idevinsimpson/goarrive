@@ -28,6 +28,7 @@ import { doc, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Icon } from './Icon';
 import MovementVideoControls from './MovementVideoControls';
+import { FB, FH } from '../lib/theme';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -81,11 +82,6 @@ interface Props {
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
-
-const FH =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FB =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
 const SWAP_MODES: { value: 'split' | 'duplicate'; label: string; desc: string }[] = [
   { value: 'split', label: 'Split', desc: 'Half time per side' },
