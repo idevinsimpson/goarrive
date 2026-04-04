@@ -2,53 +2,46 @@
 
 This is a **mandatory** workflow rule, not a suggestion. Every GoArrive task must be classified and routed to the correct tool before work begins. This eliminates wasted credits, tool confusion, and vague handoffs between agents.
 
-## Default Mindset
+## The New Division of Labor
 
-| Task Type | Routed To | Environment |
+The previous strict split of "Maia does code, Manus does browser" is obsolete. `@maia` now has access to a headless browser via the Browser Use Cloud SDK and can perform automated UI testing and general browser automation.
+
+The new division of labor is based on **Authentication State**, not the tool type.
+
+| Task Type | Routed To | Why? |
 | :--- | :--- | :--- |
-| **Code Task** | `@maia` | Slack + GitHub repository |
-| **Browser Task** | Manus | Browser-based dashboards and admin panels |
-| **Hybrid Task** | Split between both | `@maia` orchestrates, Manus handles browser steps |
+| **Code & Repo Tasks** | `@maia` | She lives in the repository and handles all coding, testing, and deployment. |
+| **Stateless Browser Tasks** | `@maia` | She can use Browser Use for E2E testing, scraping, and interacting with sites that don't require Devin's personal logins. |
+| **Stateful Dashboard Tasks** | Manus | Manus maintains persistent login sessions for Devin's accounts (Firebase, Stripe, Google Cloud, Zoom). |
+| **Hybrid Tasks** | Split | `@maia` writes code; Manus handles the stateful dashboard configuration. |
 
 ---
 
-## 1. Code Tasks (Route to `@maia` in Slack)
+## 1. Code & Repo Tasks (Route to `@maia`)
 
-Any task that primarily involves the codebase, repository, or local development environment belongs with `@maia` in Slack. This includes editing screens and UI components, refactoring code, wiring data flows, fixing logic, updating application routes, writing or running tests, managing staging and build tasks, handling the PR/review flow, updating documentation and knowledge files inside the repository, and performing architecture analysis rooted in the codebase.
+Any task that primarily involves the codebase, repository, or local development environment belongs with `@maia` in Slack.
+- **Examples:** Editing UI components, refactoring code, writing tests, managing staging/builds, handling PRs, updating documentation.
 
-**Enforced behavior:** Keep this work strictly in Slack with `@maia` and the repository workflow. Do not unnecessarily route repository work to Manus. Prefer `@maia` for all coding, refactoring, testing, PR management, and repository-native implementation. `@maia` reports what changed, what was tested, and what needs review or approval.
+## 2. Stateless Browser Tasks (Route to `@maia`)
 
----
+Any task that requires a browser but **does not** require Devin's persistent login credentials belongs with `@maia`.
+- **Examples:** Running E2E UI tests against the staging site (`goarrive--staging.web.app`), signing up for new third-party services (like creating a new API key on a free tier), scraping public data, or verifying visual layouts.
+- **Tool:** `@maia` uses the Browser Use Cloud SDK (see `skills/browser-use-e2e/SKILL.md`).
 
-## 2. Browser Tasks (Route to Manus)
+## 3. Stateful Dashboard Tasks (Route to Manus)
 
-Any task that requires heavy browser interaction, authenticated dashboard clicking, or third-party configuration belongs with Manus. This includes Stripe dashboard configuration (products, webhooks, pricing), Firebase Console setup (auth providers, indexes, project settings, extensions), Google Cloud Console work (IAM policies, API enabling, OAuth consent screens, service accounts), Zoom dashboard setup (app creation, webhook configuration), Jotform admin setup, Google Workspace admin actions, and any task needing live browser login, session interaction, or visual navigation of external sites.
+Any task that requires heavy browser interaction inside authenticated dashboards where Devin is already logged in belongs with Manus.
+- **Examples:** Stripe dashboard configuration (products, pricing), Firebase Console setup (auth providers, project settings), Google Cloud Console (IAM, APIs), Zoom dashboard setup, Google Workspace admin actions.
+- **Why Manus?** Manus's browser environment persists Devin's cookies and login states, avoiding the need for 2FA or password sharing.
 
-**Enforced behavior:** Do not force browser-heavy dashboard work through Slack if Manus is the better tool. Treat Manus as the preferred tool for all browser, admin, and configuration tasks. When `@maia` encounters a browser task, she must not attempt it herself. Instead, she provides:
+## 4. Hybrid Tasks (Split Between Both)
 
-1. A short plain-English explanation of what needs to happen.
-2. The exact prompt to paste into Manus (copy-paste ready).
-3. Any credentials, pages, settings, or approvals needed.
-4. Exactly what to send back to `@maia` once Manus finishes.
-
----
-
-## 3. Hybrid Tasks (Split Between Both)
-
-When a task requires both code changes and browser configuration, it must be split cleanly between the two tools. Examples include changing application code to support a new subscription tier and then configuring that tier in the Stripe dashboard, updating repository logic and then creating or configuring resources in the Firebase or Zoom consoles, and preparing code-side changes with `@maia` before handing off browser steps to Manus and returning to `@maia` to finalize.
-
-**Enforced behavior:** `@maia` orchestrates the split into three distinct phases:
-
-| Phase | Owner | Description |
-| :--- | :--- | :--- |
-| Phase 1 | `@maia` | Completes all code and repository work. |
-| Phase 2 | Manus | Executes browser/dashboard steps. `@maia` provides a complete, copy-paste-ready prompt for Devin to hand to Manus. |
-| Phase 3 | `@maia` | Finalizes any remaining code work after Manus completes the browser steps. |
-
-The handoff between tools must be explicit and copy-paste ready. `@maia` must state: *"I have completed the code portion. Please hand this exact instruction to Manus to complete the browser configuration..."*
+When a task requires both code changes and stateful dashboard configuration, it must be split.
+- **Example:** Adding a new subscription tier (code) and configuring it in Stripe (dashboard).
+- **Enforced behavior:** `@maia` orchestrates the split. She completes the code, provides a copy-paste prompt for Devin to hand to Manus for the dashboard work, and finalizes the code once Manus is done.
 
 ---
 
 ## Guardrails
 
-Every response to a GoArrive task must start with a classification label: **"Code task"**, **"Browser task"**, or **"Hybrid task"**. Agents must not make Devin guess which tool to use. Agents must not attempt browser-heavy dashboard work through Slack if Manus is the better tool. Handoffs must never be vague; Manus prompts must be complete and copy-paste ready. This routing protocol is a permanent operating rule and must not be described as optional. When an agent receives a task that belongs to the other tool, it must politely inform the user of the correct routing based on this document.
+Every response to a GoArrive task must start with a classification label: **"Code task"**, **"Stateless Browser task"**, **"Stateful Dashboard task"**, or **"Hybrid task"**. Agents must not make Devin guess which tool to use. Handoffs must never be vague. When an agent receives a task that belongs to the other tool, it must politely inform the user of the correct routing based on this document.

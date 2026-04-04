@@ -51,14 +51,14 @@ For deep dives into specific areas, consult the files in the `.claude/` director
 | `.claude/design-system.md` | Brand colors, typography, layout conventions, and UX principles. |
 | `.claude/deployment-and-build.md` | Build process, deployment workflow, and Firebase Hosting configuration. |
 | `.claude/multi-agent-workflow-guide.md` | Staging-first protocol and agent coordination. |
-| `.claude/agent-task-routing.md` | Official workflow split between @maia (Slack/code) and Manus (browser/dashboard). |
+| `.claude/agent-task-routing.md` | Official workflow split between @maia (Slack/code/stateless-browser) and Manus (stateful-dashboard). |
 | `.claude/current-state-and-roadmap.md` | What is built, what is missing, and the build priority order. |
 | `.claude/do-not-build.md` | Features and technologies explicitly rejected from the roadmap. |
 | `.claude/known-issues-and-lessons.md` | Resolved bugs, performance risks, and architectural decisions to preserve. |
 | `.claude/testing-and-quality.md` | Testing infrastructure, quality checklist, and deployment verification. |
 | `.claude/existing-docs-index.md` | Index of all existing documentation files with relevance ratings. |
 | `.claude/interaction-rules.md` | **Mandatory.** Behavioral rules: scope adherence, continuous improvement loop, communication style, and initiative protocol. |
-| `.claude/task-routing.md` | **Mandatory.** Task routing protocol — Code vs Browser vs Hybrid workflow split between Maia and Manus. |
+| `.claude/task-routing.md` | **Mandatory.** Task routing protocol — Code vs Browser vs Hybrid workflow split based on authentication state. |
 
 ## Recent Context
 Recent development has focused heavily on enhancing the coach and admin experience. Key updates include fixing admin impersonation for lazy-loaded components and implementing prorated earnings caps with yearly admin configuration. The team also built a bulk movement upload feature utilizing AI auto-analysis and enhanced the workout thumbnail grid with dynamic scaling (4:5 aspect ratio). Additionally, sorting logic across all libraries was updated to prioritize the most recently edited items.

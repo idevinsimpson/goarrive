@@ -103,4 +103,4 @@ For deep dives, see the `.claude/` directory:
 - `deployment-and-build.md` — Build process and Firebase Hosting config
 - `multi-agent-workflow-guide.md` — Staging-first protocol and agent coordination
 - `interaction-rules.md` — **Mandatory.** Behavioral rules: scope adherence, continuous improvement loop, communication style, and initiative protocol
-- `agent-task-routing.md` — **Mandatory.** Official workflow split between @maia (Slack/code) and Manus (browser/dashboard)
+- `agent-task-routing.md` — **Mandatory.** Official workflow split between @maia (Slack/code/stateless-browser) and Manus (stateful-dashboard)
