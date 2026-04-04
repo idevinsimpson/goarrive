@@ -450,3 +450,5 @@ export function useScheduleState() {
     setTransitionPhase, setTransitioning, setPendingEditPayload, setDragSlot, setDragPreview,
   };
 }
+
+export type ScheduleState = ReturnType<typeof useScheduleState>;
