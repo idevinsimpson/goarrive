@@ -5,6 +5,7 @@ dist/
 *.log
 .firebase/
 .env
+.secrets/
 
 .github/workflows/test.yml
 
