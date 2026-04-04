@@ -270,6 +270,7 @@ export default function WorkoutPlayer({
   // ── Render ────────────────────────────────────────────────────────────
   return (
     <Modal visible={visible} animationType="fade" transparent={false}>
+      <View style={st.portraitLockOuter}>
       <View style={st.container}>
 
         {/* ── READY state ─────────────────────────────────────── */}
@@ -302,36 +303,64 @@ export default function WorkoutPlayer({
         )}
 
         {/* ── INTRO — Full-screen cinematic welcome ────────────── */}
-        {phase === 'intro' && current && (
+        {phase === 'intro' && current && (() => {
+          // Find the first exercise movement's video for the left panel
+          const firstExercise = flatMovements.find((f: any) => f.stepType === 'exercise');
+          const introVideoUrl = firstExercise?.videoUrl;
+          const introThumbUrl = firstExercise?.thumbnailUrl;
+          return (
+            <View style={st.introSplitContainer}>
+              {/* Left: video panel */}
+              <View style={st.introVideoPanel}>
+                {introVideoUrl ? (
+                  <Video
+                    source={{ uri: introVideoUrl }}
+                    resizeMode={ResizeMode.COVER}
+                    isLooping
+                    shouldPlay
+                    isMuted
+                    style={StyleSheet.absoluteFillObject}
+                  />
+                ) : introThumbUrl ? (
+                  <Image source={{ uri: introThumbUrl }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+                ) : (
+                  <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#1A2035' }]} />
+                )}
+              </View>
+              {/* Right: branding panel */}
+              <View style={st.introBrandPanel}>
+                <Image
+                  source={require('../assets/logo.png')}
+                  style={st.introLogo}
+                  resizeMode="contain"
+                />
+                <Text style={st.introBlockLabel}>
+                  {current.name || current.label || 'WARM-UP & STRETCH'}
+                </Text>
+                <View style={st.goldTimerBox}>
+                  <Text style={st.goldTimerText}>{timeLeft}</Text>
+                </View>
+                <TouchableOpacity style={[st.skipPill, { marginTop: 16 }]} onPress={handleSkip}>
+                  <Icon name="skip-forward" size={16} color="#F5A623" />
+                  <Text style={st.skipPillText}>Skip</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        })()}
+
+        {/* ── OUTRO — Cinematic completion ────────────────────── */}
+        {phase === 'outro' && current && (
           <View style={st.introOutroContainer}>
             <View style={st.introOutroGradient}>
               <Image
                 source={require('../assets/logo.png')}
-                style={st.introLogo}
+                style={{ width: 280, height: 90, marginBottom: 16 }}
                 resizeMode="contain"
               />
-              <Text style={st.introTitle}>{workout?.name ?? 'Workout'}</Text>
-              <Text style={st.introSubtitle}>LET'S GO</Text>
-              <View style={st.introTimerPill}>
-                <Text style={st.introTimerText}>{timeLeft}</Text>
-              </View>
-              <TouchableOpacity style={st.skipPill} onPress={handleSkip}>
-                <Icon name="skip-forward" size={16} color="#F5A623" />
-                <Text style={st.skipPillText}>Skip</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
-        {/* ── OUTRO — Full-screen completion celebration ────────── */}
-        {phase === 'outro' && current && (
-          <View style={st.introOutroContainer}>
-            <View style={st.introOutroGradient}>
-              <Icon name="check-circle" size={80} color="#F5A623" />
-              <Text style={st.outroTitle}>YOU DID IT!</Text>
-              <Text style={st.outroSubtitle}>{workout?.name ?? 'Workout'} Complete</Text>
-              <View style={st.introTimerPill}>
-                <Text style={st.introTimerText}>{timeLeft}</Text>
+              <Text style={st.outroTitle}>WORKOUT</Text>
+              <View style={st.goldTimerBox}>
+                <Text style={st.goldTimerText}>{timeLeft}</Text>
               </View>
               <TouchableOpacity style={st.skipPill} onPress={handleSkip}>
                 <Icon name="skip-forward" size={16} color="#F5A623" />
@@ -342,44 +371,48 @@ export default function WorkoutPlayer({
         )}
 
         {/* ── DEMO — Preview upcoming movements ───────────────── */}
-        {phase === 'demo' && current && (
-          <>
-            {renderHeader()}
-            <View style={st.specialContent}>
-              <View style={st.specialIconCircle}>
-                <Icon name="eye" size={32} color="#FBBF24" />
-              </View>
-              <Text style={st.specialPhaseLabel}>PREVIEW</Text>
-              <Text style={st.specialTitle}>Here's What's Coming Up</Text>
-
-              <ScrollView style={st.demoList} showsVerticalScrollIndicator={false}>
-                {(current.demoMovements || []).map((mv: any, i: number) => (
-                  <View key={i} style={st.demoItem}>
-                    {mv.thumbnailUrl ? (
-                      <Image source={{ uri: mv.thumbnailUrl }} style={st.demoThumb} resizeMode="cover" />
-                    ) : (
-                      <View style={[st.demoThumb, { backgroundColor: '#1A2035', justifyContent: 'center', alignItems: 'center' }]}>
-                        <Text style={st.demoThumbNum}>{i + 1}</Text>
-                      </View>
-                    )}
-                    <View style={st.demoItemInfo}>
-                      <Text style={st.demoItemNum}>{i + 1}</Text>
-                      <Text style={st.demoItemName}>{mv.name}</Text>
-                    </View>
+        {phase === 'demo' && current && (() => {
+          const demos = current.demoMovements || [];
+          const cols = demos.length <= 4 ? 2 : 3;
+          return (
+            <>
+              {renderHeader()}
+              <View style={st.specialContent}>
+                {/* GoArrive Logo */}
+                <Image
+                  source={require('../assets/logo.png')}
+                  style={{ width: 200, height: 56, marginBottom: 12 }}
+                  resizeMode="contain"
+                />
+                {/* Block title + timer row */}
+                <View style={st.demoTitleRow}>
+                  <Text style={st.demoBlockTitle}>{current.name}</Text>
+                  <View style={st.goldTimerBox}>
+                    <Text style={st.goldTimerText}>{timeLeft}</Text>
                   </View>
-                ))}
-              </ScrollView>
-
-              <View style={st.specialTimerRow}>
-                <Text style={st.specialTimerNum}>{timeLeft}</Text>
-                <TouchableOpacity style={st.skipPill} onPress={handleSkip}>
+                </View>
+                {/* Thumbnail grid */}
+                <View style={st.demoGrid}>
+                  {demos.map((mv: any, i: number) => (
+                    <View key={i} style={[st.demoGridCell, { width: `${Math.floor(100 / cols) - 2}%` as any }]}>
+                      {mv.thumbnailUrl ? (
+                        <Image source={{ uri: mv.thumbnailUrl }} style={st.demoGridImage} resizeMode="cover" />
+                      ) : (
+                        <View style={[st.demoGridImage, { backgroundColor: '#1A2035', justifyContent: 'center', alignItems: 'center' }]}>
+                          <Icon name="play-circle" size={24} color="#3A4050" />
+                        </View>
+                      )}
+                    </View>
+                  ))}
+                </View>
+                <TouchableOpacity style={[st.skipPill, { marginTop: 'auto' as any, marginBottom: 24 }]} onPress={handleSkip}>
                   <Icon name="skip-forward" size={16} color="#F5A623" />
                   <Text style={st.skipPillText}>Skip</Text>
                 </TouchableOpacity>
               </View>
-            </View>
-          </>
-        )}
+            </>
+          );
+        })()}
 
         {/* ── TRANSITION — Instruction card with countdown ─────── */}
         {phase === 'transition' && current && (
@@ -398,10 +431,10 @@ export default function WorkoutPlayer({
               ) : null}
 
               <View style={st.specialTimerRow}>
-                <View style={[st.timerRing, { borderColor: '#94A3B8', width: 140, height: 140, borderRadius: 70 }]}>
-                  <Text style={st.timerNum}>{formatTime(timeLeft)}</Text>
+                <View style={st.goldTimerBox}>
+                  <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
                 </View>
-                <TouchableOpacity style={st.skipPill} onPress={handleSkip}>
+                <TouchableOpacity style={[st.skipPill, { marginTop: 8 }]} onPress={handleSkip}>
                   <Icon name="skip-forward" size={16} color="#F5A623" />
                   <Text style={st.skipPillText}>Skip</Text>
                 </TouchableOpacity>
@@ -414,29 +447,44 @@ export default function WorkoutPlayer({
 
         {/* ── WATER BREAK — Hydration pause ───────────────────── */}
         {phase === 'waterBreak' && current && (
-          <>
+          <View style={st.waterBreakContainer}>
             {renderHeader()}
-            <View style={st.specialContent}>
-              <View style={[st.specialIconCircle, { backgroundColor: 'rgba(56,189,248,0.15)' }]}>
-                <Icon name="droplet" size={36} color="#38BDF8" />
-              </View>
-              <Text style={[st.specialPhaseLabel, { color: '#38BDF8' }]}>WATER BREAK</Text>
-              <Text style={st.specialTitle}>Stay Hydrated</Text>
-              <Text style={st.waterBreakHint}>Grab your water and take a moment</Text>
-
-              <View style={[st.timerRing, { borderColor: '#38BDF8', width: 160, height: 160, borderRadius: 80, marginTop: 24 }]}>
-                <Text style={st.timerNum}>{formatTime(timeLeft)}</Text>
-                <Text style={st.timerSub}>seconds</Text>
-              </View>
-
-              <TouchableOpacity style={[st.skipPill, { marginTop: 24 }]} onPress={handleSkip}>
-                <Icon name="skip-forward" size={16} color="#F5A623" />
-                <Text style={st.skipPillText}>Skip</Text>
-              </TouchableOpacity>
-
-              {renderNextUp()}
+            {/* Blue-tinted background */}
+            <View style={st.waterBreakBg}>
+              {current.videoUrl ? (
+                <Video
+                  source={{ uri: current.videoUrl }}
+                  resizeMode={ResizeMode.COVER}
+                  isLooping
+                  shouldPlay
+                  isMuted
+                  style={StyleSheet.absoluteFillObject}
+                />
+              ) : null}
+              <View style={st.waterBreakOverlay} />
             </View>
-          </>
+            {/* GoArrive Logo */}
+            <Image
+              source={require('../assets/logo.png')}
+              style={{ width: 200, height: 56, alignSelf: 'center', marginTop: 16 }}
+              resizeMode="contain"
+            />
+            {/* Gold timer */}
+            <View style={{ alignSelf: 'center', marginTop: 16 }}>
+              <View style={st.goldTimerBox}>
+                <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
+              </View>
+            </View>
+            {/* Stylized WATER BREAK text at bottom */}
+            <View style={st.waterBreakTextArea}>
+              <Text style={st.waterBreakTitle}>WATER</Text>
+              <Text style={st.waterBreakTitle}>BREAK</Text>
+            </View>
+            <TouchableOpacity style={[st.skipPill, { alignSelf: 'center', marginBottom: 24 }]} onPress={handleSkip}>
+              <Icon name="skip-forward" size={16} color="#F5A623" />
+              <Text style={st.skipPillText}>Skip</Text>
+            </TouchableOpacity>
+          </View>
         )}
 
         {/* ── COUNTDOWN state ─────────────────────────────────── */}
@@ -501,18 +549,19 @@ export default function WorkoutPlayer({
                 ) : null}
               </View>
               {!isRepBased ? (
-                <Text style={st.workTimer}>{formatTime(timeLeft)}</Text>
+                <View style={st.goldTimerBox}>
+                  <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
+                </View>
               ) : null}
             </View>
 
-            {/* Side badge */}
+            {/* SPLIT label */}
             {current.swapSides && (
-              <View style={st.sideBadgeRow}>
-                <View style={st.sideBadge}>
-                  <Text style={st.sideBadgeText}>
-                    {swapSide === 'L' ? 'LEFT SIDE' : 'RIGHT SIDE'}
-                  </Text>
-                </View>
+              <View style={st.splitLabelRow}>
+                <Text style={st.splitText}>SPLIT</Text>
+                <Text style={st.splitSep}> | </Text>
+                <Text style={st.splitDuration}>5 sec</Text>
+                <Text style={st.splitArrows}> ⇄</Text>
               </View>
             )}
 
@@ -600,8 +649,8 @@ export default function WorkoutPlayer({
               </TouchableWithoutFeedback>
             </View>
 
-            {/* NEXT UP bar */}
-            {renderNextUp()}
+            {/* NEXT UP bar — appears in final ~3.5 seconds */}
+            {timeLeft <= 4 && renderNextUp()}
           </View>
         )}
 
@@ -665,6 +714,7 @@ export default function WorkoutPlayer({
           </>
         )}
       </View>
+      </View>
 
       {/* Swap movement modal */}
       <Modal visible={showSwap} transparent animationType="slide">
@@ -713,10 +763,20 @@ export default function WorkoutPlayer({
 // ── Styles ──────────────────────────────────────────────────────────────────
 const { width: SCREEN_W } = Dimensions.get('window');
 
+const PORTRAIT_MAX_W = 430;
+
 const st = StyleSheet.create({
+  portraitLockOuter: {
+    flex: 1,
+    backgroundColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   container: {
     flex: 1,
     backgroundColor: '#0E1117',
+    width: '100%',
+    maxWidth: PORTRAIT_MAX_W,
   },
   header: {
     flexDirection: 'row',
@@ -791,7 +851,29 @@ const st = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 32,
   },
-  introLogo: { width: 240, height: 80, marginBottom: 24 },
+  // Intro split-screen
+  introSplitContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: '#0E1117',
+  },
+  introVideoPanel: {
+    flex: 1,
+    backgroundColor: '#000',
+    overflow: 'hidden',
+  },
+  introBrandPanel: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    backgroundColor: '#0E1117',
+  },
+  introLogo: { width: 160, height: 54, marginBottom: 20 },
+  introBlockLabel: {
+    fontSize: 20, fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
+    textAlign: 'center', marginBottom: 24, letterSpacing: 1,
+  },
   introTitle: {
     fontSize: 36, fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
     textAlign: 'center', marginBottom: 8,
@@ -809,8 +891,8 @@ const st = StyleSheet.create({
     fontSize: 24, fontWeight: '700', color: '#F5A623', fontFamily: FH,
   },
   outroTitle: {
-    fontSize: 36, fontWeight: '700', color: '#F5A623', fontFamily: FH,
-    textAlign: 'center', marginTop: 16, marginBottom: 8,
+    fontSize: 42, fontWeight: '900', color: '#FFFFFF', fontFamily: FH,
+    textAlign: 'center', letterSpacing: 8, marginBottom: 24,
   },
   outroSubtitle: {
     fontSize: 18, color: '#8A95A3', fontFamily: FB,
@@ -858,32 +940,26 @@ const st = StyleSheet.create({
     marginBottom: 8,
   },
 
-  // ── Demo block ─────────────────────────────────────────────────────
-  demoList: {
-    flex: 1, width: '100%', marginTop: 8,
+  // ── Demo block — thumbnail grid ─────────────────────────────────────
+  demoTitleRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    width: '100%', paddingHorizontal: 4, marginBottom: 16,
   },
-  demoItem: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 10, borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
+  demoBlockTitle: {
+    fontSize: 22, fontWeight: '700', color: '#F0F4F8', fontFamily: FH, flex: 1, marginRight: 12,
   },
-  demoThumb: {
-    width: 56, height: 70, borderRadius: 8,
-    backgroundColor: '#1A2035', marginRight: 14,
+  demoGrid: {
+    flex: 1, flexDirection: 'row', flexWrap: 'wrap',
+    justifyContent: 'center', gap: 8, width: '100%',
   },
-  demoThumbNum: {
-    fontSize: 20, fontWeight: '700', color: '#3A4050', fontFamily: FH,
+  demoGridCell: {
+    aspectRatio: 4 / 5,
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: '#1A2035',
   },
-  demoItemInfo: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10,
-  },
-  demoItemNum: {
-    fontSize: 18, fontWeight: '700', color: '#F5A623', fontFamily: FH,
-    width: 28,
-  },
-  demoItemName: {
-    fontSize: 16, fontWeight: '600', color: '#F0F4F8', fontFamily: FH,
-    flex: 1,
+  demoGridImage: {
+    width: '100%', height: '100%',
   },
 
   // ── Transition block ───────────────────────────────────────────────
@@ -894,6 +970,26 @@ const st = StyleSheet.create({
   },
 
   // ── Water Break block ──────────────────────────────────────────────
+  waterBreakContainer: {
+    flex: 1, backgroundColor: '#0E1117',
+  },
+  waterBreakBg: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(56,189,248,0.12)',
+  } as any,
+  waterBreakOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(14,17,23,0.6)',
+  } as any,
+  waterBreakTextArea: {
+    marginTop: 'auto' as any,
+    alignItems: 'center',
+    paddingBottom: 16,
+  },
+  waterBreakTitle: {
+    fontSize: 48, fontWeight: '900', color: '#38BDF8', fontFamily: FH,
+    letterSpacing: 6, textAlign: 'center', opacity: 0.85,
+  },
   waterBreakHint: {
     fontSize: 16, color: '#8A95A3', fontFamily: FB,
     textAlign: 'center', marginBottom: 8,
@@ -954,7 +1050,40 @@ const st = StyleSheet.create({
   workTimer: {
     fontSize: 80, fontWeight: '700', color: '#FFFFFF', fontFamily: FH, lineHeight: 80,
   },
+  // Gold timer box (used across all screens)
+  goldTimerBox: {
+    backgroundColor: '#F5A623',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  goldTimerText: {
+    fontSize: 48,
+    fontWeight: '700',
+    color: '#0E1117',
+    fontFamily: FH,
+    lineHeight: 52,
+  },
   sideBadgeRow: { alignItems: 'center', marginBottom: 4 },
+  // SPLIT label
+  splitLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    marginBottom: 4,
+  },
+  splitText: {
+    fontSize: 14, fontWeight: '700', color: '#F5A623', fontFamily: FH, letterSpacing: 1,
+  },
+  splitSep: {
+    fontSize: 14, color: '#6B7280', fontFamily: FB,
+  },
+  splitDuration: {
+    fontSize: 14, color: '#8A95A3', fontFamily: FB,
+  },
+  splitArrows: {
+    fontSize: 14, color: '#F5A623', fontFamily: FB,
+  },
 
   // Video area
   videoArea: {
