@@ -70,7 +70,7 @@ export type HostingMode = 'coach_led' | 'hosted';
 export type ScheduleSessionType = 'Strength' | 'Cardio + Mobility' | 'Mix';
 
 /** Session type used in scheduling UI (lowercase, granular) */
-export type SessionType = 'strength' | 'cardio' | 'flexibility' | 'hiit' | 'recovery' | 'check_in';
+export type SchedulingSessionType = 'strength' | 'cardio' | 'flexibility' | 'hiit' | 'recovery' | 'check_in';
 
 export const GUIDANCE_PHASE_LABELS: Record<GuidancePhase, string> = {
   coach_guided: 'Coach Guided',
@@ -89,7 +89,7 @@ export const ROOM_SOURCE_LABELS: Record<RoomSource, string> = {
   shared_pool: 'Shared Room',
 };
 
-export const SESSION_TYPE_LABELS: Record<SessionType, string> = {
+export const SESSION_TYPE_LABELS: Record<SchedulingSessionType, string> = {
   strength: 'Strength',
   cardio: 'Cardio',
   flexibility: 'Flexibility',

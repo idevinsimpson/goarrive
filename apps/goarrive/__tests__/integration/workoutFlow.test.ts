@@ -13,17 +13,9 @@
 import { resolveBlockType } from '../../hooks/useWorkoutFlatten';
 import { calculateAdjustedRest } from '../../hooks/useRestAutoAdjust';
 import { filterMovements } from '../../hooks/useMovementFilters';
+import { mockMovements } from '../fixtures/movements';
 
 // ── Test data ─────────────────────────────────────────────────────────────
-
-const mockMovements = [
-  { id: '1', name: 'Barbell Squat', category: 'Lower Body', equipment: 'Barbell', muscleGroups: ['Quads'] },
-  { id: '2', name: 'Bench Press', category: 'Upper Body', equipment: 'Barbell', muscleGroups: ['Chest'] },
-  { id: '3', name: 'Pull Up', category: 'Upper Body', equipment: 'Bodyweight', muscleGroups: ['Back'] },
-  { id: '4', name: 'Plank', category: 'Core', equipment: 'Bodyweight', muscleGroups: ['Core'] },
-  { id: '5', name: 'Dumbbell Curl', category: 'Upper Body', equipment: 'Dumbbell', muscleGroups: ['Biceps'] },
-  { id: '6', name: 'Romanian Deadlift', category: 'Lower Body', equipment: 'Barbell', muscleGroups: ['Hamstrings'] },
-];
 
 const mockWorkout = {
   name: 'Full Body Strength',
@@ -135,13 +127,13 @@ describe('Workout Flow Integration', () => {
   describe('Movement Library Filtering', () => {
     it('filters by category', () => {
       const result = filterMovements(mockMovements, { category: 'Upper Body' });
-      expect(result).toHaveLength(3);
+      expect(result).toHaveLength(4); // Bench Press, Push-Up, Dumbbell Curl, Pull Up
       expect(result.every((m: any) => m.category === 'Upper Body')).toBe(true);
     });
 
     it('filters by equipment', () => {
       const result = filterMovements(mockMovements, { equipment: 'Barbell' });
-      expect(result).toHaveLength(3);
+      expect(result).toHaveLength(3); // Bench Press, Barbell Squat, Romanian Deadlift
       expect(result.every((m: any) => m.equipment === 'Barbell')).toBe(true);
     });
 
@@ -153,13 +145,13 @@ describe('Workout Flow Integration', () => {
 
     it('combines multiple filters', () => {
       const result = filterMovements(mockMovements, { category: 'Upper Body', equipment: 'Bodyweight' });
-      expect(result).toHaveLength(1);
-      expect(result[0].name).toBe('Pull Up');
+      expect(result).toHaveLength(2); // Push-Up, Pull Up
+      expect(result.every((m: any) => m.category === 'Upper Body' && m.equipment === 'Bodyweight')).toBe(true);
     });
 
     it('returns all movements with no filters', () => {
       const result = filterMovements(mockMovements, {});
-      expect(result).toHaveLength(6);
+      expect(result).toHaveLength(7);
     });
   });
 
