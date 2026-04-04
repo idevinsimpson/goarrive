@@ -330,6 +330,86 @@ function batchReducer(state: BatchState, action: BatchAction): BatchState {
   }
 }
 
+// ── Data Reducer ────────────────────────────────────────────────────────────
+interface DataState {
+  allCoachSlots: any[];
+  memberPlan: MemberPlanData | null;
+  planLoading: boolean;
+  slotTemplates: any[];
+  sharedTemplates: any[];
+  coachInstances: any[];
+  templateUpdateAvailable: Record<string, boolean>;
+  conflictWarning: string | null;
+  conflictSuggestions: { day: string; time: string; dayIdx: number }[];
+}
+
+const INITIAL_DATA_STATE: DataState = {
+  allCoachSlots: [],
+  memberPlan: null,
+  planLoading: false,
+  slotTemplates: [],
+  sharedTemplates: [],
+  coachInstances: [],
+  templateUpdateAvailable: {},
+  conflictWarning: null,
+  conflictSuggestions: [],
+};
+
+type DataAction = { type: 'SET_FIELD'; field: keyof DataState; value: any };
+
+function dataReducer(state: DataState, action: DataAction): DataState {
+  switch (action.type) {
+    case 'SET_FIELD':
+      return { ...state, [action.field]: action.value };
+    default:
+      return state;
+  }
+}
+
+// ── UI Reducer ──────────────────────────────────────────────────────────────
+interface UIState {
+  showCalendarView: boolean;
+  showEditConfirm: boolean;
+  showSharedTemplates: boolean;
+  showAssignWorkout: boolean;
+  showReviewQueue: boolean;
+  showAnalytics: boolean;
+  showLogReview: boolean;
+  showWorkoutHistory: boolean;
+  transitionPhase: GuidancePhase | null;
+  transitioning: boolean;
+  pendingEditPayload: any;
+  dragSlot: { id: string; startY: number; startDay: number; startMin: number } | null;
+  dragPreview: { day: number; min: number } | null;
+}
+
+const INITIAL_UI_STATE: UIState = {
+  showCalendarView: false,
+  showEditConfirm: false,
+  showSharedTemplates: false,
+  showAssignWorkout: false,
+  showReviewQueue: false,
+  showAnalytics: false,
+  showLogReview: false,
+  showWorkoutHistory: false,
+  transitionPhase: null,
+  transitioning: false,
+  pendingEditPayload: null,
+  dragSlot: null,
+  dragPreview: null,
+};
+
+type UIAction = { type: 'SET_FIELD'; field: keyof UIState; value: any };
+
+function uiReducer(state: UIState, action: UIAction): UIState {
+  switch (action.type) {
+    case 'SET_FIELD':
+      return { ...state, [action.field]: action.value };
+    default:
+      return state;
+  }
+}
+
 // ── Dual-Handle Range Slider (web-native pointer events for smooth dragging) ─
 function DualHandleSlider({
   totalMinutes,
@@ -568,29 +648,44 @@ export default function ScheduleModal({
   // Destructure batch state
   const { showBatchPicker, batchMembers, selectedBatchMembers, batchCreating, batchOverrides } = batch;
 
-  // ── Remaining individual state (data, UI toggles, misc) ─────────────────
-  const [allCoachSlots, setAllCoachSlots] = useState<any[]>([]);
-  const [conflictWarning, setConflictWarning] = useState<string | null>(null);
-  const [showCalendarView, setShowCalendarView] = useState(false);
-  const [memberPlan, setMemberPlan] = useState<MemberPlanData | null>(null);
-  const [planLoading, setPlanLoading] = useState(false);
-  const [transitionPhase, setTransitionPhase] = useState<GuidancePhase | null>(null);
-  const [transitioning, setTransitioning] = useState(false);
-  const [slotTemplates, setSlotTemplates] = useState<any[]>([]);
-  const [pendingEditPayload, setPendingEditPayload] = useState<any>(null);
-  const [showEditConfirm, setShowEditConfirm] = useState(false);
-  const [coachInstances, setCoachInstances] = useState<any[]>([]);
-  const [sharedTemplates, setSharedTemplates] = useState<any[]>([]);
-  const [showSharedTemplates, setShowSharedTemplates] = useState(false);
-  const [dragSlot, setDragSlot] = useState<{ id: string; startY: number; startDay: number; startMin: number } | null>(null);
-  const [dragPreview, setDragPreview] = useState<{ day: number; min: number } | null>(null);
-  const [conflictSuggestions, setConflictSuggestions] = useState<{ day: string; time: string; dayIdx: number }[]>([]);
-  const [templateUpdateAvailable, setTemplateUpdateAvailable] = useState<Record<string, boolean>>({});
-  const [showAssignWorkout, setShowAssignWorkout] = useState(false);
-  const [showReviewQueue, setShowReviewQueue] = useState(false);
-  const [showAnalytics, setShowAnalytics] = useState(false);
-  const [showLogReview, setShowLogReview] = useState(false);
-  const [showWorkoutHistory, setShowWorkoutHistory] = useState(false);
+  // ── Data & UI reducer slices ──────────────────────────────────────────────
+  const [data, dataDispatch] = useReducer(dataReducer, INITIAL_DATA_STATE);
+  const [ui, uiDispatch] = useReducer(uiReducer, INITIAL_UI_STATE);
+
+  // Destructure data state
+  const { allCoachSlots, memberPlan, planLoading, slotTemplates, sharedTemplates,
+    coachInstances, templateUpdateAvailable, conflictWarning, conflictSuggestions } = data;
+
+  // Destructure UI state
+  const { showCalendarView, showEditConfirm, showSharedTemplates, showAssignWorkout,
+    showReviewQueue, showAnalytics, showLogReview, showWorkoutHistory,
+    transitionPhase, transitioning, pendingEditPayload, dragSlot, dragPreview } = ui;
+
+  // Data setter wrappers
+  const setAllCoachSlots = (v: any[]) => dataDispatch({ type: 'SET_FIELD', field: 'allCoachSlots', value: v });
+  const setConflictWarning = (v: string | null) => dataDispatch({ type: 'SET_FIELD', field: 'conflictWarning', value: v });
+  const setMemberPlan = (v: MemberPlanData | null) => dataDispatch({ type: 'SET_FIELD', field: 'memberPlan', value: v });
+  const setPlanLoading = (v: boolean) => dataDispatch({ type: 'SET_FIELD', field: 'planLoading', value: v });
+  const setSlotTemplates = (v: any[]) => dataDispatch({ type: 'SET_FIELD', field: 'slotTemplates', value: v });
+  const setSharedTemplates = (v: any[]) => dataDispatch({ type: 'SET_FIELD', field: 'sharedTemplates', value: v });
+  const setCoachInstances = (v: any[]) => dataDispatch({ type: 'SET_FIELD', field: 'coachInstances', value: v });
+  const setTemplateUpdateAvailable = (v: Record<string, boolean>) => dataDispatch({ type: 'SET_FIELD', field: 'templateUpdateAvailable', value: v });
+  const setConflictSuggestions = (v: { day: string; time: string; dayIdx: number }[]) => dataDispatch({ type: 'SET_FIELD', field: 'conflictSuggestions', value: v });
+
+  // UI setter wrappers
+  const setShowCalendarView = (v: boolean) => uiDispatch({ type: 'SET_FIELD', field: 'showCalendarView', value: v });
+  const setShowEditConfirm = (v: boolean) => uiDispatch({ type: 'SET_FIELD', field: 'showEditConfirm', value: v });
+  const setShowSharedTemplates = (v: boolean) => uiDispatch({ type: 'SET_FIELD', field: 'showSharedTemplates', value: v });
+  const setShowAssignWorkout = (v: boolean) => uiDispatch({ type: 'SET_FIELD', field: 'showAssignWorkout', value: v });
+  const setShowReviewQueue = (v: boolean) => uiDispatch({ type: 'SET_FIELD', field: 'showReviewQueue', value: v });
+  const setShowAnalytics = (v: boolean) => uiDispatch({ type: 'SET_FIELD', field: 'showAnalytics', value: v });
+  const setShowLogReview = (v: boolean) => uiDispatch({ type: 'SET_FIELD', field: 'showLogReview', value: v });
+  const setShowWorkoutHistory = (v: boolean) => uiDispatch({ type: 'SET_FIELD', field: 'showWorkoutHistory', value: v });
+  const setTransitionPhase = (v: GuidancePhase | null) => uiDispatch({ type: 'SET_FIELD', field: 'transitionPhase', value: v });
+  const setTransitioning = (v: boolean) => uiDispatch({ type: 'SET_FIELD', field: 'transitioning', value: v });
+  const setPendingEditPayload = (v: any) => uiDispatch({ type: 'SET_FIELD', field: 'pendingEditPayload', value: v });
+  const setDragSlot = (v: UIState['dragSlot']) => uiDispatch({ type: 'SET_FIELD', field: 'dragSlot', value: v });
+  const setDragPreview = (v: UIState['dragPreview']) => uiDispatch({ type: 'SET_FIELD', field: 'dragPreview', value: v });
 
   // ── Setter wrappers (delegate to reducers, keep call sites unchanged) ──
   const setSelectedDays = (v: DayTimeEntry[] | ((prev: DayTimeEntry[]) => DayTimeEntry[])) => {
@@ -1863,6 +1958,443 @@ export default function ScheduleModal({
     );
   }
 
+  function SlotForm() {
+    return (
+      <View style={s.schedSection}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={s.schedSectionTitle}>
+            {editingSlotId ? 'Edit Slot' : (activeSlots.length > 0 ? 'Add More Slots' : 'Create Recurring Slots')}
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+            {editingSlotId && (
+              <TouchableOpacity onPress={resetForm}>
+                <Text style={[s.overrideLink, { color: MUTED }]}>Cancel Edit</Text>
+              </TouchableOpacity>
+            )}
+            {slotTemplates.length > 0 && (
+              <TouchableOpacity onPress={() => setShowTemplateMenu(!showTemplateMenu)}>
+                <Text style={{ fontSize: 11, color: BLUE, fontFamily: FB }}>Templates</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={() => setShowSaveTemplate(!showSaveTemplate)}>
+              <Text style={{ fontSize: 11, color: GREEN, fontFamily: FB }}>Save as Template</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Template menu dropdown (Item 4: includes shared templates) */}
+        {showTemplateMenu && (slotTemplates.length > 0 || sharedTemplates.length > 0) && (
+          <View style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 6, padding: 8, marginBottom: 8 }}>
+            {slotTemplates.length > 0 && (
+              <>
+                <Text style={{ fontSize: 11, color: MUTED, fontFamily: FH, marginBottom: 4 }}>My Templates</Text>
+                {slotTemplates.map((t: any) => (
+                  <View key={t.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
+                    <TouchableOpacity style={{ flex: 1 }} onPress={() => handleLoadTemplate(t)}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={{ fontSize: 12, color: FG, fontFamily: FB }}>{t.name}</Text>
+                        {templateUpdateAvailable[t.id] && (
+                          <View style={{ backgroundColor: '#FFC000' + '20', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 3 }}>
+                            <Text style={{ fontSize: 8, color: '#FFC000', fontFamily: FH }}>Update Available</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={{ fontSize: 10, color: MUTED, fontFamily: FB }}>
+                        {t.sessionType} · {t.guidancePhase} · {t.durationMinutes}min · {t.recurrencePattern}
+                      </Text>
+                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <TouchableOpacity onPress={async () => {
+                        try {
+                          const version = (t.version || 0) + 1;
+                          await addDoc(collection(db, 'shared_templates'), { ...t, sharedBy: coachId, sharedAt: new Date(), version });
+                          const tRef = doc(db, 'coaches', coachId, 'slot_templates', t.id);
+                          await updateDoc(tRef, { version });
+                          Alert.alert('Shared', 'Template shared with all coaches');
+                        } catch (err) { console.error('Share failed:', err); }
+                      }}>
+                        <Text style={{ fontSize: 10, color: BLUE, fontFamily: FB }}>Share</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => handleDeleteTemplate(t.id)}>
+                        <Text style={{ fontSize: 10, color: RED, fontFamily: FB }}>Delete</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+              </>
+            )}
+            {sharedTemplates.length > 0 && (
+              <>
+                <Text style={{ fontSize: 11, color: BLUE, fontFamily: FH, marginTop: slotTemplates.length > 0 ? 8 : 0, marginBottom: 4 }}>Shared Templates</Text>
+                {sharedTemplates.map((t: any) => (
+                  <View key={t.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
+                    <TouchableOpacity style={{ flex: 1 }} onPress={() => handleLoadTemplate(t)}>
+                      <Text style={{ fontSize: 12, color: FG, fontFamily: FB }}>{t.name}</Text>
+                      <Text style={{ fontSize: 10, color: MUTED, fontFamily: FB }}>
+                        {t.sessionType} · {t.guidancePhase} · {t.durationMinutes}min · {t.recurrencePattern}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </>
+            )}
+          </View>
+        )}
+
+        {/* Save template input */}
+        {showSaveTemplate && (
+          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <TextInput
+              style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 6, padding: 8, color: FG, fontFamily: FB, fontSize: 12 }}
+              placeholder="Template name..."
+              placeholderTextColor={MUTED}
+              value={templateName}
+              onChangeText={setTemplateName}
+            />
+            <TouchableOpacity
+              style={{ backgroundColor: GREEN + '20', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6 }}
+              onPress={handleSaveTemplate}
+            >
+              <Text style={{ fontSize: 11, color: GREEN, fontFamily: FH }}>Save</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => { setShowSaveTemplate(false); setTemplateName(''); }}>
+              <Text style={{ fontSize: 11, color: MUTED, fontFamily: FB }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Session Type */}
+        <Text style={s.fieldLabel}>Session Type</Text>
+        <View style={s.dayRow}>
+          {(['strength', 'cardio', 'flexibility', 'hiit', 'recovery', 'check_in'] as SchedulingSessionType[]).map(st => {
+            const isUsed = usedSessionTypes.has(st) && !editingSlotId;
+            return (
+              <TouchableOpacity
+                key={st}
+                style={[s.dayBtn, selectedSessionType === st && s.dayBtnActive, isUsed && { opacity: 0.4 }, { minWidth: 70 }]}
+                onPress={() => setSelectedSessionType(st)}
+              >
+                <Text style={[s.dayBtnText, selectedSessionType === st && s.dayBtnTextActive, { fontSize: 12 }]}>
+                  {st === 'check_in' ? 'Check-in' : st.charAt(0).toUpperCase() + st.slice(1)}
+                </Text>
+                {isUsed && <Text style={{ fontSize: 8, color: MUTED, fontFamily: FB, marginTop: 1 }}>Active</Text>}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        {sessionTypeWarning && (
+          <View style={{ backgroundColor: 'rgba(245,166,35,0.1)', padding: 8, borderRadius: 6, marginTop: 6 }}>
+            <Text style={{ fontSize: 11, color: GOLD, fontFamily: FB }}>
+              ⚠ {sessionTypeWarning}
+            </Text>
+          </View>
+        )}
+
+        {/* Guidance Phase */}
+        {selectedSessionType !== 'check_in' && (<>
+        <View style={s.phaseHeaderRow}>
+          <Text style={s.fieldLabel}>Guidance Phase</Text>
+          {planPhases && !planPhaseOverride && (
+            <TouchableOpacity onPress={() => setPlanPhaseOverride(true)}>
+              <Text style={s.overrideLink}>Override</Text>
+            </TouchableOpacity>
+          )}
+          {planPhaseOverride && (
+            <TouchableOpacity onPress={() => setPlanPhaseOverride(false)}>
+              <Text style={[s.overrideLink, { color: GREEN }]}>Sync to plan</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        <View style={s.dayRow}>
+          {([
+            { key: 'coach_guided' as GuidancePhase, label: 'Coach Guided', color: GREEN },
+            { key: 'shared_guidance' as GuidancePhase, label: 'Shared Guidance', color: '#5B9BD5' },
+            { key: 'self_guided' as GuidancePhase, label: 'Self Guided', color: '#FFC000' },
+          ] as const).map(phase => {
+            const weekCount = phaseWeekMap[phase.key];
+            const isDisabled = !planPhaseOverride && autoPhaseForSessionType !== null;
+            return (
+              <TouchableOpacity
+                key={phase.key}
+                style={[
+                  s.phaseBtn,
+                  selectedPhase === phase.key && { backgroundColor: phase.color + '18', borderColor: phase.color + '60' },
+                  isDisabled && selectedPhase !== phase.key && { opacity: 0.35 },
+                ]}
+                onPress={() => {
+                  if (!isDisabled) setSelectedPhase(phase.key);
+                }}
+                disabled={isDisabled}
+              >
+                <Text style={[s.phaseBtnLabel, selectedPhase === phase.key && { color: phase.color }]}>
+                  {phase.label}
+                </Text>
+                {weekCount > 0 && (
+                  <Text style={[s.phaseBtnWeeks, selectedPhase === phase.key && { color: phase.color }]}>
+                    {weekCount} weeks
+                  </Text>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        {!planPhaseOverride && autoPhaseForSessionType !== null && (
+          <Text style={{ fontSize: 10, color: MUTED, fontFamily: FB, marginTop: 4, fontStyle: 'italic' }}>
+            Auto-set from plan. Tap "Override" to change.
+          </Text>
+        )}
+        </>)}
+        {selectedSessionType === 'check_in' && (
+          <View style={s.roomSourceRow}>
+            <Icon name="info" size={14} color={GREEN} />
+            <Text style={[s.roomSourceText, { color: GREEN }]}>Check-in — always coach-guided, monthly</Text>
+          </View>
+        )}
+
+        {/* Hosting Mode Indicator */}
+        {selectedSessionType !== 'check_in' && (
+          <View style={s.roomSourceRow}>
+            <Icon name="info" size={14} color={MUTED} />
+            <Text style={s.roomSourceText}>
+              {selectedPhase === 'coach_guided'
+                ? 'Coach-led \u2014 sessions use your personal Zoom'
+                : 'Hosted \u2014 sessions use shared infrastructure'}
+            </Text>
+          </View>
+        )}
+
+        {/* Shared Guidance Window */}
+        {selectedPhase === 'shared_guidance' && selectedSessionType !== 'check_in' && (
+          <View style={s.sliderSection}>
+            <Text style={s.fieldLabel}>Shared Guidance Window</Text>
+            <Text style={s.fieldHint}>Drag the handles to set when you'll be guiding your member</Text>
+            <DualHandleSlider
+              totalMinutes={selectedDuration}
+              liveStart={liveStart}
+              liveEnd={liveEnd}
+              onChangeStart={setLiveStart}
+              onChangeEnd={setLiveEnd}
+            />
+          </View>
+        )}
+
+        {/* Multi-Day Selector */}
+        <Text style={s.fieldLabel}>Days & Times</Text>
+        <Text style={s.fieldHint}>Tap days to select. Each day gets its own start time.</Text>
+        <View style={s.dayRow}>
+          {DAY_SHORT_LABELS.map((label, idx) => {
+            const isSelected = selectedDays.some(d => d.dayOfWeek === idx);
+            return (
+              <TouchableOpacity
+                key={idx}
+                style={[s.dayBtn, isSelected && s.dayBtnActive]}
+                onPress={() => toggleDay(idx)}
+              >
+                <Text style={[s.dayBtnText, isSelected && s.dayBtnTextActive]}>{label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* Per-day time pickers */}
+        {selectedDays.map(entry => (
+          <View key={entry.dayOfWeek} style={s.dayTimeRow}>
+            <View style={s.dayTimeLabel}>
+              <Text style={s.dayTimeDayText}>{DAY_LABELS[entry.dayOfWeek]}</Text>
+            </View>
+            <TouchableOpacity
+              style={s.dayTimeBtn}
+              onPress={() => setEditingTimeForDay(editingTimeForDay === entry.dayOfWeek ? null : entry.dayOfWeek)}
+            >
+              <Text style={s.dayTimeBtnText}>{formatTime(entry.startTime)}</Text>
+              <Icon name="chevron-down" size={14} color={MUTED} />
+            </TouchableOpacity>
+            <Text style={s.dayTimeEnd}>— {formatTime(addMinutesToTime(entry.startTime, selectedDuration))}</Text>
+          </View>
+        ))}
+
+        {/* Time picker dropdown */}
+        {editingTimeForDay !== null && (
+          <View style={s.timePickerWrap}>
+            <Text style={s.timePickerTitle}>Set time for {DAY_LABELS[editingTimeForDay]}</Text>
+            <ScrollView style={s.timeList} nestedScrollEnabled>
+              {TIME_OPTIONS.map(t => {
+                const isActive = selectedDays.find(d => d.dayOfWeek === editingTimeForDay)?.startTime === t;
+                return (
+                  <TouchableOpacity
+                    key={t}
+                    style={[s.timeOption, isActive && s.timeOptionActive]}
+                    onPress={() => updateDayTime(editingTimeForDay, t)}
+                  >
+                    <Text style={[s.timeOptionText, isActive && { color: GOLD }]}>{formatTime(t)}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* Duration */}
+        <Text style={s.fieldLabel}>Duration — {selectedDuration} min</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }}>
+          <View style={[s.dayRow, { flexWrap: 'nowrap' }]}>
+            {DURATION_OPTIONS.map(d => (
+              <TouchableOpacity
+                key={d}
+                style={[s.dayBtn, selectedDuration === d && s.dayBtnActive, { minWidth: 48, paddingHorizontal: 8 }]}
+                onPress={() => setSelectedDuration(d)}
+              >
+                <Text style={[s.dayBtnText, selectedDuration === d && s.dayBtnTextActive, { fontSize: 12 }]}>{d}m</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
+
+        {/* Pattern */}
+        <Text style={s.fieldLabel}>Recurrence</Text>
+        <View style={s.dayRow}>
+          {(['weekly', 'biweekly', 'monthly'] as const).map(p => (
+            <TouchableOpacity
+              key={p}
+              style={[s.dayBtn, selectedPattern === p && s.dayBtnActive, { minWidth: 80 }]}
+              onPress={() => setSelectedPattern(p)}
+            >
+              <Text style={[s.dayBtnText, selectedPattern === p && s.dayBtnTextActive]}>
+                {p.charAt(0).toUpperCase() + p.slice(1)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Week of Month */}
+        {selectedPattern === 'monthly' && (
+          <>
+            <Text style={s.fieldLabel}>Which week?</Text>
+            <View style={s.dayRow}>
+              {([1, 2, 3, 4] as const).map(w => {
+                const labels = ['1st', '2nd', '3rd', '4th'];
+                return (
+                  <TouchableOpacity
+                    key={w}
+                    style={[s.dayBtn, selectedWeekOfMonth === w && s.dayBtnActive, { minWidth: 60 }]}
+                    onPress={() => setSelectedWeekOfMonth(w)}
+                  >
+                    <Text style={[s.dayBtnText, selectedWeekOfMonth === w && s.dayBtnTextActive]}>{labels[w - 1]}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </>
+        )}
+
+        {/* Timezone */}
+        <Text style={s.fieldLabel}>Timezone</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+          <View style={[s.dayRow, { flexWrap: 'nowrap' }]}>
+            {TIMEZONE_OPTIONS.map(tz => {
+              const short = tz.split('/')[1]?.replace(/_/g, ' ') || tz;
+              return (
+                <TouchableOpacity
+                  key={tz}
+                  style={[s.dayBtn, selectedTimezone === tz && s.dayBtnActive, { minWidth: 70 }]}
+                  onPress={() => setSelectedTimezone(tz)}
+                >
+                  <Text style={[s.dayBtnText, selectedTimezone === tz && s.dayBtnTextActive, { fontSize: 11 }]}>{short}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </ScrollView>
+
+        {/* Summary */}
+        <View style={s.summaryCard}>
+          <Text style={s.summaryText}>
+            {selectedDays.length === 1
+              ? `${DAY_LABELS[selectedDays[0].dayOfWeek]}s at ${formatTime(selectedDays[0].startTime)} for ${selectedDuration} min`
+              : `${selectedDays.length} days/week for ${selectedDuration} min each`}
+            {selectedPattern === 'monthly'
+              ? `, ${['1st', '2nd', '3rd', '4th'][selectedWeekOfMonth - 1]} week monthly`
+              : `, ${selectedPattern}`}
+          </Text>
+          {selectedDays.length > 1 && (
+            <Text style={s.summaryDays}>
+              {selectedDays.map(d => `${DAY_SHORT_LABELS[d.dayOfWeek]} ${formatTime(d.startTime)}`).join(' · ')}
+            </Text>
+          )}
+          <Text style={s.summaryMeta}>
+            {selectedSessionType === 'check_in' ? 'Check-in' : selectedSessionType.charAt(0).toUpperCase() + selectedSessionType.slice(1)}
+            {' · '}{SCHED_PHASE_LABELS[selectedPhase]}
+            {selectedPhase === 'shared_guidance' && ` (${liveEnd - liveStart}min live)`}
+          </Text>
+          <Text style={s.summaryMeta}>
+            {resolvedRoomSource === 'coach_personal' ? 'Coach-led (Your Zoom)' : 'Hosted'}
+            {' \u00b7 '}{selectedTimezone.split('/')[1]?.replace(/_/g, ' ')} time
+          </Text>
+          {selectedPhase === 'shared_guidance' && (
+            <Text style={[s.summaryMeta, { color: GOLD }]}>
+              Calendar block: {liveEnd - liveStart} min (join at {liveStart}min, leave at {liveEnd}min)
+            </Text>
+          )}
+        </View>
+
+        {/* Conflict Warning */}
+        {conflictWarning && (
+          <View style={{ backgroundColor: 'rgba(224,82,82,0.1)', padding: 10, borderRadius: 6, marginBottom: 8, borderWidth: 1, borderColor: RED + '40' }}>
+            <Text style={{ fontSize: 12, color: RED, fontFamily: FH, marginBottom: 4 }}>⚠ Schedule Conflict</Text>
+            <Text style={{ fontSize: 11, color: RED, fontFamily: FB }}>{conflictWarning}</Text>
+            <Text style={{ fontSize: 10, color: MUTED, fontFamily: FB, marginTop: 4, fontStyle: 'italic' }}>You can still create this slot, but you'll need to be in two places at once.</Text>
+            {conflictSuggestions.length > 0 && (
+              <View style={{ marginTop: 8 }}>
+                <Text style={{ fontSize: 10, color: GREEN, fontFamily: FH, marginBottom: 4 }}>Available times:</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                  {conflictSuggestions.map((sg, i) => (
+                    <TouchableOpacity
+                      key={i}
+                      style={{ backgroundColor: GREEN + '15', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, borderWidth: 1, borderColor: GREEN + '30' }}
+                      onPress={() => {
+                        const [hStr, rest] = sg.time.split(':');
+                        const mStr = rest.slice(0, 2);
+                        const ampm = rest.slice(3);
+                        let h = parseInt(hStr);
+                        if (ampm === 'PM' && h !== 12) h += 12;
+                        if (ampm === 'AM' && h === 12) h = 0;
+                        const newTime = `${h.toString().padStart(2, '0')}:${mStr}`;
+                        setSelectedDays(prev => prev.map(d => d.dayOfWeek === sg.dayIdx ? { ...d, startTime: newTime } : d));
+                      }}
+                    >
+                      <Text style={{ fontSize: 10, color: GREEN, fontFamily: FB }}>{sg.day} {sg.time}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
+          </View>
+        )}
+
+        <BatchCreator />
+
+        {/* Create Button */}
+        <TouchableOpacity
+          style={s.createBtn}
+          onPress={handleCreateOrUpdate}
+          disabled={creating}
+        >
+          {creating ? (
+            <ActivityIndicator size="small" color={BG} />
+          ) : (
+            <Text style={s.createBtnText}>
+              {editingSlotId
+                ? 'Update Slot'
+                : selectedDays.length > 1
+                  ? `Create ${selectedDays.length} Recurring Slots`
+                  : 'Create Recurring Slot'}
+            </Text>
+          )}
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   function CalendarView() {
     if (!allCoachSlots.length) return null;
     // Compute hour range from all slots
@@ -2165,470 +2697,7 @@ export default function ScheduleModal({
               )}
 
               {/* New Slot Form */}
-              <View style={s.schedSection}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text style={s.schedSectionTitle}>
-                    {editingSlotId ? 'Edit Slot' : (activeSlots.length > 0 ? 'Add More Slots' : 'Create Recurring Slots')}
-                  </Text>
-                  <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-                    {editingSlotId && (
-                      <TouchableOpacity onPress={resetForm}>
-                        <Text style={[s.overrideLink, { color: MUTED }]}>Cancel Edit</Text>
-                      </TouchableOpacity>
-                    )}
-                    {slotTemplates.length > 0 && (
-                      <TouchableOpacity onPress={() => setShowTemplateMenu(!showTemplateMenu)}>
-                        <Text style={{ fontSize: 11, color: BLUE, fontFamily: FB }}>Templates</Text>
-                      </TouchableOpacity>
-                    )}
-                    <TouchableOpacity onPress={() => setShowSaveTemplate(!showSaveTemplate)}>
-                      <Text style={{ fontSize: 11, color: GREEN, fontFamily: FB }}>Save as Template</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                {/* Template menu dropdown (Item 4: includes shared templates) */}
-                {showTemplateMenu && (slotTemplates.length > 0 || sharedTemplates.length > 0) && (
-                  <View style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 6, padding: 8, marginBottom: 8 }}>
-                    {slotTemplates.length > 0 && (
-                      <>
-                        <Text style={{ fontSize: 11, color: MUTED, fontFamily: FH, marginBottom: 4 }}>My Templates</Text>
-                        {slotTemplates.map((t: any) => (
-                          <View key={t.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
-                            <TouchableOpacity style={{ flex: 1 }} onPress={() => handleLoadTemplate(t)}>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                <Text style={{ fontSize: 12, color: FG, fontFamily: FB }}>{t.name}</Text>
-                                {templateUpdateAvailable[t.id] && (
-                                  <View style={{ backgroundColor: '#FFC000' + '20', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 3 }}>
-                                    <Text style={{ fontSize: 8, color: '#FFC000', fontFamily: FH }}>Update Available</Text>
-                                  </View>
-                                )}
-                              </View>
-                              <Text style={{ fontSize: 10, color: MUTED, fontFamily: FB }}>
-                                {t.sessionType} · {t.guidancePhase} · {t.durationMinutes}min · {t.recurrencePattern}
-                              </Text>
-                            </TouchableOpacity>
-                            <View style={{ flexDirection: 'row', gap: 8 }}>
-                              <TouchableOpacity onPress={async () => {
-                                try {
-                                  const version = (t.version || 0) + 1;
-                                  await addDoc(collection(db, 'shared_templates'), { ...t, sharedBy: coachId, sharedAt: new Date(), version });
-                                  // Update local template with sharedTemplateId reference
-                                  const tRef = doc(db, 'coaches', coachId, 'slot_templates', t.id);
-                                  await updateDoc(tRef, { version });
-                                  Alert.alert('Shared', 'Template shared with all coaches');
-                                } catch (err) { console.error('Share failed:', err); }
-                              }}>
-                                <Text style={{ fontSize: 10, color: BLUE, fontFamily: FB }}>Share</Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity onPress={() => handleDeleteTemplate(t.id)}>
-                                <Text style={{ fontSize: 10, color: RED, fontFamily: FB }}>Delete</Text>
-                              </TouchableOpacity>
-                            </View>
-                          </View>
-                        ))}
-                      </>
-                    )}
-                    {sharedTemplates.length > 0 && (
-                      <>
-                        <Text style={{ fontSize: 11, color: BLUE, fontFamily: FH, marginTop: slotTemplates.length > 0 ? 8 : 0, marginBottom: 4 }}>Shared Templates</Text>
-                        {sharedTemplates.map((t: any) => (
-                          <View key={t.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
-                            <TouchableOpacity style={{ flex: 1 }} onPress={() => handleLoadTemplate(t)}>
-                              <Text style={{ fontSize: 12, color: FG, fontFamily: FB }}>{t.name}</Text>
-                              <Text style={{ fontSize: 10, color: MUTED, fontFamily: FB }}>
-                                {t.sessionType} · {t.guidancePhase} · {t.durationMinutes}min · {t.recurrencePattern}
-                              </Text>
-                            </TouchableOpacity>
-                          </View>
-                        ))}
-                      </>
-                    )}
-                  </View>
-                )}
-
-                {/* Save template input */}
-                {showSaveTemplate && (
-                  <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-                    <TextInput
-                      style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 6, padding: 8, color: FG, fontFamily: FB, fontSize: 12 }}
-                      placeholder="Template name..."
-                      placeholderTextColor={MUTED}
-                      value={templateName}
-                      onChangeText={setTemplateName}
-                    />
-                    <TouchableOpacity
-                      style={{ backgroundColor: GREEN + '20', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6 }}
-                      onPress={handleSaveTemplate}
-                    >
-                      <Text style={{ fontSize: 11, color: GREEN, fontFamily: FH }}>Save</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => { setShowSaveTemplate(false); setTemplateName(''); }}>
-                      <Text style={{ fontSize: 11, color: MUTED, fontFamily: FB }}>Cancel</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                {/* Session Type */}
-                <Text style={s.fieldLabel}>Session Type</Text>
-                <View style={s.dayRow}>
-                  {(['strength', 'cardio', 'flexibility', 'hiit', 'recovery', 'check_in'] as SchedulingSessionType[]).map(st => {
-                    const isUsed = usedSessionTypes.has(st) && !editingSlotId;
-                    return (
-                      <TouchableOpacity
-                        key={st}
-                        style={[s.dayBtn, selectedSessionType === st && s.dayBtnActive, isUsed && { opacity: 0.4 }, { minWidth: 70 }]}
-                        onPress={() => setSelectedSessionType(st)}
-                      >
-                        <Text style={[s.dayBtnText, selectedSessionType === st && s.dayBtnTextActive, { fontSize: 12 }]}>
-                          {st === 'check_in' ? 'Check-in' : st.charAt(0).toUpperCase() + st.slice(1)}
-                        </Text>
-                        {isUsed && <Text style={{ fontSize: 8, color: MUTED, fontFamily: FB, marginTop: 1 }}>Active</Text>}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-                {/* Session type validation warning */}
-                {sessionTypeWarning && (
-                  <View style={{ backgroundColor: 'rgba(245,166,35,0.1)', padding: 8, borderRadius: 6, marginTop: 6 }}>
-                    <Text style={{ fontSize: 11, color: GOLD, fontFamily: FB }}>
-                      ⚠ {sessionTypeWarning}
-                    </Text>
-                  </View>
-                )}
-
-                {/* Guidance Phase — with week counts from plan (hidden for check-in) */}
-                {selectedSessionType !== 'check_in' && (<>
-                <View style={s.phaseHeaderRow}>
-                  <Text style={s.fieldLabel}>Guidance Phase</Text>
-                  {planPhases && !planPhaseOverride && (
-                    <TouchableOpacity onPress={() => setPlanPhaseOverride(true)}>
-                      <Text style={s.overrideLink}>Override</Text>
-                    </TouchableOpacity>
-                  )}
-                  {planPhaseOverride && (
-                    <TouchableOpacity onPress={() => setPlanPhaseOverride(false)}>
-                      <Text style={[s.overrideLink, { color: GREEN }]}>Sync to plan</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-                <View style={s.dayRow}>
-                  {([
-                    { key: 'coach_guided' as GuidancePhase, label: 'Coach Guided', color: GREEN },
-                    { key: 'shared_guidance' as GuidancePhase, label: 'Shared Guidance', color: '#5B9BD5' },
-                    { key: 'self_guided' as GuidancePhase, label: 'Self Guided', color: '#FFC000' },
-                  ] as const).map(phase => {
-                    const weekCount = phaseWeekMap[phase.key];
-                    const isDisabled = !planPhaseOverride && autoPhaseForSessionType !== null;
-                    return (
-                      <TouchableOpacity
-                        key={phase.key}
-                        style={[
-                          s.phaseBtn,
-                          selectedPhase === phase.key && { backgroundColor: phase.color + '18', borderColor: phase.color + '60' },
-                          isDisabled && selectedPhase !== phase.key && { opacity: 0.35 },
-                        ]}
-                        onPress={() => {
-                          if (!isDisabled) setSelectedPhase(phase.key);
-                        }}
-                        disabled={isDisabled}
-                      >
-                        <Text style={[
-                          s.phaseBtnLabel,
-                          selectedPhase === phase.key && { color: phase.color },
-                        ]}>
-                          {phase.label}
-                        </Text>
-                        {weekCount > 0 && (
-                          <Text style={[
-                            s.phaseBtnWeeks,
-                            selectedPhase === phase.key && { color: phase.color },
-                          ]}>
-                            {weekCount} weeks
-                          </Text>
-                        )}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-                {!planPhaseOverride && autoPhaseForSessionType !== null && (
-                  <Text style={{ fontSize: 10, color: MUTED, fontFamily: FB, marginTop: 4, fontStyle: 'italic' }}>
-                    Auto-set from plan. Tap "Override" to change.
-                  </Text>
-                )}
-                </>)}
-                {selectedSessionType === 'check_in' && (
-                  <View style={s.roomSourceRow}>
-                    <Icon name="info" size={14} color={GREEN} />
-                    <Text style={[s.roomSourceText, { color: GREEN }]}>
-                      Check-in — always coach-guided, monthly
-                    </Text>
-                  </View>
-                )}
-
-                {/* Hosting Mode Indicator (auto-determined, hidden for check-in) */}
-                {selectedSessionType !== 'check_in' && (
-                  <View style={s.roomSourceRow}>
-                    <Icon name="info" size={14} color={MUTED} />
-                    <Text style={s.roomSourceText}>
-                      {selectedPhase === 'coach_guided'
-                        ? 'Coach-led \u2014 sessions use your personal Zoom'
-                        : 'Hosted \u2014 sessions use shared infrastructure'}
-                    </Text>
-                  </View>
-                )}
-
-                {/* ── Shared Guidance Window (only for shared_guidance phase, not check-in) ── */}
-                {selectedPhase === 'shared_guidance' && selectedSessionType !== 'check_in' && (
-                  <View style={s.sliderSection}>
-                    <Text style={s.fieldLabel}>Shared Guidance Window</Text>
-                    <Text style={s.fieldHint}>
-                      Drag the handles to set when you'll be guiding your member
-                    </Text>
-                    <DualHandleSlider
-                      totalMinutes={selectedDuration}
-                      liveStart={liveStart}
-                      liveEnd={liveEnd}
-                      onChangeStart={setLiveStart}
-                      onChangeEnd={setLiveEnd}
-                    />
-                  </View>
-                )}
-
-                {/* ── Multi-Day Selector ─────────────────────────────────────── */}
-                <Text style={s.fieldLabel}>Days & Times</Text>
-                <Text style={s.fieldHint}>Tap days to select. Each day gets its own start time.</Text>
-                <View style={s.dayRow}>
-                  {DAY_SHORT_LABELS.map((label, idx) => {
-                    const isSelected = selectedDays.some(d => d.dayOfWeek === idx);
-                    return (
-                      <TouchableOpacity
-                        key={idx}
-                        style={[s.dayBtn, isSelected && s.dayBtnActive]}
-                        onPress={() => toggleDay(idx)}
-                      >
-                        <Text style={[s.dayBtnText, isSelected && s.dayBtnTextActive]}>
-                          {label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-
-                {/* Per-day time pickers */}
-                {selectedDays.map(entry => (
-                  <View key={entry.dayOfWeek} style={s.dayTimeRow}>
-                    <View style={s.dayTimeLabel}>
-                      <Text style={s.dayTimeDayText}>{DAY_LABELS[entry.dayOfWeek]}</Text>
-                    </View>
-                    <TouchableOpacity
-                      style={s.dayTimeBtn}
-                      onPress={() => setEditingTimeForDay(
-                        editingTimeForDay === entry.dayOfWeek ? null : entry.dayOfWeek
-                      )}
-                    >
-                      <Text style={s.dayTimeBtnText}>{formatTime(entry.startTime)}</Text>
-                      <Icon name="chevron-down" size={14} color={MUTED} />
-                    </TouchableOpacity>
-                    <Text style={s.dayTimeEnd}>
-                      — {formatTime(addMinutesToTime(entry.startTime, selectedDuration))}
-                    </Text>
-                  </View>
-                ))}
-
-                {/* Time picker dropdown for active day */}
-                {editingTimeForDay !== null && (
-                  <View style={s.timePickerWrap}>
-                    <Text style={s.timePickerTitle}>
-                      Set time for {DAY_LABELS[editingTimeForDay]}
-                    </Text>
-                    <ScrollView style={s.timeList} nestedScrollEnabled>
-                      {TIME_OPTIONS.map(t => {
-                        const isActive = selectedDays.find(d => d.dayOfWeek === editingTimeForDay)?.startTime === t;
-                        return (
-                          <TouchableOpacity
-                            key={t}
-                            style={[s.timeOption, isActive && s.timeOptionActive]}
-                            onPress={() => updateDayTime(editingTimeForDay, t)}
-                          >
-                            <Text style={[s.timeOptionText, isActive && { color: GOLD }]}>
-                              {formatTime(t)}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </ScrollView>
-                  </View>
-                )}
-
-                {/* Duration — sliding scale */}
-                <Text style={s.fieldLabel}>Duration — {selectedDuration} min</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }}>
-                  <View style={[s.dayRow, { flexWrap: 'nowrap' }]}>
-                    {DURATION_OPTIONS.map(d => (
-                      <TouchableOpacity
-                        key={d}
-                        style={[s.dayBtn, selectedDuration === d && s.dayBtnActive, { minWidth: 48, paddingHorizontal: 8 }]}
-                        onPress={() => setSelectedDuration(d)}
-                      >
-                        <Text style={[s.dayBtnText, selectedDuration === d && s.dayBtnTextActive, { fontSize: 12 }]}>
-                          {d}m
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </ScrollView>
-
-                {/* Pattern */}
-                <Text style={s.fieldLabel}>Recurrence</Text>
-                <View style={s.dayRow}>
-                  {(['weekly', 'biweekly', 'monthly'] as const).map(p => (
-                    <TouchableOpacity
-                      key={p}
-                      style={[s.dayBtn, selectedPattern === p && s.dayBtnActive, { minWidth: 80 }]}
-                      onPress={() => setSelectedPattern(p)}
-                    >
-                      <Text style={[s.dayBtnText, selectedPattern === p && s.dayBtnTextActive]}>
-                        {p.charAt(0).toUpperCase() + p.slice(1)}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                {/* Week of Month — only visible when Monthly is selected */}
-                {selectedPattern === 'monthly' && (
-                  <>
-                    <Text style={s.fieldLabel}>Which week?</Text>
-                    <View style={s.dayRow}>
-                      {([1, 2, 3, 4] as const).map(w => {
-                        const labels = ['1st', '2nd', '3rd', '4th'];
-                        return (
-                          <TouchableOpacity
-                            key={w}
-                            style={[s.dayBtn, selectedWeekOfMonth === w && s.dayBtnActive, { minWidth: 60 }]}
-                            onPress={() => setSelectedWeekOfMonth(w)}
-                          >
-                            <Text style={[s.dayBtnText, selectedWeekOfMonth === w && s.dayBtnTextActive]}>
-                              {labels[w - 1]}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                  </>
-                )}
-
-                {/* Timezone */}
-                <Text style={s.fieldLabel}>Timezone</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
-                  <View style={[s.dayRow, { flexWrap: 'nowrap' }]}>
-                    {TIMEZONE_OPTIONS.map(tz => {
-                      const short = tz.split('/')[1]?.replace(/_/g, ' ') || tz;
-                      return (
-                        <TouchableOpacity
-                          key={tz}
-                          style={[s.dayBtn, selectedTimezone === tz && s.dayBtnActive, { minWidth: 70 }]}
-                          onPress={() => setSelectedTimezone(tz)}
-                        >
-                          <Text style={[s.dayBtnText, selectedTimezone === tz && s.dayBtnTextActive, { fontSize: 11 }]}>
-                            {short}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                </ScrollView>
-
-                {/* Summary */}
-                <View style={s.summaryCard}>
-                  <Text style={s.summaryText}>
-                    {selectedDays.length === 1
-                      ? `${DAY_LABELS[selectedDays[0].dayOfWeek]}s at ${formatTime(selectedDays[0].startTime)} for ${selectedDuration} min`
-                      : `${selectedDays.length} days/week for ${selectedDuration} min each`}
-                    {selectedPattern === 'monthly'
-                      ? `, ${['1st', '2nd', '3rd', '4th'][selectedWeekOfMonth - 1]} week monthly`
-                      : `, ${selectedPattern}`}
-                  </Text>
-                  {selectedDays.length > 1 && (
-                    <Text style={s.summaryDays}>
-                      {selectedDays.map(d => `${DAY_SHORT_LABELS[d.dayOfWeek]} ${formatTime(d.startTime)}`).join(' · ')}
-                    </Text>
-                  )}
-                  <Text style={s.summaryMeta}>
-                    {selectedSessionType === 'check_in' ? 'Check-in' : selectedSessionType.charAt(0).toUpperCase() + selectedSessionType.slice(1)}
-                    {' · '}
-                    {SCHED_PHASE_LABELS[selectedPhase]}
-                    {selectedPhase === 'shared_guidance' && ` (${liveEnd - liveStart}min live)`}
-                  </Text>
-                  <Text style={s.summaryMeta}>
-                    {resolvedRoomSource === 'coach_personal' ? 'Coach-led (Your Zoom)' : 'Hosted'}
-                    {' \u00b7 '}
-                    {selectedTimezone.split('/')[1]?.replace(/_/g, ' ')} time
-                  </Text>
-                  {selectedPhase === 'shared_guidance' && (
-                    <Text style={[s.summaryMeta, { color: GOLD }]}>
-                      Calendar block: {liveEnd - liveStart} min (join at {liveStart}min, leave at {liveEnd}min)
-                    </Text>
-                  )}
-                </View>
-
-                {/* Conflict Warning */}
-                {conflictWarning && (
-                  <View style={{ backgroundColor: 'rgba(224,82,82,0.1)', padding: 10, borderRadius: 6, marginBottom: 8, borderWidth: 1, borderColor: RED + '40' }}>
-                    <Text style={{ fontSize: 12, color: RED, fontFamily: FH, marginBottom: 4 }}>⚠ Schedule Conflict</Text>
-                    <Text style={{ fontSize: 11, color: RED, fontFamily: FB }}>{conflictWarning}</Text>
-                    <Text style={{ fontSize: 10, color: MUTED, fontFamily: FB, marginTop: 4, fontStyle: 'italic' }}>You can still create this slot, but you'll need to be in two places at once.</Text>
-                    {/* Item 4: Conflict resolution suggestions */}
-                    {conflictSuggestions.length > 0 && (
-                      <View style={{ marginTop: 8 }}>
-                        <Text style={{ fontSize: 10, color: GREEN, fontFamily: FH, marginBottom: 4 }}>Available times:</Text>
-                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                          {conflictSuggestions.map((s, i) => (
-                            <TouchableOpacity
-                              key={i}
-                              style={{ backgroundColor: GREEN + '15', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, borderWidth: 1, borderColor: GREEN + '30' }}
-                              onPress={() => {
-                                // Apply suggested time to the matching day
-                                const [hStr, rest] = s.time.split(':');
-                                const mStr = rest.slice(0, 2);
-                                const ampm = rest.slice(3);
-                                let h = parseInt(hStr);
-                                if (ampm === 'PM' && h !== 12) h += 12;
-                                if (ampm === 'AM' && h === 12) h = 0;
-                                const newTime = `${h.toString().padStart(2, '0')}:${mStr}`;
-                                setSelectedDays(prev => prev.map(d => d.dayOfWeek === s.dayIdx ? { ...d, startTime: newTime } : d));
-                              }}
-                            >
-                              <Text style={{ fontSize: 10, color: GREEN, fontFamily: FB }}>{s.day} {s.time}</Text>
-                            </TouchableOpacity>
-                          ))}
-                        </View>
-                      </View>
-                    )}
-                  </View>
-                )}
-
-                <BatchCreator />
-
-                {/* Create Button */}
-                <TouchableOpacity
-                  style={s.createBtn}
-                  onPress={handleCreateOrUpdate}
-                  disabled={creating}
-                >
-                  {creating ? (
-                    <ActivityIndicator size="small" color={BG} />
-                  ) : (
-                    <Text style={s.createBtnText}>
-                      {editingSlotId
-                        ? 'Update Slot'
-                        : selectedDays.length > 1
-                          ? `Create ${selectedDays.length} Recurring Slots`
-                          : 'Create Recurring Slot'}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              </View>
+              <SlotForm />
             </ScrollView>
           </View>
         </View>
