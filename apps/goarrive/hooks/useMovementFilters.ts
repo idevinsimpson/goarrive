@@ -21,9 +21,14 @@ export interface MovementFilterable {
   equipment?: string;
   muscleGroups?: string[];
   difficulty?: string;
-  createdAt?: any;
-  updatedAt?: any;
-  [key: string]: any;
+  coachId?: string;
+  isGlobal?: boolean;
+  tags?: string[];
+  mediaUrl?: string | null;
+  videoUrl?: string | null;
+  thumbnailUrl?: string | null;
+  createdAt?: { seconds: number; nanoseconds: number };
+  updatedAt?: { seconds: number; nanoseconds: number };
 }
 
 export const EQUIPMENT_FILTER_OPTIONS = [
