@@ -54,7 +54,7 @@ interface MemberPickerItem {
 interface Props {
   visible: boolean;
   /** Pre-selected member name (from Members screen). Empty = show member picker. */
-  memberName: string;
+  memberName?: string;
   /** Pre-selected member ID (from Members screen). Empty = show member picker. */
   memberId?: string;
   coachId: string;

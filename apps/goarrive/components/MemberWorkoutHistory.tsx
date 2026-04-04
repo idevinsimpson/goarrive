@@ -53,6 +53,7 @@ interface HistoryLog {
 interface MemberWorkoutHistoryProps {
   visible: boolean;
   memberId: string;
+  memberName?: string;
   onClose: () => void;
 }
 

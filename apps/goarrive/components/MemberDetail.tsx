@@ -629,7 +629,7 @@ export default function MemberDetail({
             left,
             started,
             eventCount: events.length,
-            label: joined ? 'Attended' : (inst.status === 'missed' ? 'Missed' : (started ? 'No-show' : 'Pending')),
+            label: joined ? 'Attended' : ((inst as any).status === 'missed' ? 'Missed' : (started ? 'No-show' : 'Pending')),
           };
         } catch {
           attendance[inst.id] = { label: '—', eventCount: 0 };
@@ -2280,7 +2280,7 @@ export default function MemberDetail({
                     { key: 'self_guided' as GuidancePhase, label: 'Self Guided', color: '#FFC000' },
                   ] as const).map(phase => {
                     const weekCount = phaseWeekMap[phase.key];
-                    const isDisabled = !planPhaseOverride && autoPhaseForSessionType !== null && selectedSessionType !== 'check_in';
+                    const isDisabled = !planPhaseOverride && autoPhaseForSessionType !== null && (selectedSessionType as string) !== 'check_in';
                     return (
                       <TouchableOpacity
                         key={phase.key}
@@ -2781,19 +2781,19 @@ export default function MemberDetail({
       />
       <CoachReviewQueue
         visible={showReviewQueue}
-        coachId={claims?.coachId || user?.uid || ''}
+        coachId={claims?.coachId || authUser?.uid || ''}
         onClose={() => setShowReviewQueue(false)}
       />
       <WorkoutAnalytics
         visible={showAnalytics}
         memberId={member.id}
         memberName={member.name || member.displayName || 'Member'}
-        coachId={claims?.coachId || user?.uid || ''}
+        coachId={claims?.coachId || authUser?.uid || ''}
         onClose={() => setShowAnalytics(false)}
       />
       <WorkoutLogReview
         visible={showLogReview}
-        coachId={claims?.coachId || user?.uid || ''}
+        coachId={claims?.coachId || authUser?.uid || ''}
         onClose={() => setShowLogReview(false)}
       />
       <MemberWorkoutHistory

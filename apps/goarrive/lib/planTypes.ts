@@ -190,6 +190,8 @@ export interface PostContract {
    * monthly rate (monthlyRate × 0.5).
    */
   ctsMonthlySavings?: number;
+  /** Computed monthly rate for post-contract phase */
+  monthlyRate?: number;
 }
 
 // ─── Continuation pricing (post-contract phase, coach-editable) ─────────────
@@ -216,6 +218,12 @@ export interface ContinuationPricing {
   continuationCheckInMinutesPerMonth: number;
   /** Whether the continuation module is enabled (coach toggle). Default: true. */
   continuationEnabled: boolean;
+  /** Computed monthly price for continuation phase */
+  continuationMonthlyPrice?: number;
+  /** Computed pay-in-full total for continuation phase */
+  continuationPayInFullTotal?: number;
+  /** Computed monthly equivalent when paying in full for continuation */
+  continuationPayInFullMonthlyEquivalent?: number;
 }
 
 // ─── Accepted plan snapshot (immutable at checkout time) ─────────────────────
@@ -444,6 +452,12 @@ export interface MemberPlanData {
   // Timestamps
   createdAt?: any;
   updatedAt?: any;
+
+  // Plan start date
+  planStartDate?: any;
+
+  // Legacy pricing object
+  pricing?: any;
 
   // Shareable link
   shareToken?: string;
