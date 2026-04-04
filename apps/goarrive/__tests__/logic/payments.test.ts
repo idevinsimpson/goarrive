@@ -101,6 +101,11 @@ describe('createDefaultSchedule', () => {
     const s5 = createDefaultSchedule(5).filter(d => d.type === 'Rest').length;
     expect(s3).toBeGreaterThan(s5);
   });
+
+  it.each([2, 3, 4, 5, 6] as const)('createDefaultSchedule(%i) produces exactly %i session days', (n) => {
+    const sessionDays = createDefaultSchedule(n).filter(d => d.isSession && d.type !== 'Rest');
+    expect(sessionDays).toHaveLength(n);
+  });
 });
 
 describe('createDefaultPhases', () => {
@@ -131,5 +136,43 @@ describe('calculatePricing', () => {
     plan.monthlyPriceOverride = 999;
     const result = calculatePricing(plan);
     expect(result.displayMonthlyPrice).toBe(999);
+  });
+
+  it('2-session plan produces lower price than 6-session plan', () => {
+    const plan2 = createDefaultPlan('A', 'm1', 'c1');
+    plan2.sessionsPerWeek = 2;
+    plan2.weeklySchedule = createDefaultSchedule(2);
+    const plan6 = createDefaultPlan('B', 'm2', 'c1');
+    plan6.sessionsPerWeek = 6;
+    plan6.weeklySchedule = createDefaultSchedule(6);
+    expect(calculatePricing(plan2).calculatedMonthlyPrice).toBeLessThan(
+      calculatePricing(plan6).calculatedMonthlyPrice
+    );
+  });
+
+  it('pay-in-full discount produces finite positive value', () => {
+    const plan = createDefaultPlan('Test', 'm1', 'c1');
+    const result = calculatePricing(plan);
+    expect(result.payInFullDiscount).toBeGreaterThan(0);
+    expect(Number.isFinite(result.payInFullDiscount)).toBe(true);
+  });
+
+  it('all numeric results are finite (no NaN or Infinity)', () => {
+    const plan = createDefaultPlan('Test', 'm1', 'c1');
+    const result = calculatePricing(plan);
+    const numericKeys = Object.entries(result).filter(([, v]) => typeof v === 'number');
+    for (const [key, value] of numericKeys) {
+      expect(Number.isFinite(value)).toBe(true);
+    }
+  });
+
+  it('short contract (6 months) still produces valid pricing', () => {
+    const plan = createDefaultPlan('Test', 'm1', 'c1');
+    plan.contractMonths = 6;
+    plan.phases = createDefaultPhases(6);
+    const result = calculatePricing(plan);
+    expect(result.calculatedMonthlyPrice).toBeGreaterThan(0);
+    expect(result.totalSessions).toBeGreaterThan(0);
+    expect(Number.isFinite(result.totalProgramPrice)).toBe(true);
   });
 });
