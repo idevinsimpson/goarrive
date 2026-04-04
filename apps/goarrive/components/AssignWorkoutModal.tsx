@@ -35,6 +35,7 @@ import {
   orderBy,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { FB, FH } from '../lib/theme';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -66,11 +67,6 @@ interface Props {
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
-
-const FONT_HEADING =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FONT_BODY =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -848,7 +844,7 @@ const s = StyleSheet.create({
     fontSize: 17,
     fontWeight: '700',
     color: '#F0F4F8',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   badgeRow: {
     flexDirection: 'row',
@@ -877,7 +873,7 @@ const s = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#F5A623',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
     maxWidth: 140,
   },
   searchRow: {
@@ -899,7 +895,7 @@ const s = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     color: '#F0F4F8',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   loadingWrap: {
     flex: 1,
@@ -916,7 +912,7 @@ const s = StyleSheet.create({
   emptyText: {
     fontSize: 14,
     color: '#8A95A3',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     textAlign: 'center',
     lineHeight: 22,
   },
@@ -954,12 +950,12 @@ const s = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#F0F4F8',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   cardMeta: {
     fontSize: 12,
     color: '#8A95A3',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     marginTop: 2,
   },
   // Member card
@@ -986,7 +982,7 @@ const s = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#7DD3FC',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   // Schedule step
   scheduleContent: {
@@ -1007,14 +1003,14 @@ const s = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#F0F4F8',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
     flex: 1,
   },
   sectionLabel: {
     fontSize: 13,
     fontWeight: '600',
     color: '#8A95A3',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 10,
@@ -1041,7 +1037,7 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#8A95A3',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   quickDateBtnTextActive: {
     color: '#F5A623',
@@ -1053,7 +1049,7 @@ const s = StyleSheet.create({
     paddingVertical: 14,
     fontSize: 16,
     color: '#F0F4F8',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
     marginBottom: 8,
@@ -1061,7 +1057,7 @@ const s = StyleSheet.create({
   datePreview: {
     fontSize: 14,
     color: '#8A95A3',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     marginBottom: 32,
     paddingLeft: 4,
   },
@@ -1081,7 +1077,7 @@ const s = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#0E1117',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   // Workout preview
   previewSection: {
@@ -1096,7 +1092,7 @@ const s = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#8A95A3',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 10,
@@ -1108,13 +1104,13 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#F5A623',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
     marginBottom: 4,
   },
   previewMovement: {
     fontSize: 12,
     color: '#A0AEC0',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     lineHeight: 18,
   },
   // Success step
@@ -1133,12 +1129,12 @@ const s = StyleSheet.create({
     fontSize: 22,
     fontWeight: '700',
     color: '#F0F4F8',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   successSub: {
     fontSize: 14,
     color: '#8A95A3',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     textAlign: 'center',
     lineHeight: 22,
     marginBottom: 16,
@@ -1160,7 +1156,7 @@ const s = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#F5A623',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   calendarBtn: {
     flexDirection: 'row',
@@ -1179,7 +1175,7 @@ const s = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#5B9BD5',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   doneBtn: {
     paddingVertical: 14,
@@ -1195,7 +1191,7 @@ const s = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#8A95A3',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   // Recurring schedule
   recurringSection: {
@@ -1224,7 +1220,7 @@ const s = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#F0F4F8',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   recurringOptions: {
     marginTop: 14,
@@ -1234,7 +1230,7 @@ const s = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#8A95A3',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -1260,7 +1256,7 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#8A95A3',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   dayBtnTextActive: {
     color: '#0E1117',
@@ -1285,7 +1281,7 @@ const s = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#8A95A3',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   weekBtnTextActive: {
     color: '#F5A623',

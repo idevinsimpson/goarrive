@@ -12,15 +12,10 @@ import {
   Text,
   Pressable,
   StyleSheet,
-  Platform,
   Modal,
 } from 'react-native';
 import { Icon } from './Icon';
-
-const FONT_HEADING =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FONT_BODY =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+import { FB, FH } from '../lib/theme';
 
 interface Props {
   visible: boolean;
@@ -113,13 +108,13 @@ const s = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#F0F4F8',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
     textAlign: 'center',
   },
   message: {
     fontSize: 14,
     color: '#8A95A3',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -140,7 +135,7 @@ const s = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#8A95A3',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   confirmBtn: {
     flex: 1,
@@ -152,6 +147,6 @@ const s = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#FFFFFF',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
 });

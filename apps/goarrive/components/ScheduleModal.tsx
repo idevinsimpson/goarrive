@@ -5,7 +5,7 @@
  * Includes phase timeline, calendar view, conflict detection, templates,
  * batch creation, and instance management.
  */
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, useReducer } from 'react';
 import {
   View,
   Text,
@@ -103,6 +103,233 @@ interface DayTimeEntry {
   dayOfWeek: number;
   startTime: string;
 }
+
+// ── Form Reducer ────────────────────────────────────────────────────────────
+interface FormState {
+  selectedDays: DayTimeEntry[];
+  editingTimeForDay: number | null;
+  selectedDuration: number;
+  selectedTimezone: string;
+  selectedPattern: 'weekly' | 'biweekly' | 'monthly';
+  selectedWeekOfMonth: 1 | 2 | 3 | 4;
+  selectedSessionType: SchedulingSessionType;
+  selectedPhase: GuidancePhase;
+  creating: boolean;
+  editingSlotId: string | null;
+  liveStart: number;
+  liveEnd: number;
+  planPhaseOverride: boolean;
+  templateName: string;
+  showSaveTemplate: boolean;
+  showTemplateMenu: boolean;
+}
+
+const INITIAL_FORM_STATE: FormState = {
+  selectedDays: [{ dayOfWeek: 1, startTime: '06:00' }],
+  editingTimeForDay: null,
+  selectedDuration: 30,
+  selectedTimezone: 'America/New_York',
+  selectedPattern: 'weekly',
+  selectedWeekOfMonth: 1,
+  selectedSessionType: 'strength',
+  selectedPhase: 'coach_guided',
+  creating: false,
+  editingSlotId: null,
+  liveStart: Math.round((30 * 0.25) / STEP) * STEP,
+  liveEnd: Math.round((30 * 0.75) / STEP) * STEP,
+  planPhaseOverride: false,
+  templateName: '',
+  showSaveTemplate: false,
+  showTemplateMenu: false,
+};
+
+type FormAction =
+  | { type: 'SET_FIELD'; field: keyof FormState; value: any }
+  | { type: 'RESET'; duration?: number }
+  | { type: 'LOAD_TEMPLATE'; template: any }
+  | { type: 'EDIT_SLOT'; slot: any }
+  | { type: 'SET_DURATION'; duration: number };
+
+function formReducer(state: FormState, action: FormAction): FormState {
+  switch (action.type) {
+    case 'SET_FIELD':
+      return { ...state, [action.field]: action.value };
+    case 'RESET': {
+      const dur = action.duration || 30;
+      return {
+        ...INITIAL_FORM_STATE,
+        selectedDuration: DURATION_OPTIONS.includes(dur) ? dur : 30,
+        liveStart: Math.round((dur * 0.25) / STEP) * STEP,
+        liveEnd: Math.round((dur * 0.75) / STEP) * STEP,
+      };
+    }
+    case 'LOAD_TEMPLATE': {
+      const t = action.template;
+      return {
+        ...state,
+        selectedSessionType: t.sessionType || 'strength',
+        selectedPhase: t.guidancePhase || 'coach_guided',
+        selectedDuration: t.durationMinutes || 30,
+        selectedPattern: t.recurrencePattern || 'weekly',
+        selectedTimezone: t.timezone || 'America/New_York',
+        liveStart: t.liveStart !== undefined ? t.liveStart : state.liveStart,
+        liveEnd: t.liveEnd !== undefined ? t.liveEnd : state.liveEnd,
+        selectedDays: t.days?.length
+          ? t.days.map((d: number) => ({ dayOfWeek: d, startTime: '06:00' }))
+          : state.selectedDays,
+        showTemplateMenu: false,
+        planPhaseOverride: true,
+      };
+    }
+    case 'EDIT_SLOT': {
+      const s = action.slot;
+      return {
+        ...state,
+        editingSlotId: s.id,
+        selectedSessionType: s.sessionType || 'strength',
+        selectedPhase: s.guidancePhase || 'coach_guided',
+        selectedDays: [{ dayOfWeek: s.dayOfWeek, startTime: s.startTime || '06:00' }],
+        selectedDuration: s.durationMinutes || 30,
+        selectedPattern: s.recurrencePattern || 'weekly',
+        selectedWeekOfMonth: s.weekOfMonth || state.selectedWeekOfMonth,
+        selectedTimezone: s.timezone || 'America/New_York',
+        liveStart: s.liveCoachingStartMin !== undefined ? s.liveCoachingStartMin : state.liveStart,
+        liveEnd: s.liveCoachingEndMin !== undefined ? s.liveCoachingEndMin : state.liveEnd,
+        planPhaseOverride: true,
+      };
+    }
+    case 'SET_DURATION': {
+      const dur = action.duration;
+      return {
+        ...state,
+        selectedDuration: dur,
+        liveStart: Math.min(state.liveStart, dur - STEP),
+        liveEnd: Math.min(state.liveEnd, dur),
+      };
+    }
+    default:
+      return state;
+  }
+}
+
+// ── Instance Reducer ────────────────────────────────────────────────────────
+interface InstanceState {
+  expandedSlotId: string | null;
+  slotInstances: any[];
+  instanceAttendance: Record<string, any>;
+  rescheduleInstanceId: string | null;
+  rescheduleDate: string;
+  rescheduleTime: string;
+  rescheduling: boolean;
+  skippingInstanceId: string | null;
+  skipReason: string;
+  editingNoteId: string | null;
+  noteText: string;
+  instanceNotes: Record<string, string>;
+}
+
+const INITIAL_INSTANCE_STATE: InstanceState = {
+  expandedSlotId: null,
+  slotInstances: [],
+  instanceAttendance: {},
+  rescheduleInstanceId: null,
+  rescheduleDate: '',
+  rescheduleTime: '06:00',
+  rescheduling: false,
+  skippingInstanceId: null,
+  skipReason: '',
+  editingNoteId: null,
+  noteText: '',
+  instanceNotes: {},
+};
+
+type InstanceAction =
+  | { type: 'SET_FIELD'; field: keyof InstanceState; value: any }
+  | { type: 'EXPAND_SLOT'; slotId: string | null }
+  | { type: 'START_RESCHEDULE'; instanceId: string; date: string; time: string }
+  | { type: 'CANCEL_RESCHEDULE' }
+  | { type: 'START_SKIP'; instanceId: string }
+  | { type: 'CANCEL_SKIP' }
+  | { type: 'SAVE_NOTE'; instanceId: string; notes: string };
+
+function instanceReducer(state: InstanceState, action: InstanceAction): InstanceState {
+  switch (action.type) {
+    case 'SET_FIELD':
+      return { ...state, [action.field]: action.value };
+    case 'EXPAND_SLOT':
+      return {
+        ...state,
+        expandedSlotId: action.slotId,
+        slotInstances: action.slotId ? state.slotInstances : [],
+        instanceAttendance: action.slotId ? state.instanceAttendance : {},
+      };
+    case 'START_RESCHEDULE':
+      return {
+        ...state,
+        rescheduleInstanceId: action.instanceId,
+        rescheduleDate: action.date,
+        rescheduleTime: action.time,
+      };
+    case 'CANCEL_RESCHEDULE':
+      return { ...state, rescheduleInstanceId: null };
+    case 'START_SKIP':
+      return { ...state, skippingInstanceId: action.instanceId, skipReason: '' };
+    case 'CANCEL_SKIP':
+      return { ...state, skippingInstanceId: null, skipReason: '' };
+    case 'SAVE_NOTE':
+      return {
+        ...state,
+        instanceNotes: { ...state.instanceNotes, [action.instanceId]: action.notes },
+      };
+    default:
+      return state;
+  }
+}
+
+// ── Batch Reducer ───────────────────────────────────────────────────────────
+interface BatchState {
+  showBatchPicker: boolean;
+  batchMembers: any[];
+  selectedBatchMembers: Set<string>;
+  batchCreating: boolean;
+  batchOverrides: Record<string, { dayOfWeek?: string; startTime?: string }>;
+}
+
+const INITIAL_BATCH_STATE: BatchState = {
+  showBatchPicker: false,
+  batchMembers: [],
+  selectedBatchMembers: new Set(),
+  batchCreating: false,
+  batchOverrides: {},
+};
+
+type BatchAction =
+  | { type: 'SET_FIELD'; field: keyof BatchState; value: any }
+  | { type: 'TOGGLE_MEMBER'; memberId: string }
+  | { type: 'CLOSE' }
+  | { type: 'SET_OVERRIDE'; memberId: string; override: { dayOfWeek?: string; startTime?: string } };
+
+function batchReducer(state: BatchState, action: BatchAction): BatchState {
+  switch (action.type) {
+    case 'SET_FIELD':
+      return { ...state, [action.field]: action.value };
+    case 'TOGGLE_MEMBER': {
+      const next = new Set(state.selectedBatchMembers);
+      if (next.has(action.memberId)) next.delete(action.memberId); else next.add(action.memberId);
+      return { ...state, selectedBatchMembers: next };
+    }
+    case 'CLOSE':
+      return { ...state, showBatchPicker: false, selectedBatchMembers: new Set() };
+    case 'SET_OVERRIDE':
+      return {
+        ...state,
+        batchOverrides: { ...state.batchOverrides, [action.memberId]: action.override },
+      };
+    default:
+      return state;
+  }
+}
+
 // ── Dual-Handle Range Slider (web-native pointer events for smooth dragging) ─
 function DualHandleSlider({
   totalMinutes,
@@ -322,104 +549,99 @@ export default function ScheduleModal({
   existingSlots,
   onNavigateToPlan,
 }: ScheduleModalProps) {
-  // All coach's slots (for conflict detection)
+  // ── Reducer state slices ──────────────────────────────────────────────────
+  const [form, formDispatch] = useReducer(formReducer, INITIAL_FORM_STATE);
+  const [inst, instDispatch] = useReducer(instanceReducer, INITIAL_INSTANCE_STATE);
+  const [batch, batchDispatch] = useReducer(batchReducer, INITIAL_BATCH_STATE);
+
+  // Destructure form state for backward-compatible access
+  const { selectedDays, editingTimeForDay, selectedDuration, selectedTimezone,
+    selectedPattern, selectedWeekOfMonth, selectedSessionType, selectedPhase,
+    creating, editingSlotId, liveStart, liveEnd, planPhaseOverride,
+    templateName, showSaveTemplate, showTemplateMenu } = form;
+
+  // Destructure instance state
+  const { expandedSlotId, slotInstances, instanceAttendance, rescheduleInstanceId,
+    rescheduleDate, rescheduleTime, rescheduling, skippingInstanceId, skipReason,
+    editingNoteId, noteText, instanceNotes } = inst;
+
+  // Destructure batch state
+  const { showBatchPicker, batchMembers, selectedBatchMembers, batchCreating, batchOverrides } = batch;
+
+  // ── Remaining individual state (data, UI toggles, misc) ─────────────────
   const [allCoachSlots, setAllCoachSlots] = useState<any[]>([]);
   const [conflictWarning, setConflictWarning] = useState<string | null>(null);
   const [showCalendarView, setShowCalendarView] = useState(false);
-
-  // Plan data for phase sync
   const [memberPlan, setMemberPlan] = useState<MemberPlanData | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
-  const [planPhaseOverride, setPlanPhaseOverride] = useState(false);
-
-  // Schedule form state — multi-day
-  const [selectedDays, setSelectedDays] = useState<DayTimeEntry[]>([
-    { dayOfWeek: 1, startTime: '06:00' },
-  ]);
-  const [editingTimeForDay, setEditingTimeForDay] = useState<number | null>(null);
-
-  // Shared settings for all days in this batch
-  const [selectedDuration, setSelectedDuration] = useState(30);
-  const [selectedTimezone, setSelectedTimezone] = useState('America/New_York');
-  const [selectedPattern, setSelectedPattern] = useState<'weekly' | 'biweekly' | 'monthly'>('weekly');
-  const [selectedWeekOfMonth, setSelectedWeekOfMonth] = useState<1 | 2 | 3 | 4>(1);
-  const [selectedSessionType, setSelectedSessionType] = useState<SchedulingSessionType>('strength');
-  const [selectedPhase, setSelectedPhase] = useState<GuidancePhase>('coach_guided');
-  const [creating, setCreating] = useState(false);
-
-  // Phase transition control
   const [transitionPhase, setTransitionPhase] = useState<GuidancePhase | null>(null);
   const [transitioning, setTransitioning] = useState(false);
-
-  // Editing existing slot
-  const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
-
-  // Slot template presets
   const [slotTemplates, setSlotTemplates] = useState<any[]>([]);
-  const [showTemplateMenu, setShowTemplateMenu] = useState(false);
-  const [templateName, setTemplateName] = useState('');
-  const [showSaveTemplate, setShowSaveTemplate] = useState(false);
-
-  // View Instances expansion
-  const [expandedSlotId, setExpandedSlotId] = useState<string | null>(null);
-  const [slotInstances, setSlotInstances] = useState<any[]>([]);
-
-  // Reschedule UI state (Item 1)
-  const [rescheduleInstanceId, setRescheduleInstanceId] = useState<string | null>(null);
-  const [rescheduleDate, setRescheduleDate] = useState('');
-  const [rescheduleTime, setRescheduleTime] = useState('06:00');
-  const [rescheduling, setRescheduling] = useState(false);
-
-  // Edit confirmation modal (Item 6)
   const [pendingEditPayload, setPendingEditPayload] = useState<any>(null);
   const [showEditConfirm, setShowEditConfirm] = useState(false);
-
-  // Instance attendance data (Item 7)
-  const [instanceAttendance, setInstanceAttendance] = useState<Record<string, any>>({});
-
-  // Precise conflict detection: actual instance dates for biweekly/monthly (Item 2)
   const [coachInstances, setCoachInstances] = useState<any[]>([]);
-
-  // Shared templates (Item 4)
   const [sharedTemplates, setSharedTemplates] = useState<any[]>([]);
   const [showSharedTemplates, setShowSharedTemplates] = useState(false);
-
-  // Item 1: Drag-and-drop calendar state
   const [dragSlot, setDragSlot] = useState<{ id: string; startY: number; startDay: number; startMin: number } | null>(null);
   const [dragPreview, setDragPreview] = useState<{ day: number; min: number } | null>(null);
-
-  // Item 2: Skip instance state
-  const [skipReason, setSkipReason] = useState('');
-  const [skippingInstanceId, setSkippingInstanceId] = useState<string | null>(null);
-
-  // Item 4: Conflict resolution suggestions
   const [conflictSuggestions, setConflictSuggestions] = useState<{ day: string; time: string; dayIdx: number }[]>([]);
-
-  // Item 5: Template versioning
   const [templateUpdateAvailable, setTemplateUpdateAvailable] = useState<Record<string, boolean>>({});
-
-  // Item 6: Batch slot creation
-  const [showBatchPicker, setShowBatchPicker] = useState(false);
-  const [batchMembers, setBatchMembers] = useState<any[]>([]);
-  const [selectedBatchMembers, setSelectedBatchMembers] = useState<Set<string>>(new Set());
-  const [batchCreating, setBatchCreating] = useState(false);
-  const [batchOverrides, setBatchOverrides] = useState<Record<string, { dayOfWeek?: string; startTime?: string }>>({});
-
-  // Workouts tile — assign workout modal
   const [showAssignWorkout, setShowAssignWorkout] = useState(false);
   const [showReviewQueue, setShowReviewQueue] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showLogReview, setShowLogReview] = useState(false);
   const [showWorkoutHistory, setShowWorkoutHistory] = useState(false);
-  // Item 7: Session notes per instance
-  const [instanceNotes, setInstanceNotes] = useState<Record<string, string>>({});
-  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
-  const [noteText, setNoteText] = useState('');
 
-  // Shared Guidance Window: dual-handle live coaching window (in minutes from session start)
-  // Defaults to centered — equal solo time on both sides
-  const [liveStart, setLiveStart] = useState(Math.round((selectedDuration * 0.25) / STEP) * STEP);
-  const [liveEnd, setLiveEnd] = useState(Math.round((selectedDuration * 0.75) / STEP) * STEP);
+  // ── Setter wrappers (delegate to reducers, keep call sites unchanged) ──
+  const setSelectedDays = (v: DayTimeEntry[] | ((prev: DayTimeEntry[]) => DayTimeEntry[])) => {
+    if (typeof v === 'function') formDispatch({ type: 'SET_FIELD', field: 'selectedDays', value: v(form.selectedDays) });
+    else formDispatch({ type: 'SET_FIELD', field: 'selectedDays', value: v });
+  };
+  const setEditingTimeForDay = (v: number | null) => formDispatch({ type: 'SET_FIELD', field: 'editingTimeForDay', value: v });
+  const setSelectedDuration = (v: number) => formDispatch({ type: 'SET_DURATION', duration: v });
+  const setSelectedTimezone = (v: string) => formDispatch({ type: 'SET_FIELD', field: 'selectedTimezone', value: v });
+  const setSelectedPattern = (v: 'weekly' | 'biweekly' | 'monthly') => formDispatch({ type: 'SET_FIELD', field: 'selectedPattern', value: v });
+  const setSelectedWeekOfMonth = (v: 1 | 2 | 3 | 4) => formDispatch({ type: 'SET_FIELD', field: 'selectedWeekOfMonth', value: v });
+  const setSelectedSessionType = (v: SchedulingSessionType) => formDispatch({ type: 'SET_FIELD', field: 'selectedSessionType', value: v });
+  const setSelectedPhase = (v: GuidancePhase) => formDispatch({ type: 'SET_FIELD', field: 'selectedPhase', value: v });
+  const setCreating = (v: boolean) => formDispatch({ type: 'SET_FIELD', field: 'creating', value: v });
+  const setEditingSlotId = (v: string | null) => formDispatch({ type: 'SET_FIELD', field: 'editingSlotId', value: v });
+  const setLiveStart = (v: number) => formDispatch({ type: 'SET_FIELD', field: 'liveStart', value: v });
+  const setLiveEnd = (v: number) => formDispatch({ type: 'SET_FIELD', field: 'liveEnd', value: v });
+  const setPlanPhaseOverride = (v: boolean) => formDispatch({ type: 'SET_FIELD', field: 'planPhaseOverride', value: v });
+  const setTemplateName = (v: string) => formDispatch({ type: 'SET_FIELD', field: 'templateName', value: v });
+  const setShowSaveTemplate = (v: boolean) => formDispatch({ type: 'SET_FIELD', field: 'showSaveTemplate', value: v });
+  const setShowTemplateMenu = (v: boolean) => formDispatch({ type: 'SET_FIELD', field: 'showTemplateMenu', value: v });
+
+  const setExpandedSlotId = (v: string | null | ((prev: string | null) => string | null)) => {
+    if (typeof v === 'function') instDispatch({ type: 'SET_FIELD', field: 'expandedSlotId', value: v(inst.expandedSlotId) });
+    else instDispatch({ type: 'EXPAND_SLOT', slotId: v });
+  };
+  const setSlotInstances = (v: any[]) => instDispatch({ type: 'SET_FIELD', field: 'slotInstances', value: v });
+  const setInstanceAttendance = (v: Record<string, any>) => instDispatch({ type: 'SET_FIELD', field: 'instanceAttendance', value: v });
+  const setRescheduleInstanceId = (v: string | null) => instDispatch({ type: 'SET_FIELD', field: 'rescheduleInstanceId', value: v });
+  const setRescheduleDate = (v: string) => instDispatch({ type: 'SET_FIELD', field: 'rescheduleDate', value: v });
+  const setRescheduleTime = (v: string) => instDispatch({ type: 'SET_FIELD', field: 'rescheduleTime', value: v });
+  const setSkippingInstanceId = (v: string | null) => instDispatch({ type: 'SET_FIELD', field: 'skippingInstanceId', value: v });
+  const setSkipReason = (v: string) => instDispatch({ type: 'SET_FIELD', field: 'skipReason', value: v });
+  const setEditingNoteId = (v: string | null) => instDispatch({ type: 'SET_FIELD', field: 'editingNoteId', value: v });
+  const setNoteText = (v: string) => instDispatch({ type: 'SET_FIELD', field: 'noteText', value: v });
+  const setInstanceNotes = (v: Record<string, string> | ((prev: Record<string, string>) => Record<string, string>)) => {
+    if (typeof v === 'function') instDispatch({ type: 'SET_FIELD', field: 'instanceNotes', value: v(inst.instanceNotes) });
+    else instDispatch({ type: 'SET_FIELD', field: 'instanceNotes', value: v });
+  };
+
+  const setShowBatchPicker = (v: boolean) => batchDispatch({ type: 'SET_FIELD', field: 'showBatchPicker', value: v });
+  const setBatchMembers = (v: any[]) => batchDispatch({ type: 'SET_FIELD', field: 'batchMembers', value: v });
+  const setSelectedBatchMembers = (v: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+    if (typeof v === 'function') batchDispatch({ type: 'SET_FIELD', field: 'selectedBatchMembers', value: v(batch.selectedBatchMembers) });
+    else batchDispatch({ type: 'SET_FIELD', field: 'selectedBatchMembers', value: v });
+  };
+  const setBatchCreating = (v: boolean) => batchDispatch({ type: 'SET_FIELD', field: 'batchCreating', value: v });
+  const setBatchOverrides = (v: Record<string, { dayOfWeek?: string; startTime?: string }> | ((prev: Record<string, { dayOfWeek?: string; startTime?: string }>) => Record<string, { dayOfWeek?: string; startTime?: string }>)) => {
+    if (typeof v === 'function') batchDispatch({ type: 'SET_FIELD', field: 'batchOverrides', value: v(batch.batchOverrides) });
+    else batchDispatch({ type: 'SET_FIELD', field: 'batchOverrides', value: v });
+  };
   // ── Transition awareness: which phase is the member currently in? ────────
   const currentPhaseInfo = useMemo(() => {
     if (!memberPlan?.phases?.length) return null;
@@ -812,33 +1034,12 @@ export default function ScheduleModal({
 
   // ── Reset form to defaults ──────────────────────────────────────────────────
   const resetForm = useCallback(() => {
-    setSelectedDays([{ dayOfWeek: 1, startTime: '06:00' }]);
-    setSelectedSessionType('strength');
-    setSelectedPhase('coach_guided');
-    setSelectedPattern('weekly');
-    setSelectedWeekOfMonth(1);
-    setSelectedTimezone('America/New_York');
-    const dur = memberPlan?.pricing?.sessionLengthMinutes || 30;
-    setSelectedDuration(DURATION_OPTIONS.includes(dur) ? dur : 30);
-    setLiveStart(Math.round((dur * 0.25) / STEP) * STEP);
-    setLiveEnd(Math.round((dur * 0.75) / STEP) * STEP);
-    setEditingSlotId(null);
-    setPlanPhaseOverride(false);
+    formDispatch({ type: 'RESET', duration: memberPlan?.pricing?.sessionLengthMinutes });
   }, [memberPlan]);
 
   // ── Edit existing slot: populate form with slot data ──────────────────────
   const handleEditSlot = useCallback((slot: any) => {
-    setEditingSlotId(slot.id);
-    setSelectedSessionType(slot.sessionType || 'strength');
-    setSelectedPhase(slot.guidancePhase || 'coach_guided');
-    setSelectedDays([{ dayOfWeek: slot.dayOfWeek, startTime: slot.startTime || '06:00' }]);
-    setSelectedDuration(slot.durationMinutes || 30);
-    setSelectedPattern(slot.recurrencePattern || 'weekly');
-    if (slot.weekOfMonth) setSelectedWeekOfMonth(slot.weekOfMonth);
-    setSelectedTimezone(slot.timezone || 'America/New_York');
-    if (slot.liveCoachingStartMin !== undefined) setLiveStart(slot.liveCoachingStartMin);
-    if (slot.liveCoachingEndMin !== undefined) setLiveEnd(slot.liveCoachingEndMin);
-    setPlanPhaseOverride(true); // allow manual control when editing
+    formDispatch({ type: 'EDIT_SLOT', slot });
   }, []);
 
   // ── Save current form as a template ──────────────────────────────────────
@@ -866,18 +1067,7 @@ export default function ScheduleModal({
 
   // ── Load a template into the form ────────────────────────────────────────
   const handleLoadTemplate = useCallback((template: any) => {
-    setSelectedSessionType(template.sessionType || 'strength');
-    setSelectedPhase(template.guidancePhase || 'coach_guided');
-    setSelectedDuration(template.durationMinutes || 30);
-    setSelectedPattern(template.recurrencePattern || 'weekly');
-    setSelectedTimezone(template.timezone || 'America/New_York');
-    if (template.liveStart !== undefined) setLiveStart(template.liveStart);
-    if (template.liveEnd !== undefined) setLiveEnd(template.liveEnd);
-    if (template.days?.length) {
-      setSelectedDays(template.days.map((d: number) => ({ dayOfWeek: d, startTime: '06:00' })));
-    }
-    setShowTemplateMenu(false);
-    setPlanPhaseOverride(true);
+    formDispatch({ type: 'LOAD_TEMPLATE', template });
   }, []);
 
   // ── Delete a template ─────────────────────────────────────────────────
@@ -1245,6 +1435,551 @@ export default function ScheduleModal({
     );
   }
 
+  function InstanceList({ slot }: { slot: any }) {
+    return (
+      <>
+        {/* View Instances toggle */}
+        <TouchableOpacity
+          style={{ marginTop: 6 }}
+          onPress={() => setExpandedSlotId(expandedSlotId === slot.id ? null : slot.id)}
+        >
+          <Text style={{ fontSize: 11, color: BLUE, fontFamily: FB }}>
+            {expandedSlotId === slot.id ? 'Hide Instances' : 'View Instances'}
+          </Text>
+        </TouchableOpacity>
+        {/* Instance list expansion (Item 1: reschedule UI, Item 7: attendance) */}
+        {expandedSlotId === slot.id && (
+          <View style={{ marginTop: 8, paddingLeft: 4 }}>
+            {slotInstances.length === 0 ? (
+              <Text style={{ fontSize: 11, color: MUTED, fontFamily: FB }}>No upcoming instances</Text>
+            ) : (
+              slotInstances.map((inst: any) => {
+                const att = instanceAttendance[inst.id];
+                const attColor = att?.label === 'Attended' ? GREEN : att?.label === 'Missed' || att?.label === 'No-show' ? RED : MUTED;
+                const isRescheduling = rescheduleInstanceId === inst.id;
+                return (
+                <View key={inst.id} style={{ paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 11, color: FG, fontFamily: FB }}>
+                        {inst.scheduledDate} at {inst.startTime || '—'}
+                      </Text>
+                      <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 2 }}>
+                        <Text style={{ fontSize: 10, color: inst.status === 'completed' ? GREEN : inst.status === 'missed' ? RED : inst.status === 'skip_requested' ? '#FFC000' : inst.status === 'skipped' ? '#FFC000' : MUTED, fontFamily: FB }}>
+                          {inst.status === 'skip_requested' ? 'skip requested' : (inst.status || 'scheduled')}
+                        </Text>
+                        {att && (
+                          <Text style={{ fontSize: 9, color: attColor, fontFamily: FB }}>
+                            {att.label}{att.eventCount > 0 ? ` (${att.eventCount} events)` : ''}
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                    {inst.status !== 'completed' && inst.status !== 'missed' && (
+                      <TouchableOpacity
+                        onPress={() => {
+                          setRescheduleInstanceId(isRescheduling ? null : inst.id);
+                          setRescheduleDate(inst.scheduledDate || '');
+                          setRescheduleTime(inst.startTime || '06:00');
+                        }}
+                      >
+                        <Text style={{ fontSize: 10, color: BLUE, fontFamily: FB }}>
+                          {isRescheduling ? 'Cancel' : 'Reschedule'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  {/* Reschedule form */}
+                  {isRescheduling && (
+                    <View style={{ marginTop: 6, backgroundColor: 'rgba(91,155,213,0.06)', borderRadius: 6, padding: 8 }}>
+                      <Text style={{ fontSize: 10, color: MUTED, fontFamily: FH, marginBottom: 4 }}>New Date & Time</Text>
+                      <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                        <TextInput
+                          style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 6, padding: 6, color: FG, fontFamily: FB, fontSize: 11 }}
+                          placeholder="YYYY-MM-DD"
+                          placeholderTextColor={MUTED}
+                          value={rescheduleDate}
+                          onChangeText={setRescheduleDate}
+                        />
+                        <TouchableOpacity
+                          style={{ backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 6, padding: 6 }}
+                          onPress={() => setEditingTimeForDay(editingTimeForDay === -99 ? null : -99)}
+                        >
+                          <Text style={{ fontSize: 11, color: FG, fontFamily: FB }}>{formatTime(rescheduleTime)}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={{ backgroundColor: BLUE + '20', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 }}
+                          onPress={async () => {
+                            if (!rescheduleDate || !rescheduleTime) return;
+                            await handleRescheduleInstance(inst.id, rescheduleDate, rescheduleTime);
+                            setRescheduleInstanceId(null);
+                            Alert.alert('Rescheduled', `Session moved to ${rescheduleDate} at ${formatTime(rescheduleTime)}`);
+                          }}
+                        >
+                          <Text style={{ fontSize: 10, color: BLUE, fontFamily: FH }}>Confirm</Text>
+                        </TouchableOpacity>
+                      </View>
+                      {/* Quick time picker for reschedule */}
+                      {editingTimeForDay === -99 && (
+                        <ScrollView horizontal style={{ marginTop: 6 }} showsHorizontalScrollIndicator={false}>
+                          <View style={{ flexDirection: 'row', gap: 4 }}>
+                            {TIME_OPTIONS.filter((_, i) => i % 2 === 0).map(t => (
+                              <TouchableOpacity
+                                key={t}
+                                style={[{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, backgroundColor: rescheduleTime === t ? BLUE + '30' : 'rgba(255,255,255,0.06)' }]}
+                                onPress={() => { setRescheduleTime(t); setEditingTimeForDay(null); }}
+                              >
+                                <Text style={{ fontSize: 10, color: rescheduleTime === t ? BLUE : MUTED, fontFamily: FB }}>{formatTime(t)}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        </ScrollView>
+                      )}
+                    </View>
+                  )}
+                  {/* Item 2: Skip instance */}
+                  {inst.status !== 'completed' && inst.status !== 'missed' && inst.status !== 'skipped' && inst.status !== 'skip_requested' && (
+                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+                      {skippingInstanceId === inst.id ? (
+                        <View style={{ flex: 1, backgroundColor: 'rgba(255,200,0,0.06)', borderRadius: 6, padding: 6 }}>
+                          <TextInput
+                            style={{ backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 4, padding: 4, color: FG, fontFamily: FB, fontSize: 10, marginBottom: 4 }}
+                            placeholder="Reason (e.g., holiday, vacation)"
+                            placeholderTextColor={MUTED}
+                            value={skipReason}
+                            onChangeText={setSkipReason}
+                          />
+                          <View style={{ flexDirection: 'row', gap: 6 }}>
+                            <TouchableOpacity onPress={() => handleSkipInstance(slot.id, inst.id, skipReason)} style={{ backgroundColor: '#FFC000' + '20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 }}>
+                              <Text style={{ fontSize: 9, color: '#FFC000', fontFamily: FH }}>Confirm Skip</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={() => { setSkippingInstanceId(null); setSkipReason(''); }}>
+                              <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB }}>Cancel</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      ) : (
+                        <TouchableOpacity onPress={() => { setSkippingInstanceId(inst.id); setSkipReason(''); }}>
+                          <Text style={{ fontSize: 9, color: '#FFC000', fontFamily: FB }}>Skip</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  )}
+                  {inst.status === 'skipped' && (inst.skipReason || inst.skipCategory) && (
+                    <View style={{ marginTop: 2 }}>
+                      <Text style={{ fontSize: 9, color: '#FFC000', fontFamily: FB }}>Skipped{inst.skipCategory ? ` [${inst.skipCategory}]` : ''}{inst.skipReason ? `: ${inst.skipReason}` : ''}</Text>
+                      {inst.skipRequestedBy && <Text style={{ fontSize: 8, color: MUTED, fontFamily: FB }}>Requested by member</Text>}
+                    </View>
+                  )}
+                  {/* Skip request pending — approve/deny buttons */}
+                  {inst.status === 'skip_requested' && (
+                    <View style={{ marginTop: 4, backgroundColor: 'rgba(255,200,0,0.06)', borderRadius: 6, padding: 6 }}>
+                      <Text style={{ fontSize: 10, color: '#FFC000', fontFamily: FH, marginBottom: 2 }}>Skip Requested</Text>
+                      {inst.skipCategory && <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB }}>Category: {inst.skipCategory}</Text>}
+                      {inst.skipReason && <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB }}>Reason: {inst.skipReason}</Text>}
+                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+                        <TouchableOpacity
+                          style={{ backgroundColor: GREEN + '20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 4 }}
+                          onPress={async () => {
+                            try {
+                              const fn = httpsCallable(functions, 'updateRecurringSlot');
+                              await fn({ slotId: slot.id, action: 'approve_skip_request', instanceId: inst.id });
+                              Alert.alert('Approved', 'Skip request has been approved.');
+                            } catch (err: any) {
+                              Alert.alert('Error', err.message || 'Failed to approve skip request');
+                            }
+                          }}
+                        >
+                          <Text style={{ fontSize: 9, color: GREEN, fontFamily: FH }}>Approve</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={{ backgroundColor: RED + '20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 4 }}
+                          onPress={async () => {
+                            try {
+                              const fn = httpsCallable(functions, 'updateRecurringSlot');
+                              await fn({ slotId: slot.id, action: 'deny_skip_request', instanceId: inst.id });
+                              Alert.alert('Denied', 'Skip request has been denied.');
+                            } catch (err: any) {
+                              Alert.alert('Error', err.message || 'Failed to deny skip request');
+                            }
+                          }}
+                        >
+                          <Text style={{ fontSize: 9, color: RED, fontFamily: FH }}>Deny</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+                  {/* Item 7: Session notes */}
+                  <View style={{ marginTop: 4 }}>
+                    {editingNoteId === inst.id ? (
+                      <View style={{ backgroundColor: 'rgba(91,155,213,0.06)', borderRadius: 6, padding: 6 }}>
+                        <TextInput
+                          style={{ backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 4, padding: 4, color: FG, fontFamily: FB, fontSize: 10, minHeight: 40 }}
+                          placeholder="Session notes..."
+                          placeholderTextColor={MUTED}
+                          value={noteText}
+                          onChangeText={setNoteText}
+                          multiline
+                        />
+                        <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
+                          <TouchableOpacity onPress={() => handleSaveInstanceNotes(slot.id, inst.id, noteText)} style={{ backgroundColor: BLUE + '20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 }}>
+                            <Text style={{ fontSize: 9, color: BLUE, fontFamily: FH }}>Save Note</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => { setEditingNoteId(null); setNoteText(''); }}>
+                            <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB }}>Cancel</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ) : (
+                      <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                        {(instanceNotes[inst.id] || inst.notes) ? (
+                          <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB, flex: 1 }} numberOfLines={2}>
+                            📝 {instanceNotes[inst.id] || inst.notes}
+                          </Text>
+                        ) : null}
+                        <TouchableOpacity onPress={() => { setEditingNoteId(inst.id); setNoteText(instanceNotes[inst.id] || inst.notes || ''); }}>
+                          <Text style={{ fontSize: 9, color: BLUE, fontFamily: FB }}>{(instanceNotes[inst.id] || inst.notes) ? 'Edit Note' : 'Add Note'}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                  {/* Zoom recording link — coaches/admins only */}
+                  {inst.recordings && inst.recordings.length > 0 && (
+                    <View style={{ marginTop: 4, backgroundColor: 'rgba(91,155,213,0.06)', borderRadius: 4, padding: 4 }}>
+                      <Text style={{ fontSize: 9, color: BLUE, fontFamily: FH, marginBottom: 2 }}>Session Recordings</Text>
+                      {inst.recordings.map((rec: any, ri: number) => (
+                        <TouchableOpacity
+                          key={ri}
+                          onPress={() => {
+                            const url = rec.playUrl || rec.downloadUrl;
+                            if (url) Linking.openURL(url);
+                          }}
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2 }}
+                        >
+                          <Icon name="video" size={10} color={BLUE} />
+                          <Text style={{ fontSize: 9, color: BLUE, fontFamily: FB, textDecorationLine: 'underline' }} numberOfLines={1}>
+                            {rec.topic || `Recording ${ri + 1}`}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+                  {inst.zoomRecordingUrl && !inst.recordings?.length && (
+                    <View style={{ marginTop: 4, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <TouchableOpacity
+                        onPress={() => Linking.openURL(inst.zoomRecordingUrl)}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                      >
+                        <Icon name="video" size={10} color={BLUE} />
+                        <Text style={{ fontSize: 9, color: BLUE, fontFamily: FB, textDecorationLine: 'underline' }}>View Recording</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={async () => {
+                          try {
+                            const fn = httpsCallable(functions, 'refreshRecordingUrl');
+                            const result = await fn({ instanceId: inst.id }) as any;
+                            if (result.data?.recordingUrl) {
+                              Linking.openURL(result.data.recordingUrl);
+                            } else {
+                              Alert.alert('Info', 'No updated recording URL available.');
+                            }
+                          } catch (err: any) {
+                            Alert.alert('Error', err.message || 'Failed to refresh recording URL');
+                          }
+                        }}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}
+                      >
+                        <Icon name="refresh" size={9} color={MUTED} />
+                        <Text style={{ fontSize: 8, color: MUTED, fontFamily: FB }}>Refresh</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  {/* Transcription link (coaches/admins only) */}
+                  {inst.transcriptionUrl && (
+                    <View style={{ marginTop: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <TouchableOpacity
+                        onPress={() => Linking.openURL(inst.transcriptionUrl)}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                      >
+                        <Icon name="document" size={10} color={BLUE} />
+                        <Text style={{ fontSize: 9, color: BLUE, fontFamily: FB, textDecorationLine: 'underline' }}>View Transcript</Text>
+                      </TouchableOpacity>
+                      {inst.transcriptionStatus && (
+                        <Text style={{ fontSize: 8, color: MUTED }}>({inst.transcriptionStatus})</Text>
+                      )}
+                    </View>
+                  )}
+                </View>
+                );
+              })
+            )}
+          </View>
+        )}
+      </>
+    );
+  }
+
+  function BatchCreator() {
+    return (
+      <>
+        {/* Batch creation button */}
+        {!editingSlotId && (
+          <TouchableOpacity
+            style={{ marginBottom: 8, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: BLUE + '40', alignItems: 'center' }}
+            onPress={() => setShowBatchPicker(true)}
+          >
+            <Text style={{ fontSize: 12, color: BLUE, fontFamily: FH }}>Apply to Multiple Members</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Batch member picker modal */}
+        {showBatchPicker && (
+          <View style={{ backgroundColor: 'rgba(91,155,213,0.06)', borderRadius: 8, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: BLUE + '20' }}>
+            {/* Batch template picker */}
+            {(slotTemplates.length > 0 || sharedTemplates.length > 0) && (
+              <View style={{ marginBottom: 8 }}>
+                <Text style={{ fontSize: 11, color: GOLD, fontFamily: FH, marginBottom: 4 }}>Apply Template First</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }}>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    {[...slotTemplates, ...sharedTemplates].map((t: any) => (
+                      <TouchableOpacity
+                        key={t.id}
+                        style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, borderWidth: 1, borderColor: GOLD + '40', backgroundColor: 'rgba(245,166,35,0.08)' }}
+                        onPress={() => handleLoadTemplate(t)}
+                      >
+                        <Text style={{ fontSize: 10, color: GOLD, fontFamily: FB }}>{t.name}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </ScrollView>
+                <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB }}>Tap a template to load its settings, then select members below.</Text>
+              </View>
+            )}
+            <Text style={{ fontSize: 12, color: BLUE, fontFamily: FH, marginBottom: 6 }}>Select Members</Text>
+            {batchMembers.length === 0 ? (
+              <Text style={{ fontSize: 11, color: MUTED, fontFamily: FB }}>Loading members...</Text>
+            ) : (
+              <ScrollView style={{ maxHeight: 150 }} nestedScrollEnabled>
+                {batchMembers.map((bm: any) => (
+                  <TouchableOpacity
+                    key={bm.id}
+                    style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}
+                    onPress={() => {
+                      setSelectedBatchMembers(prev => {
+                        const next = new Set(prev);
+                        if (next.has(bm.id)) next.delete(bm.id); else next.add(bm.id);
+                        return next;
+                      });
+                    }}
+                  >
+                    <View style={{ width: 18, height: 18, borderRadius: 3, borderWidth: 1, borderColor: selectedBatchMembers.has(bm.id) ? BLUE : MUTED, backgroundColor: selectedBatchMembers.has(bm.id) ? BLUE + '30' : 'transparent', marginRight: 8, alignItems: 'center', justifyContent: 'center' }}>
+                      {selectedBatchMembers.has(bm.id) && <Text style={{ fontSize: 10, color: BLUE }}>✓</Text>}
+                    </View>
+                    <Text style={{ fontSize: 12, color: FG, fontFamily: FB }}>{bm.name || bm.id}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+            {/* Per-member day/time overrides */}
+            {selectedBatchMembers.size > 0 && (
+              <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)', paddingTop: 8 }}>
+                <Text style={{ fontSize: 11, color: GOLD, fontFamily: FH, marginBottom: 4 }}>Per-Member Overrides (optional)</Text>
+                <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB, marginBottom: 6 }}>Set a different day or time for specific members. Leave blank to use the form defaults.</Text>
+                {batchMembers.filter(bm => selectedBatchMembers.has(bm.id)).map((bm: any) => {
+                  const ov = batchOverrides[bm.id];
+                  const dayVal = ov?.dayOfWeek ?? '';
+                  const timeVal = ov?.startTime ?? '';
+                  const dayInvalid = dayVal !== '' && (!/^[0-6]$/.test(dayVal));
+                  const timeInvalid = timeVal !== '' && (!/^([01]\d|2[0-3]):[0-5]\d$/.test(timeVal));
+                  return (
+                    <View key={bm.id} style={{ marginBottom: 4 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={{ fontSize: 10, color: FG, fontFamily: FB, width: 80 }} numberOfLines={1}>{bm.name || bm.id}</Text>
+                        <TextInput
+                          style={{ flex: 1, backgroundColor: '#0E1117', borderRadius: 4, borderWidth: 1, borderColor: dayInvalid ? '#FF5722' : MUTED + '30', color: FG, fontSize: 10, fontFamily: FB, paddingHorizontal: 6, paddingVertical: 3 }}
+                          placeholder="Day (0=Sun..6=Sat)"
+                          placeholderTextColor={MUTED}
+                          value={dayVal}
+                          onChangeText={(v) => setBatchOverrides(prev => ({ ...prev, [bm.id]: { ...prev[bm.id], dayOfWeek: v || undefined } }))}
+                          keyboardType="numeric"
+                          maxLength={1}
+                        />
+                        <TextInput
+                          style={{ flex: 1, backgroundColor: '#0E1117', borderRadius: 4, borderWidth: 1, borderColor: timeInvalid ? '#FF5722' : MUTED + '30', color: FG, fontSize: 10, fontFamily: FB, paddingHorizontal: 6, paddingVertical: 3 }}
+                          placeholder="Time (HH:MM)"
+                          placeholderTextColor={MUTED}
+                          value={timeVal}
+                          onChangeText={(v) => setBatchOverrides(prev => ({ ...prev, [bm.id]: { ...prev[bm.id], startTime: v || undefined } }))}
+                          maxLength={5}
+                        />
+                      </View>
+                      {(dayInvalid || timeInvalid) && (
+                        <Text style={{ fontSize: 8, color: '#FF5722', fontFamily: FB, marginLeft: 86, marginTop: 2 }}>
+                          {dayInvalid ? 'Day must be 0-6 (0=Sun, 1=Mon, ..., 6=Sat)' : ''}
+                          {dayInvalid && timeInvalid ? ' · ' : ''}
+                          {timeInvalid ? 'Time must be HH:MM (e.g. 09:00)' : ''}
+                        </Text>
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+              <TouchableOpacity
+                style={{ flex: 1, backgroundColor: BLUE, paddingVertical: 8, borderRadius: 6, alignItems: 'center', opacity: selectedBatchMembers.size === 0 || batchCreating || (() => {
+                  for (const bmId of Array.from(selectedBatchMembers)) {
+                    const ov = batchOverrides[bmId];
+                    if (ov?.dayOfWeek && !/^[0-6]$/.test(ov.dayOfWeek)) return true;
+                    if (ov?.startTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(ov.startTime)) return true;
+                  }
+                  return false;
+                })() ? 0.5 : 1 }}
+                onPress={handleBatchCreate}
+                disabled={selectedBatchMembers.size === 0 || batchCreating || (() => {
+                  for (const bmId of Array.from(selectedBatchMembers)) {
+                    const ov = batchOverrides[bmId];
+                    if (ov?.dayOfWeek && !/^[0-6]$/.test(ov.dayOfWeek)) return true;
+                    if (ov?.startTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(ov.startTime)) return true;
+                  }
+                  return false;
+                })()}
+              >
+                <Text style={{ fontSize: 12, color: '#fff', fontFamily: FH }}>
+                  {batchCreating ? 'Creating...' : `Create for ${selectedBatchMembers.size} Members`}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6 }}
+                onPress={() => { setShowBatchPicker(false); setSelectedBatchMembers(new Set()); }}
+              >
+                <Text style={{ fontSize: 12, color: MUTED, fontFamily: FB }}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      </>
+    );
+  }
+
+  function CalendarView() {
+    if (!allCoachSlots.length) return null;
+    // Compute hour range from all slots
+    let minHour = 24, maxHour = 0;
+    for (const slot of allCoachSlots) {
+      const mins = timeToMinutes(slot.startTime || '06:00');
+      const endMins = mins + (slot.durationMinutes || 30);
+      minHour = Math.min(minHour, Math.floor(mins / 60));
+      maxHour = Math.max(maxHour, Math.ceil(endMins / 60));
+    }
+    if (minHour >= maxHour) { minHour = 5; maxHour = 21; }
+    minHour = Math.max(0, minHour - 1);
+    maxHour = Math.min(24, maxHour + 1);
+    const hours = Array.from({ length: maxHour - minHour }, (_, i) => minHour + i);
+    const HOUR_HEIGHT = 32;
+    return (
+      <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
+        <TouchableOpacity
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
+          onPress={() => setShowCalendarView(!showCalendarView)}
+        >
+          <Icon name={showCalendarView ? 'chevron-down' : 'chevron-right'} size={14} color={BLUE} />
+          <Text style={{ fontSize: 12, color: BLUE, fontFamily: FH }}>Weekly Calendar (All Members)</Text>
+        </TouchableOpacity>
+        {showCalendarView && (() => {
+          return (
+          <View style={{ marginTop: 8, borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
+            {/* Header row */}
+            <View style={{ flexDirection: 'row' }}>
+              <View style={{ width: 30, paddingVertical: 4, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center' }}>
+                <Text style={{ fontSize: 8, color: MUTED, fontFamily: FH }}> </Text>
+              </View>
+              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, idx) => (
+                <View key={day} style={{ flex: 1, paddingVertical: 4, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', borderLeftWidth: 1, borderLeftColor: 'rgba(255,255,255,0.05)' }}>
+                  <Text style={{ fontSize: 9, color: MUTED, fontFamily: FH }}>{day}</Text>
+                </View>
+              ))}
+            </View>
+            {/* Time grid */}
+            <ScrollView style={{ maxHeight: 240 }} nestedScrollEnabled>
+              <View style={{ flexDirection: 'row', height: hours.length * HOUR_HEIGHT }}>
+                {/* Time axis */}
+                <View style={{ width: 30 }}>
+                  {hours.map(h => (
+                    <View key={h} style={{ height: HOUR_HEIGHT, justifyContent: 'flex-start', paddingTop: 1, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.04)' }}>
+                      <Text style={{ fontSize: 7, color: MUTED, fontFamily: FB, textAlign: 'right', paddingRight: 3 }}>
+                        {h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+                {/* Day columns */}
+                {[1, 2, 3, 4, 5, 6, 0].map((dayIdx) => {
+                  const daySlots = allCoachSlots.filter(s => s.dayOfWeek === dayIdx);
+                  return (
+                    <View key={dayIdx} style={{ flex: 1, borderLeftWidth: 1, borderLeftColor: 'rgba(255,255,255,0.04)', position: 'relative' }}>
+                      {/* Hour grid lines */}
+                      {hours.map(h => (
+                        <View key={h} style={{ position: 'absolute', top: (h - minHour) * HOUR_HEIGHT, left: 0, right: 0, height: 1, backgroundColor: 'rgba(255,255,255,0.04)' }} />
+                      ))}
+                      {/* Slot blocks */}
+                      {/* Drag-and-drop preview */}
+                      {dragPreview && dragPreview.day === dayIdx && (
+                        <View style={{ position: 'absolute', top: ((dragPreview.min / 60) - minHour) * HOUR_HEIGHT, left: 0, right: 0, height: Math.max(12, (selectedDuration / 60) * HOUR_HEIGHT), backgroundColor: 'rgba(91,155,213,0.3)', borderRadius: 2, borderWidth: 1, borderColor: BLUE, borderStyle: 'dashed' }} />
+                      )}
+                      {daySlots.map((slot: any) => {
+                        const mins = timeToMinutes(slot.startTime || '06:00');
+                        const top = ((mins / 60) - minHour) * HOUR_HEIGHT;
+                        const height = Math.max(12, ((slot.durationMinutes || 30) / 60) * HOUR_HEIGHT);
+                        const isCurrentMember = slot.memberId === memberId;
+                        const isDragging = dragSlot?.id === slot.id;
+                        const phaseColors: Record<string, string> = { coach_guided: GREEN, shared_guidance: BLUE, self_guided: '#FFC000' };
+                        const borderColor = phaseColors[slot.guidancePhase] || MUTED;
+                        return (
+                          <TouchableOpacity
+                            key={slot.id}
+                            activeOpacity={0.7}
+                            delayLongPress={400}
+                            onLongPress={() => {
+                              if (isCurrentMember) {
+                                setDragSlot({ id: slot.id, startY: 0, startDay: dayIdx, startMin: mins });
+                                Alert.alert(
+                                  'Move Slot',
+                                  `Drag ${slot.memberName}'s ${slot.startTime} slot to a new time.\n\nSelect a new time:`,
+                                  [
+                                    { text: 'Cancel', style: 'cancel', onPress: () => setDragSlot(null) },
+                                    { text: '30 min earlier', onPress: () => handleDragDrop(slot.id, dayIdx, Math.max(0, mins - 30)) },
+                                    { text: '30 min later', onPress: () => handleDragDrop(slot.id, dayIdx, Math.min(1410, mins + 30)) },
+                                    { text: '1 hour earlier', onPress: () => handleDragDrop(slot.id, dayIdx, Math.max(0, mins - 60)) },
+                                    { text: '1 hour later', onPress: () => handleDragDrop(slot.id, dayIdx, Math.min(1410, mins + 60)) },
+                                  ]
+                                );
+                              }
+                            }}
+                            style={{ position: 'absolute', top, left: 1, right: 1, height, backgroundColor: isDragging ? 'rgba(91,155,213,0.4)' : isCurrentMember ? 'rgba(91,155,213,0.2)' : 'rgba(255,255,255,0.06)', borderRadius: 2, borderLeftWidth: 2, borderLeftColor: borderColor, padding: 1, overflow: 'hidden' }}
+                          >
+                            <Text style={{ fontSize: 6, color: isCurrentMember ? BLUE : MUTED, fontFamily: FH }} numberOfLines={1}>
+                              {slot.startTime?.slice(0, 5)}
+                            </Text>
+                            <Text style={{ fontSize: 6, color: isCurrentMember ? FG : MUTED, fontFamily: FB }} numberOfLines={1}>
+                              {slot.memberName?.split(' ')[0] || '?'}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  );
+                })}
+              </View>
+            </ScrollView>
+          </View>
+          );
+        })()}
+      </View>
+    );
+  }
+
   return (
     <>
       {/* Schedule Modal */}
@@ -1363,120 +2098,8 @@ export default function ScheduleModal({
                 </>
               )}
 
-              {/* Calendar View Toggle (Item 3: with time axis) */}
-              {allCoachSlots.length > 0 && (
-                <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
-                  <TouchableOpacity
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
-                    onPress={() => setShowCalendarView(!showCalendarView)}
-                  >
-                    <Icon name={showCalendarView ? 'chevron-down' : 'chevron-right'} size={14} color={BLUE} />
-                    <Text style={{ fontSize: 12, color: BLUE, fontFamily: FH }}>Weekly Calendar (All Members)</Text>
-                  </TouchableOpacity>
-                  {showCalendarView && (() => {
-                    // Compute hour range from all slots
-                    let minHour = 24, maxHour = 0;
-                    for (const slot of allCoachSlots) {
-                      const mins = timeToMinutes(slot.startTime || '06:00');
-                      const endMins = mins + (slot.durationMinutes || 30);
-                      minHour = Math.min(minHour, Math.floor(mins / 60));
-                      maxHour = Math.max(maxHour, Math.ceil(endMins / 60));
-                    }
-                    if (minHour >= maxHour) { minHour = 5; maxHour = 21; }
-                    minHour = Math.max(0, minHour - 1);
-                    maxHour = Math.min(24, maxHour + 1);
-                    const hours = Array.from({ length: maxHour - minHour }, (_, i) => minHour + i);
-                    const HOUR_HEIGHT = 32;
-                    return (
-                    <View style={{ marginTop: 8, borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
-                      {/* Header row */}
-                      <View style={{ flexDirection: 'row' }}>
-                        <View style={{ width: 30, paddingVertical: 4, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center' }}>
-                          <Text style={{ fontSize: 8, color: MUTED, fontFamily: FH }}> </Text>
-                        </View>
-                        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, idx) => (
-                          <View key={day} style={{ flex: 1, paddingVertical: 4, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', borderLeftWidth: 1, borderLeftColor: 'rgba(255,255,255,0.05)' }}>
-                            <Text style={{ fontSize: 9, color: MUTED, fontFamily: FH }}>{day}</Text>
-                          </View>
-                        ))}
-                      </View>
-                      {/* Time grid */}
-                      <ScrollView style={{ maxHeight: 240 }} nestedScrollEnabled>
-                        <View style={{ flexDirection: 'row', height: hours.length * HOUR_HEIGHT }}>
-                          {/* Time axis */}
-                          <View style={{ width: 30 }}>
-                            {hours.map(h => (
-                              <View key={h} style={{ height: HOUR_HEIGHT, justifyContent: 'flex-start', paddingTop: 1, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.04)' }}>
-                                <Text style={{ fontSize: 7, color: MUTED, fontFamily: FB, textAlign: 'right', paddingRight: 3 }}>
-                                  {h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`}
-                                </Text>
-                              </View>
-                            ))}
-                          </View>
-                          {/* Day columns */}
-                          {[1, 2, 3, 4, 5, 6, 0].map((dayIdx) => {
-                            const daySlots = allCoachSlots.filter(s => s.dayOfWeek === dayIdx);
-                            return (
-                              <View key={dayIdx} style={{ flex: 1, borderLeftWidth: 1, borderLeftColor: 'rgba(255,255,255,0.04)', position: 'relative' }}>
-                                {/* Hour grid lines */}
-                                {hours.map(h => (
-                                  <View key={h} style={{ position: 'absolute', top: (h - minHour) * HOUR_HEIGHT, left: 0, right: 0, height: 1, backgroundColor: 'rgba(255,255,255,0.04)' }} />
-                                ))}
-                                {/* Slot blocks */}
-                                {/* Item 1: Drag-and-drop preview */}
-                                {dragPreview && dragPreview.day === dayIdx && (
-                                  <View style={{ position: 'absolute', top: ((dragPreview.min / 60) - minHour) * HOUR_HEIGHT, left: 0, right: 0, height: Math.max(12, (selectedDuration / 60) * HOUR_HEIGHT), backgroundColor: 'rgba(91,155,213,0.3)', borderRadius: 2, borderWidth: 1, borderColor: BLUE, borderStyle: 'dashed' }} />
-                                )}
-                                {daySlots.map((slot: any) => {
-                                  const mins = timeToMinutes(slot.startTime || '06:00');
-                                  const top = ((mins / 60) - minHour) * HOUR_HEIGHT;
-                                  const height = Math.max(12, ((slot.durationMinutes || 30) / 60) * HOUR_HEIGHT);
-                                  const isCurrentMember = slot.memberId === memberId;
-                                  const isDragging = dragSlot?.id === slot.id;
-                                  const phaseColors: Record<string, string> = { coach_guided: GREEN, shared_guidance: BLUE, self_guided: '#FFC000' };
-                                  const borderColor = phaseColors[slot.guidancePhase] || MUTED;
-                                  return (
-                                    <TouchableOpacity
-                                      key={slot.id}
-                                      activeOpacity={0.7}
-                                      delayLongPress={400}
-                                      onLongPress={() => {
-                                        if (isCurrentMember) {
-                                          setDragSlot({ id: slot.id, startY: 0, startDay: dayIdx, startMin: mins });
-                                          Alert.alert(
-                                            'Move Slot',
-                                            `Drag ${slot.memberName}'s ${slot.startTime} slot to a new time.\n\nSelect a new time:`,
-                                            [
-                                              { text: 'Cancel', style: 'cancel', onPress: () => setDragSlot(null) },
-                                              { text: '30 min earlier', onPress: () => handleDragDrop(slot.id, dayIdx, Math.max(0, mins - 30)) },
-                                              { text: '30 min later', onPress: () => handleDragDrop(slot.id, dayIdx, Math.min(1410, mins + 30)) },
-                                              { text: '1 hour earlier', onPress: () => handleDragDrop(slot.id, dayIdx, Math.max(0, mins - 60)) },
-                                              { text: '1 hour later', onPress: () => handleDragDrop(slot.id, dayIdx, Math.min(1410, mins + 60)) },
-                                            ]
-                                          );
-                                        }
-                                      }}
-                                      style={{ position: 'absolute', top, left: 1, right: 1, height, backgroundColor: isDragging ? 'rgba(91,155,213,0.4)' : isCurrentMember ? 'rgba(91,155,213,0.2)' : 'rgba(255,255,255,0.06)', borderRadius: 2, borderLeftWidth: 2, borderLeftColor: borderColor, padding: 1, overflow: 'hidden' }}
-                                    >
-                                      <Text style={{ fontSize: 6, color: isCurrentMember ? BLUE : MUTED, fontFamily: FH }} numberOfLines={1}>
-                                        {slot.startTime?.slice(0, 5)}
-                                      </Text>
-                                      <Text style={{ fontSize: 6, color: isCurrentMember ? FG : MUTED, fontFamily: FB }} numberOfLines={1}>
-                                        {slot.memberName?.split(' ')[0] || '?'}
-                                      </Text>
-                                    </TouchableOpacity>
-                                  );
-                                })}
-                              </View>
-                            );
-                          })}
-                        </View>
-                      </ScrollView>
-                    </View>
-                    );
-                  })()}
-                </View>
-              )}
+              {/* Calendar View */}
+              <CalendarView />
 
               {/* Existing Slots */}
               {activeSlots.length > 0 && (
@@ -1534,283 +2157,7 @@ export default function ScheduleModal({
                           <Text style={[s.slotActionText, { color: RED }]}>Cancel</Text>
                         </TouchableOpacity>
                       </View>
-                      {/* View Instances toggle */}
-                      <TouchableOpacity
-                        style={{ marginTop: 6 }}
-                        onPress={() => setExpandedSlotId(expandedSlotId === slot.id ? null : slot.id)}
-                      >
-                        <Text style={{ fontSize: 11, color: BLUE, fontFamily: FB }}>
-                          {expandedSlotId === slot.id ? 'Hide Instances' : 'View Instances'}
-                        </Text>
-                      </TouchableOpacity>
-                      {/* Instance list expansion (Item 1: reschedule UI, Item 7: attendance) */}
-                      {expandedSlotId === slot.id && (
-                        <View style={{ marginTop: 8, paddingLeft: 4 }}>
-                          {slotInstances.length === 0 ? (
-                            <Text style={{ fontSize: 11, color: MUTED, fontFamily: FB }}>No upcoming instances</Text>
-                          ) : (
-                            slotInstances.map((inst: any) => {
-                              const att = instanceAttendance[inst.id];
-                              const attColor = att?.label === 'Attended' ? GREEN : att?.label === 'Missed' || att?.label === 'No-show' ? RED : MUTED;
-                              const isRescheduling = rescheduleInstanceId === inst.id;
-                              return (
-                              <View key={inst.id} style={{ paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
-                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <View style={{ flex: 1 }}>
-                                    <Text style={{ fontSize: 11, color: FG, fontFamily: FB }}>
-                                      {inst.scheduledDate} at {inst.startTime || '—'}
-                                    </Text>
-                                    <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 2 }}>
-                                      <Text style={{ fontSize: 10, color: inst.status === 'completed' ? GREEN : inst.status === 'missed' ? RED : inst.status === 'skip_requested' ? '#FFC000' : inst.status === 'skipped' ? '#FFC000' : MUTED, fontFamily: FB }}>
-                                        {inst.status === 'skip_requested' ? 'skip requested' : (inst.status || 'scheduled')}
-                                      </Text>
-                                      {att && (
-                                        <Text style={{ fontSize: 9, color: attColor, fontFamily: FB }}>
-                                          {att.label}{att.eventCount > 0 ? ` (${att.eventCount} events)` : ''}
-                                        </Text>
-                                      )}
-                                    </View>
-                                  </View>
-                                  {inst.status !== 'completed' && inst.status !== 'missed' && (
-                                    <TouchableOpacity
-                                      onPress={() => {
-                                        setRescheduleInstanceId(isRescheduling ? null : inst.id);
-                                        setRescheduleDate(inst.scheduledDate || '');
-                                        setRescheduleTime(inst.startTime || '06:00');
-                                      }}
-                                    >
-                                      <Text style={{ fontSize: 10, color: BLUE, fontFamily: FB }}>
-                                        {isRescheduling ? 'Cancel' : 'Reschedule'}
-                                      </Text>
-                                    </TouchableOpacity>
-                                  )}
-                                </View>
-                                {/* Reschedule form */}
-                                {isRescheduling && (
-                                  <View style={{ marginTop: 6, backgroundColor: 'rgba(91,155,213,0.06)', borderRadius: 6, padding: 8 }}>
-                                    <Text style={{ fontSize: 10, color: MUTED, fontFamily: FH, marginBottom: 4 }}>New Date & Time</Text>
-                                    <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-                                      <TextInput
-                                        style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 6, padding: 6, color: FG, fontFamily: FB, fontSize: 11 }}
-                                        placeholder="YYYY-MM-DD"
-                                        placeholderTextColor={MUTED}
-                                        value={rescheduleDate}
-                                        onChangeText={setRescheduleDate}
-                                      />
-                                      <TouchableOpacity
-                                        style={{ backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 6, padding: 6 }}
-                                        onPress={() => setEditingTimeForDay(editingTimeForDay === -99 ? null : -99)}
-                                      >
-                                        <Text style={{ fontSize: 11, color: FG, fontFamily: FB }}>{formatTime(rescheduleTime)}</Text>
-                                      </TouchableOpacity>
-                                      <TouchableOpacity
-                                        style={{ backgroundColor: BLUE + '20', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 }}
-                                        onPress={async () => {
-                                          if (!rescheduleDate || !rescheduleTime) return;
-                                          await handleRescheduleInstance(inst.id, rescheduleDate, rescheduleTime);
-                                          setRescheduleInstanceId(null);
-                                          Alert.alert('Rescheduled', `Session moved to ${rescheduleDate} at ${formatTime(rescheduleTime)}`);
-                                        }}
-                                      >
-                                        <Text style={{ fontSize: 10, color: BLUE, fontFamily: FH }}>Confirm</Text>
-                                      </TouchableOpacity>
-                                    </View>
-                                    {/* Quick time picker for reschedule */}
-                                    {editingTimeForDay === -99 && (
-                                      <ScrollView horizontal style={{ marginTop: 6 }} showsHorizontalScrollIndicator={false}>
-                                        <View style={{ flexDirection: 'row', gap: 4 }}>
-                                          {TIME_OPTIONS.filter((_, i) => i % 2 === 0).map(t => (
-                                            <TouchableOpacity
-                                              key={t}
-                                              style={[{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, backgroundColor: rescheduleTime === t ? BLUE + '30' : 'rgba(255,255,255,0.06)' }]}
-                                              onPress={() => { setRescheduleTime(t); setEditingTimeForDay(null); }}
-                                            >
-                                              <Text style={{ fontSize: 10, color: rescheduleTime === t ? BLUE : MUTED, fontFamily: FB }}>{formatTime(t)}</Text>
-                                            </TouchableOpacity>
-                                          ))}
-                                        </View>
-                                      </ScrollView>
-                                    )}
-                                  </View>
-                                )}
-                                {/* Item 2: Skip instance */}
-                                {inst.status !== 'completed' && inst.status !== 'missed' && inst.status !== 'skipped' && inst.status !== 'skip_requested' && (
-                                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
-                                    {skippingInstanceId === inst.id ? (
-                                      <View style={{ flex: 1, backgroundColor: 'rgba(255,200,0,0.06)', borderRadius: 6, padding: 6 }}>
-                                        <TextInput
-                                          style={{ backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 4, padding: 4, color: FG, fontFamily: FB, fontSize: 10, marginBottom: 4 }}
-                                          placeholder="Reason (e.g., holiday, vacation)"
-                                          placeholderTextColor={MUTED}
-                                          value={skipReason}
-                                          onChangeText={setSkipReason}
-                                        />
-                                        <View style={{ flexDirection: 'row', gap: 6 }}>
-                                          <TouchableOpacity onPress={() => handleSkipInstance(slot.id, inst.id, skipReason)} style={{ backgroundColor: '#FFC000' + '20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 }}>
-                                            <Text style={{ fontSize: 9, color: '#FFC000', fontFamily: FH }}>Confirm Skip</Text>
-                                          </TouchableOpacity>
-                                          <TouchableOpacity onPress={() => { setSkippingInstanceId(null); setSkipReason(''); }}>
-                                            <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB }}>Cancel</Text>
-                                          </TouchableOpacity>
-                                        </View>
-                                      </View>
-                                    ) : (
-                                      <TouchableOpacity onPress={() => { setSkippingInstanceId(inst.id); setSkipReason(''); }}>
-                                        <Text style={{ fontSize: 9, color: '#FFC000', fontFamily: FB }}>Skip</Text>
-                                      </TouchableOpacity>
-                                    )}
-                                  </View>
-                                )}
-                                {inst.status === 'skipped' && (inst.skipReason || inst.skipCategory) && (
-                                  <View style={{ marginTop: 2 }}>
-                                    <Text style={{ fontSize: 9, color: '#FFC000', fontFamily: FB }}>Skipped{inst.skipCategory ? ` [${inst.skipCategory}]` : ''}{inst.skipReason ? `: ${inst.skipReason}` : ''}</Text>
-                                    {inst.skipRequestedBy && <Text style={{ fontSize: 8, color: MUTED, fontFamily: FB }}>Requested by member</Text>}
-                                  </View>
-                                )}
-                                {/* Skip request pending — approve/deny buttons */}
-                                {inst.status === 'skip_requested' && (
-                                  <View style={{ marginTop: 4, backgroundColor: 'rgba(255,200,0,0.06)', borderRadius: 6, padding: 6 }}>
-                                    <Text style={{ fontSize: 10, color: '#FFC000', fontFamily: FH, marginBottom: 2 }}>Skip Requested</Text>
-                                    {inst.skipCategory && <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB }}>Category: {inst.skipCategory}</Text>}
-                                    {inst.skipReason && <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB }}>Reason: {inst.skipReason}</Text>}
-                                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
-                                      <TouchableOpacity
-                                        style={{ backgroundColor: GREEN + '20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 4 }}
-                                        onPress={async () => {
-                                          try {
-                                            const fn = httpsCallable(functions, 'updateRecurringSlot');
-                                            await fn({ slotId: slot.id, action: 'approve_skip_request', instanceId: inst.id });
-                                            Alert.alert('Approved', 'Skip request has been approved.');
-                                          } catch (err: any) {
-                                            Alert.alert('Error', err.message || 'Failed to approve skip request');
-                                          }
-                                        }}
-                                      >
-                                        <Text style={{ fontSize: 9, color: GREEN, fontFamily: FH }}>Approve</Text>
-                                      </TouchableOpacity>
-                                      <TouchableOpacity
-                                        style={{ backgroundColor: RED + '20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 4 }}
-                                        onPress={async () => {
-                                          try {
-                                            const fn = httpsCallable(functions, 'updateRecurringSlot');
-                                            await fn({ slotId: slot.id, action: 'deny_skip_request', instanceId: inst.id });
-                                            Alert.alert('Denied', 'Skip request has been denied.');
-                                          } catch (err: any) {
-                                            Alert.alert('Error', err.message || 'Failed to deny skip request');
-                                          }
-                                        }}
-                                      >
-                                        <Text style={{ fontSize: 9, color: RED, fontFamily: FH }}>Deny</Text>
-                                      </TouchableOpacity>
-                                    </View>
-                                  </View>
-                                )}
-                                {/* Item 7: Session notes */}
-                                <View style={{ marginTop: 4 }}>
-                                  {editingNoteId === inst.id ? (
-                                    <View style={{ backgroundColor: 'rgba(91,155,213,0.06)', borderRadius: 6, padding: 6 }}>
-                                      <TextInput
-                                        style={{ backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 4, padding: 4, color: FG, fontFamily: FB, fontSize: 10, minHeight: 40 }}
-                                        placeholder="Session notes..."
-                                        placeholderTextColor={MUTED}
-                                        value={noteText}
-                                        onChangeText={setNoteText}
-                                        multiline
-                                      />
-                                      <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
-                                        <TouchableOpacity onPress={() => handleSaveInstanceNotes(slot.id, inst.id, noteText)} style={{ backgroundColor: BLUE + '20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 }}>
-                                          <Text style={{ fontSize: 9, color: BLUE, fontFamily: FH }}>Save Note</Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity onPress={() => { setEditingNoteId(null); setNoteText(''); }}>
-                                          <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB }}>Cancel</Text>
-                                        </TouchableOpacity>
-                                      </View>
-                                    </View>
-                                  ) : (
-                                    <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-                                      {(instanceNotes[inst.id] || inst.notes) ? (
-                                        <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB, flex: 1 }} numberOfLines={2}>
-                                          📝 {instanceNotes[inst.id] || inst.notes}
-                                        </Text>
-                                      ) : null}
-                                      <TouchableOpacity onPress={() => { setEditingNoteId(inst.id); setNoteText(instanceNotes[inst.id] || inst.notes || ''); }}>
-                                        <Text style={{ fontSize: 9, color: BLUE, fontFamily: FB }}>{(instanceNotes[inst.id] || inst.notes) ? 'Edit Note' : 'Add Note'}</Text>
-                                      </TouchableOpacity>
-                                    </View>
-                                  )}
-                                </View>
-                                {/* Zoom recording link — coaches/admins only */}
-                                {inst.recordings && inst.recordings.length > 0 && (
-                                  <View style={{ marginTop: 4, backgroundColor: 'rgba(91,155,213,0.06)', borderRadius: 4, padding: 4 }}>
-                                    <Text style={{ fontSize: 9, color: BLUE, fontFamily: FH, marginBottom: 2 }}>Session Recordings</Text>
-                                    {inst.recordings.map((rec: any, ri: number) => (
-                                      <TouchableOpacity
-                                        key={ri}
-                                        onPress={() => {
-                                          const url = rec.playUrl || rec.downloadUrl;
-                                          if (url) Linking.openURL(url);
-                                        }}
-                                        style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2 }}
-                                      >
-                                        <Icon name="video" size={10} color={BLUE} />
-                                        <Text style={{ fontSize: 9, color: BLUE, fontFamily: FB, textDecorationLine: 'underline' }} numberOfLines={1}>
-                                          {rec.topic || `Recording ${ri + 1}`}
-                                        </Text>
-                                      </TouchableOpacity>
-                                    ))}
-                                  </View>
-                                )}
-                                {inst.zoomRecordingUrl && !inst.recordings?.length && (
-                                  <View style={{ marginTop: 4, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                                    <TouchableOpacity
-                                      onPress={() => Linking.openURL(inst.zoomRecordingUrl)}
-                                      style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
-                                    >
-                                      <Icon name="video" size={10} color={BLUE} />
-                                      <Text style={{ fontSize: 9, color: BLUE, fontFamily: FB, textDecorationLine: 'underline' }}>View Recording</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                      onPress={async () => {
-                                        try {
-                                          const fn = httpsCallable(functions, 'refreshRecordingUrl');
-                                          const result = await fn({ instanceId: inst.id }) as any;
-                                          if (result.data?.recordingUrl) {
-                                            Linking.openURL(result.data.recordingUrl);
-                                          } else {
-                                            Alert.alert('Info', 'No updated recording URL available.');
-                                          }
-                                        } catch (err: any) {
-                                          Alert.alert('Error', err.message || 'Failed to refresh recording URL');
-                                        }
-                                      }}
-                                      style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}
-                                    >
-                                      <Icon name="refresh" size={9} color={MUTED} />
-                                      <Text style={{ fontSize: 8, color: MUTED, fontFamily: FB }}>Refresh</Text>
-                                    </TouchableOpacity>
-                                  </View>
-                                )}
-                                {/* Transcription link (coaches/admins only) */}
-                                {inst.transcriptionUrl && (
-                                  <View style={{ marginTop: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                    <TouchableOpacity
-                                      onPress={() => Linking.openURL(inst.transcriptionUrl)}
-                                      style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
-                                    >
-                                      <Icon name="document" size={10} color={BLUE} />
-                                      <Text style={{ fontSize: 9, color: BLUE, fontFamily: FB, textDecorationLine: 'underline' }}>View Transcript</Text>
-                                    </TouchableOpacity>
-                                    {inst.transcriptionStatus && (
-                                      <Text style={{ fontSize: 8, color: MUTED }}>({inst.transcriptionStatus})</Text>
-                                    )}
-                                  </View>
-                                )}
-                              </View>
-                              );
-                            })
-                          )}
-                        </View>
-                      )}
+                      <InstanceList slot={slot} />
                     </View>
                     );
                   })}
@@ -2261,143 +2608,7 @@ export default function ScheduleModal({
                   </View>
                 )}
 
-                {/* Item 6: Batch creation button */}
-                {!editingSlotId && (
-                  <TouchableOpacity
-                    style={{ marginBottom: 8, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: BLUE + '40', alignItems: 'center' }}
-                    onPress={() => setShowBatchPicker(true)}
-                  >
-                    <Text style={{ fontSize: 12, color: BLUE, fontFamily: FH }}>Apply to Multiple Members</Text>
-                  </TouchableOpacity>
-                )}
-
-                {/* Item 6: Batch member picker modal */}
-                {showBatchPicker && (
-                  <View style={{ backgroundColor: 'rgba(91,155,213,0.06)', borderRadius: 8, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: BLUE + '20' }}>
-                    {/* Batch template picker */}
-                    {(slotTemplates.length > 0 || sharedTemplates.length > 0) && (
-                      <View style={{ marginBottom: 8 }}>
-                        <Text style={{ fontSize: 11, color: GOLD, fontFamily: FH, marginBottom: 4 }}>Apply Template First</Text>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }}>
-                          <View style={{ flexDirection: 'row', gap: 6 }}>
-                            {[...slotTemplates, ...sharedTemplates].map((t: any) => (
-                              <TouchableOpacity
-                                key={t.id}
-                                style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, borderWidth: 1, borderColor: GOLD + '40', backgroundColor: 'rgba(245,166,35,0.08)' }}
-                                onPress={() => handleLoadTemplate(t)}
-                              >
-                                <Text style={{ fontSize: 10, color: GOLD, fontFamily: FB }}>{t.name}</Text>
-                              </TouchableOpacity>
-                            ))}
-                          </View>
-                        </ScrollView>
-                        <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB }}>Tap a template to load its settings, then select members below.</Text>
-                      </View>
-                    )}
-                    <Text style={{ fontSize: 12, color: BLUE, fontFamily: FH, marginBottom: 6 }}>Select Members</Text>
-                    {batchMembers.length === 0 ? (
-                      <Text style={{ fontSize: 11, color: MUTED, fontFamily: FB }}>Loading members...</Text>
-                    ) : (
-                      <ScrollView style={{ maxHeight: 150 }} nestedScrollEnabled>
-                        {batchMembers.map((bm: any) => (
-                          <TouchableOpacity
-                            key={bm.id}
-                            style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}
-                            onPress={() => {
-                              setSelectedBatchMembers(prev => {
-                                const next = new Set(prev);
-                                if (next.has(bm.id)) next.delete(bm.id); else next.add(bm.id);
-                                return next;
-                              });
-                            }}
-                          >
-                            <View style={{ width: 18, height: 18, borderRadius: 3, borderWidth: 1, borderColor: selectedBatchMembers.has(bm.id) ? BLUE : MUTED, backgroundColor: selectedBatchMembers.has(bm.id) ? BLUE + '30' : 'transparent', marginRight: 8, alignItems: 'center', justifyContent: 'center' }}>
-                              {selectedBatchMembers.has(bm.id) && <Text style={{ fontSize: 10, color: BLUE }}>✓</Text>}
-                            </View>
-                            <Text style={{ fontSize: 12, color: FG, fontFamily: FB }}>{bm.name || bm.id}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    )}
-                    {/* Per-member day/time overrides */}
-                    {selectedBatchMembers.size > 0 && (
-                      <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)', paddingTop: 8 }}>
-                        <Text style={{ fontSize: 11, color: GOLD, fontFamily: FH, marginBottom: 4 }}>Per-Member Overrides (optional)</Text>
-                        <Text style={{ fontSize: 9, color: MUTED, fontFamily: FB, marginBottom: 6 }}>Set a different day or time for specific members. Leave blank to use the form defaults.</Text>
-                        {batchMembers.filter(bm => selectedBatchMembers.has(bm.id)).map((bm: any) => {
-                          const ov = batchOverrides[bm.id];
-                          const dayVal = ov?.dayOfWeek ?? '';
-                          const timeVal = ov?.startTime ?? '';
-                          const dayInvalid = dayVal !== '' && (!/^[0-6]$/.test(dayVal));
-                          const timeInvalid = timeVal !== '' && (!/^([01]\d|2[0-3]):[0-5]\d$/.test(timeVal));
-                          return (
-                            <View key={bm.id} style={{ marginBottom: 4 }}>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                <Text style={{ fontSize: 10, color: FG, fontFamily: FB, width: 80 }} numberOfLines={1}>{bm.name || bm.id}</Text>
-                                <TextInput
-                                  style={{ flex: 1, backgroundColor: '#0E1117', borderRadius: 4, borderWidth: 1, borderColor: dayInvalid ? '#FF5722' : MUTED + '30', color: FG, fontSize: 10, fontFamily: FB, paddingHorizontal: 6, paddingVertical: 3 }}
-                                  placeholder="Day (0=Sun..6=Sat)"
-                                  placeholderTextColor={MUTED}
-                                  value={dayVal}
-                                  onChangeText={(v) => setBatchOverrides(prev => ({ ...prev, [bm.id]: { ...prev[bm.id], dayOfWeek: v || undefined } }))}
-                                  keyboardType="numeric"
-                                  maxLength={1}
-                                />
-                                <TextInput
-                                  style={{ flex: 1, backgroundColor: '#0E1117', borderRadius: 4, borderWidth: 1, borderColor: timeInvalid ? '#FF5722' : MUTED + '30', color: FG, fontSize: 10, fontFamily: FB, paddingHorizontal: 6, paddingVertical: 3 }}
-                                  placeholder="Time (HH:MM)"
-                                  placeholderTextColor={MUTED}
-                                  value={timeVal}
-                                  onChangeText={(v) => setBatchOverrides(prev => ({ ...prev, [bm.id]: { ...prev[bm.id], startTime: v || undefined } }))}
-                                  maxLength={5}
-                                />
-                              </View>
-                              {(dayInvalid || timeInvalid) && (
-                                <Text style={{ fontSize: 8, color: '#FF5722', fontFamily: FB, marginLeft: 86, marginTop: 2 }}>
-                                  {dayInvalid ? 'Day must be 0-6 (0=Sun, 1=Mon, ..., 6=Sat)' : ''}
-                                  {dayInvalid && timeInvalid ? ' · ' : ''}
-                                  {timeInvalid ? 'Time must be HH:MM (e.g. 09:00)' : ''}
-                                </Text>
-                              )}
-                            </View>
-                          );
-                        })}
-                      </View>
-                    )}
-
-                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                      <TouchableOpacity
-                        style={{ flex: 1, backgroundColor: BLUE, paddingVertical: 8, borderRadius: 6, alignItems: 'center', opacity: selectedBatchMembers.size === 0 || batchCreating || (() => {
-                          for (const bmId of Array.from(selectedBatchMembers)) {
-                            const ov = batchOverrides[bmId];
-                            if (ov?.dayOfWeek && !/^[0-6]$/.test(ov.dayOfWeek)) return true;
-                            if (ov?.startTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(ov.startTime)) return true;
-                          }
-                          return false;
-                        })() ? 0.5 : 1 }}
-                        onPress={handleBatchCreate}
-                        disabled={selectedBatchMembers.size === 0 || batchCreating || (() => {
-                          for (const bmId of Array.from(selectedBatchMembers)) {
-                            const ov = batchOverrides[bmId];
-                            if (ov?.dayOfWeek && !/^[0-6]$/.test(ov.dayOfWeek)) return true;
-                            if (ov?.startTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(ov.startTime)) return true;
-                          }
-                          return false;
-                        })()}
-                      >
-                        <Text style={{ fontSize: 12, color: '#fff', fontFamily: FH }}>
-                          {batchCreating ? 'Creating...' : `Create for ${selectedBatchMembers.size} Members`}
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6 }}
-                        onPress={() => { setShowBatchPicker(false); setSelectedBatchMembers(new Set()); }}
-                      >
-                        <Text style={{ fontSize: 12, color: MUTED, fontFamily: FB }}>Cancel</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                )}
+                <BatchCreator />
 
                 {/* Create Button */}
                 <TouchableOpacity

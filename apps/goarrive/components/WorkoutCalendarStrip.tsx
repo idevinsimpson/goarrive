@@ -19,13 +19,8 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Platform,
 } from 'react-native';
-
-const FH =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FB =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+import { FB, FH } from '../lib/theme';
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTH_NAMES = [

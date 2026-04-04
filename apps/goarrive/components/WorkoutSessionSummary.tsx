@@ -19,14 +19,9 @@ import {
   StyleSheet,
   Modal,
   TouchableOpacity,
-  Platform,
 } from 'react-native';
 import { Icon } from './Icon';
-
-const FH =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FB =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+import { FB, FH } from '../lib/theme';
 
 interface SessionStats {
   /** Total elapsed time in seconds */

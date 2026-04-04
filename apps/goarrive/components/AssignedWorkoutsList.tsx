@@ -16,7 +16,6 @@ import {
   Text,
   Pressable,
   StyleSheet,
-  Platform,
   ActivityIndicator,
 } from 'react-native';
 import { Icon } from './Icon';
@@ -31,6 +30,7 @@ import {
   orderBy,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { FB, FH } from '../lib/theme';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -53,11 +53,6 @@ interface Props {
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
-
-const FONT_HEADING =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FONT_BODY =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -353,7 +348,7 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#8A95A3',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 10,
@@ -362,7 +357,7 @@ const s = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: '#4A5568',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 6,
@@ -382,7 +377,7 @@ const s = StyleSheet.create({
   emptyText: {
     fontSize: 13,
     color: '#4A5568',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   assignmentCard: {
     flexDirection: 'row',
@@ -416,7 +411,7 @@ const s = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#F0F4F8',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   pastName: {
     color: '#8A95A3',
@@ -424,7 +419,7 @@ const s = StyleSheet.create({
   assignmentDate: {
     fontSize: 12,
     color: '#8A95A3',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     marginTop: 2,
   },
   statusBadge: {
@@ -443,7 +438,7 @@ const s = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: '#F5A623',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
     textTransform: 'uppercase',
     letterSpacing: 0.3,
   },
@@ -503,7 +498,7 @@ const s = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     color: '#E05252',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   retryBtn: {
     backgroundColor: 'rgba(245,166,35,0.12)',
@@ -515,7 +510,7 @@ const s = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#F5A623',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   // NEXT-C: Sort chip styles
   sortRow: {
@@ -541,7 +536,7 @@ const s = StyleSheet.create({
   sortChipText: {
     fontSize: 10,
     color: '#4A5568',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   sortChipTextActive: {
     color: '#F5A623',

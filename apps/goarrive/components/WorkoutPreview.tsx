@@ -27,11 +27,7 @@ import {
 } from 'react-native';
 import { Icon } from './Icon';
 import { useOfflineVideoCache } from '../hooks/useOfflineVideoCache';
-
-const FH =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FB =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+import { FB, FH } from '../lib/theme';
 
 interface WorkoutPreviewProps {
   visible: boolean;

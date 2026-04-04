@@ -29,11 +29,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { router } from 'expo-router';
-
-const FONT_HEADING =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FONT_BODY =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+import { FB, FH } from '../lib/theme';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PANEL_WIDTH = Math.min(SCREEN_WIDTH * 0.82, 320);
@@ -404,7 +400,7 @@ const s = StyleSheet.create({
     fontSize: 22,
     fontWeight: '700',
     color: '#F5A623',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
   },
   closeBtn: {
     padding: 6,
@@ -414,13 +410,13 @@ const s = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#F0F4F8',
-    fontFamily: FONT_HEADING,
+    fontFamily: FH,
     marginBottom: 3,
   },
   email: {
     fontSize: 13,
     color: '#8A95A3',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     marginBottom: 10,
   },
   roleBadge: {
@@ -436,7 +432,7 @@ const s = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#F5A623',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -470,7 +466,7 @@ const s = StyleSheet.create({
     fontSize: 15,
     fontWeight: '500',
     color: '#D0D8E4',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   menuLabelDanger: {
     color: '#E05252',
@@ -478,7 +474,7 @@ const s = StyleSheet.create({
   menuSublabel: {
     fontSize: 12,
     color: '#5A6478',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   signOutBtn: {
     flexDirection: 'row',
@@ -494,7 +490,7 @@ const s = StyleSheet.create({
     fontSize: 15,
     fontWeight: '500',
     color: '#E05252',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
   toast: {
     marginHorizontal: 16,
@@ -509,7 +505,7 @@ const s = StyleSheet.create({
   toastText: {
     fontSize: 13,
     color: '#F5A623',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     textAlign: 'center',
     lineHeight: 18,
   },
@@ -528,7 +524,7 @@ const s = StyleSheet.create({
   zoomHint: {
     fontSize: 12,
     color: '#6A7585',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     lineHeight: 17,
   },
   zoomInput: {
@@ -538,7 +534,7 @@ const s = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 14,
     color: '#F0F4F8',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
     borderWidth: 1,
     borderColor: '#2A3548',
   },
@@ -552,6 +548,6 @@ const s = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#0A0F1A',
-    fontFamily: FONT_BODY,
+    fontFamily: FB,
   },
 });

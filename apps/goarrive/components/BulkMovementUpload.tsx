@@ -39,12 +39,9 @@ import { Icon } from './Icon';
 import { generateCroppedGif } from '../utils/generateCroppedGif';
 import { generateMovementVoice } from '../utils/generateMovementVoice';
 import { analyzeMovementMedia } from '../utils/analyzeMovementMedia';
+import { FB, FH } from '../lib/theme';
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const FH =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FB =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type UploadStatus = 'queued' | 'uploading' | 'generating_gif' | 'analyzing' | 'saving' | 'voice' | 'done' | 'error';

@@ -47,11 +47,7 @@ import { useMovementSwap } from '../hooks/useMovementSwap';
 import { useMovementHydrate } from '../hooks/useMovementHydrate';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
-
-const FH =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FB =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
+import { FB, FH } from '../lib/theme';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface WorkoutPlayerProps {

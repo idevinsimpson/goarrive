@@ -50,12 +50,9 @@ import { MovementDetailData } from './MovementDetail';
 import { generateCroppedGif } from '../utils/generateCroppedGif';
 import { generateMovementVoice } from '../utils/generateMovementVoice';
 import { analyzeMovementMedia } from '../utils/analyzeMovementMedia';
+import { FB, FH } from '../lib/theme';
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const FH =
-  Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FB =
-  Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
 const CATEGORY_OPTIONS = [
   'Upper Body Push',
