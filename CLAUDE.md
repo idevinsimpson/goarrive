@@ -57,6 +57,7 @@ For deep dives into specific areas, consult the files in the `.claude/` director
 | `.claude/known-issues-and-lessons.md` | Resolved bugs, performance risks, and architectural decisions to preserve. |
 | `.claude/testing-and-quality.md` | Testing infrastructure, quality checklist, and deployment verification. |
 | `.claude/existing-docs-index.md` | Index of all existing documentation files with relevance ratings. |
+| `.claude/interaction-rules.md` | **Mandatory.** Behavioral rules: scope adherence, continuous improvement loop, communication style, and initiative protocol. |
 | `.claude/task-routing.md` | **Mandatory.** Task routing protocol — Code vs Browser vs Hybrid workflow split between Maia and Manus. |
 
 ## Recent Context
