@@ -1,27 +1,135 @@
-import { describe, it, expect } from 'vitest';
+/**
+ * Tests for pricing and payment utility functions from planTypes.ts
+ */
+import {
+  formatCurrency,
+  monthsToWeeks,
+  getDefaultGuidance,
+  getGuidanceProfile,
+  countSessionsByType,
+  createDefaultSchedule,
+  createDefaultPhases,
+  calculatePricing,
+  createDefaultPlan,
+} from '../../lib/planTypes';
 
-describe('Payment Logic', () => {
-  it('should correctly calculate prorated earnings cap', () => {
-    // This is a placeholder test. In a real scenario, you would test the logic
-    // for calculating prorated earnings caps based on start dates and yearly caps.
-    const yearlyCap = 100000;
-    const profitShareStartDate = new Date('2026-07-01'); // Mid-year
-    const expectedProratedCap = yearlyCap / 2; // Roughly half
-
-    // In a real test, you'd call a function that performs this calculation
-    const actualProratedCap = 50000; // Placeholder for actual calculation result
-
-    expect(actualProratedCap).toBe(expectedProratedCap);
+describe('formatCurrency', () => {
+  it('formats whole numbers', () => {
+    expect(formatCurrency(500)).toBe('$500');
   });
 
-  it('should correctly apply a CTS accountability fee', () => {
-    // Placeholder for testing CTS fee application logic
-    const memberStatus = { hasOptedInCTS: true, missedCheckins: 2 };
-    const feePerMissedCheckin = 10;
-    const expectedFee = memberStatus.missedCheckins * feePerMissedCheckin;
+  it('rounds decimals', () => {
+    expect(formatCurrency(499.7)).toBe('$500');
+  });
 
-    const actualFee = 20; // Placeholder for actual calculation result
+  it('formats large numbers with commas', () => {
+    expect(formatCurrency(10000)).toBe('$10,000');
+  });
 
-    expect(actualFee).toBe(expectedFee);
+  it('handles zero', () => {
+    expect(formatCurrency(0)).toBe('$0');
+  });
+
+  it('handles NaN', () => {
+    expect(formatCurrency(NaN)).toBe('$0');
+  });
+});
+
+describe('monthsToWeeks', () => {
+  it('converts 6 months to 26 weeks', () => {
+    expect(monthsToWeeks(6)).toBe(26);
+  });
+
+  it('converts 9 months to 39 weeks', () => {
+    expect(monthsToWeeks(9)).toBe(39);
+  });
+
+  it('converts 12 months to 52 weeks', () => {
+    expect(monthsToWeeks(12)).toBe(52);
+  });
+});
+
+describe('getDefaultGuidance', () => {
+  it('returns default phase progression for Strength', () => {
+    const g = getDefaultGuidance('Strength');
+    expect(g.sessionType).toBe('Strength');
+    expect(g.phase1).toBe('Fully guided');
+    expect(g.phase2).toBe('Blended');
+    expect(g.phase3).toBe('Self-reliant');
+  });
+});
+
+describe('getGuidanceProfile', () => {
+  it('finds matching profile from list', () => {
+    const profiles = [
+      { sessionType: 'Strength' as const, phase1: 'Blended' as const, phase2: 'Blended' as const, phase3: 'Self-reliant' as const },
+    ];
+    const result = getGuidanceProfile('Strength', profiles);
+    expect(result.phase1).toBe('Blended');
+  });
+
+  it('returns default when no match found', () => {
+    const result = getGuidanceProfile('Mix', []);
+    expect(result.sessionType).toBe('Mix');
+    expect(result.phase1).toBe('Fully guided');
+  });
+});
+
+describe('countSessionsByType', () => {
+  it('counts non-rest session types', () => {
+    const schedule = createDefaultSchedule(3);
+    const counts = countSessionsByType(schedule);
+    const total = Object.values(counts).reduce((a, b) => a + b, 0);
+    expect(total).toBe(3); // 3 sessions per week
+  });
+
+  it('excludes rest days from count', () => {
+    const schedule = createDefaultSchedule(3);
+    const counts = countSessionsByType(schedule);
+    expect(counts['Rest']).toBeUndefined();
+  });
+});
+
+describe('createDefaultSchedule', () => {
+  it('creates a 7-day schedule', () => {
+    const schedule = createDefaultSchedule(3);
+    expect(schedule).toHaveLength(7);
+  });
+
+  it('more sessions per week means fewer rest days', () => {
+    const s3 = createDefaultSchedule(3).filter(d => d.type === 'Rest').length;
+    const s5 = createDefaultSchedule(5).filter(d => d.type === 'Rest').length;
+    expect(s3).toBeGreaterThan(s5);
+  });
+});
+
+describe('createDefaultPhases', () => {
+  it('creates 3 phases for a 12-month contract', () => {
+    const phases = createDefaultPhases(12);
+    expect(phases).toHaveLength(3);
+  });
+
+  it('phase weeks sum to contract weeks', () => {
+    const phases = createDefaultPhases(12);
+    const totalWeeks = phases.reduce((sum, p) => sum + p.weeks, 0);
+    expect(totalWeeks).toBe(52);
+  });
+});
+
+describe('calculatePricing', () => {
+  it('calculates pricing from a default plan', () => {
+    const plan = createDefaultPlan('Test Member', 'm1', 'c1');
+    const result = calculatePricing(plan);
+    expect(result.calculatedMonthlyPrice).toBeGreaterThan(0);
+    expect(result.totalProgramPrice).toBeGreaterThan(0);
+    expect(result.payInFullPrice).toBeLessThan(result.totalProgramPrice); // PIF discount
+  });
+
+  it('manual override replaces calculated price', () => {
+    const plan = createDefaultPlan('Test Member', 'm1', 'c1');
+    plan.isManualOverride = true;
+    plan.monthlyPriceOverride = 999;
+    const result = calculatePricing(plan);
+    expect(result.displayMonthlyPrice).toBe(999);
   });
 });
