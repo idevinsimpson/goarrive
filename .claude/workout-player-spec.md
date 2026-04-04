@@ -92,12 +92,13 @@ Next exercise block's first movement videoUrl → left-side video
    - `ResizeMode.COVER` to fill the area
    - Video is muted (movement demos have no audio)
    - `cropScale` / `cropTranslateX` / `cropTranslateY` applied as transform styles to zoom/pan the video per coach configuration
+   - **CRITICAL ASPECT RATIO:** The video player area MUST be strictly 4:5 aspect ratio (vertical rectangle), not a square or 16:9. This ensures the coach's framing is preserved exactly as intended.
    - Thumbnail fallback while video loads
    - **Tap behavior:** Single tap toggles controls overlay (play/pause, skip, swap movement, playback speed). Controls auto-hide after 3 seconds.
 
 5. **Next Up Bar** — pinned to bottom:
    - Shows the NEXT movement's thumbnail + name + block name + duration
-   - **CRITICAL TIMING:** In the video, the "next up" information appears approximately **3.5 seconds before the current movement ends**, not permanently. The next movement's name visually transitions in. Current code shows it always — must be changed to appear only in the final ~3.5 seconds of the current movement's timer.
+   - **CRITICAL TIMING & REVEAL:** The countdown audio (3, 2, 1) should reveal the next movement in the main video area **3.5 seconds before the next movement actually starts**. When you hear the countdown, you should already see the next movement playing in the big screen area. The "Next Up" bar at the bottom also appears at this 3.5s mark.
 
 **Data mapping:**
 ```
@@ -234,11 +235,13 @@ Style: {
 
 ## 4. Next Up Bar — Timing Behavior
 
-**From the video:** The "next up" information does NOT display permanently during the entire movement. It appears approximately **3.5 seconds before the current movement's timer reaches 0**.
+**From the video:** The "next up" information does NOT display permanently during the entire movement. It appears approximately **3.5 seconds before the current movement's timer reaches 0**. Furthermore, the main video area itself should transition to show the *next* movement's video during this 3.5-second countdown window, so the user sees what's coming before the timer hits 0.
 
 **Implementation:**
 - Track `timeLeft` in the work phase
 - When `timeLeft <= 3.5` (or `timeLeft <= 4` for integer comparison), render the Next Up bar with a fade-in animation
+- The main video component should also switch its source to the `next.videoUrl` when `timeLeft <= 3.5`.
+- **Rest screens:** During a rest period, there is NEVER an instance where a movement video is not playing. The rest screen must show the upcoming movement video playing in the main area while the rest timer counts down. The timer text should be white during rest (not gold).
 - The Next Up bar shows: thumbnail of next movement + movement name
 - When the timer hits 0 and transitions to the next movement, the bar disappears and the new movement takes over
 
@@ -311,6 +314,9 @@ Priority order (highest impact first):
 7. **Outro cinematic** — Replace check-circle + "YOU DID IT!" with large centered logo + "WORKOUT" text.
 8. **Portrait lock** — Cap max width at ~430px on wide screens, center with black bars.
 9. **Swap duration** — Change swap phase from 3 seconds to 5 seconds to match the video.
+10. **Video Aspect Ratio** — Force the main video player area to a strict 4:5 aspect ratio.
+11. **Countdown Reveal** — Transition the main video to the next movement 3.5 seconds before the current timer ends.
+12. **Rest Screen Video** — Ensure the rest screen always plays the upcoming movement video, with a white timer (not gold).
 
 ---
 
