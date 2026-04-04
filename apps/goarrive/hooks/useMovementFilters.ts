@@ -13,7 +13,7 @@
  * picker within the workout builder.
  */
 import { useState, useMemo, useCallback } from 'react';
-import type { FirestoreTimestamp } from '../lib/planTypes';
+import type { FirestoreTimestamp } from '../lib/types';
 
 export interface MovementFilterable {
   id: string;
@@ -131,7 +131,7 @@ export function filterMovements(
 }
 
 /** Sort movements by the given option */
-function sortMovements(
+export function sortMovements(
   movements: MovementFilterable[],
   sortBy: SortOption,
 ): MovementFilterable[] {

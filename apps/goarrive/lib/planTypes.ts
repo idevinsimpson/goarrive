@@ -4,13 +4,8 @@
  * Pricing engine with per-type guidance profiles
  */
 
-// ─── Firestore timestamp type (avoids importing Firebase SDK into types) ──────
-/** Represents a Firestore Timestamp or its serialized form */
-export type FirestoreTimestamp = {
-  seconds: number;
-  nanoseconds: number;
-  toDate?: () => Date;
-};
+export type { FirestoreTimestamp } from './types';
+import type { FirestoreTimestamp } from './types';
 
 // ─── Session schedule ─────────────────────────────────────────────────────────
 
