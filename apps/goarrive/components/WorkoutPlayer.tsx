@@ -124,11 +124,15 @@ export default function WorkoutPlayer({
   } = useMovementSwap(flatMovements, currentIndex, setFlatOverride);
   const [swapReason, setSwapReason] = useState('');
 
-  // ── Landscape detection ─────────────────────────────────
+  // ── Landscape / wide-screen detection ─────────────────────────────────
   const { width: winW, height: winH } = useWindowDimensions();
   const dimsValid = winW > 0 && winH > 0;
   const isLandscape = dimsValid ? winW > winH : false;
   const isTablet = dimsValid ? Math.min(winW, winH) >= 600 : false;
+  // Portrait column: on wide screens, constrain to 9:16 within 430px max
+  const isWideScreen = dimsValid && winW > 500;
+  const portraitW = isWideScreen ? Math.min(PORTRAIT_MAX_W, winH * (9 / 16)) : winW;
+  const portraitH = isWideScreen ? winH : winH;
 
   // ── Video ref ────────────────────────────────
   const videoRef = useRef<any>(null);
@@ -271,7 +275,7 @@ export default function WorkoutPlayer({
   return (
     <Modal visible={visible} animationType="fade" transparent={false}>
       <View style={st.portraitLockOuter}>
-      <View style={st.container}>
+      <View style={[st.container, isWideScreen && { width: portraitW, maxWidth: portraitW }]}>
 
         {/* ── READY state ─────────────────────────────────────── */}
         {phase === 'ready' && (
@@ -566,14 +570,20 @@ export default function WorkoutPlayer({
             )}
 
             {/* Video area */}
+            {(() => {
+              // At 3.5s before end, switch to next movement's video
+              const showNextVideo = !isRepBased && timeLeft <= 4 && next?.videoUrl;
+              const activeVideoUrl = showNextVideo ? next.videoUrl : current.videoUrl;
+              const activeThumbUrl = showNextVideo ? next.thumbnailUrl : current.thumbnailUrl;
+              return (
             <View style={st.videoArea}>
               <TouchableWithoutFeedback onPress={handleVideoTap}>
                 <View style={st.videoInner}>
-                  {current.videoUrl ? (
+                  {activeVideoUrl ? (
                     <>
                       <Video
                         ref={videoRef}
-                        source={{ uri: current.videoUrl }}
+                        source={{ uri: activeVideoUrl }}
                         resizeMode={ResizeMode.COVER}
                         isLooping
                         shouldPlay={!isPaused}
@@ -586,17 +596,17 @@ export default function WorkoutPlayer({
                         }
                         onReadyForDisplay={() => setVideoReady(true)}
                       />
-                      {!videoReady && current.thumbnailUrl && (
+                      {!videoReady && activeThumbUrl && (
                         <Image
-                          source={{ uri: current.thumbnailUrl }}
+                          source={{ uri: activeThumbUrl }}
                           style={st.posterFallback}
                           resizeMode="cover"
                         />
                       )}
                     </>
-                  ) : current.thumbnailUrl ? (
+                  ) : activeThumbUrl ? (
                     <Image
-                      source={{ uri: current.thumbnailUrl }}
+                      source={{ uri: activeThumbUrl }}
                       style={st.videoPlayer}
                       resizeMode="cover"
                     />
@@ -648,30 +658,61 @@ export default function WorkoutPlayer({
                 </View>
               </TouchableWithoutFeedback>
             </View>
+              );
+            })()}
 
-            {/* NEXT UP bar — appears in final ~3.5 seconds */}
-            {timeLeft <= 4 && renderNextUp()}
+            {/* NEXT UP bar — always visible */}
+            {renderNextUp()}
           </View>
         )}
 
-        {/* ── REST state ──────────────────────────────────────── */}
+        {/* ── REST state — show next movement video ──────────── */}
         {phase === 'rest' && (
-          <>
+          <View style={st.workContainer}>
             {renderHeader()}
-            <View style={st.centerContent}>
-              <Text style={st.phaseLabel}>REST</Text>
-              <View style={[st.timerRing, st.timerRingRest]}>
-                <Text style={st.timerNum}>{formatTime(timeLeft)}</Text>
+            {/* REST label + white timer */}
+            <View style={st.nameTimerRow}>
+              <View style={st.nameColumn}>
+                <Text style={st.restPhaseLabel}>REST</Text>
+                {next && <Text style={st.restNextName}>Next: {next.name}</Text>}
               </View>
-
-              {renderNextUp()}
-
-              <TouchableOpacity style={st.skipBtn} onPress={handleSkip}>
-                <Icon name="skip-forward" size={24} color="#F5A623" />
-                <Text style={st.skipText}>Skip Rest</Text>
-              </TouchableOpacity>
+              <View style={st.restTimerBox}>
+                <Text style={st.restTimerText}>{formatTime(timeLeft)}</Text>
+              </View>
             </View>
-          </>
+
+            {/* Next movement video preview */}
+            <View style={st.videoArea}>
+              <View style={st.videoInner}>
+                {next?.videoUrl ? (
+                  <Video
+                    source={{ uri: next.videoUrl }}
+                    resizeMode={ResizeMode.COVER}
+                    isLooping
+                    shouldPlay
+                    isMuted
+                    style={st.videoPlayer}
+                    videoStyle={
+                      Platform.OS === 'web'
+                        ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
+                        : undefined
+                    }
+                  />
+                ) : next?.thumbnailUrl ? (
+                  <Image source={{ uri: next.thumbnailUrl }} style={st.videoPlayer} resizeMode="cover" />
+                ) : (
+                  <View style={[st.videoPlayer, st.videoPlaceholder]}>
+                    <Icon name="play-circle" size={48} color="#3A4050" />
+                  </View>
+                )}
+              </View>
+            </View>
+
+            <TouchableOpacity style={[st.skipPill, { alignSelf: 'center', marginTop: 12 }]} onPress={handleSkip}>
+              <Icon name="skip-forward" size={16} color="#F5A623" />
+              <Text style={st.skipPillText}>Skip Rest</Text>
+            </TouchableOpacity>
+          </View>
         )}
 
         {/* ── SWAP state ──────────────────────────────────────── */}
@@ -1064,6 +1105,27 @@ const st = StyleSheet.create({
     fontFamily: FH,
     lineHeight: 52,
   },
+  // REST phase styles
+  restPhaseLabel: {
+    fontSize: 16, fontWeight: '700', color: '#8A95A3', fontFamily: FH,
+    letterSpacing: 2,
+  },
+  restNextName: {
+    fontSize: 20, fontWeight: '700', color: '#F0F4F8', fontFamily: FH, marginTop: 2,
+  },
+  restTimerBox: {
+    backgroundColor: '#1A2035',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  restTimerText: {
+    fontSize: 48,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    fontFamily: FH,
+    lineHeight: 52,
+  },
   sideBadgeRow: { alignItems: 'center', marginBottom: 4 },
   // SPLIT label
   splitLabelRow: {
@@ -1085,9 +1147,9 @@ const st = StyleSheet.create({
     fontSize: 14, color: '#F5A623', fontFamily: FB,
   },
 
-  // Video area
+  // Video area — strict 4:5 portrait crop
   videoArea: {
-    flex: 1, marginHorizontal: 0, marginTop: 4,
+    aspectRatio: 4 / 5, width: '100%', marginTop: 4,
     borderRadius: 0, overflow: 'hidden', backgroundColor: '#000000',
   },
   videoInner: { flex: 1, position: 'relative' },
