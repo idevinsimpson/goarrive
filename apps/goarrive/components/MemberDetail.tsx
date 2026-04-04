@@ -14,8 +14,6 @@ import {
   Modal,
   TouchableOpacity,
   ScrollView,
-  Platform,
-  Dimensions,
 } from 'react-native';
 import { db } from '../lib/firebase';
 import { doc, onSnapshot, collection, query, where, addDoc } from 'firebase/firestore';
@@ -29,22 +27,7 @@ import WorkoutAnalytics from './WorkoutAnalytics';
 import WorkoutLogReview from './WorkoutLogReview';
 import MemberWorkoutHistory from './MemberWorkoutHistory';
 import ScheduleModal from './ScheduleModal';
-
-const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
-const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
-
-const BG = '#0E1117';
-const CARD = '#111827';
-const CARD2 = '#151B28';
-const BORDER = '#1E2A3A';
-const MUTED = '#8A95A3';
-const GOLD = '#F5A623';
-const GREEN = '#6EBB7A';
-const BLUE = '#5B9BD5';
-const RED = '#E05252';
-const FG = '#F0F4F8';
-
-const { width: SCREEN_W } = Dimensions.get('window');
+import { BG, CARD, CARD2, BORDER, MUTED, GOLD, GREEN, BLUE, RED, FG, FH, FB } from '../lib/theme';
 
 interface MemberDetailProps {
   member: any;
