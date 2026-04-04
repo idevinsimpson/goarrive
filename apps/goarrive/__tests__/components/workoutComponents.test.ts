@@ -50,11 +50,11 @@ describe('WorkoutPlayer — block type resolution', () => {
 
 describe('WorkoutForm — movement filter integration', () => {
   const mockMovements = [
-    { id: '1', name: 'Bench Press', bodyRegion: 'Upper Body', equipment: 'Barbell', tags: ['chest', 'push'], coachId: 'c1', isGlobal: false },
-    { id: '2', name: 'Squat', bodyRegion: 'Lower Body', equipment: 'Barbell', tags: ['legs', 'compound'], coachId: 'c1', isGlobal: false },
-    { id: '3', name: 'Plank', bodyRegion: 'Core', equipment: 'Bodyweight', tags: ['core', 'stability'], coachId: '', isGlobal: true },
-    { id: '4', name: 'Deadlift', bodyRegion: 'Full Body', equipment: 'Barbell', tags: ['posterior', 'compound'], coachId: 'c1', isGlobal: false },
-    { id: '5', name: 'Push-Up', bodyRegion: 'Upper Body', equipment: 'Bodyweight', tags: ['chest', 'push'], coachId: '', isGlobal: true },
+    { id: '1', name: 'Bench Press', category: 'Upper Body', equipment: 'Barbell', tags: ['chest', 'push'], coachId: 'c1', isGlobal: false },
+    { id: '2', name: 'Squat', category: 'Lower Body', equipment: 'Barbell', tags: ['legs', 'compound'], coachId: 'c1', isGlobal: false },
+    { id: '3', name: 'Plank', category: 'Core', equipment: 'Bodyweight', tags: ['core', 'stability'], coachId: '', isGlobal: true },
+    { id: '4', name: 'Deadlift', category: 'Full Body', equipment: 'Barbell', tags: ['posterior', 'compound'], coachId: 'c1', isGlobal: false },
+    { id: '5', name: 'Push-Up', category: 'Upper Body', equipment: 'Bodyweight', tags: ['chest', 'push'], coachId: '', isGlobal: true },
   ];
 
   test('filters by search term', () => {
@@ -65,9 +65,7 @@ describe('WorkoutForm — movement filter integration', () => {
 
   test('filters by category', () => {
     const result = filterMovements(mockMovements, { category: 'Upper Body' });
-    // Only items with category === 'Upper Body' match (our mock uses bodyRegion, not category)
-    // Fix mock data to use category field which filterMovements actually checks
-    expect(result.length).toBe(0); // No items have category='Upper Body' in mock
+    expect(result.length).toBe(2);
   });
 
   test('filters by equipment', () => {
@@ -81,7 +79,7 @@ describe('WorkoutForm — movement filter integration', () => {
   });
 
   test('combines search and body region filters', () => {
-    const result = filterMovements(mockMovements, { search: 'push', bodyRegion: 'Upper Body' });
+    const result = filterMovements(mockMovements, { search: 'push', category: 'Upper Body' });
     expect(result.length).toBe(1);
     expect(result[0].name).toBe('Push-Up');
   });

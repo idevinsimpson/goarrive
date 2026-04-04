@@ -76,6 +76,7 @@ export default function PaymentSelectScreen() {
 
   // ── Read pricing from plan (auto-synced from plan builder) ─────────────────
   const contractMonths = plan?.contractMonths ?? 12;
+  const sessionsPerWeek = plan?.sessionsPerWeek ?? 3;
   const pr = (plan as any)?.pricingResult;
   const cp = (plan as any)?.continuationPricing;
 

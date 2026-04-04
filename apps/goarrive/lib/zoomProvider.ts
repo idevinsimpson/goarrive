@@ -21,6 +21,8 @@ import type { ZoomProvider, ZoomMeetingRequest, ZoomMeetingResponse } from './sc
 let mockMeetingCounter = 1000;
 
 export class MockZoomProvider implements ZoomProvider {
+  mode: 'mock' | 'live' = 'mock';
+
   async createMeeting(request: ZoomMeetingRequest): Promise<ZoomMeetingResponse> {
     // Simulate a small delay like a real API call
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -67,6 +69,7 @@ export class MockZoomProvider implements ZoomProvider {
 //
 
 export class RealZoomProvider implements ZoomProvider {
+  mode: 'mock' | 'live' = 'live';
   private accountId: string;
   private clientId: string;
   private clientSecret: string;
@@ -122,5 +125,5 @@ export function getZoomProvider(): ZoomProvider {
       _provider = new MockZoomProvider();
     }
   }
-  return _provider;
+  return _provider!;
 }

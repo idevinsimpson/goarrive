@@ -33,8 +33,8 @@ function getAudioContext(): AudioContext | null {
     sharedCtx = new AudioCtx();
   }
   // Resume if suspended (autoplay policy)
-  if (sharedCtx.state === 'suspended') {
-    sharedCtx.resume().catch(() => {});
+  if (sharedCtx!.state === 'suspended') {
+    sharedCtx!.resume().catch(() => {});
   }
   return sharedCtx;
 }

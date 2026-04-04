@@ -189,6 +189,7 @@ interface MovementOption {
   id: string;
   name: string;
   category: string;
+  thumbnailUrl?: string | null;
   mediaUrl?: string | null;
   videoUrl?: string | null;
 }
