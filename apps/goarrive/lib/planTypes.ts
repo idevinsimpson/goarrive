@@ -726,16 +726,14 @@ export function createDefaultSchedule(sessionsPerWeek: SessionsPerWeek): DayPlan
     basePlan[5] = 'Rest';
   }
   if (sessionsPerWeek === 4) {
-    basePlan[5] = 'Strength';
+    // base already has 4 non-Rest days — no changes needed
   }
   if (sessionsPerWeek === 5) {
     basePlan[5] = 'Strength';
-    basePlan[6] = 'Cardio + Mobility';
   }
   if (sessionsPerWeek === 6) {
     basePlan[2] = 'Strength';
     basePlan[5] = 'Strength';
-    basePlan[6] = 'Cardio + Mobility';
   }
 
   return DAYS_OF_WEEK.map((day, i) => {
