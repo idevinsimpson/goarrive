@@ -13,6 +13,7 @@
  * picker within the workout builder.
  */
 import { useState, useMemo, useCallback } from 'react';
+import type { FirestoreTimestamp } from '../lib/planTypes';
 
 export interface MovementFilterable {
   id: string;
@@ -21,9 +22,14 @@ export interface MovementFilterable {
   equipment?: string;
   muscleGroups?: string[];
   difficulty?: string;
-  createdAt?: any;
-  updatedAt?: any;
-  [key: string]: any;
+  coachId?: string;
+  isGlobal?: boolean;
+  tags?: string[];
+  mediaUrl?: string | null;
+  videoUrl?: string | null;
+  thumbnailUrl?: string | null;
+  createdAt?: FirestoreTimestamp;
+  updatedAt?: FirestoreTimestamp;
 }
 
 export const EQUIPMENT_FILTER_OPTIONS = [

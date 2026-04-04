@@ -2,64 +2,54 @@
  * Integration tests for useMovementFilters / filterMovements
  *
  * Tests the actual exported filterMovements function from the hook module.
- * Risk 7: Refactored to import real logic instead of duplicating it.
+ * Uses the shared fixture to keep test data consistent with real Firestore schema.
  */
 import { filterMovements } from '../../hooks/useMovementFilters';
-
-const movements = [
-  { id: '1', name: 'Barbell Squat', category: 'Lower Body Push', equipment: 'Barbell', muscleGroups: ['Quads', 'Glutes'] },
-  { id: '2', name: 'Bench Press', category: 'Upper Body Push', equipment: 'Barbell', muscleGroups: ['Chest', 'Triceps'] },
-  { id: '3', name: 'Pull-Up', category: 'Upper Body Pull', equipment: 'Bodyweight', muscleGroups: ['Back', 'Biceps'] },
-  { id: '4', name: 'Plank', category: 'Core', equipment: 'Bodyweight', muscleGroups: ['Core'] },
-  { id: '5', name: 'Dumbbell Curl', category: 'Upper Body Pull', equipment: 'Dumbbell', muscleGroups: ['Biceps'] },
-  { id: '6', name: 'Kettlebell Swing', category: 'Full Body', equipment: 'Kettlebell', muscleGroups: ['Glutes', 'Hamstrings'] },
-];
+import { mockMovements } from '../fixtures/movements';
 
 describe('filterMovements', () => {
   test('returns all movements with no filters', () => {
-    expect(filterMovements(movements, {})).toHaveLength(6);
+    expect(filterMovements(mockMovements, {})).toHaveLength(7);
   });
 
   test('filters by search text', () => {
-    const result = filterMovements(movements, { search: 'squat' });
+    const result = filterMovements(mockMovements, { search: 'squat' });
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe('Barbell Squat');
   });
 
   test('filters by category', () => {
-    const result = filterMovements(movements, { category: 'Upper Body Push' });
-    expect(result).toHaveLength(1);
-    expect(result[0].name).toBe('Bench Press');
+    const result = filterMovements(mockMovements, { category: 'Upper Body' });
+    expect(result).toHaveLength(4); // Bench Press, Push-Up, Dumbbell Curl, Pull Up
   });
 
   test('filters by equipment', () => {
-    const result = filterMovements(movements, { equipment: 'Bodyweight' });
-    expect(result).toHaveLength(2);
+    const result = filterMovements(mockMovements, { equipment: 'Bodyweight' });
+    expect(result).toHaveLength(3); // Plank, Push-Up, Pull Up
   });
 
   test('filters by muscle group', () => {
-    const result = filterMovements(movements, { muscleGroup: 'Biceps' });
-    expect(result).toHaveLength(2); // Pull-Up and Dumbbell Curl
+    const result = filterMovements(mockMovements, { muscleGroup: 'Chest' });
+    expect(result).toHaveLength(2); // Bench Press, Push-Up
   });
 
   test('combines multiple filters', () => {
-    const result = filterMovements(movements, {
+    const result = filterMovements(mockMovements, {
       equipment: 'Barbell',
-      category: 'Lower Body Push',
+      category: 'Lower Body',
     });
-    expect(result).toHaveLength(1);
-    expect(result[0].name).toBe('Barbell Squat');
+    expect(result).toHaveLength(2); // Barbell Squat, Romanian Deadlift
   });
 
   test('returns empty for no matches', () => {
-    expect(filterMovements(movements, { search: 'nonexistent' })).toHaveLength(0);
+    expect(filterMovements(mockMovements, { search: 'nonexistent' })).toHaveLength(0);
   });
 
   test('search is case-insensitive', () => {
-    expect(filterMovements(movements, { search: 'BENCH' })).toHaveLength(1);
+    expect(filterMovements(mockMovements, { search: 'BENCH' })).toHaveLength(1);
   });
 
   test('"All" category returns everything', () => {
-    expect(filterMovements(movements, { category: 'All' })).toHaveLength(6);
+    expect(filterMovements(mockMovements, { category: 'All' })).toHaveLength(7);
   });
 });

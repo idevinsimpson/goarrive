@@ -67,10 +67,10 @@ export type RoomSource = 'coach_personal' | 'shared_pool';
  */
 export type HostingMode = 'coach_led' | 'hosted';
 
-export type ScheduleSessionType = 'Strength' | 'Cardio + Mobility' | 'Mix';
+export type PlanSessionType = 'Strength' | 'Cardio + Mobility' | 'Mix';
 
 /** Session type used in scheduling UI (lowercase, granular) */
-export type SessionType = 'strength' | 'cardio' | 'flexibility' | 'hiit' | 'recovery' | 'check_in';
+export type SchedulingSessionType = 'strength' | 'cardio' | 'flexibility' | 'hiit' | 'recovery' | 'check_in';
 
 export const GUIDANCE_PHASE_LABELS: Record<GuidancePhase, string> = {
   coach_guided: 'Coach Guided',
@@ -89,7 +89,7 @@ export const ROOM_SOURCE_LABELS: Record<RoomSource, string> = {
   shared_pool: 'Shared Room',
 };
 
-export const SESSION_TYPE_LABELS: Record<SessionType, string> = {
+export const SESSION_TYPE_LABELS: Record<SchedulingSessionType, string> = {
   strength: 'Strength',
   cardio: 'Cardio',
   flexibility: 'Flexibility',
@@ -150,7 +150,7 @@ export interface RecurringSlot {
   effectiveUntil?: Timestamp;       // Optional end date
 
   // Phase-aware scheduling fields
-  sessionType?: ScheduleSessionType;  // What kind of session (Strength, Cardio, Mix)
+  sessionType?: PlanSessionType;  // What kind of session (Strength, Cardio, Mix)
   guidancePhase?: GuidancePhase;      // Which plan phase this slot belongs to
   roomSource?: RoomSource;            // Where the Zoom meeting comes from (internal)
   coachJoining?: boolean;             // For shared_guidance: is the coach joining this session?
@@ -207,7 +207,7 @@ export interface SessionInstance {
   status: InstanceStatus;
 
   // Phase-aware scheduling fields
-  sessionType?: ScheduleSessionType;  // Inherited from slot
+  sessionType?: PlanSessionType;  // Inherited from slot
   guidancePhase?: GuidancePhase;      // Inherited from slot
   roomSource?: RoomSource;            // Inherited from slot (can be overridden per instance)
   coachJoining?: boolean;             // For shared_guidance: coach toggled on/off for this instance

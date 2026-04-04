@@ -7,6 +7,7 @@
  */
 import { resolveBlockType } from '../../hooks/useWorkoutFlatten';
 import { filterMovements } from '../../hooks/useMovementFilters';
+import { mockMovements } from '../fixtures/movements';
 
 // ── WorkoutPlayer logic tests ─────────────────────────────────────────────
 
@@ -49,14 +50,6 @@ describe('WorkoutPlayer — block type resolution', () => {
 // ── WorkoutForm logic tests ───────────────────────────────────────────────
 
 describe('WorkoutForm — movement filter integration', () => {
-  const mockMovements = [
-    { id: '1', name: 'Bench Press', category: 'Upper Body', equipment: 'Barbell', tags: ['chest', 'push'], coachId: 'c1', isGlobal: false },
-    { id: '2', name: 'Squat', category: 'Lower Body', equipment: 'Barbell', tags: ['legs', 'compound'], coachId: 'c1', isGlobal: false },
-    { id: '3', name: 'Plank', category: 'Core', equipment: 'Bodyweight', tags: ['core', 'stability'], coachId: '', isGlobal: true },
-    { id: '4', name: 'Deadlift', category: 'Full Body', equipment: 'Barbell', tags: ['posterior', 'compound'], coachId: 'c1', isGlobal: false },
-    { id: '5', name: 'Push-Up', category: 'Upper Body', equipment: 'Bodyweight', tags: ['chest', 'push'], coachId: '', isGlobal: true },
-  ];
-
   test('filters by search term', () => {
     const result = filterMovements(mockMovements, { search: 'bench' });
     expect(result.length).toBe(1);
@@ -65,20 +58,20 @@ describe('WorkoutForm — movement filter integration', () => {
 
   test('filters by category', () => {
     const result = filterMovements(mockMovements, { category: 'Upper Body' });
-    expect(result.length).toBe(2);
+    expect(result.length).toBe(4); // Bench Press, Push-Up, Dumbbell Curl, Pull Up
   });
 
   test('filters by equipment', () => {
     const result = filterMovements(mockMovements, { equipment: 'Bodyweight' });
-    expect(result.length).toBe(2);
+    expect(result.length).toBe(3); // Plank, Push-Up, Pull Up
   });
 
   test('returns all when no filters applied', () => {
     const result = filterMovements(mockMovements, {});
-    expect(result.length).toBe(5);
+    expect(result.length).toBe(7);
   });
 
-  test('combines search and body region filters', () => {
+  test('combines search and category filters', () => {
     const result = filterMovements(mockMovements, { search: 'push', category: 'Upper Body' });
     expect(result.length).toBe(1);
     expect(result[0].name).toBe('Push-Up');

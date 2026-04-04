@@ -4,6 +4,14 @@
  * Pricing engine with per-type guidance profiles
  */
 
+// ─── Firestore timestamp type (avoids importing Firebase SDK into types) ──────
+/** Represents a Firestore Timestamp or its serialized form */
+export type FirestoreTimestamp = {
+  seconds: number;
+  nanoseconds: number;
+  toDate?: () => Date;
+};
+
 // ─── Session schedule ─────────────────────────────────────────────────────────
 
 export type SessionType = 'Strength' | 'Cardio + Mobility' | 'Mix' | 'Rest';
@@ -239,7 +247,7 @@ export interface AcceptedPlanSnapshot {
   planId: string;              // member_plans/{planId}
   memberId: string;
   coachId: string;
-  snapshotAt: any;             // Firestore Timestamp
+  snapshotAt: FirestoreTimestamp;  // Firestore Timestamp
 
   // ── Initial contract pricing ──
   contractLengthMonths: 6 | 9 | 12;
@@ -280,9 +288,9 @@ export interface CoachStripeAccount {
   chargesEnabled: boolean;
   payoutsEnabled: boolean;
   requirementsDue: string[];         // Stripe requirements.currently_due
-  createdAt: any;
-  updatedAt: any;
-  lastStatusSyncAt: any;
+  createdAt: FirestoreTimestamp;
+  updatedAt: FirestoreTimestamp;
+  lastStatusSyncAt: FirestoreTimestamp;
 }
 
 /** checkoutIntents/{intentId} */
@@ -296,8 +304,8 @@ export interface CheckoutIntent {
   stripeSessionId?: string;          // set after Stripe session created
   stripeSessionUrl?: string;
   status: 'pending' | 'completed' | 'cancelled' | 'expired';
-  createdAt: any;
-  updatedAt: any;
+  createdAt: FirestoreTimestamp;
+  updatedAt: FirestoreTimestamp;
 }
 
 /** memberSubscriptions/{subscriptionId} */
@@ -312,13 +320,13 @@ export interface MemberSubscription {
   stripeCustomerId: string;
   paymentOption: 'monthly' | 'pay_in_full';
   phase: 'contract' | 'continuation';
-  contractStartAt: any;
-  contractEndAt: any;
-  continuationStartAt?: any;
+  contractStartAt: FirestoreTimestamp;
+  contractEndAt: FirestoreTimestamp;
+  continuationStartAt?: FirestoreTimestamp;
   status: 'active' | 'past_due' | 'canceled' | 'unpaid' | 'trialing';
-  currentPeriodEnd: any;
-  createdAt: any;
-  updatedAt: any;
+  currentPeriodEnd: FirestoreTimestamp;
+  createdAt: FirestoreTimestamp;
+  updatedAt: FirestoreTimestamp;
 }
 
 /** billingEvents/{eventId} — append-only, idempotent by stripeEventId */
@@ -331,7 +339,7 @@ export interface BillingEvent {
   planId?: string;
   snapshotId?: string;
   rawPayload: Record<string, unknown>; // full Stripe event object
-  processedAt: any;
+  processedAt: FirestoreTimestamp;
 }
 
 /** ledgerEntries/{entryId} — append-only, derived from billingEvents */
@@ -350,11 +358,11 @@ export interface LedgerEntry {
   applicationFeePercent: number;
   stripeInvoiceId?: string;
   stripeChargeId?: string;
-  contractStartAt: any;
-  contractEndAt: any;
+  contractStartAt: FirestoreTimestamp;
+  contractEndAt: FirestoreTimestamp;
   pricingSnapshotId: string;
   ruleSnapshot: Record<string, unknown>; // BP-001: rule snapshot at time of entry
-  createdAt: any;
+  createdAt: FirestoreTimestamp;
 }
 
 // ─── Full plan data ───────────────────────────────────────────────────────────
@@ -436,9 +444,9 @@ export interface MemberPlanData {
   continuationPricing?: ContinuationPricing;
 
   // Billing / Stripe fields (set at accept time, do not edit after)
-  acceptedAt?: any;               // Timestamp when member accepted
-  contractStartAt?: any;          // Timestamp when contract begins (= acceptedAt for monthly)
-  contractEndAt?: any;            // Timestamp = contractStartAt + contractLengthMonths
+  acceptedAt?: FirestoreTimestamp;       // Timestamp when member accepted
+  contractStartAt?: FirestoreTimestamp;  // Timestamp when contract begins (= acceptedAt for monthly)
+  contractEndAt?: FirestoreTimestamp;    // Timestamp = contractStartAt + contractLengthMonths
   acceptedSnapshotId?: string;    // references acceptedPlanSnapshots/{id}
   stripeCustomerId?: string;      // Stripe customer ID on coach connected account
   checkoutStatus?: 'pending_payment' | 'paid' | 'pay_in_full_paid' | 'failed';
@@ -450,14 +458,18 @@ export interface MemberPlanData {
   injuryNotes?: string;
 
   // Timestamps
-  createdAt?: any;
-  updatedAt?: any;
+  createdAt?: FirestoreTimestamp;
+  updatedAt?: FirestoreTimestamp;
 
   // Plan start date
-  planStartDate?: any;
+  planStartDate?: FirestoreTimestamp | string;
 
-  // Legacy pricing object
-  pricing?: any;
+  // Legacy pricing object (pre-refactor, some plans still carry this)
+  pricing?: {
+    commitToSave?: boolean;
+    sessionLengthMinutes?: number;
+    [key: string]: unknown;
+  };
 
   // Shareable link
   shareToken?: string;

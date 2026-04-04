@@ -45,7 +45,7 @@ import { httpsCallable } from 'firebase/functions';
 import { Icon } from './Icon';
 import { router } from 'expo-router';
 import { useAuth } from '../lib/AuthContext';
-import { DAY_LABELS, DAY_SHORT_LABELS, formatTime, addMinutesToTime, type GuidancePhase, type SessionType, type RoomSource } from '../lib/schedulingTypes';
+import { DAY_LABELS, DAY_SHORT_LABELS, formatTime, addMinutesToTime, type GuidancePhase, type SchedulingSessionType, type RoomSource } from '../lib/schedulingTypes';
 import { type Phase, type MemberPlanData, type SessionTypeGuidance, type GuidanceLevel, resolvePhaseColor } from '../lib/planTypes';
 import { defaultHostingMode, defaultCoachExpectedLive } from '../lib/schedulingTypes';
 import AssignWorkoutModal from './AssignWorkoutModal';
@@ -126,7 +126,7 @@ const GUIDANCE_LEVEL_TO_PHASE: Record<GuidanceLevel, GuidancePhase> = {
 };
 
 // Map scheduling session type → plan session type for guidance profile lookup
-const SCHED_TO_PLAN_SESSION_TYPE: Record<SessionType, string> = {
+const SCHED_TO_PLAN_SESSION_TYPE: Record<SchedulingSessionType, string> = {
   strength: 'Strength',
   cardio: 'Cardio + Mobility',
   flexibility: 'Cardio + Mobility',
@@ -391,7 +391,7 @@ export default function MemberDetail({
   const [selectedTimezone, setSelectedTimezone] = useState('America/New_York');
   const [selectedPattern, setSelectedPattern] = useState<'weekly' | 'biweekly' | 'monthly'>('weekly');
   const [selectedWeekOfMonth, setSelectedWeekOfMonth] = useState<1 | 2 | 3 | 4>(1);
-  const [selectedSessionType, setSelectedSessionType] = useState<SessionType>('strength');
+  const [selectedSessionType, setSelectedSessionType] = useState<SchedulingSessionType>('strength');
   const [selectedPhase, setSelectedPhase] = useState<GuidancePhase>('coach_guided');
   const [creating, setCreating] = useState(false);
 
@@ -472,8 +472,9 @@ export default function MemberDetail({
   // ── Transition awareness: which phase is the member currently in? ────────
   const currentPhaseInfo = useMemo(() => {
     if (!memberPlan?.phases?.length) return null;
-    const startDate = memberPlan.planStartDate
-      ? new Date(memberPlan.planStartDate)
+    const psd = memberPlan.planStartDate;
+    const startDate = psd
+      ? (typeof psd === 'string' ? new Date(psd) : psd.toDate ? psd.toDate() : new Date(psd.seconds * 1000))
       : memberPlan.createdAt?.toDate
         ? memberPlan.createdAt.toDate()
         : null;
@@ -2233,7 +2234,7 @@ export default function MemberDetail({
                 {/* Session Type */}
                 <Text style={s.fieldLabel}>Session Type</Text>
                 <View style={s.dayRow}>
-                  {(['strength', 'cardio', 'flexibility', 'hiit', 'recovery', 'check_in'] as SessionType[]).map(st => {
+                  {(['strength', 'cardio', 'flexibility', 'hiit', 'recovery', 'check_in'] as SchedulingSessionType[]).map(st => {
                     const isUsed = usedSessionTypes.has(st) && !editingSlotId;
                     return (
                       <TouchableOpacity
@@ -2280,7 +2281,7 @@ export default function MemberDetail({
                     { key: 'self_guided' as GuidancePhase, label: 'Self Guided', color: '#FFC000' },
                   ] as const).map(phase => {
                     const weekCount = phaseWeekMap[phase.key];
-                    const isDisabled = !planPhaseOverride && autoPhaseForSessionType !== null && (selectedSessionType as string) !== 'check_in';
+                    const isDisabled = !planPhaseOverride && autoPhaseForSessionType !== null;
                     return (
                       <TouchableOpacity
                         key={phase.key}
