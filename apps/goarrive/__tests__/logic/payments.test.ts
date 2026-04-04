@@ -176,3 +176,25 @@ describe('calculatePricing', () => {
     expect(Number.isFinite(result.totalProgramPrice)).toBe(true);
   });
 });
+
+describe('createDefaultPlan', () => {
+  it('returns a plan with consistent sessionsPerWeek and schedule length', () => {
+    const plan = createDefaultPlan('Test', 'm1', 'c1');
+    const sessionDays = plan.weeklySchedule.filter(d => d.isSession && d.type !== 'Rest');
+    expect(sessionDays).toHaveLength(plan.sessionsPerWeek);
+    expect(plan.weeklySchedule).toHaveLength(7);
+  });
+
+  it('phase count matches default 3-phase structure', () => {
+    const plan = createDefaultPlan('Test', 'm1', 'c1');
+    expect(plan.phases).toHaveLength(3);
+    const totalWeeks = plan.phases.reduce((sum, p) => sum + p.weeks, 0);
+    expect(totalWeeks).toBe(52); // 12 months
+  });
+
+  it('whatsIncluded reflects sessionsPerWeek and contractMonths', () => {
+    const plan = createDefaultPlan('Test', 'm1', 'c1');
+    expect(plan.whatsIncluded[0]).toContain(String(plan.sessionsPerWeek));
+    expect(plan.whatsIncluded[1]).toContain(String(plan.contractMonths));
+  });
+});

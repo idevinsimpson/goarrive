@@ -806,8 +806,10 @@ export function createDefaultNutrition(): NutritionAddOn {
 // ─── Default plan data ────────────────────────────────────────────────────────
 
 export function createDefaultPlan(memberName: string, memberId: string, coachId: string): MemberPlanData {
-  const schedule = createDefaultSchedule(4);
-  const phases = createDefaultPhases(12);
+  const sessionsPerWeek: SessionsPerWeek = 4;
+  const contractMonths: ContractLength = 12;
+  const schedule = createDefaultSchedule(sessionsPerWeek);
+  const phases = createDefaultPhases(contractMonths);
 
   return {
     memberId,
@@ -830,13 +832,13 @@ export function createDefaultPlan(memberName: string, memberId: string, coachId:
     whyTranslation: '',
     readiness: 7,
     motivation: 8,
-    sessionsPerWeek: 4,
-    contractMonths: 12,
+    sessionsPerWeek,
+    contractMonths,
     weeklySchedule: schedule,
     phases,
     whatsIncluded: [
-      '4 coaching sessions per week',
-      '12-month commitment',
+      `${sessionsPerWeek} coaching sessions per week`,
+      `${contractMonths}-month commitment`,
       'Tailored fitness plan updated as you progress',
       'Injury-aware programming adapted to your needs',
       'Monthly progress check-in calls',
