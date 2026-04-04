@@ -4,7 +4,7 @@
  * Tests the actual exported functions from the hook module.
  * Uses the shared fixture to keep test data consistent with real Firestore schema.
  */
-import { filterMovements, sortMovements } from '../../hooks/useMovementFilters';
+import { filterMovements, sortMovements, type SortOption } from '../../hooks/useMovementFilters';
 import { mockMovements } from '../fixtures/movements';
 
 describe('filterMovements', () => {
@@ -110,5 +110,13 @@ describe('sortMovements', () => {
     const original = [...mockMovements];
     sortMovements(mockMovements, 'name-asc');
     expect(mockMovements.map(m => m.id)).toEqual(original.map(m => m.id));
+  });
+
+  test('all SortOption values produce valid results', () => {
+    const options: SortOption[] = ['name-asc', 'name-desc', 'newest', 'oldest', 'recently-edited'];
+    for (const opt of options) {
+      const result = sortMovements(mockMovements, opt);
+      expect(result).toHaveLength(mockMovements.length);
+    }
   });
 });
