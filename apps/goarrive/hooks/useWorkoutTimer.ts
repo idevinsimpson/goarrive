@@ -148,7 +148,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
       if (current?.swapSides && swapSide === 'L') {
         setSwapSide('R');
         setPhase('swap');
-        setTimeLeft(3);
+        setTimeLeft(5);
       } else if (current?.restAfter > 0) {
         setPhase('rest');
         setTimeLeft(current.restAfter);
@@ -200,7 +200,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     if (current.swapSides && swapSide === 'L') {
       setSwapSide('R');
       setPhase('swap');
-      setTimeLeft(3);
+      setTimeLeft(5);
     } else if (current.restAfter > 0) {
       setPhase('rest');
       setTimeLeft(current.restAfter);

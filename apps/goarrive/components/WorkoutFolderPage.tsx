@@ -38,6 +38,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Icon } from './Icon';
+import WorkoutPlayer from './WorkoutPlayer';
 import { FB, FH } from '../lib/theme';
 
 
@@ -220,6 +221,7 @@ export default function WorkoutFolderPage({
   const [showDescriptionEdit, setShowDescriptionEdit] = useState(false);
   const [showIntroOutroPage, setShowIntroOutroPage] = useState(false);
   const [showMoveTo, setShowMoveTo] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
   const [moveToSearch, setMoveToSearch] = useState('');
   const [editingNameKey, setEditingNameKey] = useState<string | null>(null);
   const [editingNameValue, setEditingNameValue] = useState('');
@@ -900,6 +902,15 @@ export default function WorkoutFolderPage({
             <Text style={st.savedText}>Saved</Text>
           </View>
         )}
+
+        {/* Preview button */}
+        <Pressable
+          onPress={async () => { await flushSave(); setShowPreview(true); }}
+          style={st.previewBtn}
+        >
+          <Icon name="eye" size={16} color="#FBBF24" />
+          <Text style={st.previewBtnText}>Preview</Text>
+        </Pressable>
 
         {/* Three-dots menu */}
         <Pressable
@@ -1653,6 +1664,15 @@ export default function WorkoutFolderPage({
           </View>
         </Pressable>
       </Modal>
+
+      {/* Workout preview */}
+      <WorkoutPlayer
+        visible={showPreview}
+        workout={{ id: workoutId, name: workoutName, description: workoutDescription, blocks, ...originalData }}
+        onClose={() => setShowPreview(false)}
+        onComplete={() => setShowPreview(false)}
+        isPreview
+      />
     </View>
   );
 }
@@ -1677,6 +1697,21 @@ const st = StyleSheet.create({
     height: 36,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  previewBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: 'rgba(251,191,36,0.12)',
+  },
+  previewBtnText: {
+    fontSize: 13,
+    color: '#FBBF24',
+    fontWeight: '600',
+    fontFamily: FB,
   },
   breadcrumb: {
     flex: 1,

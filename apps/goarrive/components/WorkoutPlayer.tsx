@@ -124,11 +124,15 @@ export default function WorkoutPlayer({
   } = useMovementSwap(flatMovements, currentIndex, setFlatOverride);
   const [swapReason, setSwapReason] = useState('');
 
-  // ── Landscape detection ─────────────────────────────────
+  // ── Landscape / wide-screen detection ─────────────────────────────────
   const { width: winW, height: winH } = useWindowDimensions();
   const dimsValid = winW > 0 && winH > 0;
   const isLandscape = dimsValid ? winW > winH : false;
   const isTablet = dimsValid ? Math.min(winW, winH) >= 600 : false;
+  // Portrait column: on wide screens, constrain to 9:16 within 430px max
+  const isWideScreen = dimsValid && winW > 500;
+  const portraitW = isWideScreen ? Math.min(PORTRAIT_MAX_W, winH * (9 / 16)) : winW;
+  const portraitH = isWideScreen ? winH : winH;
 
   // ── Video ref ────────────────────────────────
   const videoRef = useRef<any>(null);
@@ -137,7 +141,7 @@ export default function WorkoutPlayer({
     if (!videoRef.current) return;
     if (isPaused) {
       videoRef.current.pauseAsync?.().catch(() => {});
-    } else if (phase === 'work') {
+    } else if (phase === 'work' || phase === 'rest') {
       videoRef.current.playAsync?.().catch(() => {});
     }
   }, [isPaused, phase]);
@@ -270,7 +274,8 @@ export default function WorkoutPlayer({
   // ── Render ────────────────────────────────────────────────────────────
   return (
     <Modal visible={visible} animationType="fade" transparent={false}>
-      <View style={st.container}>
+      <View style={st.portraitLockOuter}>
+      <View style={[st.container, isWideScreen && { width: portraitW, maxWidth: portraitW }]}>
 
         {/* ── READY state ─────────────────────────────────────── */}
         {phase === 'ready' && (
@@ -302,36 +307,64 @@ export default function WorkoutPlayer({
         )}
 
         {/* ── INTRO — Full-screen cinematic welcome ────────────── */}
-        {phase === 'intro' && current && (
+        {phase === 'intro' && current && (() => {
+          // Find the first exercise movement's video for the left panel
+          const firstExercise = flatMovements.find((f: any) => f.stepType === 'exercise');
+          const introVideoUrl = firstExercise?.videoUrl;
+          const introThumbUrl = firstExercise?.thumbnailUrl;
+          return (
+            <View style={st.introSplitContainer}>
+              {/* Left: video panel */}
+              <View style={st.introVideoPanel}>
+                {introVideoUrl ? (
+                  <Video
+                    source={{ uri: introVideoUrl }}
+                    resizeMode={ResizeMode.COVER}
+                    isLooping
+                    shouldPlay
+                    isMuted
+                    style={StyleSheet.absoluteFillObject}
+                  />
+                ) : introThumbUrl ? (
+                  <Image source={{ uri: introThumbUrl }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+                ) : (
+                  <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#1A2035' }]} />
+                )}
+              </View>
+              {/* Right: branding panel */}
+              <View style={st.introBrandPanel}>
+                <Image
+                  source={require('../assets/logo.png')}
+                  style={st.introLogo}
+                  resizeMode="contain"
+                />
+                <Text style={st.introBlockLabel}>
+                  {current.name || current.label || 'WARM-UP & STRETCH'}
+                </Text>
+                <View style={st.goldTimerBox}>
+                  <Text style={st.goldTimerText}>{timeLeft}</Text>
+                </View>
+                <TouchableOpacity style={[st.skipPill, { marginTop: 16 }]} onPress={handleSkip}>
+                  <Icon name="skip-forward" size={16} color="#F5A623" />
+                  <Text style={st.skipPillText}>Skip</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        })()}
+
+        {/* ── OUTRO — Cinematic completion ────────────────────── */}
+        {phase === 'outro' && current && (
           <View style={st.introOutroContainer}>
             <View style={st.introOutroGradient}>
               <Image
                 source={require('../assets/logo.png')}
-                style={st.introLogo}
+                style={{ width: 280, height: 90, marginBottom: 16 }}
                 resizeMode="contain"
               />
-              <Text style={st.introTitle}>{workout?.name ?? 'Workout'}</Text>
-              <Text style={st.introSubtitle}>LET'S GO</Text>
-              <View style={st.introTimerPill}>
-                <Text style={st.introTimerText}>{timeLeft}</Text>
-              </View>
-              <TouchableOpacity style={st.skipPill} onPress={handleSkip}>
-                <Icon name="skip-forward" size={16} color="#F5A623" />
-                <Text style={st.skipPillText}>Skip</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
-        {/* ── OUTRO — Full-screen completion celebration ────────── */}
-        {phase === 'outro' && current && (
-          <View style={st.introOutroContainer}>
-            <View style={st.introOutroGradient}>
-              <Icon name="check-circle" size={80} color="#F5A623" />
-              <Text style={st.outroTitle}>YOU DID IT!</Text>
-              <Text style={st.outroSubtitle}>{workout?.name ?? 'Workout'} Complete</Text>
-              <View style={st.introTimerPill}>
-                <Text style={st.introTimerText}>{timeLeft}</Text>
+              <Text style={st.outroTitle}>WORKOUT</Text>
+              <View style={st.goldTimerBox}>
+                <Text style={st.goldTimerText}>{timeLeft}</Text>
               </View>
               <TouchableOpacity style={st.skipPill} onPress={handleSkip}>
                 <Icon name="skip-forward" size={16} color="#F5A623" />
@@ -342,44 +375,48 @@ export default function WorkoutPlayer({
         )}
 
         {/* ── DEMO — Preview upcoming movements ───────────────── */}
-        {phase === 'demo' && current && (
-          <>
-            {renderHeader()}
-            <View style={st.specialContent}>
-              <View style={st.specialIconCircle}>
-                <Icon name="eye" size={32} color="#FBBF24" />
-              </View>
-              <Text style={st.specialPhaseLabel}>PREVIEW</Text>
-              <Text style={st.specialTitle}>Here's What's Coming Up</Text>
-
-              <ScrollView style={st.demoList} showsVerticalScrollIndicator={false}>
-                {(current.demoMovements || []).map((mv: any, i: number) => (
-                  <View key={i} style={st.demoItem}>
-                    {mv.thumbnailUrl ? (
-                      <Image source={{ uri: mv.thumbnailUrl }} style={st.demoThumb} resizeMode="cover" />
-                    ) : (
-                      <View style={[st.demoThumb, { backgroundColor: '#1A2035', justifyContent: 'center', alignItems: 'center' }]}>
-                        <Text style={st.demoThumbNum}>{i + 1}</Text>
-                      </View>
-                    )}
-                    <View style={st.demoItemInfo}>
-                      <Text style={st.demoItemNum}>{i + 1}</Text>
-                      <Text style={st.demoItemName}>{mv.name}</Text>
-                    </View>
+        {phase === 'demo' && current && (() => {
+          const demos = current.demoMovements || [];
+          const cols = demos.length <= 4 ? 2 : 3;
+          return (
+            <>
+              {renderHeader()}
+              <View style={st.specialContent}>
+                {/* GoArrive Logo */}
+                <Image
+                  source={require('../assets/logo.png')}
+                  style={{ width: 200, height: 56, marginBottom: 12 }}
+                  resizeMode="contain"
+                />
+                {/* Block title + timer row */}
+                <View style={st.demoTitleRow}>
+                  <Text style={st.demoBlockTitle}>{current.name}</Text>
+                  <View style={st.goldTimerBox}>
+                    <Text style={st.goldTimerText}>{timeLeft}</Text>
                   </View>
-                ))}
-              </ScrollView>
-
-              <View style={st.specialTimerRow}>
-                <Text style={st.specialTimerNum}>{timeLeft}</Text>
-                <TouchableOpacity style={st.skipPill} onPress={handleSkip}>
+                </View>
+                {/* Thumbnail grid */}
+                <View style={st.demoGrid}>
+                  {demos.map((mv: any, i: number) => (
+                    <View key={i} style={[st.demoGridCell, { width: `${Math.floor(100 / cols) - 2}%` as any }]}>
+                      {mv.thumbnailUrl ? (
+                        <Image source={{ uri: mv.thumbnailUrl }} style={st.demoGridImage} resizeMode="cover" />
+                      ) : (
+                        <View style={[st.demoGridImage, { backgroundColor: '#1A2035', justifyContent: 'center', alignItems: 'center' }]}>
+                          <Icon name="play-circle" size={24} color="#3A4050" />
+                        </View>
+                      )}
+                    </View>
+                  ))}
+                </View>
+                <TouchableOpacity style={[st.skipPill, { marginTop: 'auto' as any, marginBottom: 24 }]} onPress={handleSkip}>
                   <Icon name="skip-forward" size={16} color="#F5A623" />
                   <Text style={st.skipPillText}>Skip</Text>
                 </TouchableOpacity>
               </View>
-            </View>
-          </>
-        )}
+            </>
+          );
+        })()}
 
         {/* ── TRANSITION — Instruction card with countdown ─────── */}
         {phase === 'transition' && current && (
@@ -398,10 +435,10 @@ export default function WorkoutPlayer({
               ) : null}
 
               <View style={st.specialTimerRow}>
-                <View style={[st.timerRing, { borderColor: '#94A3B8', width: 140, height: 140, borderRadius: 70 }]}>
-                  <Text style={st.timerNum}>{formatTime(timeLeft)}</Text>
+                <View style={st.goldTimerBox}>
+                  <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
                 </View>
-                <TouchableOpacity style={st.skipPill} onPress={handleSkip}>
+                <TouchableOpacity style={[st.skipPill, { marginTop: 8 }]} onPress={handleSkip}>
                   <Icon name="skip-forward" size={16} color="#F5A623" />
                   <Text style={st.skipPillText}>Skip</Text>
                 </TouchableOpacity>
@@ -414,29 +451,56 @@ export default function WorkoutPlayer({
 
         {/* ── WATER BREAK — Hydration pause ───────────────────── */}
         {phase === 'waterBreak' && current && (
-          <>
+          <View style={st.workContainer}>
             {renderHeader()}
-            <View style={st.specialContent}>
-              <View style={[st.specialIconCircle, { backgroundColor: 'rgba(56,189,248,0.15)' }]}>
-                <Icon name="droplet" size={36} color="#38BDF8" />
+            {/* Header row: WATER BREAK label + timer */}
+            <View style={st.nameTimerRow}>
+              <View style={st.nameColumn}>
+                <Text style={st.waterBreakLabel}>WATER BREAK</Text>
               </View>
-              <Text style={[st.specialPhaseLabel, { color: '#38BDF8' }]}>WATER BREAK</Text>
-              <Text style={st.specialTitle}>Stay Hydrated</Text>
-              <Text style={st.waterBreakHint}>Grab your water and take a moment</Text>
-
-              <View style={[st.timerRing, { borderColor: '#38BDF8', width: 160, height: 160, borderRadius: 80, marginTop: 24 }]}>
-                <Text style={st.timerNum}>{formatTime(timeLeft)}</Text>
-                <Text style={st.timerSub}>seconds</Text>
+              <View style={st.goldTimerBox}>
+                <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
               </View>
-
-              <TouchableOpacity style={[st.skipPill, { marginTop: 24 }]} onPress={handleSkip}>
-                <Icon name="skip-forward" size={16} color="#F5A623" />
-                <Text style={st.skipPillText}>Skip</Text>
-              </TouchableOpacity>
-
-              {renderNextUp()}
             </View>
-          </>
+
+            {/* 4:5 video area with blue tint */}
+            <View style={st.videoArea}>
+              <View style={st.videoInner}>
+                {current.videoUrl ? (
+                  <Video
+                    key={`wb-${currentIndex}`}
+                    source={{ uri: current.videoUrl }}
+                    resizeMode={ResizeMode.COVER}
+                    isLooping
+                    shouldPlay
+                    isMuted
+                    style={st.videoPlayer}
+                    videoStyle={
+                      Platform.OS === 'web'
+                        ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
+                        : undefined
+                    }
+                  />
+                ) : (
+                  <View style={[st.videoPlayer, { backgroundColor: 'rgba(56,189,248,0.15)' }]}>
+                    <Icon name="droplet" size={64} color="#38BDF8" />
+                  </View>
+                )}
+                {/* Blue tint overlay */}
+                <View style={st.waterBreakVideoOverlay} />
+                {/* WATER BREAK text overlay */}
+                <View style={st.waterBreakTextOverlay}>
+                  <Text style={st.waterBreakOverlayText}>WATER</Text>
+                  <Text style={st.waterBreakOverlayText}>BREAK</Text>
+                </View>
+              </View>
+            </View>
+
+            <TouchableOpacity style={[st.skipPill, { alignSelf: 'center', marginTop: 12 }]} onPress={handleSkip}>
+              <Icon name="skip-forward" size={16} color="#F5A623" />
+              <Text style={st.skipPillText}>Skip</Text>
+            </TouchableOpacity>
+          </View>
         )}
 
         {/* ── COUNTDOWN state ─────────────────────────────────── */}
@@ -501,30 +565,40 @@ export default function WorkoutPlayer({
                 ) : null}
               </View>
               {!isRepBased ? (
-                <Text style={st.workTimer}>{formatTime(timeLeft)}</Text>
+                <View style={st.goldTimerBox}>
+                  <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
+                </View>
               ) : null}
             </View>
 
-            {/* Side badge */}
+            {/* SPLIT label */}
             {current.swapSides && (
-              <View style={st.sideBadgeRow}>
-                <View style={st.sideBadge}>
-                  <Text style={st.sideBadgeText}>
-                    {swapSide === 'L' ? 'LEFT SIDE' : 'RIGHT SIDE'}
-                  </Text>
-                </View>
+              <View style={st.splitLabelRow}>
+                <Text style={st.splitText}>SPLIT</Text>
+                <Text style={st.splitSep}> | </Text>
+                <Text style={st.splitDuration}>5 sec</Text>
+                <Text style={st.splitArrows}> ⇄</Text>
               </View>
             )}
 
             {/* Video area */}
+            {(() => {
+              // At 3.5s before end, switch to next movement's video
+              const nextExercise = next?.stepType === 'exercise' ? next : null;
+              const showNextVideo = !isRepBased && timeLeft <= 4 && nextExercise?.videoUrl;
+              const activeVideoUrl = showNextVideo ? nextExercise!.videoUrl : current.videoUrl;
+              const activeThumbUrl = showNextVideo ? nextExercise!.thumbnailUrl : current.thumbnailUrl;
+              const videoKey = showNextVideo ? `next-${currentIndex}` : `current-${currentIndex}`;
+              return (
             <View style={st.videoArea}>
               <TouchableWithoutFeedback onPress={handleVideoTap}>
                 <View style={st.videoInner}>
-                  {current.videoUrl ? (
+                  {activeVideoUrl ? (
                     <>
                       <Video
-                        ref={videoRef}
-                        source={{ uri: current.videoUrl }}
+                        key={videoKey}
+                        ref={showNextVideo ? undefined : videoRef}
+                        source={{ uri: activeVideoUrl }}
                         resizeMode={ResizeMode.COVER}
                         isLooping
                         shouldPlay={!isPaused}
@@ -537,17 +611,17 @@ export default function WorkoutPlayer({
                         }
                         onReadyForDisplay={() => setVideoReady(true)}
                       />
-                      {!videoReady && current.thumbnailUrl && (
+                      {!videoReady && activeThumbUrl && (
                         <Image
-                          source={{ uri: current.thumbnailUrl }}
+                          source={{ uri: activeThumbUrl }}
                           style={st.posterFallback}
                           resizeMode="cover"
                         />
                       )}
                     </>
-                  ) : current.thumbnailUrl ? (
+                  ) : activeThumbUrl ? (
                     <Image
-                      source={{ uri: current.thumbnailUrl }}
+                      source={{ uri: activeThumbUrl }}
                       style={st.videoPlayer}
                       resizeMode="cover"
                     />
@@ -599,31 +673,74 @@ export default function WorkoutPlayer({
                 </View>
               </TouchableWithoutFeedback>
             </View>
+              );
+            })()}
 
-            {/* NEXT UP bar */}
+            {/* NEXT UP bar — always visible */}
             {renderNextUp()}
           </View>
         )}
 
-        {/* ── REST state ──────────────────────────────────────── */}
-        {phase === 'rest' && (
-          <>
+        {/* ── REST state — show next movement video ──────────── */}
+        {phase === 'rest' && (() => {
+          // Find the next exercise step for video preview (skip special blocks)
+          const nextExForRest = (() => {
+            for (let i = currentIndex + 1; i < flatMovements.length; i++) {
+              if (flatMovements[i].stepType === 'exercise') return flatMovements[i];
+            }
+            return next; // fallback to whatever is next
+          })();
+          const restVideoUrl = nextExForRest?.videoUrl || current?.videoUrl;
+          const restThumbUrl = nextExForRest?.thumbnailUrl || current?.thumbnailUrl;
+          return (
+          <View style={st.workContainer}>
             {renderHeader()}
-            <View style={st.centerContent}>
-              <Text style={st.phaseLabel}>REST</Text>
-              <View style={[st.timerRing, st.timerRingRest]}>
-                <Text style={st.timerNum}>{formatTime(timeLeft)}</Text>
+            {/* REST label + white timer */}
+            <View style={st.nameTimerRow}>
+              <View style={st.nameColumn}>
+                <Text style={st.restPhaseLabel}>REST</Text>
+                {nextExForRest && <Text style={st.restNextName}>Next: {nextExForRest.name}</Text>}
               </View>
-
-              {renderNextUp()}
-
-              <TouchableOpacity style={st.skipBtn} onPress={handleSkip}>
-                <Icon name="skip-forward" size={24} color="#F5A623" />
-                <Text style={st.skipText}>Skip Rest</Text>
-              </TouchableOpacity>
+              <View style={st.restTimerBox}>
+                <Text style={st.restTimerText}>{formatTime(timeLeft)}</Text>
+              </View>
             </View>
-          </>
-        )}
+
+            {/* Next movement video preview */}
+            <View style={st.videoArea}>
+              <View style={st.videoInner}>
+                {restVideoUrl ? (
+                  <Video
+                    key={`rest-${currentIndex}`}
+                    source={{ uri: restVideoUrl }}
+                    resizeMode={ResizeMode.COVER}
+                    isLooping
+                    shouldPlay
+                    isMuted
+                    style={st.videoPlayer}
+                    videoStyle={
+                      Platform.OS === 'web'
+                        ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
+                        : undefined
+                    }
+                  />
+                ) : restThumbUrl ? (
+                  <Image source={{ uri: restThumbUrl }} style={st.videoPlayer} resizeMode="cover" />
+                ) : (
+                  <View style={[st.videoPlayer, st.videoPlaceholder]}>
+                    <Icon name="play-circle" size={48} color="#3A4050" />
+                  </View>
+                )}
+              </View>
+            </View>
+
+            <TouchableOpacity style={[st.skipPill, { alignSelf: 'center', marginTop: 12 }]} onPress={handleSkip}>
+              <Icon name="skip-forward" size={16} color="#F5A623" />
+              <Text style={st.skipPillText}>Skip Rest</Text>
+            </TouchableOpacity>
+          </View>
+          );
+        })()}
 
         {/* ── SWAP state ──────────────────────────────────────── */}
         {phase === 'swap' && current && (
@@ -664,6 +781,7 @@ export default function WorkoutPlayer({
             </View>
           </>
         )}
+      </View>
       </View>
 
       {/* Swap movement modal */}
@@ -713,10 +831,20 @@ export default function WorkoutPlayer({
 // ── Styles ──────────────────────────────────────────────────────────────────
 const { width: SCREEN_W } = Dimensions.get('window');
 
+const PORTRAIT_MAX_W = 430;
+
 const st = StyleSheet.create({
+  portraitLockOuter: {
+    flex: 1,
+    backgroundColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   container: {
     flex: 1,
     backgroundColor: '#0E1117',
+    width: '100%',
+    maxWidth: PORTRAIT_MAX_W,
   },
   header: {
     flexDirection: 'row',
@@ -791,7 +919,29 @@ const st = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 32,
   },
-  introLogo: { width: 240, height: 80, marginBottom: 24 },
+  // Intro split-screen
+  introSplitContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: '#0E1117',
+  },
+  introVideoPanel: {
+    flex: 1,
+    backgroundColor: '#000',
+    overflow: 'hidden',
+  },
+  introBrandPanel: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    backgroundColor: '#0E1117',
+  },
+  introLogo: { width: 160, height: 54, marginBottom: 20 },
+  introBlockLabel: {
+    fontSize: 20, fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
+    textAlign: 'center', marginBottom: 24, letterSpacing: 1,
+  },
   introTitle: {
     fontSize: 36, fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
     textAlign: 'center', marginBottom: 8,
@@ -809,8 +959,8 @@ const st = StyleSheet.create({
     fontSize: 24, fontWeight: '700', color: '#F5A623', fontFamily: FH,
   },
   outroTitle: {
-    fontSize: 36, fontWeight: '700', color: '#F5A623', fontFamily: FH,
-    textAlign: 'center', marginTop: 16, marginBottom: 8,
+    fontSize: 42, fontWeight: '900', color: '#FFFFFF', fontFamily: FH,
+    textAlign: 'center', letterSpacing: 8, marginBottom: 24,
   },
   outroSubtitle: {
     fontSize: 18, color: '#8A95A3', fontFamily: FB,
@@ -858,32 +1008,26 @@ const st = StyleSheet.create({
     marginBottom: 8,
   },
 
-  // ── Demo block ─────────────────────────────────────────────────────
-  demoList: {
-    flex: 1, width: '100%', marginTop: 8,
+  // ── Demo block — thumbnail grid ─────────────────────────────────────
+  demoTitleRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    width: '100%', paddingHorizontal: 4, marginBottom: 16,
   },
-  demoItem: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 10, borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
+  demoBlockTitle: {
+    fontSize: 22, fontWeight: '700', color: '#F0F4F8', fontFamily: FH, flex: 1, marginRight: 12,
   },
-  demoThumb: {
-    width: 56, height: 70, borderRadius: 8,
-    backgroundColor: '#1A2035', marginRight: 14,
+  demoGrid: {
+    flex: 1, flexDirection: 'row', flexWrap: 'wrap',
+    justifyContent: 'center', gap: 8, width: '100%',
   },
-  demoThumbNum: {
-    fontSize: 20, fontWeight: '700', color: '#3A4050', fontFamily: FH,
+  demoGridCell: {
+    aspectRatio: 4 / 5,
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: '#1A2035',
   },
-  demoItemInfo: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10,
-  },
-  demoItemNum: {
-    fontSize: 18, fontWeight: '700', color: '#F5A623', fontFamily: FH,
-    width: 28,
-  },
-  demoItemName: {
-    fontSize: 16, fontWeight: '600', color: '#F0F4F8', fontFamily: FH,
-    flex: 1,
+  demoGridImage: {
+    width: '100%', height: '100%',
   },
 
   // ── Transition block ───────────────────────────────────────────────
@@ -894,9 +1038,22 @@ const st = StyleSheet.create({
   },
 
   // ── Water Break block ──────────────────────────────────────────────
-  waterBreakHint: {
-    fontSize: 16, color: '#8A95A3', fontFamily: FB,
-    textAlign: 'center', marginBottom: 8,
+  waterBreakLabel: {
+    fontSize: 20, fontWeight: '700', color: '#38BDF8', fontFamily: FH, letterSpacing: 2,
+  },
+  waterBreakVideoOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(56,189,248,0.25)',
+  } as any,
+  waterBreakTextOverlay: {
+    position: 'absolute', bottom: 24, left: 0, right: 0,
+    alignItems: 'center',
+  } as any,
+  waterBreakOverlayText: {
+    fontSize: 48, fontWeight: '900', color: '#FFFFFF', fontFamily: FH,
+    letterSpacing: 6, textAlign: 'center', opacity: 0.7,
+    textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 8,
   },
 
   // Phase labels
@@ -954,11 +1111,65 @@ const st = StyleSheet.create({
   workTimer: {
     fontSize: 80, fontWeight: '700', color: '#FFFFFF', fontFamily: FH, lineHeight: 80,
   },
+  // Gold timer box (used across all screens)
+  goldTimerBox: {
+    backgroundColor: '#F5A623',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  goldTimerText: {
+    fontSize: 48,
+    fontWeight: '700',
+    color: '#0E1117',
+    fontFamily: FH,
+    lineHeight: 52,
+  },
+  // REST phase styles
+  restPhaseLabel: {
+    fontSize: 16, fontWeight: '700', color: '#8A95A3', fontFamily: FH,
+    letterSpacing: 2,
+  },
+  restNextName: {
+    fontSize: 20, fontWeight: '700', color: '#F0F4F8', fontFamily: FH, marginTop: 2,
+  },
+  restTimerBox: {
+    backgroundColor: '#1A2035',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  restTimerText: {
+    fontSize: 48,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    fontFamily: FH,
+    lineHeight: 52,
+  },
   sideBadgeRow: { alignItems: 'center', marginBottom: 4 },
+  // SPLIT label
+  splitLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    marginBottom: 4,
+  },
+  splitText: {
+    fontSize: 14, fontWeight: '700', color: '#F5A623', fontFamily: FH, letterSpacing: 1,
+  },
+  splitSep: {
+    fontSize: 14, color: '#6B7280', fontFamily: FB,
+  },
+  splitDuration: {
+    fontSize: 14, color: '#8A95A3', fontFamily: FB,
+  },
+  splitArrows: {
+    fontSize: 14, color: '#F5A623', fontFamily: FB,
+  },
 
-  // Video area
+  // Video area — strict 4:5 portrait crop
   videoArea: {
-    flex: 1, marginHorizontal: 0, marginTop: 4,
+    aspectRatio: 4 / 5, width: '100%', marginTop: 4,
     borderRadius: 0, overflow: 'hidden', backgroundColor: '#000000',
   },
   videoInner: { flex: 1, position: 'relative' },
