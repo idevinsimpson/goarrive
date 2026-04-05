@@ -1,19 +1,14 @@
 /**
  * useWorkoutTTS — Voice coaching hook for the Workout Player
  *
- * Phase 1 upgrade: Uses pre-generated ElevenLabs "GoArrive Coach" audio files
- * from Firebase Storage for all static cues. Dynamic cues (movement names)
- * fall back to Web Speech API until Phase 2 (on-demand ElevenLabs generation).
+ * Audio pipeline (in priority order):
+ *   1. Pre-generated movement voice clips (OpenAI TTS, stored at voiceUrl)
+ *   2. Static platform cues (Firebase Storage MP3s)
+ *   3. Web Speech API fallback for any movement without a voiceUrl
  *
- * Static cues (GoArrive Coach voice — Firebase Storage):
- *   - Countdowns: countdown_3, countdown_3_rest, countdown_4, countdown_5, countdown_10
- *   - Phase markers: go, rest, rest_now, halfway, workout_complete, workout_starting
- *   - Transitions: next_up, get_ready, switch_sides, water_break, warm_up, cool_down
- *   - Encouragement: you_got_this, keep_pushing, almost_there, last_round, etc.
- *
- * Dynamic cues (movement names via Web Speech API fallback):
- *   - "Next up, [movement name]"
- *   - "Next up: [movement name]" (during rest)
+ * Movement voice clips are generated via OpenAI TTS (voice: onyx) through
+ * the generateVoice Cloud Function. Static platform cues were pre-generated
+ * and stored in Firebase Storage. Web Speech is the real-time fallback.
  *
  * Uses expo-speech on native, Web Audio API + Web Speech on web.
  * Respects the global audio mute toggle.

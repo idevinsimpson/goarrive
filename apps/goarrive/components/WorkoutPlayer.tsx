@@ -141,7 +141,7 @@ export default function WorkoutPlayer({
     if (!videoRef.current) return;
     if (isPaused) {
       videoRef.current.pauseAsync?.().catch(() => {});
-    } else if (phase === 'work') {
+    } else if (phase === 'work' || phase === 'rest') {
       videoRef.current.playAsync?.().catch(() => {});
     }
   }, [isPaused, phase]);
@@ -451,40 +451,52 @@ export default function WorkoutPlayer({
 
         {/* ── WATER BREAK — Hydration pause ───────────────────── */}
         {phase === 'waterBreak' && current && (
-          <View style={st.waterBreakContainer}>
+          <View style={st.workContainer}>
             {renderHeader()}
-            {/* Blue-tinted background */}
-            <View style={st.waterBreakBg}>
-              {current.videoUrl ? (
-                <Video
-                  source={{ uri: current.videoUrl }}
-                  resizeMode={ResizeMode.COVER}
-                  isLooping
-                  shouldPlay
-                  isMuted
-                  style={StyleSheet.absoluteFillObject}
-                />
-              ) : null}
-              <View style={st.waterBreakOverlay} />
-            </View>
-            {/* GoArrive Logo */}
-            <Image
-              source={require('../assets/logo.png')}
-              style={{ width: 200, height: 56, alignSelf: 'center', marginTop: 16 }}
-              resizeMode="contain"
-            />
-            {/* Gold timer */}
-            <View style={{ alignSelf: 'center', marginTop: 16 }}>
+            {/* Header row: WATER BREAK label + timer */}
+            <View style={st.nameTimerRow}>
+              <View style={st.nameColumn}>
+                <Text style={st.waterBreakLabel}>WATER BREAK</Text>
+              </View>
               <View style={st.goldTimerBox}>
                 <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
               </View>
             </View>
-            {/* Stylized WATER BREAK text at bottom */}
-            <View style={st.waterBreakTextArea}>
-              <Text style={st.waterBreakTitle}>WATER</Text>
-              <Text style={st.waterBreakTitle}>BREAK</Text>
+
+            {/* 4:5 video area with blue tint */}
+            <View style={st.videoArea}>
+              <View style={st.videoInner}>
+                {current.videoUrl ? (
+                  <Video
+                    key={`wb-${currentIndex}`}
+                    source={{ uri: current.videoUrl }}
+                    resizeMode={ResizeMode.COVER}
+                    isLooping
+                    shouldPlay
+                    isMuted
+                    style={st.videoPlayer}
+                    videoStyle={
+                      Platform.OS === 'web'
+                        ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
+                        : undefined
+                    }
+                  />
+                ) : (
+                  <View style={[st.videoPlayer, { backgroundColor: 'rgba(56,189,248,0.15)' }]}>
+                    <Icon name="droplet" size={64} color="#38BDF8" />
+                  </View>
+                )}
+                {/* Blue tint overlay */}
+                <View style={st.waterBreakVideoOverlay} />
+                {/* WATER BREAK text overlay */}
+                <View style={st.waterBreakTextOverlay}>
+                  <Text style={st.waterBreakOverlayText}>WATER</Text>
+                  <Text style={st.waterBreakOverlayText}>BREAK</Text>
+                </View>
+              </View>
             </View>
-            <TouchableOpacity style={[st.skipPill, { alignSelf: 'center', marginBottom: 24 }]} onPress={handleSkip}>
+
+            <TouchableOpacity style={[st.skipPill, { alignSelf: 'center', marginTop: 12 }]} onPress={handleSkip}>
               <Icon name="skip-forward" size={16} color="#F5A623" />
               <Text style={st.skipPillText}>Skip</Text>
             </TouchableOpacity>
@@ -572,9 +584,11 @@ export default function WorkoutPlayer({
             {/* Video area */}
             {(() => {
               // At 3.5s before end, switch to next movement's video
-              const showNextVideo = !isRepBased && timeLeft <= 4 && next?.videoUrl;
-              const activeVideoUrl = showNextVideo ? next.videoUrl : current.videoUrl;
-              const activeThumbUrl = showNextVideo ? next.thumbnailUrl : current.thumbnailUrl;
+              const nextExercise = next?.stepType === 'exercise' ? next : null;
+              const showNextVideo = !isRepBased && timeLeft <= 4 && nextExercise?.videoUrl;
+              const activeVideoUrl = showNextVideo ? nextExercise!.videoUrl : current.videoUrl;
+              const activeThumbUrl = showNextVideo ? nextExercise!.thumbnailUrl : current.thumbnailUrl;
+              const videoKey = showNextVideo ? `next-${currentIndex}` : `current-${currentIndex}`;
               return (
             <View style={st.videoArea}>
               <TouchableWithoutFeedback onPress={handleVideoTap}>
@@ -582,7 +596,8 @@ export default function WorkoutPlayer({
                   {activeVideoUrl ? (
                     <>
                       <Video
-                        ref={videoRef}
+                        key={videoKey}
+                        ref={showNextVideo ? undefined : videoRef}
                         source={{ uri: activeVideoUrl }}
                         resizeMode={ResizeMode.COVER}
                         isLooping
@@ -667,14 +682,24 @@ export default function WorkoutPlayer({
         )}
 
         {/* ── REST state — show next movement video ──────────── */}
-        {phase === 'rest' && (
+        {phase === 'rest' && (() => {
+          // Find the next exercise step for video preview (skip special blocks)
+          const nextExForRest = (() => {
+            for (let i = currentIndex + 1; i < flatMovements.length; i++) {
+              if (flatMovements[i].stepType === 'exercise') return flatMovements[i];
+            }
+            return next; // fallback to whatever is next
+          })();
+          const restVideoUrl = nextExForRest?.videoUrl || current?.videoUrl;
+          const restThumbUrl = nextExForRest?.thumbnailUrl || current?.thumbnailUrl;
+          return (
           <View style={st.workContainer}>
             {renderHeader()}
             {/* REST label + white timer */}
             <View style={st.nameTimerRow}>
               <View style={st.nameColumn}>
                 <Text style={st.restPhaseLabel}>REST</Text>
-                {next && <Text style={st.restNextName}>Next: {next.name}</Text>}
+                {nextExForRest && <Text style={st.restNextName}>Next: {nextExForRest.name}</Text>}
               </View>
               <View style={st.restTimerBox}>
                 <Text style={st.restTimerText}>{formatTime(timeLeft)}</Text>
@@ -684,9 +709,10 @@ export default function WorkoutPlayer({
             {/* Next movement video preview */}
             <View style={st.videoArea}>
               <View style={st.videoInner}>
-                {next?.videoUrl ? (
+                {restVideoUrl ? (
                   <Video
-                    source={{ uri: next.videoUrl }}
+                    key={`rest-${currentIndex}`}
+                    source={{ uri: restVideoUrl }}
                     resizeMode={ResizeMode.COVER}
                     isLooping
                     shouldPlay
@@ -698,8 +724,8 @@ export default function WorkoutPlayer({
                         : undefined
                     }
                   />
-                ) : next?.thumbnailUrl ? (
-                  <Image source={{ uri: next.thumbnailUrl }} style={st.videoPlayer} resizeMode="cover" />
+                ) : restThumbUrl ? (
+                  <Image source={{ uri: restThumbUrl }} style={st.videoPlayer} resizeMode="cover" />
                 ) : (
                   <View style={[st.videoPlayer, st.videoPlaceholder]}>
                     <Icon name="play-circle" size={48} color="#3A4050" />
@@ -713,7 +739,8 @@ export default function WorkoutPlayer({
               <Text style={st.skipPillText}>Skip Rest</Text>
             </TouchableOpacity>
           </View>
-        )}
+          );
+        })()}
 
         {/* ── SWAP state ──────────────────────────────────────── */}
         {phase === 'swap' && current && (
@@ -1011,29 +1038,22 @@ const st = StyleSheet.create({
   },
 
   // ── Water Break block ──────────────────────────────────────────────
-  waterBreakContainer: {
-    flex: 1, backgroundColor: '#0E1117',
+  waterBreakLabel: {
+    fontSize: 20, fontWeight: '700', color: '#38BDF8', fontFamily: FH, letterSpacing: 2,
   },
-  waterBreakBg: {
+  waterBreakVideoOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(56,189,248,0.12)',
+    backgroundColor: 'rgba(56,189,248,0.25)',
   } as any,
-  waterBreakOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(14,17,23,0.6)',
-  } as any,
-  waterBreakTextArea: {
-    marginTop: 'auto' as any,
+  waterBreakTextOverlay: {
+    position: 'absolute', bottom: 24, left: 0, right: 0,
     alignItems: 'center',
-    paddingBottom: 16,
-  },
-  waterBreakTitle: {
-    fontSize: 48, fontWeight: '900', color: '#38BDF8', fontFamily: FH,
-    letterSpacing: 6, textAlign: 'center', opacity: 0.85,
-  },
-  waterBreakHint: {
-    fontSize: 16, color: '#8A95A3', fontFamily: FB,
-    textAlign: 'center', marginBottom: 8,
+  } as any,
+  waterBreakOverlayText: {
+    fontSize: 48, fontWeight: '900', color: '#FFFFFF', fontFamily: FH,
+    letterSpacing: 6, textAlign: 'center', opacity: 0.7,
+    textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 8,
   },
 
   // Phase labels

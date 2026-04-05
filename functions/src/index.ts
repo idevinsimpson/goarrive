@@ -7767,3 +7767,67 @@ export const createMissingLedgerEntry = onCall(
     return { created, entries };
   }
 );
+
+// ─── generateVoice — OpenAI TTS for workout cues and movement names ─────────
+// Accepts text + optional voice (onyx, nova), generates MP3 via OpenAI TTS,
+// uploads to Firebase Storage, returns the download URL.
+// ─────────────────────────────────────────────────────────────────────────────
+export const generateVoice = onCall(
+  { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 30 },
+  async (request) => {
+    const { text, voice, storagePath } = request.data as {
+      text?: string;
+      voice?: string;
+      storagePath?: string;
+    };
+
+    if (!text || typeof text !== 'string' || text.length === 0) {
+      throw new HttpsError('invalid-argument', 'text is required');
+    }
+    if (text.length > 500) {
+      throw new HttpsError('invalid-argument', 'text must be under 500 characters');
+    }
+
+    const apiKey = openaiApiKey.value();
+    if (!apiKey) {
+      throw new HttpsError('internal', 'OpenAI API key not configured');
+    }
+
+    const selectedVoice = voice || 'onyx';
+    const path = storagePath || `voice_cache/tts/${Date.now()}.mp3`;
+
+    try {
+      const response = await fetch('https://api.openai.com/v1/audio/speech', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'tts-1',
+          voice: selectedVoice,
+          input: text,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[generateVoice] OpenAI TTS error:', response.status, errorText);
+        throw new HttpsError('internal', `OpenAI TTS error: ${response.status}`);
+      }
+
+      const audioBuffer = Buffer.from(await response.arrayBuffer());
+      const bucket = admin.storage().bucket();
+      const file = bucket.file(path);
+      await file.save(audioBuffer, { contentType: 'audio/mpeg' });
+      await file.makePublic();
+
+      const url = `https://storage.googleapis.com/${bucket.name}/${path}`;
+      return { url, path };
+    } catch (err: any) {
+      if (err.code) throw err;
+      console.error('[generateVoice] Failed:', err);
+      throw new HttpsError('internal', 'Voice generation failed');
+    }
+  }
+);
