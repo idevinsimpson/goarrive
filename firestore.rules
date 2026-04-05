@@ -42,10 +42,6 @@ service cloud.firestore {
       return isAuthenticated() && getRole() == 'coach';
     }
 
-    function isCoachAssistant() {
-      return isAuthenticated() && getRole() == 'coachAssistant';
-    }
-
     function isOwnDoc(uid) {
       return isAuthenticated() && request.auth.uid == uid;
     }
@@ -155,10 +151,13 @@ service cloud.firestore {
                       isOwnDoc(resource.data.memberId)
                       || isCoachOrBootstrap(resource.data.coachId)
                     ));
-      // list: query-time check — only request.auth is available, not resource.data.
-      // Restrict to authenticated users; the app always scopes queries by memberId
-      // or coachId so cross-tenant leakage is prevented at the query level.
-      allow list: if isAuthenticated();
+      // list: Firestore enforces that the query must filter by coachId or memberId
+      // matching the caller, preventing unscoped cross-tenant queries.
+      allow list: if isAuthenticated() && (
+        isPlatformAdmin()
+        || isCoachOrBootstrap(resource.data.coachId)
+        || isOwnDoc(resource.data.memberId)
+      );
       allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
       // update: only the owning coach (or admin) may modify a plan.
       // The broad isCoach() fallback has been removed — coaches can only update
@@ -641,8 +640,12 @@ service cloud.firestore {
                     || (isAuthenticated() && isCoachOrBootstrap(request.resource.data.coachId));
       // get: full document-level check (resource.data available)
       allow get: if isAuthenticated() && isCoachOrBootstrap(resource.data.coachId);
-      // list: query-time check — only request.auth available, not resource.data
-      allow list: if isAuthenticated();
+      // list: require the query to scope to the caller's coachId.
+      // The app only uses get (single doc reads), so list is admin/coach-only.
+      allow list: if isAuthenticated() && (
+        isPlatformAdmin()
+        || isCoachOrBootstrap(resource.data.coachId)
+      );
       allow update: if isAuthenticated() && isCoachOrBootstrap(resource.data.coachId);
       allow delete: if false;
     }
@@ -651,8 +654,9 @@ service cloud.firestore {
     // NOTIFICATIONS
     // ─────────────────────────────────────────────
     match /notifications/{notifId} {
-      // Coaches can create notifications for their members
-      allow create: if isAuthenticated();
+      // Only coaches can create notifications for their members
+      allow create: if isAuthenticated()
+                    && (isCoach() || isCoachByUid(request.resource.data.coachId) || isPlatformAdmin());
       // Members can read and mark their own notifications as read
       allow read, update: if isAuthenticated() && request.auth.uid == resource.data.recipientId;
       allow delete: if false;
@@ -680,35 +684,12 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
-    // CHECKOUT INTENTS (Rate limiting for checkout)
-    // Cloud Functions create; admin reads for diagnostics.
-    // ─────────────────────────────────────────────
-
-    match /checkoutIntents/{intentId} {
-      allow read: if isPlatformAdmin();
-      allow write: if false; // Cloud Functions only (Admin SDK)
-    }
-
-    // ─────────────────────────────────────────────
     // CTS ACCOUNTABILITY FEES
     // Readable by the member, their coach, or admin.
     // Writable only by Cloud Functions (Admin SDK).
     // ─────────────────────────────────────────────
 
     match /ctsAccountabilityFees/{feeId} {
-      allow read: if isPlatformAdmin()
-                  || isOwnDoc(resource.data.memberId)
-                  || isCoachOrBootstrap(resource.data.coachId);
-      allow write: if false; // Cloud Functions only (Admin SDK)
-    }
-
-    // ─────────────────────────────────────────────
-    // COMMIT TO SAVE CONSENTS
-    // Readable by the member, their coach, or admin.
-    // Writable only by Cloud Functions (Admin SDK).
-    // ─────────────────────────────────────────────
-
-    match /commitToSaveConsents/{consentId} {
       allow read: if isPlatformAdmin()
                   || isOwnDoc(resource.data.memberId)
                   || isCoachOrBootstrap(resource.data.coachId);
