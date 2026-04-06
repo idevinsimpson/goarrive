@@ -45,6 +45,7 @@ function formatCurrency(n: number): string {
 }
 
 type PaymentOption = 'monthly' | 'pay_in_full';
+type BillingInterval = 'month' | 'week';
 
 export default function PaymentSelectScreen() {
   const router = useRouter();
@@ -54,6 +55,7 @@ export default function PaymentSelectScreen() {
   const [plan, setPlan] = useState<MemberPlanData | null>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<PaymentOption | null>(null);
+  const [billingInterval, setBillingInterval] = useState<BillingInterval>('month');
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -88,6 +90,9 @@ export default function PaymentSelectScreen() {
     0
   );
 
+  // Weekly price: monthly / (52/12)
+  const displayWeeklyPrice = Math.round(displayMonthlyPrice / (52 / 12));
+
   // Contract total
   const contractTotal = displayMonthlyPrice * contractMonths;
 
@@ -117,7 +122,7 @@ export default function PaymentSelectScreen() {
     try {
       const functions = getFunctions();
       const createCheckout = httpsCallable<
-        { planId: string; memberId: string; paymentOption: PaymentOption },
+        { planId: string; memberId: string; paymentOption: PaymentOption; billingInterval?: BillingInterval },
         { sessionUrl: string; intentId: string; snapshotId: string }
       >(functions, 'createCheckoutSession');
 
@@ -125,6 +130,7 @@ export default function PaymentSelectScreen() {
         planId,
         memberId: user.uid,
         paymentOption: selected,
+        ...(selected === 'monthly' && billingInterval === 'week' ? { billingInterval: 'week' } : {}),
       });
 
       const { sessionUrl } = result.data;
@@ -204,17 +210,38 @@ export default function PaymentSelectScreen() {
               {selected === 'monthly' && <View style={s.optionRadioDot} />}
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={s.optionTitle}>Monthly</Text>
+              <Text style={s.optionTitle}>Recurring</Text>
               <Text style={s.optionSubtitle}>Flexible · Cancel after contract ends</Text>
             </View>
             <View style={s.optionPriceWrap}>
-              <Text style={s.optionPrice}>{formatCurrency(displayMonthlyPrice)}</Text>
-              <Text style={s.optionPriceSuffix}>/mo</Text>
+              <Text style={s.optionPrice}>
+                {billingInterval === 'week' ? formatCurrency(displayWeeklyPrice) : formatCurrency(displayMonthlyPrice)}
+              </Text>
+              <Text style={s.optionPriceSuffix}>{billingInterval === 'week' ? '/wk' : '/mo'}</Text>
             </View>
+          </View>
+
+          {/* Weekly / Monthly toggle */}
+          <View style={s.intervalToggleRow}>
+            <Pressable
+              onPress={() => setBillingInterval('month')}
+              style={[s.intervalPill, billingInterval === 'month' && s.intervalPillActive]}
+            >
+              <Text style={[s.intervalPillText, billingInterval === 'month' && s.intervalPillTextActive]}>Monthly</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setBillingInterval('week')}
+              style={[s.intervalPill, billingInterval === 'week' && s.intervalPillActive]}
+            >
+              <Text style={[s.intervalPillText, billingInterval === 'week' && s.intervalPillTextActive]}>Weekly</Text>
+            </Pressable>
           </View>
 
           <View style={s.optionDetail}>
             <DetailRow label="Contract total" value={formatCurrency(contractTotal)} />
+            {billingInterval === 'week' && (
+              <DetailRow label="Weekly rate" value={`${formatCurrency(displayWeeklyPrice)}/wk`} />
+            )}
             <DetailRow label="After contract" value={`${formatCurrency(continuationMonthly)}/mo`} />
             {hasCTS && (
               <DetailRow label="With Commit to Save" value={`${formatCurrency(ctsAfterPif)}/mo`} accent />
@@ -288,7 +315,9 @@ export default function PaymentSelectScreen() {
               {selected === 'pay_in_full'
                 ? `Pay ${formatCurrency(payInFullTotal)} Now`
                 : selected === 'monthly'
-                ? `Start at ${formatCurrency(displayMonthlyPrice)}/mo`
+                ? billingInterval === 'week'
+                  ? `Start at ${formatCurrency(displayWeeklyPrice)}/wk`
+                  : `Start at ${formatCurrency(displayMonthlyPrice)}/mo`
                 : 'Select a payment option'}
             </Text>
           )}
@@ -353,6 +382,32 @@ const s = StyleSheet.create({
   optionPriceWrap: { alignItems: 'flex-end' },
   optionPrice: { color: '#FFF', fontSize: 20, fontWeight: '700', fontFamily: FH },
   optionPriceSuffix: { color: MUTED, fontSize: 11 },
+  intervalToggleRow: {
+    flexDirection: 'row',
+    gap: 0,
+    marginTop: 12,
+    backgroundColor: '#0E1117',
+    borderRadius: 8,
+    padding: 2,
+    alignSelf: 'flex-start',
+  },
+  intervalPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  intervalPillActive: {
+    backgroundColor: PRIMARY,
+  },
+  intervalPillText: {
+    color: MUTED,
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: FH,
+  },
+  intervalPillTextActive: {
+    color: '#FFF',
+  },
   optionDetail: {
     marginTop: 12,
     paddingTop: 12,

@@ -430,7 +430,7 @@ export const disconnectStripeAccount = onCall(
 export const createCheckoutSession = onCall(
   { secrets: [stripeSecretKey] },
   async (request) => {
-    const { planId, memberId, paymentOption, commitToSave, nutritionAddOn, displayedMonthlyPrice: clientMonthly, displayedPayInFullTotal: clientPayInFull } = request.data as {
+    const { planId, memberId, paymentOption, commitToSave, nutritionAddOn, displayedMonthlyPrice: clientMonthly, displayedPayInFullTotal: clientPayInFull, billingInterval: clientBillingInterval } = request.data as {
       planId: string;
       memberId: string;
       paymentOption: 'monthly' | 'pay_in_full';
@@ -438,7 +438,12 @@ export const createCheckoutSession = onCall(
       nutritionAddOn?: boolean;
       displayedMonthlyPrice?: number;
       displayedPayInFullTotal?: number;
+      billingInterval?: 'week' | 'month';
     };
+
+    // Weekly billing: only applies to 'monthly' (recurring) payment option
+    const billingInterval: 'week' | 'month' = (paymentOption === 'monthly' && clientBillingInterval === 'week') ? 'week' : 'month';
+    const isWeekly = billingInterval === 'week';
 
     if (!planId || !memberId || !paymentOption) {
       throw new HttpsError('invalid-argument', 'planId, memberId, and paymentOption are required');
@@ -623,6 +628,7 @@ export const createCheckoutSession = onCall(
       continuationPayInFullTotal,
       continuationPayInFullMonthlyEquivalent,
       baseMonthlyPrice: serverBaseMonthly,
+      billingInterval,
       ctsActive,
       ctsMonthlySavings: ctsActive ? ctsMonthlySavings : (plan.postContract?.ctsMonthlySavings ?? null),
       nutActive,
@@ -644,6 +650,7 @@ export const createCheckoutSession = onCall(
       planId,
       snapshotId,
       paymentOption,
+      billingInterval,
       status: 'pending',
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
@@ -672,9 +679,13 @@ export const createCheckoutSession = onCall(
     let stripeSessionId: string;
 
     if (paymentOption === 'monthly') {
-      // ── Monthly: subscription schedule with two phases ──
-      // Phase 1: contractMonths at displayMonthlyPrice
-      // Phase 2: indefinite at continuationMonthlyPrice
+      // ── Recurring subscription: weekly or monthly ──
+      // Phase 1: contract period at displayMonthlyPrice (or weekly equivalent)
+      // Phase 2: indefinite at continuationMonthlyPrice (monthly)
+      const recurringAmount = isWeekly
+        ? Math.round(displayMonthlyPrice * 100 / (52 / 12)) // weekly in cents
+        : displayMonthlyPrice * 100; // monthly in cents
+      const intervalLabel = isWeekly ? 'Weekly' : 'Monthly';
       const session = await stripe.checkout.sessions.create(
         {
           customer: stripeCustomerId,
@@ -685,11 +696,11 @@ export const createCheckoutSession = onCall(
               price_data: {
                 currency: 'usd',
                 product_data: {
-                  name: `GoArrive Coaching — ${contractMonths}-Month Contract${ctsActive ? ' (Commit to Save)' : ''}${nutActive ? ' + Nutrition' : ''}`,
+                  name: `GoArrive Coaching — ${contractMonths}-Month Contract (${intervalLabel})${ctsActive ? ' (Commit to Save)' : ''}${nutActive ? ' + Nutrition' : ''}`,
                   metadata: { planId, snapshotId },
                 },
-                unit_amount: displayMonthlyPrice * 100, // cents
-                recurring: { interval: 'month' },
+                unit_amount: recurringAmount,
+                recurring: { interval: billingInterval },
               },
               quantity: 1,
             },
@@ -703,6 +714,7 @@ export const createCheckoutSession = onCall(
               memberId,
               coachId,
               paymentOption: 'monthly',
+              billingInterval,
               contractMonths: String(contractMonths),
               continuationMonthlyPriceCents: String(continuationMonthlyPrice * 100),
               tierSplit: String(tierSplit),
