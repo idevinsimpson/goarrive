@@ -26,6 +26,7 @@ import { Icon } from './Icon';
 import AssignWorkoutModal from './AssignWorkoutModal';
 import BatchAssignModal from './BatchAssignModal';
 import WorkoutPlayer from './WorkoutPlayer';
+import WorkoutPreview from './WorkoutPreview';
 import { useAuth } from '../lib/AuthContext';
 import { FB, FH } from '../lib/theme';
 
@@ -70,7 +71,8 @@ export default function WorkoutDetail({
   const [currentWorkout, setCurrentWorkout] = useState<WorkoutDetailData>(workout as WorkoutDetailData);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showBatchModal, setShowBatchModal] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
+  const [showPreStartPreview, setShowPreStartPreview] = useState(false);
+  const [showPlayer, setShowPlayer] = useState(false);
 
   useEffect(() => {
     if (!workout?.id) return;
@@ -296,7 +298,7 @@ export default function WorkoutDetail({
             <View style={styles.actionRow}>
               <TouchableOpacity
                 style={styles.actionBtn}
-                onPress={() => setShowPreview(true)}
+                onPress={() => setShowPreStartPreview(true)}
               >
                 <Icon name="eye" size={16} color="#FBBF24" />
                 <Text style={[styles.actionBtnText, { color: '#FBBF24' }]}>Preview</Text>
@@ -422,12 +424,24 @@ export default function WorkoutDetail({
         }}
       />
 
+      {/* Coach Pre-Start Preview — same screen the member sees */}
+      <WorkoutPreview
+        visible={showPreStartPreview}
+        workout={currentWorkout}
+        isPreview
+        onStart={() => {
+          setShowPreStartPreview(false);
+          setShowPlayer(true);
+        }}
+        onClose={() => setShowPreStartPreview(false)}
+      />
+
       {/* Workout Player Preview */}
       <WorkoutPlayer
-        visible={showPreview}
+        visible={showPlayer}
         workout={currentWorkout}
-        onClose={() => setShowPreview(false)}
-        onComplete={() => setShowPreview(false)}
+        onClose={() => setShowPlayer(false)}
+        onComplete={() => setShowPlayer(false)}
         isPreview
       />
 

@@ -65,6 +65,8 @@ interface Props {
   videoUri: string;
   /** Initial crop values (e.g. from a previous edit) */
   initialCrop?: CropValues;
+  /** Aspect ratio (width / height). Defaults to 4:5 (0.8). iPhone Pro Max portrait = 9/19.5 (~0.46) */
+  frameAspect?: number;
   /** Called when the coach taps "Done" */
   onDone: (crop: CropValues) => void;
   /** Called when the coach cancels */
@@ -73,7 +75,7 @@ interface Props {
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const FRAME_ASPECT = 4 / 5; // width / height = 0.8
+const DEFAULT_FRAME_ASPECT = 4 / 5; // width / height = 0.8
 const MIN_SCALE = 1;
 const MAX_SCALE = 3;
 
@@ -83,13 +85,17 @@ export default function VideoCropModal({
   visible,
   videoUri,
   initialCrop,
+  frameAspect = DEFAULT_FRAME_ASPECT,
   onDone,
   onCancel,
 }: Props) {
-  const { width: winWidth } = useWindowDimensions();
-  // Frame fills available width minus padding
-  const frameWidth = Math.min(winWidth - 32, 500);
-  const frameHeight = frameWidth / FRAME_ASPECT;
+  const { width: winWidth, height: winHeight } = useWindowDimensions();
+  // For tall aspect ratios (like phone screens), constrain by height so it fits on screen
+  const maxFrameHeight = winHeight - 200; // leave room for header, instructions, reset button
+  const frameWidthFromWidth = Math.min(winWidth - 32, 500);
+  const frameHeightFromWidth = frameWidthFromWidth / frameAspect;
+  const frameHeight = Math.min(frameHeightFromWidth, maxFrameHeight);
+  const frameWidth = frameHeight * frameAspect;
 
   // ── Shared values ──────────────────────────────────────────────────────
 
