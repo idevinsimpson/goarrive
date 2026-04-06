@@ -36,7 +36,9 @@ import {
   serverTimestamp,
   onSnapshot,
 } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, storage } from '../lib/firebase';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import * as ImagePicker from 'expo-image-picker';
 import { Icon } from './Icon';
 import WorkoutPlayer from './WorkoutPlayer';
 import { FB, FH } from '../lib/theme';
@@ -203,6 +205,75 @@ export default function WorkoutFolderPage({
   const [introGifUrl, setIntroGifUrl] = useState<string | null>(null);
   const [outroVideoUrl, setOutroVideoUrl] = useState<string | null>(null);
   const [outroGifUrl, setOutroGifUrl] = useState<string | null>(null);
+  const [ioUploading, setIoUploading] = useState<'intro' | 'outro' | null>(null);
+  const [ioUploadProgress, setIoUploadProgress] = useState(0);
+
+  // ── Intro/Outro video upload handler ──────────────────────────────────────
+  const pickAndUploadIntroOutro = useCallback(async (target: 'intro' | 'outro') => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        // Alert not imported — use console + return
+        console.warn('[WorkoutFolder] Media library permission not granted');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['videos'],
+        allowsEditing: false,
+        quality: 0.8,
+        videoMaxDuration: 30,
+      });
+
+      if (result.canceled || !result.assets?.[0]) return;
+
+      const asset = result.assets[0];
+      setIoUploading(target);
+      setIoUploadProgress(0);
+
+      // Upload video to Firebase Storage
+      const fileName = `workouts/${coachId}/${target}/${workoutId}_${Date.now()}.mp4`;
+      const response = await fetch(asset.uri);
+      const blob = await response.blob();
+      const storageRef = ref(storage, fileName);
+      const uploadTask = uploadBytesResumable(storageRef, blob, { contentType: 'video/mp4' });
+
+      const videoUrl = await new Promise<string>((resolve, reject) => {
+        uploadTask.on(
+          'state_changed',
+          (snapshot) => setIoUploadProgress(snapshot.bytesTransferred / snapshot.totalBytes),
+          (error) => { reject(error); },
+          async () => { resolve(await getDownloadURL(uploadTask.snapshot.ref)); },
+        );
+      });
+
+      // Upload thumbnail if available
+      let gifUrl: string | null = null;
+      if (asset.uri) {
+        // Use video URL as both video and thumbnail placeholder
+        // A proper GIF/thumbnail can be generated server-side later
+        gifUrl = videoUrl;
+      }
+
+      // Save to Firestore
+      const updates = target === 'intro'
+        ? { introVideoUrl: videoUrl, introGifUrl: gifUrl }
+        : { outroVideoUrl: videoUrl, outroGifUrl: gifUrl };
+      await updateDoc(doc(db, 'workouts', workoutId), { ...updates, updatedAt: serverTimestamp() });
+      if (target === 'intro') {
+        setIntroVideoUrl(videoUrl);
+        setIntroGifUrl(gifUrl);
+      } else {
+        setOutroVideoUrl(videoUrl);
+        setOutroGifUrl(gifUrl);
+      }
+    } catch (err: any) {
+      console.error(`[WorkoutFolder] ${target} upload error:`, err?.message ?? err);
+    } finally {
+      setIoUploading(null);
+      setIoUploadProgress(0);
+    }
+  }, [coachId, workoutId]);
 
   // Movement library
   const [availableMovements, setAvailableMovements] = useState<MovementOption[]>([]);
@@ -764,9 +835,18 @@ export default function WorkoutFolderPage({
                 </Pressable>
               </Pressable>
             ) : (
-              <Pressable style={st.ioUploadCard} onPress={() => console.log('[WorkoutFolder] Intro upload — not yet wired')}>
-                <Icon name="plus" size={28} color="#F5A623" />
-                <Text style={st.ioUploadText}>Upload Intro</Text>
+              <Pressable style={st.ioUploadCard} onPress={() => pickAndUploadIntroOutro('intro')} disabled={ioUploading === 'intro'}>
+                {ioUploading === 'intro' ? (
+                  <>
+                    <ActivityIndicator size="small" color="#F5A623" />
+                    <Text style={st.ioUploadText}>{Math.round(ioUploadProgress * 100)}%</Text>
+                  </>
+                ) : (
+                  <>
+                    <Icon name="plus" size={28} color="#F5A623" />
+                    <Text style={st.ioUploadText}>Upload Intro</Text>
+                  </>
+                )}
               </Pressable>
             )}
           </View>
@@ -790,9 +870,18 @@ export default function WorkoutFolderPage({
                 </Pressable>
               </Pressable>
             ) : (
-              <Pressable style={st.ioUploadCard} onPress={() => console.log('[WorkoutFolder] Outro upload — not yet wired')}>
-                <Icon name="plus" size={28} color="#F5A623" />
-                <Text style={st.ioUploadText}>Upload Outro</Text>
+              <Pressable style={st.ioUploadCard} onPress={() => pickAndUploadIntroOutro('outro')} disabled={ioUploading === 'outro'}>
+                {ioUploading === 'outro' ? (
+                  <>
+                    <ActivityIndicator size="small" color="#F5A623" />
+                    <Text style={st.ioUploadText}>{Math.round(ioUploadProgress * 100)}%</Text>
+                  </>
+                ) : (
+                  <>
+                    <Icon name="plus" size={28} color="#F5A623" />
+                    <Text style={st.ioUploadText}>Upload Outro</Text>
+                  </>
+                )}
               </Pressable>
             )}
           </View>

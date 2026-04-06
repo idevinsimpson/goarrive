@@ -102,6 +102,15 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
     const introBlocks = rawBlocks.filter((b: any) => (b.type || '') === 'Intro');
     const outroBlocks = rawBlocks.filter((b: any) => (b.type || '') === 'Outro');
     const middleBlocks = rawBlocks.filter((b: any) => (b.type || '') !== 'Intro' && (b.type || '') !== 'Outro');
+
+    // Synthesize Intro/Outro blocks from workout-level video URLs if no explicit blocks exist
+    if (introBlocks.length === 0 && workout.introVideoUrl) {
+      introBlocks.push({ type: 'Intro', label: 'Intro', durationSec: 10, videoUrl: workout.introVideoUrl });
+    }
+    if (outroBlocks.length === 0 && workout.outroVideoUrl) {
+      outroBlocks.push({ type: 'Outro', label: 'Outro', durationSec: 10, videoUrl: workout.outroVideoUrl });
+    }
+
     const blocks = [...introBlocks, ...middleBlocks, ...outroBlocks];
 
     blocks.forEach((block: any, bi: number) => {
@@ -138,6 +147,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
           movementIndex: 0,
           swapSides: false,
           description: block.instructionText || block.description || '',
+          videoUrl: block.videoUrl || '',
           stepType,
           demoMovements,
           instructionText: block.instructionText || '',
