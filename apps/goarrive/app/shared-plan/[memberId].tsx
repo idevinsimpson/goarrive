@@ -438,6 +438,7 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
   onChange: (updates: Partial<MemberPlanData>) => void;
 }) {
   const [selected, setSelected] = useState<'monthly' | 'pay_in_full' | null>(null);
+  const [billingInterval, setBillingInterval] = useState<'month' | 'week'>('month');
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -458,6 +459,7 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
   const nutCost = nut?.monthlyCost ?? 100;
 
   const monthlyPrice = pricing.displayMonthlyPrice;
+  const weeklyPrice = Math.round(monthlyPrice / (52 / 12));
   const payInFullTotal = pricing.payInFullPrice;
   const payInFullMonthly = Math.round(payInFullTotal / (plan.contractMonths || 12));
   const payInFullSavings = Math.round(monthlyPrice * (plan.contractMonths || 12) - payInFullTotal);
@@ -506,6 +508,7 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
         // Send exact displayed prices so Stripe charges match what the member sees
         displayedMonthlyPrice: Math.round(monthlyPrice),
         displayedPayInFullTotal: Math.round(payInFullTotal),
+        ...(selected === 'monthly' && billingInterval === 'week' ? { billingInterval: 'week' as const } : {}),
       });
       const { sessionUrl } = result.data as { sessionUrl: string };
       if (sessionUrl) {
@@ -542,19 +545,42 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
               {selected === 'monthly' && <View style={ips.optionRadioDot} />}
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={ips.optionTitle}>Monthly</Text>
+              <Text style={ips.optionTitle}>Recurring</Text>
               <Text style={ips.optionSubtitle}>Flexible · Cancel after contract ends</Text>
             </View>
             <View style={{ alignItems: 'flex-end' }}>
-              <Text style={ips.optionPrice}>{formatCurrency(monthlyPrice)}</Text>
-              <Text style={ips.optionPriceSuffix}>/mo</Text>
+              <Text style={ips.optionPrice}>
+                {billingInterval === 'week' ? formatCurrency(weeklyPrice) : formatCurrency(monthlyPrice)}
+              </Text>
+              <Text style={ips.optionPriceSuffix}>{billingInterval === 'week' ? '/wk' : '/mo'}</Text>
             </View>
+          </View>
+          {/* Weekly / Monthly toggle */}
+          <View style={ips.intervalToggleRow}>
+            <Pressable
+              onPress={() => setBillingInterval('month')}
+              style={[ips.intervalPill, billingInterval === 'month' && ips.intervalPillActive]}
+            >
+              <Text style={[ips.intervalPillText, billingInterval === 'month' && ips.intervalPillTextActive]}>Monthly</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setBillingInterval('week')}
+              style={[ips.intervalPill, billingInterval === 'week' && ips.intervalPillActive]}
+            >
+              <Text style={[ips.intervalPillText, billingInterval === 'week' && ips.intervalPillTextActive]}>Weekly</Text>
+            </Pressable>
           </View>
           <View style={ips.optionDetail}>
             <View style={ips.detailRow}>
               <Text style={ips.detailLabel}>Contract total</Text>
               <Text style={ips.detailValue}>{formatCurrency(monthlyPrice * (plan.contractMonths || 12))}</Text>
             </View>
+            {billingInterval === 'week' && (
+              <View style={ips.detailRow}>
+                <Text style={ips.detailLabel}>Weekly rate</Text>
+                <Text style={ips.detailValue}>{formatCurrency(weeklyPrice)}/wk</Text>
+              </View>
+            )}
             <View style={ips.detailRow}>
               <Text style={ips.detailLabel}>After contract</Text>
               <Text style={ips.detailValue}>{formatCurrency(plan.postContract?.monthlyRate || 199)}/mo</Text>
@@ -663,7 +689,9 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
             {selected === 'pay_in_full'
               ? `Pay ${formatCurrency(Math.round(payInFullTotal))} Now`
               : selected === 'monthly'
-              ? `Pay ${formatCurrency(Math.round(monthlyPrice))}/mo Now`
+              ? billingInterval === 'week'
+                ? `Pay ${formatCurrency(weeklyPrice)}/wk Now`
+                : `Pay ${formatCurrency(Math.round(monthlyPrice))}/mo Now`
               : 'Select a payment option'}
           </Text>
         )}
@@ -1021,6 +1049,31 @@ const ips = StyleSheet.create({
   optionSubtitle: { color: '#7A8A9A', fontSize: 12, marginTop: 1 },
   optionPrice: { color: '#FFF', fontSize: 20, fontWeight: '700' },
   optionPriceSuffix: { color: '#7A8A9A', fontSize: 11 },
+  intervalToggleRow: {
+    flexDirection: 'row',
+    gap: 0,
+    marginTop: 12,
+    backgroundColor: '#0E1117',
+    borderRadius: 8,
+    padding: 2,
+    alignSelf: 'flex-start',
+  },
+  intervalPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  intervalPillActive: {
+    backgroundColor: '#5B9BD5',
+  },
+  intervalPillText: {
+    color: '#7A8A9A',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  intervalPillTextActive: {
+    color: '#FFF',
+  },
   optionDetail: {
     marginTop: 12,
     paddingTop: 12,
