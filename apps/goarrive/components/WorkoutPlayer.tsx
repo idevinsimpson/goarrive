@@ -308,9 +308,9 @@ export default function WorkoutPlayer({
 
         {/* ── INTRO — Full-screen cinematic welcome ────────────── */}
         {phase === 'intro' && current && (() => {
-          // Find the first exercise movement's video for the left panel
+          // Use the intro block's own video, falling back to first exercise
           const firstExercise = flatMovements.find((f: any) => f.stepType === 'exercise');
-          const introVideoUrl = firstExercise?.videoUrl;
+          const introVideoUrl = current.videoUrl || firstExercise?.videoUrl;
           const introThumbUrl = firstExercise?.thumbnailUrl;
           return (
             <View style={st.introSplitContainer}>
@@ -356,7 +356,17 @@ export default function WorkoutPlayer({
         {/* ── OUTRO — Cinematic completion ────────────────────── */}
         {phase === 'outro' && current && (
           <View style={st.introOutroContainer}>
-            <View style={st.introOutroGradient}>
+            {current.videoUrl ? (
+              <Video
+                source={{ uri: current.videoUrl }}
+                resizeMode={ResizeMode.COVER}
+                isLooping
+                shouldPlay
+                isMuted
+                style={StyleSheet.absoluteFillObject}
+              />
+            ) : null}
+            <View style={[st.introOutroGradient, current.videoUrl && { backgroundColor: 'rgba(14,17,23,0.6)' }]}>
               <Image
                 source={require('../assets/logo.png')}
                 style={{ width: 280, height: 90, marginBottom: 16 }}
@@ -676,8 +686,8 @@ export default function WorkoutPlayer({
               );
             })()}
 
-            {/* NEXT UP bar — always visible */}
-            {renderNextUp()}
+            {/* NEXT UP bar — show in final 4 seconds */}
+            {(isRepBased || timeLeft <= 4) && renderNextUp()}
           </View>
         )}
 
