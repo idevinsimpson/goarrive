@@ -60,6 +60,7 @@ import {
 } from 'firebase/firestore';
 import { Icon } from './Icon';
 import { useWorkoutTemplates, WorkoutTemplate } from '../hooks/useWorkoutTemplates';
+import { calculateAdjustedRest } from '../hooks/useRestAutoAdjust';
 import { FB, FH } from '../lib/theme';
 
 // ── Web-compatible alert helper ──────────────────────────────────────────
@@ -91,15 +92,18 @@ const EXERCISE_BLOCK_TYPES = [
   'Timed', 'AMRAP', 'EMOM', 'Cool-Down', 'Rest',
 ];
 const SPECIAL_BLOCK_TYPES = [
-  'Intro', 'Outro', 'Demo', 'Transition', 'Water Break',
+  'Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment',
 ];
 const ALL_BLOCK_TYPES = [...EXERCISE_BLOCK_TYPES, ...SPECIAL_BLOCK_TYPES];
 
 // Special blocks that don't contain movements (Demo added — was missing)
-const NO_MOVEMENT_BLOCKS = ['Intro', 'Outro', 'Demo', 'Transition', 'Water Break'];
+const NO_MOVEMENT_BLOCKS = ['Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment'];
 
 // Quick-insert types for between-block "+" buttons
 const QUICK_INSERT_TYPES = ['Water Break', 'Transition', 'Rest'];
+
+// Block types that support circuit start rest override
+const CIRCUIT_TYPE_BLOCKS = ['Circuit', 'Superset', 'AMRAP', 'EMOM'];
 
 // Default timing per spec
 const DEFAULT_ROUNDS = 3;
@@ -123,6 +127,7 @@ const BLOCK_COLORS: Record<string, string> = {
   'Demo': '#FBBF24',
   'Transition': '#94A3B8',
   'Water Break': '#38BDF8',
+  'Grab Equipment': '#FB923C',
 };
 
 // ── Helper: auto-calculate duration from blocks ──────────────────────────
@@ -152,6 +157,7 @@ function calcDurationMin(blocks: WorkoutBlock[]): number {
 function generateBlockLabel(type: string, existingBlocks: WorkoutBlock[]): string {
   if (type === 'Water Break') return '💧 Water Break';
   if (type === 'Transition') return '→ Transition';
+  if (type === 'Grab Equipment') return 'Grab Equipment';
   // Count how many blocks of this type already exist
   const count = existingBlocks.filter(b => b.type === type).length + 1;
   return `${type} ${count}`;
@@ -167,6 +173,7 @@ interface BlockMovement {
   restSec?: number;
   notes?: string;
   thumbnailUrl?: string;
+  showOnPreview?: boolean;
 }
 
 interface WorkoutBlock {
@@ -178,6 +185,7 @@ interface WorkoutBlock {
   durationSec?: number;
   instructionText?: string;
   firstMovementPrepSec?: number; // extra prep time before first movement
+  circuitStartRestSec?: number; // rest before first movement, first round only (circuit-type blocks)
   movements: BlockMovement[];
 }
 
@@ -344,6 +352,7 @@ export default function WorkoutForm({
           durationSec: b.durationSec ?? undefined,
           instructionText: b.instructionText ?? undefined,
           firstMovementPrepSec: b.firstMovementPrepSec ?? 0,
+          circuitStartRestSec: b.circuitStartRestSec ?? undefined,
           movements: (b.movements ?? []).map((m: any) => ({
             movementId: m.movementId ?? '',
             movementName: m.movementName ?? '',
@@ -352,6 +361,7 @@ export default function WorkoutForm({
             durationSec: m.durationSec ?? undefined,
             restSec: m.restSec ?? undefined,
             notes: m.notes ?? '',
+            showOnPreview: m.showOnPreview,
           })),
         })),
       );
@@ -423,7 +433,7 @@ export default function WorkoutForm({
       rounds: isSpecial ? 1 : DEFAULT_ROUNDS,
       restBetweenRoundsSec: 0,
       restBetweenMovementsSec: 0,
-      durationSec: isSpecial ? (type === 'Water Break' ? 30 : type === 'Transition' ? 15 : 10) : undefined,
+      durationSec: isSpecial ? (type === 'Water Break' ? 30 : (type === 'Transition' || type === 'Grab Equipment') ? 15 : 10) : undefined,
       firstMovementPrepSec: 0,
       movements: [],
     };
@@ -607,6 +617,7 @@ export default function WorkoutForm({
         if (b.durationSec) clean.durationSec = b.durationSec;
         if (b.instructionText) clean.instructionText = b.instructionText;
         if (b.firstMovementPrepSec) clean.firstMovementPrepSec = b.firstMovementPrepSec;
+        if (b.circuitStartRestSec) clean.circuitStartRestSec = b.circuitStartRestSec;
         clean.movements = (b.movements ?? []).map((m) => {
           const cm: any = { movementId: m.movementId, movementName: m.movementName };
           if (m.sets) cm.sets = m.sets;
@@ -614,6 +625,7 @@ export default function WorkoutForm({
           if (m.durationSec) cm.durationSec = m.durationSec;
           if (m.restSec) cm.restSec = m.restSec;
           if (m.notes) cm.notes = m.notes;
+          if (m.showOnPreview === false) cm.showOnPreview = false;
           return cm;
         });
         return clean;
@@ -941,6 +953,22 @@ export default function WorkoutForm({
                                 placeholderTextColor="#4A5568"
                               />
                             </View>
+                            {/* Circuit start rest override — first round, first movement only */}
+                            {CIRCUIT_TYPE_BLOCKS.includes(block.type) && (
+                              <View style={s.blockSettingItem}>
+                                <Text style={s.blockSettingLabel}>Start Rest</Text>
+                                <TextInput
+                                  style={s.blockSettingInput}
+                                  value={String(block.circuitStartRestSec ?? 0)}
+                                  onChangeText={(t) => updateBlockField(bi, 'circuitStartRestSec', parseInt(t.replace(/[^0-9]/g, ''), 10) || 0)}
+                                  keyboardType="number-pad"
+                                  maxLength={3}
+                                  placeholder="sec"
+                                  placeholderTextColor="#4A5568"
+                                />
+                                <Text style={s.blockSettingHint}>1st round only</Text>
+                              </View>
+                            )}
                           </View>
                         )}
 
@@ -957,7 +985,7 @@ export default function WorkoutForm({
                                 maxLength={3}
                               />
                             </View>
-                            {(block.type === 'Transition' || block.type === 'Demo') && (
+                            {(block.type === 'Transition' || block.type === 'Demo' || block.type === 'Grab Equipment') && (
                               <TextInput
                                 style={s.instructionInput}
                                 value={block.instructionText ?? ''}
@@ -1021,11 +1049,11 @@ export default function WorkoutForm({
                                         />
                                         <Text style={s.movementFieldSep}>|</Text>
                                         <TextInput
-                                          style={s.movementFieldInput}
+                                          style={[s.movementFieldInput, !mov.restSec && s.movementFieldAutoRest]}
                                           value={mov.restSec ? String(mov.restSec) : ''}
                                           onChangeText={(t) => updateMovementField(bi, mi, 'restSec', parseInt(t.replace(/[^0-9]/g, ''), 10) || undefined)}
-                                          placeholder={`${DEFAULT_REST_SEC}s`}
-                                          placeholderTextColor="#4A5568"
+                                          placeholder={`${calculateAdjustedRest(mov, block, difficulty || 'Intermediate')}s`}
+                                          placeholderTextColor="#6B7280"
                                           keyboardType="number-pad"
                                           maxLength={3}
                                         />
@@ -1033,6 +1061,16 @@ export default function WorkoutForm({
                                     </View>
                                     {/* Movement actions */}
                                     <View style={s.movementActions}>
+                                      <Pressable
+                                        onPress={() => updateMovementField(bi, mi, 'showOnPreview', mov.showOnPreview === false ? true : false)}
+                                        hitSlop={4}
+                                      >
+                                        <Icon
+                                          name={mov.showOnPreview === false ? 'eye-off' : 'eye'}
+                                          size={14}
+                                          color={mov.showOnPreview === false ? '#4A5568' : '#8A95A3'}
+                                        />
+                                      </Pressable>
                                       <Pressable onPress={() => setExpandedMovement(isMovExpanded ? null : movKey)} hitSlop={4}>
                                         <Icon name={isMovExpanded ? 'chevron-up' : 'chevron-down'} size={14} color="#4A5568" />
                                       </Pressable>
@@ -1666,6 +1704,12 @@ const s = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
+  blockSettingHint: {
+    fontSize: 9,
+    color: '#4A5568',
+    fontFamily: FB,
+    fontStyle: 'italic',
+  },
   blockSettingInput: {
     backgroundColor: '#161B22',
     borderRadius: 6,
@@ -1747,6 +1791,10 @@ const s = StyleSheet.create({
     borderColor: '#2A3347',
     width: 44,
     textAlign: 'center',
+  },
+  movementFieldAutoRest: {
+    borderColor: '#2A3347',
+    borderStyle: 'dashed' as const,
   },
   movementFieldSep: {
     fontSize: 12,
