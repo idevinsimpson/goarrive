@@ -9,9 +9,9 @@ import type { StepType } from '../../hooks/useWorkoutFlatten';
 
 // ── stepTypeToPhase unit tests ─────────────────────────────────────────────
 describe('stepTypeToPhase', () => {
-  test('maps exercise stepType to countdown phase', () => {
-    expect(stepTypeToPhase('exercise')).toBe('countdown');
-    expect(stepTypeToPhase(undefined)).toBe('countdown');
+  test('maps exercise stepType to work phase', () => {
+    expect(stepTypeToPhase('exercise')).toBe('work');
+    expect(stepTypeToPhase(undefined)).toBe('work');
   });
 
   test('maps special stepTypes to their corresponding phases', () => {
@@ -33,13 +33,13 @@ describe('stepTypeToPhase', () => {
 // in the same category as other special phases.
 describe('grabEquipment phase classification', () => {
   const specialPhases = ['intro', 'outro', 'demo', 'transition', 'waterBreak', 'grabEquipment'];
-  const nonSpecialPhases = ['ready', 'countdown', 'work', 'rest', 'swap', 'complete'];
+  const nonSpecialPhases = ['ready', 'work', 'rest', 'swap', 'complete'];
 
-  test('all special stepTypes map to their own phase (not countdown)', () => {
+  test('all special stepTypes map to their own phase (not work)', () => {
     const specialStepTypes: StepType[] = ['intro', 'outro', 'demo', 'transition', 'waterBreak', 'grabEquipment'];
     specialStepTypes.forEach((st) => {
       const phase = stepTypeToPhase(st);
-      expect(phase).not.toBe('countdown');
+      expect(phase).not.toBe('work');
       expect(phase).toBe(st);
     });
   });

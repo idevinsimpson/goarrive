@@ -86,9 +86,9 @@ export default function WorkoutPlayer({
   useMediaPrefetch(
     flatMovements,
     currentIndex,
-    phase === 'work' || phase === 'countdown',
+    phase === 'work',
     phase === 'rest',
-    phase === 'countdown',
+    false,
     phase === 'ready',
   );
 
@@ -543,21 +543,6 @@ export default function WorkoutPlayer({
               <Text style={st.skipPillText}>Skip</Text>
             </TouchableOpacity>
           </View>
-        )}
-
-        {/* ── COUNTDOWN state ─────────────────────────────────── */}
-        {phase === 'countdown' && current && (
-          <>
-            {renderHeader()}
-            <View style={st.centerContent}>
-              <Text style={st.phaseLabel}>GET READY</Text>
-              <Text style={st.countdownNum}>{timeLeft}</Text>
-              <Text style={st.upNextName}>{current.name}</Text>
-              {current.description ? (
-                <Text style={st.cues} numberOfLines={2}>{current.description}</Text>
-              ) : null}
-            </View>
-          </>
         )}
 
         {/* ── WORK state — Stacked layout ──────────────────── */}

@@ -7,7 +7,7 @@
  *   - 'transition': instruction display with countdown
  *   - 'waterBreak': hydration pause with countdown
  *
- * Exercise phases remain: ready → countdown → work → rest/swap → next
+ * Exercise phases: ready → work → rest/swap → next
  * Special block phases: ready → [special] → next
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -15,10 +15,8 @@ import { playCue } from '../lib/audioCues';
 import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess } from '../lib/haptics';
 import type { StepType } from './useWorkoutFlatten';
 
-export type Phase = 'ready' | 'countdown' | 'work' | 'rest' | 'swap' | 'complete'
+export type Phase = 'ready' | 'work' | 'rest' | 'swap' | 'complete'
   | 'intro' | 'outro' | 'demo' | 'transition' | 'waterBreak' | 'grabEquipment';
-
-const COUNTDOWN_SECONDS = 3;
 
 interface FlatMovement {
   name: string;
@@ -44,7 +42,7 @@ export function stepTypeToPhase(stepType: StepType | undefined): Phase {
     case 'transition': return 'transition';
     case 'waterBreak': return 'waterBreak';
     case 'grabEquipment': return 'grabEquipment';
-    default: return 'countdown';
+    default: return 'work';
   }
 }
 
@@ -85,9 +83,11 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
         setPhase(specialPhase);
         setTimeLeft(nextStep.duration ?? 10);
       } else {
-        // Exercise — go through countdown
-        setPhase('countdown');
-        setTimeLeft(COUNTDOWN_SECONDS);
+        // Exercise — go directly to work
+        setPhase('work');
+        setTimeLeft(nextStep.duration ?? 30);
+        playCue('workStart');
+        hapticHeavy();
       }
     }
   }, [currentIndex, total, flatMovements]);
@@ -102,8 +102,8 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
       setTimeLeft((prev) => {
         const n = prev - 1;
 
-        // Audio/haptic cues for countdowns
-        if (phase === 'countdown' || phase === 'rest' || phase === 'swap') {
+        // Audio/haptic cues for rest countdown (3-2-1 heads-up)
+        if (phase === 'rest' || phase === 'swap') {
           if (n <= 3 && n > 0) {
             playCue('countdownTick');
             hapticLight();
@@ -139,12 +139,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
       return;
     }
 
-    if (phase === 'countdown') {
-      setPhase('work');
-      setTimeLeft(current?.duration ?? 30);
-      playCue('workStart');
-      hapticHeavy();
-    } else if (phase === 'work') {
+    if (phase === 'work') {
       if (isRepBased) return;
       if (current?.swapSides && swapSide === 'L') {
         setSwapSide('R');
@@ -179,8 +174,9 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
       setPhase(specialPhase);
       setTimeLeft(firstStep.duration ?? 10);
     } else {
-      setPhase('countdown');
-      setTimeLeft(COUNTDOWN_SECONDS);
+      setPhase('work');
+      setTimeLeft(firstStep.duration ?? 30);
+      playCue('workStart');
     }
     hapticHeavy();
   }, [total, flatMovements]);
