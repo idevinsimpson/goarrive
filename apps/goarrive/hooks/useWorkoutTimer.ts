@@ -16,7 +16,7 @@ import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess } from '../lib/ha
 import type { StepType } from './useWorkoutFlatten';
 
 export type Phase = 'ready' | 'countdown' | 'work' | 'rest' | 'swap' | 'complete'
-  | 'intro' | 'outro' | 'demo' | 'transition' | 'waterBreak';
+  | 'intro' | 'outro' | 'demo' | 'transition' | 'waterBreak' | 'grabEquipment';
 
 const COUNTDOWN_SECONDS = 3;
 
@@ -36,13 +36,14 @@ interface UseWorkoutTimerOptions {
 }
 
 /** Map StepType to Phase */
-function stepTypeToPhase(stepType: StepType | undefined): Phase {
+export function stepTypeToPhase(stepType: StepType | undefined): Phase {
   switch (stepType) {
     case 'intro': return 'intro';
     case 'outro': return 'outro';
     case 'demo': return 'demo';
     case 'transition': return 'transition';
     case 'waterBreak': return 'waterBreak';
+    case 'grabEquipment': return 'grabEquipment';
     default: return 'countdown';
   }
 }
@@ -60,7 +61,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
 
   const isRepBased = !!(current?.reps && (!current.duration || current.duration <= 0));
   const isSpecialPhase = phase === 'intro' || phase === 'outro' || phase === 'demo'
-    || phase === 'transition' || phase === 'waterBreak';
+    || phase === 'transition' || phase === 'waterBreak' || phase === 'grabEquipment';
 
   const progressPct = total > 0 ? (currentIndex / total) * 100 : 0;
 
@@ -133,7 +134,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
 
     // Special block phases: auto-advance when timer reaches 0
     if (phase === 'intro' || phase === 'outro' || phase === 'demo'
-        || phase === 'transition' || phase === 'waterBreak') {
+        || phase === 'transition' || phase === 'waterBreak' || phase === 'grabEquipment') {
       advanceToNext();
       return;
     }
