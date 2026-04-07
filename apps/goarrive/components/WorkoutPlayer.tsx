@@ -255,6 +255,7 @@ export default function WorkoutPlayer({
               <Icon name={
                 next.stepType === 'waterBreak' ? 'droplet' :
                 next.stepType === 'transition' ? 'arrow-right' :
+                next.stepType === 'grabEquipment' ? 'briefcase' :
                 next.stepType === 'demo' ? 'eye' :
                 'play-circle'
               } size={20} color="#3A4050" />
@@ -437,6 +438,37 @@ export default function WorkoutPlayer({
                 <Icon name="arrow-right" size={32} color="#94A3B8" />
               </View>
               <Text style={[st.specialPhaseLabel, { color: '#94A3B8' }]}>TRANSITION</Text>
+              <Text style={st.specialTitle}>{current.name}</Text>
+              {current.instructionText || current.description ? (
+                <Text style={st.transitionInstruction}>
+                  {current.instructionText || current.description}
+                </Text>
+              ) : null}
+
+              <View style={st.specialTimerRow}>
+                <View style={st.goldTimerBox}>
+                  <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
+                </View>
+                <TouchableOpacity style={[st.skipPill, { marginTop: 8 }]} onPress={handleSkip}>
+                  <Icon name="skip-forward" size={16} color="#F5A623" />
+                  <Text style={st.skipPillText}>Skip</Text>
+                </TouchableOpacity>
+              </View>
+
+              {renderNextUp()}
+            </View>
+          </>
+        )}
+
+        {/* ── GRAB EQUIPMENT — Equipment preparation ─────────── */}
+        {phase === 'grabEquipment' && current && (
+          <>
+            {renderHeader()}
+            <View style={st.specialContent}>
+              <View style={[st.specialIconCircle, { backgroundColor: 'rgba(251,146,60,0.15)' }]}>
+                <Icon name="briefcase" size={32} color="#FB923C" />
+              </View>
+              <Text style={[st.specialPhaseLabel, { color: '#FB923C' }]}>GRAB EQUIPMENT</Text>
               <Text style={st.specialTitle}>{current.name}</Text>
               {current.instructionText || current.description ? (
                 <Text style={st.transitionInstruction}>
