@@ -117,10 +117,10 @@ export default function WorkoutPreview({
     });
   });
 
-  // Count total movements
+  // Count total movements (respecting showOnPreview)
   let totalMovements = 0;
   blocks.forEach((block: any) => {
-    totalMovements += (block.movements || []).length;
+    totalMovements += (block.movements || []).filter((mv: any) => mv.showOnPreview !== false).length;
   });
 
   return (
@@ -189,7 +189,9 @@ export default function WorkoutPreview({
                       : ''}
                   </Text>
                 </View>
-                {(block.movements || []).map((mv: any, mi: number) => (
+                {(block.movements || [])
+                  .filter((mv: any) => mv.showOnPreview !== false)
+                  .map((mv: any, mi: number) => (
                   <View key={mi} style={st.movementRow}>
                     <View style={st.movementDot} />
                     <Text style={st.movementName}>{mv.name || mv.movementName || 'Movement'}</Text>
