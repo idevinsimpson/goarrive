@@ -168,25 +168,6 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
       const workoutDifficulty = workout.difficulty || 'Intermediate';
       const rounds = block.rounds ?? block.sets ?? 1;
       const bType = resolveBlockType(block.type);
-      const firstMovePrepSec = block.firstMovementPrepSec ?? 0;
-
-      // If there's a first-movement prep time, insert a prep step before the block
-      if (firstMovePrepSec > 0) {
-        flat.push({
-          name: `Get Ready: ${block.label || block.name || blockType}`,
-          duration: firstMovePrepSec,
-          restAfter: 0,
-          blockName: block.label || block.name || `Block ${bi + 1}`,
-          blockIndex: bi,
-          movementIndex: -1,
-          swapSides: false,
-          description: `Prepare for ${movements[0]?.movementName || movements[0]?.name || 'first movement'}`,
-          stepType: 'transition',
-          instructionText: `Get ready for ${movements[0]?.movementName || movements[0]?.name || 'the first movement'}`,
-          originalBlockType: blockType,
-        });
-      }
-
       if (bType === 'superset' || bType === 'circuit') {
         const circuitStartRest = block.circuitStartRestSec;
 

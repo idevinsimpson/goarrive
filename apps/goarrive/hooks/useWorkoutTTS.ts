@@ -103,8 +103,8 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
 }
 
 // ── Types ────────────────────────────────────────────────────────────
-type Phase = 'ready' | 'countdown' | 'work' | 'rest' | 'swap' | 'complete'
-  | 'intro' | 'outro' | 'demo' | 'transition' | 'waterBreak';
+type Phase = 'ready' | 'work' | 'rest' | 'swap' | 'complete'
+  | 'intro' | 'outro' | 'demo' | 'transition' | 'waterBreak' | 'grabEquipment';
 
 interface UseWorkoutTTSOptions {
   phase: Phase;
@@ -309,9 +309,9 @@ export function useWorkoutTTS({
     }
   }, [phase, current?.stepType, currentIndex, speak, playCue]);
 
-  // ── Welcome message on first countdown ──────────────────────────────
+  // ── Welcome message on first work phase ─────────────────────────────
   useEffect(() => {
-    if (phase === 'countdown' && currentIndex === 0 && !welcomeSpokenRef.current) {
+    if (phase === 'work' && currentIndex === 0 && !welcomeSpokenRef.current) {
       if (current?.stepType === 'exercise') {
         welcomeSpokenRef.current = true;
         playCue('workout_starting');

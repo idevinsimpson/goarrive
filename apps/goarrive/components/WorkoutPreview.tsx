@@ -117,11 +117,17 @@ export default function WorkoutPreview({
     });
   });
 
-  // Count total movements (respecting showOnPreview)
-  let totalMovements = 0;
+  // Count unique movements (by movementId or name, respecting showOnPreview)
+  const uniqueMovements = new Set<string>();
   blocks.forEach((block: any) => {
-    totalMovements += (block.movements || []).filter((mv: any) => mv.showOnPreview !== false).length;
+    (block.movements || [])
+      .filter((mv: any) => mv.showOnPreview !== false)
+      .forEach((mv: any) => {
+        const key = mv.movementId || mv.name || mv.movementName || 'Movement';
+        uniqueMovements.add(key);
+      });
   });
+  const totalMovements = uniqueMovements.size;
 
   return (
     <Modal visible={visible} animationType="slide" transparent={false}>
