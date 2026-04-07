@@ -160,6 +160,31 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
         return;
       }
 
+      // ── Auto-insert demo step when block.showDemo is true ─────────
+      if (block.showDemo) {
+        const demoMvs = (block.movements || []).map((m: any) => ({
+          name: m.movementName || m.name || 'Movement',
+          thumbnailUrl: m.thumbnailUrl || '',
+          videoUrl: m.videoUrl || m.mediaUrl || '',
+          movementId: m.movementId || '',
+        }));
+        flat.push({
+          name: block.label || block.name || `Block ${bi + 1}`,
+          duration: block.circuitStartRestSec ?? 20,
+          restAfter: 0,
+          blockName: block.label || block.name || `Block ${bi + 1}`,
+          blockIndex: bi,
+          movementIndex: 0,
+          swapSides: false,
+          description: '',
+          stepType: 'demo',
+          demoMovements: demoMvs,
+          instructionText: '',
+          isFullScreen: false,
+          originalBlockType: blockType,
+        });
+      }
+
       // ── Exercise blocks ─────────────────────────────────────────────
       const movements = block.movements || [];
       if (movements.length === 0) return;

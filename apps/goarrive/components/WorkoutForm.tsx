@@ -186,6 +186,7 @@ interface WorkoutBlock {
   instructionText?: string;
   firstMovementPrepSec?: number; // extra prep time before first movement
   circuitStartRestSec?: number; // rest before first movement, first round only (circuit-type blocks)
+  showDemo?: boolean; // show demo/preview screen before this block in the player
   movements: BlockMovement[];
 }
 
@@ -227,6 +228,8 @@ export default function WorkoutForm({
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [customTag, setCustomTag] = useState('');
   const [isTemplate, setIsTemplate] = useState(false);
+  const [introVideoUrl, setIntroVideoUrl] = useState('');
+  const [outroVideoUrl, setOutroVideoUrl] = useState('');
   const [blocks, setBlocks] = useState<WorkoutBlock[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
@@ -342,6 +345,8 @@ export default function WorkoutForm({
       setEstimatedDurationMin(editWorkout.estimatedDurationMin ? String(editWorkout.estimatedDurationMin) : '');
       setSelectedTags(editWorkout.tags ?? []);
       setIsTemplate(editWorkout.isTemplate ?? false);
+      setIntroVideoUrl(editWorkout.introVideoUrl ?? '');
+      setOutroVideoUrl(editWorkout.outroVideoUrl ?? '');
       setBlocks(
         (editWorkout.blocks ?? []).map((b: any) => ({
           type: b.type ?? 'Circuit',
@@ -353,6 +358,7 @@ export default function WorkoutForm({
           instructionText: b.instructionText ?? undefined,
           firstMovementPrepSec: b.firstMovementPrepSec ?? 0,
           circuitStartRestSec: b.circuitStartRestSec ?? undefined,
+          showDemo: b.showDemo ?? false,
           movements: (b.movements ?? []).map((m: any) => ({
             movementId: m.movementId ?? '',
             movementName: m.movementName ?? '',
@@ -379,6 +385,8 @@ export default function WorkoutForm({
     setSelectedTags([]);
     setCustomTag('');
     setIsTemplate(false);
+    setIntroVideoUrl('');
+    setOutroVideoUrl('');
     setBlocks([]);
     setAddingMovementToBlock(null);
     setMovementSearch('');
@@ -618,6 +626,7 @@ export default function WorkoutForm({
         if (b.instructionText) clean.instructionText = b.instructionText;
         if (b.firstMovementPrepSec) clean.firstMovementPrepSec = b.firstMovementPrepSec;
         if (b.circuitStartRestSec) clean.circuitStartRestSec = b.circuitStartRestSec;
+        if (b.showDemo != null) clean.showDemo = b.showDemo;
         clean.movements = (b.movements ?? []).map((m) => {
           const cm: any = { movementId: m.movementId, movementName: m.movementName };
           if (m.sets) cm.sets = m.sets;
@@ -655,6 +664,8 @@ export default function WorkoutForm({
         estimatedDurationMin: estimatedDurationMin ? parseInt(estimatedDurationMin, 10) : (autoDurationMin > 0 ? autoDurationMin : null),
         tags: selectedTags,
         isTemplate,
+        introVideoUrl: introVideoUrl.trim() || null,
+        outroVideoUrl: outroVideoUrl.trim() || null,
         blocks: cleanBlocks,
         coverThumbs,
         updatedAt: serverTimestamp(),
@@ -891,6 +902,40 @@ export default function WorkoutForm({
                                 {block.rounds ?? DEFAULT_ROUNDS}×
                               </Text>
                             </TouchableOpacity>
+                          )}
+                          {/* Demo eye toggle (block-level) — only for exercise blocks */}
+                          {!isSpecial && (
+                            <Pressable
+                              onPress={() => updateBlockField(bi, 'showDemo', !block.showDemo)}
+                              hitSlop={4}
+                              style={{ marginLeft: 6 }}
+                            >
+                              <Icon
+                                name={block.showDemo ? 'eye' : 'eye-off'}
+                                size={16}
+                                color={block.showDemo ? '#F5A623' : '#4A5568'}
+                              />
+                            </Pressable>
+                          )}
+                          {/* Demo duration stepper — visible only when showDemo is ON */}
+                          {!isSpecial && block.showDemo && (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 4 }}>
+                              <Pressable
+                                onPress={() => updateBlockField(bi, 'circuitStartRestSec', Math.max(5, (block.circuitStartRestSec ?? 20) - 5))}
+                                hitSlop={4}
+                              >
+                                <Text style={{ color: '#8A95A3', fontSize: 16, fontFamily: FB, paddingHorizontal: 4 }}>−</Text>
+                              </Pressable>
+                              <Text style={{ color: '#F5A623', fontSize: 13, fontWeight: '700', fontFamily: FH, minWidth: 28, textAlign: 'center' }}>
+                                {block.circuitStartRestSec ?? 20}s
+                              </Text>
+                              <Pressable
+                                onPress={() => updateBlockField(bi, 'circuitStartRestSec', Math.min(120, (block.circuitStartRestSec ?? 20) + 5))}
+                                hitSlop={4}
+                              >
+                                <Text style={{ color: '#8A95A3', fontSize: 16, fontFamily: FB, paddingHorizontal: 4 }}>+</Text>
+                              </Pressable>
+                            </View>
                           )}
                           {/* Duplicate button */}
                           <Pressable onPress={() => duplicateBlock(bi)} hitSlop={6} style={{ marginLeft: 4 }}>
@@ -1403,6 +1448,13 @@ export default function WorkoutForm({
                 ))}
               </View>
             )}
+
+            {/* Intro / Outro videos — workout-level assets */}
+            <Text style={s.label}>Intro Video URL</Text>
+            <TextInput style={s.input} value={introVideoUrl} onChangeText={setIntroVideoUrl} placeholder="Paste intro video URL..." placeholderTextColor="#4A5568" autoCapitalize="none" autoCorrect={false} />
+
+            <Text style={s.label}>Outro Video URL</Text>
+            <TextInput style={s.input} value={outroVideoUrl} onChangeText={setOutroVideoUrl} placeholder="Paste outro video URL..." placeholderTextColor="#4A5568" autoCapitalize="none" autoCorrect={false} />
 
             {/* Template toggle */}
             <View style={s.templateRow}>
