@@ -19,7 +19,7 @@ import { calculateAdjustedRest } from './useRestAutoAdjust';
 
 // ── Special block types that don't contain movements ──────────────────
 const SPECIAL_BLOCK_TYPES = new Set([
-  'Intro', 'Outro', 'Demo', 'Transition', 'Water Break',
+  'Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment',
 ]);
 
 // ── Types ─────────────────────────────────────────────────────────────
@@ -29,7 +29,8 @@ export type StepType =
   | 'outro'
   | 'demo'
   | 'transition'
-  | 'waterBreak';
+  | 'waterBreak'
+  | 'grabEquipment';
 
 export interface FlatMovement {
   name: string;
@@ -39,6 +40,7 @@ export interface FlatMovement {
   blockIndex: number;
   movementIndex: number;
   swapSides: boolean;
+  showOnPreview?: boolean;
   description?: string;
   sets?: number;
   reps?: string;
@@ -80,13 +82,14 @@ function makeLabel(blockIndex: number, movementIndex: number): string {
 }
 
 /** Map block type string to StepType */
-function toStepType(blockType: string): StepType {
+export function toStepType(blockType: string): StepType {
   switch (blockType) {
     case 'Intro': return 'intro';
     case 'Outro': return 'outro';
     case 'Demo': return 'demo';
     case 'Transition': return 'transition';
     case 'Water Break': return 'waterBreak';
+    case 'Grab Equipment': return 'grabEquipment';
     default: return 'exercise';
   }
 }
@@ -185,6 +188,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
       }
 
       if (bType === 'superset' || bType === 'circuit') {
+        const circuitStartRest = block.circuitStartRestSec;
+
         for (let round = 0; round < rounds; round++) {
           movements.forEach((mv: any, mi: number) => {
             const isLastMovementInRound = mi === movements.length - 1;
@@ -205,6 +210,11 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
                 : calculateAdjustedRest(mv, block, workoutDifficulty);
             }
 
+            // Circuit start rest override: first movement, first round only
+            if (round === 0 && mi === 0 && circuitStartRest != null && circuitStartRest > 0) {
+              restAfter = circuitStartRest;
+            }
+
             flat.push({
               name: mv.movementName || mv.name || 'Movement',
               duration: mv.duration || mv.durationSec || mv.workSec || 30,
@@ -213,6 +223,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               blockIndex: bi,
               movementIndex: mi,
               swapSides: mv.swapSides ?? false,
+              showOnPreview: mv.showOnPreview,
               description: mv.description || mv.coachingCues || mv.notes || '',
               sets: mv.sets,
               reps: mv.reps,
@@ -244,6 +255,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               blockIndex: bi,
               movementIndex: mi,
               swapSides: mv.swapSides ?? false,
+              showOnPreview: mv.showOnPreview,
               description: mv.description || mv.coachingCues || mv.notes || '',
               sets: mv.sets,
               reps: mv.reps,
