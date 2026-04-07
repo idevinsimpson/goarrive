@@ -194,31 +194,86 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
       const rounds = block.rounds ?? block.sets ?? 1;
       const bType = resolveBlockType(block.type);
       if (bType === 'superset' || bType === 'circuit') {
-        const circuitStartRest = block.circuitStartRestSec;
+        // ── Rest-shift fix ────────────────────────────────────────────
+        // Coach mental model: rest on a movement = prep time BEFORE that
+        // movement starts. But `restAfter` fires AFTER a movement ends.
+        //
+        // Strategy: compute each movement's "own rest" (what the coach set),
+        // then shift forward so movement[N]'s rest becomes movement[N-1]'s
+        // restAfter. Movement[0]'s rest becomes a prep rest inserted before
+        // the round starts.
+        // ──────────────────────────────────────────────────────────────
 
         for (let round = 0; round < rounds; round++) {
+          // 1. Compute each movement's "own rest" (prep time the coach intended)
+          const ownRests: number[] = movements.map((mv: any, mi: number) => {
+            const transitionRest = block.restBetweenMovementsSec;
+            if (transitionRest != null && transitionRest > 0) return transitionRest;
+            return bType === 'superset'
+              ? (mv.restSec ?? 0)
+              : calculateAdjustedRest(mv, block, workoutDifficulty);
+          });
+
+          // 2. Determine the prep rest before the first movement of this round
+          const firstMovementPrep = ownRests[0] ?? 0;
+
+          // For the very first round, use circuitStartRestSec if set,
+          // otherwise fall back to the first movement's own rest
+          const circuitStartRest = block.circuitStartRestSec;
+          const prepDuration = (round === 0 && circuitStartRest != null && circuitStartRest > 0)
+            ? circuitStartRest
+            : firstMovementPrep;
+
+          // Insert a prep rest on the previous step if one exists,
+          // otherwise the ready screen / previous block's last step handles it.
+          // We set restAfter on the step that was just pushed (the last item in flat)
+          // so the player shows rest with "Next: [first movement name]".
+          if (prepDuration > 0 && flat.length > 0) {
+            // Attach prep rest to the previous step in the flat array
+            flat[flat.length - 1].restAfter = prepDuration;
+          } else if (prepDuration > 0 && flat.length === 0) {
+            // Very first step of the entire workout — no previous step exists.
+            // Insert a synthetic prep step so the player shows a rest screen first.
+            const firstMv = movements[0];
+            flat.push({
+              name: 'Get Ready',
+              duration: 0, // no work phase — just rest
+              restAfter: prepDuration,
+              blockName: block.name || block.label || `Block ${bi + 1}`,
+              blockIndex: bi,
+              movementIndex: -1,
+              swapSides: false,
+              description: '',
+              stepType: 'exercise',
+              originalBlockType: blockType,
+              videoUrl: firstMv?.videoUrl || firstMv?.mediaUrl || '',
+              thumbnailUrl: firstMv?.thumbnailUrl || '',
+              movementId: '',
+              blockType: bType,
+              supersetLabel: '',
+              cropScale: 1,
+              cropTranslateX: 0,
+              cropTranslateY: 0,
+              voiceUrl: '',
+            });
+          }
+
+          // 3. Push each movement with shifted restAfter
           movements.forEach((mv: any, mi: number) => {
             const isLastMovementInRound = mi === movements.length - 1;
             const isLastRound = round === rounds - 1;
             const isVeryLast = isLastMovementInRound && isLastRound;
 
-            const transitionRest = block.restBetweenMovementsSec;
+            // restAfter = the NEXT movement's prep rest (shifted forward)
             let restAfter = 0;
             if (isVeryLast) {
-              restAfter = 0;
+              restAfter = 0; // nothing after the very last movement
             } else if (isLastMovementInRound) {
+              // Between rounds: use the block-level between-rounds rest
               restAfter = blockRest;
-            } else if (transitionRest != null && transitionRest > 0) {
-              restAfter = transitionRest;
             } else {
-              restAfter = bType === 'superset'
-                ? (mv.restSec ?? 0)
-                : calculateAdjustedRest(mv, block, workoutDifficulty);
-            }
-
-            // Circuit start rest override: first movement, first round only
-            if (round === 0 && mi === 0 && circuitStartRest != null && circuitStartRest > 0) {
-              restAfter = circuitStartRest;
+              // Next movement's own rest = prep before the next movement
+              restAfter = ownRests[mi + 1] ?? 0;
             }
 
             flat.push({
@@ -249,14 +304,61 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
           });
         }
       } else {
+        // ── Linear blocks: same rest-shift logic ──────────────────────
         for (let setNum = 0; setNum < rounds; setNum++) {
+          // Compute each movement's "own rest" (prep before it)
+          const ownRests: number[] = movements.map((mv: any) =>
+            calculateAdjustedRest(mv, block, workoutDifficulty),
+          );
+
+          // Prep rest before first movement of this set
+          const firstPrep = ownRests[0] ?? 0;
+          if (firstPrep > 0 && flat.length > 0) {
+            flat[flat.length - 1].restAfter = firstPrep;
+          } else if (firstPrep > 0 && flat.length === 0) {
+            const firstMv = movements[0];
+            flat.push({
+              name: 'Get Ready',
+              duration: 0,
+              restAfter: firstPrep,
+              blockName: block.name || block.label || `Block ${bi + 1}`,
+              blockIndex: bi,
+              movementIndex: -1,
+              swapSides: false,
+              description: '',
+              stepType: 'exercise',
+              originalBlockType: blockType,
+              videoUrl: firstMv?.videoUrl || firstMv?.mediaUrl || '',
+              thumbnailUrl: firstMv?.thumbnailUrl || '',
+              movementId: '',
+              blockType: 'linear',
+              supersetLabel: '',
+              cropScale: 1,
+              cropTranslateX: 0,
+              cropTranslateY: 0,
+              voiceUrl: '',
+            });
+          }
+
           movements.forEach((mv: any, mi: number) => {
             const isLastInBlock =
               setNum === rounds - 1 && mi === movements.length - 1;
+
+            // Shifted rest: next movement's prep rest
+            let restAfter = 0;
+            if (isLastInBlock) {
+              restAfter = 0;
+            } else if (mi < movements.length - 1) {
+              restAfter = ownRests[mi + 1] ?? 0;
+            } else {
+              // Last in this set but more sets remain — between-set rest
+              restAfter = blockRest;
+            }
+
             flat.push({
               name: mv.movementName || mv.name || 'Movement',
               duration: mv.duration || mv.durationSec || mv.workSec || 30,
-              restAfter: isLastInBlock ? 0 : calculateAdjustedRest(mv, block, workoutDifficulty),
+              restAfter,
               blockName: block.name || block.label || `Block ${bi + 1}`,
               blockIndex: bi,
               movementIndex: mi,
