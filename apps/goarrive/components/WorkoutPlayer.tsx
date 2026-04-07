@@ -17,9 +17,9 @@
  *   - NEXT UP bar at the bottom
  *
  * Decomposed into hooks: useWorkoutFlatten, useWorkoutTimer, useMediaPrefetch,
- * useMovementHydrate, useWorkoutTTS, useMovementSwap, usePlaybackSpeed
+ * useMovementHydrate, useMovementSwap, usePlaybackSpeed
  */
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -37,12 +37,10 @@ import {
 import { Video, ResizeMode } from 'expo-av';
 import MovementVideoControls from './MovementVideoControls';
 import { Icon } from './Icon';
-import { setAudioMuted, isAudioMuted } from '../lib/audioCues';
 import { useWakeLock } from '../lib/useWakeLock';
 import { useWorkoutFlatten } from '../hooks/useWorkoutFlatten';
 import { useWorkoutTimer } from '../hooks/useWorkoutTimer';
 import { useMediaPrefetch } from '../hooks/useMediaPrefetch';
-import { useWorkoutTTS } from '../hooks/useWorkoutTTS';
 import { useMovementSwap } from '../hooks/useMovementSwap';
 import { useMovementHydrate } from '../hooks/useMovementHydrate';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
@@ -91,28 +89,6 @@ export default function WorkoutPlayer({
     false,
     phase === 'ready',
   );
-
-  // ── Audio mute toggle ───────────────────────────────────────────
-  const [audioMuted, setAudioMutedState] = useState(isAudioMuted());
-  const toggleMute = () => {
-    const n = !audioMuted;
-    setAudioMutedState(n);
-    setAudioMuted(n);
-  };
-
-  // ── TTS for voice coaching ──────────────────────
-  const { isTTSAvailable } = useWorkoutTTS({
-    phase,
-    current,
-    next,
-    isMuted: audioMuted,
-    currentIndex,
-    total,
-    timeLeft,
-    currentDuration: current?.duration ?? 0,
-  });
-
-  const showTTSWarning = !isTTSAvailable && !audioMuted;
 
   // ── Offline resilience ─────────────────────────────
   const { isOffline, queueSize } = useNetworkStatus();
@@ -198,6 +174,51 @@ export default function WorkoutPlayer({
   const exerciseIndex = exerciseSteps.indexOf(current as any);
   const exerciseTotal = exerciseSteps.length;
 
+  // ── Persistent video URL — decoupled from phase transitions ────────
+  // Video swaps happen ONCE per movement cycle at timeLeft <= 4 during REST.
+  // Phase boundaries (work→rest, rest→work) do NOT trigger video changes.
+  const { activeVideoUrl, activeThumbUrl } = useMemo(() => {
+    if (!current) return { activeVideoUrl: null, activeThumbUrl: null };
+
+    const findNextExercise = () => {
+      for (let i = currentIndex + 1; i < flatMovements.length; i++) {
+        if (flatMovements[i].stepType === 'exercise') return flatMovements[i];
+      }
+      return null;
+    };
+
+    const findPrevExercise = () => {
+      for (let i = currentIndex - 1; i >= 0; i--) {
+        if (flatMovements[i].stepType === 'exercise') return flatMovements[i];
+      }
+      return null;
+    };
+
+    const currentExercise = current.stepType === 'exercise' ? current : null;
+    const nextExercise = findNextExercise();
+    const prevExercise = findPrevExercise();
+
+    if (phase === 'work' && currentExercise) {
+      return { activeVideoUrl: currentExercise.videoUrl, activeThumbUrl: currentExercise.thumbnailUrl };
+    }
+
+    if (phase === 'rest') {
+      if (timeLeft <= 4 && nextExercise?.videoUrl) {
+        return { activeVideoUrl: nextExercise.videoUrl, activeThumbUrl: nextExercise.thumbnailUrl };
+      }
+      return {
+        activeVideoUrl: currentExercise?.videoUrl || prevExercise?.videoUrl || nextExercise?.videoUrl,
+        activeThumbUrl: currentExercise?.thumbnailUrl || prevExercise?.thumbnailUrl || nextExercise?.thumbnailUrl,
+      };
+    }
+
+    // Special phases (transition, water break, etc.) — use their own video or fallback
+    return {
+      activeVideoUrl: current.videoUrl || nextExercise?.videoUrl,
+      activeThumbUrl: current.thumbnailUrl || nextExercise?.thumbnailUrl,
+    };
+  }, [phase, timeLeft, current, currentIndex, flatMovements]);
+
   // ── Shared header component ───────────────────────────────────────
   const renderHeader = (showProgress = true) => (
     <>
@@ -215,15 +236,6 @@ export default function WorkoutPlayer({
               <Text style={st.offlineBadgeText}>Offline{queueSize > 0 ? ` (${queueSize})` : ''}</Text>
             </View>
           )}
-          {showTTSWarning && (
-            <View style={st.ttsWarning}>
-              <Icon name="alert-triangle" size={12} color="#E06B4F" />
-              <Text style={st.ttsWarningText}>No TTS</Text>
-            </View>
-          )}
-          <TouchableOpacity onPress={toggleMute} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-            <Icon name={audioMuted ? 'volume-x' : 'volume-2'} size={22} color="#8A95A3" />
-          </TouchableOpacity>
           {showProgress && (
             <Text style={st.progressText}>
               {currentIndex + 1}/{total}
@@ -611,8 +623,13 @@ export default function WorkoutPlayer({
                 ) : wbThumbUrl ? (
                   <Image source={{ uri: wbThumbUrl }} style={st.videoPlayer} resizeMode="cover" />
                 ) : (
-                  <View style={[st.videoPlayer, { backgroundColor: 'rgba(56,189,248,0.15)', justifyContent: 'center', alignItems: 'center' }]}>
-                    <Icon name="droplet" size={64} color="#38BDF8" />
+                  <View style={[st.videoPlayer, st.waterBreakPlaceholder]}>
+                    <Image
+                      source={require('../assets/logo.png')}
+                      style={{ width: 180, height: 60, marginBottom: 16 }}
+                      resizeMode="contain"
+                    />
+                    <Text style={st.waterBreakPlaceholderText}>WATER BREAK</Text>
                   </View>
                 )}
                 {/* Blue tint overlay */}
@@ -645,14 +662,9 @@ export default function WorkoutPlayer({
                 <Text style={st.floatingWorkoutName} numberOfLines={1}>
                   {workout?.name ?? 'Workout'}
                 </Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <TouchableOpacity onPress={toggleMute} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-                    <Icon name={audioMuted ? 'volume-x' : 'volume-2'} size={18} color="#8A95A3" />
-                  </TouchableOpacity>
-                  <Text style={st.floatingProgress}>
-                    {currentIndex + 1}/{total}
-                  </Text>
-                </View>
+                <Text style={st.floatingProgress}>
+                  {currentIndex + 1}/{total}
+                </Text>
               </View>
             )}
 
@@ -696,23 +708,15 @@ export default function WorkoutPlayer({
               </View>
             )}
 
-            {/* Video area */}
-            {(() => {
-              // At 3.5s before end, switch to next movement's video
-              const nextExercise = next?.stepType === 'exercise' ? next : null;
-              const showNextVideo = !isRepBased && timeLeft <= 4 && nextExercise?.videoUrl;
-              const activeVideoUrl = showNextVideo ? nextExercise!.videoUrl : current.videoUrl;
-              const activeThumbUrl = showNextVideo ? nextExercise!.thumbnailUrl : current.thumbnailUrl;
-              const videoKey = showNextVideo ? `next-${currentIndex}` : `current-${currentIndex}`;
-              return (
+            {/* Video area — persistent video, overlay controls only */}
             <View style={st.videoArea}>
               <TouchableWithoutFeedback onPress={handleVideoTap}>
                 <View style={st.videoInner}>
                   {activeVideoUrl ? (
                     <>
                       <Video
-                        key={videoKey}
-                        ref={showNextVideo ? undefined : videoRef}
+                        key={activeVideoUrl}
+                        ref={videoRef}
                         source={{ uri: activeVideoUrl }}
                         resizeMode={ResizeMode.COVER}
                         isLooping
@@ -788,25 +792,20 @@ export default function WorkoutPlayer({
                 </View>
               </TouchableWithoutFeedback>
             </View>
-              );
-            })()}
 
-            {/* NEXT UP bar — show in final 4 seconds */}
-            {(isRepBased || timeLeft <= 4) && renderNextUp()}
+            {/* NEXT UP bar — always visible during work */}
+            {renderNextUp()}
           </View>
         )}
 
-        {/* ── REST state — show next movement video ──────────── */}
+        {/* ── REST state — persistent video continues, overlay UI only ── */}
         {phase === 'rest' && (() => {
-          // Find the next exercise step for video preview (skip special blocks)
           const nextExForRest = (() => {
             for (let i = currentIndex + 1; i < flatMovements.length; i++) {
               if (flatMovements[i].stepType === 'exercise') return flatMovements[i];
             }
-            return next; // fallback to whatever is next
+            return next;
           })();
-          const restVideoUrl = nextExForRest?.videoUrl || current?.videoUrl;
-          const restThumbUrl = nextExForRest?.thumbnailUrl || current?.thumbnailUrl;
           return (
           <View style={st.workContainer}>
             {renderHeader()}
@@ -821,16 +820,17 @@ export default function WorkoutPlayer({
               </View>
             </View>
 
-            {/* Next movement video preview */}
+            {/* Persistent video — same component as work phase, keyed by activeVideoUrl */}
             <View style={st.videoArea}>
               <View style={st.videoInner}>
-                {restVideoUrl ? (
+                {activeVideoUrl ? (
                   <Video
-                    key={`rest-${currentIndex}`}
-                    source={{ uri: restVideoUrl }}
+                    key={activeVideoUrl}
+                    ref={videoRef}
+                    source={{ uri: activeVideoUrl }}
                     resizeMode={ResizeMode.COVER}
                     isLooping
-                    shouldPlay
+                    shouldPlay={!isPaused}
                     isMuted
                     style={st.videoPlayer}
                     videoStyle={
@@ -839,8 +839,8 @@ export default function WorkoutPlayer({
                         : undefined
                     }
                   />
-                ) : restThumbUrl ? (
-                  <Image source={{ uri: restThumbUrl }} style={st.videoPlayer} resizeMode="cover" />
+                ) : activeThumbUrl ? (
+                  <Image source={{ uri: activeThumbUrl }} style={st.videoPlayer} resizeMode="cover" />
                 ) : (
                   <View style={[st.videoPlayer, st.videoPlaceholder]}>
                     <Icon name="play-circle" size={48} color="#3A4050" />
@@ -1207,6 +1207,15 @@ const st = StyleSheet.create({
     letterSpacing: 6, textAlign: 'center', opacity: 0.7,
     textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 8,
+  },
+  waterBreakPlaceholder: {
+    backgroundColor: 'rgba(56,189,248,0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  waterBreakPlaceholderText: {
+    fontSize: 32, fontWeight: '900', color: '#FFFFFF', fontFamily: FH,
+    letterSpacing: 4, textAlign: 'center',
   },
 
   // Phase labels
