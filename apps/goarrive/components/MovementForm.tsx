@@ -273,9 +273,27 @@ export default function MovementForm({
             setGifProgress(p);
           });
 
-          if (!result) {
-            console.warn('[MovementForm] Derivative pipeline returned null');
+          // If new pipeline failed or produced no usable GIF, fall back to old proven pipeline
+          const needsFallback = !result || (!result.gifHigh && !result.firstFrame);
+          if (needsFallback) {
+            console.warn('[MovementForm] New pipeline failed, falling back to generateCroppedGif');
+            const legacyCrop = { cropScale: crop.cropScale, cropTranslateX: crop.cropTranslateX, cropTranslateY: crop.cropTranslateY };
+            const fallbackBlob = await generateCroppedGif(url, legacyCrop, (p) => setGifProgress(p));
+            if (fallbackBlob) {
+              const fallbackUrl = await uploadBlob(fallbackBlob, 'thumbnails', 'gif');
+              setThumbnailUrl(fallbackUrl);
+              setGeneratingGif(false);
+              setGifProgress(0);
+              if (savedDocIdRef.current) {
+                updateDoc(doc(db, 'movements', savedDocIdRef.current), {
+                  thumbnailUrl: fallbackUrl,
+                }).catch((err) => console.error('[MovementForm] Fallback auto-patch error:', err));
+              }
+              return { gifHighUrl: fallbackUrl, gifLowUrl: null, thumbnailImageUrl: null, _loFrames: [] };
+            }
+            // Both pipelines failed
             setGeneratingGif(false);
+            setGifProgress(0);
             return { gifHighUrl: null, gifLowUrl: null, thumbnailImageUrl: null, _loFrames: [] };
           }
 
@@ -302,6 +320,20 @@ export default function MovementForm({
           return { gifHighUrl, gifLowUrl, thumbnailImageUrl, _loFrames: result._loFrames };
         } catch (err) {
           console.error('[MovementForm] Derivative pipeline error:', err);
+          // Last-resort fallback to old pipeline
+          try {
+            const legacyCrop = { cropScale: crop.cropScale, cropTranslateX: crop.cropTranslateX, cropTranslateY: crop.cropTranslateY };
+            const fallbackBlob = await generateCroppedGif(url, legacyCrop);
+            if (fallbackBlob) {
+              const fallbackUrl = await uploadBlob(fallbackBlob, 'thumbnails', 'gif');
+              setThumbnailUrl(fallbackUrl);
+              setGeneratingGif(false);
+              setGifProgress(0);
+              return { gifHighUrl: fallbackUrl, gifLowUrl: null, thumbnailImageUrl: null, _loFrames: [] };
+            }
+          } catch (fallbackErr) {
+            console.error('[MovementForm] Fallback pipeline also failed:', fallbackErr);
+          }
           setGeneratingGif(false);
           setGifProgress(0);
           return { gifHighUrl: null, gifLowUrl: null, thumbnailImageUrl: null, _loFrames: [] };
