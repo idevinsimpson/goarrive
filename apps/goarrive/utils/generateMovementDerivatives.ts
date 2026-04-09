@@ -53,11 +53,11 @@ export interface CropTransform {
 
 export interface DerivativeBlobs {
   /** 240×300 high-quality animated GIF */
-  gifHigh: Blob;
+  gifHigh: Blob | null;
   /** 120×150 low-quality animated GIF */
-  gifLow: Blob;
+  gifLow: Blob | null;
   /** 240×300 JPEG of the first frame */
-  firstFrame: Blob;
+  firstFrame: Blob | null;
   /** Raw high-res frame ImageData array — kept for optional one-rep loop encoding */
   _hiFrames: ImageData[];
   /** Raw low-res frame ImageData array */
@@ -172,9 +172,10 @@ export async function generateMovementDerivatives(
   onProgress?: (progress: number) => void,
 ): Promise<DerivativeBlobs | null> {
   if (Platform.OS !== 'web') return null;
-  if (!GIFConstructor) {
-    console.error('[Derivatives] GIF encoder not available');
-    return null;
+
+  const canEncodeGif = !!GIFConstructor;
+  if (!canEncodeGif) {
+    console.warn('[Derivatives] GIF encoder not available — will generate first-frame JPEG only');
   }
 
   try {
@@ -223,10 +224,42 @@ export async function generateMovementDerivatives(
       hiCtx.drawImage(video, 0, 0, HI_WIDTH, HI_HEIGHT);
       hiCtx.getImageData(HI_WIDTH / 2, HI_HEIGHT / 2, 1, 1);
     } catch {
-      console.error('[Derivatives] Canvas tainted by CORS');
+      console.error('[Derivatives] Canvas tainted by CORS — video URL:', videoUrl.slice(0, 120));
       video.src = '';
       video.remove();
       return null;
+    }
+
+    // ── Generate first-frame JPEG first (always) ──────────────────────
+    drawCroppedFrame(hiCtx, video, HI_WIDTH, HI_HEIGHT, crop);
+
+    let firstFrameBlob: Blob | null = null;
+    try {
+      firstFrameBlob = await new Promise<Blob>((resolve, reject) => {
+        hiCanvas.toBlob(
+          (blob) => (blob ? resolve(blob) : reject(new Error('First frame JPEG failed'))),
+          'image/jpeg',
+          0.85,
+        );
+      });
+    } catch (err) {
+      console.warn('[Derivatives] First-frame JPEG failed:', err);
+    }
+
+    onProgress?.(0.1);
+
+    // If GIF encoder isn't available, return with just the first frame
+    if (!canEncodeGif) {
+      video.src = '';
+      video.remove();
+      onProgress?.(1);
+      return {
+        gifHigh: null,
+        gifLow: null,
+        firstFrame: firstFrameBlob,
+        _hiFrames: [],
+        _loFrames: [],
+      };
     }
 
     // ── Capture frames ─────────────────────────────────────────────────
@@ -284,40 +317,31 @@ export async function generateMovementDerivatives(
       }
 
       // Progress: frame capture = 50% of total work
-      onProgress?.((i / hiTotalFrames) * 0.5);
+      onProgress?.((0.1 + (i / hiTotalFrames) * 0.45));
     }
-
-    // ── Generate first-frame JPEG ──────────────────────────────────────
-    // Re-draw the first frame (already captured, but we need the canvas state)
-    drawCroppedFrame(hiCtx, video, HI_WIDTH, HI_HEIGHT, crop);
-    // Seek back to 0 for the still image
-    video.currentTime = 0;
-    await new Promise<void>((r) => {
-      video.onseeked = () => r();
-      setTimeout(r, 1000);
-    });
-    drawCroppedFrame(hiCtx, video, HI_WIDTH, HI_HEIGHT, crop);
-
-    const firstFrameBlob = await new Promise<Blob>((resolve, reject) => {
-      hiCanvas.toBlob(
-        (blob) => (blob ? resolve(blob) : reject(new Error('First frame JPEG failed'))),
-        'image/jpeg',
-        0.85,
-      );
-    });
 
     onProgress?.(0.55);
 
-    // ── Encode high-quality GIF ────────────────────────────────────────
-    const gifHighBlob = await encodeGif(hiFrames, HI_WIDTH, HI_HEIGHT, HI_FPS, 10, (p) =>
-      onProgress?.(0.55 + p * 0.2),
-    );
+    // ── Encode GIFs (failures are non-fatal) ───────────────────────────
+    let gifHighBlob: Blob | null = null;
+    let gifLowBlob: Blob | null = null;
+
+    try {
+      gifHighBlob = await encodeGif(hiFrames, HI_WIDTH, HI_HEIGHT, HI_FPS, 10, (p) =>
+        onProgress?.(0.55 + p * 0.2),
+      );
+    } catch (err) {
+      console.warn('[Derivatives] High-quality GIF encoding failed:', err);
+    }
     onProgress?.(0.75);
 
-    // ── Encode low-quality GIF ─────────────────────────────────────────
-    const gifLowBlob = await encodeGif(loFrames, LO_WIDTH, LO_HEIGHT, LO_FPS, 20, (p) =>
-      onProgress?.(0.75 + p * 0.2),
-    );
+    try {
+      gifLowBlob = await encodeGif(loFrames, LO_WIDTH, LO_HEIGHT, LO_FPS, 20, (p) =>
+        onProgress?.(0.75 + p * 0.2),
+      );
+    } catch (err) {
+      console.warn('[Derivatives] Low-quality GIF encoding failed:', err);
+    }
     onProgress?.(0.95);
 
     // Cleanup

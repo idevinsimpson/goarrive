@@ -24,6 +24,8 @@ import {
   Platform,
   useWindowDimensions,
   ActivityIndicator,
+  TouchableOpacity,
+  Alert,
 } from 'react-native';
 import {
   doc,
@@ -115,6 +117,12 @@ interface WorkoutBlock {
   firstMovementPrepSec?: number;
   showDemo?: boolean;
   demoDurationSec?: number;
+  showGrabEquipment?: boolean;
+  grabEquipmentDurationSec?: number;
+  grabEquipmentText?: string;
+  beginningRestSec?: number;
+  blockPreSequence?: ('demo' | 'grabEquipment')[];
+  circuitStartRestSec?: number; // legacy compat
   movements: BlockMovement[];
 }
 
@@ -282,6 +290,7 @@ export default function WorkoutFolderPage({
   // UI state — overlay controls
   const [expandedMovKey, setExpandedMovKey] = useState<string | null>(null); // "blockIdx-movIdx"
   const [expandedBlockIdx, setExpandedBlockIdx] = useState<number | null>(null);
+  const [blockOverlayIndex, setBlockOverlayIndex] = useState<number | null>(null);
   const [showAddBlockMenu, setShowAddBlockMenu] = useState(false);
   const [addBlockAtIndex, setAddBlockAtIndex] = useState<number | null>(null);
   const [showMovementPicker, setShowMovementPicker] = useState(false);
@@ -308,6 +317,16 @@ export default function WorkoutFolderPage({
   // Keep refs in sync
   useEffect(() => { blocksRef.current = blocks; }, [blocks]);
   useEffect(() => { nameRef.current = workoutName; }, [workoutName]);
+
+  // ── Stable workout prop for WorkoutPlayer (avoid re-flatten on every render) ──
+  const previewWorkout = useMemo(() => ({
+    ...originalData,
+    id: workoutId,
+    name: workoutName,
+    description: workoutDescription,
+    blocks,
+  }), [originalData, workoutId, workoutName, workoutDescription, blocks]);
+  const closePreview = useCallback(() => setShowPreview(false), []);
 
   // ── Dismiss all overlays ─────────────────────────────────────────────────
   const dismissAll = useCallback(() => {
@@ -344,6 +363,12 @@ export default function WorkoutFolderPage({
               firstMovementPrepSec: b.firstMovementPrepSec ?? DEFAULT_REST_SEC,
               showDemo: b.showDemo ?? false,
               demoDurationSec: b.demoDurationSec ?? DEFAULT_DEMO_DURATION_SEC,
+              showGrabEquipment: b.showGrabEquipment ?? false,
+              grabEquipmentDurationSec: b.grabEquipmentDurationSec ?? undefined,
+              grabEquipmentText: b.grabEquipmentText ?? '',
+              beginningRestSec: b.beginningRestSec ?? b.circuitStartRestSec ?? undefined,
+              blockPreSequence: b.blockPreSequence ?? undefined,
+              circuitStartRestSec: b.circuitStartRestSec ?? undefined,
               movements: (b.movements ?? []).map((m: any) => ({
                 movementId: m.movementId ?? '',
                 movementName: m.movementName ?? '',
@@ -449,31 +474,46 @@ export default function WorkoutFolderPage({
     saveTimeoutRef.current = setTimeout(async () => {
       try {
         setSaving(true);
-        const cleanBlocks = newBlocks.map((b) => ({
-          type: b.type,
-          label: b.label,
-          rounds: b.rounds ?? DEFAULT_ROUNDS,
-          restBetweenRoundsSec: b.restBetweenRoundsSec ?? 0,
-          restBetweenMovementsSec: b.restBetweenMovementsSec ?? 0,
-          durationSec: b.durationSec ?? undefined,
-          instructionText: b.instructionText ?? undefined,
-          firstMovementPrepSec: b.firstMovementPrepSec ?? DEFAULT_REST_SEC,
-          showDemo: b.showDemo ?? false,
-          demoDurationSec: b.demoDurationSec ?? DEFAULT_DEMO_DURATION_SEC,
-          movements: (b.movements ?? []).map((m) => ({
-            movementId: m.movementId,
-            movementName: m.movementName,
-            displayName: m.displayName ?? undefined,
-            hidden: m.hidden ?? undefined,
-            sets: m.sets ?? undefined,
-            reps: m.reps ?? undefined,
-            weight: m.weight ?? undefined,
-            durationSec: m.durationSec ?? undefined,
-            restSec: m.restSec ?? undefined,
-            notes: m.notes ?? '',
-            thumbnailUrl: m.thumbnailUrl ?? undefined,
-          })),
-        }));
+        const cleanBlocks = newBlocks.map((b) => {
+          const clean: any = {
+            type: b.type,
+            label: b.label,
+            rounds: b.rounds ?? DEFAULT_ROUNDS,
+            restBetweenRoundsSec: b.restBetweenRoundsSec ?? 0,
+            restBetweenMovementsSec: b.restBetweenMovementsSec ?? 0,
+            durationSec: b.durationSec ?? undefined,
+            instructionText: b.instructionText ?? undefined,
+            firstMovementPrepSec: b.firstMovementPrepSec ?? DEFAULT_REST_SEC,
+            showDemo: b.showDemo ?? false,
+            demoDurationSec: b.demoDurationSec ?? DEFAULT_DEMO_DURATION_SEC,
+            movements: (b.movements ?? []).map((m) => ({
+              movementId: m.movementId,
+              movementName: m.movementName,
+              displayName: m.displayName ?? undefined,
+              hidden: m.hidden ?? undefined,
+              sets: m.sets ?? undefined,
+              reps: m.reps ?? undefined,
+              weight: m.weight ?? undefined,
+              durationSec: m.durationSec ?? undefined,
+              restSec: m.restSec ?? undefined,
+              notes: m.notes ?? '',
+              thumbnailUrl: m.thumbnailUrl ?? undefined,
+            })),
+          };
+          if (b.showDemo != null) clean.showDemo = b.showDemo;
+          if (b.demoDurationSec != null && b.demoDurationSec > 0) clean.demoDurationSec = b.demoDurationSec;
+          if (b.showGrabEquipment) {
+            clean.showGrabEquipment = true;
+            if (b.grabEquipmentDurationSec) clean.grabEquipmentDurationSec = b.grabEquipmentDurationSec;
+            if (b.grabEquipmentText) clean.grabEquipmentText = b.grabEquipmentText;
+          }
+          if (b.blockPreSequence) clean.blockPreSequence = b.blockPreSequence;
+          if (b.beginningRestSec != null && b.beginningRestSec > 0) {
+            clean.beginningRestSec = b.beginningRestSec;
+            clean.circuitStartRestSec = b.beginningRestSec; // backwards compat
+          }
+          return clean;
+        });
 
         const coverThumbs: string[] = [];
         for (const b of cleanBlocks) {
@@ -526,23 +566,36 @@ export default function WorkoutFolderPage({
     if (!dirtyRef.current) return;
     try {
       const currentBlocks = blocksRef.current;
-      const cleanBlocks = currentBlocks.map((b) => ({
-        type: b.type, label: b.label,
-        rounds: b.rounds ?? DEFAULT_ROUNDS,
-        restBetweenRoundsSec: b.restBetweenRoundsSec ?? 0,
-        restBetweenMovementsSec: b.restBetweenMovementsSec ?? 0,
-        durationSec: b.durationSec ?? undefined,
-        instructionText: b.instructionText ?? undefined,
-        firstMovementPrepSec: b.firstMovementPrepSec ?? DEFAULT_REST_SEC,
-        showDemo: b.showDemo ?? false,
-        demoDurationSec: b.demoDurationSec ?? DEFAULT_DEMO_DURATION_SEC,
-        movements: (b.movements ?? []).map((m) => ({
-          movementId: m.movementId, movementName: m.movementName,
-          sets: m.sets ?? undefined, reps: m.reps ?? undefined,
-          durationSec: m.durationSec ?? undefined, restSec: m.restSec ?? undefined,
-          notes: m.notes ?? '', thumbnailUrl: m.thumbnailUrl ?? undefined,
-        })),
-      }));
+      const cleanBlocks = currentBlocks.map((b) => {
+        const clean: any = {
+          type: b.type, label: b.label,
+          rounds: b.rounds ?? DEFAULT_ROUNDS,
+          restBetweenRoundsSec: b.restBetweenRoundsSec ?? 0,
+          restBetweenMovementsSec: b.restBetweenMovementsSec ?? 0,
+          durationSec: b.durationSec ?? undefined,
+          instructionText: b.instructionText ?? undefined,
+          firstMovementPrepSec: b.firstMovementPrepSec ?? DEFAULT_REST_SEC,
+          showDemo: b.showDemo ?? false,
+          demoDurationSec: b.demoDurationSec ?? DEFAULT_DEMO_DURATION_SEC,
+          movements: (b.movements ?? []).map((m) => ({
+            movementId: m.movementId, movementName: m.movementName,
+            sets: m.sets ?? undefined, reps: m.reps ?? undefined,
+            durationSec: m.durationSec ?? undefined, restSec: m.restSec ?? undefined,
+            notes: m.notes ?? '', thumbnailUrl: m.thumbnailUrl ?? undefined,
+          })),
+        };
+        if (b.showGrabEquipment) {
+          clean.showGrabEquipment = true;
+          if (b.grabEquipmentDurationSec) clean.grabEquipmentDurationSec = b.grabEquipmentDurationSec;
+          if (b.grabEquipmentText) clean.grabEquipmentText = b.grabEquipmentText;
+        }
+        if (b.blockPreSequence) clean.blockPreSequence = b.blockPreSequence;
+        if (b.beginningRestSec != null && b.beginningRestSec > 0) {
+          clean.beginningRestSec = b.beginningRestSec;
+          clean.circuitStartRestSec = b.beginningRestSec;
+        }
+        return clean;
+      });
       const coverThumbs: string[] = [];
       for (const b of cleanBlocks) {
         for (const m of b.movements ?? []) {
@@ -618,6 +671,8 @@ export default function WorkoutFolderPage({
       firstMovementPrepSec: isSpecial ? undefined : DEFAULT_REST_SEC,
       showDemo: false,
       demoDurationSec: DEFAULT_DEMO_DURATION_SEC,
+      showGrabEquipment: false,
+      beginningRestSec: undefined,
       movements: [],
     };
     const newBlocks = [...blocks];
@@ -654,6 +709,12 @@ export default function WorkoutFolderPage({
   const toggleBlockDemo = useCallback((blockIdx: number) => {
     const newBlocks = [...blocks];
     newBlocks[blockIdx].showDemo = !newBlocks[blockIdx].showDemo;
+    updateBlocks(newBlocks);
+  }, [blocks, updateBlocks]);
+
+  const updateBlockField = useCallback((blockIdx: number, field: string, value: any) => {
+    const newBlocks = [...blocks];
+    (newBlocks[blockIdx] as any)[field] = value;
     updateBlocks(newBlocks);
   }, [blocks, updateBlocks]);
 
@@ -1532,70 +1593,31 @@ export default function WorkoutFolderPage({
                     </View>
                   )}
 
-                  {/* ── Block control bar (stretches left from bottom-right) ── */}
+                  {/* ── Block control bar — rounds badge opens overlay ── */}
                   {!isSpecial && !hasNoMovements && (
-                    <Pressable
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        if (expandedBlockIdx === blockIdx) {
-                          setExpandedBlockIdx(null);
-                        } else {
-                          setExpandedBlockIdx(blockIdx);
-                          setExpandedMovKey(null);
-                        }
-                      }}
-                    >
-                      <View style={[st.blockControlBar, isBlockExpanded && st.blockControlBarExpanded]}>
-                        {isBlockExpanded ? (
-                          <>
-                            {/* Trash */}
-                            <Pressable
-                              style={st.bcTrash}
-                              onPress={(e) => { e.stopPropagation(); removeBlock(blockIdx); }}
-                            >
-                              <Icon name="trash-2" size={13} color="#EF4444" />
-                            </Pressable>
-
-                            <View style={st.bcDivider} />
-
-                            {/* Rounds: − 3× + */}
-                            <Pressable style={st.bcBtn} onPress={(e) => { e.stopPropagation(); updateBlockRounds(blockIdx, -1); }}>
-                              <Text style={st.bcBtnText}>−</Text>
-                            </Pressable>
-                            <Text style={st.bcValue}>{block.rounds ?? DEFAULT_ROUNDS}×</Text>
-                            <Pressable style={st.bcBtn} onPress={(e) => { e.stopPropagation(); updateBlockRounds(blockIdx, 1); }}>
-                              <Text style={st.bcBtnText}>+</Text>
-                            </Pressable>
-
-                            <View style={st.bcDivider} />
-
-                            {/* Prep: − 20s + */}
-                            <Pressable style={st.bcBtn} onPress={(e) => { e.stopPropagation(); updateBlockPrepTime(blockIdx, -5); }}>
-                              <Text style={st.bcBtnText}>−</Text>
-                            </Pressable>
-                            <Text style={st.bcValue}>{block.firstMovementPrepSec ?? DEFAULT_REST_SEC}s</Text>
-                            <Pressable style={st.bcBtn} onPress={(e) => { e.stopPropagation(); updateBlockPrepTime(blockIdx, 5); }}>
-                              <Text style={st.bcBtnText}>+</Text>
-                            </Pressable>
-
-                            <View style={st.bcDivider} />
-
-                            {/* Demo toggle — eye icon */}
-                            <Pressable
-                              style={[st.bcDemoBtn, block.showDemo && st.bcDemoBtnOn]}
-                              onPress={(e) => { e.stopPropagation(); toggleBlockDemo(blockIdx); }}
-                            >
-                              <Icon name="eye" size={13} color={block.showDemo ? '#0E1117' : '#4A5568'} />
-                            </Pressable>
-                          </>
-                        ) : (
-                          /* Collapsed: just show rounds badge */
-                          <Text style={[st.roundsText, { color: blockColor }]}>
-                            {block.rounds ?? DEFAULT_ROUNDS}×
-                          </Text>
-                        )}
-                      </View>
-                    </Pressable>
+                    <View style={st.blockControlBar}>
+                      <Pressable
+                        style={[st.roundsBadge, { borderColor: blockColor }]}
+                        onPress={(e) => { e.stopPropagation(); setBlockOverlayIndex(blockIdx); }}
+                      >
+                        <Text style={[st.roundsText, { color: blockColor }]}>
+                          {block.rounds ?? DEFAULT_ROUNDS}×
+                        </Text>
+                      </Pressable>
+                      {block.showDemo && (
+                        <View style={{ backgroundColor: 'rgba(251,191,36,0.15)', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2 }}>
+                          <Text style={{ fontSize: 9, color: '#FBBF24', fontFamily: FB }}>DEMO</Text>
+                        </View>
+                      )}
+                      {block.showGrabEquipment && (
+                        <View style={{ backgroundColor: 'rgba(251,146,60,0.15)', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2 }}>
+                          <Text style={{ fontSize: 9, color: '#FB923C', fontFamily: FB }}>EQUIP</Text>
+                        </View>
+                      )}
+                      {(block.beginningRestSec ?? 0) > 0 && (
+                        <Text style={{ fontSize: 11, color: '#8A95A3', fontFamily: FB }}>{block.beginningRestSec}s</Text>
+                      )}
+                    </View>
                   )}
                 </View>
 
@@ -1754,14 +1776,255 @@ export default function WorkoutFolderPage({
         </Pressable>
       </Modal>
 
-      {/* Workout preview */}
-      <WorkoutPlayer
-        visible={showPreview}
-        workout={{ id: workoutId, name: workoutName, description: workoutDescription, blocks, ...originalData }}
-        onClose={() => setShowPreview(false)}
-        onComplete={() => setShowPreview(false)}
-        isPreview
-      />
+      {/* ── Block Settings Overlay ──────────────────────────────────────── */}
+      <Modal visible={blockOverlayIndex != null} transparent animationType="slide" onRequestClose={() => setBlockOverlayIndex(null)}>
+        {(() => {
+          const bi = blockOverlayIndex ?? 0;
+          const block = blocks[bi];
+          if (blockOverlayIndex == null || !block) return null;
+          const blockColor = BLOCK_COLORS[block.type] || '#4A5568';
+          return (
+            <Pressable style={st.modalBackdrop} onPress={() => setBlockOverlayIndex(null)}>
+              <Pressable style={st.overlaySheet} onPress={(e) => e.stopPropagation()}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 }}>
+                  <Text style={{ fontSize: 18, fontWeight: '700', color: '#F0F4F8', fontFamily: FH }}>
+                    {block.label || block.type} Settings
+                  </Text>
+                  <TouchableOpacity onPress={() => setBlockOverlayIndex(null)} hitSlop={8}>
+                    <Icon name="x" size={22} color="#8A95A3" />
+                  </TouchableOpacity>
+                </View>
+                <ScrollView style={{ paddingHorizontal: 20 }} contentContainerStyle={{ paddingBottom: 40, gap: 20 }}>
+
+                  {/* 1. Demo Preview */}
+                  <View style={st.overlaySection}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={st.overlaySectionTitle}>Demo Preview</Text>
+                        <Text style={st.overlaySectionHint}>Play the first movement video before the block starts</Text>
+                      </View>
+                      <Pressable
+                        style={[st.overlayToggle, block.showDemo && st.overlayToggleActive]}
+                        onPress={() => updateBlockField(bi, 'showDemo', !block.showDemo)}
+                      >
+                        <View style={[st.overlayToggleKnob, block.showDemo && st.overlayToggleKnobActive]} />
+                      </Pressable>
+                    </View>
+                    {block.showDemo && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 10 }}>
+                        <Text style={st.overlaySectionHint}>Duration</Text>
+                        <TouchableOpacity
+                          style={st.stepperBtn}
+                          onPress={() => updateBlockField(bi, 'demoDurationSec', Math.max(5, (block.demoDurationSec ?? 10) - 5))}
+                        >
+                          <Text style={st.stepperBtnText}>−</Text>
+                        </TouchableOpacity>
+                        <Text style={st.stepperValue}>{block.demoDurationSec ?? 10}s</Text>
+                        <TouchableOpacity
+                          style={st.stepperBtn}
+                          onPress={() => updateBlockField(bi, 'demoDurationSec', (block.demoDurationSec ?? 10) + 5)}
+                        >
+                          <Text style={st.stepperBtnText}>+</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* 2. Grab Equipment */}
+                  <View style={st.overlaySection}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={st.overlaySectionTitle}>Grab Equipment</Text>
+                        <Text style={st.overlaySectionHint}>Give members time to get their equipment ready</Text>
+                      </View>
+                      <Pressable
+                        style={[st.overlayToggle, block.showGrabEquipment && st.overlayToggleActive]}
+                        onPress={() => updateBlockField(bi, 'showGrabEquipment', !block.showGrabEquipment)}
+                      >
+                        <View style={[st.overlayToggleKnob, block.showGrabEquipment && st.overlayToggleKnobActive]} />
+                      </Pressable>
+                    </View>
+                    {block.showGrabEquipment && (
+                      <View style={{ gap: 10, marginTop: 10 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                          <Text style={st.overlaySectionHint}>Duration</Text>
+                          <TouchableOpacity
+                            style={st.stepperBtn}
+                            onPress={() => updateBlockField(bi, 'grabEquipmentDurationSec', Math.max(5, (block.grabEquipmentDurationSec ?? 15) - 5))}
+                          >
+                            <Text style={st.stepperBtnText}>−</Text>
+                          </TouchableOpacity>
+                          <Text style={st.stepperValue}>{block.grabEquipmentDurationSec ?? 15}s</Text>
+                          <TouchableOpacity
+                            style={st.stepperBtn}
+                            onPress={() => updateBlockField(bi, 'grabEquipmentDurationSec', (block.grabEquipmentDurationSec ?? 15) + 5)}
+                          >
+                            <Text style={st.stepperBtnText}>+</Text>
+                          </TouchableOpacity>
+                        </View>
+                        <TextInput
+                          style={st.overlayTextInput}
+                          value={block.grabEquipmentText ?? ''}
+                          onChangeText={(t) => updateBlockField(bi, 'grabEquipmentText', t)}
+                          placeholder="e.g. Grab a pair of dumbbells"
+                          placeholderTextColor="#4A5568"
+                        />
+                      </View>
+                    )}
+                  </View>
+
+                  {/* 3. Order (only when both Demo and Grab are ON) */}
+                  {block.showDemo && block.showGrabEquipment && (
+                    <View style={st.overlaySection}>
+                      <Text style={st.overlaySectionTitle}>Order</Text>
+                      <Text style={st.overlaySectionHint}>What plays first before the block starts?</Text>
+                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                        <TouchableOpacity
+                          style={[st.orderPill, (block.blockPreSequence?.[0] ?? 'demo') === 'demo' && st.orderPillActive]}
+                          onPress={() => updateBlockField(bi, 'blockPreSequence', ['demo', 'grabEquipment'])}
+                        >
+                          <Text style={[st.orderPillText, (block.blockPreSequence?.[0] ?? 'demo') === 'demo' && st.orderPillTextActive]}>Demo first</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[st.orderPill, block.blockPreSequence?.[0] === 'grabEquipment' && st.orderPillActive]}
+                          onPress={() => updateBlockField(bi, 'blockPreSequence', ['grabEquipment', 'demo'])}
+                        >
+                          <Text style={[st.orderPillText, block.blockPreSequence?.[0] === 'grabEquipment' && st.orderPillTextActive]}>Equipment first</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* 4. Beginning Rest */}
+                  <View style={st.overlaySection}>
+                    <Text style={st.overlaySectionTitle}>Beginning Rest</Text>
+                    <Text style={st.overlaySectionHint}>Prep time before first movement, first round only</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 }}>
+                      <TouchableOpacity
+                        style={st.stepperBtn}
+                        onPress={() => updateBlockField(bi, 'beginningRestSec', Math.max(0, (block.beginningRestSec ?? 0) - 5))}
+                      >
+                        <Text style={st.stepperBtnText}>−</Text>
+                      </TouchableOpacity>
+                      <Text style={st.stepperValue}>{block.beginningRestSec ?? 0}s</Text>
+                      <TouchableOpacity
+                        style={st.stepperBtn}
+                        onPress={() => updateBlockField(bi, 'beginningRestSec', (block.beginningRestSec ?? 0) + 5)}
+                      >
+                        <Text style={st.stepperBtnText}>+</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* 5. Rounds */}
+                  <View style={st.overlaySection}>
+                    <Text style={st.overlaySectionTitle}>Rounds</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 }}>
+                      <TouchableOpacity
+                        style={st.stepperBtn}
+                        onPress={() => updateBlockField(bi, 'rounds', Math.max(1, (block.rounds ?? DEFAULT_ROUNDS) - 1))}
+                      >
+                        <Text style={st.stepperBtnText}>−</Text>
+                      </TouchableOpacity>
+                      <Text style={st.stepperValue}>{block.rounds ?? DEFAULT_ROUNDS}</Text>
+                      <TouchableOpacity
+                        style={st.stepperBtn}
+                        onPress={() => updateBlockField(bi, 'rounds', (block.rounds ?? DEFAULT_ROUNDS) + 1)}
+                      >
+                        <Text style={st.stepperBtnText}>+</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* 6. Rest Between Rounds */}
+                  <View style={st.overlaySection}>
+                    <Text style={st.overlaySectionTitle}>Rest Between Rounds</Text>
+                    <Text style={st.overlaySectionHint}>Rest after completing all movements in a round</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 }}>
+                      <TouchableOpacity
+                        style={st.stepperBtn}
+                        onPress={() => updateBlockField(bi, 'restBetweenRoundsSec', Math.max(0, (block.restBetweenRoundsSec ?? DEFAULT_REST_SEC) - 5))}
+                      >
+                        <Text style={st.stepperBtnText}>−</Text>
+                      </TouchableOpacity>
+                      <Text style={st.stepperValue}>{block.restBetweenRoundsSec ?? DEFAULT_REST_SEC}s</Text>
+                      <TouchableOpacity
+                        style={st.stepperBtn}
+                        onPress={() => updateBlockField(bi, 'restBetweenRoundsSec', (block.restBetweenRoundsSec ?? DEFAULT_REST_SEC) + 5)}
+                      >
+                        <Text style={st.stepperBtnText}>+</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* 7. Transition Rest (Circuit/Superset only) */}
+                  {(block.type === 'Circuit' || block.type === 'Superset') && (
+                    <View style={st.overlaySection}>
+                      <Text style={st.overlaySectionTitle}>Transition Rest</Text>
+                      <Text style={st.overlaySectionHint}>Rest between movements within a round</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 }}>
+                        <TouchableOpacity
+                          style={st.stepperBtn}
+                          onPress={() => updateBlockField(bi, 'restBetweenMovementsSec', Math.max(0, (block.restBetweenMovementsSec ?? 0) - 5))}
+                        >
+                          <Text style={st.stepperBtnText}>−</Text>
+                        </TouchableOpacity>
+                        <Text style={st.stepperValue}>{block.restBetweenMovementsSec ?? 0}s</Text>
+                        <TouchableOpacity
+                          style={st.stepperBtn}
+                          onPress={() => updateBlockField(bi, 'restBetweenMovementsSec', (block.restBetweenMovementsSec ?? 0) + 5)}
+                        >
+                          <Text style={st.stepperBtnText}>+</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* 8. Delete Block */}
+                  <View style={[st.overlaySection, { borderTopWidth: 1, borderTopColor: '#2A3347', paddingTop: 20 }]}>
+                    <TouchableOpacity
+                      style={st.deleteBlockBtn}
+                      onPress={() => {
+                        if (Platform.OS === 'web') {
+                          if (window.confirm('Delete "' + (block.label || block.type) + '" block? This cannot be undone.')) {
+                            const idx = bi;
+                            setBlockOverlayIndex(null);
+                            removeBlock(idx);
+                          }
+                        } else {
+                          Alert.alert(
+                            'Delete Block',
+                            'Delete "' + (block.label || block.type) + '" block? This cannot be undone.',
+                            [
+                              { text: 'Cancel', style: 'cancel' },
+                              { text: 'Delete', style: 'destructive', onPress: () => { setBlockOverlayIndex(null); removeBlock(bi); } },
+                            ]
+                          );
+                        }
+                      }}
+                    >
+                      <Icon name="trash-2" size={16} color="#EF4444" />
+                      <Text style={st.deleteBlockBtnText}>Delete Block</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                </ScrollView>
+              </Pressable>
+            </Pressable>
+          );
+        })()}
+      </Modal>
+
+      {/* Workout preview — conditionally rendered so state resets on each open */}
+      {showPreview && (
+        <WorkoutPlayer
+          visible
+          workout={previewWorkout}
+          onClose={closePreview}
+          onComplete={closePreview}
+          isPreview
+        />
+      )}
     </View>
   );
 }
@@ -2223,18 +2486,9 @@ const st = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    gap: 4,
+    gap: 6,
     marginTop: 8,
-    paddingVertical: 5,
-    paddingHorizontal: 8,
-    backgroundColor: 'rgba(30, 42, 58, 0.6)',
-    borderRadius: 10,
     alignSelf: 'flex-end',
-  },
-  blockControlBarExpanded: {
-    alignSelf: 'stretch',
-    justifyContent: 'center',
-    backgroundColor: '#1E2A3A',
     paddingVertical: 6,
     paddingHorizontal: 8,
   },
@@ -2698,5 +2952,129 @@ const st = StyleSheet.create({
     color: '#F5A623',
     fontFamily: FB,
     fontWeight: '600',
+  },
+
+  // ── Block settings overlay ──────────────────────────────────────────
+  roundsBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+  },
+  overlaySheet: {
+    backgroundColor: '#111827',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '85%',
+    borderWidth: 1,
+    borderColor: '#1E2A3A',
+    borderBottomWidth: 0,
+  },
+  overlaySection: {
+    gap: 4,
+  },
+  overlaySectionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FH,
+  },
+  overlaySectionHint: {
+    fontSize: 12,
+    color: '#8A95A3',
+    fontFamily: FB,
+  },
+  overlayToggle: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#2A3347',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  overlayToggleActive: {
+    backgroundColor: 'rgba(167,139,250,0.3)',
+  },
+  overlayToggleKnob: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#4A5568',
+  },
+  overlayToggleKnobActive: {
+    backgroundColor: '#A78BFA',
+    alignSelf: 'flex-end' as const,
+  },
+  stepperBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: '#1E2A3A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperBtnText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FH,
+  },
+  stepperValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FH,
+    minWidth: 44,
+    textAlign: 'center',
+  },
+  overlayTextInput: {
+    backgroundColor: '#161B22',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#F0F4F8',
+    fontFamily: FB,
+    borderWidth: 1,
+    borderColor: '#2A3347',
+  },
+  orderPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#1E2A3A',
+    borderWidth: 1,
+    borderColor: '#2A3347',
+  },
+  orderPillActive: {
+    backgroundColor: 'rgba(167,139,250,0.2)',
+    borderColor: '#A78BFA',
+  },
+  orderPillText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8A95A3',
+    fontFamily: FB,
+  },
+  orderPillTextActive: {
+    color: '#A78BFA',
+  },
+  deleteBlockBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(239,68,68,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.3)',
+  },
+  deleteBlockBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#EF4444',
+    fontFamily: FB,
   },
 });

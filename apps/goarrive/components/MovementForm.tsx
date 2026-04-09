@@ -279,23 +279,23 @@ export default function MovementForm({
             return { gifHighUrl: null, gifLowUrl: null, thumbnailImageUrl: null, _loFrames: [] };
           }
 
-          // Upload all derivatives in parallel
+          // Upload available derivatives in parallel (some may be null if GIF encoding failed)
           const [gifHighUrl, gifLowUrl, thumbnailImageUrl] = await Promise.all([
-            uploadBlob(result.gifHigh, 'thumbnails', 'gif'),
-            uploadBlob(result.gifLow, 'thumbnails-low', 'gif'),
-            uploadBlob(result.firstFrame, 'thumbnails-img', 'jpg'),
+            result.gifHigh ? uploadBlob(result.gifHigh, 'thumbnails', 'gif') : Promise.resolve(null),
+            result.gifLow ? uploadBlob(result.gifLow, 'thumbnails-low', 'gif') : Promise.resolve(null),
+            result.firstFrame ? uploadBlob(result.firstFrame, 'thumbnails-img', 'jpg') : Promise.resolve(null),
           ]);
 
-          setThumbnailUrl(gifHighUrl);
+          setThumbnailUrl(gifHighUrl || thumbnailImageUrl || '');
           setGeneratingGif(false);
           setGifProgress(0);
 
           // Auto-patch if doc was already saved
           if (savedDocIdRef.current) {
             updateDoc(doc(db, 'movements', savedDocIdRef.current), {
-              thumbnailUrl: gifHighUrl,
-              gifLowUrl,
-              thumbnailImageUrl,
+              thumbnailUrl: gifHighUrl || thumbnailImageUrl || '',
+              gifLowUrl: gifLowUrl || '',
+              thumbnailImageUrl: thumbnailImageUrl || '',
             }).catch((err) => console.error('[MovementForm] Auto-patch derivatives error:', err));
           }
 
@@ -308,7 +308,7 @@ export default function MovementForm({
         }
       })();
 
-      gifPromiseRef.current = promise.then((r) => r.gifHighUrl);
+      gifPromiseRef.current = promise.then((r) => r.gifHighUrl || r.thumbnailImageUrl);
       return promise;
     },
     [coachId, uploadBlob],
@@ -520,7 +520,7 @@ export default function MovementForm({
         swapMode: 'split' as const,
         swapWindowSec: 5,
         videoUrl: videoUrl.trim(),
-        thumbnailUrl: gifHighUrl || '',
+        thumbnailUrl: gifHighUrl || thumbnailImageUrl || '',
         thumbnailImageUrl: thumbnailImageUrl || '',
         gifLowUrl: gifLowUrl || '',
         gifLoopUrl: '', // populated by one-rep loop step below
@@ -625,6 +625,8 @@ export default function MovementForm({
           cropScale,
           cropTranslateX,
           cropTranslateY,
+          cropFrameWidth,
+          cropFrameHeight,
         });
       }
 

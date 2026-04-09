@@ -618,10 +618,8 @@ function BuildScreenInner() {
       const iconName = isPlan ? 'plan' : isPlaybook ? 'playbook' : isMovement ? 'movements' : 'workouts';
       const iconColor = isPlan ? '#60A5FA' : isPlaybook ? '#A78BFA' : '#4A5568';
 
-      // Prefer thumbnailUrl (GIF) over mediaUrl (video) for static card display
-      const thumbOrGif = item.thumbnailUrl || null;
-      const fallbackMedia = isMovement ? null : item.mediaUrl; // Don't use video as thumbnail for movements
-      const singleThumbUri = thumbOrGif || fallbackMedia || null;
+      // Prefer thumbnailUrl (GIF), then first-frame image, then low-quality GIF, then mediaUrl
+      const singleThumbUri = item.thumbnailUrl || item.thumbnailImageUrl || item.gifLowUrl || item.mediaUrl || null;
 
       // Workout and playbook cards use the mosaic (mini-library) layout when they have coverThumbs
       const isWorkoutCard = isWorkout;
@@ -684,8 +682,8 @@ function BuildScreenInner() {
         }}
       >
         <View style={s.listMedia}>
-          {item.thumbnailUrl ? (
-            <Image source={{ uri: item.thumbnailUrl }} style={s.listImage} />
+          {(item.thumbnailUrl || item.thumbnailImageUrl || item.gifLowUrl || item.mediaUrl) ? (
+            <Image source={{ uri: (item.thumbnailUrl || item.thumbnailImageUrl || item.gifLowUrl || item.mediaUrl) }} style={s.listImage} />
           ) : (
             <View style={s.listPlaceholder}>
               <Icon name={item.type === 'Plans' ? 'plan' : item.type === 'Playbooks' ? 'playbook' : item.type === 'Movements' ? 'movements' : 'workouts'} size={20} color={item.type === 'Plans' ? '#60A5FA' : item.type === 'Playbooks' ? '#A78BFA' : '#4A5568'} />
