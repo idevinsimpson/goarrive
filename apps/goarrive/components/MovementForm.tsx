@@ -48,8 +48,14 @@ import MovementVideoControls from './MovementVideoControls';
 import VideoCropModal, { CropValues } from './VideoCropModal';
 import { MovementDetailData } from './MovementDetail';
 import { generateCroppedGif } from '../utils/generateCroppedGif';
+import {
+  generateMovementDerivatives,
+  encodeOneRepLoopGif,
+  CropTransform,
+} from '../utils/generateMovementDerivatives';
 import { generateMovementVoice } from '../utils/generateMovementVoice';
 import { analyzeMovementMedia } from '../utils/analyzeMovementMedia';
+import { analyzeMovementReps } from '../utils/analyzeMovementReps';
 import { FB, FH } from '../lib/theme';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -157,6 +163,8 @@ export default function MovementForm({
   const [showCropModal, setShowCropModal] = useState(false);
   const [cropScale, setCropScale] = useState(1);
   const [cropTranslateX, setCropTranslateX] = useState(0);
+  const [cropFrameWidth, setCropFrameWidth] = useState(345);
+  const [cropFrameHeight, setCropFrameHeight] = useState(431);
   const [cropTranslateY, setCropTranslateY] = useState(0);
 
   // ── Pre-populate on edit ───────────────────────────────────────────────
@@ -180,6 +188,8 @@ export default function MovementForm({
       setCropScale((editMovement as any).cropScale ?? 1);
       setCropTranslateX((editMovement as any).cropTranslateX ?? 0);
       setCropTranslateY((editMovement as any).cropTranslateY ?? 0);
+      setCropFrameWidth((editMovement as any).cropFrameWidth ?? 345);
+      setCropFrameHeight((editMovement as any).cropFrameHeight ?? 431);
     } else {
       resetForm();
     }
@@ -209,6 +219,8 @@ export default function MovementForm({
     setCropScale(1);
     setCropTranslateX(0);
     setCropTranslateY(0);
+    setCropFrameWidth(345);
+    setCropFrameHeight(431);
     setShowCropModal(false);
     setGeneratingGif(false);
     setGifProgress(0);
@@ -217,75 +229,102 @@ export default function MovementForm({
   };
 
   // ── GIF thumbnail generation ─────────────────────────────────────────
-  const generateAndUploadGif = useCallback(
-    (url: string, crop: CropValues): Promise<string | null> => {
-      if (Platform.OS !== 'web' || !url) return Promise.resolve(null);
+  /**
+   * Upload a blob to Firebase Storage and return its download URL.
+   */
+  const uploadBlob = useCallback(
+    async (blob: Blob, subfolder: string, ext: string): Promise<string> => {
+      const fileName = `movements/${coachId}/${subfolder}/${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+      const storageRef = ref(storage, fileName);
+      const uploadTask = uploadBytesResumable(storageRef, blob, {
+        contentType: ext === 'gif' ? 'image/gif' : 'image/jpeg',
+      });
+      return new Promise<string>((resolve, reject) => {
+        uploadTask.on('state_changed', null, reject, async () => {
+          const url = await getDownloadURL(uploadTask.snapshot.ref);
+          resolve(url);
+        });
+      });
+    },
+    [coachId],
+  );
+
+  /**
+   * Generate all derivatives and upload them. Returns URLs for each asset.
+   * Uses the new multi-derivative pipeline (single frame capture pass).
+   */
+  const generateAndUploadDerivatives = useCallback(
+    (url: string, crop: CropTransform): Promise<{
+      gifHighUrl: string | null;
+      gifLowUrl: string | null;
+      thumbnailImageUrl: string | null;
+      _loFrames: ImageData[];
+    }> => {
+      if (Platform.OS !== 'web' || !url) {
+        return Promise.resolve({ gifHighUrl: null, gifLowUrl: null, thumbnailImageUrl: null, _loFrames: [] });
+      }
 
       setGeneratingGif(true);
       setGifProgress(0);
 
-      const promise = (async (): Promise<string | null> => {
+      const promise = (async () => {
         try {
-          const blob = await generateCroppedGif(url, crop, (p) => {
+          const result = await generateMovementDerivatives(url, crop, (p) => {
             setGifProgress(p);
           });
 
-          if (!blob) {
-            console.warn('[MovementForm] GIF generation returned null');
+          if (!result) {
+            console.warn('[MovementForm] Derivative pipeline returned null');
             setGeneratingGif(false);
-            return null;
+            return { gifHighUrl: null, gifLowUrl: null, thumbnailImageUrl: null, _loFrames: [] };
           }
 
-          // Upload the GIF to Firebase Storage
-          const fileName = `movements/${coachId}/thumbnails/${Date.now()}.gif`;
-          const storageRef = ref(storage, fileName);
-          const uploadTask = uploadBytesResumable(storageRef, blob, {
-            contentType: 'image/gif',
-          });
+          // Upload all derivatives in parallel
+          const [gifHighUrl, gifLowUrl, thumbnailImageUrl] = await Promise.all([
+            uploadBlob(result.gifHigh, 'thumbnails', 'gif'),
+            uploadBlob(result.gifLow, 'thumbnails-low', 'gif'),
+            uploadBlob(result.firstFrame, 'thumbnails-img', 'jpg'),
+          ]);
 
-          const downloadUrl = await new Promise<string>((resolve, reject) => {
-            uploadTask.on(
-              'state_changed',
-              (snapshot) => {
-                const uploadPct = snapshot.bytesTransferred / snapshot.totalBytes;
-                setGifProgress(0.9 + uploadPct * 0.1);
-              },
-              (error) => reject(error),
-              async () => {
-                const url = await getDownloadURL(uploadTask.snapshot.ref);
-                resolve(url);
-              },
-            );
-          });
-
-          setThumbnailUrl(downloadUrl);
+          setThumbnailUrl(gifHighUrl);
           setGeneratingGif(false);
           setGifProgress(0);
 
-          // If the form was already saved, auto-patch the Firestore document
+          // Auto-patch if doc was already saved
           if (savedDocIdRef.current) {
-            try {
-              await updateDoc(doc(db, 'movements', savedDocIdRef.current), {
-                thumbnailUrl: downloadUrl,
-              });
-            } catch (patchErr) {
-              console.error('[MovementForm] Auto-patch thumbnailUrl error:', patchErr);
-            }
+            updateDoc(doc(db, 'movements', savedDocIdRef.current), {
+              thumbnailUrl: gifHighUrl,
+              gifLowUrl,
+              thumbnailImageUrl,
+            }).catch((err) => console.error('[MovementForm] Auto-patch derivatives error:', err));
           }
 
-          return downloadUrl;
+          return { gifHighUrl, gifLowUrl, thumbnailImageUrl, _loFrames: result._loFrames };
         } catch (err) {
-          console.error('[MovementForm] GIF generation error:', err);
+          console.error('[MovementForm] Derivative pipeline error:', err);
           setGeneratingGif(false);
           setGifProgress(0);
-          return null;
+          return { gifHighUrl: null, gifLowUrl: null, thumbnailImageUrl: null, _loFrames: [] };
         }
       })();
 
-      gifPromiseRef.current = promise;
+      gifPromiseRef.current = promise.then((r) => r.gifHighUrl);
       return promise;
     },
-    [coachId],
+    [coachId, uploadBlob],
+  );
+
+  /** Legacy wrapper for edit-mode GIF regeneration (backwards compat). */
+  const generateAndUploadGif = useCallback(
+    (url: string, crop: CropValues): Promise<string | null> => {
+      const fullCrop: CropTransform = {
+        ...crop,
+        cropFrameWidth: (crop as any).cropFrameWidth ?? cropFrameWidth,
+        cropFrameHeight: (crop as any).cropFrameHeight ?? cropFrameHeight,
+      };
+      return generateAndUploadDerivatives(url, fullCrop).then((r) => r.gifHighUrl);
+    },
+    [generateAndUploadDerivatives, cropFrameWidth, cropFrameHeight],
   );
 
   // ── Media upload (shared by Library and Camera) ──────────────────────
@@ -413,25 +452,36 @@ export default function MovementForm({
     setCropScale(crop.cropScale);
     setCropTranslateX(crop.cropTranslateX);
     setCropTranslateY(crop.cropTranslateY);
+    setCropFrameWidth(crop.cropFrameWidth);
+    setCropFrameHeight(crop.cropFrameHeight);
     setShowCropModal(false);
     setCreateStep('processing');
 
+    const fullCrop: CropTransform = {
+      cropScale: crop.cropScale,
+      cropTranslateX: crop.cropTranslateX,
+      cropTranslateY: crop.cropTranslateY,
+      cropFrameWidth: crop.cropFrameWidth,
+      cropFrameHeight: crop.cropFrameHeight,
+    };
+
     try {
-      // Step 1: Generate GIF thumbnail
-      setProcessingStatus('Creating thumbnail...');
+      // Step 1: Generate all derivatives (GIF high, GIF low, first-frame image)
+      setProcessingStatus('Creating thumbnails...');
       setProcessingProgress(0.1);
 
-      const gifUrl = await generateAndUploadGif(videoUrl, crop);
+      const derivatives = await generateAndUploadDerivatives(videoUrl, fullCrop);
+      const { gifHighUrl, gifLowUrl, thumbnailImageUrl, _loFrames } = derivatives;
 
       setProcessingProgress(0.4);
 
-      // Step 2: AI Analysis (runs on the GIF)
+      // Step 2: AI Analysis (runs on the high-quality GIF)
       let aiData: Record<string, any> = {};
-      if (gifUrl) {
+      if (gifHighUrl) {
         setProcessingStatus('Analyzing movement...');
         setProcessingProgress(0.5);
         try {
-          const analysis = await analyzeMovementMedia(gifUrl);
+          const analysis = await analyzeMovementMedia(gifHighUrl);
           if (analysis) {
             aiData = {
               name: analysis.name || '',
@@ -455,7 +505,7 @@ export default function MovementForm({
       setProcessingProgress(0.7);
       setProcessingStatus('Saving movement...');
 
-      // Step 3: Save to Firestore
+      // Step 3: Save to Firestore with all derivative URLs
       const data: Record<string, any> = {
         name: aiData.name || 'New Movement',
         category: aiData.category || '',
@@ -470,13 +520,18 @@ export default function MovementForm({
         swapMode: 'split' as const,
         swapWindowSec: 5,
         videoUrl: videoUrl.trim(),
-        thumbnailUrl: gifUrl || '',
+        thumbnailUrl: gifHighUrl || '',
+        thumbnailImageUrl: thumbnailImageUrl || '',
+        gifLowUrl: gifLowUrl || '',
+        gifLoopUrl: '', // populated by one-rep loop step below
         regression: aiData.regression || '',
         progression: aiData.progression || '',
         contraindications: aiData.contraindications || '',
         cropScale: crop.cropScale,
         cropTranslateX: crop.cropTranslateX,
         cropTranslateY: crop.cropTranslateY,
+        cropFrameWidth: crop.cropFrameWidth,
+        cropFrameHeight: crop.cropFrameHeight,
         coachId,
         tenantId,
         isGlobal: false,
@@ -501,6 +556,28 @@ export default function MovementForm({
             }
           })
           .catch(() => {});
+      }
+
+      // Step 5: AI one-rep loop detection (non-blocking, runs after save)
+      if (gifHighUrl && _loFrames.length > 0) {
+        (async () => {
+          try {
+            const repAnalysis = await analyzeMovementReps(gifHighUrl);
+            if (repAnalysis && repAnalysis.repCount >= 2) {
+              const loopBlob = await encodeOneRepLoopGif(
+                _loFrames,
+                repAnalysis.loopStartPct,
+                repAnalysis.loopEndPct,
+              );
+              if (loopBlob) {
+                const gifLoopUrl = await uploadBlob(loopBlob, 'thumbnails-loop', 'gif');
+                await updateDoc(doc(db, 'movements', docId), { gifLoopUrl });
+              }
+            }
+          } catch (err) {
+            console.warn('[MovementForm] One-rep loop generation failed:', err);
+          }
+        })();
       }
 
       setProcessingProgress(1);
@@ -584,6 +661,8 @@ export default function MovementForm({
         cropScale,
         cropTranslateX,
         cropTranslateY,
+        cropFrameWidth,
+        cropFrameHeight,
         updatedAt: serverTimestamp(),
       };
 
@@ -860,11 +939,13 @@ export default function MovementForm({
         <VideoCropModal
           visible={showCropModal}
           videoUri={videoUrl}
-          initialCrop={{ cropScale, cropTranslateX, cropTranslateY }}
+          initialCrop={{ cropScale, cropTranslateX, cropTranslateY, cropFrameWidth, cropFrameHeight }}
           onDone={(crop: CropValues) => {
             setCropScale(crop.cropScale);
             setCropTranslateX(crop.cropTranslateX);
             setCropTranslateY(crop.cropTranslateY);
+            setCropFrameWidth(crop.cropFrameWidth);
+            setCropFrameHeight(crop.cropFrameHeight);
             setShowCropModal(false);
             generateAndUploadGif(videoUrl, crop);
           }}
@@ -1004,7 +1085,7 @@ export default function MovementForm({
       <VideoCropModal
         visible={showCropModal}
         videoUri={videoUrl}
-        initialCrop={{ cropScale, cropTranslateX, cropTranslateY }}
+        initialCrop={{ cropScale, cropTranslateX, cropTranslateY, cropFrameWidth, cropFrameHeight }}
         onDone={(crop: CropValues) => {
           processAfterCrop(crop);
         }}
