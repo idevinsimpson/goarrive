@@ -726,7 +726,10 @@ function BuildScreenInner() {
       >
         <View style={s.listMedia}>
           {item.thumbnailUrl ? (
-            <Image source={{ uri: item.thumbnailUrl }} style={s.listImage} />
+            <Image
+              source={{ uri: previewEngine.scrollState === 'idle' ? item.thumbnailUrl : 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' }}
+              style={[s.listImage, { backgroundColor: '#151B28' }]}
+            />
           ) : (
             <View style={s.listPlaceholder}>
               <Icon name={item.type === 'Plans' ? 'plan' : item.type === 'Playbooks' ? 'playbook' : item.type === 'Movements' ? 'movements' : 'workouts'} size={20} color={item.type === 'Plans' ? '#60A5FA' : item.type === 'Playbooks' ? '#A78BFA' : '#4A5568'} />
@@ -872,6 +875,21 @@ function BuildScreenInner() {
               </Text>
             </Pressable>
           </View>
+        </View>
+      )}
+
+      {/* DEBUG OVERLAY — temporary, remove after verification */}
+      {Platform.OS === 'web' && (
+        <View style={{ flexDirection: 'row', justifyContent: 'center', paddingVertical: 4, backgroundColor: previewEngine.scrollState === 'scrolling' ? '#FF4444' : previewEngine.scrollState === 'settling' ? '#FFAA00' : '#44FF44', gap: 12 }}>
+          <Text style={{ fontSize: 11, fontWeight: '700', color: '#000' }}>
+            scroll: {previewEngine.scrollState}
+          </Text>
+          <Text style={{ fontSize: 11, fontWeight: '700', color: '#000' }}>
+            animating: {previewEngine.animatingIds.size}
+          </Text>
+          <Text style={{ fontSize: 11, fontWeight: '700', color: '#000' }}>
+            view: {viewMode}
+          </Text>
         </View>
       )}
 
