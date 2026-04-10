@@ -126,16 +126,24 @@ HEAD_INJECT = """
       /* ═══════════════════════════════════════════════════════════════════
          3. MODAL SCROLL FIX — iOS Safari PWA
          React Native Web modals use [role="dialog"][aria-modal="true"].
-         Their ScrollViews need momentum scrolling on iOS Safari.
 
-         IMPORTANT: Do NOT override height/max-height/flex here.
-         Those are set by component inline styles (e.g. flex:1 on
-         ScrollViews, maxHeight:'80%' on sheets). Overriding them
-         with !important breaks scroll containment — the ScrollView
-         expands to content height and gets clipped by the parent.
+         CRITICAL: The global .css-175oi2r rule above overrides RNW's
+         default min-height:0px with min-height:auto. That prevents
+         flex items from shrinking below content height, which breaks
+         ScrollView containment inside modals (the ScrollView expands
+         to full content height and gets clipped by the parent).
+
+         Fix: restore min-height:0 inside modals so flex shrinking
+         works correctly. This selector (0,2,0) beats the global
+         .css-175oi2r (0,1,0) specificity.
          ═══════════════════════════════════════════════════════════════════ */
 
-      /* Modal ScrollViews: enable iOS momentum scrolling only */
+      /* Restore min-height:0 inside modals for proper flex shrinking */
+      [role="dialog"] .css-175oi2r {
+        min-height: 0px !important;
+      }
+
+      /* Modal ScrollViews: enable iOS momentum scrolling */
       [role="dialog"] .r-agouwx,
       [aria-modal="true"] .r-agouwx {
         -webkit-overflow-scrolling: touch !important;
