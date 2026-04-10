@@ -33,6 +33,7 @@ import {
   Image,
   Linking,
 } from 'react-native';
+import ModalSheet from './ModalSheet';
 import { db, storage } from '../lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -626,9 +627,7 @@ export default function MovementForm({
   if (isEdit) {
     return (
       <>
-        <Modal visible={visible} animationType="slide" transparent={true}>
-          <View style={st.overlay}>
-            <View style={st.sheet}>
+        <ModalSheet visible={visible} onClose={onClose} maxHeightPct={0.9}>
               <View style={st.header}>
                 <Text style={st.headerTitle}>Edit Movement</Text>
                 <Pressable onPress={onClose} hitSlop={8}>
@@ -859,9 +858,7 @@ export default function MovementForm({
                   </Text>
                 </Pressable>
               </View>
-            </View>
-          </View>
-        </Modal>
+        </ModalSheet>
 
         <VideoCropModal
           visible={showCropModal}
@@ -883,9 +880,7 @@ export default function MovementForm({
   // ── CREATE MODE: Simplified 3-step flow ────────────────────────────────
   return (
     <>
-      <Modal visible={visible} animationType="slide" transparent={true}>
-        <View style={st.overlay}>
-          <View style={st.createSheet}>
+      <ModalSheet visible={visible} onClose={() => { resetForm(); onClose(); }} maxHeightPct={0.92}>
             {/* Close button — always visible */}
             <Pressable
               style={st.createCloseBtn}
@@ -1002,9 +997,7 @@ export default function MovementForm({
                 </View>
               </View>
             )}
-          </View>
-        </View>
-      </Modal>
+      </ModalSheet>
 
       {/* Crop Modal — rendered OUTSIDE so it layers on top on iOS */}
       <VideoCropModal
@@ -1026,20 +1019,7 @@ export default function MovementForm({
 
 // ── Styles ────────────────────────────────────────────────────────────────
 const st = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    justifyContent: 'flex-end',
-  },
-
-  // ── Edit mode sheet (same as before) ─────────────────────────────────
-  sheet: {
-    backgroundColor: '#0E1117',
-    borderTopLeftRadius: 20,
-    overflow: 'hidden' as const,
-    borderTopRightRadius: 20,
-    height: '90%',
-  },
+  // overlay + sheet styles removed — now handled by ModalSheet component
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1064,14 +1044,7 @@ const st = StyleSheet.create({
     gap: 16,
   },
 
-  // ── Create mode sheet ─────────────────────────────────────────────────
-  createSheet: {
-    backgroundColor: '#0E1117',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    height: '92%',
-    overflow: 'hidden' as const,
-  },
+  // createSheet styles removed — now handled by ModalSheet component
   createCloseBtn: {
     position: 'absolute',
     top: Platform.select({ ios: 16, default: 16 }),

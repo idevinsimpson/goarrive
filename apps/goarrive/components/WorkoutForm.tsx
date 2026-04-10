@@ -43,6 +43,7 @@ import {
   Platform,
   Image,
 } from 'react-native';
+import ModalSheet from './ModalSheet';
 import DraggableFlatList, {
   ScaleDecorator,
   RenderItemParams,
@@ -727,9 +728,7 @@ export default function WorkoutForm({
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <>
-    <Modal visible={visible} animationType="slide" transparent>
-      <View style={s.overlay}>
-        <View style={s.sheet}>
+    <ModalSheet visible={visible} onClose={onClose} maxHeightPct={0.95} sheetBg="#111827" backdropColor="rgba(0,0,0,0.65)" borderRadius={24}>
           {/* Handle */}
           <View style={s.handle} />
 
@@ -1246,9 +1245,7 @@ export default function WorkoutForm({
               <Text style={s.toastText}>{toastMessage}</Text>
             </View>
           )}
-        </View>
-      </View>
-    </Modal>
+    </ModalSheet>
 
     {/* ── Block Type Picker Modal ──────────────────────────────────── */}
     <Modal visible={showBlockTypePicker} transparent animationType="fade">
@@ -1343,9 +1340,7 @@ export default function WorkoutForm({
     </Modal>
 
     {/* ── Details Sheet Modal ─────────────────────────────────────── */}
-    <Modal visible={showDetails} transparent animationType="slide">
-      <View style={s.overlay}>
-        <View style={s.detailsSheet}>
+    <ModalSheet visible={showDetails} onClose={() => setShowDetails(false)} maxHeightPct={0.85} sheetBg="#111827" backdropColor="rgba(0,0,0,0.65)" borderRadius={24}>
           <View style={s.handle} />
           <View style={s.header}>
             <Text style={s.headerTitle}>Workout Details</Text>
@@ -1425,14 +1420,10 @@ export default function WorkoutForm({
 
             <View style={{ height: 40 }} />
           </ScrollView>
-        </View>
-      </View>
-    </Modal>
+    </ModalSheet>
 
     {/* ── Template Picker Modal ───────────────────────────────────── */}
-    <Modal visible={showTemplatePicker} transparent animationType="slide">
-      <View style={s.overlay}>
-        <View style={s.detailsSheet}>
+    <ModalSheet visible={showTemplatePicker} onClose={() => setShowTemplatePicker(false)} maxHeightPct={0.85} sheetBg="#111827" backdropColor="rgba(0,0,0,0.65)" borderRadius={24}>
           <View style={s.header}>
             <Text style={s.headerTitle}>Load from Template</Text>
             <TouchableOpacity onPress={() => setShowTemplatePicker(false)}>
@@ -1475,31 +1466,14 @@ export default function WorkoutForm({
               </TouchableOpacity>
             ))}
           </ScrollView>
-        </View>
-      </View>
-    </Modal>
+    </ModalSheet>
     </>
   );
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: '#111827',
-    borderTopLeftRadius: 24,
-    overflow: "hidden" as const,
-    borderTopRightRadius: 24,
-    maxHeight: '95%',
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#1E2A3A',
-    borderBottomWidth: 0,
-  },
+  // overlay + sheet styles removed — now handled by ModalSheet component
   handle: {
     width: 40,
     height: 4,
@@ -2046,16 +2020,7 @@ const s = StyleSheet.create({
   },
 
   // ── Details sheet ───────────────────────────────────────────────────
-  detailsSheet: {
-    backgroundColor: '#111827',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '85%',
-    borderWidth: 1,
-    borderColor: '#1E2A3A',
-    borderBottomWidth: 0,
-    flex: 1,
-  },
+  // detailsSheet styles removed — now handled by ModalSheet component
   detailsContent: {
     paddingHorizontal: 20,
     paddingTop: 16,

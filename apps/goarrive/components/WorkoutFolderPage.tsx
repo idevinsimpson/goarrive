@@ -25,6 +25,7 @@ import {
   useWindowDimensions,
   ActivityIndicator,
 } from 'react-native';
+import ModalSheet from './ModalSheet';
 import {
   doc,
   getDoc,
@@ -1670,9 +1671,14 @@ export default function WorkoutFolderPage({
       </Modal>
 
       {/* ── Movement Picker Modal ───────────────────────────────────────── */}
-      <Modal transparent visible={showMovementPicker} animationType="slide" onRequestClose={() => { setShowMovementPicker(false); setMovementPickerBlockIdx(null); }}>
-        <View style={st.pickerBackdrop}>
-          <View style={st.pickerSheet}>
+      <ModalSheet
+        visible={showMovementPicker}
+        onClose={() => { setShowMovementPicker(false); setMovementPickerBlockIdx(null); }}
+        maxHeightPct={0.8}
+        sheetBg="#1E2A3A"
+        backdropColor="rgba(0,0,0,0.7)"
+        borderRadius={24}
+      >
             <View style={st.pickerHeader}>
               <Text style={st.pickerTitle}>Add Movement</Text>
               <Pressable onPress={() => { setShowMovementPicker(false); setMovementPickerBlockIdx(null); }}>
@@ -1723,9 +1729,7 @@ export default function WorkoutFolderPage({
                 <Text style={st.pickerEmpty}>No movements found</Text>
               )}
             </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      </ModalSheet>
 
       {/* ── Description Edit Modal ───────────────────────────────────────── */}
       <Modal transparent visible={showDescriptionEdit} animationType="fade" onRequestClose={() => setShowDescriptionEdit(false)}>
@@ -2428,19 +2432,7 @@ const st = StyleSheet.create({
     fontWeight: '600',
   },
 
-  // Movement picker modal
-  pickerBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'flex-end',
-  },
-  pickerSheet: {
-    backgroundColor: '#1E2A3A',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '80%',
-    overflow: 'hidden',
-  },
+  // pickerBackdrop + pickerSheet styles removed — now handled by ModalSheet
   pickerHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
