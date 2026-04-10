@@ -1,13 +1,18 @@
 /**
  * AnimatedPreviewTile — Viewport-aware media tile for the Build library.
  *
- * Strategy: On web, GIF `<img>` elements auto-play. The ONLY reliable way to
- * stop a GIF is to swap its `src` to a non-animated image. Unmounting the
- * element is NOT enough — browsers may keep the last decoded frame visible
- * in the compositor layer.
+ * Visual states for each tile:
+ *   1. SCROLLING  — blank pixel, hidden (performance: stop GIF decoding)
+ *   2. IDLE, not promoted — show thumbnail/poster at full opacity (stable resting state)
+ *   3. IDLE, promoted (isAnimating) — show GIF with crossfade animation
+ *   4. No URI — show dark placeholder with optional fallback icon
  *
- * So we keep the Image always mounted and swap `src` between the real GIF URL
- * and a transparent 1×1 pixel when the engine says "don't animate."
+ * On web, GIF <img> elements auto-play. The ONLY reliable way to stop a GIF
+ * is to swap its src to a non-animated image. We swap to a 1×1 blank pixel
+ * during scroll, and restore the real URI when idle.
+ *
+ * DO NOT make tiles go dark/blank when idle. The resting state must always
+ * show the thumbnail so the grid looks intentional and premium.
  */
 import React, { useEffect, useRef, useCallback, memo } from 'react';
 import { View, Image, Animated, StyleSheet, Platform } from 'react-native';
@@ -19,11 +24,6 @@ const USE_NATIVE_DRIVER = Platform.OS !== 'web';
 // 1×1 transparent GIF — used as a "blank" source to kill GIF decoding on web
 const BLANK_GIF = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
-// ── Debug: log every Image mount/src change (temporary) ────────────────────
-const __imgLog = (component: string, active: boolean, scrollInfo: string, detail: string) => {
-  console.log(`[IMG] ${component} | active=${active} | ${scrollInfo} | ${detail}`);
-};
-
 // ── Standalone preview tile (movement cards, folder cards) ──────────────────
 
 interface AnimatedPreviewTileProps {
@@ -32,6 +32,8 @@ interface AnimatedPreviewTileProps {
   width: number;
   height: number;
   isAnimating: boolean;
+  /** Whether scroll is idle — tiles show thumbnail when idle, blank when scrolling */
+  scrollIdle: boolean;
   priority: TilePriority;
   registerTile: (id: string, priority: TilePriority) => void;
   borderRadius?: number;
@@ -46,6 +48,7 @@ export const AnimatedPreviewTile = memo(function AnimatedPreviewTile({
   width,
   height,
   isAnimating,
+  scrollIdle,
   priority,
   registerTile,
   borderRadius = 0,
@@ -78,14 +81,13 @@ export const AnimatedPreviewTile = memo(function AnimatedPreviewTile({
 
   const hasUri = !!uri;
 
-  // Debug log on every render
-  __imgLog('AnimatedPreviewTile', isAnimating, `hasUri=${hasUri}`, `item=${itemId}`);
-
-  // On web: always mount the Image but swap src. On native: conditional mount.
   if (Platform.OS === 'web') {
-    // Determine effective src: real URI when animating, blank pixel otherwise
-    const effectiveSrc = (isAnimating && hasUri) ? uri! : BLANK_GIF;
-    const showImage = isAnimating && hasUri;
+    // Scrolling: blank pixel (stop GIF decoding for performance)
+    // Idle, not promoted: real URI (auto-plays but stable resting state)
+    // Idle, promoted: real URI with crossfade
+    const effectiveSrc = (!scrollIdle && !isAnimating) ? BLANK_GIF : (hasUri ? uri! : BLANK_GIF);
+    // Show image at full opacity when idle (even if not promoted), animate crossfade when promoted
+    const imgOpacity = isAnimating ? fadeAnim : (scrollIdle && hasUri ? 1 : 0);
 
     return (
       <View style={{ width, height, borderRadius, overflow: 'hidden' }}>
@@ -97,32 +99,32 @@ export const AnimatedPreviewTile = memo(function AnimatedPreviewTile({
             source={{ uri: effectiveSrc }}
             style={[
               StyleSheet.absoluteFill,
-              { borderRadius, opacity: showImage ? fadeAnim : 0 },
+              { borderRadius, opacity: imgOpacity },
             ]}
             resizeMode="cover"
-            onLoad={showImage ? onGifLoad : undefined}
+            onLoad={isAnimating ? onGifLoad : undefined}
           />
         )}
       </View>
     );
   }
 
-  // Native: conditional mount (unmount truly removes the element)
-  const shouldShowGif = isAnimating && hasUri;
+  // Native: show image when idle, hide during scroll
+  const shouldShow = (isAnimating || scrollIdle) && hasUri;
   return (
     <View style={{ width, height, borderRadius, overflow: 'hidden' }}>
       <View style={[styles.placeholder, StyleSheet.absoluteFill, { borderRadius }]}>
         {fallbackIcon || null}
       </View>
-      {shouldShowGif && (
+      {shouldShow && (
         <Animated.Image
           source={{ uri: uri! }}
           style={[
             StyleSheet.absoluteFill,
-            { borderRadius, opacity: fadeAnim },
+            { borderRadius, opacity: isAnimating ? fadeAnim : 1 },
           ]}
           resizeMode="cover"
-          onLoad={onGifLoad}
+          onLoad={isAnimating ? onGifLoad : undefined}
         />
       )}
     </View>
@@ -152,11 +154,10 @@ export const MosaicPreviewTile = memo(function MosaicPreviewTile({
 }: MosaicPreviewTileProps) {
   const shortestSide = Math.min(width, height);
 
-  // Sub-72px: on web, always mount Image but swap src based on scroll state
+  // Sub-72px: show image when idle, blank when scrolling
   if (shortestSide < SIZE_THRESHOLDS.stillOnly) {
     if (Platform.OS === 'web') {
       const effectiveSrc = scrollIdle ? uri : BLANK_GIF;
-      __imgLog('MosaicMini(sub72)', scrollIdle, `idle=${scrollIdle}`, `size=${shortestSide.toFixed(0)}`);
       return (
         <Image
           source={{ uri: effectiveSrc }}
@@ -189,6 +190,7 @@ export const MosaicPreviewTile = memo(function MosaicPreviewTile({
       width={width}
       height={height}
       isPromoted={isPromoted}
+      scrollIdle={scrollIdle}
       borderRadius={borderRadius}
     />
   );
@@ -201,6 +203,7 @@ interface MosaicCrossfadeTileProps {
   width: number;
   height: number;
   isPromoted: boolean;
+  scrollIdle: boolean;
   borderRadius: number;
 }
 
@@ -209,6 +212,7 @@ const MosaicCrossfadeTile = memo(function MosaicCrossfadeTile({
   width,
   height,
   isPromoted,
+  scrollIdle,
   borderRadius,
 }: MosaicCrossfadeTileProps) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -227,10 +231,11 @@ const MosaicCrossfadeTile = memo(function MosaicCrossfadeTile({
     }).start();
   }, [fadeAnim]);
 
-  __imgLog('MosaicCrossfade(72+)', isPromoted, `promoted=${isPromoted}`, `size=72+`);
-
   if (Platform.OS === 'web') {
-    const effectiveSrc = isPromoted ? uri : BLANK_GIF;
+    // Scrolling: blank pixel. Idle: show image (promoted gets crossfade, non-promoted gets full opacity)
+    const effectiveSrc = (!scrollIdle && !isPromoted) ? BLANK_GIF : uri;
+    const imgOpacity = isPromoted ? fadeAnim : (scrollIdle ? 1 : 0);
+
     return (
       <View style={{ width, height, borderRadius, overflow: 'hidden' }}>
         <View style={[styles.miniPlaceholder, StyleSheet.absoluteFill, { borderRadius }]} />
@@ -238,7 +243,7 @@ const MosaicCrossfadeTile = memo(function MosaicCrossfadeTile({
           source={{ uri: effectiveSrc }}
           style={[
             StyleSheet.absoluteFill,
-            { borderRadius, opacity: isPromoted ? fadeAnim : 0 },
+            { borderRadius, opacity: imgOpacity },
           ]}
           resizeMode="cover"
           onLoad={isPromoted ? onGifLoad : undefined}
@@ -247,19 +252,20 @@ const MosaicCrossfadeTile = memo(function MosaicCrossfadeTile({
     );
   }
 
-  // Native: conditional mount
+  // Native: show when idle or promoted
+  const shouldShow = isPromoted || scrollIdle;
   return (
     <View style={{ width, height, borderRadius, overflow: 'hidden' }}>
       <View style={[styles.miniPlaceholder, StyleSheet.absoluteFill, { borderRadius }]} />
-      {isPromoted && (
+      {shouldShow && (
         <Animated.Image
           source={{ uri }}
           style={[
             StyleSheet.absoluteFill,
-            { borderRadius, opacity: fadeAnim },
+            { borderRadius, opacity: isPromoted ? fadeAnim : 1 },
           ]}
           resizeMode="cover"
-          onLoad={onGifLoad}
+          onLoad={isPromoted ? onGifLoad : undefined}
         />
       )}
     </View>

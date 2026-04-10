@@ -594,7 +594,7 @@ function BuildScreenInner() {
                 width={cardWidth}
                 height={cardHeight}
                 isAnimating={folderAnimating}
-                scrollIdle={previewEngine.scrollState === 'idle'}
+                scrollIdle={previewEngine.scrollState !== 'scrolling'}
               />
             ) : (
               <AnimatedPreviewTile
@@ -603,6 +603,7 @@ function BuildScreenInner() {
                 width={cardWidth}
                 height={cardHeight}
                 isAnimating={false}
+                scrollIdle={previewEngine.scrollState !== 'scrolling'}
                 priority={2}
                 registerTile={previewEngine.registerTile}
                 borderRadius={10}
@@ -678,7 +679,7 @@ function BuildScreenInner() {
               width={cardWidth}
               height={cardHeight}
               isAnimating={tileAnimating}
-              scrollIdle={previewEngine.scrollState === 'idle'}
+              scrollIdle={previewEngine.scrollState !== 'scrolling'}
             />
           ) : singleThumbUri ? (
             <AnimatedPreviewTile
@@ -687,6 +688,7 @@ function BuildScreenInner() {
               width={cardWidth}
               height={cardHeight}
               isAnimating={tileAnimating}
+              scrollIdle={previewEngine.scrollState !== 'scrolling'}
               priority={tilePriority}
               registerTile={previewEngine.registerTile}
               borderRadius={10}
@@ -698,6 +700,7 @@ function BuildScreenInner() {
               width={cardWidth}
               height={cardHeight}
               isAnimating={false}
+              scrollIdle={previewEngine.scrollState !== 'scrolling'}
               priority={tilePriority}
               registerTile={previewEngine.registerTile}
               borderRadius={10}
@@ -727,7 +730,7 @@ function BuildScreenInner() {
         <View style={s.listMedia}>
           {item.thumbnailUrl ? (
             <Image
-              source={{ uri: previewEngine.scrollState === 'idle' ? item.thumbnailUrl : 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' }}
+              source={{ uri: previewEngine.scrollState !== 'scrolling' ? item.thumbnailUrl : 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' }}
               style={[s.listImage, { backgroundColor: '#151B28' }]}
             />
           ) : (
@@ -878,20 +881,7 @@ function BuildScreenInner() {
         </View>
       )}
 
-      {/* DEBUG OVERLAY — temporary, remove after verification */}
-      {Platform.OS === 'web' && (
-        <View style={{ flexDirection: 'row', justifyContent: 'center', paddingVertical: 4, backgroundColor: previewEngine.scrollState === 'scrolling' ? '#FF4444' : previewEngine.scrollState === 'settling' ? '#FFAA00' : '#44FF44', gap: 12 }}>
-          <Text style={{ fontSize: 11, fontWeight: '700', color: '#000' }}>
-            scroll: {previewEngine.scrollState}
-          </Text>
-          <Text style={{ fontSize: 11, fontWeight: '700', color: '#000' }}>
-            animating: {previewEngine.animatingIds.size}
-          </Text>
-          <Text style={{ fontSize: 11, fontWeight: '700', color: '#000' }}>
-            view: {viewMode}
-          </Text>
-        </View>
-      )}
+      {/* Debug overlay removed — was temporary scroll/animation state banner */}
 
       {loading ? (
         <View style={s.centered}>
