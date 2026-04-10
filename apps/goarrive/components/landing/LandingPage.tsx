@@ -1,23 +1,22 @@
 /**
  * LandingPage — GoArrive public homepage
  *
- * Full marketing landing page shown to unauthenticated visitors at the root URL.
- * Designed to satisfy Stripe's business verification requirements and serve as
- * the primary public face of GoArrive.
+ * Positions GoArrive as a premium online fitness coaching firm —
+ * not a self-serve SaaS product. Two audiences:
+ *   - Members seeking personalized online coaching
+ *   - Coaches who want to apply to join the G➲A ecosystem
  *
  * Sections:
  *   1. Navigation bar
- *   2. Hero
- *   3. Trust / stats bar
- *   4. Problem statement
- *   5. Feature showcase (coach-focused)
- *   6. How it works
- *   7. Member experience
- *   8. Testimonials / social proof
- *   9. Pricing overview
- *  10. FAQ
- *  11. Final CTA
- *  12. Footer
+ *   2. Hero (dual-audience)
+ *   3. What is GoArrive
+ *   4. For Members
+ *   5. For Coaches
+ *   6. The G➲A Difference
+ *   7. How It Works (member journey)
+ *   8. Coach Application CTA
+ *   9. FAQ
+ *  10. Footer
  */
 import React, { useState, useRef, useCallback } from 'react';
 import {
@@ -105,17 +104,19 @@ function SecondaryButton({ label, onPress }: { label: string; onPress: () => voi
   );
 }
 
-function Divider() {
-  return <View style={a.divider} />;
+function GreenButton({ label, onPress, large }: { label: string; onPress: () => void; large?: boolean }) {
+  return (
+    <Pressable
+      style={({ pressed }) => [a.greenBtn, large && a.primaryBtnLg, pressed && { opacity: 0.85 }]}
+      onPress={onPress}
+    >
+      <Text style={[a.greenBtnText, large && a.primaryBtnTextLg]}>{label}</Text>
+    </Pressable>
+  );
 }
 
-/* ─── Icon components (simple SVG-free shapes) ─── */
-function FeatureIcon({ emoji }: { emoji: string }) {
-  return (
-    <View style={a.featureIcon}>
-      <Text style={a.featureIconText}>{emoji}</Text>
-    </View>
-  );
+function Divider() {
+  return <View style={a.divider} />;
 }
 
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -124,14 +125,27 @@ function FeatureIcon({ emoji }: { emoji: string }) {
 export default function LandingPage() {
   const { w, onLayout } = useWidth();
   const isMobile = w < 768;
-  const isTablet = w >= 768 && w < 1024;
   const scrollRef = useRef<ScrollView>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
 
   const goLogin = () => router.push('/(auth)/login');
-  const goSignup = () => router.push('/coach-signup');
-  const goIntake = () => router.push('/intake');
+  // Coach apply — currently routes to coach-signup; will be replaced
+  // with a dedicated application flow in the future.
+  const goCoachApply = () => router.push('/coach-signup');
+  const goMemberStart = () => router.push('/intake');
+
+  /* Section ref map for scroll-to */
+  const sectionOffsets = useRef<Record<string, number>>({});
+  const scrollToSection = (key: string) => {
+    const offset = sectionOffsets.current[key];
+    if (offset != null && scrollRef.current) {
+      scrollRef.current.scrollTo({ y: offset - 70, animated: true });
+    }
+  };
+  const onSectionLayout = (key: string) => (e: LayoutChangeEvent) => {
+    sectionOffsets.current[key] = e.nativeEvent.layout.y;
+  };
 
   /* ─── 1. NAVIGATION ─── */
   const NavBar = (
@@ -149,106 +163,81 @@ export default function LandingPage() {
           </Pressable>
         ) : (
           <View style={n.links}>
-            <Pressable onPress={() => scrollToSection('features')}><Text style={n.link}>Features</Text></Pressable>
-            <Pressable onPress={() => scrollToSection('how-it-works')}><Text style={n.link}>How It Works</Text></Pressable>
-            <Pressable onPress={() => scrollToSection('pricing')}><Text style={n.link}>Pricing</Text></Pressable>
+            <Pressable onPress={() => scrollToSection('members')}><Text style={n.link}>For Members</Text></Pressable>
+            <Pressable onPress={() => scrollToSection('coaches')}><Text style={n.link}>For Coaches</Text></Pressable>
+            <Pressable onPress={() => scrollToSection('difference')}><Text style={n.link}>Why G➲A</Text></Pressable>
             <Pressable onPress={() => scrollToSection('faq')}><Text style={n.link}>FAQ</Text></Pressable>
             <Pressable onPress={goLogin} style={n.signInBtn}><Text style={n.signInText}>Sign In</Text></Pressable>
-            <PrimaryButton label="Get Started" onPress={goLogin} />
+            <GreenButton label="Apply to Coach" onPress={goCoachApply} />
           </View>
         )}
       </View>
       {mobileMenuOpen && isMobile && (
         <View style={n.mobileMenu}>
-          <Pressable onPress={() => { scrollToSection('features'); setMobileMenuOpen(false); }}><Text style={n.mobileLink}>Features</Text></Pressable>
-          <Pressable onPress={() => { scrollToSection('how-it-works'); setMobileMenuOpen(false); }}><Text style={n.mobileLink}>How It Works</Text></Pressable>
-          <Pressable onPress={() => { scrollToSection('pricing'); setMobileMenuOpen(false); }}><Text style={n.mobileLink}>Pricing</Text></Pressable>
+          <Pressable onPress={() => { scrollToSection('members'); setMobileMenuOpen(false); }}><Text style={n.mobileLink}>For Members</Text></Pressable>
+          <Pressable onPress={() => { scrollToSection('coaches'); setMobileMenuOpen(false); }}><Text style={n.mobileLink}>For Coaches</Text></Pressable>
+          <Pressable onPress={() => { scrollToSection('difference'); setMobileMenuOpen(false); }}><Text style={n.mobileLink}>Why G➲A</Text></Pressable>
           <Pressable onPress={() => { scrollToSection('faq'); setMobileMenuOpen(false); }}><Text style={n.mobileLink}>FAQ</Text></Pressable>
           <Divider />
           <Pressable onPress={() => { goLogin(); setMobileMenuOpen(false); }}><Text style={[n.mobileLink, { color: C.gold }]}>Sign In</Text></Pressable>
-          <PrimaryButton label="Get Started" onPress={() => { goLogin(); setMobileMenuOpen(false); }} />
+          <GreenButton label="Apply to Coach" onPress={() => { goCoachApply(); setMobileMenuOpen(false); }} />
         </View>
       )}
     </View>
   );
 
-  /* Section ref map for scroll-to */
-  const sectionOffsets = useRef<Record<string, number>>({});
-  const scrollToSection = (key: string) => {
-    const offset = sectionOffsets.current[key];
-    if (offset != null && scrollRef.current) {
-      scrollRef.current.scrollTo({ y: offset - 70, animated: true });
-    }
-  };
-  const onSectionLayout = (key: string) => (e: LayoutChangeEvent) => {
-    sectionOffsets.current[key] = e.nativeEvent.layout.y;
-  };
-
   /* ─── 2. HERO ─── */
   const Hero = (
-    <View style={[h.wrap, { paddingTop: isMobile ? 100 : 120, paddingBottom: isMobile ? 60 : 80 }]}>
-      {/* Decorative gradient accent */}
+    <View style={[h.wrap, { paddingTop: isMobile ? 100 : 130, paddingBottom: isMobile ? 60 : 90 }]}>
       <View style={h.gradientOrb} />
       <View style={h.gradientOrb2} />
 
-      <View style={[h.inner, { maxWidth: 800 }]}>
+      <View style={[h.inner, { maxWidth: 820 }]}>
         <View style={h.badge}>
-          <Text style={h.badgeText}>Online Fitness Coaching Platform</Text>
+          <Text style={h.badgeText}>Premium Online Fitness Coaching</Text>
         </View>
-        <Text style={[h.headline, isMobile && { fontSize: 36, lineHeight: 42 }]}>
-          Your Coaching Business,{'\n'}All in One Place
+        <Text style={[h.headline, isMobile && { fontSize: 34, lineHeight: 40 }]}>
+          Real Coaches. Real Programs.{'\n'}Real Results.
         </Text>
         <Text style={[h.sub, isMobile && { fontSize: 16 }]}>
-          Build workouts, manage members, handle payments, and deliver a premium
-          experience — all from one platform designed for independent fitness coaches.
+          GoArrive is building a better future for fitness coaching. Personalized
+          programming, dedicated accountability, and a premium experience —
+          delivered by coaches who are held to a higher standard.
         </Text>
         <View style={[h.ctas, isMobile && { flexDirection: 'column', alignItems: 'stretch' }]}>
-          <PrimaryButton label="Launch Your Coaching Business" onPress={goLogin} large />
-          <SecondaryButton label="See How It Works" onPress={() => scrollToSection('how-it-works')} />
+          <PrimaryButton label="Start Your Coaching Journey" onPress={goMemberStart} large />
+          <GreenButton label="Apply to Coach with G➲A" onPress={goCoachApply} large />
         </View>
-        <Text style={h.trust}>No credit card required  ·  Free to get started  ·  Cancel anytime</Text>
       </View>
     </View>
   );
 
-  /* ─── 3. STATS BAR ─── */
-  const stats = [
-    { value: 'All-in-One', label: 'Coaching Platform' },
-    { value: 'Zero', label: 'Tech Headaches' },
-    { value: 'Premium', label: 'Member Experience' },
-    { value: '100%', label: 'Your Brand' },
-  ];
-  const StatsBar = (
-    <View style={sb.wrap}>
-      <View style={[sb.inner, isMobile && { flexDirection: 'column', gap: 20 }]}>
-        {stats.map((s, i) => (
-          <View key={i} style={[sb.stat, isMobile && { flexDirection: 'row', gap: 12 }]}>
-            <Text style={sb.val}>{s.value}</Text>
-            <Text style={sb.label}>{s.label}</Text>
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-
-  /* ─── 4. PROBLEM STATEMENT ─── */
-  const ProblemSection = (
-    <View style={p.wrap}>
-      <View style={p.inner}>
-        <SectionLabel text="THE PROBLEM" color={C.error} />
-        <SectionTitle text="Coaches Deserve Better Tools" />
-        <SectionSub text="Right now, most independent fitness coaches are duct-taping together 5+ tools just to run their business. One app for workouts, another for payments, a spreadsheet for member tracking, a calendar app for scheduling, and DMs for communication. It's fragmented, frustrating, and it's holding you back." />
-
-        <View style={[p.painGrid, isMobile && { flexDirection: 'column' }]}>
+  /* ─── 3. WHAT IS G➲A ─── */
+  const WhatIsGA = (
+    <View style={wi.wrap}>
+      <View style={wi.inner}>
+        <SectionLabel text="WHO WE ARE" color={C.gold} />
+        <SectionTitle text="More Than an App. A Coaching Firm." />
+        <Text style={wi.body}>
+          GoArrive is a premium online fitness coaching company with a growing team
+          of vetted coaches and a proprietary coaching infrastructure behind them.
+          We are not a marketplace. We are not a generic software subscription.
+          We are building a coaching ecosystem where members get a genuinely
+          personalized experience and coaches get the structure, support, and
+          technology to do their best work.
+        </Text>
+        <View style={[wi.pillars, isMobile && { flexDirection: 'column' }]}>
           {[
-            { icon: '😤', title: 'Tool Overload', desc: 'Juggling between apps wastes hours every week that should be spent coaching.' },
-            { icon: '💸', title: 'Revenue Leakage', desc: 'Manual invoicing and disconnected payments mean missed revenue and awkward follow-ups.' },
-            { icon: '😞', title: 'Generic Experience', desc: 'Your members get a cookie-cutter experience instead of the premium, branded coaching they deserve.' },
+            { label: 'Curated Coaches', desc: 'Every coach in the G➲A ecosystem is vetted. We set high standards because your results depend on it.' },
+            { label: 'Personalized Coaching', desc: 'No templates. No one-size-fits-all. Your program is built for you by a real coach who knows your goals.' },
+            { label: 'Serious Infrastructure', desc: 'Technology-enabled coaching with scheduling, video, payments, and progress tracking — all handled for you.' },
           ].map((item, i) => (
-            <View key={i} style={[p.painCard, isMobile && { width: '100%' as any }]}>
-              <Text style={p.painIcon}>{item.icon}</Text>
-              <Text style={p.painTitle}>{item.title}</Text>
-              <Text style={p.painDesc}>{item.desc}</Text>
+            <View key={i} style={[wi.pillar, isMobile && { width: '100%' as any }]}>
+              <View style={[wi.pillarAccent, { backgroundColor: i === 0 ? C.greenDim : i === 1 ? C.goldDim : C.blueDim }]}>
+                <Text style={[wi.pillarDot, { color: i === 0 ? C.green : i === 1 ? C.gold : C.blue }]}>●</Text>
+              </View>
+              <Text style={wi.pillarTitle}>{item.label}</Text>
+              <Text style={wi.pillarDesc}>{item.desc}</Text>
             </View>
           ))}
         </View>
@@ -256,67 +245,95 @@ export default function LandingPage() {
     </View>
   );
 
-  /* ─── 5. FEATURES ─── */
-  const features = [
-    {
-      icon: '🏋️',
-      title: 'Workout Builder',
-      desc: 'Build professional workout programs with a drag-and-drop block canvas. Organize movements into sets, supersets, and circuits. Your movement library grows with every upload — AI auto-analyzes each one.',
-      color: C.green,
-      bg: C.greenDim,
-    },
-    {
-      icon: '👥',
-      title: 'Member Management',
-      desc: 'Onboard new members with beautiful intake forms. Manage plans, track progress, and keep every detail organized in one place. Members see a premium, coach-branded experience.',
-      color: C.blue,
-      bg: C.blueDim,
-    },
-    {
-      icon: '📅',
-      title: 'Scheduling & Sessions',
-      desc: 'Set your availability, let members book sessions, and sync everything to Google Calendar. Zoom rooms are auto-assigned. Automated reminders keep no-shows near zero.',
-      color: C.gold,
-      bg: C.goldDim,
-    },
-    {
-      icon: '💳',
-      title: 'Payments & Billing',
-      desc: 'Get paid seamlessly with Stripe Connect. Members subscribe to plans, payments process automatically, and you see every dollar on your earnings dashboard. No chasing invoices.',
-      color: C.green,
-      bg: C.greenDim,
-    },
-    {
-      icon: '📊',
-      title: 'Command Center',
-      desc: 'Your dashboard tells you what needs attention today — new sign-ups, upcoming sessions, members who need a check-in, and recent workout completions. Coach smarter, not harder.',
-      color: C.blue,
-      bg: C.blueDim,
-    },
-    {
-      icon: '🎯',
-      title: 'Plans & Programs',
-      desc: 'Create tiered coaching plans with custom pricing. The built-in pricing engine handles plan selection, checkout, and subscription management so you can focus on delivering results.',
-      color: C.gold,
-      bg: C.goldDim,
-    },
+  /* ─── 4. FOR MEMBERS ─── */
+  const memberPoints = [
+    { icon: '🎯', title: 'A Program Built for You', desc: 'Your coach designs a workout program based on your goals, experience, and schedule. Every session has a purpose.' },
+    { icon: '🤝', title: 'Dedicated Coach Guidance', desc: 'You are not alone. Your coach reviews your progress, adjusts your plan, and keeps you moving forward — every week.' },
+    { icon: '📹', title: 'Video-Guided Workouts', desc: 'Every movement in your program comes with professional demonstrations so you always know exactly what to do.' },
+    { icon: '📊', title: 'Accountability That Works', desc: 'Post-workout reflections, session check-ins, and coach follow-ups keep you honest and motivated without being invasive.' },
+    { icon: '📅', title: 'Seamless Scheduling', desc: 'Book live sessions with your coach, get calendar reminders, and join video calls — all from one place.' },
+    { icon: '✨', title: 'A Premium Experience', desc: 'From your first intake to your hundredth workout, the G➲A member experience is designed to feel personal, polished, and supportive.' },
   ];
 
-  const FeaturesSection = (
-    <View style={f.wrap} onLayout={onSectionLayout('features')}>
-      <View style={f.inner}>
-        <SectionLabel text="FEATURES" color={C.green} />
-        <SectionTitle text="Everything You Need to Coach Online" />
-        <SectionSub text="GoArrive replaces your scattered toolkit with one integrated platform. Every feature is designed to help you spend more time coaching and less time on admin." />
+  const ForMembers = (
+    <View style={fm.wrap} onLayout={onSectionLayout('members')}>
+      <View style={fm.inner}>
+        <SectionLabel text="FOR MEMBERS" color={C.gold} />
+        <SectionTitle text="Coaching That Meets You Where You Are" />
+        <SectionSub text="Whether you are just starting out or pushing past a plateau, G➲A connects you with a dedicated coach and a program designed around your life. This is not a generic workout app — this is your coach, in your corner." />
 
-        <View style={[f.grid, isMobile && { flexDirection: 'column' }]}>
-          {features.map((ft, i) => (
-            <View key={i} style={[f.card, isMobile ? { width: '100%' as any } : { width: '30%' as any, minWidth: 280 }]}>
-              <View style={[f.iconWrap, { backgroundColor: ft.bg }]}>
-                <Text style={f.iconText}>{ft.icon}</Text>
-              </View>
-              <Text style={f.cardTitle}>{ft.title}</Text>
-              <Text style={f.cardDesc}>{ft.desc}</Text>
+        <View style={[fm.grid, isMobile && { flexDirection: 'column' }]}>
+          {memberPoints.map((mp, i) => (
+            <View key={i} style={[fm.card, isMobile ? { width: '100%' as any } : { width: '30%' as any, minWidth: 280 }]}>
+              <Text style={fm.cardIcon}>{mp.icon}</Text>
+              <Text style={fm.cardTitle}>{mp.title}</Text>
+              <Text style={fm.cardDesc}>{mp.desc}</Text>
+            </View>
+          ))}
+        </View>
+
+        <View style={fm.ctaWrap}>
+          <PrimaryButton label="Find Your Coach" onPress={goMemberStart} large />
+        </View>
+      </View>
+    </View>
+  );
+
+  /* ─── 5. FOR COACHES ─── */
+  const coachPoints = [
+    { icon: '🏛', title: 'A Curated Ecosystem', desc: 'G➲A is not open to everyone. Coaches apply to join, are vetted for quality and alignment, and become part of a growing professional coaching network.' },
+    { icon: '⚙️', title: 'Infrastructure That Works', desc: 'Workout programming, member management, scheduling, video sessions, and automated payments — all built in. You coach. We handle the operations.' },
+    { icon: '📈', title: 'Grow Within the System', desc: 'G➲A coaches operate inside a proven structure with growth-based earnings, support from the team, and a brand that adds credibility to your coaching.' },
+    { icon: '🎓', title: 'Standards That Matter', desc: 'We believe coaching quality matters. G➲A sets expectations for responsiveness, programming quality, and member experience — and supports coaches in meeting them.' },
+    { icon: '🛡', title: 'Support, Not Isolation', desc: 'Independent coaching can be lonely. G➲A provides a professional home — community, operational support, and a team that wants you to succeed.' },
+    { icon: '💡', title: 'Technology-Enabled Coaching', desc: 'Purpose-built tools that make you a better coach — not a SaaS product you have to figure out. The technology serves the coaching, not the other way around.' },
+  ];
+
+  const ForCoaches = (
+    <View style={fco.wrap} onLayout={onSectionLayout('coaches')}>
+      <View style={fco.inner}>
+        <SectionLabel text="FOR COACHES" color={C.green} />
+        <SectionTitle text="Build Your Coaching Career Inside a Serious Ecosystem" />
+        <SectionSub text="G➲A is looking for dedicated coaches who care about their craft. If you want a professional home with real infrastructure, real standards, and real growth potential — we want to hear from you." />
+
+        <View style={[fco.grid, isMobile && { flexDirection: 'column' }]}>
+          {coachPoints.map((cp, i) => (
+            <View key={i} style={[fco.card, isMobile ? { width: '100%' as any } : { width: '30%' as any, minWidth: 280 }]}>
+              <Text style={fco.cardIcon}>{cp.icon}</Text>
+              <Text style={fco.cardTitle}>{cp.title}</Text>
+              <Text style={fco.cardDesc}>{cp.desc}</Text>
+            </View>
+          ))}
+        </View>
+
+        <View style={fco.ctaWrap}>
+          <GreenButton label="Apply to Coach with G➲A" onPress={goCoachApply} large />
+        </View>
+      </View>
+    </View>
+  );
+
+  /* ─── 6. THE G➲A DIFFERENCE ─── */
+  const differences = [
+    { title: 'Human-First, Technology-Enabled', desc: 'Coaching is a human relationship. Our technology amplifies that relationship — it never replaces it. Every feature exists to help coaches serve members better.' },
+    { title: 'Quality Over Quantity', desc: 'We are not trying to onboard thousands of random coaches. We are building a curated team of professionals who share a commitment to excellence.' },
+    { title: 'A Premium Member Experience', desc: 'From intake to workout delivery to post-session reflection, every touchpoint is designed to feel personal, polished, and worthy of your investment.' },
+    { title: 'A Bigger Vision', desc: 'GoArrive is building toward something larger — a coaching ecosystem where great coaches thrive and members get an experience that does not exist anywhere else.' },
+  ];
+
+  const DifferenceSection = (
+    <View style={ds.wrap} onLayout={onSectionLayout('difference')}>
+      <View style={ds.inner}>
+        <SectionLabel text="WHY G➲A" color={C.blue} />
+        <SectionTitle text="What Makes GoArrive Different" />
+        <SectionSub text="This is not another fitness app. This is not a marketplace where anyone can list themselves as a coach. GoArrive is a coaching firm with standards, infrastructure, and a genuine commitment to results." />
+
+        <View style={[ds.grid, isMobile && { flexDirection: 'column' }]}>
+          {differences.map((d, i) => (
+            <View key={i} style={[ds.card, isMobile && { width: '100%' as any }]}>
+              <View style={ds.cardAccent} />
+              <Text style={ds.cardTitle}>{d.title}</Text>
+              <Text style={ds.cardDesc}>{d.desc}</Text>
             </View>
           ))}
         </View>
@@ -324,24 +341,24 @@ export default function LandingPage() {
     </View>
   );
 
-  /* ─── 6. HOW IT WORKS ─── */
-  const steps = [
+  /* ─── 7. HOW IT WORKS (MEMBER JOURNEY) ─── */
+  const memberSteps = [
     {
       num: '01',
-      title: 'Set Up Your Profile',
-      desc: 'Create your coach account, connect Stripe for payments, set your availability, and upload your movement library. Your branded coaching business is ready in minutes.',
+      title: 'Tell Us About Yourself',
+      desc: 'Complete a short intake that covers your goals, experience, schedule, and preferences. This is how we match you with the right coach.',
       color: C.green,
     },
     {
       num: '02',
-      title: 'Build Your Program',
-      desc: 'Design workout programs using the visual builder. Create coaching plans with custom pricing. Set up intake forms for new member onboarding. Everything your members need — built by you.',
+      title: 'Get Matched with Your Coach',
+      desc: 'A G➲A coach reviews your intake and builds a personalized program designed around your life. You are never just a number.',
       color: C.blue,
     },
     {
       num: '03',
-      title: 'Grow Your Business',
-      desc: 'Share your intake link, onboard members, deliver incredible coaching, and get paid automatically. GoArrive handles the operations so you can focus on what you do best — coaching.',
+      title: 'Train, Reflect, Progress',
+      desc: 'Follow your program, log your workouts, and check in with your coach. Real coaching means real feedback, real adjustments, and real results over time.',
       color: C.gold,
     },
   ];
@@ -349,12 +366,12 @@ export default function LandingPage() {
   const HowItWorks = (
     <View style={hi.wrap} onLayout={onSectionLayout('how-it-works')}>
       <View style={hi.inner}>
-        <SectionLabel text="HOW IT WORKS" color={C.blue} />
-        <SectionTitle text="Up and Running in Three Steps" />
-        <SectionSub text="GoArrive is designed to get you from sign-up to your first paying member as fast as possible." />
+        <SectionLabel text="THE MEMBER JOURNEY" color={C.blue} />
+        <SectionTitle text="How G➲A Coaching Works" />
+        <SectionSub text="Getting started is simple. The hard part — the programming, the accountability, the progress — that is what your coach is for." />
 
         <View style={[hi.steps, isMobile && { flexDirection: 'column' }]}>
-          {steps.map((step, i) => (
+          {memberSteps.map((step, i) => (
             <View key={i} style={[hi.step, isMobile && { width: '100%' as any, flexDirection: 'row', gap: 16 }]}>
               <View style={[hi.numCircle, { borderColor: step.color }]}>
                 <Text style={[hi.num, { color: step.color }]}>{step.num}</Text>
@@ -363,7 +380,7 @@ export default function LandingPage() {
                 <Text style={hi.stepTitle}>{step.title}</Text>
                 <Text style={hi.stepDesc}>{step.desc}</Text>
               </View>
-              {!isMobile && i < steps.length - 1 && (
+              {!isMobile && i < memberSteps.length - 1 && (
                 <View style={hi.connector}>
                   <Text style={hi.connectorArrow}>→</Text>
                 </View>
@@ -371,154 +388,72 @@ export default function LandingPage() {
             </View>
           ))}
         </View>
-      </View>
-    </View>
-  );
 
-  /* ─── 7. MEMBER EXPERIENCE ─── */
-  const memberFeatures = [
-    { icon: '📱', title: 'Personalized Workout Plans', desc: 'Members see their custom program — built by you — with clear daily instructions and progress tracking.' },
-    { icon: '🎥', title: 'Video-Guided Movements', desc: 'Every movement comes with video demonstrations so members always know proper form, even without you in the room.' },
-    { icon: '📝', title: 'Post-Workout Journaling', desc: 'After every workout, members reflect with the Glow/Grow journal — what went well and where to improve. You see every entry.' },
-    { icon: '🔔', title: 'Smart Reminders', desc: 'Automated session reminders and workout nudges keep your members accountable without you lifting a finger.' },
-  ];
-
-  const MemberSection = (
-    <View style={m.wrap}>
-      <View style={m.inner}>
-        <SectionLabel text="FOR YOUR MEMBERS" color={C.gold} />
-        <SectionTitle text="A Premium Experience That Keeps Members Coming Back" />
-        <SectionSub text="When you coach on GoArrive, your members get a world-class experience that makes them feel supported, motivated, and connected to you — their coach." />
-
-        <View style={[m.grid, isMobile && { flexDirection: 'column' }]}>
-          {memberFeatures.map((mf, i) => (
-            <View key={i} style={[m.card, isMobile && { width: '100%' as any }]}>
-              <Text style={m.cardIcon}>{mf.icon}</Text>
-              <Text style={m.cardTitle}>{mf.title}</Text>
-              <Text style={m.cardDesc}>{mf.desc}</Text>
-            </View>
-          ))}
+        <View style={hi.ctaWrap}>
+          <PrimaryButton label="Start Your Coaching Journey" onPress={goMemberStart} large />
         </View>
       </View>
     </View>
   );
 
-  /* ─── 8. SOCIAL PROOF ─── */
-  const SocialProof = (
-    <View style={sp.wrap}>
-      <View style={sp.inner}>
-        <View style={sp.quoteCard}>
-          <Text style={sp.quoteMarks}>"</Text>
-          <Text style={sp.quoteText}>
-            GoArrive gives independent coaches the same operational power that big box gyms have — scheduling, payments, workout delivery, member management — but in a platform built specifically for the way we work. One coach, one member at a time.
-          </Text>
-          <View style={sp.quoteAuthor}>
-            <View style={sp.authorDot} />
-            <View>
-              <Text style={sp.authorName}>Built for Coaches, by a Coach</Text>
-              <Text style={sp.authorRole}>The GoArrive Team</Text>
-            </View>
-          </View>
+  /* ─── 8. COACH APPLICATION CTA ─── */
+  const CoachCta = (
+    <View style={cc.wrap}>
+      <View style={cc.gradientOrb} />
+      <View style={cc.inner}>
+        <SectionLabel text="FOR COACHES" color={C.green} />
+        <Text style={[cc.headline, isMobile && { fontSize: 28 }]}>
+          Ready to Coach at a Higher Level?
+        </Text>
+        <Text style={cc.sub}>
+          GoArrive is selectively growing its coaching team. If you are a qualified
+          fitness coach who values quality, accountability, and professional growth,
+          we would like to hear from you. Apply to join the G➲A coaching ecosystem.
+        </Text>
+        <View style={[cc.ctas, isMobile && { flexDirection: 'column', alignItems: 'stretch' }]}>
+          <GreenButton label="Apply to Coach with G➲A" onPress={goCoachApply} large />
+          <SecondaryButton label="Contact Us" onPress={() => Linking.openURL('mailto:coaches@goa.fit')} />
         </View>
+        <Text style={cc.note}>
+          Coach positions are application-based. We review every application personally.
+        </Text>
       </View>
     </View>
   );
 
-  /* ─── 9. PRICING ─── */
-  const PricingSection = (
-    <View style={pr.wrap} onLayout={onSectionLayout('pricing')}>
-      <View style={pr.inner}>
-        <SectionLabel text="PRICING" color={C.green} />
-        <SectionTitle text="Simple, Coach-First Pricing" />
-        <SectionSub text="GoArrive operates on a franchise model inspired by Keller Williams. You run your business, we provide the platform. Pricing is based on your active member volume — start free and scale as you grow." />
-
-        <View style={[pr.cards, isMobile && { flexDirection: 'column' }]}>
-          {/* Starter */}
-          <View style={[pr.card, isMobile && { width: '100%' as any }]}>
-            <Text style={pr.planName}>Starter</Text>
-            <Text style={pr.price}>Free</Text>
-            <Text style={pr.priceNote}>to get started</Text>
-            <View style={pr.featureList}>
-              {['Full workout builder', 'Up to 5 members', 'Movement library', 'Intake forms', 'Basic scheduling'].map((f, i) => (
-                <View key={i} style={pr.featureRow}>
-                  <Text style={pr.checkmark}>✓</Text>
-                  <Text style={pr.featureText}>{f}</Text>
-                </View>
-              ))}
-            </View>
-            <PrimaryButton label="Get Started Free" onPress={goLogin} />
-          </View>
-
-          {/* Growth */}
-          <View style={[pr.card, pr.cardFeatured, isMobile && { width: '100%' as any }]}>
-            <View style={pr.popularBadge}><Text style={pr.popularText}>Most Popular</Text></View>
-            <Text style={pr.planName}>Growth</Text>
-            <Text style={pr.price}>Tiered</Text>
-            <Text style={pr.priceNote}>based on active members</Text>
-            <View style={pr.featureList}>
-              {['Everything in Starter', 'Unlimited members', 'Stripe payments', 'Zoom integration', 'Google Calendar sync', 'Automated reminders', 'Earnings dashboard'].map((f, i) => (
-                <View key={i} style={pr.featureRow}>
-                  <Text style={[pr.checkmark, { color: C.gold }]}>✓</Text>
-                  <Text style={pr.featureText}>{f}</Text>
-                </View>
-              ))}
-            </View>
-            <PrimaryButton label="Start Growing" onPress={goLogin} large />
-          </View>
-
-          {/* Enterprise */}
-          <View style={[pr.card, isMobile && { width: '100%' as any }]}>
-            <Text style={pr.planName}>Enterprise</Text>
-            <Text style={pr.price}>Custom</Text>
-            <Text style={pr.priceNote}>for coaching teams</Text>
-            <View style={pr.featureList}>
-              {['Everything in Growth', 'Multi-coach support', 'Profit share & distributions', 'Priority support', 'Custom integrations'].map((f, i) => (
-                <View key={i} style={pr.featureRow}>
-                  <Text style={pr.checkmark}>✓</Text>
-                  <Text style={pr.featureText}>{f}</Text>
-                </View>
-              ))}
-            </View>
-            <SecondaryButton label="Contact Us" onPress={() => Linking.openURL('mailto:support@goa.fit')} />
-          </View>
-        </View>
-      </View>
-    </View>
-  );
-
-  /* ─── 10. FAQ ─── */
+  /* ─── 9. FAQ ─── */
   const faqs = [
     {
       q: 'What is GoArrive?',
-      a: 'GoArrive is an all-in-one online fitness coaching platform. It gives independent coaches everything they need to run their coaching business — workout programming, member management, scheduling, payments, and a premium member experience — all in one place.',
+      a: 'GoArrive is a premium online fitness coaching firm. We connect members with dedicated, vetted coaches who build personalized programs and provide ongoing guidance and accountability. Our proprietary coaching infrastructure handles everything from workout delivery to scheduling to payments — so coaches can focus on coaching and members can focus on results.',
     },
     {
-      q: 'Who is GoArrive for?',
-      a: 'GoArrive is built for independent fitness coaches who want to deliver online coaching at scale. Whether you train 5 members or 500, GoArrive provides the tools and infrastructure to run your business professionally.',
+      q: 'How is GoArrive different from a fitness app?',
+      a: 'Fitness apps give you generic workouts and leave you on your own. GoArrive gives you a real coach — someone who builds your program, reviews your progress, adjusts your plan, and holds you accountable. The technology is there to make that coaching relationship seamless, not to replace it.',
     },
     {
-      q: 'How does pricing work?',
-      a: 'GoArrive uses a tiered pricing model based on your active member count. You can start free with up to 5 members. As your business grows, your platform fee scales with your revenue — so you only pay more when you\'re earning more.',
+      q: 'How do I get started as a member?',
+      a: 'Start by completing a short intake form. Based on your goals, experience, and preferences, a G➲A coach will review your information and reach out to build your personalized coaching plan. From there, you will have a dedicated coach and a custom program designed for you.',
     },
     {
-      q: 'Can my members pay me through GoArrive?',
-      a: 'Yes. GoArrive integrates with Stripe Connect, so your members can subscribe to your coaching plans and pay directly through the platform. Payments are processed automatically and deposited to your bank account.',
+      q: 'Can anyone become a G➲A coach?',
+      a: 'No. Coaching positions at GoArrive are application-based. We look for qualified coaches who are committed to quality programming, responsiveness, and a premium member experience. If you believe you are a good fit, we encourage you to apply.',
     },
     {
-      q: 'Do I need to be technical to use GoArrive?',
-      a: 'Not at all. GoArrive is designed to be intuitive for coaches, not developers. The workout builder is visual and drag-and-drop. Member onboarding uses simple intake forms. Payments are handled by Stripe. You focus on coaching — we handle the tech.',
+      q: 'What does the coaching include?',
+      a: 'G➲A coaching includes a personalized workout program with video-guided movements, regular coach check-ins, live session scheduling, post-workout reflections, and ongoing program adjustments. The specifics depend on the coaching plan you and your coach agree on.',
     },
     {
-      q: 'What do my members see?',
-      a: 'Your members get a clean, branded experience. They see their personalized workout plans, video-guided movements, scheduling tools, and a post-workout journal. Everything is designed to feel premium and personal.',
+      q: 'How are payments handled?',
+      a: 'Payments are processed securely through Stripe. Members subscribe to a coaching plan and payments are handled automatically — no awkward invoicing or manual transactions. Your investment goes directly to supporting your coaching experience.',
     },
     {
-      q: 'Does GoArrive support video sessions?',
-      a: 'Yes. GoArrive integrates with Zoom for live coaching sessions. Rooms are automatically assigned, calendar events are created, and reminders are sent to both you and your member.',
+      q: 'What technology does GoArrive use?',
+      a: 'GoArrive has built a proprietary coaching platform that includes workout programming and delivery, member management, scheduling with video integration, automated reminders, and secure payments. This technology is purpose-built to support the coaching relationship — it is not a generic SaaS product.',
     },
     {
-      q: 'Can I try GoArrive before committing?',
-      a: 'Absolutely. You can sign up and start building your coaching business for free. No credit card required. Explore the workout builder, set up your profile, and see the platform in action before you bring on paying members.',
+      q: 'Is GoArrive a marketplace?',
+      a: 'No. GoArrive is not a marketplace where coaches list themselves and compete for attention. It is a coaching firm with a curated team, shared standards, and a unified member experience. Think of it as a professional coaching ecosystem — not a directory.',
     },
   ];
 
@@ -543,30 +478,10 @@ export default function LandingPage() {
     </View>
   );
 
-  /* ─── 11. FINAL CTA ─── */
-  const FinalCta = (
-    <View style={fc.wrap}>
-      <View style={fc.gradientOrb} />
-      <View style={fc.inner}>
-        <Text style={[fc.headline, isMobile && { fontSize: 30 }]}>
-          Ready to Elevate Your Coaching?
-        </Text>
-        <Text style={fc.sub}>
-          Join GoArrive and give your members the premium experience they deserve — while building the coaching business you've always wanted.
-        </Text>
-        <View style={[fc.ctas, isMobile && { flexDirection: 'column', alignItems: 'stretch' }]}>
-          <PrimaryButton label="Get Started Free" onPress={goLogin} large />
-          <SecondaryButton label="Contact Us" onPress={() => Linking.openURL('mailto:support@goa.fit')} />
-        </View>
-      </View>
-    </View>
-  );
-
-  /* ─── 12. FOOTER ─── */
+  /* ─── 10. FOOTER ─── */
   const Footer = (
     <View style={ft.wrap}>
       <View style={[ft.inner, isMobile && { flexDirection: 'column', gap: 32 }]}>
-        {/* Brand column */}
         <View style={ft.brandCol}>
           <Image
             source={require('../../assets/logo.png')}
@@ -574,35 +489,36 @@ export default function LandingPage() {
             resizeMode="contain"
           />
           <Text style={ft.brandDesc}>
-            The all-in-one platform for independent fitness coaches. Build workouts, manage members, get paid — all in one place.
+            Premium online fitness coaching. Real coaches, real programs, real results.
+            GoArrive is building a better future for the coaching industry.
           </Text>
         </View>
 
-        {/* Links columns */}
         <View style={ft.linksCol}>
-          <Text style={ft.colTitle}>Platform</Text>
-          <Pressable onPress={() => scrollToSection('features')}><Text style={ft.footerLink}>Features</Text></Pressable>
-          <Pressable onPress={() => scrollToSection('pricing')}><Text style={ft.footerLink}>Pricing</Text></Pressable>
+          <Text style={ft.colTitle}>Members</Text>
+          <Pressable onPress={() => scrollToSection('members')}><Text style={ft.footerLink}>Member Experience</Text></Pressable>
           <Pressable onPress={() => scrollToSection('how-it-works')}><Text style={ft.footerLink}>How It Works</Text></Pressable>
-          <Pressable onPress={() => scrollToSection('faq')}><Text style={ft.footerLink}>FAQ</Text></Pressable>
+          <Pressable onPress={goMemberStart}><Text style={ft.footerLink}>Get Started</Text></Pressable>
+        </View>
+
+        <View style={ft.linksCol}>
+          <Text style={ft.colTitle}>Coaches</Text>
+          <Pressable onPress={() => scrollToSection('coaches')}><Text style={ft.footerLink}>Coach Ecosystem</Text></Pressable>
+          <Pressable onPress={goCoachApply}><Text style={ft.footerLink}>Apply to Coach</Text></Pressable>
+          <Pressable onPress={() => Linking.openURL('mailto:coaches@goa.fit')}><Text style={ft.footerLink}>Coach Inquiries</Text></Pressable>
         </View>
 
         <View style={ft.linksCol}>
           <Text style={ft.colTitle}>Company</Text>
+          <Pressable onPress={() => scrollToSection('difference')}><Text style={ft.footerLink}>About G➲A</Text></Pressable>
           <Pressable onPress={() => Linking.openURL('mailto:support@goa.fit')}><Text style={ft.footerLink}>Contact</Text></Pressable>
-          <Pressable onPress={() => Linking.openURL('mailto:support@goa.fit')}><Text style={ft.footerLink}>Support</Text></Pressable>
-        </View>
-
-        <View style={ft.linksCol}>
-          <Text style={ft.colTitle}>Get Started</Text>
           <Pressable onPress={goLogin}><Text style={ft.footerLink}>Sign In</Text></Pressable>
-          <Pressable onPress={goLogin}><Text style={ft.footerLink}>Create Account</Text></Pressable>
         </View>
       </View>
 
       <View style={ft.bottom}>
         <Text style={ft.copyright}>© {new Date().getFullYear()} GoArrive. All rights reserved.</Text>
-        <Text style={ft.legal}>GoArrive is an online fitness coaching platform providing tools for independent coaches to manage their businesses and deliver personalized member experiences.</Text>
+        <Text style={ft.legal}>GoArrive is a premium online fitness coaching firm providing personalized coaching programs, dedicated coach guidance, and technology-enabled member experiences. Payments processed securely via Stripe.</Text>
       </View>
     </View>
   );
@@ -620,15 +536,13 @@ export default function LandingPage() {
         showsVerticalScrollIndicator={false}
       >
         {Hero}
-        {StatsBar}
-        {ProblemSection}
-        {FeaturesSection}
+        {WhatIsGA}
+        {ForMembers}
+        {ForCoaches}
+        {DifferenceSection}
         {HowItWorks}
-        {MemberSection}
-        {SocialProof}
-        {PricingSection}
+        {CoachCta}
         {FaqSection}
-        {FinalCta}
         {Footer}
       </ScrollView>
     </View>
@@ -706,21 +620,23 @@ const a = StyleSheet.create({
     color: C.textSoft,
     fontFamily: FONT_H,
   },
+  greenBtn: {
+    backgroundColor: C.green,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  greenBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: C.white,
+    fontFamily: FONT_H,
+  },
   divider: {
     height: 1,
     backgroundColor: C.border,
     width: '100%' as any,
-  },
-  featureIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: C.goldDim,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  featureIconText: {
-    fontSize: 24,
   },
 });
 
@@ -801,27 +717,27 @@ const h = StyleSheet.create({
   },
   inner: { alignItems: 'center', zIndex: 1 },
   badge: {
-    backgroundColor: 'rgba(123,160,91,0.12)',
+    backgroundColor: 'rgba(245,166,35,0.10)',
     paddingHorizontal: 16,
     paddingVertical: 6,
     borderRadius: 20,
     marginBottom: 24,
     borderWidth: 1,
-    borderColor: 'rgba(123,160,91,0.2)',
+    borderColor: 'rgba(245,166,35,0.18)',
   },
   badgeText: {
     fontSize: 13,
     fontWeight: '600',
-    color: C.green,
+    color: C.gold,
     fontFamily: FONT_B,
   },
   headline: {
-    fontSize: 52,
+    fontSize: 50,
     fontWeight: '700',
     color: C.text,
     fontFamily: FONT_H,
     textAlign: 'center',
-    lineHeight: 60,
+    lineHeight: 58,
     marginBottom: 20,
   },
   sub: {
@@ -839,81 +755,65 @@ const h = StyleSheet.create({
     marginBottom: 24,
     alignItems: 'center',
   },
-  trust: {
-    fontSize: 13,
-    color: C.muted,
-    fontFamily: FONT_B,
-    textAlign: 'center',
-  },
 });
 
-/* Stats Bar */
-const sb = StyleSheet.create({
+/* What is G➲A */
+const wi = StyleSheet.create({
   wrap: {
+    paddingVertical: 80,
+    paddingHorizontal: 24,
     backgroundColor: C.surfaceAlt,
     borderTopWidth: 1,
     borderBottomWidth: 1,
     borderColor: C.borderSub,
-    paddingVertical: 32,
-    paddingHorizontal: 24,
-    marginTop: 40,
   },
   inner: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
     maxWidth: 900,
     alignSelf: 'center',
     width: '100%' as any,
+    alignItems: 'center',
   },
-  stat: { alignItems: 'center', gap: 4 },
-  val: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: C.gold,
-    fontFamily: FONT_H,
-  },
-  label: {
-    fontSize: 14,
+  body: {
+    fontSize: 17,
     color: C.textSoft,
     fontFamily: FONT_B,
+    textAlign: 'center',
+    lineHeight: 28,
+    maxWidth: 700,
+    marginBottom: 48,
   },
-});
-
-/* Problem */
-const p = StyleSheet.create({
-  wrap: {
-    paddingVertical: 80,
-    paddingHorizontal: 24,
-  },
-  inner: {
-    maxWidth: 1000,
-    alignSelf: 'center',
-    width: '100%' as any,
-  },
-  painGrid: {
+  pillars: {
     flexDirection: 'row',
     gap: 20,
-    flexWrap: 'wrap',
+    width: '100%' as any,
     justifyContent: 'center',
   },
-  painCard: {
+  pillar: {
+    width: '30%' as any,
+    minWidth: 240,
     backgroundColor: C.surface,
     borderRadius: 16,
     padding: 28,
-    width: '30%' as any,
-    minWidth: 260,
     borderWidth: 1,
     borderColor: C.border,
   },
-  painIcon: { fontSize: 32, marginBottom: 16 },
-  painTitle: {
-    fontSize: 18,
+  pillarAccent: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  pillarDot: { fontSize: 18 },
+  pillarTitle: {
+    fontSize: 17,
     fontWeight: '700',
     color: C.text,
     fontFamily: FONT_H,
     marginBottom: 8,
   },
-  painDesc: {
+  pillarDesc: {
     fontSize: 15,
     color: C.textSoft,
     fontFamily: FONT_B,
@@ -921,8 +821,52 @@ const p = StyleSheet.create({
   },
 });
 
-/* Features */
-const f = StyleSheet.create({
+/* For Members */
+const fm = StyleSheet.create({
+  wrap: {
+    paddingVertical: 80,
+    paddingHorizontal: 24,
+  },
+  inner: {
+    maxWidth: 1100,
+    alignSelf: 'center',
+    width: '100%' as any,
+  },
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 24,
+    justifyContent: 'center',
+  },
+  card: {
+    backgroundColor: C.surface,
+    borderRadius: 16,
+    padding: 28,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  cardIcon: { fontSize: 28, marginBottom: 12 },
+  cardTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: C.text,
+    fontFamily: FONT_H,
+    marginBottom: 8,
+  },
+  cardDesc: {
+    fontSize: 15,
+    color: C.textSoft,
+    fontFamily: FONT_B,
+    lineHeight: 23,
+  },
+  ctaWrap: {
+    alignItems: 'center',
+    marginTop: 40,
+  },
+});
+
+/* For Coaches */
+const fco = StyleSheet.create({
   wrap: {
     paddingVertical: 80,
     paddingHorizontal: 24,
@@ -946,21 +890,69 @@ const f = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
   },
-  iconWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
+  cardIcon: { fontSize: 28, marginBottom: 12 },
+  cardTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: C.text,
+    fontFamily: FONT_H,
+    marginBottom: 8,
   },
-  iconText: { fontSize: 26 },
+  cardDesc: {
+    fontSize: 15,
+    color: C.textSoft,
+    fontFamily: FONT_B,
+    lineHeight: 23,
+  },
+  ctaWrap: {
+    alignItems: 'center',
+    marginTop: 40,
+  },
+});
+
+/* G➲A Difference */
+const ds = StyleSheet.create({
+  wrap: {
+    paddingVertical: 80,
+    paddingHorizontal: 24,
+  },
+  inner: {
+    maxWidth: 1000,
+    alignSelf: 'center',
+    width: '100%' as any,
+  },
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 20,
+    justifyContent: 'center',
+  },
+  card: {
+    width: '46%' as any,
+    minWidth: 280,
+    backgroundColor: C.surface,
+    borderRadius: 16,
+    padding: 28,
+    borderWidth: 1,
+    borderColor: C.border,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  cardAccent: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    backgroundColor: C.gold,
+  },
   cardTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: C.text,
     fontFamily: FONT_H,
     marginBottom: 8,
+    marginTop: 4,
   },
   cardDesc: {
     fontSize: 15,
@@ -975,6 +967,7 @@ const hi = StyleSheet.create({
   wrap: {
     paddingVertical: 80,
     paddingHorizontal: 24,
+    backgroundColor: C.surfaceAlt,
   },
   inner: {
     maxWidth: 1000,
@@ -1031,202 +1024,63 @@ const hi = StyleSheet.create({
     fontSize: 20,
     color: C.muted,
   },
+  ctaWrap: {
+    alignItems: 'center',
+    marginTop: 40,
+  },
 });
 
-/* Member Experience */
-const m = StyleSheet.create({
+/* Coach Application CTA */
+const cc = StyleSheet.create({
   wrap: {
-    paddingVertical: 80,
+    paddingVertical: 100,
     paddingHorizontal: 24,
-    backgroundColor: C.surfaceAlt,
+    alignItems: 'center',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  gradientOrb: {
+    position: 'absolute',
+    top: -50,
+    width: 600,
+    height: 600,
+    borderRadius: 300,
+    backgroundColor: 'rgba(123,160,91,0.05)',
   },
   inner: {
-    maxWidth: 1000,
-    alignSelf: 'center',
-    width: '100%' as any,
+    alignItems: 'center',
+    maxWidth: 620,
+    zIndex: 1,
   },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 20,
-    justifyContent: 'center',
-  },
-  card: {
-    width: '46%' as any,
-    minWidth: 260,
-    backgroundColor: C.surface,
-    borderRadius: 16,
-    padding: 28,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  cardIcon: { fontSize: 28, marginBottom: 12 },
-  cardTitle: {
-    fontSize: 17,
+  headline: {
+    fontSize: 36,
     fontWeight: '700',
     color: C.text,
     fontFamily: FONT_H,
-    marginBottom: 6,
+    textAlign: 'center',
+    lineHeight: 44,
+    marginBottom: 16,
   },
-  cardDesc: {
-    fontSize: 15,
+  sub: {
+    fontSize: 17,
     color: C.textSoft,
     fontFamily: FONT_B,
-    lineHeight: 23,
+    textAlign: 'center',
+    lineHeight: 26,
+    marginBottom: 36,
   },
-});
-
-/* Social Proof */
-const sp = StyleSheet.create({
-  wrap: {
-    paddingVertical: 60,
-    paddingHorizontal: 24,
-  },
-  inner: {
-    maxWidth: 700,
-    alignSelf: 'center',
-    width: '100%' as any,
-  },
-  quoteCard: {
-    backgroundColor: C.surface,
-    borderRadius: 20,
-    padding: 40,
-    borderWidth: 1,
-    borderColor: C.border,
-    borderLeftWidth: 4,
-    borderLeftColor: C.gold,
-  },
-  quoteMarks: {
-    fontSize: 48,
-    color: C.gold,
-    fontFamily: FONT_H,
-    lineHeight: 48,
-    marginBottom: 8,
-  },
-  quoteText: {
-    fontSize: 18,
-    color: C.text,
-    fontFamily: FONT_B,
-    lineHeight: 30,
-    fontStyle: 'italic',
-    marginBottom: 24,
-  },
-  quoteAuthor: {
+  ctas: {
     flexDirection: 'row',
+    gap: 16,
     alignItems: 'center',
-    gap: 12,
+    marginBottom: 20,
   },
-  authorDot: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: C.goldDim,
-    borderWidth: 2,
-    borderColor: C.gold,
-  },
-  authorName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: C.text,
-    fontFamily: FONT_H,
-  },
-  authorRole: {
+  note: {
     fontSize: 13,
     color: C.muted,
     fontFamily: FONT_B,
-  },
-});
-
-/* Pricing */
-const pr = StyleSheet.create({
-  wrap: {
-    paddingVertical: 80,
-    paddingHorizontal: 24,
-    backgroundColor: C.surfaceAlt,
-  },
-  inner: {
-    maxWidth: 1100,
-    alignSelf: 'center',
-    width: '100%' as any,
-  },
-  cards: {
-    flexDirection: 'row',
-    gap: 24,
-    justifyContent: 'center',
-    flexWrap: 'wrap',
-  },
-  card: {
-    width: '30%' as any,
-    minWidth: 280,
-    backgroundColor: C.surface,
-    borderRadius: 20,
-    padding: 32,
-    borderWidth: 1,
-    borderColor: C.border,
-    alignItems: 'center',
-  },
-  cardFeatured: {
-    borderColor: C.gold,
-    borderWidth: 2,
-    position: 'relative',
-    ...(Platform.OS === 'web' ? { transform: [{ scale: 1.04 }] } : {}),
-  },
-  popularBadge: {
-    position: 'absolute',
-    top: -14,
-    backgroundColor: C.gold,
-    paddingHorizontal: 16,
-    paddingVertical: 5,
-    borderRadius: 12,
-  },
-  popularText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: C.dark,
-    fontFamily: FONT_H,
-  },
-  planName: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: C.text,
-    fontFamily: FONT_H,
-    marginBottom: 8,
-    marginTop: 8,
-  },
-  price: {
-    fontSize: 38,
-    fontWeight: '700',
-    color: C.gold,
-    fontFamily: FONT_H,
-  },
-  priceNote: {
-    fontSize: 14,
-    color: C.muted,
-    fontFamily: FONT_B,
-    marginBottom: 24,
-  },
-  featureList: {
-    width: '100%' as any,
-    gap: 12,
-    marginBottom: 28,
-  },
-  featureRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-  },
-  checkmark: {
-    fontSize: 16,
-    color: C.green,
-    fontWeight: '700',
-    marginTop: 1,
-  },
-  featureText: {
-    fontSize: 14,
-    color: C.textSoft,
-    fontFamily: FONT_B,
-    lineHeight: 20,
-    flex: 1,
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
 });
 
@@ -1235,6 +1089,7 @@ const fq = StyleSheet.create({
   wrap: {
     paddingVertical: 80,
     paddingHorizontal: 24,
+    backgroundColor: C.surfaceAlt,
   },
   inner: {
     maxWidth: 700,
@@ -1282,56 +1137,10 @@ const fq = StyleSheet.create({
   },
 });
 
-/* Final CTA */
-const fc = StyleSheet.create({
-  wrap: {
-    paddingVertical: 100,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    position: 'relative',
-    overflow: 'hidden',
-  },
-  gradientOrb: {
-    position: 'absolute',
-    top: -50,
-    width: 600,
-    height: 600,
-    borderRadius: 300,
-    backgroundColor: 'rgba(245,166,35,0.04)',
-  },
-  inner: {
-    alignItems: 'center',
-    maxWidth: 600,
-    zIndex: 1,
-  },
-  headline: {
-    fontSize: 38,
-    fontWeight: '700',
-    color: C.text,
-    fontFamily: FONT_H,
-    textAlign: 'center',
-    lineHeight: 46,
-    marginBottom: 16,
-  },
-  sub: {
-    fontSize: 17,
-    color: C.textSoft,
-    fontFamily: FONT_B,
-    textAlign: 'center',
-    lineHeight: 26,
-    marginBottom: 36,
-  },
-  ctas: {
-    flexDirection: 'row',
-    gap: 16,
-    alignItems: 'center',
-  },
-});
-
 /* Footer */
 const ft = StyleSheet.create({
   wrap: {
-    backgroundColor: C.surfaceAlt,
+    backgroundColor: C.bg,
     borderTopWidth: 1,
     borderTopColor: C.borderSub,
     paddingTop: 48,
