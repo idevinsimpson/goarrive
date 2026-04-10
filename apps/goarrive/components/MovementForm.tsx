@@ -448,8 +448,12 @@ export default function MovementForm({
         console.warn('[MovementForm] AI analysis failed, saving without:', aiErr);
       }
 
+      if (!aiData.name) {
+        setProcessingStatus('AI analysis unavailable — saving with defaults...');
+      } else {
+        setProcessingStatus('Creating thumbnail...');
+      }
       setProcessingProgress(0.5);
-      setProcessingStatus('Creating thumbnail...');
 
       // Wait for GIF to finish (may already be done)
       const gifUrl = await gifPromise;

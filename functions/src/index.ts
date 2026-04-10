@@ -7108,9 +7108,14 @@ export const analyzeMovement = onCall(
       throw new HttpsError('invalid-argument', 'Either contactSheet or gifUrl is required');
     }
 
-    const apiKey = openaiApiKey.value();
+    // Trim whitespace/newlines — secrets stored via CLI often have trailing \n
+    const apiKey = openaiApiKey.value()?.trim();
     if (!apiKey) {
       throw new HttpsError('internal', 'OpenAI API key not configured');
+    }
+    if (apiKey.length < 30) {
+      console.error('[analyzeMovement] API key appears truncated (length:', apiKey.length, ')');
+      throw new HttpsError('internal', 'OpenAI API key appears invalid — check Firebase secrets');
     }
 
     const isContactSheet = !!contactSheet;
@@ -7813,7 +7818,7 @@ export const generateVoice = onCall(
       throw new HttpsError('invalid-argument', 'text must be under 500 characters');
     }
 
-    const apiKey = openaiApiKey.value();
+    const apiKey = openaiApiKey.value()?.trim();
     if (!apiKey) {
       throw new HttpsError('internal', 'OpenAI API key not configured');
     }
