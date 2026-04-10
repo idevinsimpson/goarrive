@@ -818,7 +818,7 @@ export const createCheckoutSession = onCall(
  *   The ledger entry records the refund amount and marks the entry as refunded.
  */
 export const stripeWebhook = onRequest(
-  { secrets: [stripeSecretKey, stripeWebhookSecret, stripeWebhookSecretConnect] },
+  { secrets: [stripeSecretKey, stripeWebhookSecret] },
   async (req, res) => {
     const sig = req.headers['stripe-signature'] as string;
     if (!sig) {
@@ -827,97 +827,121 @@ export const stripeWebhook = onRequest(
     }
 
     const stripe = getStripe(stripeSecretKey.value());
-    let event!: Stripe.Event;
+    let event: Stripe.Event;
 
-    // Try platform webhook secret first, then connected account secret
-    const secrets = [
-      stripeWebhookSecret.value(),
-      stripeWebhookSecretConnect.value(),
-    ].filter(Boolean);
-
-    let verified = false;
-    for (const secret of secrets) {
-      try {
-        event = stripe.webhooks.constructEvent(req.rawBody, sig, secret);
-        verified = true;
-        break;
-      } catch (_err) {
-        // Try next secret
-      }
-    }
-
-    if (!verified) {
-      console.error('[stripeWebhook] Signature verification failed with all secrets');
+    try {
+      event = stripe.webhooks.constructEvent(req.rawBody, sig, stripeWebhookSecret.value().trim());
+    } catch (err) {
+      console.error('[stripeWebhook] Signature verification failed:', err);
       res.status(400).send('Webhook signature error: verification failed');
       return;
     }
 
-    // Log connected account info if present
-    const connectedAccountId = (event as any).account;
-    if (connectedAccountId) {
-      console.log(`[stripeWebhook] Connected account event from: ${connectedAccountId}`);
-    }
-
-    // ── Idempotency: check if already processed ──
-    const eventRef = db.collection('billingEvents').doc(event.id);
-    const existing = await eventRef.get();
-    if (existing.exists) {
-      console.log('[stripeWebhook] Already processed event', event.id, '— skipping');
-      res.status(200).send('Already processed');
-      return;
-    }
-
-    // ── Store raw event (append-only) ──
-    const billingEvent = {
-      eventId: event.id,
-      stripeEventId: event.id,
-      stripeEventType: event.type,
-      rawPayload: event as unknown as Record<string, unknown>,
-      processedAt: FieldValue.serverTimestamp(),
-    };
-
-    try {
-      await eventRef.set(billingEvent);
-    } catch (err) {
-      console.error('[stripeWebhook] Failed to store billing event:', err);
-      res.status(500).send('Failed to store event');
-      return;
-    }
-
-    // ── Process event ──
-    try {
-      switch (event.type) {
-        case 'checkout.session.completed':
-          await handleCheckoutSessionCompleted(event.data.object as Stripe.Checkout.Session, event.id);
-          break;
-        case 'invoice.paid':
-          await handleInvoicePaid(event.data.object as Stripe.Invoice, event.id);
-          break;
-        case 'invoice.payment_failed':
-          await handleInvoicePaymentFailed(event.data.object as Stripe.Invoice, event.id);
-          break;
-        case 'customer.subscription.created':
-        case 'customer.subscription.updated':
-          await handleSubscriptionUpsert(event.data.object as Stripe.Subscription, event.id);
-          break;
-        case 'customer.subscription.deleted':
-          await handleSubscriptionDeleted(event.data.object as Stripe.Subscription, event.id);
-          break;
-        case 'charge.refunded':
-          await handleChargeRefunded(event.data.object as Stripe.Charge, event.id);
-          break;
-        default:
-          console.log('[stripeWebhook] Unhandled event type:', event.type);
-      }
-    } catch (err) {
-      console.error('[stripeWebhook] Error processing event', event.id, ':', err);
-      // Don't return 500 — Stripe will retry. Log and return 200 to avoid retry loops
-      // for non-transient errors. For transient errors, throw to trigger retry.
-    }
-
-    res.status(200).send('OK');
+    await processStripeEvent('stripeWebhook', event, res);
   }
 );
+
+// ─── 6b. stripeConnectWebhook ─────────────────────────────────────────────────
+/**
+ * Handles Stripe webhook events from connected accounts (coach payouts via
+ * Stripe Connect). Uses STRIPE_WEBHOOK_SECRET_CONNECT for signature verification.
+ *
+ * Handles the same event types as stripeWebhook — both feed into the same
+ * idempotent processing pipeline.
+ */
+export const stripeConnectWebhook = onRequest(
+  { secrets: [stripeSecretKey, stripeWebhookSecretConnect] },
+  async (req, res) => {
+    const sig = req.headers['stripe-signature'] as string;
+    if (!sig) {
+      res.status(400).send('Missing stripe-signature header');
+      return;
+    }
+
+    const stripe = getStripe(stripeSecretKey.value());
+    let event: Stripe.Event;
+
+    try {
+      event = stripe.webhooks.constructEvent(req.rawBody, sig, stripeWebhookSecretConnect.value().trim());
+    } catch (err) {
+      console.error('[stripeConnectWebhook] Signature verification failed:', err);
+      res.status(400).send('Webhook signature error: verification failed');
+      return;
+    }
+
+    const connectedAccountId = (event as any).account;
+    if (connectedAccountId) {
+      console.log(`[stripeConnectWebhook] Connected account event from: ${connectedAccountId}`);
+    }
+
+    await processStripeEvent('stripeConnectWebhook', event, res);
+  }
+);
+
+/**
+ * Shared event processing for both platform and connected account webhooks.
+ * Idempotent: uses stripeEventId as Firestore doc ID.
+ */
+async function processStripeEvent(tag: string, event: Stripe.Event, res: any) {
+  // ── Idempotency: check if already processed ──
+  const eventRef = db.collection('billingEvents').doc(event.id);
+  const existing = await eventRef.get();
+  if (existing.exists) {
+    console.log(`[${tag}] Already processed event`, event.id, '— skipping');
+    res.status(200).send('Already processed');
+    return;
+  }
+
+  // ── Store raw event (append-only) ──
+  const billingEvent = {
+    eventId: event.id,
+    stripeEventId: event.id,
+    stripeEventType: event.type,
+    rawPayload: event as unknown as Record<string, unknown>,
+    processedAt: FieldValue.serverTimestamp(),
+  };
+
+  try {
+    await eventRef.set(billingEvent);
+  } catch (err) {
+    console.error(`[${tag}] Failed to store billing event:`, err);
+    res.status(500).send('Failed to store event');
+    return;
+  }
+
+  // ── Process event ──
+  try {
+    switch (event.type) {
+      case 'checkout.session.completed':
+        await handleCheckoutSessionCompleted(event.data.object as Stripe.Checkout.Session, event.id);
+        break;
+      case 'invoice.paid':
+        await handleInvoicePaid(event.data.object as Stripe.Invoice, event.id);
+        break;
+      case 'invoice.payment_failed':
+        await handleInvoicePaymentFailed(event.data.object as Stripe.Invoice, event.id);
+        break;
+      case 'customer.subscription.created':
+      case 'customer.subscription.updated':
+        await handleSubscriptionUpsert(event.data.object as Stripe.Subscription, event.id);
+        break;
+      case 'customer.subscription.deleted':
+        await handleSubscriptionDeleted(event.data.object as Stripe.Subscription, event.id);
+        break;
+      case 'charge.refunded':
+        await handleChargeRefunded(event.data.object as Stripe.Charge, event.id);
+        break;
+      default:
+        console.log(`[${tag}] Unhandled event type:`, event.type);
+    }
+  } catch (err) {
+    console.error(`[${tag}] Error processing event`, event.id, ':', err);
+    // Don't return 500 — Stripe will retry. Log and return 200 to avoid retry loops
+    // for non-transient errors. For transient errors, throw to trigger retry.
+  }
+
+  res.status(200).send('OK');
+}
 
 // ── Webhook handlers ──────────────────────────────────────────────────────────
 
