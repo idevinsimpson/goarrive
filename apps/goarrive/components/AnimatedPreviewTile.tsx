@@ -1,12 +1,13 @@
 /**
  * AnimatedPreviewTile — Viewport-aware media tile for the Build library.
  *
- * Renders either a placeholder (solid bg) or the animated GIF based on
- * whether the preview engine has promoted this tile to 'animating'.
- *
- * Key rule: the <Image> element is ONLY mounted when promoted. This is the
- * only reliable way to prevent GIF decode on web (where <img> auto-animates).
- * Unmounting the Image when demoted frees decode buffers and memory.
+ * Three rendering states:
+ *   1. Poster (always-on) — sub-72px tiles always show the thumbnail image as a
+ *      static poster. Decode cost is trivial at that size and the movement pose
+ *      is visible immediately. No blank rectangles.
+ *   2. Placeholder — tiles ≥72px that are NOT promoted show a solid bg placeholder.
+ *      The <Image> is unmounted to prevent GIF decode during scroll.
+ *   3. Animated — tiles ≥72px that ARE promoted mount the <Image> (GIF auto-plays).
  */
 import React, { useEffect, memo } from 'react';
 import { View, Image, StyleSheet } from 'react-native';
@@ -53,15 +54,26 @@ export const AnimatedPreviewTile = memo(function AnimatedPreviewTile({
     registerTile(itemId, priority);
   }, [itemId, priority, registerTile]);
 
-  // Size gate: below threshold → never animate, always placeholder
   const shortestSide = Math.min(width, height);
-  const sizeAllowsAnimation = shortestSide >= SIZE_THRESHOLDS.stillOnly;
-  const shouldMount = isAnimating && sizeAllowsAnimation && !!uri;
 
-  if (shouldMount) {
+  // Sub-72px tiles: always show image as poster — decode cost is trivial at this
+  // size and the user sees the actual movement pose instead of a blank rectangle.
+  if (shortestSide < SIZE_THRESHOLDS.stillOnly && uri) {
     return (
       <Image
-        source={{ uri: uri! }}
+        source={{ uri }}
+        style={{ width, height, borderRadius }}
+        resizeMode="cover"
+      />
+    );
+  }
+
+  // ≥72px tiles: only mount <Image> when the engine has promoted this tile.
+  // Keeps GIF decode off during scroll for larger (more expensive) tiles.
+  if (isAnimating && uri) {
+    return (
+      <Image
+        source={{ uri }}
         style={{ width, height, borderRadius }}
         resizeMode="cover"
       />
@@ -99,15 +111,10 @@ export const MosaicPreviewTile = memo(function MosaicPreviewTile({
 }: MosaicPreviewTileProps) {
   const shortestSide = Math.min(width, height);
 
-  // Gate 1: parent must be promoted
-  // Gate 2: tile must be above stillOnly size threshold (72px)
-  // Gate 3: tile index must be within per-folder cap
-  const shouldMount =
-    parentIsAnimating &&
-    shortestSide >= SIZE_THRESHOLDS.stillOnly &&
-    index < BUDGET.maxMiniPreviewsPerFolder;
-
-  if (shouldMount) {
+  // Sub-72px tiles: always show the image as a static poster regardless of
+  // scroll state or promotion. At this size the decode cost is negligible and
+  // the user sees the actual movement pose instead of a blank mini-rectangle.
+  if (shortestSide < SIZE_THRESHOLDS.stillOnly) {
     return (
       <Image
         source={{ uri }}
@@ -117,7 +124,18 @@ export const MosaicPreviewTile = memo(function MosaicPreviewTile({
     );
   }
 
-  // Not promoted — show placeholder. No Image mounted = no GIF decode.
+  // ≥72px tiles: only mount when parent is promoted AND within per-folder cap.
+  if (parentIsAnimating && index < BUDGET.maxMiniPreviewsPerFolder) {
+    return (
+      <Image
+        source={{ uri }}
+        style={{ width, height, borderRadius }}
+        resizeMode="cover"
+      />
+    );
+  }
+
+  // ≥72px but not promoted — placeholder (prevents GIF decode during scroll)
   return (
     <View style={[styles.miniPlaceholder, { width, height, borderRadius }]} />
   );
