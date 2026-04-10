@@ -1055,6 +1055,7 @@ const st = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
+    paddingBottom: 40,
     gap: 16,
   },
 

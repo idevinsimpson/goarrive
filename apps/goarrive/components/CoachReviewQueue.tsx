@@ -15,6 +15,7 @@ import {
   TextInput,
   TouchableOpacity,
   FlatList,
+  ScrollView,
   StyleSheet,
   Modal,
   Platform,
@@ -473,6 +474,7 @@ export default function CoachReviewQueue({
                   </TouchableOpacity>
                 </View>
 
+                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
                 <Text style={st.detailWorkout}>{activeLog.workoutName}</Text>
                 <Text style={st.detailMeta}>
                   {formatDate(activeLog.completedAt)}
@@ -557,6 +559,7 @@ export default function CoachReviewQueue({
                     </Text>
                   )}
                 </TouchableOpacity>
+                </ScrollView>
               </View>
             </View>
           </Modal>
@@ -805,8 +808,9 @@ const st = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 24,
-    paddingBottom: 40,
+    paddingBottom: 0,
     maxHeight: '85%',
+    overflow: 'hidden' as const,
   },
   detailHeader: {
     flexDirection: 'row',

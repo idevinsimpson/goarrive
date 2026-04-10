@@ -530,7 +530,7 @@ const st = StyleSheet.create({
     alignItems: 'center',
   },
   listWrap: {
-    maxHeight: 320,
+    flex: 1,
     paddingHorizontal: 20,
   },
   memberRow: {

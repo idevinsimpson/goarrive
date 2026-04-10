@@ -346,6 +346,7 @@ const st = StyleSheet.create({
     fontFamily: FH,
   },
   scrollArea: {
+    flex: 1,
     paddingHorizontal: 16,
   },
   countText: {
