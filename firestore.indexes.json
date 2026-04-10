@@ -341,7 +341,7 @@
       ]
     },
     {
-      "collectionGroup": "users",
+      "collectionGroup": "coaches",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "funnelSubdomain", "order": "ASCENDING" }

@@ -76,7 +76,7 @@ export default function MyPageScreen() {
     if (!coachId) return;
     (async () => {
       try {
-        const snap = await getDoc(doc(db, 'users', coachId));
+        const snap = await getDoc(doc(db, 'coaches', coachId));
         if (snap.exists()) {
           const d = snap.data();
           setSubdomain(d.funnelSubdomain || '');
@@ -119,7 +119,7 @@ export default function MyPageScreen() {
   async function checkSubdomainUnique(slug: string): Promise<boolean> {
     if (slug === savedSubdomain) return true; // unchanged
     const q = query(
-      collection(db, 'users'),
+      collection(db, 'coaches'),
       where('funnelSubdomain', '==', slug),
     );
     const snap = await getDocs(q);
@@ -200,7 +200,7 @@ export default function MyPageScreen() {
       );
 
       await setDoc(
-        doc(db, 'users', coachId!),
+        doc(db, 'coaches', coachId!),
         {
           funnelSubdomain: subdomain,
           funnelHeadline: headline.trim(),
