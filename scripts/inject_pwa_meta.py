@@ -126,31 +126,22 @@ HEAD_INJECT = """
       /* ═══════════════════════════════════════════════════════════════════
          3. MODAL SCROLL FIX — iOS Safari PWA
          React Native Web modals use [role="dialog"][aria-modal="true"].
-         Their ScrollViews need:
-           a) -webkit-overflow-scrolling: touch for momentum scrolling
-           b) The sheet container needs overflow:hidden for proper containment
-           c) Undo any height constraints from the tab screen rules above
+         Their ScrollViews need momentum scrolling on iOS Safari.
+
+         IMPORTANT: Do NOT override height/max-height/flex here.
+         Those are set by component inline styles (e.g. flex:1 on
+         ScrollViews, maxHeight:'80%' on sheets). Overriding them
+         with !important breaks scroll containment — the ScrollView
+         expands to content height and gets clipped by the parent.
          ═══════════════════════════════════════════════════════════════════ */
 
-      /* Modal ScrollViews: ensure iOS momentum scrolling works */
+      /* Modal ScrollViews: enable iOS momentum scrolling only */
       [role="dialog"] .r-agouwx,
       [aria-modal="true"] .r-agouwx {
         -webkit-overflow-scrolling: touch !important;
-        overflow-y: auto !important;
-        /* Undo any tab-screen height constraints that might leak */
-        height: auto !important;
-        max-height: none !important;
-        flex: 1 1 0% !important;
       }
 
-      /* Modal sheet containers (the ones with maxHeight %) need overflow:hidden
-         to create a proper scroll containment context on iOS Safari.
-         These are the direct children of the overlay that have border-radius. */
-      [role="dialog"] > div > div > div {
-        overflow: hidden !important;
-      }
-
-      /* Ensure the modal overlay itself fills the viewport properly */
+      /* Ensure the modal overlay itself supports momentum scrolling */
       [role="dialog"] {
         -webkit-overflow-scrolling: touch !important;
       }
