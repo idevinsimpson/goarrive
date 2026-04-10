@@ -113,6 +113,8 @@ export function usePreviewEngine(): PreviewEngineResult {
 
   // ── Promotion logic ─────────────────────────────────────────────────────
   const runPromotion = useCallback(() => {
+    // Cancel any in-progress stagger chain to prevent parallel promotion races
+    if (staggerTimerRef.current) clearTimeout(staggerTimerRef.current);
     promotionAbortRef.current = false;
 
     // Gather visible items sorted by priority
@@ -123,7 +125,7 @@ export function usePreviewEngine(): PreviewEngineResult {
     }
     candidates.sort((a, b) => a.priority - b.priority);
 
-    // Apply budget caps
+    // Apply budget caps — count already-promoted items against caps
     let standaloneCount = 0;
     let folderCount = 0;
     let totalCount = 0;
@@ -133,15 +135,18 @@ export function usePreviewEngine(): PreviewEngineResult {
       if (totalCount >= BUDGET.maxTotalAnimated) break;
       if (priority === 1 && standaloneCount >= BUDGET.maxStandaloneMovements) continue;
       if (priority === 2 && folderCount >= BUDGET.maxFolderCards) continue;
-      // Priority 3 (mini-tiles) are handled inside WorkoutMosaic, not here
 
       if (priority === 1) standaloneCount++;
       if (priority === 2) folderCount++;
       totalCount++;
-      toPromote.push(id);
+
+      // Skip items already animating — they count against budget but don't need re-promotion
+      if (!animatingRef.current.has(id)) {
+        toPromote.push(id);
+      }
     }
 
-    // Stagger promotions
+    // Stagger only genuinely new promotions
     if (toPromote.length === 0) return;
 
     const promoteNext = (index: number) => {
