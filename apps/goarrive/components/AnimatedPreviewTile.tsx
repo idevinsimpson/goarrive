@@ -2,17 +2,7 @@
  * AnimatedPreviewTile — Viewport-aware media tile for the Build library.
  *
  * Every tile respects scroll state. No GIF is ever visible during active scroll.
- *
- * Rendering modes for ≥72px tiles (engine-controlled):
- *   - Scrolling: placeholder only (GIF unmounted, zero decode)
- *   - Idle + promoted: GIF crossfades in over placeholder (250ms on first frame)
- *   - Idle + not promoted: placeholder (over budget)
- *
- * Rendering modes for sub-72px tiles (mosaic mini-tiles):
- *   - Scrolling: placeholder (dark bg, no GIF mounted)
- *   - Idle: GIF mounted (shows movement pose; animates at tiny size, acceptable)
- *
- * On demotion / scroll start: GIF unmounts instantly, placeholder visible.
+ * FlatList re-renders items via extraData={animatingIds} when engine state changes.
  */
 import React, { useEffect, useRef, useCallback, memo } from 'react';
 import { View, Image, Animated, StyleSheet, Platform } from 'react-native';
@@ -20,6 +10,11 @@ import { SIZE_THRESHOLDS, BUDGET, type TilePriority } from '../hooks/usePreviewE
 
 const CROSSFADE_DURATION_MS = 250;
 const USE_NATIVE_DRIVER = Platform.OS !== 'web';
+
+// ── Debug: log every Image mount (temporary — remove after verification) ────
+const __imgLog = (component: string, uri: string, scrollState: string, reason: string) => {
+  console.log(`[IMG MOUNT] ${component} | scroll=${scrollState} | reason=${reason} | uri=${uri.slice(-40)}`);
+};
 
 // ── Standalone preview tile (movement cards, folder cards) ──────────────────
 
@@ -48,17 +43,14 @@ export const AnimatedPreviewTile = memo(function AnimatedPreviewTile({
   borderRadius = 0,
   fallbackIcon,
 }: AnimatedPreviewTileProps) {
-  // Register with engine
   useEffect(() => {
     registerTile(itemId, priority);
   }, [itemId, priority, registerTile]);
 
-  // Crossfade opacity
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const prevAnimating = useRef(false);
   const prevItemId = useRef(itemId);
 
-  // Reset fade when promotion starts or cell is recycled
   if (
     (isAnimating && !prevAnimating.current) ||
     (itemId !== prevItemId.current)
@@ -76,30 +68,27 @@ export const AnimatedPreviewTile = memo(function AnimatedPreviewTile({
     }).start();
   }, [fadeAnim]);
 
-  const shortestSide = Math.min(width, height);
-
-  // ALL tiles ≥72px: layered crossfade, engine-controlled
-  // Sub-72px standalone tiles are rare in practice (list view uses raw Image),
-  // but if they occur, treat them the same — engine controls visibility.
   const shouldShowGif = isAnimating && !!uri;
+
+  // Debug: log when GIF mounts
+  if (shouldShowGif) {
+    __imgLog('AnimatedPreviewTile', uri!, isAnimating ? 'promoted' : 'NOT-promoted', `item=${itemId}`);
+  }
 
   return (
     <View style={{ width, height, borderRadius, overflow: 'hidden' }}>
-      {/* Base layer: placeholder (always rendered) */}
       <View style={[styles.placeholder, StyleSheet.absoluteFill, { borderRadius }]}>
         {fallbackIcon || null}
       </View>
-
-      {/* Top layer: GIF, only mounted when promoted, fades in on first frame */}
       {shouldShowGif && (
         <Animated.Image
           source={{ uri: uri! }}
           style={[
             StyleSheet.absoluteFill,
-            { borderRadius, opacity: shortestSide < SIZE_THRESHOLDS.stillOnly ? 1 : fadeAnim },
+            { borderRadius, opacity: fadeAnim },
           ]}
           resizeMode="cover"
-          onLoad={shortestSide >= SIZE_THRESHOLDS.stillOnly ? onGifLoad : undefined}
+          onLoad={onGifLoad}
         />
       )}
     </View>
@@ -112,11 +101,8 @@ interface MosaicPreviewTileProps {
   uri: string;
   width: number;
   height: number;
-  /** Is the parent folder/workout card promoted to animating? */
   parentIsAnimating: boolean;
-  /** Is the scroll state idle? (controls sub-72px tile visibility) */
   scrollIdle: boolean;
-  /** Index of this tile within the mosaic (0-based) */
   index: number;
   borderRadius?: number;
 }
@@ -132,11 +118,10 @@ export const MosaicPreviewTile = memo(function MosaicPreviewTile({
 }: MosaicPreviewTileProps) {
   const shortestSide = Math.min(width, height);
 
-  // Sub-72px tiles: show GIF ONLY when scroll is idle.
-  // During scroll → placeholder (no GIF mounted, no animation visible).
-  // When idle → mount GIF (shows movement pose; tiny animation acceptable at rest).
+  // Sub-72px: show only when idle
   if (shortestSide < SIZE_THRESHOLDS.stillOnly) {
     if (scrollIdle) {
+      __imgLog('MosaicPreviewTile(sub72)', uri, scrollIdle ? 'idle' : 'NOT-idle', `size=${shortestSide.toFixed(0)}`);
       return (
         <Image
           source={{ uri }}
@@ -150,7 +135,7 @@ export const MosaicPreviewTile = memo(function MosaicPreviewTile({
     );
   }
 
-  // ≥72px tiles: engine-controlled with crossfade
+  // ≥72px: engine-controlled with crossfade
   const isPromoted = parentIsAnimating && index < BUDGET.maxMiniPreviewsPerFolder;
 
   return (
@@ -196,6 +181,10 @@ const MosaicCrossfadeTile = memo(function MosaicCrossfadeTile({
       useNativeDriver: USE_NATIVE_DRIVER,
     }).start();
   }, [fadeAnim]);
+
+  if (isPromoted) {
+    __imgLog('MosaicCrossfadeTile(72+)', uri, isPromoted ? 'promoted' : 'NOT-promoted', `size=72+`);
+  }
 
   return (
     <View style={{ width, height, borderRadius, overflow: 'hidden' }}>

@@ -895,6 +895,7 @@ function BuildScreenInner() {
             gap: GRID_GAP,
             marginBottom: 0,
           } : undefined}
+          extraData={previewEngine.animatingIds}
           refreshControl={
             <RefreshControl refreshing={loading} onRefresh={() => setLoading(true)} tintColor="#F5A623" />
           }
