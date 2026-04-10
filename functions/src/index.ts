@@ -438,12 +438,16 @@ export const createCheckoutSession = onCall(
       nutritionAddOn?: boolean;
       displayedMonthlyPrice?: number;
       displayedPayInFullTotal?: number;
-      billingInterval?: 'week' | 'month';
+      billingInterval?: 'week' | 'month' | 'year';
     };
 
-    // Weekly billing: only applies to 'monthly' (recurring) payment option
-    const billingInterval: 'week' | 'month' = (paymentOption === 'monthly' && clientBillingInterval === 'week') ? 'week' : 'month';
+    // Billing interval: only applies to 'monthly' (recurring) payment option
+    const billingInterval: 'week' | 'month' | 'year' =
+      paymentOption === 'monthly' && (clientBillingInterval === 'week' || clientBillingInterval === 'year')
+        ? clientBillingInterval
+        : 'month';
     const isWeekly = billingInterval === 'week';
+    const isYearly = billingInterval === 'year';
 
     if (!planId || !memberId || !paymentOption) {
       throw new HttpsError('invalid-argument', 'planId, memberId, and paymentOption are required');
@@ -684,8 +688,10 @@ export const createCheckoutSession = onCall(
       // Phase 2: indefinite at continuationMonthlyPrice (monthly)
       const recurringAmount = isWeekly
         ? Math.round(displayMonthlyPrice * 100 / (52 / 12)) // weekly in cents
-        : displayMonthlyPrice * 100; // monthly in cents
-      const intervalLabel = isWeekly ? 'Weekly' : 'Monthly';
+        : isYearly
+          ? displayMonthlyPrice * 12 * 100 // yearly in cents
+          : displayMonthlyPrice * 100; // monthly in cents
+      const intervalLabel = isWeekly ? 'Weekly' : isYearly ? 'Yearly' : 'Monthly';
       const session = await stripe.checkout.sessions.create(
         {
           customer: stripeCustomerId,

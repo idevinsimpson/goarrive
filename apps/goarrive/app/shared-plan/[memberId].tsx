@@ -438,7 +438,7 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
   onChange: (updates: Partial<MemberPlanData>) => void;
 }) {
   const [selected, setSelected] = useState<'monthly' | 'pay_in_full' | null>(null);
-  const [billingInterval, setBillingInterval] = useState<'month' | 'week'>('month');
+  const [billingInterval, setBillingInterval] = useState<'month' | 'week' | 'year'>('month');
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -460,6 +460,7 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
 
   const monthlyPrice = pricing.displayMonthlyPrice;
   const weeklyPrice = Math.round(monthlyPrice / (52 / 12));
+  const yearlyPrice = monthlyPrice * 12;
   const payInFullTotal = pricing.payInFullPrice;
   const payInFullMonthly = Math.round(payInFullTotal / (plan.contractMonths || 12));
   const payInFullSavings = Math.round(monthlyPrice * (plan.contractMonths || 12) - payInFullTotal);
@@ -508,7 +509,7 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
         // Send exact displayed prices so Stripe charges match what the member sees
         displayedMonthlyPrice: Math.round(monthlyPrice),
         displayedPayInFullTotal: Math.round(payInFullTotal),
-        ...(selected === 'monthly' && billingInterval === 'week' ? { billingInterval: 'week' as const } : {}),
+        ...(selected === 'monthly' && billingInterval !== 'month' ? { billingInterval: billingInterval as 'week' | 'year' } : {}),
       });
       const { sessionUrl } = result.data as { sessionUrl: string };
       if (sessionUrl) {
@@ -550,13 +551,19 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
             </View>
             <View style={{ alignItems: 'flex-end' }}>
               <Text style={ips.optionPrice}>
-                {billingInterval === 'week' ? formatCurrency(weeklyPrice) : formatCurrency(monthlyPrice)}
+                {billingInterval === 'week' ? formatCurrency(weeklyPrice) : billingInterval === 'year' ? formatCurrency(yearlyPrice) : formatCurrency(monthlyPrice)}
               </Text>
-              <Text style={ips.optionPriceSuffix}>{billingInterval === 'week' ? '/wk' : '/mo'}</Text>
+              <Text style={ips.optionPriceSuffix}>{billingInterval === 'week' ? '/wk' : billingInterval === 'year' ? '/yr' : '/mo'}</Text>
             </View>
           </View>
-          {/* Weekly / Monthly toggle */}
+          {/* Weekly / Monthly / Yearly toggle */}
           <View style={ips.intervalToggleRow}>
+            <Pressable
+              onPress={() => setBillingInterval('week')}
+              style={[ips.intervalPill, billingInterval === 'week' && ips.intervalPillActive]}
+            >
+              <Text style={[ips.intervalPillText, billingInterval === 'week' && ips.intervalPillTextActive]}>Weekly</Text>
+            </Pressable>
             <Pressable
               onPress={() => setBillingInterval('month')}
               style={[ips.intervalPill, billingInterval === 'month' && ips.intervalPillActive]}
@@ -564,10 +571,10 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
               <Text style={[ips.intervalPillText, billingInterval === 'month' && ips.intervalPillTextActive]}>Monthly</Text>
             </Pressable>
             <Pressable
-              onPress={() => setBillingInterval('week')}
-              style={[ips.intervalPill, billingInterval === 'week' && ips.intervalPillActive]}
+              onPress={() => setBillingInterval('year')}
+              style={[ips.intervalPill, billingInterval === 'year' && ips.intervalPillActive]}
             >
-              <Text style={[ips.intervalPillText, billingInterval === 'week' && ips.intervalPillTextActive]}>Weekly</Text>
+              <Text style={[ips.intervalPillText, billingInterval === 'year' && ips.intervalPillTextActive]}>Yearly</Text>
             </Pressable>
           </View>
           <View style={ips.optionDetail}>
@@ -579,6 +586,12 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
               <View style={ips.detailRow}>
                 <Text style={ips.detailLabel}>Weekly rate</Text>
                 <Text style={ips.detailValue}>{formatCurrency(weeklyPrice)}/wk</Text>
+              </View>
+            )}
+            {billingInterval === 'year' && (
+              <View style={ips.detailRow}>
+                <Text style={ips.detailLabel}>Yearly rate</Text>
+                <Text style={ips.detailValue}>{formatCurrency(yearlyPrice)}/yr</Text>
               </View>
             )}
             <View style={ips.detailRow}>
@@ -691,7 +704,9 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
               : selected === 'monthly'
               ? billingInterval === 'week'
                 ? `Pay ${formatCurrency(weeklyPrice)}/wk Now`
-                : `Pay ${formatCurrency(Math.round(monthlyPrice))}/mo Now`
+                : billingInterval === 'year'
+                  ? `Pay ${formatCurrency(yearlyPrice)}/yr Now`
+                  : `Pay ${formatCurrency(Math.round(monthlyPrice))}/mo Now`
               : 'Select a payment option'}
           </Text>
         )}
