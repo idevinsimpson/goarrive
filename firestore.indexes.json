@@ -339,6 +339,13 @@
         { "fieldPath": "stripeEventType", "order": "ASCENDING" },
         { "fieldPath": "processedAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "funnelSubdomain", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

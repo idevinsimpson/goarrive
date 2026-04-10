@@ -174,7 +174,18 @@ export default function AccountPanel({ visible, onClose }: Props) {
     onClose();
   }
 
+  function handleMyPage() {
+    onClose();
+    setTimeout(() => router.push('/(app)/my-page'), 240);
+  }
+
   const menuItems: MenuItem[] = [
+    {
+      icon: 'link',
+      label: 'My Page',
+      sublabel: 'Your public landing page',
+      onPress: handleMyPage,
+    },
     {
       icon: 'settings',
       label: 'Settings',
