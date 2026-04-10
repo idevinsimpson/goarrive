@@ -417,40 +417,42 @@ export default function MovementForm({
     setCreateStep('processing');
 
     try {
-      // Step 1: Generate GIF thumbnail
-      setProcessingStatus('Creating thumbnail...');
+      // Step 1: Start GIF thumbnail generation + AI analysis in parallel
+      setProcessingStatus('Analyzing movement...');
       setProcessingProgress(0.1);
 
-      const gifUrl = await generateAndUploadGif(videoUrl, crop);
+      // GIF generation (for thumbnail display) runs alongside AI analysis
+      const gifPromise = generateAndUploadGif(videoUrl, crop);
 
-      setProcessingProgress(0.4);
-
-      // Step 2: AI Analysis (runs on the GIF)
+      // AI analysis uses a lightweight contact sheet (12 frames) instead of the full GIF
       let aiData: Record<string, any> = {};
-      if (gifUrl) {
-        setProcessingStatus('Analyzing movement...');
-        setProcessingProgress(0.5);
-        try {
-          const analysis = await analyzeMovementMedia(gifUrl);
-          if (analysis) {
-            aiData = {
-              name: analysis.name || '',
-              category: analysis.category || '',
-              equipment: analysis.equipment || '',
-              difficulty: analysis.difficulty || '',
-              muscleGroups: analysis.muscleGroups || [],
-              description: analysis.description || '',
-              regression: analysis.regression || '',
-              progression: analysis.progression || '',
-              contraindications: analysis.contraindications || '',
-              workSec: analysis.workSec || 30,
-              restSec: analysis.restSec || 15,
-            };
-          }
-        } catch (aiErr) {
-          console.warn('[MovementForm] AI analysis failed, saving without:', aiErr);
+      try {
+        setProcessingProgress(0.2);
+        const analysis = await analyzeMovementMedia(videoUrl, crop);
+        if (analysis) {
+          aiData = {
+            name: analysis.name || '',
+            category: analysis.category || '',
+            equipment: analysis.equipment || '',
+            difficulty: analysis.difficulty || '',
+            muscleGroups: analysis.muscleGroups || [],
+            description: analysis.description || '',
+            regression: analysis.regression || '',
+            progression: analysis.progression || '',
+            contraindications: analysis.contraindications || '',
+            workSec: analysis.workSec || 30,
+            restSec: analysis.restSec || 15,
+          };
         }
+      } catch (aiErr) {
+        console.warn('[MovementForm] AI analysis failed, saving without:', aiErr);
       }
+
+      setProcessingProgress(0.5);
+      setProcessingStatus('Creating thumbnail...');
+
+      // Wait for GIF to finish (may already be done)
+      const gifUrl = await gifPromise;
 
       setProcessingProgress(0.7);
       setProcessingStatus('Saving movement...');
