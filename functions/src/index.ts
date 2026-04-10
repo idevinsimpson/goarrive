@@ -831,8 +831,8 @@ export const stripeWebhook = onRequest(
 
     // Try platform webhook secret first, then connected account secret
     const secrets = [
-      stripeWebhookSecret.value(),
-      stripeWebhookSecretConnect.value(),
+      stripeWebhookSecret.value().trim(),
+      stripeWebhookSecretConnect.value().trim(),
     ].filter(Boolean);
 
     let verified = false;
