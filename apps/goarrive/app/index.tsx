@@ -1,17 +1,17 @@
 /**
- * Root index — Role-based routing
+ * Root index — Landing page + Role-based routing
  *
- * Routes authenticated users to the appropriate dashboard based on their role:
- *   - platformAdmin → (app)/dashboard (coach/admin dashboard)
- *   - coach → (app)/dashboard (coach dashboard)
- *   - member → (member)/home (member dashboard)
- *   - no role (bootstrap) → (app)/dashboard (default to coach for bootstrapped accounts)
- *
- * Unauthenticated users are sent to the login screen.
+ * Unauthenticated visitors see the public marketing landing page.
+ * Authenticated users are routed to the appropriate dashboard based on role:
+ *   - platformAdmin → (app)/dashboard
+ *   - coach → (app)/dashboard
+ *   - member → (member)/home
+ *   - no role (bootstrap) → (app)/dashboard
  */
 import { Redirect } from 'expo-router';
 import { useAuth } from '../lib/AuthContext';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import LandingPage from '../components/landing/LandingPage';
 
 export default function Index() {
   const { user, claims, loading } = useAuth();
@@ -24,8 +24,9 @@ export default function Index() {
     );
   }
 
+  // Unauthenticated → show public landing page
   if (!user) {
-    return <Redirect href="/(auth)/login" />;
+    return <LandingPage />;
   }
 
   // Determine role from custom claims

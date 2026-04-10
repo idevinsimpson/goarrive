@@ -339,6 +339,13 @@
         { "fieldPath": "stripeEventType", "order": "ASCENDING" },
         { "fieldPath": "processedAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "coaches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "funnelSubdomain", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [
