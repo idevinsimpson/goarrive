@@ -140,7 +140,7 @@ function useGridLayout() {
  *  Tight borders, distinct background, top-to-bottom left-to-right layout. */
 const WORKOUT_CARD_BG = '#1A2332'; // Slightly lighter than page bg so cards stand out
 
-function WorkoutMosaic({ thumbs, width, height, isAnimating = false }: { thumbs: string[]; width: number; height: number; isAnimating?: boolean }) {
+function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle = false }: { thumbs: string[]; width: number; height: number; isAnimating?: boolean; scrollIdle?: boolean }) {
   const gap = 2; // tight gap between mini GIFs
   const inset = 6; // small padding inside the card
   const innerW = width - inset * 2;
@@ -168,6 +168,7 @@ function WorkoutMosaic({ thumbs, width, height, isAnimating = false }: { thumbs:
           width={clampedW}
           height={clampedH}
           parentIsAnimating={isAnimating}
+          scrollIdle={scrollIdle}
           index={0}
           borderRadius={6}
         />
@@ -205,6 +206,7 @@ function WorkoutMosaic({ thumbs, width, height, isAnimating = false }: { thumbs:
             width={finalCellW}
             height={finalCellH}
             parentIsAnimating={isAnimating}
+            scrollIdle={scrollIdle}
             index={i}
             borderRadius={3}
           />
@@ -592,6 +594,7 @@ function BuildScreenInner() {
                 width={cardWidth}
                 height={cardHeight}
                 isAnimating={folderAnimating}
+                scrollIdle={previewEngine.scrollState === 'idle'}
               />
             ) : (
               <AnimatedPreviewTile
@@ -675,6 +678,7 @@ function BuildScreenInner() {
               width={cardWidth}
               height={cardHeight}
               isAnimating={tileAnimating}
+              scrollIdle={previewEngine.scrollState === 'idle'}
             />
           ) : singleThumbUri ? (
             <AnimatedPreviewTile

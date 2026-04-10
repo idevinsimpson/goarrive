@@ -111,6 +111,13 @@ export function usePreviewEngine(): PreviewEngineResult {
     tileRegistryRef.current.set(id, priority);
   }, []);
 
+  // ── Debug logging (temporary — remove after verification) ────────────────
+  const __log = (msg: string, data?: any) => {
+    if (typeof console !== 'undefined') {
+      console.log(`[PreviewEngine] ${msg}`, data ?? '');
+    }
+  };
+
   // ── Promotion logic ─────────────────────────────────────────────────────
   const runPromotion = useCallback(() => {
     // Cancel any in-progress stagger chain to prevent parallel promotion races
@@ -147,6 +154,7 @@ export function usePreviewEngine(): PreviewEngineResult {
     }
 
     // Stagger only genuinely new promotions
+    __log('promote', { candidates: candidates.length, toPromote: toPromote.length, visible: visibleIdsRef.current.size });
     if (toPromote.length === 0) return;
 
     const promoteNext = (index: number) => {
@@ -166,6 +174,7 @@ export function usePreviewEngine(): PreviewEngineResult {
 
   // ── Demote all ──────────────────────────────────────────────────────────
   const demoteAll = useCallback(() => {
+    __log('demoteAll', { wasAnimating: animatingRef.current.size });
     promotionAbortRef.current = true;
     if (staggerTimerRef.current) clearTimeout(staggerTimerRef.current);
     animatingRef.current.clear();
@@ -188,6 +197,7 @@ export function usePreviewEngine(): PreviewEngineResult {
 
   // ── Transition to idle → run promotion ──────────────────────────────────
   const transitionToIdle = useCallback(() => {
+    __log('→ idle');
     scrollStateRef.current = 'idle';
     setScrollState('idle');
     demoteInvisible();
@@ -205,6 +215,7 @@ export function usePreviewEngine(): PreviewEngineResult {
   const onScroll = useCallback((_e: NativeSyntheticEvent<NativeScrollEvent>) => {
     // Enter scrolling state
     if (scrollStateRef.current !== 'scrolling') {
+      __log('→ scrolling');
       scrollStateRef.current = 'scrolling';
       setScrollState('scrolling');
       demoteAll();
