@@ -33,6 +33,7 @@ import {
   Image,
   Linking,
 } from 'react-native';
+import ModalSheet from './ModalSheet';
 import { db, storage } from '../lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -417,40 +418,46 @@ export default function MovementForm({
     setCreateStep('processing');
 
     try {
-      // Step 1: Generate GIF thumbnail
-      setProcessingStatus('Creating thumbnail...');
+      // Step 1: Start GIF thumbnail generation + AI analysis in parallel
+      setProcessingStatus('Analyzing movement...');
       setProcessingProgress(0.1);
 
-      const gifUrl = await generateAndUploadGif(videoUrl, crop);
+      // GIF generation (for thumbnail display) runs alongside AI analysis
+      const gifPromise = generateAndUploadGif(videoUrl, crop);
 
-      setProcessingProgress(0.4);
-
-      // Step 2: AI Analysis (runs on the GIF)
+      // AI analysis uses a lightweight contact sheet (12 frames) instead of the full GIF
       let aiData: Record<string, any> = {};
-      if (gifUrl) {
-        setProcessingStatus('Analyzing movement...');
-        setProcessingProgress(0.5);
-        try {
-          const analysis = await analyzeMovementMedia(gifUrl);
-          if (analysis) {
-            aiData = {
-              name: analysis.name || '',
-              category: analysis.category || '',
-              equipment: analysis.equipment || '',
-              difficulty: analysis.difficulty || '',
-              muscleGroups: analysis.muscleGroups || [],
-              description: analysis.description || '',
-              regression: analysis.regression || '',
-              progression: analysis.progression || '',
-              contraindications: analysis.contraindications || '',
-              workSec: analysis.workSec || 30,
-              restSec: analysis.restSec || 15,
-            };
-          }
-        } catch (aiErr) {
-          console.warn('[MovementForm] AI analysis failed, saving without:', aiErr);
+      try {
+        setProcessingProgress(0.2);
+        const analysis = await analyzeMovementMedia(videoUrl, crop);
+        if (analysis) {
+          aiData = {
+            name: analysis.name || '',
+            category: analysis.category || '',
+            equipment: analysis.equipment || '',
+            difficulty: analysis.difficulty || '',
+            muscleGroups: analysis.muscleGroups || [],
+            description: analysis.description || '',
+            regression: analysis.regression || '',
+            progression: analysis.progression || '',
+            contraindications: analysis.contraindications || '',
+            workSec: analysis.workSec || 30,
+            restSec: analysis.restSec || 15,
+          };
         }
+      } catch (aiErr) {
+        console.warn('[MovementForm] AI analysis failed, saving without:', aiErr);
       }
+
+      if (!aiData.name) {
+        setProcessingStatus('AI analysis unavailable — saving with defaults...');
+      } else {
+        setProcessingStatus('Creating thumbnail...');
+      }
+      setProcessingProgress(0.5);
+
+      // Wait for GIF to finish (may already be done)
+      const gifUrl = await gifPromise;
 
       setProcessingProgress(0.7);
       setProcessingStatus('Saving movement...');
@@ -620,9 +627,7 @@ export default function MovementForm({
   if (isEdit) {
     return (
       <>
-        <Modal visible={visible} animationType="slide" transparent={true}>
-          <View style={st.overlay}>
-            <View style={st.sheet}>
+        <ModalSheet visible={visible} onClose={onClose} maxHeightPct={0.9}>
               <View style={st.header}>
                 <Text style={st.headerTitle}>Edit Movement</Text>
                 <Pressable onPress={onClose} hitSlop={8}>
@@ -853,9 +858,7 @@ export default function MovementForm({
                   </Text>
                 </Pressable>
               </View>
-            </View>
-          </View>
-        </Modal>
+        </ModalSheet>
 
         <VideoCropModal
           visible={showCropModal}
@@ -877,9 +880,7 @@ export default function MovementForm({
   // ── CREATE MODE: Simplified 3-step flow ────────────────────────────────
   return (
     <>
-      <Modal visible={visible} animationType="slide" transparent={true}>
-        <View style={st.overlay}>
-          <View style={st.createSheet}>
+      <ModalSheet visible={visible} onClose={() => { resetForm(); onClose(); }} maxHeightPct={0.92}>
             {/* Close button — always visible */}
             <Pressable
               style={st.createCloseBtn}
@@ -996,9 +997,7 @@ export default function MovementForm({
                 </View>
               </View>
             )}
-          </View>
-        </View>
-      </Modal>
+      </ModalSheet>
 
       {/* Crop Modal — rendered OUTSIDE so it layers on top on iOS */}
       <VideoCropModal
@@ -1020,20 +1019,7 @@ export default function MovementForm({
 
 // ── Styles ────────────────────────────────────────────────────────────────
 const st = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    justifyContent: 'flex-end',
-  },
-
-  // ── Edit mode sheet (same as before) ─────────────────────────────────
-  sheet: {
-    backgroundColor: '#0E1117',
-    borderTopLeftRadius: 20,
-    overflow: 'hidden' as const,
-    borderTopRightRadius: 20,
-    height: '90%',
-  },
+  // overlay + sheet styles removed — now handled by ModalSheet component
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1058,14 +1044,7 @@ const st = StyleSheet.create({
     gap: 16,
   },
 
-  // ── Create mode sheet ─────────────────────────────────────────────────
-  createSheet: {
-    backgroundColor: '#0E1117',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    height: '92%',
-    overflow: 'hidden' as const,
-  },
+  // createSheet styles removed — now handled by ModalSheet component
   createCloseBtn: {
     position: 'absolute',
     top: Platform.select({ ios: 16, default: 16 }),

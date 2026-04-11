@@ -20,6 +20,7 @@ import {
   ScrollView,
   Alert,
 } from 'react-native';
+import ModalSheet from './ModalSheet';
 import { db } from '../lib/firebase';
 import { doc, onSnapshot, updateDoc, addDoc, collection, Timestamp } from 'firebase/firestore';
 import { Icon } from './Icon';
@@ -146,9 +147,7 @@ export default function WorkoutDetail({
   const isLegacy = !category && !difficulty && !duration;
 
   return (
-    <Modal visible={true} animationType="slide" transparent={true}>
-      <View style={styles.overlay}>
-        <View style={styles.sheet}>
+    <ModalSheet visible={true} onClose={onClose} maxHeightPct={0.9} sheetBg="#111827" backdropColor="rgba(0,0,0,0.65)" borderRadius={24}>
           {/* Drag handle */}
           <View style={styles.handle} />
 
@@ -406,8 +405,6 @@ export default function WorkoutDetail({
               </TouchableOpacity>
             </View>
           </View>
-        </View>
-      </View>
 
       {/* Assign Workout Modal */}
       <AssignWorkoutModal
@@ -441,26 +438,13 @@ export default function WorkoutDetail({
         onClose={() => setShowBatchModal(false)}
         onDone={() => setShowBatchModal(false)}
       />
-    </Modal>
+    </ModalSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: '#111827',
-    borderTopLeftRadius: 24,
-    overflow: "hidden" as const,
-    borderTopRightRadius: 24,
-    maxHeight: '90%',
-    borderWidth: 1,
-    borderColor: '#1E2A3A',
-    borderBottomWidth: 0,
-  },
+  // overlay styles removed — now handled by ModalSheet component
+  // sheet styles removed — now handled by ModalSheet component
   handle: {
     width: 36,
     height: 4,

@@ -52,6 +52,8 @@ import WorkoutDetail from '../../components/WorkoutDetail';
 import WorkoutForm from '../../components/WorkoutForm';
 import WorkoutFolderPage from '../../components/WorkoutFolderPage';
 import BulkMovementUpload from '../../components/BulkMovementUpload';
+import { usePreviewEngine } from '../../hooks/usePreviewEngine';
+import { AnimatedPreviewTile, MosaicPreviewTile } from '../../components/AnimatedPreviewTile';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -138,7 +140,7 @@ function useGridLayout() {
  *  Tight borders, distinct background, top-to-bottom left-to-right layout. */
 const WORKOUT_CARD_BG = '#1A2332'; // Slightly lighter than page bg so cards stand out
 
-function WorkoutMosaic({ thumbs, width, height }: { thumbs: string[]; width: number; height: number }) {
+function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle = false }: { thumbs: string[]; width: number; height: number; isAnimating?: boolean; scrollIdle?: boolean }) {
   const gap = 2; // tight gap between mini GIFs
   const inset = 6; // small padding inside the card
   const innerW = width - inset * 2;
@@ -161,10 +163,14 @@ function WorkoutMosaic({ thumbs, width, height }: { thumbs: string[]; width: num
     const clampedW = clampedH * (4 / 5);
     return (
       <View style={{ width, height, backgroundColor: WORKOUT_CARD_BG, justifyContent: 'center', alignItems: 'center' }}>
-        <Image
-          source={{ uri: thumbs[0] }}
-          style={{ width: clampedW, height: clampedH, borderRadius: 6 }}
-          resizeMode="cover"
+        <MosaicPreviewTile
+          uri={thumbs[0]}
+          width={clampedW}
+          height={clampedH}
+          parentIsAnimating={isAnimating}
+          scrollIdle={scrollIdle}
+          index={0}
+          borderRadius={6}
         />
       </View>
     );
@@ -194,15 +200,15 @@ function WorkoutMosaic({ thumbs, width, height }: { thumbs: string[]; width: num
         overflow: 'hidden',
       }}>
         {thumbs.slice(0, maxShow).map((url, i) => (
-          <Image
+          <MosaicPreviewTile
             key={i}
-            source={{ uri: url }}
-            style={{
-              width: finalCellW,
-              height: finalCellH,
-              borderRadius: 3,
-            }}
-            resizeMode="cover"
+            uri={url}
+            width={finalCellW}
+            height={finalCellH}
+            parentIsAnimating={isAnimating}
+            scrollIdle={scrollIdle}
+            index={i}
+            borderRadius={3}
           />
         ))}
       </View>
@@ -214,7 +220,10 @@ function BuildScreenInner() {
   const { user, claims } = useAuth();
   const coachId = claims?.coachId ?? user?.uid ?? '';
   const { cols, cardWidth, cardHeight } = useGridLayout();
-  
+
+  // ── Preview Engine (scroll-aware animation scheduling) ─────────────────
+  const previewEngine = usePreviewEngine();
+
   // ── State ──────────────────────────────────────────────────────────────
   const [items, setItems] = useState<BuildItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -563,6 +572,9 @@ function BuildScreenInner() {
   const renderItem = ({ item }: { item: BuildItem }) => {
     // Folder card
     if (item.type === 'Folder') {
+      // Register folder tiles with engine for budget tracking
+      previewEngine.registerTile(item.id, 2);
+      const folderAnimating = previewEngine.animatingIds.has(item.id);
       if (viewMode === 'grid') {
         return (
           <Pressable
@@ -581,11 +593,22 @@ function BuildScreenInner() {
                 thumbs={item.coverThumbs}
                 width={cardWidth}
                 height={cardHeight}
+                isAnimating={folderAnimating}
+                scrollIdle={previewEngine.scrollState !== 'scrolling'}
               />
             ) : (
-              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                <Icon name="folder" size={36} color="#F5A623" />
-              </View>
+              <AnimatedPreviewTile
+                itemId={item.id}
+                uri={null}
+                width={cardWidth}
+                height={cardHeight}
+                isAnimating={false}
+                scrollIdle={previewEngine.scrollState !== 'scrolling'}
+                priority={2}
+                registerTile={previewEngine.registerTile}
+                borderRadius={10}
+                fallbackIcon={<Icon name="folder" size={36} color="#F5A623" />}
+              />
             )}
             {/* Name overlay */}
             <View style={styles.nameOverlay}>
@@ -627,6 +650,11 @@ function BuildScreenInner() {
       const isWorkoutCard = isWorkout;
       const hasMosaic = (isWorkoutCard || isPlaybook) && (item.coverThumbs ?? []).length > 0;
 
+      // Preview engine: register tile and check if promoted
+      const tilePriority = isMovement ? 1 as const : 2 as const;
+      previewEngine.registerTile(item.id, tilePriority);
+      const tileAnimating = previewEngine.animatingIds.has(item.id);
+
       return (
         <Pressable
           style={{
@@ -644,24 +672,40 @@ function BuildScreenInner() {
             else setOpenWorkoutId(item.id);
           }}
         >
-          {/* Media area */}
+          {/* Media area — controlled by preview engine */}
           {(isWorkoutCard || hasMosaic) ? (
-            // Workout/playbook cards: show mini-library mosaic
             <WorkoutMosaic
               thumbs={item.coverThumbs ?? []}
               width={cardWidth}
               height={cardHeight}
+              isAnimating={tileAnimating}
+              scrollIdle={previewEngine.scrollState !== 'scrolling'}
             />
           ) : singleThumbUri ? (
-            <Image
-              source={{ uri: singleThumbUri }}
-              style={{ width: cardWidth, height: cardHeight }}
-              resizeMode="cover"
+            <AnimatedPreviewTile
+              itemId={item.id}
+              uri={singleThumbUri}
+              width={cardWidth}
+              height={cardHeight}
+              isAnimating={tileAnimating}
+              scrollIdle={previewEngine.scrollState !== 'scrolling'}
+              priority={tilePriority}
+              registerTile={previewEngine.registerTile}
+              borderRadius={10}
             />
           ) : (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-              <Icon name={iconName} size={32} color={iconColor} />
-            </View>
+            <AnimatedPreviewTile
+              itemId={item.id}
+              uri={null}
+              width={cardWidth}
+              height={cardHeight}
+              isAnimating={false}
+              scrollIdle={previewEngine.scrollState !== 'scrolling'}
+              priority={tilePriority}
+              registerTile={previewEngine.registerTile}
+              borderRadius={10}
+              fallbackIcon={<Icon name={iconName} size={32} color={iconColor} />}
+            />
           )}
 
           {/* Name overlay — transparent gradient at bottom */}
@@ -685,7 +729,10 @@ function BuildScreenInner() {
       >
         <View style={s.listMedia}>
           {item.thumbnailUrl ? (
-            <Image source={{ uri: item.thumbnailUrl }} style={s.listImage} />
+            <Image
+              source={{ uri: previewEngine.scrollState !== 'scrolling' ? item.thumbnailUrl : 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' }}
+              style={[s.listImage, { backgroundColor: '#151B28' }]}
+            />
           ) : (
             <View style={s.listPlaceholder}>
               <Icon name={item.type === 'Plans' ? 'plan' : item.type === 'Playbooks' ? 'playbook' : item.type === 'Movements' ? 'movements' : 'workouts'} size={20} color={item.type === 'Plans' ? '#60A5FA' : item.type === 'Playbooks' ? '#A78BFA' : '#4A5568'} />
@@ -834,6 +881,8 @@ function BuildScreenInner() {
         </View>
       )}
 
+      {/* Debug overlay removed — was temporary scroll/animation state banner */}
+
       {loading ? (
         <View style={s.centered}>
           <ActivityIndicator size="large" color="#F5A623" />
@@ -854,9 +903,14 @@ function BuildScreenInner() {
             gap: GRID_GAP,
             marginBottom: 0,
           } : undefined}
+          extraData={previewEngine.animatingIds}
           refreshControl={
             <RefreshControl refreshing={loading} onRefresh={() => setLoading(true)} tintColor="#F5A623" />
           }
+          onScroll={previewEngine.onScroll}
+          scrollEventThrottle={16}
+          onViewableItemsChanged={previewEngine.onViewableItemsChanged}
+          viewabilityConfig={previewEngine.viewabilityConfig}
         />
       ) : (
         <View style={s.centered}>

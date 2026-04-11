@@ -72,7 +72,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
-exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
+exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -404,7 +404,10 @@ exports.disconnectStripeAccount = (0, https_1.onCall)({ secrets: [stripeSecretKe
  */
 exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey] }, async (request) => {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w;
-    const { planId, memberId, paymentOption, commitToSave, nutritionAddOn, displayedMonthlyPrice: clientMonthly, displayedPayInFullTotal: clientPayInFull } = request.data;
+    const { planId, memberId, paymentOption, commitToSave, nutritionAddOn, displayedMonthlyPrice: clientMonthly, displayedPayInFullTotal: clientPayInFull, billingInterval: clientBillingInterval } = request.data;
+    // Weekly billing: only applies to 'monthly' (recurring) payment option
+    const billingInterval = (paymentOption === 'monthly' && clientBillingInterval === 'week') ? 'week' : 'month';
+    const isWeekly = billingInterval === 'week';
     if (!planId || !memberId || !paymentOption) {
         throw new https_1.HttpsError('invalid-argument', 'planId, memberId, and paymentOption are required');
     }
@@ -562,6 +565,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
             continuationPayInFullTotal,
             continuationPayInFullMonthlyEquivalent,
             baseMonthlyPrice: serverBaseMonthly,
+            billingInterval,
             ctsActive,
             ctsMonthlySavings: ctsActive ? ctsMonthlySavings : ((_t = (_s = plan.postContract) === null || _s === void 0 ? void 0 : _s.ctsMonthlySavings) !== null && _t !== void 0 ? _t : null),
             nutActive,
@@ -582,6 +586,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
             planId,
             snapshotId,
             paymentOption,
+            billingInterval,
             status: 'pending',
             createdAt: firestore_2.FieldValue.serverTimestamp(),
             updatedAt: firestore_2.FieldValue.serverTimestamp(),
@@ -603,9 +608,13 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
         let sessionUrl;
         let stripeSessionId;
         if (paymentOption === 'monthly') {
-            // ── Monthly: subscription schedule with two phases ──
-            // Phase 1: contractMonths at displayMonthlyPrice
-            // Phase 2: indefinite at continuationMonthlyPrice
+            // ── Recurring subscription: weekly or monthly ──
+            // Phase 1: contract period at displayMonthlyPrice (or weekly equivalent)
+            // Phase 2: indefinite at continuationMonthlyPrice (monthly)
+            const recurringAmount = isWeekly
+                ? Math.round(displayMonthlyPrice * 100 / (52 / 12)) // weekly in cents
+                : displayMonthlyPrice * 100; // monthly in cents
+            const intervalLabel = isWeekly ? 'Weekly' : 'Monthly';
             const session = await stripe.checkout.sessions.create({
                 customer: stripeCustomerId,
                 payment_method_types: ['card'],
@@ -615,11 +624,11 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
                         price_data: {
                             currency: 'usd',
                             product_data: {
-                                name: `GoArrive Coaching — ${contractMonths}-Month Contract${ctsActive ? ' (Commit to Save)' : ''}${nutActive ? ' + Nutrition' : ''}`,
+                                name: `GoArrive Coaching — ${contractMonths}-Month Contract (${intervalLabel})${ctsActive ? ' (Commit to Save)' : ''}${nutActive ? ' + Nutrition' : ''}`,
                                 metadata: { planId, snapshotId },
                             },
-                            unit_amount: displayMonthlyPrice * 100, // cents
-                            recurring: { interval: 'month' },
+                            unit_amount: recurringAmount,
+                            recurring: { interval: billingInterval },
                         },
                         quantity: 1,
                     },
@@ -633,6 +642,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
                         memberId,
                         coachId,
                         paymentOption: 'monthly',
+                        billingInterval,
                         contractMonths: String(contractMonths),
                         continuationMonthlyPriceCents: String(continuationMonthlyPrice * 100),
                         tierSplit: String(tierSplit),
@@ -6203,25 +6213,33 @@ exports.retryFailedGifGeneration = (0, scheduler_1.onSchedule)({ schedule: '0 */
     }
 });
 // ─── 27. analyzeMovement — AI-powered movement analysis via GPT-4.1-mini ────
-// Accepts a GIF URL, sends it to GPT-4.1-mini vision, and returns structured
-// movement metadata (name, category, equipment, difficulty, muscleGroups,
-// description, regression, progression, contraindications, workSec, restSec).
+// Accepts either a contact sheet (base64 JPEG) or a GIF URL, sends it to
+// GPT-4.1-mini vision, and returns structured movement metadata plus a
+// confidence score (0-1). The contact sheet path is the default — it sends
+// 12 ordered frames in a single image, which is much cheaper than a full
+// animated GIF. Falls back to GIF URL if provided for backwards compat.
 //
 // ME-008: OPENAI_API_KEY must be set as a Firebase secret.
 //         firebase functions:secrets:set OPENAI_API_KEY
 // ─────────────────────────────────────────────────────────────────────────────
 const openaiApiKey = (0, params_1.defineSecret)('OPENAI_API_KEY');
-exports.analyzeMovement = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60 }, async (request) => {
-    var _a, _b, _c, _d;
-    const { gifUrl } = request.data;
-    if (!gifUrl || typeof gifUrl !== 'string') {
-        throw new https_1.HttpsError('invalid-argument', 'gifUrl is required');
+exports.analyzeMovement = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60, maxInstances: 20 }, async (request) => {
+    var _a, _b, _c, _d, _e;
+    const { gifUrl, contactSheet } = request.data;
+    if (!gifUrl && !contactSheet) {
+        throw new https_1.HttpsError('invalid-argument', 'Either contactSheet or gifUrl is required');
     }
-    const apiKey = openaiApiKey.value();
+    // Trim whitespace/newlines — secrets stored via CLI often have trailing \n
+    const apiKey = (_a = openaiApiKey.value()) === null || _a === void 0 ? void 0 : _a.trim();
     if (!apiKey) {
         throw new https_1.HttpsError('internal', 'OpenAI API key not configured');
     }
-    const systemPrompt = `You are a fitness movement analysis expert. You will be shown an animated GIF of a fitness/exercise movement. Analyze it carefully and return a JSON object with the following fields:
+    if (apiKey.length < 30) {
+        console.error('[analyzeMovement] API key appears truncated (length:', apiKey.length, ')');
+        throw new https_1.HttpsError('internal', 'OpenAI API key appears invalid — check Firebase secrets');
+    }
+    const isContactSheet = !!contactSheet;
+    const systemPrompt = `You are a fitness movement analysis expert. You will be shown ${isContactSheet ? 'a contact sheet of sequential frames extracted from a fitness/exercise movement video. The frames are ordered left-to-right, top-to-bottom, showing the movement progression over time.' : 'an animated GIF of a fitness/exercise movement.'} Analyze it carefully and return a JSON object with the following fields:
 
 - "name": string — the standard exercise name (e.g. "Barbell Back Squat", "Dumbbell Lateral Raise")
 - "category": string — one of: "Upper Body Push", "Upper Body Pull", "Lower Body Push", "Lower Body Pull", "Core", "Cardio", "Mobility"
@@ -6234,8 +6252,15 @@ exports.analyzeMovement = (0, https_1.onCall)({ region: 'us-central1', secrets: 
 - "contraindications": string — brief note on who should avoid this (e.g. "Avoid with lower back injury")
 - "workSec": number — recommended work duration in seconds (typically 30-45)
 - "restSec": number — recommended rest duration in seconds (typically 15-30)
+- "confidence": number — your confidence in the analysis from 0.0 to 1.0 (1.0 = certain, 0.7+ = good, below 0.7 = uncertain/ambiguous)
+
+Set confidence below 0.7 if: the movement is unclear, frames are too dark/blurry to identify, you are guessing between multiple possible movements, or the equipment/form cannot be determined.
 
 Return ONLY valid JSON, no markdown, no explanation.`;
+    // Build the image content block
+    const imageContent = contactSheet
+        ? { type: 'image_url', image_url: { url: contactSheet, detail: 'high' } }
+        : { type: 'image_url', image_url: { url: gifUrl, detail: 'high' } };
     try {
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
@@ -6250,18 +6275,15 @@ Return ONLY valid JSON, no markdown, no explanation.`;
                     {
                         role: 'user',
                         content: [
-                            {
-                                type: 'image_url',
-                                image_url: { url: gifUrl, detail: 'high' },
-                            },
+                            imageContent,
                             {
                                 type: 'text',
-                                text: 'Analyze this fitness movement and return the JSON metadata.',
+                                text: `Analyze this fitness movement${isContactSheet ? ' from the contact sheet frames' : ''} and return the JSON metadata.`,
                             },
                         ],
                     },
                 ],
-                max_tokens: 500,
+                max_tokens: 600,
                 temperature: 0.3,
             }),
         });
@@ -6271,7 +6293,7 @@ Return ONLY valid JSON, no markdown, no explanation.`;
             throw new https_1.HttpsError('internal', `OpenAI API error: ${response.status}`);
         }
         const result = await response.json();
-        const content = ((_d = (_c = (_b = (_a = result.choices) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.message) === null || _c === void 0 ? void 0 : _c.content) === null || _d === void 0 ? void 0 : _d.trim()) || '';
+        const content = ((_e = (_d = (_c = (_b = result.choices) === null || _b === void 0 ? void 0 : _b[0]) === null || _c === void 0 ? void 0 : _c.message) === null || _d === void 0 ? void 0 : _d.content) === null || _e === void 0 ? void 0 : _e.trim()) || '';
         // Parse JSON from the response (strip markdown fences if present)
         let jsonStr = content;
         if (jsonStr.startsWith('```')) {
@@ -6290,6 +6312,7 @@ Return ONLY valid JSON, no markdown, no explanation.`;
             contraindications: analysis.contraindications || '',
             workSec: typeof analysis.workSec === 'number' ? analysis.workSec : 30,
             restSec: typeof analysis.restSec === 'number' ? analysis.restSec : 15,
+            confidence: typeof analysis.confidence === 'number' ? analysis.confidence : 0.5,
         };
     }
     catch (err) {
@@ -6806,5 +6829,57 @@ exports.createMissingLedgerEntry = (0, https_1.onCall)({ secrets: [stripeSecretK
         console.log(`[createMissingLedgerEntry] Created ledger entry for invoice ${invoice.id}`);
     }
     return { created, entries };
+});
+// ─── generateVoice — OpenAI TTS for workout cues and movement names ─────────
+// Accepts text + optional voice (onyx, nova), generates MP3 via OpenAI TTS,
+// uploads to Firebase Storage, returns the download URL.
+// ─────────────────────────────────────────────────────────────────────────────
+exports.generateVoice = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 30 }, async (request) => {
+    var _a;
+    const { text, voice, storagePath } = request.data;
+    if (!text || typeof text !== 'string' || text.length === 0) {
+        throw new https_1.HttpsError('invalid-argument', 'text is required');
+    }
+    if (text.length > 500) {
+        throw new https_1.HttpsError('invalid-argument', 'text must be under 500 characters');
+    }
+    const apiKey = (_a = openaiApiKey.value()) === null || _a === void 0 ? void 0 : _a.trim();
+    if (!apiKey) {
+        throw new https_1.HttpsError('internal', 'OpenAI API key not configured');
+    }
+    const selectedVoice = voice || 'onyx';
+    const path = storagePath || `voice_cache/tts/${Date.now()}.mp3`;
+    try {
+        const response = await fetch('https://api.openai.com/v1/audio/speech', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: 'tts-1',
+                voice: selectedVoice,
+                input: text,
+            }),
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[generateVoice] OpenAI TTS error:', response.status, errorText);
+            throw new https_1.HttpsError('internal', `OpenAI TTS error: ${response.status}`);
+        }
+        const audioBuffer = Buffer.from(await response.arrayBuffer());
+        const bucket = admin.storage().bucket();
+        const file = bucket.file(path);
+        await file.save(audioBuffer, { contentType: 'audio/mpeg' });
+        await file.makePublic();
+        const url = `https://storage.googleapis.com/${bucket.name}/${path}`;
+        return { url, path };
+    }
+    catch (err) {
+        if (err.code)
+            throw err;
+        console.error('[generateVoice] Failed:', err);
+        throw new https_1.HttpsError('internal', 'Voice generation failed');
+    }
 });
 //# sourceMappingURL=index.js.map

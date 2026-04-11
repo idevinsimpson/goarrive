@@ -23,7 +23,9 @@ import {
   Image,
   Switch,
   Alert,
+  useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { doc, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Icon } from './Icon';
@@ -100,6 +102,10 @@ export default function MovementDetail({
   isAdmin = false,
   backLabel,
 }: Props) {
+  // On mobile web, Modal extends behind browser chrome. Constrain root to visible viewport.
+  const { height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+
   // Coach name lookup
   const [coachName, setCoachName] = useState<string | null>(null);
 
@@ -150,7 +156,7 @@ export default function MovementDetail({
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
-      <View style={s.root}>
+      <View style={[s.root, Platform.OS === 'web' && { height: windowHeight }]}>
         {/* Back-to-workout breadcrumb (shown when opened from workout builder) */}
         {backLabel && (
           <Pressable style={s.backBreadcrumb} onPress={onClose}>
@@ -169,7 +175,7 @@ export default function MovementDetail({
           </Pressable>
         </View>
 
-        <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent}>
+        <ScrollView style={s.scroll} contentContainerStyle={[s.scrollContent, { paddingBottom: 16 + insets.bottom }]}>
           {/* Name */}
           <Text style={s.name}>{movement.name}</Text>
 

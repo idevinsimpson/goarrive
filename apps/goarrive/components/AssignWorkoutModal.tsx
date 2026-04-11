@@ -24,6 +24,7 @@ import {
   Alert,
   Linking,
 } from 'react-native';
+import ModalSheet from './ModalSheet';
 import { Icon } from './Icon';
 import {
   collection,
@@ -452,9 +453,7 @@ export default function AssignWorkoutModal({
   // ── Render ────────────────────────────────────────────────────────────
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={s.overlay}>
-        <View style={s.sheet}>
+    <ModalSheet visible={visible} onClose={onClose} maxHeightPct={0.9} backdropColor="rgba(0,0,0,0.5)">
           {/* Header */}
           <View style={s.header}>
             {step === 'success' ? (
@@ -806,31 +805,14 @@ export default function AssignWorkoutModal({
               <View style={{ height: 40 }} />
             </ScrollView>
           )}
-        </View>
-      </View>
-    </Modal>
+    </ModalSheet>
   );
 }
 
 // ── Styles ──────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: '#0E1117',
-    borderTopLeftRadius: 20,
-    overflow: "hidden" as const,
-    borderTopRightRadius: 20,
-    maxHeight: '90%',
-    minHeight: '60%',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    borderBottomWidth: 0,
-  },
+  // overlay + sheet styles removed — now handled by ModalSheet component
   header: {
     flexDirection: 'row',
     alignItems: 'center',
