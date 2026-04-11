@@ -9,20 +9,16 @@ import React, { useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
-  TextInput,
   Pressable,
   ScrollView,
   StyleSheet,
   Platform,
-  ActivityIndicator,
   KeyboardAvoidingView,
   Image,
   Dimensions,
   LayoutChangeEvent,
 } from 'react-native';
 import { router } from 'expo-router';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 
 /* ─── Brand Tokens ─── */
 const C = {
@@ -90,17 +86,6 @@ export default function CoachApplyScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  /* ─── Form State ─── */
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [experience, setExperience] = useState('');
-  const [certifications, setCertifications] = useState('');
-  const [why, setWhy] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState(false);
-
   /* ─── Section offsets ─── */
   const offsets = useRef<Record<string, number>>({});
   const scrollTo = (key: string) => {
@@ -111,36 +96,9 @@ export default function CoachApplyScreen() {
     offsets.current[key] = e.nativeEvent.layout.y;
   };
 
-  const goApply = () => scrollTo('apply');
+  const goApply = () => router.push('/coach-application');
   const goHome = () => router.replace('/');
   const goLogin = () => router.push('/(auth)/login');
-
-  /* ─── Submit ─── */
-  async function handleSubmit() {
-    if (!name.trim() || !email.trim()) {
-      setError('Please fill in at least your name and email.');
-      return;
-    }
-    setLoading(true);
-    setError('');
-    try {
-      await addDoc(collection(db, 'coachApplications'), {
-        name: name.trim(),
-        email: email.trim().toLowerCase(),
-        phone: phone.trim(),
-        experience: experience.trim(),
-        certifications: certifications.trim(),
-        why: why.trim(),
-        status: 'pending',
-        createdAt: serverTimestamp(),
-      });
-      setSuccess(true);
-    } catch (err: any) {
-      setError('Something went wrong. Please try again or email coaches@goa.fit directly.');
-    } finally {
-      setLoading(false);
-    }
-  }
 
   /* ━━━ NAV ━━━ */
   const Nav = (
@@ -476,139 +434,6 @@ export default function CoachApplyScreen() {
     </View>
   );
 
-  /* ━━━ APPLICATION FORM ━━━ */
-  const ApplicationForm = (
-    <View style={form.wrap} onLayout={mark('apply')}>
-      <View style={form.rule} />
-      <View style={form.inner}>
-        <Text style={form.label}>APPLY NOW</Text>
-        <Text style={[form.heading, isMobile && { fontSize: 26 }]}>Apply to Coach with GoArrive</Text>
-        <Text style={form.sub}>
-          We are selectively growing our coaching team. Tell us about yourself and we will be in touch.
-        </Text>
-
-        {success ? (
-          <View style={form.successWrap}>
-            <Text style={form.successIcon}>&#x2713;</Text>
-            <Text style={form.successTitle}>Application Received</Text>
-            <Text style={form.successBody}>
-              Thank you for your interest in coaching with GoArrive. We review every application personally and will be in touch soon.
-            </Text>
-            <Pressable style={btn.cta} onPress={goHome}>
-              <Text style={btn.ctaText}>Back to Home</Text>
-            </Pressable>
-          </View>
-        ) : (
-          <View style={form.card}>
-            <View style={form.fieldWrap}>
-              <Text style={form.fieldLabel}>Full Name *</Text>
-              <TextInput
-                style={form.input}
-                placeholder="Your full name"
-                placeholderTextColor="#4A5568"
-                value={name}
-                onChangeText={setName}
-                autoCapitalize="words"
-                autoCorrect={false}
-                editable={!loading}
-              />
-            </View>
-
-            <View style={form.fieldWrap}>
-              <Text style={form.fieldLabel}>Email Address *</Text>
-              <TextInput
-                style={form.input}
-                placeholder="your@email.com"
-                placeholderTextColor="#4A5568"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!loading}
-              />
-            </View>
-
-            <View style={form.fieldWrap}>
-              <Text style={form.fieldLabel}>Phone Number</Text>
-              <TextInput
-                style={form.input}
-                placeholder="(optional)"
-                placeholderTextColor="#4A5568"
-                value={phone}
-                onChangeText={setPhone}
-                keyboardType="phone-pad"
-                editable={!loading}
-              />
-            </View>
-
-            <View style={form.fieldWrap}>
-              <Text style={form.fieldLabel}>Coaching Experience</Text>
-              <TextInput
-                style={[form.input, form.textArea]}
-                placeholder="How long have you been coaching? What kind of coaching do you do?"
-                placeholderTextColor="#4A5568"
-                value={experience}
-                onChangeText={setExperience}
-                multiline
-                numberOfLines={3}
-                editable={!loading}
-              />
-            </View>
-
-            <View style={form.fieldWrap}>
-              <Text style={form.fieldLabel}>Certifications</Text>
-              <TextInput
-                style={form.input}
-                placeholder="e.g. NASM-CPT, CSCS, etc. (optional)"
-                placeholderTextColor="#4A5568"
-                value={certifications}
-                onChangeText={setCertifications}
-                editable={!loading}
-              />
-            </View>
-
-            <View style={form.fieldWrap}>
-              <Text style={form.fieldLabel}>Why GoArrive?</Text>
-              <TextInput
-                style={[form.input, form.textArea]}
-                placeholder="What interests you about coaching with GoArrive?"
-                placeholderTextColor="#4A5568"
-                value={why}
-                onChangeText={setWhy}
-                multiline
-                numberOfLines={3}
-                editable={!loading}
-              />
-            </View>
-
-            {error ? (
-              <View style={form.errorBanner}>
-                <Text style={form.errorText}>{error}</Text>
-              </View>
-            ) : null}
-
-            <Pressable
-              style={[btn.cta, loading && { opacity: 0.6 }]}
-              onPress={handleSubmit}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color={C.dark} size="small" />
-              ) : (
-                <Text style={btn.ctaText}>Submit Application</Text>
-              )}
-            </Pressable>
-
-            <Text style={form.note}>
-              We review every application personally. Coach positions are selective.
-            </Text>
-          </View>
-        )}
-      </View>
-    </View>
-  );
-
   /* ━━━ FOOTER ━━━ */
   const Footer = (
     <View style={ft.wrap}>
@@ -658,7 +483,6 @@ export default function CoachApplyScreen() {
           {Pricing}
           {FaqSection}
           {BottomCta}
-          {ApplicationForm}
           {Footer}
         </ScrollView>
       </View>
@@ -1368,135 +1192,6 @@ const mid = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 26,
     marginBottom: 36,
-  },
-});
-
-/* ─ Application Form ─ */
-const form = StyleSheet.create({
-  wrap: {
-    paddingTop: 60,
-    paddingBottom: 80,
-    paddingHorizontal: 24,
-    backgroundColor: C.surface,
-    borderTopWidth: 1,
-    borderColor: C.borderSub,
-  },
-  rule: {
-    width: 40,
-    height: 3,
-    backgroundColor: C.green,
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: 40,
-  },
-  inner: {
-    maxWidth: 540,
-    alignSelf: 'center',
-    width: '100%' as any,
-    alignItems: 'center',
-  },
-  label: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: C.green,
-    fontFamily: FONT_H,
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    marginBottom: 16,
-  },
-  heading: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: C.text,
-    fontFamily: FONT_H,
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  sub: {
-    fontSize: 15,
-    color: C.textSoft,
-    fontFamily: FONT_B,
-    textAlign: 'center',
-    lineHeight: 24,
-    marginBottom: 32,
-    maxWidth: 400,
-  },
-  card: {
-    width: '100%' as any,
-    backgroundColor: C.card,
-    borderRadius: 16,
-    padding: 20,
-    gap: 16,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  fieldWrap: { gap: 6 },
-  fieldLabel: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: C.textSoft,
-    fontFamily: FONT_B,
-  },
-  input: {
-    backgroundColor: C.dark,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: C.text,
-    fontFamily: FONT_B,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  textArea: {
-    minHeight: 80,
-    textAlignVertical: 'top',
-    paddingTop: 12,
-  },
-  errorBanner: {
-    padding: 12,
-    borderRadius: 10,
-    backgroundColor: 'rgba(224,82,82,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(224,82,82,0.2)',
-  },
-  errorText: {
-    fontSize: 13,
-    color: C.red,
-    fontFamily: FONT_B,
-    lineHeight: 18,
-  },
-  note: {
-    fontSize: 13,
-    color: C.muted,
-    fontFamily: FONT_B,
-    textAlign: 'center',
-    fontStyle: 'italic',
-  },
-  successWrap: {
-    alignItems: 'center',
-    paddingVertical: 40,
-    gap: 16,
-  },
-  successIcon: {
-    fontSize: 48,
-    color: '#6EBB7A',
-  },
-  successTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: C.text,
-    fontFamily: FONT_H,
-    textAlign: 'center',
-  },
-  successBody: {
-    fontSize: 15,
-    color: C.textSoft,
-    fontFamily: FONT_B,
-    textAlign: 'center',
-    lineHeight: 22,
-    maxWidth: 320,
-    marginBottom: 8,
   },
 });
 

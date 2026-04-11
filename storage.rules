@@ -18,6 +18,12 @@ service firebase.storage {
         && request.auth.uid == coachId;
     }
 
+    // Coach application uploads — public write (no auth), admin-only read
+    match /coachApplications/{fileName} {
+      allow write: if request.resource.size < 200 * 1024 * 1024;
+      allow read: if request.auth != null;
+    }
+
     // Fallback: deny everything else
     match /{allPaths=**} {
       allow read, write: if false;

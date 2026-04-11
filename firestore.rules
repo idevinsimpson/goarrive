@@ -94,7 +94,9 @@ service cloud.firestore {
     // ─────────────────────────────────────────────
 
     match /coaches/{coachId} {
-      allow read: if isOwnDoc(coachId) || isPlatformAdmin();
+      // Public list for coach selection on intake page; get requires auth
+      allow list: if true;
+      allow get: if isOwnDoc(coachId) || isPlatformAdmin();
       // Coaches can update their own scheduling settings
       allow update: if isOwnDoc(coachId)
                     && request.resource.data.diff(resource.data).affectedKeys()
@@ -630,9 +632,29 @@ service cloud.firestore {
     // ─────────────────────────────────────────────
 
     match /coachApplications/{applicationId} {
-      allow create: if request.resource.data.keys().hasOnly([
-        'name', 'email', 'phone', 'experience', 'certifications', 'why', 'status', 'createdAt'
-      ]) && request.resource.data.status == 'pending';
+      allow create: if request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasAll(['firstName', 'lastName', 'email', 'status', 'createdAt'])
+        && request.resource.data.keys().hasOnly([
+          'firstName', 'lastName', 'dateOfBirth', 'streetAddress', 'streetAddress2',
+          'city', 'state', 'zipCode', 'phone', 'email', 'igHandle', 'facebookHandle',
+          'currentOccupation', 'employmentStatus', 'otherEmploymentStatus',
+          'maintainEmployment', 'employerName', 'employerWebsite',
+          'certifications', 'yearsExperience', 'specializations',
+          'topThreeStrengths', 'weakness', 'standOut', 'idealMember',
+          'numberOneGoal', 'supportFromTeamLead', 'desiredMonthlyEarnings',
+          'whyJoinGoArrive', 'greatFit',
+          'entrepreneurialSpirit', 'teamPlayer', 'adaptability', 'communicationSkills',
+          'howHeardAbout', 'otherHowHeard', 'referringCoachName',
+          'weeklyHoursAvailable', 'weekendAvailability', 'availability',
+          'resumeUrl', 'resumeFileName', 'certificationsUrl', 'certificationsFileName',
+          'futureResume',
+          'futureResumeVideoUrl', 'futureResumeVideoFileName',
+          'ref1Name', 'ref1Email', 'ref1Phone',
+          'ref2Name', 'ref2Email', 'ref2Phone',
+          'ref3Name', 'ref3Email', 'ref3Phone',
+          'truthAcknowledged', 'signatureName', 'signatureDate',
+          'status', 'createdAt'
+        ]);
       allow read, update: if isPlatformAdmin();
       allow delete: if false;
     }
