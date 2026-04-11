@@ -710,12 +710,10 @@ export default function WorkoutFolderPage({
 
   // ── Delete workout (confirmed) ──────────────────────────────────────────
   const confirmDeleteWorkout = useCallback(async () => {
-    console.log('[WorkoutFolder] confirmDeleteWorkout called — deleting', workoutId);
     try {
       deletedRef.current = true;
       await deleteDoc(doc(db, 'workouts', workoutId));
-      console.log('[WorkoutFolder] deleteDoc succeeded');
-      setShowDeleteConfirm(false);
+      // Navigate back immediately — component unmount handles Modal cleanup
       onBack();
     } catch (e) {
       console.error('[WorkoutFolder] Delete workout error:', e);
