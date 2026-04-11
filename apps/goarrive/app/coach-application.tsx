@@ -24,6 +24,11 @@ import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
 
+/* ─── TEMPORARY: Skip validation for staging/testing ─── */
+/* Remove this flag (set to false) before merging to production */
+const SKIP_VALIDATION = Platform.OS === 'web' && typeof window !== 'undefined'
+  && window.location.hostname.includes('staging');
+
 /* ─── Brand Tokens ─── */
 const C = {
   bg:        '#0F1117',
@@ -446,6 +451,7 @@ export default function CoachApplicationScreen() {
 
   /* ─── Field-Level Validation ─── */
   function validateStepFields(s: number): Record<string, string> {
+    if (SKIP_VALIDATION) return {};
     const errs: Record<string, string> = {};
     switch (s) {
       case 0: {
