@@ -45,7 +45,7 @@ function formatCurrency(n: number): string {
 }
 
 type PaymentOption = 'monthly' | 'pay_in_full';
-type BillingInterval = 'month' | 'week';
+type BillingInterval = 'month' | 'week' | 'year';
 
 export default function PaymentSelectScreen() {
   const router = useRouter();
@@ -93,6 +93,9 @@ export default function PaymentSelectScreen() {
   // Weekly price: monthly / (52/12)
   const displayWeeklyPrice = Math.round(displayMonthlyPrice / (52 / 12));
 
+  // Yearly price: monthly * 12
+  const displayYearlyPrice = displayMonthlyPrice * 12;
+
   // Contract total
   const contractTotal = displayMonthlyPrice * contractMonths;
 
@@ -130,7 +133,7 @@ export default function PaymentSelectScreen() {
         planId,
         memberId: user.uid,
         paymentOption: selected,
-        ...(selected === 'monthly' && billingInterval === 'week' ? { billingInterval: 'week' } : {}),
+        ...(selected === 'monthly' && billingInterval !== 'month' ? { billingInterval } : {}),
       });
 
       const { sessionUrl } = result.data;
@@ -215,14 +218,20 @@ export default function PaymentSelectScreen() {
             </View>
             <View style={s.optionPriceWrap}>
               <Text style={s.optionPrice}>
-                {billingInterval === 'week' ? formatCurrency(displayWeeklyPrice) : formatCurrency(displayMonthlyPrice)}
+                {billingInterval === 'week' ? formatCurrency(displayWeeklyPrice) : billingInterval === 'year' ? formatCurrency(displayYearlyPrice) : formatCurrency(displayMonthlyPrice)}
               </Text>
-              <Text style={s.optionPriceSuffix}>{billingInterval === 'week' ? '/wk' : '/mo'}</Text>
+              <Text style={s.optionPriceSuffix}>{billingInterval === 'week' ? '/wk' : billingInterval === 'year' ? '/yr' : '/mo'}</Text>
             </View>
           </View>
 
-          {/* Weekly / Monthly toggle */}
+          {/* Weekly / Monthly / Yearly toggle */}
           <View style={s.intervalToggleRow}>
+            <Pressable
+              onPress={() => setBillingInterval('week')}
+              style={[s.intervalPill, billingInterval === 'week' && s.intervalPillActive]}
+            >
+              <Text style={[s.intervalPillText, billingInterval === 'week' && s.intervalPillTextActive]}>Weekly</Text>
+            </Pressable>
             <Pressable
               onPress={() => setBillingInterval('month')}
               style={[s.intervalPill, billingInterval === 'month' && s.intervalPillActive]}
@@ -230,10 +239,10 @@ export default function PaymentSelectScreen() {
               <Text style={[s.intervalPillText, billingInterval === 'month' && s.intervalPillTextActive]}>Monthly</Text>
             </Pressable>
             <Pressable
-              onPress={() => setBillingInterval('week')}
-              style={[s.intervalPill, billingInterval === 'week' && s.intervalPillActive]}
+              onPress={() => setBillingInterval('year')}
+              style={[s.intervalPill, billingInterval === 'year' && s.intervalPillActive]}
             >
-              <Text style={[s.intervalPillText, billingInterval === 'week' && s.intervalPillTextActive]}>Weekly</Text>
+              <Text style={[s.intervalPillText, billingInterval === 'year' && s.intervalPillTextActive]}>Yearly</Text>
             </Pressable>
           </View>
 
@@ -241,6 +250,9 @@ export default function PaymentSelectScreen() {
             <DetailRow label="Contract total" value={formatCurrency(contractTotal)} />
             {billingInterval === 'week' && (
               <DetailRow label="Weekly rate" value={`${formatCurrency(displayWeeklyPrice)}/wk`} />
+            )}
+            {billingInterval === 'year' && (
+              <DetailRow label="Yearly rate" value={`${formatCurrency(displayYearlyPrice)}/yr`} />
             )}
             <DetailRow label="After contract" value={`${formatCurrency(continuationMonthly)}/mo`} />
             {hasCTS && (
@@ -317,7 +329,9 @@ export default function PaymentSelectScreen() {
                 : selected === 'monthly'
                 ? billingInterval === 'week'
                   ? `Start at ${formatCurrency(displayWeeklyPrice)}/wk`
-                  : `Start at ${formatCurrency(displayMonthlyPrice)}/mo`
+                  : billingInterval === 'year'
+                    ? `Start at ${formatCurrency(displayYearlyPrice)}/yr`
+                    : `Start at ${formatCurrency(displayMonthlyPrice)}/mo`
                 : 'Select a payment option'}
             </Text>
           )}
