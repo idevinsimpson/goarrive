@@ -411,6 +411,11 @@ export default function CoachApplicationScreen() {
   const [uploading, setUploading] = useState<'resume' | 'certifications' | 'video' | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [videoFileSize, setVideoFileSize] = useState(0);
+  const [videoBytesTransferred, setVideoBytesTransferred] = useState(0);
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState('');
+  // Keep file input ref alive to prevent Safari from GC-ing the File blob mid-upload
+  const videoInputRef = useRef<HTMLInputElement | null>(null);
 
   /* Restore saved progress */
   useEffect(() => {
@@ -607,38 +612,67 @@ export default function CoachApplicationScreen() {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'video/*';
+    // Store the input element in a ref so Safari doesn't GC the File blob
+    // during a long upload (known WebKit issue with temporary input elements)
+    videoInputRef.current = input;
     input.onchange = async (e: any) => {
       const file = e.target?.files?.[0];
       if (!file) return;
-      if (file.size > 200 * 1024 * 1024) { setError('Video must be under 200 MB.'); return; }
+      if (file.size > 500 * 1024 * 1024) {
+        setError('Video must be under 500 MB. Try trimming or using a lower resolution.');
+        return;
+      }
       setUploading('video');
       setUploadProgress(0);
+      setVideoFileSize(file.size);
+      setVideoBytesTransferred(0);
       setError('');
       setFieldErrors(prev => { const n = { ...prev }; delete n.futureResumeVideo; return n; });
+      // Create local preview URL immediately so user sees their video
+      if (videoPreviewUrl) URL.revokeObjectURL(videoPreviewUrl);
+      setVideoPreviewUrl(URL.createObjectURL(file));
       try {
         const storageRef = ref(storage, `coachApplications/videos/${Date.now()}_${file.name}`);
-        // For video, keep the File blob (too large for ArrayBuffer in memory)
-        // but set contentType explicitly
         const task = uploadBytesResumable(storageRef, file, { contentType: file.type || 'video/mp4' });
         task.on('state_changed', (snap) => {
           setUploadProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100));
+          setVideoBytesTransferred(snap.bytesTransferred);
         });
         await task;
         const url = await getDownloadURL(storageRef);
         setForm(prev => ({ ...prev, futureResumeVideoUrl: url, futureResumeVideoFileName: file.name }));
       } catch (err: any) {
         console.error('Video upload error:', err);
+        // Clean up preview on failure
+        if (videoPreviewUrl) URL.revokeObjectURL(videoPreviewUrl);
+        setVideoPreviewUrl('');
         const code = err?.code || '';
         const msg = code === 'storage/unauthorized' ? 'Video upload permission denied.'
           : code === 'storage/canceled' ? 'Video upload was canceled.'
+          : code === 'storage/retry-limit-exceeded' ? 'Upload timed out. Please check your connection and try again.'
           : `Video upload failed (${code || err?.message || 'unknown'}). Please try again.`;
         setError(msg);
       } finally {
         setUploading(null);
-        setUploadProgress(0);
+        // Keep videoInputRef alive until component unmounts or new upload
       }
     };
     input.click();
+  }
+
+  function removeVideo() {
+    setForm(prev => ({ ...prev, futureResumeVideoUrl: '', futureResumeVideoFileName: '' }));
+    if (videoPreviewUrl) URL.revokeObjectURL(videoPreviewUrl);
+    setVideoPreviewUrl('');
+    setUploadProgress(0);
+    setVideoFileSize(0);
+    setVideoBytesTransferred(0);
+    videoInputRef.current = null;
+  }
+
+  function formatBytes(bytes: number): string {
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
   /* ─── Submit ─── */
@@ -900,28 +934,66 @@ export default function CoachApplicationScreen() {
         )}
         <View style={st.divider} />
         <Field label="Your Future Resume Video" required error={fe('futureResumeVideo')} fieldId="futureResumeVideo" hint="Record a 2-3 minute video sharing your vision for your coaching career with GoArrive. What do you hope to achieve? What milestones do you want to reach? How will you grow as a coach? Be aspirational, specific, and authentic.">
-          <Pressable style={[fi.uploadBtn, fe('futureResumeVideo') && { borderColor: C.red }]} onPress={pickVideo} disabled={uploading === 'video'}>
-            {uploading === 'video' ? (
+          {uploading === 'video' ? (
+            <View style={[fi.uploadBtn, { borderColor: C.gold, borderStyle: 'solid' as any }]}>
               <View style={fi.uploadEmpty}>
                 <ActivityIndicator color={C.gold} size="small" />
                 <Text style={fi.uploadLabel}>Uploading video... {uploadProgress}%</Text>
-                <View style={[pg.barBg, { marginTop: 8, width: '80%' as any }]}>
+                <Text style={fi.uploadSub}>
+                  {formatBytes(videoBytesTransferred)} of {formatBytes(videoFileSize)}
+                </Text>
+                <View style={[pg.barBg, { marginTop: 8, width: '100%' as any }]}>
                   <View style={[pg.barFill, { width: `${uploadProgress}%` as any }]} />
                 </View>
+                {videoPreviewUrl ? (
+                  <View style={{ marginTop: 12, width: '100%' as any, borderRadius: 8, overflow: 'hidden' as any }}>
+                    {Platform.OS === 'web' && (
+                      <video
+                        src={videoPreviewUrl}
+                        style={{ width: '100%', maxHeight: 180, objectFit: 'cover' as any, borderRadius: 8, opacity: 0.6 }}
+                        muted
+                      />
+                    )}
+                  </View>
+                ) : null}
               </View>
-            ) : form.futureResumeVideoFileName ? (
-              <View style={fi.uploadDone}>
-                <Text style={fi.uploadCheckIcon}>{'\u2705'}</Text>
-                <Text style={fi.uploadFileName} numberOfLines={1}>{form.futureResumeVideoFileName}</Text>
+            </View>
+          ) : form.futureResumeVideoUrl ? (
+            <View style={[fi.uploadBtn, { borderColor: C.green, borderStyle: 'solid' as any }]}>
+              <View style={{ alignItems: 'center' as any, gap: 10, width: '100%' as any }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={fi.uploadCheckIcon}>{'\u2705'}</Text>
+                  <Text style={[fi.uploadFileName, { flex: 1 }]} numberOfLines={1}>{form.futureResumeVideoFileName}</Text>
+                </View>
+                {videoFileSize > 0 && (
+                  <Text style={fi.uploadSub}>{formatBytes(videoFileSize)} uploaded</Text>
+                )}
+                {(videoPreviewUrl || form.futureResumeVideoUrl) && Platform.OS === 'web' && (
+                  <View style={{ width: '100%' as any, borderRadius: 8, overflow: 'hidden' as any, marginTop: 4 }}>
+                    <video
+                      src={videoPreviewUrl || form.futureResumeVideoUrl}
+                      controls
+                      style={{ width: '100%', maxHeight: 240, borderRadius: 8, background: '#000' }}
+                    />
+                  </View>
+                )}
+                <Pressable
+                  onPress={removeVideo}
+                  style={{ marginTop: 4, paddingVertical: 6, paddingHorizontal: 14, borderRadius: 8, backgroundColor: C.redDim, borderWidth: 1, borderColor: 'rgba(224,82,82,0.25)' }}
+                >
+                  <Text style={{ fontSize: 13, color: C.red, fontFamily: FONT_B }}>Remove & Re-upload</Text>
+                </Pressable>
               </View>
-            ) : (
+            </View>
+          ) : (
+            <Pressable style={[fi.uploadBtn, fe('futureResumeVideo') && { borderColor: C.red }]} onPress={pickVideo}>
               <View style={fi.uploadEmpty}>
                 <Text style={fi.uploadPlusIcon}>{'\uD83C\uDFA5'}</Text>
                 <Text style={fi.uploadLabel}>Upload Your Future Resume Video</Text>
-                <Text style={fi.uploadSub}>MP4, MOV, AVI, WebM — Max 200 MB</Text>
+                <Text style={fi.uploadSub}>MP4, MOV, AVI, WebM — Max 500 MB</Text>
               </View>
-            )}
-          </Pressable>
+            </Pressable>
+          )}
         </Field>
       </>
     );
