@@ -8000,58 +8000,8 @@ export const generateVoice = onCall(
 
 // ─────────────────────────────────────────────
 // COACH APPLICATION EMAIL NOTIFICATION
-// Sends an email to Devin when a coach applies via /coach-apply
+// Email notification is handled by the VM-based coach-app-watcher service
+// (~/agent-setup/shared/coach-app-watcher/) which uses Gmail API via
+// domain-wide delegation. The Resend EMAIL_API_KEY is a placeholder
+// so Cloud Functions cannot send email directly.
 // ─────────────────────────────────────────────
-
-export const onCoachApplicationCreated = onDocumentCreated(
-  { document: 'coachApplications/{applicationId}', secrets: [emailApiKey] },
-  async (event) => {
-    const snap = event.data;
-    if (!snap) return;
-
-    const data = snap.data() as {
-      name?: string;
-      email?: string;
-      phone?: string;
-      experience?: string;
-      certifications?: string;
-      why?: string;
-    };
-
-    const applicantName = data.name || 'Unknown';
-    const applicantEmail = data.email || 'Not provided';
-
-    const subject = `New Coach Application: ${applicantName}`;
-    const htmlBody = `
-      <div style="font-family: 'DM Sans', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #1A1D23; color: #E8EAF0; padding: 32px; border-radius: 12px;">
-        <h2 style="color: #7BA05B; margin-top: 0;">New Coach Application</h2>
-        <table style="width: 100%; border-collapse: collapse;">
-          <tr><td style="padding: 8px 0; color: #9BA3B8; width: 140px;">Name</td><td style="padding: 8px 0;">${applicantName}</td></tr>
-          <tr><td style="padding: 8px 0; color: #9BA3B8;">Email</td><td style="padding: 8px 0;">${applicantEmail}</td></tr>
-          <tr><td style="padding: 8px 0; color: #9BA3B8;">Phone</td><td style="padding: 8px 0;">${data.phone || 'Not provided'}</td></tr>
-          <tr><td style="padding: 8px 0; color: #9BA3B8;">Experience</td><td style="padding: 8px 0;">${data.experience || 'Not provided'}</td></tr>
-          <tr><td style="padding: 8px 0; color: #9BA3B8;">Certifications</td><td style="padding: 8px 0;">${data.certifications || 'Not provided'}</td></tr>
-          <tr><td style="padding: 8px 0; color: #9BA3B8;">Why GoArrive?</td><td style="padding: 8px 0;">${data.why || 'Not provided'}</td></tr>
-        </table>
-        <hr style="border: none; border-top: 1px solid #252B3D; margin: 24px 0;" />
-        <p style="color: #6B7280; font-size: 13px;">Application ID: ${snap.id}</p>
-      </div>
-    `;
-
-    const textBody = `New Coach Application\n\nName: ${applicantName}\nEmail: ${applicantEmail}\nPhone: ${data.phone || 'N/A'}\nExperience: ${data.experience || 'N/A'}\nCertifications: ${data.certifications || 'N/A'}\nWhy GoArrive: ${data.why || 'N/A'}\n\nApplication ID: ${snap.id}`;
-
-    try {
-      const result = await sendNotification({
-        channel: 'email',
-        recipient: { uid: 'system', email: 'Devin.Simpson@goa.fit', role: 'admin' },
-        subject,
-        htmlBody,
-        body: textBody,
-        messageType: 'coach_application',
-      });
-      console.log('[onCoachApplicationCreated] Email sent:', result);
-    } catch (err) {
-      console.error('[onCoachApplicationCreated] Failed to send email:', err);
-    }
-  }
-);
