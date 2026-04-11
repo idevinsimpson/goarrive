@@ -1,22 +1,39 @@
-import React, { useRef } from 'react';
-import { Pressable, View, Text, Animated, StyleSheet } from 'react-native';
+/**
+ * EditableSection — subtle tap-to-edit wrapper for builder mode.
+ *
+ * At rest: zero visible chrome. The section looks exactly like the real page.
+ * On hover/focus: a faint border and tiny pencil icon appear.
+ * The actual page design stays visually primary at all times.
+ */
+import React, { useRef, useState } from 'react';
+import { Pressable, View, Animated, StyleSheet } from 'react-native';
 import { Icon } from '../Icon';
 
 interface Props {
-  label: string;
   onEdit: () => void;
   children: React.ReactNode;
 }
 
-export function EditableSection({ label, onEdit, children }: Props) {
+export function EditableSection({ onEdit, children }: Props) {
   const scale = useRef(new Animated.Value(1)).current;
+  const [hovered, setHovered] = useState(false);
 
   function handlePressIn() {
-    Animated.spring(scale, { toValue: 0.98, useNativeDriver: true }).start();
+    Animated.spring(scale, {
+      toValue: 0.985,
+      useNativeDriver: true,
+      speed: 50,
+      bounciness: 4,
+    }).start();
   }
 
   function handlePressOut() {
-    Animated.spring(scale, { toValue: 1, useNativeDriver: true }).start();
+    Animated.spring(scale, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 50,
+      bounciness: 4,
+    }).start();
   }
 
   return (
@@ -24,15 +41,25 @@ export function EditableSection({ label, onEdit, children }: Props) {
       onPress={onEdit}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
+      onHoverIn={() => setHovered(true)}
+      onHoverOut={() => setHovered(false)}
       accessibilityRole="button"
-      accessibilityLabel={`Edit ${label}`}
+      accessibilityLabel="Tap to edit this section"
     >
-      <Animated.View style={[s.wrap, { transform: [{ scale }] }]}>
+      <Animated.View
+        style={[
+          s.wrap,
+          hovered && s.hovered,
+          { transform: [{ scale }] },
+        ]}
+      >
         {children}
-        <View style={s.badge}>
-          <Icon name="edit-2" size={12} color="#F5A623" />
-          <Text style={s.badgeText}>{label}</Text>
-        </View>
+        {/* Tiny pencil — only visible on hover */}
+        {hovered && (
+          <View style={s.pencil}>
+            <Icon name="edit-2" size={12} color="rgba(255,255,255,0.6)" />
+          </View>
+        )}
       </Animated.View>
     </Pressable>
   );
@@ -40,29 +67,23 @@ export function EditableSection({ label, onEdit, children }: Props) {
 
 const s = StyleSheet.create({
   wrap: {
-    borderWidth: 1.5,
-    borderStyle: 'dashed',
-    borderColor: 'rgba(245,166,35,0.35)',
-    borderRadius: 8,
-    overflow: 'hidden',
     position: 'relative',
+    borderWidth: 1,
+    borderColor: 'transparent',
+    borderRadius: 4,
   },
-  badge: {
+  hovered: {
+    borderColor: 'rgba(123,160,91,0.25)',
+  },
+  pencil: {
     position: 'absolute',
-    top: 6,
-    right: 6,
-    flexDirection: 'row',
+    top: 12,
+    right: 12,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(245,166,35,0.12)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  badgeText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#F5A623',
-    letterSpacing: 0.3,
   },
 });

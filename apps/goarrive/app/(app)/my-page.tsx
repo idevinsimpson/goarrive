@@ -311,17 +311,14 @@ export default function MyPageScreen() {
         </Pressable>
 
         {/* ── Live Preview ───────────────────────────────── */}
-        <Text style={[s.sectionLabel, { marginTop: 24 }]}>
-          Page Preview
-        </Text>
-        <Text style={s.previewHint}>
-          Tap any highlighted section to edit it
-        </Text>
-        <FunnelPreview
-          data={data}
-          coachName={coachName}
-          onEditSection={setActiveEditor}
-        />
+        <View style={{ marginTop: 24 }}>
+          <FunnelPreview
+            data={data}
+            coachName={coachName}
+            onEditSection={setActiveEditor}
+            maxHeight={560}
+          />
+        </View>
 
         {/* ── Share Preview (collapsible) ────────────────── */}
         <Pressable
@@ -551,14 +548,6 @@ const s = StyleSheet.create({
   },
   photoLabel: { fontSize: 14, fontWeight: '600', color: FG, fontFamily: FB },
   photoHint: { fontSize: 11, color: MUTED, fontFamily: FB, marginTop: 2 },
-
-  // Preview hint
-  previewHint: {
-    fontSize: 12,
-    color: MUTED,
-    fontFamily: FB,
-    marginBottom: 10,
-  },
 
   // Collapsibles
   collapsibleHeader: {
