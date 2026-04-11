@@ -710,9 +710,11 @@ export default function WorkoutFolderPage({
 
   // ── Delete workout (confirmed) ──────────────────────────────────────────
   const confirmDeleteWorkout = useCallback(async () => {
+    console.log('[WorkoutFolder] confirmDeleteWorkout called — deleting', workoutId);
     try {
       deletedRef.current = true;
       await deleteDoc(doc(db, 'workouts', workoutId));
+      console.log('[WorkoutFolder] deleteDoc succeeded');
       setShowDeleteConfirm(false);
       onBack();
     } catch (e) {
@@ -1209,7 +1211,12 @@ export default function WorkoutFolderPage({
             <View style={st.menuDivider} />
             <Pressable
               style={st.menuItem}
-              onPress={() => { setShowTitleMenu(false); setShowDeleteConfirm(true); }}
+              onPress={(e) => {
+                e.stopPropagation();
+                console.log('[WorkoutFolder] Delete menu item tapped — setting showDeleteConfirm=true');
+                setShowTitleMenu(false);
+                setShowDeleteConfirm(true);
+              }}
             >
               <Icon name="trash-2" size={16} color="#EF4444" />
               <Text style={[st.menuItemText, { color: '#EF4444' }]}>Delete Workout</Text>
@@ -2103,32 +2110,44 @@ export default function WorkoutFolderPage({
         />
       )}
 
-      {/* ── Delete Workout Confirmation — ModalSheet for mobile web ──── */}
-      <ModalSheet
-        visible={showDeleteConfirm}
-        onClose={() => setShowDeleteConfirm(false)}
-        maxHeightPct={0.4}
-        dismissOnBackdrop
-        animationType="fade"
-        sheetBg="#1E2A3A"
-      >
-        <View style={{ padding: 24 }}>
-          <Text style={[st.descTitle, { color: '#EF4444' }]}>Delete Workout</Text>
-          <Text style={{ color: '#CBD5E1', fontSize: 14, fontFamily: FB, lineHeight: 20, marginTop: 8 }}>
-            Are you sure you want to permanently delete{' '}
-            <Text style={{ fontWeight: '700', color: '#F0F4F8' }}>{workoutName}</Text>?
-            {'\n\n'}This action cannot be undone.
-          </Text>
-          <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
-            <Pressable style={[st.descBtn, { backgroundColor: '#0E1117' }]} onPress={() => setShowDeleteConfirm(false)}>
-              <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
-            </Pressable>
-            <Pressable style={[st.descBtn, { backgroundColor: '#EF4444', flex: 1 }]} onPress={confirmDeleteWorkout}>
-              <Text style={{ color: '#FFFFFF', fontWeight: '700', fontFamily: FH }}>Delete</Text>
-            </Pressable>
+      {/* ── Delete Workout Confirmation — inline overlay (no Modal portal) ── */}
+      {showDeleteConfirm && (
+        <Pressable
+          style={{
+            position: 'absolute',
+            top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.85)',
+            justifyContent: 'flex-end',
+            zIndex: 9999,
+          }}
+          onPress={() => setShowDeleteConfirm(false)}
+        >
+          <View
+            style={{
+              backgroundColor: '#1E2A3A',
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
+              padding: 24,
+            }}
+            onStartShouldSetResponder={() => true}
+          >
+            <Text style={[st.descTitle, { color: '#EF4444' }]}>Delete Workout</Text>
+            <Text style={{ color: '#CBD5E1', fontSize: 14, fontFamily: FB, lineHeight: 20, marginTop: 8 }}>
+              Are you sure you want to permanently delete{' '}
+              <Text style={{ fontWeight: '700', color: '#F0F4F8' }}>{workoutName}</Text>?
+              {'\n\n'}This action cannot be undone.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
+              <Pressable style={[st.descBtn, { backgroundColor: '#0E1117' }]} onPress={() => setShowDeleteConfirm(false)}>
+                <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
+              </Pressable>
+              <Pressable style={[st.descBtn, { backgroundColor: '#EF4444', flex: 1 }]} onPress={confirmDeleteWorkout}>
+                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontFamily: FH }}>Delete</Text>
+              </Pressable>
+            </View>
           </View>
-        </View>
-      </ModalSheet>
+        </Pressable>
+      )}
     </View>
   );
 }
