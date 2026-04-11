@@ -514,7 +514,7 @@ export default function MovementForm({
         setProcessingStatus('Analyzing movement...');
         setProcessingProgress(0.5);
         try {
-          const analysis = await analyzeMovementMedia(gifHighUrl);
+          const analysis = await analyzeMovementMedia(videoUrl, fullCrop);
           if (analysis) {
             aiData = {
               name: analysis.name || '',
