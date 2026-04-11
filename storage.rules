@@ -19,7 +19,9 @@ service firebase.storage {
     }
 
     // Coach application uploads — public write (no auth), admin-only read
-    match /coachApplications/{fileName} {
+    // Covers both document uploads (coachApplications/{file}) and
+    // video uploads (coachApplications/videos/{file})
+    match /coachApplications/{allPaths=**} {
       allow write: if request.resource.size < 200 * 1024 * 1024;
       allow read: if request.auth != null;
     }

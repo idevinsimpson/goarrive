@@ -570,8 +570,12 @@ export default function CoachApplicationScreen() {
       setUploadProgress(0);
       setError('');
       try {
+        // Read file into memory first — iOS Safari can garbage-collect
+        // the blob reference before an async upload starts
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
         const storageRef = ref(storage, `coachApplications/${Date.now()}_${file.name}`);
-        const task = uploadBytesResumable(storageRef, file);
+        const task = uploadBytesResumable(storageRef, bytes, { contentType: file.type || 'application/octet-stream' });
         task.on('state_changed', (snap) => {
           setUploadProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100));
         });
@@ -582,9 +586,13 @@ export default function CoachApplicationScreen() {
         } else {
           setForm(prev => ({ ...prev, certificationsUrl: url, certificationsFileName: file.name }));
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Upload error:', err);
-        setError('File upload failed. Please try again.');
+        const code = err?.code || '';
+        const msg = code === 'storage/unauthorized' ? 'Upload permission denied.'
+          : code === 'storage/canceled' ? 'Upload was canceled.'
+          : `File upload failed (${code || err?.message || 'unknown'}). Please try again.`;
+        setError(msg);
       } finally {
         setUploading(null);
         setUploadProgress(0);
@@ -609,16 +617,22 @@ export default function CoachApplicationScreen() {
       setFieldErrors(prev => { const n = { ...prev }; delete n.futureResumeVideo; return n; });
       try {
         const storageRef = ref(storage, `coachApplications/videos/${Date.now()}_${file.name}`);
-        const task = uploadBytesResumable(storageRef, file);
+        // For video, keep the File blob (too large for ArrayBuffer in memory)
+        // but set contentType explicitly
+        const task = uploadBytesResumable(storageRef, file, { contentType: file.type || 'video/mp4' });
         task.on('state_changed', (snap) => {
           setUploadProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100));
         });
         await task;
         const url = await getDownloadURL(storageRef);
         setForm(prev => ({ ...prev, futureResumeVideoUrl: url, futureResumeVideoFileName: file.name }));
-      } catch (err) {
+      } catch (err: any) {
         console.error('Video upload error:', err);
-        setError('Video upload failed. Please try again.');
+        const code = err?.code || '';
+        const msg = code === 'storage/unauthorized' ? 'Video upload permission denied.'
+          : code === 'storage/canceled' ? 'Video upload was canceled.'
+          : `Video upload failed (${code || err?.message || 'unknown'}). Please try again.`;
+        setError(msg);
       } finally {
         setUploading(null);
         setUploadProgress(0);
