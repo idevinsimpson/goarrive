@@ -30,6 +30,7 @@ import {
   doc,
   getDoc,
   updateDoc,
+  deleteDoc,
   collection,
   query,
   where,
@@ -294,6 +295,7 @@ export default function WorkoutFolderPage({
   const [showIntroOutroPage, setShowIntroOutroPage] = useState(false);
   const [showMoveTo, setShowMoveTo] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [moveToSearch, setMoveToSearch] = useState('');
   const [editingNameKey, setEditingNameKey] = useState<string | null>(null);
   const [editingNameValue, setEditingNameValue] = useState('');
@@ -602,6 +604,50 @@ export default function WorkoutFolderPage({
       }
     };
   }, [workoutId]);
+
+  // ── Empty workout check ──────────────────────────────────────────────────
+  // A workout is "empty" if it has zero movements across all blocks AND
+  // no intro/outro videos. Default scaffold blocks with empty movement
+  // arrays don't count as real content.
+  const isWorkoutEmpty = useCallback((): boolean => {
+    const totalMovs = blocksRef.current.reduce(
+      (sum, b) => sum + (b.movements?.length ?? 0), 0,
+    );
+    if (totalMovs > 0) return false;
+    if (introVideoUrl || outroVideoUrl) return false;
+    return true;
+  }, [introVideoUrl, outroVideoUrl]);
+
+  // ── Back handler (auto-deletes empty workouts) ──────────────────────────
+  const handleBack = useCallback(async () => {
+    // Cancel any pending debounced save
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    if (isWorkoutEmpty()) {
+      // Silently remove the empty shell — no confirmation needed
+      try {
+        await deleteDoc(doc(db, 'workouts', workoutId));
+      } catch (e) {
+        console.error('[WorkoutFolder] Auto-delete empty workout error:', e);
+      }
+    } else {
+      await flushSave();
+    }
+    onBack();
+  }, [workoutId, isWorkoutEmpty, flushSave, onBack]);
+
+  // ── Delete workout (confirmed) ──────────────────────────────────────────
+  const confirmDeleteWorkout = useCallback(async () => {
+    try {
+      await deleteDoc(doc(db, 'workouts', workoutId));
+      setShowDeleteConfirm(false);
+      onBack();
+    } catch (e) {
+      console.error('[WorkoutFolder] Delete workout error:', e);
+    }
+  }, [workoutId, onBack]);
 
   // ── Block operations ──────────────────────────────────────────────────────
   const updateBlocks = useCallback((newBlocks: WorkoutBlock[]) => {
@@ -954,12 +1000,12 @@ export default function WorkoutFolderPage({
     <View style={st.root}>
       {/* ── Header / Breadcrumb ──────────────────────────────────────────── */}
       <View style={st.header}>
-        <Pressable onPress={async () => { await flushSave(); onBack(); }} style={st.backBtn}>
+        <Pressable onPress={handleBack} style={st.backBtn}>
           <Icon name="arrow-left" size={20} color="#F0F4F8" />
         </Pressable>
 
         <View style={st.breadcrumb}>
-          <Pressable onPress={async () => { await flushSave(); onBack(); }}>
+          <Pressable onPress={handleBack}>
             <Text style={st.breadcrumbRoot}>Build</Text>
           </Pressable>
           <Text style={st.breadcrumbSep}>/</Text>
@@ -1079,6 +1125,14 @@ export default function WorkoutFolderPage({
             >
               <Icon name="arrow-right" size={16} color="#8A95A3" />
               <Text style={st.menuItemText}>Move to...</Text>
+            </Pressable>
+            <View style={st.menuDivider} />
+            <Pressable
+              style={st.menuItem}
+              onPress={() => { setShowTitleMenu(false); setShowDeleteConfirm(true); }}
+            >
+              <Icon name="trash-2" size={16} color="#EF4444" />
+              <Text style={[st.menuItemText, { color: '#EF4444' }]}>Delete Workout</Text>
             </Pressable>
           </View>
         </Pressable>
@@ -1766,6 +1820,28 @@ export default function WorkoutFolderPage({
         onComplete={() => setShowPreview(false)}
         isPreview
       />
+
+      {/* ── Delete Workout Confirmation Modal ──────────────────────────── */}
+      <Modal transparent visible={showDeleteConfirm} animationType="fade" onRequestClose={() => setShowDeleteConfirm(false)}>
+        <Pressable style={st.modalBackdrop} onPress={() => setShowDeleteConfirm(false)}>
+          <View style={st.descSheet} onStartShouldSetResponder={() => true}>
+            <Text style={[st.descTitle, { color: '#EF4444' }]}>Delete Workout</Text>
+            <Text style={{ color: '#CBD5E1', fontSize: 14, fontFamily: FB, lineHeight: 20, marginTop: 8 }}>
+              Are you sure you want to permanently delete{' '}
+              <Text style={{ fontWeight: '700', color: '#F0F4F8' }}>{workoutName}</Text>?
+              {'\n\n'}This action cannot be undone.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
+              <Pressable style={[st.descBtn, { backgroundColor: '#1E2A3A' }]} onPress={() => setShowDeleteConfirm(false)}>
+                <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
+              </Pressable>
+              <Pressable style={[st.descBtn, { backgroundColor: '#EF4444', flex: 1 }]} onPress={confirmDeleteWorkout}>
+                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontFamily: FH }}>Delete</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
