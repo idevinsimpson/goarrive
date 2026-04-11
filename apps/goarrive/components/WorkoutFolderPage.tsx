@@ -634,7 +634,7 @@ export default function WorkoutFolderPage({
         (sum, b) => sum + ((b.movements ?? []).length), 0,
       );
       if (totalMovs === 0) {
-        deleteDoc(doc(db, 'workouts', workoutId)).catch(() => {});
+        deleteDoc(doc(db, 'workouts', workoutId)).catch((e) => console.error('[WorkoutFolder] Unmount auto-delete error:', e));
         return;
       }
 
@@ -2110,34 +2110,17 @@ export default function WorkoutFolderPage({
         />
       )}
 
-      {/* ── Delete Workout Confirmation — inline overlay (no Modal portal) ── */}
-      {showDeleteConfirm && (
-        <Pressable
-          style={{
-            position: 'absolute',
-            top: 0, left: 0, right: 0, bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.85)',
-            justifyContent: 'flex-end',
-            zIndex: 9999,
-          }}
-          onPress={() => setShowDeleteConfirm(false)}
-        >
-          <View
-            style={{
-              backgroundColor: '#1E2A3A',
-              borderTopLeftRadius: 20,
-              borderTopRightRadius: 20,
-              padding: 24,
-            }}
-            onStartShouldSetResponder={() => true}
-          >
+      {/* ── Delete Workout Confirmation — uses <Modal> portal like description edit ── */}
+      <Modal transparent visible={showDeleteConfirm} animationType="fade" onRequestClose={() => setShowDeleteConfirm(false)}>
+        <Pressable style={st.modalBackdrop} onPress={() => setShowDeleteConfirm(false)}>
+          <View style={[st.descSheet, { backgroundColor: '#1E2A3A' }]} onStartShouldSetResponder={() => true}>
             <Text style={[st.descTitle, { color: '#EF4444' }]}>Delete Workout</Text>
             <Text style={{ color: '#CBD5E1', fontSize: 14, fontFamily: FB, lineHeight: 20, marginTop: 8 }}>
               Are you sure you want to permanently delete{' '}
               <Text style={{ fontWeight: '700', color: '#F0F4F8' }}>{workoutName}</Text>?
               {'\n\n'}This action cannot be undone.
             </Text>
-            <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
               <Pressable style={[st.descBtn, { backgroundColor: '#0E1117' }]} onPress={() => setShowDeleteConfirm(false)}>
                 <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
               </Pressable>
@@ -2147,7 +2130,7 @@ export default function WorkoutFolderPage({
             </View>
           </View>
         </Pressable>
-      )}
+      </Modal>
     </View>
   );
 }
