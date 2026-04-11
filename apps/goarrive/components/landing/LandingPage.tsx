@@ -91,7 +91,7 @@ export default function LandingPage() {
 
   const goStart = () => router.push('/intake');
   const goLogin = () => router.push('/(auth)/login');
-  const goCoachApply = () => router.push('/coach-signup');
+  const goCoachApply = () => router.push('/coach-apply');
 
   const offsets = useRef<Record<string, number>>({});
   const scrollTo = (key: string) => {
