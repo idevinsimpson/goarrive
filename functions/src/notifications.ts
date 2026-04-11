@@ -32,7 +32,8 @@ export type MessageType =
   | 'skip_request_resolved'
   | 'workout_assigned'
   | 'workout_reviewed'
-  | 'workout_completed';
+  | 'workout_completed'
+  | 'coach_application';
 
 export interface NotificationRecipient {
   uid: string;
