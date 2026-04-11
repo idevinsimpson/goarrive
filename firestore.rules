@@ -277,9 +277,8 @@ service cloud.firestore {
       allow create: if isCoachOrBootstrap(request.resource.data.coachId);
       // Only the owning coach or admin can update (including toggling isShared)
       allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
-      // R5: Only templates can be deleted (assigned workouts should be archived, not deleted)
-      allow delete: if (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin())
-                    && resource.data.isTemplate == true;
+      // R5: Owning coach or admin can delete any workout they own
+      allow delete: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
     }
 
     // ─────────────────────────────────────────────
@@ -623,6 +622,19 @@ service cloud.firestore {
       allow create: if isOwnDoc(coachId);
       allow update: if isOwnDoc(coachId);
       allow delete: if isOwnDoc(coachId); // disconnect flow
+    }
+
+    // ─────────────────────────────────────────────
+    // COACH APPLICATIONS (public form — no auth required)
+    // Anyone can submit an application; only admins can read/update.
+    // ─────────────────────────────────────────────
+
+    match /coachApplications/{applicationId} {
+      allow create: if request.resource.data.keys().hasOnly([
+        'name', 'email', 'phone', 'experience', 'certifications', 'why', 'status', 'createdAt'
+      ]) && request.resource.data.status == 'pending';
+      allow read, update: if isPlatformAdmin();
+      allow delete: if false;
     }
 
     // ─────────────────────────────────────────────
