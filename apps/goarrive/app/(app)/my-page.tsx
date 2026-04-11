@@ -1,10 +1,10 @@
 /**
- * My Page — Coach funnel landing page settings
+ * My Page — Coach funnel landing page builder (preview-first)
  *
- * Allows coaches to configure their public landing page at {slug}.goarrive.fit.
- * Reads/writes funnel fields on the users/{uid} document in Firestore.
+ * Coaches see a live preview of their page with defaults already filled in,
+ * then tap directly on sections to edit them. Minimal friction, visual-first.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { router } from 'expo-router';
 import {
   View,
@@ -35,61 +35,44 @@ import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../../lib/firebase';
 import * as ImagePicker from 'expo-image-picker';
 import { BG, CARD, BORDER, MUTED, GOLD, GREEN, RED, FG, FH, FB } from '../../lib/theme';
+import { mergeFunnelData, type FunnelData } from '../../lib/funnelDefaults';
+import { FunnelPreview, type EditSection } from '../../components/funnel/FunnelPreview';
+import { SectionEditor } from '../../components/funnel/SectionEditor';
 
-const CARD_BG = '#1A2035';
+const INPUT_BG = '#1A2035';
 const INPUT_BORDER = '#2A3548';
-const TEXT_SECONDARY = '#8A95A3';
-
-interface Testimonial {
-  name: string;
-  text: string;
-}
+const SUBDOMAIN_RE = /^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/;
 
 export default function MyPageScreen() {
-  const { user, claims, effectiveUid } = useAuth();
+  const { user, effectiveUid } = useAuth();
   const coachId = effectiveUid || user?.uid;
+  const coachName = user?.displayName || '';
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-
-  // Fields
-  const [subdomain, setSubdomain] = useState('');
-  const [savedSubdomain, setSavedSubdomain] = useState('');
-  const [headline, setHeadline] = useState('');
-  const [subheadline, setSubheadline] = useState('');
-  const [bullets, setBullets] = useState<string[]>(['']);
-  const [bio, setBio] = useState('');
-  const [photoUrl, setPhotoUrl] = useState('');
-  const [heroVideoLink, setHeroVideoLink] = useState('');
-  const [ogImageUrl, setOgImageUrl] = useState('');
-  const [testimonials, setTestimonials] = useState<Testimonial[]>([]);
-
-  // Upload states
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const [uploadingOg, setUploadingOg] = useState(false);
 
-  // Validation
+  // Core data
+  const [data, setData] = useState<FunnelData>(mergeFunnelData(undefined));
+  const [savedSubdomain, setSavedSubdomain] = useState('');
   const [subdomainError, setSubdomainError] = useState('');
 
-  // ── Load existing data ──────────────────────────────────────────────
+  // Editor state
+  const [activeEditor, setActiveEditor] = useState<EditSection | null>(null);
+
+  // Advanced sections visibility
+  const [showSharePreview, setShowSharePreview] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // ── Load data ───────────────────────────────────────────────────────
   useEffect(() => {
     if (!coachId) return;
     (async () => {
       try {
         const snap = await getDoc(doc(db, 'coaches', coachId));
-        if (snap.exists()) {
-          const d = snap.data();
-          setSubdomain(d.funnelSubdomain || '');
-          setSavedSubdomain(d.funnelSubdomain || '');
-          setHeadline(d.funnelHeadline || '');
-          setSubheadline(d.funnelSubheadline || '');
-          setBullets(d.funnelBullets?.length ? d.funnelBullets : ['']);
-          setBio(d.funnelBio || '');
-          setPhotoUrl(d.funnelPhotoUrl || '');
-          setHeroVideoLink(d.funnelHeroVideoLink || '');
-          setOgImageUrl(d.funnelOgImageUrl || '');
-          setTestimonials(d.funnelTestimonials?.length ? d.funnelTestimonials : []);
-        }
+        const merged = mergeFunnelData(snap.exists() ? snap.data() : undefined);
+        setData(merged);
+        setSavedSubdomain(merged.funnelSubdomain);
       } catch (err) {
         console.error('[MyPage] load error:', err);
       } finally {
@@ -98,26 +81,24 @@ export default function MyPageScreen() {
     })();
   }, [coachId]);
 
-  // ── Subdomain validation ────────────────────────────────────────────
-  const SUBDOMAIN_RE = /^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/;
-
+  // ── Subdomain helpers ───────────────────────────────────────────────
   function validateSubdomain(val: string): string {
     if (!val) return 'Subdomain is required';
     if (val.length < 3) return 'Must be at least 3 characters';
     if (val.length > 30) return 'Must be 30 characters or less';
-    if (!SUBDOMAIN_RE.test(val)) return 'Lowercase letters, numbers, and hyphens only';
+    if (!SUBDOMAIN_RE.test(val))
+      return 'Lowercase letters, numbers, and hyphens only';
     return '';
   }
 
   function handleSubdomainChange(val: string) {
     const clean = val.toLowerCase().replace(/[^a-z0-9-]/g, '');
-    setSubdomain(clean);
+    setData((prev) => ({ ...prev, funnelSubdomain: clean }));
     setSubdomainError(validateSubdomain(clean));
   }
 
-  // ── Uniqueness check ────────────────────────────────────────────────
   async function checkSubdomainUnique(slug: string): Promise<boolean> {
-    if (slug === savedSubdomain) return true; // unchanged
+    if (slug === savedSubdomain) return true;
     const q = query(
       collection(db, 'coaches'),
       where('funnelSubdomain', '==', slug),
@@ -126,14 +107,10 @@ export default function MyPageScreen() {
     return snap.empty;
   }
 
-  // ── Image upload helper ─────────────────────────────────────────────
-  async function pickAndUploadImage(
-    folder: string,
-    setUrl: (url: string) => void,
-    setUploading: (v: boolean) => void,
-    aspect?: [number, number],
-  ) {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  // ── Photo upload ────────────────────────────────────────────────────
+  async function handlePhotoUpload() {
+    const { status } =
+      await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permission Required', 'Please grant media library access.');
       return;
@@ -142,18 +119,16 @@ export default function MyPageScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
-      aspect,
+      aspect: [1, 1],
       quality: 0.85,
     });
-
     if (result.canceled || !result.assets?.[0]) return;
 
-    setUploading(true);
+    setUploadingPhoto(true);
     try {
-      const asset = result.assets[0];
-      const response = await fetch(asset.uri);
+      const response = await fetch(result.assets[0].uri);
       const blob = await response.blob();
-      const fileName = `funnel/${coachId}/${folder}/${Date.now()}.jpg`;
+      const fileName = `funnel/${coachId}/photo/${Date.now()}.jpg`;
       const storageRef = ref(storage, fileName);
       const uploadTask = uploadBytesResumable(storageRef, blob, {
         contentType: 'image/jpeg',
@@ -162,7 +137,7 @@ export default function MyPageScreen() {
       await new Promise<void>((resolve, reject) => {
         uploadTask.on('state_changed', null, reject, async () => {
           const url = await getDownloadURL(uploadTask.snapshot.ref);
-          setUrl(url);
+          setData((prev) => ({ ...prev, funnelPhotoUrl: url }));
           resolve();
         });
       });
@@ -170,13 +145,13 @@ export default function MyPageScreen() {
       console.error('[MyPage] upload error:', err);
       Alert.alert('Upload Failed', 'Could not upload image. Please try again.');
     } finally {
-      setUploading(false);
+      setUploadingPhoto(false);
     }
   }
 
   // ── Save ────────────────────────────────────────────────────────────
   async function handleSave() {
-    const err = validateSubdomain(subdomain);
+    const err = validateSubdomain(data.funnelSubdomain);
     if (err) {
       setSubdomainError(err);
       return;
@@ -184,40 +159,40 @@ export default function MyPageScreen() {
 
     setSaving(true);
     try {
-      const isUnique = await checkSubdomainUnique(subdomain);
+      const isUnique = await checkSubdomainUnique(data.funnelSubdomain);
       if (!isUnique) {
         setSubdomainError('This subdomain is already taken');
         setSaving(false);
         return;
       }
 
-      // Filter empty bullets
-      const cleanBullets = bullets.map((b) => b.trim()).filter(Boolean);
-
-      // Filter incomplete testimonials
-      const cleanTestimonials = testimonials.filter(
+      const cleanBullets = data.funnelBullets
+        .map((b) => b.trim())
+        .filter(Boolean);
+      const cleanTestimonials = data.funnelTestimonials.filter(
         (t) => t.name.trim() && t.text.trim(),
       );
 
       await setDoc(
         doc(db, 'coaches', coachId!),
         {
-          funnelSubdomain: subdomain,
-          funnelHeadline: headline.trim(),
-          funnelSubheadline: subheadline.trim(),
+          funnelSubdomain: data.funnelSubdomain,
+          funnelHeadline: data.funnelHeadline.trim(),
+          funnelSubheadline: data.funnelSubheadline.trim(),
           funnelBullets: cleanBullets,
-          funnelBio: bio.trim(),
-          funnelPhotoUrl: photoUrl,
-          funnelHeroVideoLink: heroVideoLink.trim(),
-          funnelOgImageUrl: ogImageUrl,
+          funnelBio: data.funnelBio.trim(),
+          funnelPhotoUrl: data.funnelPhotoUrl,
+          funnelHeroVideoLink: data.funnelHeroVideoLink.trim(),
+          // Auto-derive OG image from photo if no custom OG set
+          funnelOgImageUrl: data.funnelOgImageUrl || data.funnelPhotoUrl,
           funnelTestimonials: cleanTestimonials,
           funnelUpdatedAt: Timestamp.now(),
         },
         { merge: true },
       );
 
-      setSavedSubdomain(subdomain);
-      Alert.alert('Saved', 'Your page settings have been saved.');
+      setSavedSubdomain(data.funnelSubdomain);
+      Alert.alert('Saved', 'Your page has been updated.');
     } catch (err) {
       console.error('[MyPage] save error:', err);
       Alert.alert('Error', 'Failed to save. Please try again.');
@@ -226,45 +201,21 @@ export default function MyPageScreen() {
     }
   }
 
-  // ── Bullet helpers ──────────────────────────────────────────────────
-  function updateBullet(index: number, text: string) {
-    const next = [...bullets];
-    next[index] = text;
-    setBullets(next);
-  }
-
-  function removeBullet(index: number) {
-    setBullets(bullets.filter((_, i) => i !== index));
-  }
-
-  function addBullet() {
-    if (bullets.length < 4) setBullets([...bullets, '']);
-  }
-
-  // ── Testimonial helpers ─────────────────────────────────────────────
-  function updateTestimonial(index: number, field: 'name' | 'text', value: string) {
-    const next = [...testimonials];
-    next[index] = { ...next[index], [field]: value };
-    setTestimonials(next);
-  }
-
-  function removeTestimonial(index: number) {
-    setTestimonials(testimonials.filter((_, i) => i !== index));
-  }
-
-  function addTestimonial() {
-    if (testimonials.length < 5) setTestimonials([...testimonials, { name: '', text: '' }]);
-  }
-
-  // ── Preview ─────────────────────────────────────────────────────────
+  // ── Preview link ────────────────────────────────────────────────────
   function openPreview() {
-    const url = `https://${subdomain || 'preview'}.goarrive.fit`;
+    const url = `https://${data.funnelSubdomain || 'preview'}.goarrive.fit`;
     if (Platform.OS === 'web') {
       window.open(url, '_blank');
     } else {
       Linking.openURL(url);
     }
   }
+
+  // Auto-generated OG metadata
+  const ogTitle = `${coachName || 'Your Coach'} — Fitness Coach | GoArrive`;
+  const ogDescription =
+    data.funnelSubheadline.slice(0, 150) ||
+    'Get a personalized fitness plan from a real coach.';
 
   if (loading) {
     return (
@@ -283,23 +234,29 @@ export default function MyPageScreen() {
         </Pressable>
         <Text style={s.headerTitle}>My Page</Text>
         <Pressable
-          onPress={openPreview}
-          hitSlop={8}
-          disabled={!subdomain}
-          style={{ opacity: subdomain ? 1 : 0.4 }}
+          style={[s.saveHeaderBtn, saving && { opacity: 0.6 }]}
+          onPress={handleSave}
+          disabled={saving}
         >
-          <Icon name="share" size={22} color={GOLD} />
+          {saving ? (
+            <ActivityIndicator size="small" color={BG} />
+          ) : (
+            <Text style={s.saveHeaderText}>Save</Text>
+          )}
         </Pressable>
       </View>
 
-      <ScrollView style={s.scroll} contentContainerStyle={s.content}>
-        {/* ── Page URL ────────────────────────────────────── */}
-        <Text style={s.sectionTitle}>Page URL</Text>
-        <View style={s.card}>
-          <Text style={s.label}>Subdomain</Text>
+      <ScrollView
+        style={s.scroll}
+        contentContainerStyle={s.content}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* ── Subdomain ──────────────────────────────────── */}
+        <Text style={s.sectionLabel}>Page URL</Text>
+        <View style={s.subdomainRow}>
           <TextInput
-            style={[s.input, subdomainError ? s.inputError : null]}
-            value={subdomain}
+            style={[s.subdomainInput, subdomainError ? s.inputError : null]}
+            value={data.funnelSubdomain}
             onChangeText={handleSubdomainChange}
             placeholder="your-name"
             placeholderTextColor="#4A5568"
@@ -307,191 +264,153 @@ export default function MyPageScreen() {
             autoCorrect={false}
             maxLength={30}
           />
-          {subdomainError ? (
-            <Text style={s.errorText}>{subdomainError}</Text>
-          ) : null}
-          {subdomain ? (
-            <Text style={s.previewUrl}>{subdomain}.goarrive.fit</Text>
-          ) : null}
+          <Text style={s.subdomainSuffix}>.goarrive.fit</Text>
         </View>
+        {subdomainError ? (
+          <Text style={s.errorText}>{subdomainError}</Text>
+        ) : data.funnelSubdomain ? (
+          <Text style={s.urlPreview}>
+            {data.funnelSubdomain}.goarrive.fit
+          </Text>
+        ) : null}
 
-        {/* ── Hero Section ────────────────────────────────── */}
-        <Text style={s.sectionTitle}>Hero</Text>
-        <View style={s.card}>
-          <Text style={s.label}>Coach Photo</Text>
-          <Text style={s.hint}>Portrait orientation (3:4), minimum 600px wide</Text>
-          <Pressable
-            style={s.uploadBtn}
-            onPress={() => pickAndUploadImage('photo', setPhotoUrl, setUploadingPhoto, [3, 4])}
-            disabled={uploadingPhoto}
-          >
-            {uploadingPhoto ? (
-              <ActivityIndicator size="small" color={BG} />
-            ) : (
-              <>
-                <Icon name="image" size={18} color={BG} />
-                <Text style={s.uploadBtnText}>
-                  {photoUrl ? 'Replace Photo' : 'Upload Photo'}
-                </Text>
-              </>
-            )}
-          </Pressable>
-          {photoUrl ? (
-            <Image source={{ uri: photoUrl }} style={s.photoPreview} />
-          ) : null}
-
-          <View style={s.fieldGap} />
-          <Text style={s.label}>Hero Video URL (optional)</Text>
-          <Text style={s.hint}>YouTube or Vimeo embed URL — replaces photo in hero</Text>
-          <TextInput
-            style={s.input}
-            value={heroVideoLink}
-            onChangeText={setHeroVideoLink}
-            placeholder="https://youtube.com/embed/..."
-            placeholderTextColor="#4A5568"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-        </View>
-
-        {/* ── Content ─────────────────────────────────────── */}
-        <Text style={s.sectionTitle}>Content</Text>
-        <View style={s.card}>
-          <Text style={s.label}>Headline</Text>
-          <TextInput
-            style={s.input}
-            value={headline}
-            onChangeText={(t) => setHeadline(t.slice(0, 60))}
-            placeholder="Your Fitness Plan, Built Just for You"
-            placeholderTextColor="#4A5568"
-            maxLength={60}
-          />
-          <Text style={s.charCount}>{headline.length}/60</Text>
-
-          <View style={s.fieldGap} />
-          <Text style={s.label}>Subheadline</Text>
-          <TextInput
-            style={[s.input, s.textArea]}
-            value={subheadline}
-            onChangeText={(t) => setSubheadline(t.slice(0, 200))}
-            placeholder="A short description of your coaching approach"
-            placeholderTextColor="#4A5568"
-            multiline
-            maxLength={200}
-          />
-          <Text style={s.charCount}>{subheadline.length}/200</Text>
-
-          <View style={s.fieldGap} />
-          <Text style={s.label}>Value Prop Bullets (max 4)</Text>
-          {bullets.map((b, i) => (
-            <View key={i} style={s.bulletRow}>
-              <TextInput
-                style={[s.input, { flex: 1 }]}
-                value={b}
-                onChangeText={(t) => updateBullet(i, t.slice(0, 80))}
-                placeholder={`Bullet ${i + 1}`}
-                placeholderTextColor="#4A5568"
-                maxLength={80}
-              />
-              {bullets.length > 1 ? (
-                <Pressable onPress={() => removeBullet(i)} hitSlop={8} style={s.removeBtn}>
-                  <Icon name="x" size={16} color={RED} />
-                </Pressable>
-              ) : null}
+        {/* ── Photo Upload ───────────────────────────────── */}
+        <Text style={[s.sectionLabel, { marginTop: 20 }]}>Coach Photo</Text>
+        <Pressable
+          style={s.photoRow}
+          onPress={handlePhotoUpload}
+          disabled={uploadingPhoto}
+        >
+          {data.funnelPhotoUrl ? (
+            <Image
+              source={{ uri: data.funnelPhotoUrl }}
+              style={s.photoCircle}
+            />
+          ) : (
+            <View style={[s.photoCircle, s.photoPlaceholder]}>
+              <Icon name="camera" size={24} color={MUTED} />
             </View>
-          ))}
-          {bullets.length < 4 ? (
-            <Pressable style={s.addBtn} onPress={addBullet}>
-              <Icon name="plus" size={14} color={GOLD} />
-              <Text style={s.addBtnText}>Add Bullet</Text>
-            </Pressable>
-          ) : null}
+          )}
+          <View style={{ flex: 1 }}>
+            <Text style={s.photoLabel}>
+              {uploadingPhoto
+                ? 'Uploading...'
+                : data.funnelPhotoUrl
+                  ? 'Change Photo'
+                  : 'Add Your Photo'}
+            </Text>
+            <Text style={s.photoHint}>
+              Used in page header, bio section, and link previews
+            </Text>
+          </View>
+          {uploadingPhoto ? (
+            <ActivityIndicator size="small" color={GOLD} />
+          ) : (
+            <Icon name="upload" size={18} color={GOLD} />
+          )}
+        </Pressable>
 
-          <View style={s.fieldGap} />
-          <Text style={s.label}>Bio</Text>
-          <TextInput
-            style={[s.input, s.textArea]}
-            value={bio}
-            onChangeText={(t) => setBio(t.slice(0, 300))}
-            placeholder="A short bio about your coaching background"
-            placeholderTextColor="#4A5568"
-            multiline
-            maxLength={300}
+        {/* ── Live Preview ───────────────────────────────── */}
+        <View style={{ marginTop: 24 }}>
+          <FunnelPreview
+            data={data}
+            coachName={coachName}
+            onEditSection={setActiveEditor}
+            maxHeight={560}
           />
-          <Text style={s.charCount}>{bio.length}/300</Text>
         </View>
 
-        {/* ── Testimonials ────────────────────────────────── */}
-        <Text style={s.sectionTitle}>Testimonials</Text>
-        <View style={s.card}>
-          <Text style={s.hint}>Add up to 5 testimonials. Leave empty to use defaults.</Text>
-          {testimonials.map((t, i) => (
-            <View key={i} style={s.testimonialCard}>
-              <View style={s.testimonialHeader}>
-                <Text style={s.testimonialLabel}>Testimonial {i + 1}</Text>
-                <Pressable onPress={() => removeTestimonial(i)} hitSlop={8}>
-                  <Icon name="x" size={16} color={RED} />
-                </Pressable>
+        {/* ── Share Preview (collapsible) ────────────────── */}
+        <Pressable
+          style={s.collapsibleHeader}
+          onPress={() => setShowSharePreview(!showSharePreview)}
+        >
+          <View style={s.collapsibleLeft}>
+            <Icon name="eye" size={16} color={MUTED} />
+            <Text style={s.collapsibleTitle}>Share Preview</Text>
+          </View>
+          <Icon
+            name={showSharePreview ? 'chevron-up' : 'chevron-down'}
+            size={16}
+            color={MUTED}
+          />
+        </Pressable>
+        {showSharePreview && (
+          <View style={s.ogCard}>
+            <Text style={s.ogHint}>
+              How your page looks when shared via text or social media
+            </Text>
+            <View style={s.ogMock}>
+              {data.funnelPhotoUrl ? (
+                <Image
+                  source={{ uri: data.funnelPhotoUrl }}
+                  style={s.ogThumb}
+                />
+              ) : (
+                <View style={[s.ogThumb, { backgroundColor: '#2A3548' }]} />
+              )}
+              <View style={s.ogText}>
+                <Text style={s.ogMockTitle} numberOfLines={1}>
+                  {ogTitle}
+                </Text>
+                <Text style={s.ogMockDesc} numberOfLines={2}>
+                  {ogDescription}
+                </Text>
+                <Text style={s.ogMockUrl}>
+                  {data.funnelSubdomain || 'your-name'}.goarrive.fit
+                </Text>
               </View>
-              <TextInput
-                style={s.input}
-                value={t.name}
-                onChangeText={(v) => updateTestimonial(i, 'name', v)}
-                placeholder="Name"
-                placeholderTextColor="#4A5568"
-              />
-              <TextInput
-                style={[s.input, s.textArea, { marginTop: 8 }]}
-                value={t.text}
-                onChangeText={(v) => updateTestimonial(i, 'text', v)}
-                placeholder="Testimonial text"
-                placeholderTextColor="#4A5568"
-                multiline
-              />
             </View>
-          ))}
-          {testimonials.length < 5 ? (
-            <Pressable style={s.addBtn} onPress={addTestimonial}>
-              <Icon name="plus" size={14} color={GOLD} />
-              <Text style={s.addBtnText}>Add Testimonial</Text>
-            </Pressable>
-          ) : null}
-        </View>
+            <Text style={s.ogAutoNote}>
+              Auto-generated from your content. Customize below if needed.
+            </Text>
+          </View>
+        )}
 
-        {/* ── Link Preview ────────────────────────────────── */}
-        <Text style={s.sectionTitle}>Link Preview (OG Image)</Text>
-        <View style={s.card}>
-          <Text style={s.hint}>1200x630 image for iMessage / social link previews</Text>
-          <Pressable
-            style={s.uploadBtn}
-            onPress={() => pickAndUploadImage('og', setOgImageUrl, setUploadingOg, [120, 63])}
-            disabled={uploadingOg}
-          >
-            {uploadingOg ? (
-              <ActivityIndicator size="small" color={BG} />
-            ) : (
-              <>
-                <Icon name="image" size={18} color={BG} />
-                <Text style={s.uploadBtnText}>
-                  {ogImageUrl ? 'Replace OG Image' : 'Upload OG Image'}
-                </Text>
-              </>
-            )}
-          </Pressable>
-          {ogImageUrl ? (
-            <Image source={{ uri: ogImageUrl }} style={s.ogPreview} />
-          ) : null}
-        </View>
+        {/* ── Advanced (collapsible) ─────────────────────── */}
+        <Pressable
+          style={s.collapsibleHeader}
+          onPress={() => setShowAdvanced(!showAdvanced)}
+        >
+          <View style={s.collapsibleLeft}>
+            <Icon name="settings" size={16} color={MUTED} />
+            <Text style={s.collapsibleTitle}>Advanced</Text>
+          </View>
+          <Icon
+            name={showAdvanced ? 'chevron-up' : 'chevron-down'}
+            size={16}
+            color={MUTED}
+          />
+        </Pressable>
+        {showAdvanced && (
+          <View style={s.advancedCard}>
+            <Text style={s.fieldLabel}>Hero Video URL</Text>
+            <Text style={s.fieldHint}>
+              YouTube or Vimeo embed URL — replaces photo in hero
+            </Text>
+            <TextInput
+              style={s.advancedInput}
+              value={data.funnelHeroVideoLink}
+              onChangeText={(t) =>
+                setData((prev) => ({ ...prev, funnelHeroVideoLink: t }))
+              }
+              placeholder="https://youtube.com/embed/..."
+              placeholderTextColor="#4A5568"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+        )}
 
-        {/* ── Preview + Save ──────────────────────────────── */}
+        {/* ── Bottom Actions ─────────────────────────────── */}
         <View style={s.actionRow}>
           <Pressable
-            style={[s.previewBtn, !subdomain && { opacity: 0.4 }]}
+            style={[s.previewBtn, !data.funnelSubdomain && { opacity: 0.4 }]}
             onPress={openPreview}
-            disabled={!subdomain}
+            disabled={!data.funnelSubdomain}
           >
-            <Icon name="share" size={16} color={GOLD} />
-            <Text style={s.previewBtnText}>Preview Page</Text>
+            <Icon name="external-link" size={16} color={GOLD} />
+            <Text style={s.previewBtnText}>View Live Page</Text>
           </Pressable>
 
           <Pressable
@@ -509,16 +428,22 @@ export default function MyPageScreen() {
 
         <View style={{ height: 120 }} />
       </ScrollView>
+
+      {/* Editor bottom sheet */}
+      <SectionEditor
+        visible={!!activeEditor}
+        section={activeEditor}
+        data={data}
+        onUpdate={setData}
+        onClose={() => setActiveEditor(null)}
+      />
     </View>
   );
 }
 
 // ── Styles ──────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: BG,
-  },
+  root: { flex: 1, backgroundColor: BG },
   loadingWrap: {
     flex: 1,
     backgroundColor: BG,
@@ -533,60 +458,163 @@ const s = StyleSheet.create({
     paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: BORDER,
-    paddingTop: Platform.select({
-      ios: 56,
-      android: 16,
-      default: 16,
-    }),
+    paddingTop: Platform.select({ ios: 56, android: 16, default: 16 }),
     ...(Platform.OS === 'web'
       ? ({ paddingTop: 'max(16px, env(safe-area-inset-top, 16px))' } as any)
       : {}),
   },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: FG,
-    fontFamily: FH,
+  headerTitle: { fontSize: 18, fontWeight: '700', color: FG, fontFamily: FH },
+  saveHeaderBtn: {
+    backgroundColor: GOLD,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 7,
   },
-  scroll: {
-    flex: 1,
-  },
-  content: {
-    padding: 20,
-  },
-  sectionTitle: {
-    fontSize: 15,
+  saveHeaderText: { fontSize: 14, fontWeight: '700', color: BG, fontFamily: FB },
+  scroll: { flex: 1 },
+  content: { padding: 20 },
+
+  // Subdomain
+  sectionLabel: {
+    fontSize: 13,
     fontWeight: '700',
     color: GOLD,
     fontFamily: FH,
-    marginTop: 24,
-    marginBottom: 10,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+    marginBottom: 8,
   },
-  card: {
+  subdomainRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 0,
+  },
+  subdomainInput: {
+    flex: 1,
+    backgroundColor: INPUT_BG,
+    borderRadius: 8,
+    borderTopRightRadius: 0,
+    borderBottomRightRadius: 0,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: FG,
+    fontFamily: FB,
+    borderWidth: 1,
+    borderRightWidth: 0,
+    borderColor: INPUT_BORDER,
+  },
+  subdomainSuffix: {
+    backgroundColor: '#151B28',
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    borderRadius: 8,
+    borderTopLeftRadius: 0,
+    borderBottomLeftRadius: 0,
+    fontSize: 14,
+    color: MUTED,
+    fontFamily: FB,
+    borderWidth: 1,
+    borderLeftWidth: 0,
+    borderColor: INPUT_BORDER,
+  },
+  inputError: { borderColor: RED },
+  errorText: { fontSize: 12, color: RED, fontFamily: FB, marginTop: 4 },
+  urlPreview: { fontSize: 12, color: GREEN, fontFamily: FB, marginTop: 4 },
+
+  // Photo
+  photoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
     backgroundColor: CARD,
     borderRadius: 12,
-    padding: 16,
+    padding: 14,
     borderWidth: 1,
     borderColor: BORDER,
   },
-  label: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: FG,
-    fontFamily: FB,
-    marginBottom: 6,
+  photoCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#1A2035',
   },
-  hint: {
-    fontSize: 12,
+  photoPlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: '#3A4558',
+  },
+  photoLabel: { fontSize: 14, fontWeight: '600', color: FG, fontFamily: FB },
+  photoHint: { fontSize: 11, color: MUTED, fontFamily: FB, marginTop: 2 },
+
+  // Collapsibles
+  collapsibleHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 20,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: BORDER,
+  },
+  collapsibleLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  collapsibleTitle: { fontSize: 14, fontWeight: '600', color: FG, fontFamily: FB },
+
+  // OG Preview
+  ogCard: {
+    backgroundColor: CARD,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  ogHint: { fontSize: 12, color: MUTED, fontFamily: FB, marginBottom: 12 },
+  ogMock: {
+    flexDirection: 'row',
+    backgroundColor: '#1A2035',
+    borderRadius: 8,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: INPUT_BORDER,
+  },
+  ogThumb: { width: 80, height: 80, backgroundColor: '#0E1117' },
+  ogText: { flex: 1, padding: 10, justifyContent: 'center' },
+  ogMockTitle: { fontSize: 12, fontWeight: '700', color: FG, fontFamily: FB },
+  ogMockDesc: {
+    fontSize: 11,
     color: MUTED,
     fontFamily: FB,
-    marginBottom: 10,
-    lineHeight: 17,
+    marginTop: 2,
+    lineHeight: 15,
   },
-  input: {
-    backgroundColor: CARD_BG,
+  ogMockUrl: {
+    fontSize: 10,
+    color: '#4A5568',
+    fontFamily: FB,
+    marginTop: 4,
+  },
+  ogAutoNote: {
+    fontSize: 11,
+    color: MUTED,
+    fontFamily: FB,
+    marginTop: 10,
+    fontStyle: 'italic',
+  },
+
+  // Advanced
+  advancedCard: {
+    backgroundColor: CARD,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  fieldLabel: { fontSize: 13, fontWeight: '600', color: FG, fontFamily: FB, marginBottom: 4 },
+  fieldHint: { fontSize: 12, color: MUTED, fontFamily: FB, marginBottom: 10 },
+  advancedInput: {
+    backgroundColor: INPUT_BG,
     borderRadius: 8,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -596,113 +624,12 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: INPUT_BORDER,
   },
-  inputError: {
-    borderColor: RED,
-  },
-  textArea: {
-    minHeight: 72,
-    textAlignVertical: 'top',
-  },
-  errorText: {
-    fontSize: 12,
-    color: RED,
-    fontFamily: FB,
-    marginTop: 4,
-  },
-  previewUrl: {
-    fontSize: 13,
-    color: GREEN,
-    fontFamily: FB,
-    marginTop: 6,
-  },
-  charCount: {
-    fontSize: 11,
-    color: MUTED,
-    fontFamily: FB,
-    textAlign: 'right',
-    marginTop: 4,
-  },
-  fieldGap: {
-    height: 16,
-  },
-  bulletRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  removeBtn: {
-    padding: 6,
-  },
-  addBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 8,
-    paddingVertical: 8,
-  },
-  addBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: GOLD,
-    fontFamily: FB,
-  },
-  uploadBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: GOLD,
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    alignSelf: 'flex-start',
-  },
-  uploadBtnText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: BG,
-    fontFamily: FB,
-  },
-  photoPreview: {
-    width: 120,
-    height: 160,
-    borderRadius: 10,
-    marginTop: 12,
-    backgroundColor: CARD_BG,
-  },
-  ogPreview: {
-    width: '100%',
-    height: 160,
-    borderRadius: 10,
-    marginTop: 12,
-    backgroundColor: CARD_BG,
-    resizeMode: 'cover',
-  },
-  testimonialCard: {
-    backgroundColor: CARD_BG,
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: INPUT_BORDER,
-  },
-  testimonialHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  testimonialLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: MUTED,
-    fontFamily: FB,
-  },
+
+  // Actions
   actionRow: {
     flexDirection: 'row',
     gap: 12,
-    marginTop: 28,
+    marginTop: 24,
   },
   previewBtn: {
     flex: 1,
@@ -715,12 +642,7 @@ const s = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 14,
   },
-  previewBtnText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: GOLD,
-    fontFamily: FB,
-  },
+  previewBtnText: { fontSize: 15, fontWeight: '600', color: GOLD, fontFamily: FB },
   saveBtn: {
     flex: 1,
     backgroundColor: GOLD,
@@ -729,10 +651,5 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  saveBtnText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: BG,
-    fontFamily: FB,
-  },
+  saveBtnText: { fontSize: 15, fontWeight: '700', color: BG, fontFamily: FB },
 });
