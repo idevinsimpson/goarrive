@@ -305,6 +305,7 @@ export default function WorkoutFolderPage({
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyRef = useRef(false); // prevents onSnapshot from overwriting local edits
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deletedRef = useRef(false); // set true after deleteDoc to prevent unmount re-save
   const blocksRef = useRef<WorkoutBlock[]>(blocks);
   const nameRef = useRef(workoutName);
 
@@ -565,13 +566,27 @@ export default function WorkoutFolderPage({
     }
   }, [workoutId]);
 
-  // Flush save on unmount
+  // Flush save on unmount — also auto-deletes empty workouts for ANY exit path
+  // (tab switch, browser back, etc. — not just the in-app back button)
   useEffect(() => {
     return () => {
-      if (dirtyRef.current && saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-        // Fire-and-forget save on unmount
-        const currentBlocks = blocksRef.current;
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+
+      // Already deleted via handleBack or confirmDeleteWorkout — skip
+      if (deletedRef.current) return;
+
+      // Auto-delete empty workouts regardless of how the user exited
+      const currentBlocks = blocksRef.current;
+      const totalMovs = currentBlocks.reduce(
+        (sum, b) => sum + ((b.movements ?? []).length), 0,
+      );
+      if (totalMovs === 0) {
+        deleteDoc(doc(db, 'workouts', workoutId)).catch(() => {});
+        return;
+      }
+
+      // Non-empty workout with pending edits — fire-and-forget save
+      if (dirtyRef.current) {
         const cleanBlocks = currentBlocks.map((b) => ({
           type: b.type, label: b.label,
           rounds: b.rounds ?? DEFAULT_ROUNDS,
@@ -628,9 +643,11 @@ export default function WorkoutFolderPage({
     if (isWorkoutEmpty()) {
       // Silently remove the empty shell — no confirmation needed
       try {
+        deletedRef.current = true;
         await deleteDoc(doc(db, 'workouts', workoutId));
       } catch (e) {
         console.error('[WorkoutFolder] Auto-delete empty workout error:', e);
+        deletedRef.current = false;
       }
     } else {
       await flushSave();
@@ -641,11 +658,13 @@ export default function WorkoutFolderPage({
   // ── Delete workout (confirmed) ──────────────────────────────────────────
   const confirmDeleteWorkout = useCallback(async () => {
     try {
+      deletedRef.current = true;
       await deleteDoc(doc(db, 'workouts', workoutId));
       setShowDeleteConfirm(false);
       onBack();
     } catch (e) {
       console.error('[WorkoutFolder] Delete workout error:', e);
+      deletedRef.current = false;
     }
   }, [workoutId, onBack]);
 
@@ -1821,27 +1840,32 @@ export default function WorkoutFolderPage({
         isPreview
       />
 
-      {/* ── Delete Workout Confirmation Modal ──────────────────────────── */}
-      <Modal transparent visible={showDeleteConfirm} animationType="fade" onRequestClose={() => setShowDeleteConfirm(false)}>
-        <Pressable style={st.modalBackdrop} onPress={() => setShowDeleteConfirm(false)}>
-          <View style={st.descSheet} onStartShouldSetResponder={() => true}>
-            <Text style={[st.descTitle, { color: '#EF4444' }]}>Delete Workout</Text>
-            <Text style={{ color: '#CBD5E1', fontSize: 14, fontFamily: FB, lineHeight: 20, marginTop: 8 }}>
-              Are you sure you want to permanently delete{' '}
-              <Text style={{ fontWeight: '700', color: '#F0F4F8' }}>{workoutName}</Text>?
-              {'\n\n'}This action cannot be undone.
-            </Text>
-            <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
-              <Pressable style={[st.descBtn, { backgroundColor: '#1E2A3A' }]} onPress={() => setShowDeleteConfirm(false)}>
-                <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
-              </Pressable>
-              <Pressable style={[st.descBtn, { backgroundColor: '#EF4444', flex: 1 }]} onPress={confirmDeleteWorkout}>
-                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontFamily: FH }}>Delete</Text>
-              </Pressable>
-            </View>
+      {/* ── Delete Workout Confirmation — ModalSheet for mobile web ──── */}
+      <ModalSheet
+        visible={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        maxHeightPct={0.4}
+        dismissOnBackdrop
+        animationType="fade"
+        sheetBg="#1E2A3A"
+      >
+        <View style={{ padding: 24 }}>
+          <Text style={[st.descTitle, { color: '#EF4444' }]}>Delete Workout</Text>
+          <Text style={{ color: '#CBD5E1', fontSize: 14, fontFamily: FB, lineHeight: 20, marginTop: 8 }}>
+            Are you sure you want to permanently delete{' '}
+            <Text style={{ fontWeight: '700', color: '#F0F4F8' }}>{workoutName}</Text>?
+            {'\n\n'}This action cannot be undone.
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
+            <Pressable style={[st.descBtn, { backgroundColor: '#0E1117' }]} onPress={() => setShowDeleteConfirm(false)}>
+              <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
+            </Pressable>
+            <Pressable style={[st.descBtn, { backgroundColor: '#EF4444', flex: 1 }]} onPress={confirmDeleteWorkout}>
+              <Text style={{ color: '#FFFFFF', fontWeight: '700', fontFamily: FH }}>Delete</Text>
+            </Pressable>
           </View>
-        </Pressable>
-      </Modal>
+        </View>
+      </ModalSheet>
     </View>
   );
 }

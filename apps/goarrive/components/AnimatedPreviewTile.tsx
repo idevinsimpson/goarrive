@@ -62,11 +62,12 @@ export const AnimatedPreviewTile = memo(function AnimatedPreviewTile({
   const prevAnimating = useRef(false);
   const prevItemId = useRef(itemId);
 
-  if (
-    (isAnimating && !prevAnimating.current) ||
-    (itemId !== prevItemId.current)
-  ) {
+  if (itemId !== prevItemId.current) {
+    // New item assigned to this cell — fade in from zero
     fadeAnim.setValue(0);
+  } else if (isAnimating && !prevAnimating.current) {
+    // Same item re-promoted — was already visible at opacity 1, keep it there
+    fadeAnim.setValue(1);
   }
   prevAnimating.current = isAnimating;
   prevItemId.current = itemId;
@@ -219,7 +220,8 @@ const MosaicCrossfadeTile = memo(function MosaicCrossfadeTile({
   const prevPromoted = useRef(false);
 
   if (isPromoted && !prevPromoted.current) {
-    fadeAnim.setValue(0);
+    // Image was already visible at opacity 1 (idle state) — keep it visible
+    fadeAnim.setValue(1);
   }
   prevPromoted.current = isPromoted;
 
