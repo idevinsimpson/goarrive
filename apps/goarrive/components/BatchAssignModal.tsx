@@ -22,6 +22,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import ModalSheet from './ModalSheet';
 import { Icon } from './Icon';
 import {
   collection,
@@ -223,9 +224,7 @@ export default function BatchAssignModal({
   tomorrow.setDate(tomorrow.getDate() + 1);
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={st.overlay}>
-        <View style={st.sheet}>
+    <ModalSheet visible={visible} onClose={onClose} maxHeightPct={0.85} sheetBg="#151921" backdropColor="rgba(0,0,0,0.7)" borderRadius={24}>
           {/* Header */}
           <View style={st.header}>
             <Pressable onPress={onClose} hitSlop={12}>
@@ -440,26 +439,12 @@ export default function BatchAssignModal({
               </Pressable>
             </View>
           )}
-        </View>
-      </View>
-    </Modal>
+    </ModalSheet>
   );
 }
 
 const st = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: '#151921',
-    borderTopLeftRadius: 24,
-    overflow: "hidden" as const,
-    borderTopRightRadius: 24,
-    maxHeight: '85%',
-    paddingBottom: Platform.select({ ios: 34, default: 20 }),
-  },
+  // overlay + sheet styles removed — now handled by ModalSheet component
   header: {
     flexDirection: 'row',
     alignItems: 'center',

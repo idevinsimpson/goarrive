@@ -7115,9 +7115,11 @@ export const retryFailedGifGeneration = onSchedule(
 
 
 // ─── 27. analyzeMovement — AI-powered movement analysis via GPT-4.1-mini ────
-// Accepts a GIF URL, sends it to GPT-4.1-mini vision, and returns structured
-// movement metadata (name, category, equipment, difficulty, muscleGroups,
-// description, regression, progression, contraindications, workSec, restSec).
+// Accepts either a contact sheet (base64 JPEG) or a GIF URL, sends it to
+// GPT-4.1-mini vision, and returns structured movement metadata plus a
+// confidence score (0-1). The contact sheet path is the default — it sends
+// 12 ordered frames in a single image, which is much cheaper than a full
+// animated GIF. Falls back to GIF URL if provided for backwards compat.
 //
 // ME-008: OPENAI_API_KEY must be set as a Firebase secret.
 //         firebase functions:secrets:set OPENAI_API_KEY
@@ -7125,20 +7127,30 @@ export const retryFailedGifGeneration = onSchedule(
 const openaiApiKey = defineSecret('OPENAI_API_KEY');
 
 export const analyzeMovement = onCall(
-  { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60 },
+  { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60, maxInstances: 20 },
   async (request) => {
-    const { gifUrl } = request.data as { gifUrl?: string };
+    const { gifUrl, contactSheet } = request.data as {
+      gifUrl?: string;
+      contactSheet?: string; // base64 data URL (e.g. "data:image/jpeg;base64,...")
+    };
 
-    if (!gifUrl || typeof gifUrl !== 'string') {
-      throw new HttpsError('invalid-argument', 'gifUrl is required');
+    if (!gifUrl && !contactSheet) {
+      throw new HttpsError('invalid-argument', 'Either contactSheet or gifUrl is required');
     }
 
-    const apiKey = openaiApiKey.value();
+    // Trim whitespace/newlines — secrets stored via CLI often have trailing \n
+    const apiKey = openaiApiKey.value()?.trim();
     if (!apiKey) {
       throw new HttpsError('internal', 'OpenAI API key not configured');
     }
+    if (apiKey.length < 30) {
+      console.error('[analyzeMovement] API key appears truncated (length:', apiKey.length, ')');
+      throw new HttpsError('internal', 'OpenAI API key appears invalid — check Firebase secrets');
+    }
 
-    const systemPrompt = `You are a fitness movement analysis expert. You will be shown an animated GIF of a fitness/exercise movement. Analyze it carefully and return a JSON object with the following fields:
+    const isContactSheet = !!contactSheet;
+
+    const systemPrompt = `You are a fitness movement analysis expert. You will be shown ${isContactSheet ? 'a contact sheet of sequential frames extracted from a fitness/exercise movement video. The frames are ordered left-to-right, top-to-bottom, showing the movement progression over time.' : 'an animated GIF of a fitness/exercise movement.'} Analyze it carefully and return a JSON object with the following fields:
 
 - "name": string — the standard exercise name (e.g. "Barbell Back Squat", "Dumbbell Lateral Raise")
 - "category": string — one of: "Upper Body Push", "Upper Body Pull", "Lower Body Push", "Lower Body Pull", "Core", "Cardio", "Mobility"
@@ -7151,8 +7163,16 @@ export const analyzeMovement = onCall(
 - "contraindications": string — brief note on who should avoid this (e.g. "Avoid with lower back injury")
 - "workSec": number — recommended work duration in seconds (typically 30-45)
 - "restSec": number — recommended rest duration in seconds (typically 15-30)
+- "confidence": number — your confidence in the analysis from 0.0 to 1.0 (1.0 = certain, 0.7+ = good, below 0.7 = uncertain/ambiguous)
+
+Set confidence below 0.7 if: the movement is unclear, frames are too dark/blurry to identify, you are guessing between multiple possible movements, or the equipment/form cannot be determined.
 
 Return ONLY valid JSON, no markdown, no explanation.`;
+
+    // Build the image content block
+    const imageContent = contactSheet
+      ? { type: 'image_url' as const, image_url: { url: contactSheet, detail: 'high' as const } }
+      : { type: 'image_url' as const, image_url: { url: gifUrl!, detail: 'high' as const } };
 
     try {
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -7168,18 +7188,15 @@ Return ONLY valid JSON, no markdown, no explanation.`;
             {
               role: 'user',
               content: [
-                {
-                  type: 'image_url',
-                  image_url: { url: gifUrl, detail: 'high' },
-                },
+                imageContent,
                 {
                   type: 'text',
-                  text: 'Analyze this fitness movement and return the JSON metadata.',
+                  text: `Analyze this fitness movement${isContactSheet ? ' from the contact sheet frames' : ''} and return the JSON metadata.`,
                 },
               ],
             },
           ],
-          max_tokens: 500,
+          max_tokens: 600,
           temperature: 0.3,
         }),
       });
@@ -7215,11 +7232,118 @@ Return ONLY valid JSON, no markdown, no explanation.`;
         contraindications: analysis.contraindications || '',
         workSec: typeof analysis.workSec === 'number' ? analysis.workSec : 30,
         restSec: typeof analysis.restSec === 'number' ? analysis.restSec : 15,
+        confidence: typeof analysis.confidence === 'number' ? analysis.confidence : 0.5,
       };
     } catch (err: any) {
       if (err instanceof HttpsError) throw err;
       console.error('[analyzeMovement] Unexpected error:', err);
       throw new HttpsError('internal', 'Failed to analyze movement');
+    }
+  },
+);
+
+
+// ─── analyzeMovementReps — AI-powered rep detection for one-rep loop GIFs ───
+// Accepts a GIF URL, sends it to GPT-4.1-mini vision, and returns:
+//   - repCount: how many complete reps are in the clip
+//   - loopStartPct / loopEndPct: boundaries of one clean full rep (0–1)
+//
+// Used by the client to create a trimmed one-rep loop GIF derivative.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const analyzeMovementReps = onCall(
+  { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60 },
+  async (request) => {
+    const { gifUrl } = request.data as { gifUrl?: string };
+
+    if (!gifUrl || typeof gifUrl !== 'string') {
+      throw new HttpsError('invalid-argument', 'gifUrl is required');
+    }
+
+    const apiKey = openaiApiKey.value();
+    if (!apiKey) {
+      throw new HttpsError('internal', 'OpenAI API key not configured');
+    }
+
+    const systemPrompt = `You are an expert at analyzing fitness movement animations. You will be shown an animated GIF of a fitness exercise.
+
+Your task:
+1. Count how many COMPLETE repetitions (reps) of the exercise are visible in the animation.
+2. If there are 2 or more complete reps, identify the BEST single full rep that would loop seamlessly — meaning the starting position and ending position match as closely as possible.
+3. Express the start and end of that rep as a percentage of the total clip duration (0.0 to 1.0).
+
+Rules:
+- A "rep" is one full cycle of the movement (e.g. down and back up for a squat, push and return for a push-up).
+- Choose the rep where start and end body positions are most similar for the smoothest loop.
+- If the movement is continuous (e.g. running, jumping jacks), count complete cycles.
+- If only 1 rep or partial reps are visible, set repCount to 1 and loopStartPct/loopEndPct to 0/1.
+
+Return ONLY valid JSON with this exact structure:
+{
+  "repCount": <number>,
+  "loopStartPct": <number 0-1>,
+  "loopEndPct": <number 0-1>
+}
+
+No markdown, no explanation.`;
+
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4.1-mini',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'image_url',
+                  image_url: { url: gifUrl, detail: 'high' },
+                },
+                {
+                  type: 'text',
+                  text: 'Analyze this fitness movement GIF. Count the reps and identify the best single-rep loop boundaries.',
+                },
+              ],
+            },
+          ],
+          max_tokens: 200,
+          temperature: 0.2,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[analyzeMovementReps] OpenAI API error:', response.status, errorText);
+        throw new HttpsError('internal', `OpenAI API error: ${response.status}`);
+      }
+
+      const result = await response.json() as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      const content = result.choices?.[0]?.message?.content?.trim() || '';
+
+      let jsonStr = content;
+      if (jsonStr.startsWith('```')) {
+        jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+      }
+
+      const analysis = JSON.parse(jsonStr);
+
+      return {
+        repCount: typeof analysis.repCount === 'number' ? analysis.repCount : 1,
+        loopStartPct: typeof analysis.loopStartPct === 'number' ? analysis.loopStartPct : 0,
+        loopEndPct: typeof analysis.loopEndPct === 'number' ? analysis.loopEndPct : 1,
+      };
+    } catch (err: any) {
+      if (err instanceof HttpsError) throw err;
+      console.error('[analyzeMovementReps] Unexpected error:', err);
+      throw new HttpsError('internal', 'Failed to analyze movement reps');
     }
   },
 );
@@ -7830,7 +7954,7 @@ export const generateVoice = onCall(
       throw new HttpsError('invalid-argument', 'text must be under 500 characters');
     }
 
-    const apiKey = openaiApiKey.value();
+    const apiKey = openaiApiKey.value()?.trim();
     if (!apiKey) {
       throw new HttpsError('internal', 'OpenAI API key not configured');
     }

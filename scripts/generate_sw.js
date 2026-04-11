@@ -106,8 +106,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // For HTML pages, use network-first strategy
-  if (request.headers.get('accept')?.includes('text/html')) {
+  // For HTML pages and JS bundles, use network-first strategy
+  // JS bundles must be network-first because Metro/Expo can reuse filenames
+  // across builds, and cache-first would serve stale code indefinitely.
+  const isHtml = request.headers.get('accept')?.includes('text/html');
+  const isJsBundle = url.pathname.endsWith('.js');
+  if (isHtml || isJsBundle) {
     event.respondWith(
       fetch(request)
         .then((response) => {
@@ -125,14 +129,15 @@ self.addEventListener('fetch', (event) => {
               console.log('[SW] Serving from cache:', request.url);
               return cached;
             }
-            return caches.match('/index.html');
+            if (isHtml) return caches.match('/index.html');
+            return undefined;
           });
         })
     );
     return;
   }
 
-  // For other assets, use cache-first strategy
+  // For other assets (images, fonts, CSS), use cache-first strategy
   event.respondWith(
     caches.match(request).then((cached) => {
       if (cached) {

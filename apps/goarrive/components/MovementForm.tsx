@@ -33,6 +33,7 @@ import {
   Image,
   Linking,
 } from 'react-native';
+import ModalSheet from './ModalSheet';
 import { db, storage } from '../lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -48,8 +49,14 @@ import MovementVideoControls from './MovementVideoControls';
 import VideoCropModal, { CropValues } from './VideoCropModal';
 import { MovementDetailData } from './MovementDetail';
 import { generateCroppedGif } from '../utils/generateCroppedGif';
+import {
+  generateMovementDerivatives,
+  encodeOneRepLoopGif,
+  CropTransform,
+} from '../utils/generateMovementDerivatives';
 import { generateMovementVoice } from '../utils/generateMovementVoice';
 import { analyzeMovementMedia } from '../utils/analyzeMovementMedia';
+import { analyzeMovementReps } from '../utils/analyzeMovementReps';
 import { FB, FH } from '../lib/theme';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -157,6 +164,8 @@ export default function MovementForm({
   const [showCropModal, setShowCropModal] = useState(false);
   const [cropScale, setCropScale] = useState(1);
   const [cropTranslateX, setCropTranslateX] = useState(0);
+  const [cropFrameWidth, setCropFrameWidth] = useState(345);
+  const [cropFrameHeight, setCropFrameHeight] = useState(431);
   const [cropTranslateY, setCropTranslateY] = useState(0);
 
   // ── Pre-populate on edit ───────────────────────────────────────────────
@@ -180,6 +189,8 @@ export default function MovementForm({
       setCropScale((editMovement as any).cropScale ?? 1);
       setCropTranslateX((editMovement as any).cropTranslateX ?? 0);
       setCropTranslateY((editMovement as any).cropTranslateY ?? 0);
+      setCropFrameWidth((editMovement as any).cropFrameWidth ?? 345);
+      setCropFrameHeight((editMovement as any).cropFrameHeight ?? 431);
     } else {
       resetForm();
     }
@@ -209,6 +220,8 @@ export default function MovementForm({
     setCropScale(1);
     setCropTranslateX(0);
     setCropTranslateY(0);
+    setCropFrameWidth(345);
+    setCropFrameHeight(431);
     setShowCropModal(false);
     setGeneratingGif(false);
     setGifProgress(0);
@@ -217,75 +230,134 @@ export default function MovementForm({
   };
 
   // ── GIF thumbnail generation ─────────────────────────────────────────
-  const generateAndUploadGif = useCallback(
-    (url: string, crop: CropValues): Promise<string | null> => {
-      if (Platform.OS !== 'web' || !url) return Promise.resolve(null);
+  /**
+   * Upload a blob to Firebase Storage and return its download URL.
+   */
+  const uploadBlob = useCallback(
+    async (blob: Blob, subfolder: string, ext: string): Promise<string> => {
+      const fileName = `movements/${coachId}/${subfolder}/${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+      const storageRef = ref(storage, fileName);
+      const uploadTask = uploadBytesResumable(storageRef, blob, {
+        contentType: ext === 'gif' ? 'image/gif' : 'image/jpeg',
+      });
+      return new Promise<string>((resolve, reject) => {
+        uploadTask.on('state_changed', null, reject, async () => {
+          const url = await getDownloadURL(uploadTask.snapshot.ref);
+          resolve(url);
+        });
+      });
+    },
+    [coachId],
+  );
+
+  /**
+   * Generate all derivatives and upload them. Returns URLs for each asset.
+   * Uses the new multi-derivative pipeline (single frame capture pass).
+   */
+  const generateAndUploadDerivatives = useCallback(
+    (url: string, crop: CropTransform): Promise<{
+      gifHighUrl: string | null;
+      gifLowUrl: string | null;
+      thumbnailImageUrl: string | null;
+      _loFrames: ImageData[];
+    }> => {
+      if (Platform.OS !== 'web' || !url) {
+        return Promise.resolve({ gifHighUrl: null, gifLowUrl: null, thumbnailImageUrl: null, _loFrames: [] });
+      }
 
       setGeneratingGif(true);
       setGifProgress(0);
 
-      const promise = (async (): Promise<string | null> => {
+      const promise = (async () => {
         try {
-          const blob = await generateCroppedGif(url, crop, (p) => {
+          const result = await generateMovementDerivatives(url, crop, (p) => {
             setGifProgress(p);
           });
 
-          if (!blob) {
-            console.warn('[MovementForm] GIF generation returned null');
-            setGeneratingGif(false);
-            return null;
-          }
-
-          // Upload the GIF to Firebase Storage
-          const fileName = `movements/${coachId}/thumbnails/${Date.now()}.gif`;
-          const storageRef = ref(storage, fileName);
-          const uploadTask = uploadBytesResumable(storageRef, blob, {
-            contentType: 'image/gif',
-          });
-
-          const downloadUrl = await new Promise<string>((resolve, reject) => {
-            uploadTask.on(
-              'state_changed',
-              (snapshot) => {
-                const uploadPct = snapshot.bytesTransferred / snapshot.totalBytes;
-                setGifProgress(0.9 + uploadPct * 0.1);
-              },
-              (error) => reject(error),
-              async () => {
-                const url = await getDownloadURL(uploadTask.snapshot.ref);
-                resolve(url);
-              },
-            );
-          });
-
-          setThumbnailUrl(downloadUrl);
-          setGeneratingGif(false);
-          setGifProgress(0);
-
-          // If the form was already saved, auto-patch the Firestore document
-          if (savedDocIdRef.current) {
-            try {
-              await updateDoc(doc(db, 'movements', savedDocIdRef.current), {
-                thumbnailUrl: downloadUrl,
-              });
-            } catch (patchErr) {
-              console.error('[MovementForm] Auto-patch thumbnailUrl error:', patchErr);
+          // If new pipeline failed or produced no usable GIF, fall back to old proven pipeline
+          const needsFallback = !result || (!result.gifHigh && !result.firstFrame);
+          if (needsFallback) {
+            console.warn('[MovementForm] New pipeline failed, falling back to generateCroppedGif');
+            const legacyCrop = { cropScale: crop.cropScale, cropTranslateX: crop.cropTranslateX, cropTranslateY: crop.cropTranslateY };
+            const fallbackBlob = await generateCroppedGif(url, legacyCrop, (p) => setGifProgress(p));
+            if (fallbackBlob) {
+              const fallbackUrl = await uploadBlob(fallbackBlob, 'thumbnails', 'gif');
+              setThumbnailUrl(fallbackUrl);
+              setGeneratingGif(false);
+              setGifProgress(0);
+              if (savedDocIdRef.current) {
+                updateDoc(doc(db, 'movements', savedDocIdRef.current), {
+                  thumbnailUrl: fallbackUrl,
+                }).catch((err) => console.error('[MovementForm] Fallback auto-patch error:', err));
+              }
+              return { gifHighUrl: fallbackUrl, gifLowUrl: null, thumbnailImageUrl: null, _loFrames: [] };
             }
+            // Both pipelines failed
+            setGeneratingGif(false);
+            setGifProgress(0);
+            return { gifHighUrl: null, gifLowUrl: null, thumbnailImageUrl: null, _loFrames: [] };
           }
 
-          return downloadUrl;
-        } catch (err) {
-          console.error('[MovementForm] GIF generation error:', err);
+          // Upload available derivatives in parallel (some may be null if GIF encoding failed)
+          const [gifHighUrl, gifLowUrl, thumbnailImageUrl] = await Promise.all([
+            result.gifHigh ? uploadBlob(result.gifHigh, 'thumbnails', 'gif') : Promise.resolve(null),
+            result.gifLow ? uploadBlob(result.gifLow, 'thumbnails-low', 'gif') : Promise.resolve(null),
+            result.firstFrame ? uploadBlob(result.firstFrame, 'thumbnails-img', 'jpg') : Promise.resolve(null),
+          ]);
+
+          setThumbnailUrl(gifHighUrl || thumbnailImageUrl || '');
           setGeneratingGif(false);
           setGifProgress(0);
-          return null;
+
+          // Auto-patch if doc was already saved
+          if (savedDocIdRef.current) {
+            updateDoc(doc(db, 'movements', savedDocIdRef.current), {
+              thumbnailUrl: gifHighUrl || thumbnailImageUrl || '',
+              gifLowUrl: gifLowUrl || '',
+              thumbnailImageUrl: thumbnailImageUrl || '',
+            }).catch((err) => console.error('[MovementForm] Auto-patch derivatives error:', err));
+          }
+
+          return { gifHighUrl, gifLowUrl, thumbnailImageUrl, _loFrames: result._loFrames };
+        } catch (err) {
+          console.error('[MovementForm] Derivative pipeline error:', err);
+          // Last-resort fallback to old pipeline
+          try {
+            const legacyCrop = { cropScale: crop.cropScale, cropTranslateX: crop.cropTranslateX, cropTranslateY: crop.cropTranslateY };
+            const fallbackBlob = await generateCroppedGif(url, legacyCrop);
+            if (fallbackBlob) {
+              const fallbackUrl = await uploadBlob(fallbackBlob, 'thumbnails', 'gif');
+              setThumbnailUrl(fallbackUrl);
+              setGeneratingGif(false);
+              setGifProgress(0);
+              return { gifHighUrl: fallbackUrl, gifLowUrl: null, thumbnailImageUrl: null, _loFrames: [] };
+            }
+          } catch (fallbackErr) {
+            console.error('[MovementForm] Fallback pipeline also failed:', fallbackErr);
+          }
+          setGeneratingGif(false);
+          setGifProgress(0);
+          return { gifHighUrl: null, gifLowUrl: null, thumbnailImageUrl: null, _loFrames: [] };
         }
       })();
 
-      gifPromiseRef.current = promise;
+      gifPromiseRef.current = promise.then((r) => r.gifHighUrl || r.thumbnailImageUrl);
       return promise;
     },
-    [coachId],
+    [coachId, uploadBlob],
+  );
+
+  /** Legacy wrapper for edit-mode GIF regeneration (backwards compat). */
+  const generateAndUploadGif = useCallback(
+    (url: string, crop: CropValues): Promise<string | null> => {
+      const fullCrop: CropTransform = {
+        ...crop,
+        cropFrameWidth: (crop as any).cropFrameWidth ?? cropFrameWidth,
+        cropFrameHeight: (crop as any).cropFrameHeight ?? cropFrameHeight,
+      };
+      return generateAndUploadDerivatives(url, fullCrop).then((r) => r.gifHighUrl);
+    },
+    [generateAndUploadDerivatives, cropFrameWidth, cropFrameHeight],
   );
 
   // ── Media upload (shared by Library and Camera) ──────────────────────
@@ -413,25 +485,36 @@ export default function MovementForm({
     setCropScale(crop.cropScale);
     setCropTranslateX(crop.cropTranslateX);
     setCropTranslateY(crop.cropTranslateY);
+    setCropFrameWidth(crop.cropFrameWidth);
+    setCropFrameHeight(crop.cropFrameHeight);
     setShowCropModal(false);
     setCreateStep('processing');
 
+    const fullCrop: CropTransform = {
+      cropScale: crop.cropScale,
+      cropTranslateX: crop.cropTranslateX,
+      cropTranslateY: crop.cropTranslateY,
+      cropFrameWidth: crop.cropFrameWidth,
+      cropFrameHeight: crop.cropFrameHeight,
+    };
+
     try {
-      // Step 1: Generate GIF thumbnail
-      setProcessingStatus('Creating thumbnail...');
+      // Step 1: Generate all derivatives (GIF high, GIF low, first-frame image)
+      setProcessingStatus('Creating thumbnails...');
       setProcessingProgress(0.1);
 
-      const gifUrl = await generateAndUploadGif(videoUrl, crop);
+      const derivatives = await generateAndUploadDerivatives(videoUrl, fullCrop);
+      const { gifHighUrl, gifLowUrl, thumbnailImageUrl, _loFrames } = derivatives;
 
       setProcessingProgress(0.4);
 
-      // Step 2: AI Analysis (runs on the GIF)
+      // Step 2: AI Analysis (runs on the high-quality GIF)
       let aiData: Record<string, any> = {};
-      if (gifUrl) {
+      if (gifHighUrl) {
         setProcessingStatus('Analyzing movement...');
         setProcessingProgress(0.5);
         try {
-          const analysis = await analyzeMovementMedia(gifUrl);
+          const analysis = await analyzeMovementMedia(gifHighUrl);
           if (analysis) {
             aiData = {
               name: analysis.name || '',
@@ -452,10 +535,15 @@ export default function MovementForm({
         }
       }
 
+      if (!aiData.name) {
+        setProcessingStatus('AI analysis unavailable — saving with defaults...');
+      } else {
+        setProcessingStatus('Saving movement...');
+      }
       setProcessingProgress(0.7);
       setProcessingStatus('Saving movement...');
 
-      // Step 3: Save to Firestore
+      // Step 3: Save to Firestore with all derivative URLs
       const data: Record<string, any> = {
         name: aiData.name || 'New Movement',
         category: aiData.category || '',
@@ -470,13 +558,18 @@ export default function MovementForm({
         swapMode: 'split' as const,
         swapWindowSec: 5,
         videoUrl: videoUrl.trim(),
-        thumbnailUrl: gifUrl || '',
+        thumbnailUrl: gifHighUrl || thumbnailImageUrl || '',
+        thumbnailImageUrl: thumbnailImageUrl || '',
+        gifLowUrl: gifLowUrl || '',
+        gifLoopUrl: '', // populated by one-rep loop step below
         regression: aiData.regression || '',
         progression: aiData.progression || '',
         contraindications: aiData.contraindications || '',
         cropScale: crop.cropScale,
         cropTranslateX: crop.cropTranslateX,
         cropTranslateY: crop.cropTranslateY,
+        cropFrameWidth: crop.cropFrameWidth,
+        cropFrameHeight: crop.cropFrameHeight,
         coachId,
         tenantId,
         isGlobal: false,
@@ -501,6 +594,28 @@ export default function MovementForm({
             }
           })
           .catch(() => {});
+      }
+
+      // Step 5: AI one-rep loop detection (non-blocking, runs after save)
+      if (gifHighUrl && _loFrames.length > 0) {
+        (async () => {
+          try {
+            const repAnalysis = await analyzeMovementReps(gifHighUrl);
+            if (repAnalysis && repAnalysis.repCount >= 2) {
+              const loopBlob = await encodeOneRepLoopGif(
+                _loFrames,
+                repAnalysis.loopStartPct,
+                repAnalysis.loopEndPct,
+              );
+              if (loopBlob) {
+                const gifLoopUrl = await uploadBlob(loopBlob, 'thumbnails-loop', 'gif');
+                await updateDoc(doc(db, 'movements', docId), { gifLoopUrl });
+              }
+            }
+          } catch (err) {
+            console.warn('[MovementForm] One-rep loop generation failed:', err);
+          }
+        })();
       }
 
       setProcessingProgress(1);
@@ -548,6 +663,8 @@ export default function MovementForm({
           cropScale,
           cropTranslateX,
           cropTranslateY,
+          cropFrameWidth,
+          cropFrameHeight,
         });
       }
 
@@ -584,6 +701,8 @@ export default function MovementForm({
         cropScale,
         cropTranslateX,
         cropTranslateY,
+        cropFrameWidth,
+        cropFrameHeight,
         updatedAt: serverTimestamp(),
       };
 
@@ -620,9 +739,7 @@ export default function MovementForm({
   if (isEdit) {
     return (
       <>
-        <Modal visible={visible} animationType="slide" transparent={true}>
-          <View style={st.overlay}>
-            <View style={st.sheet}>
+        <ModalSheet visible={visible} onClose={onClose} maxHeightPct={0.9}>
               <View style={st.header}>
                 <Text style={st.headerTitle}>Edit Movement</Text>
                 <Pressable onPress={onClose} hitSlop={8}>
@@ -853,18 +970,18 @@ export default function MovementForm({
                   </Text>
                 </Pressable>
               </View>
-            </View>
-          </View>
-        </Modal>
+        </ModalSheet>
 
         <VideoCropModal
           visible={showCropModal}
           videoUri={videoUrl}
-          initialCrop={{ cropScale, cropTranslateX, cropTranslateY }}
+          initialCrop={{ cropScale, cropTranslateX, cropTranslateY, cropFrameWidth, cropFrameHeight }}
           onDone={(crop: CropValues) => {
             setCropScale(crop.cropScale);
             setCropTranslateX(crop.cropTranslateX);
             setCropTranslateY(crop.cropTranslateY);
+            setCropFrameWidth(crop.cropFrameWidth);
+            setCropFrameHeight(crop.cropFrameHeight);
             setShowCropModal(false);
             generateAndUploadGif(videoUrl, crop);
           }}
@@ -877,9 +994,7 @@ export default function MovementForm({
   // ── CREATE MODE: Simplified 3-step flow ────────────────────────────────
   return (
     <>
-      <Modal visible={visible} animationType="slide" transparent={true}>
-        <View style={st.overlay}>
-          <View style={st.createSheet}>
+      <ModalSheet visible={visible} onClose={() => { resetForm(); onClose(); }} maxHeightPct={0.92}>
             {/* Close button — always visible */}
             <Pressable
               style={st.createCloseBtn}
@@ -996,15 +1111,13 @@ export default function MovementForm({
                 </View>
               </View>
             )}
-          </View>
-        </View>
-      </Modal>
+      </ModalSheet>
 
       {/* Crop Modal — rendered OUTSIDE so it layers on top on iOS */}
       <VideoCropModal
         visible={showCropModal}
         videoUri={videoUrl}
-        initialCrop={{ cropScale, cropTranslateX, cropTranslateY }}
+        initialCrop={{ cropScale, cropTranslateX, cropTranslateY, cropFrameWidth, cropFrameHeight }}
         onDone={(crop: CropValues) => {
           processAfterCrop(crop);
         }}
@@ -1020,20 +1133,7 @@ export default function MovementForm({
 
 // ── Styles ────────────────────────────────────────────────────────────────
 const st = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    justifyContent: 'flex-end',
-  },
-
-  // ── Edit mode sheet (same as before) ─────────────────────────────────
-  sheet: {
-    backgroundColor: '#0E1117',
-    borderTopLeftRadius: 20,
-    overflow: 'hidden' as const,
-    borderTopRightRadius: 20,
-    height: '90%',
-  },
+  // overlay + sheet styles removed — now handled by ModalSheet component
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1058,14 +1158,7 @@ const st = StyleSheet.create({
     gap: 16,
   },
 
-  // ── Create mode sheet ─────────────────────────────────────────────────
-  createSheet: {
-    backgroundColor: '#0E1117',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    height: '92%',
-    overflow: 'hidden' as const,
-  },
+  // createSheet styles removed — now handled by ModalSheet component
   createCloseBtn: {
     position: 'absolute',
     top: Platform.select({ ios: 16, default: 16 }),

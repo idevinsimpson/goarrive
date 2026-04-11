@@ -43,6 +43,7 @@ import {
   Platform,
   Image,
 } from 'react-native';
+import ModalSheet from './ModalSheet';
 import DraggableFlatList, {
   ScaleDecorator,
   RenderItemParams,
@@ -186,6 +187,7 @@ interface WorkoutBlock {
   instructionText?: string;
   firstMovementPrepSec?: number; // extra prep time before first movement
   circuitStartRestSec?: number; // rest before first movement, first round only (circuit-type blocks)
+  showDemo?: boolean; // show demo/preview screen before this block in the player
   movements: BlockMovement[];
 }
 
@@ -227,6 +229,8 @@ export default function WorkoutForm({
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [customTag, setCustomTag] = useState('');
   const [isTemplate, setIsTemplate] = useState(false);
+  const [introVideoUrl, setIntroVideoUrl] = useState('');
+  const [outroVideoUrl, setOutroVideoUrl] = useState('');
   const [blocks, setBlocks] = useState<WorkoutBlock[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
@@ -342,6 +346,8 @@ export default function WorkoutForm({
       setEstimatedDurationMin(editWorkout.estimatedDurationMin ? String(editWorkout.estimatedDurationMin) : '');
       setSelectedTags(editWorkout.tags ?? []);
       setIsTemplate(editWorkout.isTemplate ?? false);
+      setIntroVideoUrl(editWorkout.introVideoUrl ?? '');
+      setOutroVideoUrl(editWorkout.outroVideoUrl ?? '');
       setBlocks(
         (editWorkout.blocks ?? []).map((b: any) => ({
           type: b.type ?? 'Circuit',
@@ -353,6 +359,7 @@ export default function WorkoutForm({
           instructionText: b.instructionText ?? undefined,
           firstMovementPrepSec: b.firstMovementPrepSec ?? 0,
           circuitStartRestSec: b.circuitStartRestSec ?? undefined,
+          showDemo: b.showDemo ?? false,
           movements: (b.movements ?? []).map((m: any) => ({
             movementId: m.movementId ?? '',
             movementName: m.movementName ?? '',
@@ -379,6 +386,8 @@ export default function WorkoutForm({
     setSelectedTags([]);
     setCustomTag('');
     setIsTemplate(false);
+    setIntroVideoUrl('');
+    setOutroVideoUrl('');
     setBlocks([]);
     setAddingMovementToBlock(null);
     setMovementSearch('');
@@ -618,6 +627,7 @@ export default function WorkoutForm({
         if (b.instructionText) clean.instructionText = b.instructionText;
         if (b.firstMovementPrepSec) clean.firstMovementPrepSec = b.firstMovementPrepSec;
         if (b.circuitStartRestSec) clean.circuitStartRestSec = b.circuitStartRestSec;
+        if (b.showDemo != null) clean.showDemo = b.showDemo;
         clean.movements = (b.movements ?? []).map((m) => {
           const cm: any = { movementId: m.movementId, movementName: m.movementName };
           if (m.sets) cm.sets = m.sets;
@@ -655,6 +665,8 @@ export default function WorkoutForm({
         estimatedDurationMin: estimatedDurationMin ? parseInt(estimatedDurationMin, 10) : (autoDurationMin > 0 ? autoDurationMin : null),
         tags: selectedTags,
         isTemplate,
+        introVideoUrl: introVideoUrl.trim() || null,
+        outroVideoUrl: outroVideoUrl.trim() || null,
         blocks: cleanBlocks,
         coverThumbs,
         updatedAt: serverTimestamp(),
@@ -727,9 +739,7 @@ export default function WorkoutForm({
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <>
-    <Modal visible={visible} animationType="slide" transparent>
-      <View style={s.overlay}>
-        <View style={s.sheet}>
+    <ModalSheet visible={visible} onClose={onClose} maxHeightPct={0.95} sheetBg="#111827" backdropColor="rgba(0,0,0,0.65)" borderRadius={24}>
           {/* Handle */}
           <View style={s.handle} />
 
@@ -891,6 +901,40 @@ export default function WorkoutForm({
                                 {block.rounds ?? DEFAULT_ROUNDS}×
                               </Text>
                             </TouchableOpacity>
+                          )}
+                          {/* Demo eye toggle (block-level) — only for exercise blocks */}
+                          {!isSpecial && (
+                            <Pressable
+                              onPress={() => updateBlockField(bi, 'showDemo', !block.showDemo)}
+                              hitSlop={4}
+                              style={{ marginLeft: 6 }}
+                            >
+                              <Icon
+                                name={block.showDemo ? 'eye' : 'eye-off'}
+                                size={16}
+                                color={block.showDemo ? '#F5A623' : '#4A5568'}
+                              />
+                            </Pressable>
+                          )}
+                          {/* Demo duration stepper — visible only when showDemo is ON */}
+                          {!isSpecial && block.showDemo && (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 4 }}>
+                              <Pressable
+                                onPress={() => updateBlockField(bi, 'circuitStartRestSec', Math.max(5, (block.circuitStartRestSec ?? 20) - 5))}
+                                hitSlop={4}
+                              >
+                                <Text style={{ color: '#8A95A3', fontSize: 16, fontFamily: FB, paddingHorizontal: 4 }}>−</Text>
+                              </Pressable>
+                              <Text style={{ color: '#F5A623', fontSize: 13, fontWeight: '700', fontFamily: FH, minWidth: 28, textAlign: 'center' }}>
+                                {block.circuitStartRestSec ?? 20}s
+                              </Text>
+                              <Pressable
+                                onPress={() => updateBlockField(bi, 'circuitStartRestSec', Math.min(120, (block.circuitStartRestSec ?? 20) + 5))}
+                                hitSlop={4}
+                              >
+                                <Text style={{ color: '#8A95A3', fontSize: 16, fontFamily: FB, paddingHorizontal: 4 }}>+</Text>
+                              </Pressable>
+                            </View>
                           )}
                           {/* Duplicate button */}
                           <Pressable onPress={() => duplicateBlock(bi)} hitSlop={6} style={{ marginLeft: 4 }}>
@@ -1246,9 +1290,7 @@ export default function WorkoutForm({
               <Text style={s.toastText}>{toastMessage}</Text>
             </View>
           )}
-        </View>
-      </View>
-    </Modal>
+    </ModalSheet>
 
     {/* ── Block Type Picker Modal ──────────────────────────────────── */}
     <Modal visible={showBlockTypePicker} transparent animationType="fade">
@@ -1343,9 +1385,7 @@ export default function WorkoutForm({
     </Modal>
 
     {/* ── Details Sheet Modal ─────────────────────────────────────── */}
-    <Modal visible={showDetails} transparent animationType="slide">
-      <View style={s.overlay}>
-        <View style={s.detailsSheet}>
+    <ModalSheet visible={showDetails} onClose={() => setShowDetails(false)} maxHeightPct={0.85} sheetBg="#111827" backdropColor="rgba(0,0,0,0.65)" borderRadius={24}>
           <View style={s.handle} />
           <View style={s.header}>
             <Text style={s.headerTitle}>Workout Details</Text>
@@ -1404,6 +1444,13 @@ export default function WorkoutForm({
               </View>
             )}
 
+            {/* Intro / Outro videos — workout-level assets */}
+            <Text style={s.label}>Intro Video URL</Text>
+            <TextInput style={s.input} value={introVideoUrl} onChangeText={setIntroVideoUrl} placeholder="Paste intro video URL..." placeholderTextColor="#4A5568" autoCapitalize="none" autoCorrect={false} />
+
+            <Text style={s.label}>Outro Video URL</Text>
+            <TextInput style={s.input} value={outroVideoUrl} onChangeText={setOutroVideoUrl} placeholder="Paste outro video URL..." placeholderTextColor="#4A5568" autoCapitalize="none" autoCorrect={false} />
+
             {/* Template toggle */}
             <View style={s.templateRow}>
               <View style={s.templateInfo}>
@@ -1425,14 +1472,10 @@ export default function WorkoutForm({
 
             <View style={{ height: 40 }} />
           </ScrollView>
-        </View>
-      </View>
-    </Modal>
+    </ModalSheet>
 
     {/* ── Template Picker Modal ───────────────────────────────────── */}
-    <Modal visible={showTemplatePicker} transparent animationType="slide">
-      <View style={s.overlay}>
-        <View style={s.detailsSheet}>
+    <ModalSheet visible={showTemplatePicker} onClose={() => setShowTemplatePicker(false)} maxHeightPct={0.85} sheetBg="#111827" backdropColor="rgba(0,0,0,0.65)" borderRadius={24}>
           <View style={s.header}>
             <Text style={s.headerTitle}>Load from Template</Text>
             <TouchableOpacity onPress={() => setShowTemplatePicker(false)}>
@@ -1475,31 +1518,14 @@ export default function WorkoutForm({
               </TouchableOpacity>
             ))}
           </ScrollView>
-        </View>
-      </View>
-    </Modal>
+    </ModalSheet>
     </>
   );
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: '#111827',
-    borderTopLeftRadius: 24,
-    overflow: "hidden" as const,
-    borderTopRightRadius: 24,
-    maxHeight: '95%',
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#1E2A3A',
-    borderBottomWidth: 0,
-  },
+  // overlay + sheet styles removed — now handled by ModalSheet component
   handle: {
     width: 40,
     height: 4,
@@ -2046,16 +2072,7 @@ const s = StyleSheet.create({
   },
 
   // ── Details sheet ───────────────────────────────────────────────────
-  detailsSheet: {
-    backgroundColor: '#111827',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '85%',
-    borderWidth: 1,
-    borderColor: '#1E2A3A',
-    borderBottomWidth: 0,
-    flex: 1,
-  },
+  // detailsSheet styles removed — now handled by ModalSheet component
   detailsContent: {
     paddingHorizontal: 20,
     paddingTop: 16,

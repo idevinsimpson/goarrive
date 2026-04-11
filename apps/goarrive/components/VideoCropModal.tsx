@@ -58,6 +58,10 @@ export interface CropValues {
   cropScale: number;
   cropTranslateX: number;
   cropTranslateY: number;
+  /** Actual frame width used during cropping — needed for accurate translate scaling */
+  cropFrameWidth: number;
+  /** Actual frame height used during cropping */
+  cropFrameHeight: number;
 }
 
 interface Props {
@@ -74,7 +78,7 @@ interface Props {
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const FRAME_ASPECT = 4 / 5; // width / height = 0.8
-const MIN_SCALE = 1;
+const MIN_SCALE = 0.5; // Allow zoom-out to 50%
 const MAX_SCALE = 3;
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -137,8 +141,10 @@ export default function VideoCropModal({
     s: number,
   ): { x: number; y: number; clampedX: boolean; clampedY: boolean } => {
     'worklet';
-    const maxX = (frameWidth * (s - 1)) / 2;
-    const maxY = (frameHeight * (s - 1)) / 2;
+    // When zoomed out (s < 1), the video is smaller than the frame — no panning
+    // When zoomed in (s > 1), allow panning within the overflow area
+    const maxX = Math.max((frameWidth * (s - 1)) / 2, 0);
+    const maxY = Math.max((frameHeight * (s - 1)) / 2, 0);
     const cx = Math.min(Math.max(tx, -maxX), maxX);
     const cy = Math.min(Math.max(ty, -maxY), maxY);
     return {
@@ -244,8 +250,10 @@ export default function VideoCropModal({
       cropScale: scale.value,
       cropTranslateX: translateX.value,
       cropTranslateY: translateY.value,
+      cropFrameWidth: frameWidth,
+      cropFrameHeight: frameHeight,
     });
-  }, [onDone, scale, translateX, translateY]);
+  }, [onDone, scale, translateX, translateY, frameWidth, frameHeight]);
 
   const handleReset = useCallback(() => {
     scale.value = withSpring(1);
@@ -276,7 +284,7 @@ export default function VideoCropModal({
 
         {/* Instructions */}
         <Text style={s.instructions}>
-          Drag to reposition. Pinch to zoom in. Double-tap to reset.
+          Drag to reposition. Pinch to zoom in or out. Double-tap to reset.
         </Text>
 
         {/* Crop frame area with overlay */}
@@ -293,12 +301,38 @@ export default function VideoCropModal({
               { width: frameWidth, height: frameHeight },
             ]}
           >
+            {/* Blurred background — visible when zoomed out (scale < 1) */}
+            {Platform.OS === 'web' && (
+              <View
+                style={[
+                  StyleSheet.absoluteFill,
+                  { overflow: 'hidden', zIndex: 0 },
+                ]}
+                pointerEvents="none"
+              >
+                <Video
+                  source={{ uri: videoUri }}
+                  resizeMode={ResizeMode.COVER}
+                  isLooping
+                  shouldPlay
+                  isMuted
+                  style={[
+                    StyleSheet.absoluteFillObject,
+                    // @ts-ignore — web-only CSS filter
+                    { filter: 'blur(20px)', transform: [{ scale: 1.1 }] },
+                  ]}
+                  videoStyle={({ width: '100%', height: '100%' } as any)}
+                />
+              </View>
+            )}
+
             <GestureDetector gesture={composedGesture}>
               <Animated.View
                 style={[
                   {
                     width: frameWidth,
                     height: frameHeight,
+                    zIndex: 1,
                   },
                   animatedVideoStyle,
                 ]}
@@ -320,7 +354,7 @@ export default function VideoCropModal({
             </GestureDetector>
 
             {/* Zoom percentage indicator */}
-            {zoomDisplay > 100 && (
+            {zoomDisplay !== 100 && (
               <View style={s.zoomBadge} pointerEvents="none">
                 <Text style={s.zoomText}>{zoomDisplay}%</Text>
               </View>

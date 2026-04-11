@@ -72,7 +72,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
-exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
+exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -404,7 +404,10 @@ exports.disconnectStripeAccount = (0, https_1.onCall)({ secrets: [stripeSecretKe
  */
 exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey] }, async (request) => {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w;
-    const { planId, memberId, paymentOption, commitToSave, nutritionAddOn, displayedMonthlyPrice: clientMonthly, displayedPayInFullTotal: clientPayInFull } = request.data;
+    const { planId, memberId, paymentOption, commitToSave, nutritionAddOn, displayedMonthlyPrice: clientMonthly, displayedPayInFullTotal: clientPayInFull, billingInterval: clientBillingInterval } = request.data;
+    // Weekly billing: only applies to 'monthly' (recurring) payment option
+    const billingInterval = (paymentOption === 'monthly' && clientBillingInterval === 'week') ? 'week' : 'month';
+    const isWeekly = billingInterval === 'week';
     if (!planId || !memberId || !paymentOption) {
         throw new https_1.HttpsError('invalid-argument', 'planId, memberId, and paymentOption are required');
     }
@@ -562,6 +565,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
             continuationPayInFullTotal,
             continuationPayInFullMonthlyEquivalent,
             baseMonthlyPrice: serverBaseMonthly,
+            billingInterval,
             ctsActive,
             ctsMonthlySavings: ctsActive ? ctsMonthlySavings : ((_t = (_s = plan.postContract) === null || _s === void 0 ? void 0 : _s.ctsMonthlySavings) !== null && _t !== void 0 ? _t : null),
             nutActive,
@@ -582,6 +586,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
             planId,
             snapshotId,
             paymentOption,
+            billingInterval,
             status: 'pending',
             createdAt: firestore_2.FieldValue.serverTimestamp(),
             updatedAt: firestore_2.FieldValue.serverTimestamp(),
@@ -603,9 +608,13 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
         let sessionUrl;
         let stripeSessionId;
         if (paymentOption === 'monthly') {
-            // ── Monthly: subscription schedule with two phases ──
-            // Phase 1: contractMonths at displayMonthlyPrice
-            // Phase 2: indefinite at continuationMonthlyPrice
+            // ── Recurring subscription: weekly or monthly ──
+            // Phase 1: contract period at displayMonthlyPrice (or weekly equivalent)
+            // Phase 2: indefinite at continuationMonthlyPrice (monthly)
+            const recurringAmount = isWeekly
+                ? Math.round(displayMonthlyPrice * 100 / (52 / 12)) // weekly in cents
+                : displayMonthlyPrice * 100; // monthly in cents
+            const intervalLabel = isWeekly ? 'Weekly' : 'Monthly';
             const session = await stripe.checkout.sessions.create({
                 customer: stripeCustomerId,
                 payment_method_types: ['card'],
@@ -615,11 +624,11 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
                         price_data: {
                             currency: 'usd',
                             product_data: {
-                                name: `GoArrive Coaching — ${contractMonths}-Month Contract${ctsActive ? ' (Commit to Save)' : ''}${nutActive ? ' + Nutrition' : ''}`,
+                                name: `GoArrive Coaching — ${contractMonths}-Month Contract (${intervalLabel})${ctsActive ? ' (Commit to Save)' : ''}${nutActive ? ' + Nutrition' : ''}`,
                                 metadata: { planId, snapshotId },
                             },
-                            unit_amount: displayMonthlyPrice * 100, // cents
-                            recurring: { interval: 'month' },
+                            unit_amount: recurringAmount,
+                            recurring: { interval: billingInterval },
                         },
                         quantity: 1,
                     },
@@ -633,6 +642,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
                         memberId,
                         coachId,
                         paymentOption: 'monthly',
+                        billingInterval,
                         contractMonths: String(contractMonths),
                         continuationMonthlyPriceCents: String(continuationMonthlyPrice * 100),
                         tierSplit: String(tierSplit),
@@ -6299,6 +6309,98 @@ Return ONLY valid JSON, no markdown, no explanation.`;
         throw new https_1.HttpsError('internal', 'Failed to analyze movement');
     }
 });
+// ─── analyzeMovementReps — AI-powered rep detection for one-rep loop GIFs ───
+// Accepts a GIF URL, sends it to GPT-4.1-mini vision, and returns:
+//   - repCount: how many complete reps are in the clip
+//   - loopStartPct / loopEndPct: boundaries of one clean full rep (0–1)
+//
+// Used by the client to create a trimmed one-rep loop GIF derivative.
+// ─────────────────────────────────────────────────────────────────────────────
+exports.analyzeMovementReps = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60 }, async (request) => {
+    var _a, _b, _c, _d;
+    const { gifUrl } = request.data;
+    if (!gifUrl || typeof gifUrl !== 'string') {
+        throw new https_1.HttpsError('invalid-argument', 'gifUrl is required');
+    }
+    const apiKey = openaiApiKey.value();
+    if (!apiKey) {
+        throw new https_1.HttpsError('internal', 'OpenAI API key not configured');
+    }
+    const systemPrompt = `You are an expert at analyzing fitness movement animations. You will be shown an animated GIF of a fitness exercise.
+
+Your task:
+1. Count how many COMPLETE repetitions (reps) of the exercise are visible in the animation.
+2. If there are 2 or more complete reps, identify the BEST single full rep that would loop seamlessly — meaning the starting position and ending position match as closely as possible.
+3. Express the start and end of that rep as a percentage of the total clip duration (0.0 to 1.0).
+
+Rules:
+- A "rep" is one full cycle of the movement (e.g. down and back up for a squat, push and return for a push-up).
+- Choose the rep where start and end body positions are most similar for the smoothest loop.
+- If the movement is continuous (e.g. running, jumping jacks), count complete cycles.
+- If only 1 rep or partial reps are visible, set repCount to 1 and loopStartPct/loopEndPct to 0/1.
+
+Return ONLY valid JSON with this exact structure:
+{
+  "repCount": <number>,
+  "loopStartPct": <number 0-1>,
+  "loopEndPct": <number 0-1>
+}
+
+No markdown, no explanation.`;
+    try {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: 'gpt-4.1-mini',
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    {
+                        role: 'user',
+                        content: [
+                            {
+                                type: 'image_url',
+                                image_url: { url: gifUrl, detail: 'high' },
+                            },
+                            {
+                                type: 'text',
+                                text: 'Analyze this fitness movement GIF. Count the reps and identify the best single-rep loop boundaries.',
+                            },
+                        ],
+                    },
+                ],
+                max_tokens: 200,
+                temperature: 0.2,
+            }),
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[analyzeMovementReps] OpenAI API error:', response.status, errorText);
+            throw new https_1.HttpsError('internal', `OpenAI API error: ${response.status}`);
+        }
+        const result = await response.json();
+        const content = ((_d = (_c = (_b = (_a = result.choices) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.message) === null || _c === void 0 ? void 0 : _c.content) === null || _d === void 0 ? void 0 : _d.trim()) || '';
+        let jsonStr = content;
+        if (jsonStr.startsWith('```')) {
+            jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+        }
+        const analysis = JSON.parse(jsonStr);
+        return {
+            repCount: typeof analysis.repCount === 'number' ? analysis.repCount : 1,
+            loopStartPct: typeof analysis.loopStartPct === 'number' ? analysis.loopStartPct : 0,
+            loopEndPct: typeof analysis.loopEndPct === 'number' ? analysis.loopEndPct : 1,
+        };
+    }
+    catch (err) {
+        if (err instanceof https_1.HttpsError)
+            throw err;
+        console.error('[analyzeMovementReps] Unexpected error:', err);
+        throw new https_1.HttpsError('internal', 'Failed to analyze movement reps');
+    }
+});
 // ─── reconcileConnectedAccountPayments ──────────────────────────────────────
 /**
  * Admin-only callable: reconciles missed webhook events from connected accounts.
@@ -6806,5 +6908,56 @@ exports.createMissingLedgerEntry = (0, https_1.onCall)({ secrets: [stripeSecretK
         console.log(`[createMissingLedgerEntry] Created ledger entry for invoice ${invoice.id}`);
     }
     return { created, entries };
+});
+// ─── generateVoice — OpenAI TTS for workout cues and movement names ─────────
+// Accepts text + optional voice (onyx, nova), generates MP3 via OpenAI TTS,
+// uploads to Firebase Storage, returns the download URL.
+// ─────────────────────────────────────────────────────────────────────────────
+exports.generateVoice = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 30 }, async (request) => {
+    const { text, voice, storagePath } = request.data;
+    if (!text || typeof text !== 'string' || text.length === 0) {
+        throw new https_1.HttpsError('invalid-argument', 'text is required');
+    }
+    if (text.length > 500) {
+        throw new https_1.HttpsError('invalid-argument', 'text must be under 500 characters');
+    }
+    const apiKey = openaiApiKey.value();
+    if (!apiKey) {
+        throw new https_1.HttpsError('internal', 'OpenAI API key not configured');
+    }
+    const selectedVoice = voice || 'onyx';
+    const path = storagePath || `voice_cache/tts/${Date.now()}.mp3`;
+    try {
+        const response = await fetch('https://api.openai.com/v1/audio/speech', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: 'tts-1',
+                voice: selectedVoice,
+                input: text,
+            }),
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[generateVoice] OpenAI TTS error:', response.status, errorText);
+            throw new https_1.HttpsError('internal', `OpenAI TTS error: ${response.status}`);
+        }
+        const audioBuffer = Buffer.from(await response.arrayBuffer());
+        const bucket = admin.storage().bucket();
+        const file = bucket.file(path);
+        await file.save(audioBuffer, { contentType: 'audio/mpeg' });
+        await file.makePublic();
+        const url = `https://storage.googleapis.com/${bucket.name}/${path}`;
+        return { url, path };
+    }
+    catch (err) {
+        if (err.code)
+            throw err;
+        console.error('[generateVoice] Failed:', err);
+        throw new https_1.HttpsError('internal', 'Voice generation failed');
+    }
 });
 //# sourceMappingURL=index.js.map

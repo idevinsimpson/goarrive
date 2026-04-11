@@ -38,7 +38,7 @@ import {
 import { Icon } from './Icon';
 import { generateCroppedGif } from '../utils/generateCroppedGif';
 import { generateMovementVoice } from '../utils/generateMovementVoice';
-import { analyzeMovementMedia } from '../utils/analyzeMovementMedia';
+import { analyzeMovementMedia, analyzeMovementFromGif } from '../utils/analyzeMovementMedia';
 import { FB, FH } from '../lib/theme';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -195,12 +195,14 @@ export default function BulkMovementUpload({
         }
       }
 
-      // Step 3: AI Analysis
+      // Step 3: AI Analysis (contact sheet from video, falls back to GIF URL)
       let aiData: Record<string, any> = {};
-      if (gifUrl) {
+      {
         updateItem(item.id, { status: 'analyzing', statusText: 'AI analyzing movement...', progress: 0.5 });
         try {
-          const analysis = await analyzeMovementMedia(gifUrl);
+          const defaultCropForAI = { cropScale: 1, cropTranslateX: 0, cropTranslateY: 0 };
+          const analysis = await analyzeMovementMedia(videoUrl, defaultCropForAI)
+            ?? (gifUrl ? await analyzeMovementFromGif(gifUrl) : null);
           if (analysis) {
             aiData = {
               name: analysis.name || '',
