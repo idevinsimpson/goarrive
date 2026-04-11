@@ -20,7 +20,7 @@ service firebase.storage {
 
     // Coach application uploads — public write (no auth), admin-only read
     match /coachApplications/{fileName} {
-      allow write: if request.resource.size < 10 * 1024 * 1024;
+      allow write: if request.resource.size < 200 * 1024 * 1024;
       allow read: if request.auth != null;
     }
 

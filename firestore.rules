@@ -648,6 +648,7 @@ service cloud.firestore {
           'weeklyHoursAvailable', 'weekendAvailability', 'availability',
           'resumeUrl', 'resumeFileName', 'certificationsUrl', 'certificationsFileName',
           'futureResume',
+          'futureResumeVideoUrl', 'futureResumeVideoFileName',
           'ref1Name', 'ref1Email', 'ref1Phone',
           'ref2Name', 'ref2Email', 'ref2Phone',
           'ref3Name', 'ref3Email', 'ref3Phone',

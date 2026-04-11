@@ -2,7 +2,7 @@
  * Coach Application Form — /coach-application
  *
  * In-depth, multi-step application for coaches applying to join GoArrive.
- * 8 sections with progress bar, per-step validation, file uploads,
+ * 8 sections with progress bar, field-level validation, file + video uploads,
  * availability grid, self-assessment ratings, and localStorage save/resume.
  */
 import React, { useState, useRef, useEffect } from 'react';
@@ -21,7 +21,7 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
 
 /* ─── Brand Tokens ─── */
@@ -138,7 +138,8 @@ interface FormData {
   certificationsUrl: string;
   certificationsFileName: string;
 
-  futureResume: string;
+  futureResumeVideoUrl: string;
+  futureResumeVideoFileName: string;
 
   ref1Name: string;
   ref1Email: string;
@@ -168,7 +169,7 @@ const BLANK: FormData = {
   howHeardAbout: '', otherHowHeard: '', referringCoachName: '',
   weeklyHoursAvailable: '', weekendAvailability: '', availability: {},
   resumeUrl: '', resumeFileName: '', certificationsUrl: '', certificationsFileName: '',
-  futureResume: '',
+  futureResumeVideoUrl: '', futureResumeVideoFileName: '',
   ref1Name: '', ref1Email: '', ref1Phone: '',
   ref2Name: '', ref2Email: '', ref2Phone: '',
   ref3Name: '', ref3Email: '', ref3Phone: '',
@@ -214,12 +215,15 @@ function ProgressBar({ step, total, label, isMobile }: { step: number; total: nu
   );
 }
 
-function Field({ label, required, children, hint }: { label: string; required?: boolean; children: React.ReactNode; hint?: string }) {
+function Field({ label, required, children, hint, error, fieldId }: {
+  label: string; required?: boolean; children: React.ReactNode; hint?: string; error?: string; fieldId?: string;
+}) {
   return (
-    <View style={fi.wrap}>
-      <Text style={fi.label}>{label}{required ? ' *' : ''}</Text>
+    <View style={[fi.wrap, error && fi.wrapError]} nativeID={fieldId ? `field-${fieldId}` : undefined}>
+      <Text style={[fi.label, error && { color: C.red }]}>{label}{required ? ' *' : ''}</Text>
       {hint ? <Text style={fi.hint}>{hint}</Text> : null}
       {children}
+      {error ? <Text style={fi.fieldErrorText}>{error}</Text> : null}
     </View>
   );
 }
@@ -227,11 +231,12 @@ function Field({ label, required, children, hint }: { label: string; required?: 
 function Input(props: {
   value: string; onChangeText: (t: string) => void; placeholder?: string;
   multiline?: boolean; numberOfLines?: number; keyboardType?: any; autoCapitalize?: any; editable?: boolean;
+  error?: boolean;
 }) {
   const { multiline, numberOfLines } = props;
   return (
     <TextInput
-      style={[fi.input, multiline && { minHeight: (numberOfLines || 3) * 24 + 16, textAlignVertical: 'top' as any }]}
+      style={[fi.input, multiline && { minHeight: (numberOfLines || 3) * 24 + 16, textAlignVertical: 'top' as any }, props.error && fi.inputError]}
       placeholder={props.placeholder}
       placeholderTextColor={C.muted}
       value={props.value}
@@ -246,12 +251,12 @@ function Input(props: {
   );
 }
 
-function RadioGroup({ options, value, onChange }: { options: string[]; value: string; onChange: (v: string) => void }) {
+function RadioGroup({ options, value, onChange, error }: { options: string[]; value: string; onChange: (v: string) => void; error?: boolean }) {
   return (
-    <View style={fi.radioGroup}>
+    <View style={[fi.radioGroup, error && fi.radioGroupError]}>
       {options.map(opt => (
         <Pressable key={opt} style={fi.radioRow} onPress={() => onChange(opt)}>
-          <View style={[fi.radioCircle, value === opt && fi.radioCircleActive]}>
+          <View style={[fi.radioCircle, value === opt && fi.radioCircleActive, error && fi.radioCircleError]}>
             {value === opt && <View style={fi.radioDot} />}
           </View>
           <Text style={fi.radioText}>{opt}</Text>
@@ -261,11 +266,11 @@ function RadioGroup({ options, value, onChange }: { options: string[]; value: st
   );
 }
 
-function YesNo({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function YesNo({ value, onChange, error }: { value: string; onChange: (v: string) => void; error?: boolean }) {
   return (
     <View style={fi.yesNoRow}>
       {['Yes', 'No'].map(opt => (
-        <Pressable key={opt} style={[fi.yesNoBtn, value === opt && fi.yesNoBtnActive]} onPress={() => onChange(opt)}>
+        <Pressable key={opt} style={[fi.yesNoBtn, value === opt && fi.yesNoBtnActive, error && !value && fi.yesNoBtnError]} onPress={() => onChange(opt)}>
           <Text style={[fi.yesNoText, value === opt && fi.yesNoTextActive]}>{opt}</Text>
         </Pressable>
       ))}
@@ -276,7 +281,7 @@ function YesNo({ value, onChange }: { value: string; onChange: (v: string) => vo
 function Dropdown({ options, value, onChange, placeholder }: { options: string[]; value: string; onChange: (v: string) => void; placeholder: string }) {
   const [open, setOpen] = useState(false);
   return (
-    <View style={{ position: 'relative' as any, zIndex: open ? 100 : 1 }}>
+    <View style={[{ position: 'relative' as any, zIndex: open ? 9999 : 1 }, Platform.OS === 'web' && open && ({ overflow: 'visible' } as any)]}>
       <Pressable style={fi.dropdown} onPress={() => setOpen(!open)}>
         <Text style={[fi.dropdownText, !value && { color: C.muted }]}>{value || placeholder}</Text>
         <Text style={fi.dropdownArrow}>{open ? '\u25B2' : '\u25BC'}</Text>
@@ -296,14 +301,14 @@ function Dropdown({ options, value, onChange, placeholder }: { options: string[]
   );
 }
 
-function RatingScale({ value, onChange, lowLabel, highLabel }: { value: number; onChange: (v: number) => void; lowLabel: string; highLabel: string }) {
+function RatingScale({ value, onChange, lowLabel, highLabel, error }: { value: number; onChange: (v: number) => void; lowLabel: string; highLabel: string; error?: boolean }) {
   return (
     <View style={fi.ratingWrap}>
       <View style={fi.ratingLabels}>
         <Text style={fi.ratingLabelText}>{lowLabel}</Text>
         <Text style={fi.ratingLabelText}>{highLabel}</Text>
       </View>
-      <View style={fi.ratingRow}>
+      <View style={[fi.ratingRow, error && { borderWidth: 1, borderColor: C.red, borderRadius: 12, padding: 8 }]}>
         {[1, 2, 3, 4, 5].map(n => (
           <Pressable key={n} style={[fi.ratingCircle, value === n && fi.ratingCircleActive]} onPress={() => onChange(n)}>
             <Text style={[fi.ratingNum, value === n && fi.ratingNumActive]}>{n}</Text>
@@ -321,7 +326,6 @@ function AvailabilityGrid({ value, onChange }: { value: Record<string, boolean>;
   };
   return (
     <View style={fi.gridWrap}>
-      {/* Header row */}
       <View style={fi.gridRow}>
         <View style={fi.gridLabelCell} />
         {DAYS.map(d => (
@@ -330,7 +334,6 @@ function AvailabilityGrid({ value, onChange }: { value: Record<string, boolean>;
           </View>
         ))}
       </View>
-      {/* Period rows */}
       {PERIOD_LABELS.map(period => (
         <View key={period} style={fi.gridRow}>
           <View style={fi.gridLabelCell}>
@@ -352,11 +355,19 @@ function AvailabilityGrid({ value, onChange }: { value: Record<string, boolean>;
   );
 }
 
-function FileUpload({ label, fileName, uploading, onPick }: { label: string; fileName: string; uploading: boolean; onPick: () => void }) {
+function FileUpload({ label, fileName, uploading, onPick, progress }: { label: string; fileName: string; uploading: boolean; onPick: () => void; progress?: number }) {
   return (
     <Pressable style={fi.uploadBtn} onPress={onPick} disabled={uploading}>
       {uploading ? (
-        <ActivityIndicator color={C.gold} size="small" />
+        <View style={fi.uploadEmpty}>
+          <ActivityIndicator color={C.gold} size="small" />
+          <Text style={fi.uploadLabel}>Uploading{progress != null ? `... ${progress}%` : ''}</Text>
+          {progress != null && (
+            <View style={[pg.barBg, { marginTop: 8, width: '80%' as any }]}>
+              <View style={[pg.barFill, { width: `${progress}%` as any }]} />
+            </View>
+          )}
+        </View>
       ) : fileName ? (
         <View style={fi.uploadDone}>
           <Text style={fi.uploadCheckIcon}>{'\u2705'}</Text>
@@ -373,13 +384,13 @@ function FileUpload({ label, fileName, uploading, onPick }: { label: string; fil
   );
 }
 
-function Checkbox({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+function Checkbox({ checked, onChange, label, prominent }: { checked: boolean; onChange: (v: boolean) => void; label: string; prominent?: boolean }) {
   return (
-    <Pressable style={fi.checkboxRow} onPress={() => onChange(!checked)}>
-      <View style={[fi.checkbox, checked && fi.checkboxActive]}>
+    <Pressable style={[fi.checkboxRow, prominent && fi.checkboxProminent]} onPress={() => onChange(!checked)}>
+      <View style={[fi.checkbox, checked && fi.checkboxActive, prominent && !checked && fi.checkboxPromientUnchecked]}>
         {checked && <Text style={fi.checkboxCheck}>{'\u2713'}</Text>}
       </View>
-      <Text style={fi.checkboxLabel}>{label}</Text>
+      <Text style={[fi.checkboxLabel, prominent && fi.checkboxLabelProminent]}>{label}</Text>
     </Pressable>
   );
 }
@@ -397,7 +408,9 @@ export default function CoachApplicationScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
-  const [uploading, setUploading] = useState<'resume' | 'certifications' | null>(null);
+  const [uploading, setUploading] = useState<'resume' | 'certifications' | 'video' | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   /* Restore saved progress */
   useEffect(() => {
@@ -424,87 +437,126 @@ export default function CoachApplicationScreen() {
   const set = <K extends keyof FormData>(key: K) => (val: FormData[K]) =>
     setForm(prev => ({ ...prev, [key]: val }));
 
-  /* ─── Validation ─── */
-  function validateStep(s: number): string | null {
+  const fe = (field: string) => fieldErrors[field];
+
+  /* ─── Field-Level Validation ─── */
+  function validateStepFields(s: number): Record<string, string> {
+    const errs: Record<string, string> = {};
     switch (s) {
       case 0: {
-        const { firstName, lastName, dateOfBirth, streetAddress, city, state, zipCode, phone, email, igHandle, facebookHandle } = form;
-        if (!firstName.trim() || !lastName.trim()) return 'First and last name are required.';
-        if (!dateOfBirth.trim()) return 'Date of birth is required.';
-        if (!streetAddress.trim() || !city.trim() || !state.trim() || !zipCode.trim()) return 'Full address is required.';
-        if (!phone.trim()) return 'Phone number is required.';
-        if (!email.trim() || !email.includes('@')) return 'A valid email address is required.';
-        if (!igHandle.trim()) return 'Instagram handle is required.';
-        if (!facebookHandle.trim()) return 'Facebook handle is required.';
-        return null;
+        if (!form.firstName.trim()) errs.firstName = 'Required';
+        if (!form.lastName.trim()) errs.lastName = 'Required';
+        if (!form.dateOfBirth.trim()) errs.dateOfBirth = 'Required';
+        if (!form.streetAddress.trim()) errs.streetAddress = 'Required';
+        if (!form.city.trim()) errs.city = 'Required';
+        if (!form.state.trim()) errs.state = 'Required';
+        if (!form.zipCode.trim()) errs.zipCode = 'Required';
+        if (!form.phone.trim()) errs.phone = 'Required';
+        if (!form.email.trim() || !form.email.includes('@')) errs.email = 'Valid email required';
+        if (!form.igHandle.trim()) errs.igHandle = 'Required';
+        if (!form.facebookHandle.trim()) errs.facebookHandle = 'Required';
+        break;
       }
       case 1: {
-        if (!form.currentOccupation.trim()) return 'Current occupation is required.';
-        if (!form.employmentStatus) return 'Employment status is required.';
-        if (form.employmentStatus === 'Other' && !form.otherEmploymentStatus.trim()) return 'Please specify your employment status.';
-        if (!form.maintainEmployment) return 'Please indicate whether you will maintain current employment.';
-        return null;
+        if (!form.currentOccupation.trim()) errs.currentOccupation = 'Required';
+        if (!form.employmentStatus) errs.employmentStatus = 'Required';
+        if (form.employmentStatus === 'Other' && !form.otherEmploymentStatus.trim()) errs.otherEmploymentStatus = 'Required';
+        if (!form.maintainEmployment) errs.maintainEmployment = 'Required';
+        break;
       }
       case 2: {
-        if (!form.topThreeStrengths.trim()) return 'Top three strengths are required.';
-        if (!form.weakness.trim()) return 'Growth area is required.';
-        if (!form.standOut.trim()) return 'Please describe what makes you stand out.';
-        if (!form.idealMember.trim()) return 'Describe your ideal member.';
-        return null;
+        if (!form.topThreeStrengths.trim()) errs.topThreeStrengths = 'Required';
+        if (!form.weakness.trim()) errs.weakness = 'Required';
+        if (!form.standOut.trim()) errs.standOut = 'Required';
+        if (!form.idealMember.trim()) errs.idealMember = 'Required';
+        break;
       }
       case 3: {
-        if (!form.numberOneGoal.trim()) return 'Your #1 goal is required.';
-        if (!form.supportFromTeamLead.trim()) return 'Describe the support you want.';
-        if (!form.whyJoinGoArrive.trim()) return 'Please explain why you want to join GoArrive.';
-        if (!form.greatFit.trim()) return 'Describe what makes you a great fit.';
-        return null;
+        if (!form.numberOneGoal.trim()) errs.numberOneGoal = 'Required';
+        if (!form.supportFromTeamLead.trim()) errs.supportFromTeamLead = 'Required';
+        if (!form.whyJoinGoArrive.trim()) errs.whyJoinGoArrive = 'Required';
+        if (!form.greatFit.trim()) errs.greatFit = 'Required';
+        break;
       }
       case 4: {
-        if (!form.entrepreneurialSpirit || !form.teamPlayer || !form.adaptability || !form.communicationSkills)
-          return 'Please complete all four self-assessment ratings.';
-        return null;
+        if (!form.entrepreneurialSpirit) errs.entrepreneurialSpirit = 'Required';
+        if (!form.teamPlayer) errs.teamPlayer = 'Required';
+        if (!form.adaptability) errs.adaptability = 'Required';
+        if (!form.communicationSkills) errs.communicationSkills = 'Required';
+        break;
       }
       case 5: {
-        if (!form.howHeardAbout) return 'Please indicate how you heard about this opportunity.';
-        if (form.howHeardAbout === 'Other' && !form.otherHowHeard.trim()) return 'Please specify how you heard about us.';
-        if (!form.weeklyHoursAvailable.trim()) return 'Weekly hours available is required.';
-        if (!form.weekendAvailability) return 'Please indicate weekend availability.';
-        const hasSlot = Object.values(form.availability).some(Boolean);
-        if (!hasSlot) return 'Please select at least one availability time slot.';
-        return null;
+        if (!form.howHeardAbout) errs.howHeardAbout = 'Required';
+        if (form.howHeardAbout === 'Other' && !form.otherHowHeard.trim()) errs.otherHowHeard = 'Required';
+        if (!form.weeklyHoursAvailable.trim()) errs.weeklyHoursAvailable = 'Required';
+        if (!form.weekendAvailability) errs.weekendAvailability = 'Required';
+        if (!Object.values(form.availability).some(Boolean)) errs.availability = 'Select at least one time slot';
+        break;
       }
       case 6: {
-        if (!form.futureResume.trim()) return 'The future resume vision is required.';
-        return null;
+        if (!form.futureResumeVideoUrl) errs.futureResumeVideo = 'Please upload your future resume video';
+        break;
       }
       case 7: {
-        if (!form.ref1Name.trim() || !form.ref1Email.trim() || !form.ref1Phone.trim()) return 'Reference 1 is incomplete.';
-        if (!form.ref2Name.trim() || !form.ref2Email.trim() || !form.ref2Phone.trim()) return 'Reference 2 is incomplete.';
-        if (!form.ref3Name.trim() || !form.ref3Email.trim() || !form.ref3Phone.trim()) return 'Reference 3 is incomplete.';
-        if (!form.truthAcknowledged) return 'You must acknowledge the truth and accuracy of your responses.';
-        if (!form.signatureName.trim()) return 'Signature (typed full name) is required.';
-        if (!form.signatureDate.trim()) return 'Date is required.';
-        return null;
+        if (!form.ref1Name.trim()) errs.ref1Name = 'Required';
+        if (!form.ref1Email.trim()) errs.ref1Email = 'Required';
+        if (!form.ref1Phone.trim()) errs.ref1Phone = 'Required';
+        if (!form.ref2Name.trim()) errs.ref2Name = 'Required';
+        if (!form.ref2Email.trim()) errs.ref2Email = 'Required';
+        if (!form.ref2Phone.trim()) errs.ref2Phone = 'Required';
+        if (!form.ref3Name.trim()) errs.ref3Name = 'Required';
+        if (!form.ref3Email.trim()) errs.ref3Email = 'Required';
+        if (!form.ref3Phone.trim()) errs.ref3Phone = 'Required';
+        if (!form.truthAcknowledged) errs.truthAcknowledged = 'You must acknowledge to continue';
+        if (!form.signatureName.trim()) errs.signatureName = 'Required';
+        if (!form.signatureDate.trim()) errs.signatureDate = 'Required';
+        break;
       }
-      default: return null;
+    }
+    return errs;
+  }
+
+  function scrollToFirstError(errs: Record<string, string>) {
+    if (Platform.OS === 'web') {
+      const firstField = Object.keys(errs)[0];
+      if (firstField) {
+        setTimeout(() => {
+          const el = document.getElementById(`field-${firstField}`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          } else {
+            scrollRef.current?.scrollTo({ y: 0, animated: true });
+          }
+        }, 100);
+      }
+    } else {
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
     }
   }
 
   function next() {
-    const err = validateStep(step);
-    if (err) { setError(err); scrollRef.current?.scrollTo({ y: 0, animated: true }); return; }
+    const errs = validateStepFields(step);
+    if (Object.keys(errs).length > 0) {
+      setFieldErrors(errs);
+      const firstMsg = Object.values(errs)[0];
+      setError(firstMsg === 'Required' ? 'Please complete all required fields highlighted below.' : firstMsg);
+      scrollToFirstError(errs);
+      return;
+    }
+    setFieldErrors({});
     setError('');
     setStep(s => s + 1);
     scrollRef.current?.scrollTo({ y: 0, animated: true });
   }
 
   function prev() {
+    setFieldErrors({});
     setError('');
     setStep(s => s - 1);
     scrollRef.current?.scrollTo({ y: 0, animated: true });
   }
 
-  /* ─── File Upload (web only) ─── */
+  /* ─── File Upload ─── */
   function pickFile(type: 'resume' | 'certifications') {
     if (Platform.OS !== 'web') return;
     const input = document.createElement('input');
@@ -515,20 +567,61 @@ export default function CoachApplicationScreen() {
       if (!file) return;
       if (file.size > 10 * 1024 * 1024) { setError('File must be under 10 MB.'); return; }
       setUploading(type);
+      setUploadProgress(0);
       setError('');
       try {
         const storageRef = ref(storage, `coachApplications/${Date.now()}_${file.name}`);
-        await uploadBytes(storageRef, file);
+        const task = uploadBytesResumable(storageRef, file);
+        task.on('state_changed', (snap) => {
+          setUploadProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100));
+        });
+        await task;
         const url = await getDownloadURL(storageRef);
         if (type === 'resume') {
           setForm(prev => ({ ...prev, resumeUrl: url, resumeFileName: file.name }));
         } else {
           setForm(prev => ({ ...prev, certificationsUrl: url, certificationsFileName: file.name }));
         }
-      } catch {
+      } catch (err) {
+        console.error('Upload error:', err);
         setError('File upload failed. Please try again.');
       } finally {
         setUploading(null);
+        setUploadProgress(0);
+      }
+    };
+    input.click();
+  }
+
+  /* ─── Video Upload ─── */
+  function pickVideo() {
+    if (Platform.OS !== 'web') return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'video/*';
+    input.onchange = async (e: any) => {
+      const file = e.target?.files?.[0];
+      if (!file) return;
+      if (file.size > 200 * 1024 * 1024) { setError('Video must be under 200 MB.'); return; }
+      setUploading('video');
+      setUploadProgress(0);
+      setError('');
+      setFieldErrors(prev => { const n = { ...prev }; delete n.futureResumeVideo; return n; });
+      try {
+        const storageRef = ref(storage, `coachApplications/videos/${Date.now()}_${file.name}`);
+        const task = uploadBytesResumable(storageRef, file);
+        task.on('state_changed', (snap) => {
+          setUploadProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100));
+        });
+        await task;
+        const url = await getDownloadURL(storageRef);
+        setForm(prev => ({ ...prev, futureResumeVideoUrl: url, futureResumeVideoFileName: file.name }));
+      } catch (err) {
+        console.error('Video upload error:', err);
+        setError('Video upload failed. Please try again.');
+      } finally {
+        setUploading(null);
+        setUploadProgress(0);
       }
     };
     input.click();
@@ -536,16 +629,20 @@ export default function CoachApplicationScreen() {
 
   /* ─── Submit ─── */
   async function handleSubmit() {
-    const err = validateStep(step);
-    if (err) { setError(err); scrollRef.current?.scrollTo({ y: 0, animated: true }); return; }
+    const errs = validateStepFields(step);
+    if (Object.keys(errs).length > 0) {
+      setFieldErrors(errs);
+      setError('Please complete all required fields highlighted below.');
+      scrollToFirstError(errs);
+      return;
+    }
     setLoading(true);
     setError('');
+    setFieldErrors({});
     try {
-      // Build the document — spread form data and add meta fields
       const doc: Record<string, any> = {};
       for (const [k, v] of Object.entries(form)) {
-        const trimmed = typeof v === 'string' ? v.trim() : v;
-        doc[k] = trimmed;
+        doc[k] = typeof v === 'string' ? v.trim() : v;
       }
       doc.email = form.email.trim().toLowerCase();
       doc.status = 'pending';
@@ -572,63 +669,63 @@ export default function CoachApplicationScreen() {
       <>
         <View style={isMobile ? undefined : st.row}>
           <View style={isMobile ? undefined : st.half}>
-            <Field label="First Name" required>
-              <Input value={form.firstName} onChangeText={set('firstName')} placeholder="First name" autoCapitalize="words" />
+            <Field label="First Name" required error={fe('firstName')} fieldId="firstName">
+              <Input value={form.firstName} onChangeText={set('firstName')} placeholder="First name" autoCapitalize="words" error={!!fe('firstName')} />
             </Field>
           </View>
           <View style={isMobile ? undefined : st.half}>
-            <Field label="Last Name" required>
-              <Input value={form.lastName} onChangeText={set('lastName')} placeholder="Last name" autoCapitalize="words" />
+            <Field label="Last Name" required error={fe('lastName')} fieldId="lastName">
+              <Input value={form.lastName} onChangeText={set('lastName')} placeholder="Last name" autoCapitalize="words" error={!!fe('lastName')} />
             </Field>
           </View>
         </View>
-        <Field label="Date of Birth" required>
-          <Input value={form.dateOfBirth} onChangeText={set('dateOfBirth')} placeholder="MM/DD/YYYY" />
+        <Field label="Date of Birth" required error={fe('dateOfBirth')} fieldId="dateOfBirth">
+          <Input value={form.dateOfBirth} onChangeText={set('dateOfBirth')} placeholder="MM/DD/YYYY" error={!!fe('dateOfBirth')} />
         </Field>
-        <Field label="Street Address" required>
-          <Input value={form.streetAddress} onChangeText={set('streetAddress')} placeholder="Street address" autoCapitalize="words" />
+        <Field label="Street Address" required error={fe('streetAddress')} fieldId="streetAddress">
+          <Input value={form.streetAddress} onChangeText={set('streetAddress')} placeholder="Street address" autoCapitalize="words" error={!!fe('streetAddress')} />
         </Field>
         <Field label="Street Address Line 2">
           <Input value={form.streetAddress2} onChangeText={set('streetAddress2')} placeholder="Apt, suite, unit, etc. (optional)" autoCapitalize="words" />
         </Field>
         <View style={isMobile ? undefined : st.row}>
           <View style={isMobile ? undefined : { flex: 2 }}>
-            <Field label="City" required>
-              <Input value={form.city} onChangeText={set('city')} placeholder="City" autoCapitalize="words" />
+            <Field label="City" required error={fe('city')} fieldId="city">
+              <Input value={form.city} onChangeText={set('city')} placeholder="City" autoCapitalize="words" error={!!fe('city')} />
             </Field>
           </View>
           <View style={isMobile ? undefined : { flex: 1 }}>
-            <Field label="State" required>
-              <Input value={form.state} onChangeText={set('state')} placeholder="State" autoCapitalize="characters" />
+            <Field label="State" required error={fe('state')} fieldId="state">
+              <Input value={form.state} onChangeText={set('state')} placeholder="State" autoCapitalize="characters" error={!!fe('state')} />
             </Field>
           </View>
           <View style={isMobile ? undefined : { flex: 1 }}>
-            <Field label="ZIP Code" required>
-              <Input value={form.zipCode} onChangeText={set('zipCode')} placeholder="ZIP" keyboardType="number-pad" />
+            <Field label="ZIP Code" required error={fe('zipCode')} fieldId="zipCode">
+              <Input value={form.zipCode} onChangeText={set('zipCode')} placeholder="ZIP" keyboardType="number-pad" error={!!fe('zipCode')} />
             </Field>
           </View>
         </View>
         <View style={isMobile ? undefined : st.row}>
           <View style={isMobile ? undefined : st.half}>
-            <Field label="Phone Number" required>
-              <Input value={form.phone} onChangeText={set('phone')} placeholder="(555) 555-5555" keyboardType="phone-pad" />
+            <Field label="Phone Number" required error={fe('phone')} fieldId="phone">
+              <Input value={form.phone} onChangeText={set('phone')} placeholder="(555) 555-5555" keyboardType="phone-pad" error={!!fe('phone')} />
             </Field>
           </View>
           <View style={isMobile ? undefined : st.half}>
-            <Field label="Email Address" required>
-              <Input value={form.email} onChangeText={set('email')} placeholder="you@email.com" keyboardType="email-address" />
+            <Field label="Email Address" required error={fe('email')} fieldId="email">
+              <Input value={form.email} onChangeText={set('email')} placeholder="you@email.com" keyboardType="email-address" error={!!fe('email')} />
             </Field>
           </View>
         </View>
         <View style={isMobile ? undefined : st.row}>
           <View style={isMobile ? undefined : st.half}>
-            <Field label="Instagram Handle" required>
-              <Input value={form.igHandle} onChangeText={set('igHandle')} placeholder="@yourhandle" />
+            <Field label="Instagram Handle" required error={fe('igHandle')} fieldId="igHandle">
+              <Input value={form.igHandle} onChangeText={set('igHandle')} placeholder="@yourhandle" error={!!fe('igHandle')} />
             </Field>
           </View>
           <View style={isMobile ? undefined : st.half}>
-            <Field label="Facebook Handle" required>
-              <Input value={form.facebookHandle} onChangeText={set('facebookHandle')} placeholder="Your Facebook name or URL" />
+            <Field label="Facebook Handle" required error={fe('facebookHandle')} fieldId="facebookHandle">
+              <Input value={form.facebookHandle} onChangeText={set('facebookHandle')} placeholder="Your Facebook name or URL" error={!!fe('facebookHandle')} />
             </Field>
           </View>
         </View>
@@ -640,19 +737,19 @@ export default function CoachApplicationScreen() {
     const showEmployer = ['Business Owner', 'Full-Time Employee', 'Part-Time Employee'].includes(form.employmentStatus);
     return (
       <>
-        <Field label="Current Occupation" required>
-          <Input value={form.currentOccupation} onChangeText={set('currentOccupation')} placeholder="What do you do currently?" autoCapitalize="words" />
+        <Field label="Current Occupation" required error={fe('currentOccupation')} fieldId="currentOccupation">
+          <Input value={form.currentOccupation} onChangeText={set('currentOccupation')} placeholder="What do you do currently?" autoCapitalize="words" error={!!fe('currentOccupation')} />
         </Field>
-        <Field label="Current Employment Status" required>
-          <RadioGroup options={EMPLOYMENT_OPTIONS} value={form.employmentStatus} onChange={set('employmentStatus')} />
+        <Field label="Current Employment Status" required error={fe('employmentStatus')} fieldId="employmentStatus">
+          <RadioGroup options={EMPLOYMENT_OPTIONS} value={form.employmentStatus} onChange={set('employmentStatus')} error={!!fe('employmentStatus')} />
         </Field>
         {form.employmentStatus === 'Other' && (
-          <Field label="Please Specify" required>
-            <Input value={form.otherEmploymentStatus} onChangeText={set('otherEmploymentStatus')} placeholder="Describe your current status" />
+          <Field label="Please Specify" required error={fe('otherEmploymentStatus')} fieldId="otherEmploymentStatus">
+            <Input value={form.otherEmploymentStatus} onChangeText={set('otherEmploymentStatus')} placeholder="Describe your current status" error={!!fe('otherEmploymentStatus')} />
           </Field>
         )}
-        <Field label="Will you maintain current employment while growing your business with G\u27B2A?" required>
-          <YesNo value={form.maintainEmployment} onChange={set('maintainEmployment')} />
+        <Field label="Will you maintain current employment while growing your business with GoArrive?" required error={fe('maintainEmployment')} fieldId="maintainEmployment">
+          <YesNo value={form.maintainEmployment} onChange={set('maintainEmployment')} error={!!fe('maintainEmployment')} />
         </Field>
         {showEmployer && (
           <>
@@ -680,17 +777,17 @@ export default function CoachApplicationScreen() {
         <Field label="Specializations" hint="e.g., weight loss, strength training, sports performance, etc.">
           <Input value={form.specializations} onChangeText={set('specializations')} placeholder="Your coaching specializations" />
         </Field>
-        <Field label="What are your top three strengths as a fitness coach?" required>
-          <Input value={form.topThreeStrengths} onChangeText={set('topThreeStrengths')} placeholder="List your top 3 strengths" multiline numberOfLines={3} />
+        <Field label="What are your top three strengths as a fitness coach?" required error={fe('topThreeStrengths')} fieldId="topThreeStrengths">
+          <Input value={form.topThreeStrengths} onChangeText={set('topThreeStrengths')} placeholder="List your top 3 strengths" multiline numberOfLines={3} error={!!fe('topThreeStrengths')} />
         </Field>
-        <Field label="What is a weakness or growth area you'd like to develop as a coach?" required>
-          <Input value={form.weakness} onChangeText={set('weakness')} placeholder="Be honest \u2014 growth mindset matters" multiline numberOfLines={3} />
+        <Field label="What is a weakness or growth area you'd like to develop as a coach?" required error={fe('weakness')} fieldId="weakness">
+          <Input value={form.weakness} onChangeText={set('weakness')} placeholder="Be honest — growth mindset matters" multiline numberOfLines={3} error={!!fe('weakness')} />
         </Field>
-        <Field label="What makes you stand out as a fitness coach?" required>
-          <Input value={form.standOut} onChangeText={set('standOut')} placeholder="What sets you apart?" multiline numberOfLines={3} />
+        <Field label="What makes you stand out as a fitness coach?" required error={fe('standOut')} fieldId="standOut">
+          <Input value={form.standOut} onChangeText={set('standOut')} placeholder="What sets you apart?" multiline numberOfLines={3} error={!!fe('standOut')} />
         </Field>
-        <Field label="Describe your ideal member" required hint="Who do you coach best? What are their goals, lifestyle, and mindset?">
-          <Input value={form.idealMember} onChangeText={set('idealMember')} placeholder="Describe your ideal coaching member" multiline numberOfLines={4} />
+        <Field label="Describe your ideal member" required error={fe('idealMember')} fieldId="idealMember" hint="Who do you coach best? What are their goals, lifestyle, and mindset?">
+          <Input value={form.idealMember} onChangeText={set('idealMember')} placeholder="Describe your ideal coaching member" multiline numberOfLines={4} error={!!fe('idealMember')} />
         </Field>
       </>
     );
@@ -699,21 +796,25 @@ export default function CoachApplicationScreen() {
   function renderVision() {
     return (
       <>
-        <Field label="What is the #1 goal you want from this opportunity?" required>
-          <Input value={form.numberOneGoal} onChangeText={set('numberOneGoal')} placeholder="Your primary goal" multiline numberOfLines={3} />
+        <Field label="What is the #1 goal you want from this opportunity?" required error={fe('numberOneGoal')} fieldId="numberOneGoal">
+          <Input value={form.numberOneGoal} onChangeText={set('numberOneGoal')} placeholder="Your primary goal" multiline numberOfLines={3} error={!!fe('numberOneGoal')} />
         </Field>
-        <Field label="What support would you like from your G\u27B2A team lead?" required>
-          <Input value={form.supportFromTeamLead} onChangeText={set('supportFromTeamLead')} placeholder="How can we help you succeed?" multiline numberOfLines={3} />
+        <Field label="What support would you like from your GoArrive team lead?" required error={fe('supportFromTeamLead')} fieldId="supportFromTeamLead">
+          <Input value={form.supportFromTeamLead} onChangeText={set('supportFromTeamLead')} placeholder="How can we help you succeed?" multiline numberOfLines={3} error={!!fe('supportFromTeamLead')} />
         </Field>
-        <Field label="Desired monthly earnings by end of year one">
-          <Dropdown options={EARNINGS_OPTIONS} value={form.desiredMonthlyEarnings} onChange={set('desiredMonthlyEarnings')} placeholder="Select target earnings" />
-        </Field>
-        <Field label="Why do you want to join GoArrive?" required>
-          <Input value={form.whyJoinGoArrive} onChangeText={set('whyJoinGoArrive')} placeholder="What draws you to G\u27B2A specifically?" multiline numberOfLines={4} />
-        </Field>
-        <Field label="What makes you a great fit for this opportunity?" required>
-          <Input value={form.greatFit} onChangeText={set('greatFit')} placeholder="Why should we choose you?" multiline numberOfLines={4} />
-        </Field>
+        <View style={{ zIndex: 50 }}>
+          <Field label="Desired monthly earnings by end of year one">
+            <Dropdown options={EARNINGS_OPTIONS} value={form.desiredMonthlyEarnings} onChange={set('desiredMonthlyEarnings')} placeholder="Select target earnings" />
+          </Field>
+        </View>
+        <View style={{ zIndex: 1 }}>
+          <Field label="Why do you want to join GoArrive?" required error={fe('whyJoinGoArrive')} fieldId="whyJoinGoArrive">
+            <Input value={form.whyJoinGoArrive} onChangeText={set('whyJoinGoArrive')} placeholder="What draws you to GoArrive specifically?" multiline numberOfLines={4} error={!!fe('whyJoinGoArrive')} />
+          </Field>
+          <Field label="What makes you a great fit for this opportunity?" required error={fe('greatFit')} fieldId="greatFit">
+            <Input value={form.greatFit} onChangeText={set('greatFit')} placeholder="Why should we choose you?" multiline numberOfLines={4} error={!!fe('greatFit')} />
+          </Field>
+        </View>
       </>
     );
   }
@@ -722,19 +823,19 @@ export default function CoachApplicationScreen() {
     return (
       <>
         <Text style={st.intro}>
-          Rate yourself honestly on each trait below. There are no wrong answers {'\u2014'} we value self-awareness as much as high scores.
+          Rate yourself honestly on each trait below. There are no wrong answers — we value self-awareness as much as high scores.
         </Text>
-        <Field label="Entrepreneurial Spirit" required>
-          <RatingScale value={form.entrepreneurialSpirit} onChange={set('entrepreneurialSpirit')} lowLabel="Employee Mindset" highLabel="Entrepreneurial" />
+        <Field label="Entrepreneurial Spirit" required error={fe('entrepreneurialSpirit')} fieldId="entrepreneurialSpirit">
+          <RatingScale value={form.entrepreneurialSpirit} onChange={set('entrepreneurialSpirit')} lowLabel="Employee Mindset" highLabel="Entrepreneurial" error={!!fe('entrepreneurialSpirit')} />
         </Field>
-        <Field label="Team Player Mindset" required>
-          <RatingScale value={form.teamPlayer} onChange={set('teamPlayer')} lowLabel="Lone Ranger" highLabel="Team Player" />
+        <Field label="Team Player Mindset" required error={fe('teamPlayer')} fieldId="teamPlayer">
+          <RatingScale value={form.teamPlayer} onChange={set('teamPlayer')} lowLabel="Lone Ranger" highLabel="Team Player" error={!!fe('teamPlayer')} />
         </Field>
-        <Field label="Adaptability" required>
-          <RatingScale value={form.adaptability} onChange={set('adaptability')} lowLabel="Prefers Routine" highLabel="Highly Adaptable" />
+        <Field label="Adaptability" required error={fe('adaptability')} fieldId="adaptability">
+          <RatingScale value={form.adaptability} onChange={set('adaptability')} lowLabel="Prefers Routine" highLabel="Highly Adaptable" error={!!fe('adaptability')} />
         </Field>
-        <Field label="Communication Skills" required>
-          <RatingScale value={form.communicationSkills} onChange={set('communicationSkills')} lowLabel="Needs Improvement" highLabel="Excellent" />
+        <Field label="Communication Skills" required error={fe('communicationSkills')} fieldId="communicationSkills">
+          <RatingScale value={form.communicationSkills} onChange={set('communicationSkills')} lowLabel="Needs Improvement" highLabel="Excellent" error={!!fe('communicationSkills')} />
         </Field>
       </>
     );
@@ -743,25 +844,25 @@ export default function CoachApplicationScreen() {
   function renderAvailability() {
     return (
       <>
-        <Field label="How did you hear about this opportunity?" required>
-          <RadioGroup options={DISCOVERY_OPTIONS} value={form.howHeardAbout} onChange={set('howHeardAbout')} />
+        <Field label="How did you hear about this opportunity?" required error={fe('howHeardAbout')} fieldId="howHeardAbout">
+          <RadioGroup options={DISCOVERY_OPTIONS} value={form.howHeardAbout} onChange={set('howHeardAbout')} error={!!fe('howHeardAbout')} />
         </Field>
         {form.howHeardAbout === 'Other' && (
-          <Field label="Please Specify" required>
-            <Input value={form.otherHowHeard} onChangeText={set('otherHowHeard')} placeholder="How did you find us?" />
+          <Field label="Please Specify" required error={fe('otherHowHeard')} fieldId="otherHowHeard">
+            <Input value={form.otherHowHeard} onChangeText={set('otherHowHeard')} placeholder="How did you find us?" error={!!fe('otherHowHeard')} />
           </Field>
         )}
         <Field label="Referring Coach Name" hint="Only one coach can be credited as your referring coach. Provide first and last name.">
           <Input value={form.referringCoachName} onChangeText={set('referringCoachName')} placeholder="First and Last Name (if applicable)" autoCapitalize="words" />
         </Field>
         <View style={st.divider} />
-        <Field label="How many hours per week can you commit to apprenticeship / coaching?" required>
-          <Input value={form.weeklyHoursAvailable} onChangeText={set('weeklyHoursAvailable')} placeholder="e.g., 15" keyboardType="number-pad" />
+        <Field label="How many hours per week can you commit to apprenticeship / coaching?" required error={fe('weeklyHoursAvailable')} fieldId="weeklyHoursAvailable">
+          <Input value={form.weeklyHoursAvailable} onChangeText={set('weeklyHoursAvailable')} placeholder="e.g., 15" keyboardType="number-pad" error={!!fe('weeklyHoursAvailable')} />
         </Field>
-        <Field label="Are you available to work weekends?" required>
-          <YesNo value={form.weekendAvailability} onChange={set('weekendAvailability')} />
+        <Field label="Are you available to work weekends?" required error={fe('weekendAvailability')} fieldId="weekendAvailability">
+          <YesNo value={form.weekendAvailability} onChange={set('weekendAvailability')} error={!!fe('weekendAvailability')} />
         </Field>
-        <Field label="Availability" required hint="Tap the time slots when you are available for coaching.">
+        <Field label="Availability" required error={fe('availability')} fieldId="availability" hint="Tap the time slots when you are available for coaching.">
           <AvailabilityGrid value={form.availability} onChange={set('availability')} />
         </Field>
       </>
@@ -775,23 +876,38 @@ export default function CoachApplicationScreen() {
           Upload your resume and any relevant certifications. Accepted formats: PDF, DOC, DOCX, JPG, PNG (max 10 MB each).
         </Text>
         <Field label="Resume Upload">
-          <FileUpload label="Choose Resume File" fileName={form.resumeFileName} uploading={uploading === 'resume'} onPick={() => pickFile('resume')} />
+          <FileUpload label="Choose Resume File" fileName={form.resumeFileName} uploading={uploading === 'resume'} onPick={() => pickFile('resume')} progress={uploading === 'resume' ? uploadProgress : undefined} />
         </Field>
         <Field label="Certifications Upload">
-          <FileUpload label="Choose Certifications File" fileName={form.certificationsFileName} uploading={uploading === 'certifications'} onPick={() => pickFile('certifications')} />
+          <FileUpload label="Choose Certifications File" fileName={form.certificationsFileName} uploading={uploading === 'certifications'} onPick={() => pickFile('certifications')} progress={uploading === 'certifications' ? uploadProgress : undefined} />
         </Field>
         {Platform.OS !== 'web' && (
           <Text style={fi.hint}>File uploads are available on the web version. You may also email documents to coaches@goa.fit after submitting.</Text>
         )}
         <View style={st.divider} />
-        <Field label="Your Future Resume with G\u27B2A" required hint="Imagine it is two years from now and you have been thriving as a GoArrive coach. Write a short narrative describing what your future resume says \u2014 achievements, certifications earned, members impacted, income milestones, personal growth, and the legacy you are building. Be aspirational, specific, and thoughtful.">
-          <Input
-            value={form.futureResume}
-            onChangeText={set('futureResume')}
-            placeholder="Two years from now, my resume as a GoArrive coach would say..."
-            multiline
-            numberOfLines={8}
-          />
+        <Field label="Your Future Resume Video" required error={fe('futureResumeVideo')} fieldId="futureResumeVideo" hint="Record a 2-3 minute video sharing your vision for your coaching career with GoArrive. What do you hope to achieve? What milestones do you want to reach? How will you grow as a coach? Be aspirational, specific, and authentic.">
+          <Pressable style={[fi.uploadBtn, fe('futureResumeVideo') && { borderColor: C.red }]} onPress={pickVideo} disabled={uploading === 'video'}>
+            {uploading === 'video' ? (
+              <View style={fi.uploadEmpty}>
+                <ActivityIndicator color={C.gold} size="small" />
+                <Text style={fi.uploadLabel}>Uploading video... {uploadProgress}%</Text>
+                <View style={[pg.barBg, { marginTop: 8, width: '80%' as any }]}>
+                  <View style={[pg.barFill, { width: `${uploadProgress}%` as any }]} />
+                </View>
+              </View>
+            ) : form.futureResumeVideoFileName ? (
+              <View style={fi.uploadDone}>
+                <Text style={fi.uploadCheckIcon}>{'\u2705'}</Text>
+                <Text style={fi.uploadFileName} numberOfLines={1}>{form.futureResumeVideoFileName}</Text>
+              </View>
+            ) : (
+              <View style={fi.uploadEmpty}>
+                <Text style={fi.uploadPlusIcon}>{'\uD83C\uDFA5'}</Text>
+                <Text style={fi.uploadLabel}>Upload Your Future Resume Video</Text>
+                <Text style={fi.uploadSub}>MP4, MOV, AVI, WebM — Max 200 MB</Text>
+              </View>
+            )}
+          </Pressable>
         </Field>
       </>
     );
@@ -801,18 +917,18 @@ export default function CoachApplicationScreen() {
     const refBlock = (num: number, nk: keyof FormData, ek: keyof FormData, pk: keyof FormData) => (
       <View style={st.refBlock}>
         <Text style={st.refTitle}>Reference {num}</Text>
-        <Field label="Full Name" required>
-          <Input value={form[nk] as string} onChangeText={set(nk) as any} placeholder="First and Last Name" autoCapitalize="words" />
+        <Field label="Full Name" required error={fe(nk)} fieldId={nk}>
+          <Input value={form[nk] as string} onChangeText={set(nk) as any} placeholder="First and Last Name" autoCapitalize="words" error={!!fe(nk)} />
         </Field>
         <View style={isMobile ? undefined : st.row}>
           <View style={isMobile ? undefined : st.half}>
-            <Field label="Email" required>
-              <Input value={form[ek] as string} onChangeText={set(ek) as any} placeholder="email@example.com" keyboardType="email-address" />
+            <Field label="Email" required error={fe(ek)} fieldId={ek}>
+              <Input value={form[ek] as string} onChangeText={set(ek) as any} placeholder="email@example.com" keyboardType="email-address" error={!!fe(ek)} />
             </Field>
           </View>
           <View style={isMobile ? undefined : st.half}>
-            <Field label="Phone" required>
-              <Input value={form[pk] as string} onChangeText={set(pk) as any} placeholder="(555) 555-5555" keyboardType="phone-pad" />
+            <Field label="Phone" required error={fe(pk)} fieldId={pk}>
+              <Input value={form[pk] as string} onChangeText={set(pk) as any} placeholder="(555) 555-5555" keyboardType="phone-pad" error={!!fe(pk)} />
             </Field>
           </View>
         </View>
@@ -827,21 +943,30 @@ export default function CoachApplicationScreen() {
         {refBlock(2, 'ref2Name', 'ref2Email', 'ref2Phone')}
         {refBlock(3, 'ref3Name', 'ref3Email', 'ref3Phone')}
         <View style={st.divider} />
-        <Text style={st.ackTitle}>Final Acknowledgment</Text>
-        <Checkbox
-          checked={form.truthAcknowledged}
-          onChange={set('truthAcknowledged')}
-          label="By checking this box, I certify that all information provided in this application is true, complete, and accurate to the best of my knowledge. I understand that any misrepresentation may result in disqualification from the GoArrive coaching program."
-        />
+        {/* Enhanced Acknowledgment */}
+        <View style={[st.ackCard, fe('truthAcknowledged') && { borderColor: C.red }]} nativeID="field-truthAcknowledged">
+          <View style={st.ackHeader}>
+            <Text style={st.ackIcon}>{'\u26A0\uFE0F'}</Text>
+            <Text style={st.ackTitle}>Final Acknowledgment</Text>
+          </View>
+          <Text style={st.ackSubtext}>Please read carefully and confirm before submitting.</Text>
+          <Checkbox
+            checked={form.truthAcknowledged}
+            onChange={set('truthAcknowledged')}
+            label="By checking this box, I certify that all information provided in this application is true, complete, and accurate to the best of my knowledge. I understand that any misrepresentation may result in disqualification from the GoArrive coaching program."
+            prominent
+          />
+          {fe('truthAcknowledged') && <Text style={fi.fieldErrorText}>{fe('truthAcknowledged')}</Text>}
+        </View>
         <View style={isMobile ? undefined : st.row}>
           <View style={isMobile ? undefined : st.half}>
-            <Field label="Signature (Typed Full Name)" required>
-              <Input value={form.signatureName} onChangeText={set('signatureName')} placeholder="Type your full legal name" autoCapitalize="words" />
+            <Field label="Signature (Typed Full Name)" required error={fe('signatureName')} fieldId="signatureName">
+              <Input value={form.signatureName} onChangeText={set('signatureName')} placeholder="Type your full legal name" autoCapitalize="words" error={!!fe('signatureName')} />
             </Field>
           </View>
           <View style={isMobile ? undefined : st.half}>
-            <Field label="Today's Date" required>
-              <Input value={form.signatureDate} onChangeText={set('signatureDate')} placeholder="MM/DD/YYYY" />
+            <Field label="Today's Date" required error={fe('signatureDate')} fieldId="signatureDate">
+              <Input value={form.signatureDate} onChangeText={set('signatureDate')} placeholder="MM/DD/YYYY" error={!!fe('signatureDate')} />
             </Field>
           </View>
         </View>
@@ -871,10 +996,10 @@ export default function CoachApplicationScreen() {
         </View>
         <Text style={st.successTitle}>Application Submitted</Text>
         <Text style={st.successBody}>
-          Thank you for applying to coach with GoArrive. We review every application personally and with care. If your application moves forward, we will be in touch within 5{'\u2013'}7 business days.
+          Thank you for applying to coach with GoArrive. We review every application personally and with care. If your application moves forward, we will be in touch within 5–7 business days.
         </Text>
         <Text style={st.successBody}>
-          In the meantime, follow us on Instagram and Facebook to stay connected with the G{'\u27B2'}A community.
+          In the meantime, follow us on Instagram and Facebook to stay connected with the GoArrive community.
         </Text>
         <Pressable
           style={st.ctaBtn}
@@ -919,7 +1044,7 @@ export default function CoachApplicationScreen() {
                   Apply to Coach{'\n'}with GoArrive
                 </Text>
                 <Text style={st.headerSub}>
-                  G{'\u27B2'}A is building a selective team of dedicated, growth-minded fitness coaches. This application helps us understand who you are, how you coach, and whether we are the right fit for each other.
+                  GoArrive is building a selective team of dedicated, growth-minded fitness coaches. This application helps us understand who you are, how you coach, and whether we are the right fit for each other.
                 </Text>
               </View>
 
@@ -1003,20 +1128,25 @@ const pg = StyleSheet.create({
 /* ─ Form Fields ─ */
 const fi = StyleSheet.create({
   wrap: { marginBottom: 18 },
+  wrapError: { borderLeftWidth: 3, borderLeftColor: C.red, paddingLeft: 12 },
   label: { fontSize: 14, fontWeight: '600', color: C.text, fontFamily: FONT_H, marginBottom: 6 },
   hint: { fontSize: 12, color: C.muted, fontFamily: FONT_B, marginBottom: 6, lineHeight: 18 },
+  fieldErrorText: { fontSize: 12, color: C.red, fontFamily: FONT_B, marginTop: 4 },
   input: {
     backgroundColor: C.bg, borderWidth: 1, borderColor: C.border, borderRadius: 10,
     paddingHorizontal: 14, paddingVertical: 12,
     fontSize: 15, color: C.text, fontFamily: FONT_B,
   },
+  inputError: { borderColor: C.red, borderWidth: 2 },
   radioGroup: { gap: 10 },
+  radioGroupError: { borderWidth: 1, borderColor: C.red, borderRadius: 10, padding: 10 },
   radioRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   radioCircle: {
     width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: C.border,
     alignItems: 'center' as any, justifyContent: 'center' as any,
   },
   radioCircleActive: { borderColor: C.gold },
+  radioCircleError: { borderColor: C.red },
   radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: C.gold },
   radioText: { fontSize: 14, color: C.text, fontFamily: FONT_B },
   yesNoRow: { flexDirection: 'row', gap: 12 },
@@ -1025,6 +1155,7 @@ const fi = StyleSheet.create({
     alignItems: 'center' as any, backgroundColor: C.bg,
   },
   yesNoBtnActive: { borderColor: C.gold, backgroundColor: C.goldDim },
+  yesNoBtnError: { borderColor: C.red, borderWidth: 2 },
   yesNoText: { fontSize: 15, fontWeight: '600', color: C.textSoft, fontFamily: FONT_H },
   yesNoTextActive: { color: C.gold },
   dropdown: {
@@ -1037,8 +1168,8 @@ const fi = StyleSheet.create({
   dropdownList: {
     position: 'absolute' as any, top: '100%' as any, left: 0, right: 0,
     backgroundColor: C.card, borderWidth: 1, borderColor: C.border, borderRadius: 10,
-    marginTop: 4, overflow: 'hidden' as any,
-    ...(Platform.OS === 'web' ? { boxShadow: '0 8px 24px rgba(0,0,0,0.4)' } as any : {}),
+    marginTop: 4, zIndex: 9999,
+    ...(Platform.OS === 'web' ? { boxShadow: '0 8px 24px rgba(0,0,0,0.6)' } as any : {}),
   },
   dropdownItem: { paddingHorizontal: 14, paddingVertical: 11 },
   dropdownItemActive: { backgroundColor: C.goldDim },
@@ -1080,14 +1211,20 @@ const fi = StyleSheet.create({
   uploadCheckIcon: { fontSize: 18 },
   uploadFileName: { fontSize: 14, color: C.green, fontFamily: FONT_B, maxWidth: 250 },
   checkboxRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginTop: 8 },
+  checkboxProminent: {
+    backgroundColor: C.goldDim, borderRadius: 12, padding: 16,
+    borderWidth: 1, borderColor: 'rgba(245,166,35,0.3)',
+  },
   checkbox: {
     width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: C.border,
     alignItems: 'center' as any, justifyContent: 'center' as any, marginTop: 2,
     flexShrink: 0,
   },
   checkboxActive: { borderColor: C.gold, backgroundColor: C.goldDim },
+  checkboxPromientUnchecked: { borderColor: C.gold, borderWidth: 2 },
   checkboxCheck: { fontSize: 14, fontWeight: '700', color: C.gold },
   checkboxLabel: { fontSize: 13, color: C.textSoft, fontFamily: FONT_B, lineHeight: 20, flex: 1 },
+  checkboxLabelProminent: { color: C.text, fontSize: 14, lineHeight: 22 },
 });
 
 /* ─ Page Layout ─ */
@@ -1119,6 +1256,7 @@ const st = StyleSheet.create({
   formCard: {
     backgroundColor: C.card, borderRadius: 16, padding: 24, borderWidth: 1, borderColor: C.border,
     marginBottom: 16,
+    ...(Platform.OS === 'web' ? { overflow: 'visible' } as any : {}),
   },
   sectionTitle: {
     fontSize: 20, fontWeight: '700', color: C.text, fontFamily: FONT_H,
@@ -1133,7 +1271,14 @@ const st = StyleSheet.create({
     marginBottom: 16,
   },
   refTitle: { fontSize: 15, fontWeight: '700', color: C.gold, fontFamily: FONT_H, marginBottom: 12 },
-  ackTitle: { fontSize: 17, fontWeight: '700', color: C.text, fontFamily: FONT_H, marginBottom: 12 },
+  ackCard: {
+    backgroundColor: C.surface, borderRadius: 14, padding: 20, marginBottom: 20,
+    borderWidth: 2, borderColor: C.gold,
+  },
+  ackHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+  ackIcon: { fontSize: 20 },
+  ackTitle: { fontSize: 18, fontWeight: '700', color: C.gold, fontFamily: FONT_H },
+  ackSubtext: { fontSize: 13, color: C.textSoft, fontFamily: FONT_B, marginBottom: 14 },
   errorBanner: {
     backgroundColor: C.redDim, borderRadius: 10, padding: 14, marginBottom: 16,
     borderWidth: 1, borderColor: 'rgba(224,82,82,0.25)',
