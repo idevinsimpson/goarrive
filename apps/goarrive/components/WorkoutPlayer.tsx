@@ -17,9 +17,9 @@
  *   - NEXT UP bar at the bottom
  *
  * Decomposed into hooks: useWorkoutFlatten, useWorkoutTimer, useMediaPrefetch,
- * useMovementHydrate, useWorkoutTTS, useMovementSwap, usePlaybackSpeed
+ * useMovementHydrate, useMovementSwap, usePlaybackSpeed
  */
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -37,12 +37,10 @@ import {
 import { Video, ResizeMode } from 'expo-av';
 import MovementVideoControls from './MovementVideoControls';
 import { Icon } from './Icon';
-import { setAudioMuted, isAudioMuted } from '../lib/audioCues';
 import { useWakeLock } from '../lib/useWakeLock';
 import { useWorkoutFlatten } from '../hooks/useWorkoutFlatten';
 import { useWorkoutTimer } from '../hooks/useWorkoutTimer';
 import { useMediaPrefetch } from '../hooks/useMediaPrefetch';
-import { useWorkoutTTS } from '../hooks/useWorkoutTTS';
 import { useMovementSwap } from '../hooks/useMovementSwap';
 import { useMovementHydrate } from '../hooks/useMovementHydrate';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
@@ -91,28 +89,6 @@ export default function WorkoutPlayer({
     false,
     phase === 'ready',
   );
-
-  // ── Audio mute toggle ───────────────────────────────────────────
-  const [audioMuted, setAudioMutedState] = useState(isAudioMuted());
-  const toggleMute = () => {
-    const n = !audioMuted;
-    setAudioMutedState(n);
-    setAudioMuted(n);
-  };
-
-  // ── TTS for voice coaching ──────────────────────
-  const { isTTSAvailable } = useWorkoutTTS({
-    phase,
-    current,
-    next,
-    isMuted: audioMuted,
-    currentIndex,
-    total,
-    timeLeft,
-    currentDuration: current?.duration ?? 0,
-  });
-
-  const showTTSWarning = !isTTSAvailable && !audioMuted;
 
   // ── Offline resilience ─────────────────────────────
   const { isOffline, queueSize } = useNetworkStatus();
@@ -198,6 +174,51 @@ export default function WorkoutPlayer({
   const exerciseIndex = exerciseSteps.indexOf(current as any);
   const exerciseTotal = exerciseSteps.length;
 
+  // ── Persistent video URL — decoupled from phase transitions ────────
+  // Video swaps happen ONCE per movement cycle at timeLeft <= 4 during REST.
+  // Phase boundaries (work→rest, rest→work) do NOT trigger video changes.
+  const { activeVideoUrl, activeThumbUrl } = useMemo(() => {
+    if (!current) return { activeVideoUrl: null, activeThumbUrl: null };
+
+    const findNextExercise = () => {
+      for (let i = currentIndex + 1; i < flatMovements.length; i++) {
+        if (flatMovements[i].stepType === 'exercise') return flatMovements[i];
+      }
+      return null;
+    };
+
+    const findPrevExercise = () => {
+      for (let i = currentIndex - 1; i >= 0; i--) {
+        if (flatMovements[i].stepType === 'exercise') return flatMovements[i];
+      }
+      return null;
+    };
+
+    const currentExercise = current.stepType === 'exercise' ? current : null;
+    const nextExercise = findNextExercise();
+    const prevExercise = findPrevExercise();
+
+    if (phase === 'work' && currentExercise) {
+      return { activeVideoUrl: currentExercise.videoUrl, activeThumbUrl: currentExercise.thumbnailUrl };
+    }
+
+    if (phase === 'rest') {
+      if (timeLeft <= 4 && nextExercise?.videoUrl) {
+        return { activeVideoUrl: nextExercise.videoUrl, activeThumbUrl: nextExercise.thumbnailUrl };
+      }
+      return {
+        activeVideoUrl: currentExercise?.videoUrl || prevExercise?.videoUrl || nextExercise?.videoUrl,
+        activeThumbUrl: currentExercise?.thumbnailUrl || prevExercise?.thumbnailUrl || nextExercise?.thumbnailUrl,
+      };
+    }
+
+    // Special phases (transition, water break, etc.) — use their own video or fallback
+    return {
+      activeVideoUrl: current.videoUrl || nextExercise?.videoUrl,
+      activeThumbUrl: current.thumbnailUrl || nextExercise?.thumbnailUrl,
+    };
+  }, [phase, timeLeft, current, currentIndex, flatMovements]);
+
   // ── Shared header component ───────────────────────────────────────
   const renderHeader = (showProgress = true) => (
     <>
@@ -215,15 +236,6 @@ export default function WorkoutPlayer({
               <Text style={st.offlineBadgeText}>Offline{queueSize > 0 ? ` (${queueSize})` : ''}</Text>
             </View>
           )}
-          {showTTSWarning && (
-            <View style={st.ttsWarning}>
-              <Icon name="alert-triangle" size={12} color="#E06B4F" />
-              <Text style={st.ttsWarningText}>No TTS</Text>
-            </View>
-          )}
-          <TouchableOpacity onPress={toggleMute} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-            <Icon name={audioMuted ? 'volume-x' : 'volume-2'} size={22} color="#8A95A3" />
-          </TouchableOpacity>
           {showProgress && (
             <Text style={st.progressText}>
               {currentIndex + 1}/{total}
@@ -276,36 +288,74 @@ export default function WorkoutPlayer({
   return (
     <Modal visible={visible} animationType="fade" transparent={false}>
       <View style={st.portraitLockOuter}>
-      <View style={[st.container, isWideScreen && { width: portraitW, maxWidth: portraitW }]}>
+      <View style={[st.container, isWideScreen && { width: portraitW, maxWidth: portraitW }]}>        {/* ── READY state — Block overview grid ─────────────────── */}
+        {phase === 'ready' && (() => {
+          const exerciseBlocks = (workout?.blocks || []).filter(
+            (b: any) => !['Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment'].includes(b.type || '')
+          );
+          return (
+            <>
+              {renderHeader(false)}
+              <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 100 }}
+                showsVerticalScrollIndicator={false}
+              >
+                {exerciseBlocks.map((block: any, bi: number) => {
+                  const mvs = (block.movements || []).filter(
+                    (mv: any) => mv.showOnPreview !== false
+                  );
+                  if (mvs.length === 0) return null;
+                  const rounds = block.rounds ?? block.sets ?? 1;
+                  const blockLabel = block.label || block.name || `Block ${bi + 1}`;
+                  return (
+                    <View key={bi} style={{ marginBottom: 16 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                        <View style={st.readyBlockBadge}>
+                          <Text style={st.readyBlockBadgeText}>{bi + 1}</Text>
+                        </View>
+                        <Text style={st.readyBlockLabel}>{blockLabel}</Text>
+                        {rounds > 1 && (
+                          <Text style={st.readyBlockRounds}>{rounds}×</Text>
+                        )}
+                      </View>
+                      <View style={st.readyThumbGrid}>
+                        {mvs.map((mv: any, mi: number) => (
+                          <View key={mi} style={st.readyThumbCell}>
+                            {mv.thumbnailUrl ? (
+                              <Image
+                                source={{ uri: mv.thumbnailUrl }}
+                                style={st.readyThumbImage}
+                                resizeMode="cover"
+                              />
+                            ) : (
+                              <View style={[st.readyThumbImage, { backgroundColor: '#1A2035', justifyContent: 'center', alignItems: 'center' }]}>
+                                <Icon name="play-circle" size={20} color="#3A4050" />
+                              </View>
+                            )}
+                            <Text style={st.readyThumbName} numberOfLines={1}>{mv.movementName || mv.name || 'Movement'}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  );
+                })}
+              </ScrollView>
 
-        {/* ── READY state ─────────────────────────────────────── */}
-        {phase === 'ready' && (
-          <>
-            {renderHeader(false)}
-            <View style={st.centerContent}>
-              {isPreview && (
-                <View style={st.previewBadge}>
-                  <Icon name="eye" size={14} color="#F5A623" />
-                  <Text style={st.previewBadgeText}>COACH PREVIEW</Text>
-                </View>
-              )}
-              <Image
-                source={require('../assets/logo.png')}
-                style={st.readyLogo}
-                resizeMode="contain"
-              />
-              <Text style={st.readyTitle}>{workout?.name ?? 'Workout'}</Text>
-              <Text style={st.readyMeta}>
-                {exerciseTotal} movement{exerciseTotal !== 1 ? 's' : ''} ·{' '}
-                {workout?.blocks?.length ?? 0} block{(workout?.blocks?.length ?? 0) !== 1 ? 's' : ''}
-              </Text>
-              <TouchableOpacity style={st.bigStartBtn} onPress={handleStart}>
-                <Icon name="play" size={36} color="#0E1117" />
-                <Text style={st.bigStartText}>{isPreview ? 'Start Preview' : 'Start'}</Text>
-              </TouchableOpacity>
-            </View>
-          </>
-        )}
+              {/* Bottom: logo + play button */}
+              <View style={st.readyFooter}>
+                <Image
+                  source={require('../assets/logo.png')}
+                  style={{ width: 140, height: 46, marginBottom: 12 }}
+                  resizeMode="contain"
+                />
+                <TouchableOpacity style={st.readyPlayBtn} onPress={handleStart}>
+                  <Icon name="play" size={32} color="#0E1117" />
+                </TouchableOpacity>
+              </View>
+            </>
+          );
+        })()}
 
         {/* ── INTRO — Full-screen cinematic welcome ────────────── */}
         {phase === 'intro' && current && (() => {
@@ -429,36 +479,73 @@ export default function WorkoutPlayer({
           );
         })()}
 
-        {/* ── TRANSITION — Instruction card with countdown ─────── */}
-        {phase === 'transition' && current && (
-          <>
-            {renderHeader()}
-            <View style={st.specialContent}>
-              <View style={[st.specialIconCircle, { backgroundColor: 'rgba(148,163,184,0.15)' }]}>
-                <Icon name="arrow-right" size={32} color="#94A3B8" />
-              </View>
-              <Text style={[st.specialPhaseLabel, { color: '#94A3B8' }]}>TRANSITION</Text>
-              <Text style={st.specialTitle}>{current.name}</Text>
-              {current.instructionText || current.description ? (
-                <Text style={st.transitionInstruction}>
-                  {current.instructionText || current.description}
-                </Text>
-              ) : null}
-
-              <View style={st.specialTimerRow}>
+        {/* ── TRANSITION — Full-media with overlay text ───────── */}
+        {phase === 'transition' && current && (() => {
+          // Use transition block's own video, or fall back to next movement's video
+          const nextExForTrans = (() => {
+            for (let i = currentIndex + 1; i < flatMovements.length; i++) {
+              if (flatMovements[i].stepType === 'exercise') return flatMovements[i];
+            }
+            return next;
+          })();
+          const transVideoUrl = current.videoUrl || nextExForTrans?.videoUrl;
+          const transThumbUrl = nextExForTrans?.thumbnailUrl || current.thumbnailUrl;
+          return (
+            <View style={st.workContainer}>
+              {renderHeader()}
+              {/* TRANSITION label + timer */}
+              <View style={st.nameTimerRow}>
+                <View style={st.nameColumn}>
+                  <Text style={[st.restPhaseLabel, { color: '#94A3B8' }]}>TRANSITION</Text>
+                  <Text style={st.restNextName}>{current.name}</Text>
+                  {(current.instructionText || current.description) ? (
+                    <Text style={{ fontSize: 13, color: '#8A95A3', fontFamily: FB, marginTop: 2 }}>
+                      {current.instructionText || current.description}
+                    </Text>
+                  ) : null}
+                </View>
                 <View style={st.goldTimerBox}>
                   <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
                 </View>
-                <TouchableOpacity style={[st.skipPill, { marginTop: 8 }]} onPress={handleSkip}>
-                  <Icon name="skip-forward" size={16} color="#F5A623" />
-                  <Text style={st.skipPillText}>Skip</Text>
-                </TouchableOpacity>
               </View>
+
+              {/* Video area — never empty */}
+              <View style={st.videoArea}>
+                <View style={st.videoInner}>
+                  {transVideoUrl ? (
+                    <Video
+                      key={`trans-${currentIndex}`}
+                      source={{ uri: transVideoUrl }}
+                      resizeMode={ResizeMode.COVER}
+                      isLooping
+                      shouldPlay
+                      isMuted
+                      style={st.videoPlayer}
+                      videoStyle={
+                        Platform.OS === 'web'
+                          ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
+                          : undefined
+                      }
+                    />
+                  ) : transThumbUrl ? (
+                    <Image source={{ uri: transThumbUrl }} style={st.videoPlayer} resizeMode="cover" />
+                  ) : (
+                    <View style={[st.videoPlayer, st.videoPlaceholder]}>
+                      <Icon name="arrow-right" size={48} color="#3A4050" />
+                    </View>
+                  )}
+                </View>
+              </View>
+
+              <TouchableOpacity style={[st.skipPill, { alignSelf: 'center', marginTop: 12 }]} onPress={handleSkip}>
+                <Icon name="skip-forward" size={16} color="#F5A623" />
+                <Text style={st.skipPillText}>Skip</Text>
+              </TouchableOpacity>
 
               {renderNextUp()}
             </View>
-          </>
-        )}
+          );
+        })()}
 
         {/* ── GRAB EQUIPMENT — Equipment preparation ─────────── */}
         {phase === 'grabEquipment' && current && (
@@ -492,7 +579,17 @@ export default function WorkoutPlayer({
         )}
 
         {/* ── WATER BREAK — Hydration pause ───────────────────── */}
-        {phase === 'waterBreak' && current && (
+        {phase === 'waterBreak' && current && (() => {
+          // Fall back to next exercise video if no water break video
+          const nextExForWB = (() => {
+            for (let i = currentIndex + 1; i < flatMovements.length; i++) {
+              if (flatMovements[i].stepType === 'exercise') return flatMovements[i];
+            }
+            return null;
+          })();
+          const wbVideoUrl = current.videoUrl || nextExForWB?.videoUrl;
+          const wbThumbUrl = nextExForWB?.thumbnailUrl;
+          return (
           <View style={st.workContainer}>
             {renderHeader()}
             {/* Header row: WATER BREAK label + timer */}
@@ -508,10 +605,10 @@ export default function WorkoutPlayer({
             {/* 4:5 video area with blue tint */}
             <View style={st.videoArea}>
               <View style={st.videoInner}>
-                {current.videoUrl ? (
+                {wbVideoUrl ? (
                   <Video
                     key={`wb-${currentIndex}`}
-                    source={{ uri: current.videoUrl }}
+                    source={{ uri: wbVideoUrl }}
                     resizeMode={ResizeMode.COVER}
                     isLooping
                     shouldPlay
@@ -523,9 +620,16 @@ export default function WorkoutPlayer({
                         : undefined
                     }
                   />
+                ) : wbThumbUrl ? (
+                  <Image source={{ uri: wbThumbUrl }} style={st.videoPlayer} resizeMode="cover" />
                 ) : (
-                  <View style={[st.videoPlayer, { backgroundColor: 'rgba(56,189,248,0.15)' }]}>
-                    <Icon name="droplet" size={64} color="#38BDF8" />
+                  <View style={[st.videoPlayer, st.waterBreakPlaceholder]}>
+                    <Image
+                      source={require('../assets/logo.png')}
+                      style={{ width: 180, height: 60, marginBottom: 16 }}
+                      resizeMode="contain"
+                    />
+                    <Text style={st.waterBreakPlaceholderText}>WATER BREAK</Text>
                   </View>
                 )}
                 {/* Blue tint overlay */}
@@ -543,7 +647,8 @@ export default function WorkoutPlayer({
               <Text style={st.skipPillText}>Skip</Text>
             </TouchableOpacity>
           </View>
-        )}
+          );
+        })()}
 
         {/* ── WORK state — Stacked layout ──────────────────── */}
         {phase === 'work' && current && (
@@ -557,14 +662,9 @@ export default function WorkoutPlayer({
                 <Text style={st.floatingWorkoutName} numberOfLines={1}>
                   {workout?.name ?? 'Workout'}
                 </Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <TouchableOpacity onPress={toggleMute} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-                    <Icon name={audioMuted ? 'volume-x' : 'volume-2'} size={18} color="#8A95A3" />
-                  </TouchableOpacity>
-                  <Text style={st.floatingProgress}>
-                    {currentIndex + 1}/{total}
-                  </Text>
-                </View>
+                <Text style={st.floatingProgress}>
+                  {currentIndex + 1}/{total}
+                </Text>
               </View>
             )}
 
@@ -608,23 +708,15 @@ export default function WorkoutPlayer({
               </View>
             )}
 
-            {/* Video area */}
-            {(() => {
-              // At 3.5s before end, switch to next movement's video
-              const nextExercise = next?.stepType === 'exercise' ? next : null;
-              const showNextVideo = !isRepBased && timeLeft <= 4 && nextExercise?.videoUrl;
-              const activeVideoUrl = showNextVideo ? nextExercise!.videoUrl : current.videoUrl;
-              const activeThumbUrl = showNextVideo ? nextExercise!.thumbnailUrl : current.thumbnailUrl;
-              const videoKey = showNextVideo ? `next-${currentIndex}` : `current-${currentIndex}`;
-              return (
+            {/* Video area — persistent video, overlay controls only */}
             <View style={st.videoArea}>
               <TouchableWithoutFeedback onPress={handleVideoTap}>
                 <View style={st.videoInner}>
                   {activeVideoUrl ? (
                     <>
                       <Video
-                        key={videoKey}
-                        ref={showNextVideo ? undefined : videoRef}
+                        key={activeVideoUrl}
+                        ref={videoRef}
                         source={{ uri: activeVideoUrl }}
                         resizeMode={ResizeMode.COVER}
                         isLooping
@@ -700,25 +792,20 @@ export default function WorkoutPlayer({
                 </View>
               </TouchableWithoutFeedback>
             </View>
-              );
-            })()}
 
-            {/* NEXT UP bar — show in final 4 seconds */}
-            {(isRepBased || timeLeft <= 4) && renderNextUp()}
+            {/* NEXT UP bar — always visible during work */}
+            {renderNextUp()}
           </View>
         )}
 
-        {/* ── REST state — show next movement video ──────────── */}
+        {/* ── REST state — persistent video continues, overlay UI only ── */}
         {phase === 'rest' && (() => {
-          // Find the next exercise step for video preview (skip special blocks)
           const nextExForRest = (() => {
             for (let i = currentIndex + 1; i < flatMovements.length; i++) {
               if (flatMovements[i].stepType === 'exercise') return flatMovements[i];
             }
-            return next; // fallback to whatever is next
+            return next;
           })();
-          const restVideoUrl = nextExForRest?.videoUrl || current?.videoUrl;
-          const restThumbUrl = nextExForRest?.thumbnailUrl || current?.thumbnailUrl;
           return (
           <View style={st.workContainer}>
             {renderHeader()}
@@ -733,16 +820,17 @@ export default function WorkoutPlayer({
               </View>
             </View>
 
-            {/* Next movement video preview */}
+            {/* Persistent video — same component as work phase, keyed by activeVideoUrl */}
             <View style={st.videoArea}>
               <View style={st.videoInner}>
-                {restVideoUrl ? (
+                {activeVideoUrl ? (
                   <Video
-                    key={`rest-${currentIndex}`}
-                    source={{ uri: restVideoUrl }}
+                    key={activeVideoUrl}
+                    ref={videoRef}
+                    source={{ uri: activeVideoUrl }}
                     resizeMode={ResizeMode.COVER}
                     isLooping
-                    shouldPlay
+                    shouldPlay={!isPaused}
                     isMuted
                     style={st.videoPlayer}
                     videoStyle={
@@ -751,8 +839,8 @@ export default function WorkoutPlayer({
                         : undefined
                     }
                   />
-                ) : restThumbUrl ? (
-                  <Image source={{ uri: restThumbUrl }} style={st.videoPlayer} resizeMode="cover" />
+                ) : activeThumbUrl ? (
+                  <Image source={{ uri: activeThumbUrl }} style={st.videoPlayer} resizeMode="cover" />
                 ) : (
                   <View style={[st.videoPlayer, st.videoPlaceholder]}>
                     <Icon name="play-circle" size={48} color="#3A4050" />
@@ -932,6 +1020,44 @@ const st = StyleSheet.create({
   },
   bigStartText: { fontSize: 20, fontWeight: '700', color: '#0E1117', fontFamily: FH },
 
+  // Ready — block overview grid
+  readyBlockBadge: {
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: '#F5A623', justifyContent: 'center', alignItems: 'center',
+    marginRight: 10,
+  },
+  readyBlockBadgeText: {
+    fontSize: 14, fontWeight: '700', color: '#0E1117', fontFamily: FH,
+  },
+  readyBlockLabel: {
+    fontSize: 18, fontWeight: '700', color: '#F0F4F8', fontFamily: FH, flex: 1,
+  },
+  readyBlockRounds: {
+    fontSize: 14, fontWeight: '600', color: '#8A95A3', fontFamily: FH, marginLeft: 8,
+  },
+  readyThumbGrid: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 8,
+  },
+  readyThumbCell: {
+    width: '30%' as any, marginBottom: 4,
+  },
+  readyThumbImage: {
+    width: '100%' as any, aspectRatio: 4 / 5, borderRadius: 8,
+  },
+  readyThumbName: {
+    fontSize: 11, color: '#8A95A3', fontFamily: FB, marginTop: 4, textAlign: 'center',
+  },
+  readyFooter: {
+    position: 'absolute' as any, bottom: 0, left: 0, right: 0,
+    alignItems: 'center', paddingBottom: Platform.select({ ios: 40, android: 24, web: 24, default: 24 }),
+    paddingTop: 16,
+    backgroundColor: 'rgba(14,17,23,0.92)',
+  },
+  readyPlayBtn: {
+    width: 64, height: 64, borderRadius: 32,
+    backgroundColor: '#F5A623', justifyContent: 'center', alignItems: 'center',
+  },
+
   // ── Intro / Outro ──────────────────────────────────────────────────
   introOutroContainer: {
     flex: 1,
@@ -1081,6 +1207,15 @@ const st = StyleSheet.create({
     letterSpacing: 6, textAlign: 'center', opacity: 0.7,
     textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 8,
+  },
+  waterBreakPlaceholder: {
+    backgroundColor: 'rgba(56,189,248,0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  waterBreakPlaceholderText: {
+    fontSize: 32, fontWeight: '900', color: '#FFFFFF', fontFamily: FH,
+    letterSpacing: 4, textAlign: 'center',
   },
 
   // Phase labels

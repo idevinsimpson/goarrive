@@ -641,10 +641,8 @@ function BuildScreenInner() {
       const iconName = isPlan ? 'plan' : isPlaybook ? 'playbook' : isMovement ? 'movements' : 'workouts';
       const iconColor = isPlan ? '#60A5FA' : isPlaybook ? '#A78BFA' : '#4A5568';
 
-      // Prefer thumbnailUrl (GIF) over mediaUrl (video) for static card display
-      const thumbOrGif = item.thumbnailUrl || null;
-      const fallbackMedia = isMovement ? null : item.mediaUrl; // Don't use video as thumbnail for movements
-      const singleThumbUri = thumbOrGif || fallbackMedia || null;
+      // Prefer thumbnailUrl (GIF), then first-frame image, then low-quality GIF, then mediaUrl
+      const singleThumbUri = item.thumbnailUrl || item.thumbnailImageUrl || item.gifLowUrl || item.mediaUrl || null;
 
       // Workout and playbook cards use the mosaic (mini-library) layout when they have coverThumbs
       const isWorkoutCard = isWorkout;
@@ -728,9 +726,9 @@ function BuildScreenInner() {
         }}
       >
         <View style={s.listMedia}>
-          {item.thumbnailUrl ? (
+          {(item.thumbnailUrl || item.thumbnailImageUrl || item.gifLowUrl || item.mediaUrl) ? (
             <Image
-              source={{ uri: previewEngine.scrollState !== 'scrolling' ? item.thumbnailUrl : 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' }}
+              source={{ uri: previewEngine.scrollState !== 'scrolling' ? (item.thumbnailUrl || item.thumbnailImageUrl || item.gifLowUrl || item.mediaUrl) : 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' }}
               style={[s.listImage, { backgroundColor: '#151B28' }]}
             />
           ) : (

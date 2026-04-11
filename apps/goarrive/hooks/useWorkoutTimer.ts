@@ -82,6 +82,11 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
         const specialPhase = stepTypeToPhase(nextStepType);
         setPhase(specialPhase);
         setTimeLeft(nextStep.duration ?? 10);
+      } else if (nextStep.duration <= 0 && nextStep.restAfter > 0) {
+        // Synthetic "Get Ready" step — skip work, go straight to rest/prep
+        setPhase('rest');
+        setTimeLeft(nextStep.restAfter);
+        playCue('restStart');
       } else {
         // Exercise — go directly to work
         setPhase('work');
@@ -173,6 +178,11 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
       const specialPhase = stepTypeToPhase(firstStepType);
       setPhase(specialPhase);
       setTimeLeft(firstStep.duration ?? 10);
+    } else if (firstStep.duration <= 0 && firstStep.restAfter > 0) {
+      // Synthetic "Get Ready" step — skip work, go straight to rest/prep
+      setPhase('rest');
+      setTimeLeft(firstStep.restAfter);
+      playCue('restStart');
     } else {
       setPhase('work');
       setTimeLeft(firstStep.duration ?? 30);
