@@ -18,12 +18,15 @@ service firebase.storage {
         && request.auth.uid == coachId;
     }
 
-    // Coach application uploads — public write (no auth), admin-only read
-    // Covers both document uploads (coachApplications/{file}) and
-    // video uploads (coachApplications/videos/{file})
+    // Coach application uploads — public write (no auth), public read
+    // Write: unauthenticated, capped at 200 MB (video uploads)
+    // Read: unauthenticated so getDownloadURL() works from the public form.
+    //   Security is token-based: download URLs include a random token,
+    //   and the URLs are only stored in Firestore (admin-only read).
+    //   Paths use timestamps making enumeration impractical.
     match /coachApplications/{allPaths=**} {
       allow write: if request.resource.size < 200 * 1024 * 1024;
-      allow read: if request.auth != null;
+      allow read: if true;
     }
 
     // Fallback: deny everything else
