@@ -371,6 +371,7 @@ const s = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.50)',
+    zIndex: 1,
   },
   panel: {
     position: 'absolute',
@@ -384,6 +385,7 @@ const s = StyleSheet.create({
     shadowOpacity: 0.4,
     shadowRadius: 16,
     elevation: 24,
+    zIndex: 2,
   },
   profileSection: {
     paddingTop: Platform.OS === 'web' ? ('max(48px, env(safe-area-inset-top, 48px))' as any) : Platform.OS === 'ios' ? 60 : 48,
