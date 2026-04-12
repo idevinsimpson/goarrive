@@ -181,14 +181,6 @@ export default function WorkoutPreview({
     return Math.ceil(totalSec / 60);
   })();
 
-  // Collect unique equipment
-  const equipment = new Set<string>();
-  blocks.forEach((block: any) => {
-    (block.movements || []).forEach((mv: any) => {
-      if (mv.equipment) equipment.add(mv.equipment);
-    });
-  });
-
   // Count unique movements (by movementId or name, respecting showOnPreview)
   const uniqueMovements = new Set<string>();
   blocks.forEach((block: any) => {
