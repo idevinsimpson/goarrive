@@ -45,6 +45,7 @@ import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from './Icon';
 import WorkoutPlayer from './WorkoutPlayer';
+import VideoCropModal, { CropValues } from './VideoCropModal';
 import { FB, FH } from '../lib/theme';
 
 
@@ -217,15 +218,22 @@ export default function WorkoutFolderPage({
   const [outroGifUrl, setOutroGifUrl] = useState<string | null>(null);
   const [ioUploading, setIoUploading] = useState<'intro' | 'outro' | null>(null);
   const [ioUploadProgress, setIoUploadProgress] = useState(0);
+  // Intro/Outro crop state
+  const [introCrop, setIntroCrop] = useState<CropValues>({ cropScale: 1, cropTranslateX: 0, cropTranslateY: 0 });
+  const [outroCrop, setOutroCrop] = useState<CropValues>({ cropScale: 1, cropTranslateX: 0, cropTranslateY: 0 });
+  // After upload: open crop modal with the freshly uploaded URL
+  const [cropTarget, setCropTarget] = useState<{ target: 'intro' | 'outro'; videoUrl: string } | null>(null);
 
   // ── Intro/Outro video upload handler ──────────────────────────────────────
   const pickAndUploadIntroOutro = useCallback(async (target: 'intro' | 'outro') => {
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        // Alert not imported — use console + return
-        console.warn('[WorkoutFolder] Media library permission not granted');
-        return;
+      // On native, request permission; on web, browser handles file picker natively
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission Needed', 'Please allow access to your photo library to upload videos.');
+          return;
+        }
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -243,27 +251,46 @@ export default function WorkoutFolderPage({
 
       // Upload video to Firebase Storage
       const fileName = `workouts/${coachId}/${target}/${workoutId}_${Date.now()}.mp4`;
-      const response = await fetch(asset.uri);
-      const blob = await response.blob();
+
+      let blob: Blob;
+      if (Platform.OS === 'web' && asset.uri.startsWith('blob:')) {
+        // On web, expo-image-picker returns a blob: URL — fetch it directly
+        const response = await fetch(asset.uri);
+        blob = await response.blob();
+      } else if (Platform.OS === 'web' && asset.uri.startsWith('data:')) {
+        // Data URI — convert to blob
+        const response = await fetch(asset.uri);
+        blob = await response.blob();
+      } else {
+        const response = await fetch(asset.uri);
+        blob = await response.blob();
+      }
+
+      const contentType = blob.type || 'video/mp4';
       const storageRef = ref(storage, fileName);
-      const uploadTask = uploadBytesResumable(storageRef, blob, { contentType: 'video/mp4' });
+      const uploadTask = uploadBytesResumable(storageRef, blob, { contentType });
 
       const videoUrl = await new Promise<string>((resolve, reject) => {
         uploadTask.on(
           'state_changed',
           (snapshot) => setIoUploadProgress(snapshot.bytesTransferred / snapshot.totalBytes),
-          (error) => { reject(error); },
-          async () => { resolve(await getDownloadURL(uploadTask.snapshot.ref)); },
+          (error) => {
+            console.error(`[WorkoutFolder] ${target} upload state error:`, error?.message ?? error);
+            reject(error);
+          },
+          async () => {
+            try {
+              const url = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve(url);
+            } catch (e) {
+              reject(e);
+            }
+          },
         );
       });
 
-      // Upload thumbnail if available
-      let gifUrl: string | null = null;
-      if (asset.uri) {
-        // Use video URL as both video and thumbnail placeholder
-        // A proper GIF/thumbnail can be generated server-side later
-        gifUrl = videoUrl;
-      }
+      // Use video URL as thumbnail placeholder
+      const gifUrl = videoUrl;
 
       // Save to Firestore
       const updates = target === 'intro'
@@ -277,8 +304,16 @@ export default function WorkoutFolderPage({
         setOutroVideoUrl(videoUrl);
         setOutroGifUrl(gifUrl);
       }
+
+      // Immediately open crop modal for the freshly uploaded video
+      setCropTarget({ target, videoUrl });
     } catch (err: any) {
       console.error(`[WorkoutFolder] ${target} upload error:`, err?.message ?? err);
+      if (Platform.OS === 'web') {
+        window.alert(`Upload failed: ${err?.message || 'Unknown error'}. Please try again.`);
+      } else {
+        Alert.alert('Upload Failed', `Could not upload the ${target} video. Please try again.`);
+      }
     } finally {
       setIoUploading(null);
       setIoUploadProgress(0);
@@ -393,6 +428,16 @@ export default function WorkoutFolderPage({
         setIntroGifUrl(data.introGifUrl ?? null);
         setOutroVideoUrl(data.outroVideoUrl ?? null);
         setOutroGifUrl(data.outroGifUrl ?? null);
+        setIntroCrop({
+          cropScale: data.introCropScale ?? 1,
+          cropTranslateX: data.introCropTranslateX ?? 0,
+          cropTranslateY: data.introCropTranslateY ?? 0,
+        });
+        setOutroCrop({
+          cropScale: data.outroCropScale ?? 1,
+          cropTranslateX: data.outroCropTranslateX ?? 0,
+          cropTranslateY: data.outroCropTranslateY ?? 0,
+        });
         setOriginalData(data);
       }
       setLoading(false);
@@ -879,6 +924,26 @@ export default function WorkoutFolderPage({
     }
   }, [workoutId]);
 
+  // ── Crop done handler — saves crop values to Firestore ─────────────────
+  const handleCropDone = useCallback(async (crop: CropValues) => {
+    if (!cropTarget) return;
+    const prefix = cropTarget.target === 'intro' ? 'intro' : 'outro';
+    const updates: Record<string, number> = {
+      [`${prefix}CropScale`]: crop.cropScale,
+      [`${prefix}CropTranslateX`]: crop.cropTranslateX,
+      [`${prefix}CropTranslateY`]: crop.cropTranslateY,
+    };
+    try {
+      await updateDoc(doc(db, 'workouts', workoutId), { ...updates, updatedAt: serverTimestamp() });
+      if (cropTarget.target === 'intro') setIntroCrop(crop);
+      else setOutroCrop(crop);
+    } catch (err: any) {
+      console.error('[WorkoutFolder] Save crop error:', err?.message ?? err);
+      Alert.alert('Save Failed', 'Could not save crop settings. Please try again.');
+    }
+    setCropTarget(null);
+  }, [cropTarget, workoutId]);
+
   // ── Filtered movements for picker ─────────────────────────────────────────
   const filteredMovements = useMemo(() => {
     if (!movementSearch.trim()) return availableMovements;
@@ -949,18 +1014,25 @@ export default function WorkoutFolderPage({
           </Text>
           <View style={st.ioAssetRow}>
             {introGifUrl ? (
-              <Pressable style={st.ioAssetCard}>
+              <View style={st.ioAssetCard}>
                 <Image source={{ uri: introGifUrl }} style={st.ioAssetImage} resizeMode="cover" />
                 <View style={st.ioAssetOverlay}>
                   <Text style={st.ioAssetLabel}>Intro</Text>
                 </View>
                 <Pressable
                   style={st.ioRemoveBtn}
-                  onPress={() => saveIntroOutro({ introVideoUrl: null, introGifUrl: null })}
+                  onPress={(e) => { e.stopPropagation(); saveIntroOutro({ introVideoUrl: null, introGifUrl: null }); }}
                 >
                   <Icon name="close" size={14} color="#EF4444" />
                 </Pressable>
-              </Pressable>
+                <Pressable
+                  style={st.ioCropBtn}
+                  onPress={() => setCropTarget({ target: 'intro', videoUrl: introVideoUrl! })}
+                >
+                  <Icon name="crop" size={14} color="#F5A623" />
+                  <Text style={st.ioCropBtnText}>Crop</Text>
+                </Pressable>
+              </View>
             ) : (
               <Pressable style={st.ioUploadCard} onPress={() => pickAndUploadIntroOutro('intro')} disabled={ioUploading === 'intro'}>
                 {ioUploading === 'intro' ? (
@@ -984,18 +1056,25 @@ export default function WorkoutFolderPage({
           </Text>
           <View style={st.ioAssetRow}>
             {outroGifUrl ? (
-              <Pressable style={st.ioAssetCard}>
+              <View style={st.ioAssetCard}>
                 <Image source={{ uri: outroGifUrl }} style={st.ioAssetImage} resizeMode="cover" />
                 <View style={st.ioAssetOverlay}>
                   <Text style={st.ioAssetLabel}>Outro</Text>
                 </View>
                 <Pressable
                   style={st.ioRemoveBtn}
-                  onPress={() => saveIntroOutro({ outroVideoUrl: null, outroGifUrl: null })}
+                  onPress={(e) => { e.stopPropagation(); saveIntroOutro({ outroVideoUrl: null, outroGifUrl: null }); }}
                 >
                   <Icon name="close" size={14} color="#EF4444" />
                 </Pressable>
-              </Pressable>
+                <Pressable
+                  style={st.ioCropBtn}
+                  onPress={() => setCropTarget({ target: 'outro', videoUrl: outroVideoUrl! })}
+                >
+                  <Icon name="crop" size={14} color="#F5A623" />
+                  <Text style={st.ioCropBtnText}>Crop</Text>
+                </Pressable>
+              </View>
             ) : (
               <Pressable style={st.ioUploadCard} onPress={() => pickAndUploadIntroOutro('outro')} disabled={ioUploading === 'outro'}>
                 {ioUploading === 'outro' ? (
@@ -1021,6 +1100,16 @@ export default function WorkoutFolderPage({
             </Text>
           </View>
         </ScrollView>
+
+        {/* Crop modal — opens after upload or when tapping Crop button */}
+        <VideoCropModal
+          visible={!!cropTarget}
+          videoUri={cropTarget?.videoUrl ?? ''}
+          initialCrop={cropTarget?.target === 'intro' ? introCrop : outroCrop}
+          frameAspect={9 / 19.5}
+          onDone={handleCropDone}
+          onCancel={() => setCropTarget(null)}
+        />
       </View>
     );
   }
@@ -2955,6 +3044,26 @@ const st = StyleSheet.create({
     backgroundColor: 'rgba(239, 68, 68, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 2,
+  },
+  ioCropBtn: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(14, 17, 23, 0.75)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    zIndex: 2,
+  },
+  ioCropBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#F5A623',
+    fontFamily: FH,
   },
   ioUploadCard: {
     width: 140,

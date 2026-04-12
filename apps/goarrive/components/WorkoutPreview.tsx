@@ -25,6 +25,8 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { Icon } from './Icon';
 import { useOfflineVideoCache } from '../hooks/useOfflineVideoCache';
 import { FB, FH } from '../lib/theme';
@@ -34,6 +36,8 @@ interface WorkoutPreviewProps {
   workout: any;
   onStart: () => void;
   onClose: () => void;
+  /** When true, shows a lightweight "Coach Preview" label */
+  isPreview?: boolean;
 }
 
 /** Equipment checklist item with toggle */
@@ -58,8 +62,55 @@ export default function WorkoutPreview({
   workout,
   onStart,
   onClose,
+  isPreview = false,
 }: WorkoutPreviewProps) {
   const { getCachedUri, cacheVideos, progress, isCaching } = useOfflineVideoCache();
+
+  // ── Fetch equipment from movements collection (blocks only store movementId) ──
+  const [equipment, setEquipment] = useState<Set<string>>(new Set());
+  const [equipmentLoading, setEquipmentLoading] = useState(false);
+
+  useEffect(() => {
+    if (!visible || !workout) return;
+
+    const blocks = workout.blocks || [];
+    const movementIds = new Set<string>();
+    blocks.forEach((block: any) => {
+      (block.movements || []).forEach((mv: any) => {
+        if (mv.movementId) movementIds.add(mv.movementId);
+      });
+    });
+
+    if (movementIds.size === 0) {
+      setEquipment(new Set());
+      return;
+    }
+
+    let cancelled = false;
+    setEquipmentLoading(true);
+
+    (async () => {
+      const results = await Promise.allSettled(
+        [...movementIds].map(async (id) => {
+          const snap = await getDoc(doc(db, 'movements', id));
+          return snap.exists() ? snap.data() : null;
+        }),
+      );
+
+      if (cancelled) return;
+
+      const eq = new Set<string>();
+      for (const r of results) {
+        if (r.status === 'fulfilled' && r.value?.equipment) {
+          eq.add(r.value.equipment);
+        }
+      }
+      setEquipment(eq);
+      setEquipmentLoading(false);
+    })();
+
+    return () => { cancelled = true; };
+  }, [visible, workout]);
 
   // Pre-cache all movement videos when preview opens
   useEffect(() => {
@@ -78,33 +129,54 @@ export default function WorkoutPreview({
 
   const blocks = workout.blocks || [];
 
-  // Calculate estimated duration (accounts for block types)
+  // Special block types that contribute fixed duration, not movement-based timing
+  const SPECIAL_TYPES = new Set(['Intro', 'Outro', 'Demo', 'Transition', 'Water Break']);
+
+  // Calculate estimated duration using the same field names as useWorkoutFlatten
   const estimatedMin = (() => {
     if (workout.estimatedDurationMin) return workout.estimatedDurationMin;
     let totalSec = 0;
     blocks.forEach((block: any) => {
-      const rounds = block.rounds || block.sets || 1;
-      const movements = block.movements || [];
-      const blockType = (block.type || 'linear').toLowerCase();
-      const roundRest = block.restBetweenRoundsSec ?? block.restBetweenSec ?? 15;
-      const mvRest = block.restBetweenMovementsSec ?? 10;
+      const blockType = block.type || 'Circuit';
 
-      if (blockType === 'superset' || blockType === 'circuit') {
-        // Superset/circuit: all movements per round, short rest between movements
-        let roundSec = 0;
-        movements.forEach((mv: any) => {
-          roundSec += mv.duration || mv.workSec || 30;
-          roundSec += mvRest;
-        });
-        totalSec += (roundSec + roundRest) * rounds;
-      } else {
-        // Linear: each movement × rounds sequentially
-        movements.forEach((mv: any) => {
-          const work = mv.duration || mv.workSec || 30;
-          const rest = mv.restSec ?? roundRest;
-          totalSec += (work + rest) * rounds;
-        });
+      // Special blocks: fixed duration
+      if (SPECIAL_TYPES.has(blockType)) {
+        totalSec += block.durationSec ?? (blockType === 'Intro' || blockType === 'Outro' ? 10 : 30);
+        return;
       }
+
+      const rounds = block.rounds ?? block.sets ?? 1;
+      const movements = block.movements || [];
+      const blockRest = block.restBetweenRoundsSec ?? block.restBetweenSec ?? block.rest ?? 15;
+      const mvRest = block.restBetweenMovementsSec ?? 0;
+      const bt = (blockType || '').toLowerCase();
+
+      if (bt === 'superset' || bt === 'circuit' || bt === 'amrap') {
+        for (let round = 0; round < rounds; round++) {
+          movements.forEach((mv: any, mi: number) => {
+            const isLastInRound = mi === movements.length - 1;
+            const isLastRound = round === rounds - 1;
+            totalSec += mv.durationSec ?? mv.duration ?? mv.workSec ?? 40;
+            if (isLastInRound && !isLastRound) {
+              totalSec += blockRest;
+            } else if (!isLastInRound) {
+              totalSec += mvRest > 0 ? mvRest : (mv.restSec ?? 0);
+            }
+          });
+        }
+      } else {
+        // Linear: each movement × rounds
+        for (let setNum = 0; setNum < rounds; setNum++) {
+          movements.forEach((mv: any, mi: number) => {
+            const isLast = setNum === rounds - 1 && mi === movements.length - 1;
+            totalSec += mv.durationSec ?? mv.duration ?? mv.workSec ?? 40;
+            if (!isLast) totalSec += mv.restSec ?? blockRest;
+          });
+        }
+      }
+
+      // Add first-movement prep time
+      if (block.firstMovementPrepSec) totalSec += block.firstMovementPrepSec;
     });
     return Math.ceil(totalSec / 60);
   })();
@@ -138,7 +210,14 @@ export default function WorkoutPreview({
             <Icon name="arrow-left" size={22} color="#F0F4F8" />
           </TouchableOpacity>
           <Text style={st.headerTitle}>Workout Preview</Text>
-          <View style={{ width: 40 }} />
+          {isPreview ? (
+            <View style={st.coachPreviewBadge}>
+              <Icon name="eye" size={12} color="#F5A623" />
+              <Text style={st.coachPreviewBadgeText}>COACH</Text>
+            </View>
+          ) : (
+            <View style={{ width: 40 }} />
+          )}
         </View>
 
         <ScrollView style={st.scroll} contentContainerStyle={st.scrollContent}>
@@ -170,12 +249,16 @@ export default function WorkoutPreview({
           </View>
 
           {/* Equipment checklist */}
-          {equipment.size > 0 && (
+          {(equipment.size > 0 || equipmentLoading) && (
             <View style={st.section}>
               <Text style={st.sectionTitle}>Equipment Checklist</Text>
-              {Array.from(equipment).map((eq) => (
-                <EquipmentCheckItem key={eq} name={eq} />
-              ))}
+              {equipmentLoading ? (
+                <ActivityIndicator size="small" color="#F5A623" style={{ alignSelf: 'flex-start', marginVertical: 8 }} />
+              ) : (
+                Array.from(equipment).map((eq) => (
+                  <EquipmentCheckItem key={eq} name={eq} />
+                ))
+              )}
             </View>
           )}
 
@@ -204,7 +287,7 @@ export default function WorkoutPreview({
                     <Text style={st.movementMeta}>
                       {mv.reps
                         ? `${mv.sets ?? 1}×${mv.reps}`
-                        : `${mv.duration || mv.workSec || 30}s`}
+                        : `${mv.durationSec ?? mv.duration ?? mv.workSec ?? 40}s`}
                     </Text>
                   </View>
                 ))}
@@ -260,6 +343,24 @@ const st = StyleSheet.create({
     fontWeight: '600',
     color: '#F0F4F8',
     fontFamily: FH,
+  },
+  coachPreviewBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(245,166,35,0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.2)',
+  },
+  coachPreviewBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#F5A623',
+    fontFamily: FH,
+    letterSpacing: 0.8,
   },
   scroll: {
     flex: 1,
