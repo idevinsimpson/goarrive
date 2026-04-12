@@ -126,31 +126,30 @@ HEAD_INJECT = """
       /* ═══════════════════════════════════════════════════════════════════
          3. MODAL SCROLL FIX — iOS Safari PWA
          React Native Web modals use [role="dialog"][aria-modal="true"].
-         Their ScrollViews need:
-           a) -webkit-overflow-scrolling: touch for momentum scrolling
-           b) The sheet container needs overflow:hidden for proper containment
-           c) Undo any height constraints from the tab screen rules above
+
+         CRITICAL: The global .css-175oi2r rule above overrides RNW's
+         default min-height:0px with min-height:auto. That prevents
+         flex items from shrinking below content height, which breaks
+         ScrollView containment inside modals (the ScrollView expands
+         to full content height and gets clipped by the parent).
+
+         Fix: restore min-height:0 inside modals so flex shrinking
+         works correctly. This selector (0,2,0) beats the global
+         .css-175oi2r (0,1,0) specificity.
          ═══════════════════════════════════════════════════════════════════ */
 
-      /* Modal ScrollViews: ensure iOS momentum scrolling works */
+      /* Restore min-height:0 inside modals for proper flex shrinking */
+      [role="dialog"] .css-175oi2r {
+        min-height: 0px !important;
+      }
+
+      /* Modal ScrollViews: enable iOS momentum scrolling */
       [role="dialog"] .r-agouwx,
       [aria-modal="true"] .r-agouwx {
         -webkit-overflow-scrolling: touch !important;
-        overflow-y: auto !important;
-        /* Undo any tab-screen height constraints that might leak */
-        height: auto !important;
-        max-height: none !important;
-        flex: 1 1 0% !important;
       }
 
-      /* Modal sheet containers (the ones with maxHeight %) need overflow:hidden
-         to create a proper scroll containment context on iOS Safari.
-         These are the direct children of the overlay that have border-radius. */
-      [role="dialog"] > div > div > div {
-        overflow: hidden !important;
-      }
-
-      /* Ensure the modal overlay itself fills the viewport properly */
+      /* Ensure the modal overlay itself supports momentum scrolling */
       [role="dialog"] {
         -webkit-overflow-scrolling: touch !important;
       }

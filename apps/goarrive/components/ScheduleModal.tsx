@@ -1044,7 +1044,7 @@ export default function ScheduleModal({
       <Modal visible={visible} transparent animationType="slide">
         <View style={s.schedOverlay}>
           <View style={s.schedSheet}>
-            <ScrollView bounces={false} contentContainerStyle={{ paddingBottom: 40 }}>
+            <ScrollView style={{ flex: 1 }} bounces={false} contentContainerStyle={{ paddingBottom: 40 }}>
               {/* Header */}
               <View style={s.schedHeader}>
                 <Text style={s.schedTitle}>Schedule {memberName?.split(' ')[0] || 'Member'}</Text>

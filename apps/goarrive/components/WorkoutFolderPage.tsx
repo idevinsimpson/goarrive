@@ -1885,7 +1885,7 @@ export default function WorkoutFolderPage({
                 autoFocus
               />
             </View>
-            <ScrollView contentContainerStyle={st.pickerList} keyboardShouldPersistTaps="handled">
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={st.pickerList} keyboardShouldPersistTaps="handled">
               {filteredMovements.map((mov) => (
                 <Pressable
                   key={mov.id}
@@ -2909,7 +2909,7 @@ const st = StyleSheet.create({
   pickerList: {
     paddingHorizontal: 20,
     paddingTop: 12,
-    paddingBottom: 20,
+    paddingBottom: 40,
   },
   pickerItem: {
     flexDirection: 'row',

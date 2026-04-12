@@ -533,6 +533,8 @@ export default function MovementForm({
         } catch (aiErr) {
           console.warn('[MovementForm] AI analysis failed, saving without:', aiErr);
         }
+      } catch (aiErr) {
+        console.warn('[MovementForm] AI analysis failed, saving without:', aiErr);
       }
 
       if (!aiData.name) {
@@ -1155,6 +1157,7 @@ const st = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
+    paddingBottom: 40,
     gap: 16,
   },
 

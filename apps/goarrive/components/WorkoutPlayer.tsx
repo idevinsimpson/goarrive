@@ -933,19 +933,21 @@ export default function WorkoutPlayer({
               onChangeText={setSwapReason}
               maxLength={100}
             />
-            {alternatives.map((alt) => (
-              <TouchableOpacity
-                key={alt.id}
-                style={st.swapItem}
-                onPress={() => {
-                  swapMovement(alt, swapReason.trim() || undefined);
-                  setSwapReason('');
-                }}
-              >
-                <Text style={st.swapItemName}>{alt.name}</Text>
-                <Text style={st.swapItemCat}>{alt.category}</Text>
-              </TouchableOpacity>
-            ))}
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
+              {alternatives.map((alt) => (
+                <TouchableOpacity
+                  key={alt.id}
+                  style={st.swapItem}
+                  onPress={() => {
+                    swapMovement(alt, swapReason.trim() || undefined);
+                    setSwapReason('');
+                  }}
+                >
+                  <Text style={st.swapItemName}>{alt.name}</Text>
+                  <Text style={st.swapItemCat}>{alt.category}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -1527,7 +1529,7 @@ const st = StyleSheet.create({
   },
   swapSheet: {
     backgroundColor: '#111827', borderTopLeftRadius: 16, borderTopRightRadius: 16,
-    padding: 20, maxHeight: '60%',
+    padding: 20, maxHeight: '60%', overflow: 'hidden' as const,
   },
   swapHeader: {
     flexDirection: 'row', justifyContent: 'space-between',
