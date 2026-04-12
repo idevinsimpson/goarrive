@@ -533,8 +533,6 @@ export default function MovementForm({
         } catch (aiErr) {
           console.warn('[MovementForm] AI analysis failed, saving without:', aiErr);
         }
-      } catch (aiErr) {
-        console.warn('[MovementForm] AI analysis failed, saving without:', aiErr);
       }
 
       if (!aiData.name) {
