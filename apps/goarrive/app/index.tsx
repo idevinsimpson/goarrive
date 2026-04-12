@@ -10,7 +10,7 @@
  */
 import { Redirect } from 'expo-router';
 import { useAuth } from '../lib/AuthContext';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, Platform, StyleSheet } from 'react-native';
 import LandingPage from '../components/landing/LandingPage';
 
 export default function Index() {
@@ -24,9 +24,12 @@ export default function Index() {
     );
   }
 
-  // Unauthenticated → show public landing page
+  // Unauthenticated: web → marketing landing page, native → sign-in
   if (!user) {
-    return <LandingPage />;
+    if (Platform.OS === 'web') {
+      return <LandingPage />;
+    }
+    return <Redirect href="/(auth)/login" />;
   }
 
   // Determine role from custom claims
