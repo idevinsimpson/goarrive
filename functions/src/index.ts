@@ -858,7 +858,7 @@ export const stripeWebhook = onRequest(
       return;
     }
 
-    await processStripeEvent('stripeWebhook', event, res);
+    await processStripeEvent('stripeWebhook', event!, res);
   }
 );
 
