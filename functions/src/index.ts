@@ -835,10 +835,25 @@ export const stripeWebhook = onRequest(
     const stripe = getStripe(stripeSecretKey.value());
     let event: Stripe.Event;
 
-    try {
-      event = stripe.webhooks.constructEvent(req.rawBody, sig, stripeWebhookSecret.value().trim());
-    } catch (err) {
-      console.error('[stripeWebhook] Signature verification failed:', err);
+    // Try platform webhook secret first, then connected account secret
+    const secrets = [
+      stripeWebhookSecret.value().trim(),
+      stripeWebhookSecretConnect.value().trim(),
+    ].filter(Boolean);
+
+    let verified = false;
+    for (const secret of secrets) {
+      try {
+        event = stripe.webhooks.constructEvent(req.rawBody, sig, secret);
+        verified = true;
+        break;
+      } catch (_err) {
+        // Try next secret
+      }
+    }
+
+    if (!verified) {
+      console.error('[stripeWebhook] Signature verification failed with all secrets');
       res.status(400).send('Webhook signature error: verification failed');
       return;
     }
