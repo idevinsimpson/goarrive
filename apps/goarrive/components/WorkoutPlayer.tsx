@@ -375,6 +375,11 @@ export default function WorkoutPlayer({
                     shouldPlay
                     isMuted
                     style={StyleSheet.absoluteFillObject}
+                    videoStyle={
+                      Platform.OS === 'web'
+                        ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
+                        : undefined
+                    }
                   />
                 ) : introThumbUrl ? (
                   <Image source={{ uri: introThumbUrl }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
@@ -415,6 +420,11 @@ export default function WorkoutPlayer({
                 shouldPlay
                 isMuted
                 style={StyleSheet.absoluteFillObject}
+                videoStyle={
+                  Platform.OS === 'web'
+                    ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
+                    : undefined
+                }
               />
             ) : null}
             <View style={[st.introOutroGradient, current.videoUrl && { backgroundColor: 'rgba(14,17,23,0.6)' }]}>
