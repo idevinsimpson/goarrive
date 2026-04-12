@@ -1,0 +1,31 @@
+---
+applyTo: "**/*"
+---
+# GitHub Copilot Instructions for GoArrive
+
+You are GitHub Copilot working on the GoArrive project. Follow these rules strictly.
+
+## 1. Staging-First Deployment
+- NEVER deploy to `goarrive.fit` (production) without explicit approval from the user.
+- Always deploy to staging first: `cd apps/goarrive && npm run deploy:staging`
+- The staging URL is `https://goarrive--staging.web.app`. Provide this to the user for review.
+- After user approval, deploy to production: `cd apps/goarrive && npm run deploy`
+
+## 2. Architecture Constraints
+- **Stack:** React Native, Expo, Expo Router, Firebase (Firestore, Auth, Functions, Hosting), Stripe Connect.
+- **Banned Tech:** MySQL, TiDB, Drizzle, Fastify, S3, JotForm, Calendly, Zoom Embedded SDK.
+- **Roles:** `platformAdmin`, `coach`, `member`. No other roles.
+
+## 3. Core Coding Patterns
+- **Auth/Impersonation:** Use `effectiveUid` or `claims.coachId` from `useAuth()`. NEVER use `user.uid` directly for data fetching.
+- **Queries:** Every coach-scoped query MUST include `where('coachId', '==', coachId)`.
+- **Naming:** `camelCase` for Firestore docs, interfaces, props, state.
+- **Language:** "coach", "member", "movement", "Command Center".
+- **Performance:** Use `FlatList` or `react-native-draggable-flatlist` for lists > 500 items. Use `thumbnailUrl` for initial media loads.
+
+## 4. Testing
+- Run Vitest for logic: `cd apps/goarrive && npm run test:vitest`
+- Run Playwright for UI flows: `npm run test:e2e`
+
+## 5. Knowledge Base
+For deep dives, read the files in the `.claude/` directory (e.g., `.claude/data-model.md`, `.claude/build-system-vision.md`).
