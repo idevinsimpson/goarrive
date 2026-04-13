@@ -45,6 +45,7 @@ import { useMovementSwap } from '../hooks/useMovementSwap';
 import { useMovementHydrate } from '../hooks/useMovementHydrate';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
+import { useWorkoutTTS } from '../hooks/useWorkoutTTS';
 import { FB, FH } from '../lib/theme';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -92,6 +93,20 @@ export default function WorkoutPlayer({
 
   // ── Offline resilience ─────────────────────────────
   const { isOffline, queueSize } = useNetworkStatus();
+
+  // ── TTS voice coaching ─────────────────────────────
+  const [ttsMuted, setTtsMuted] = useState(false);
+  const { isPreloading: ttsPreloading } = useWorkoutTTS({
+    phase,
+    current,
+    next,
+    isMuted: ttsMuted || isPreview,
+    currentIndex,
+    total,
+    timeLeft,
+    currentDuration: current?.duration ?? 0,
+    flatMovements,
+  });
 
   // ── Movement swap ─────────────────────────────
   const {
@@ -236,6 +251,12 @@ export default function WorkoutPlayer({
               <Text style={st.offlineBadgeText}>Offline{queueSize > 0 ? ` (${queueSize})` : ''}</Text>
             </View>
           )}
+          <TouchableOpacity
+            onPress={() => setTtsMuted(m => !m)}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Icon name={ttsMuted ? 'volume-x' : 'volume-2'} size={20} color="#8A95A3" />
+          </TouchableOpacity>
           {showProgress && (
             <Text style={st.progressText}>
               {currentIndex + 1}/{total}
@@ -672,9 +693,17 @@ export default function WorkoutPlayer({
                 <Text style={st.floatingWorkoutName} numberOfLines={1}>
                   {workout?.name ?? 'Workout'}
                 </Text>
-                <Text style={st.floatingProgress}>
-                  {currentIndex + 1}/{total}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <TouchableOpacity
+                    onPress={() => setTtsMuted(m => !m)}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  >
+                    <Icon name={ttsMuted ? 'volume-x' : 'volume-2'} size={20} color="#8A95A3" />
+                  </TouchableOpacity>
+                  <Text style={st.floatingProgress}>
+                    {currentIndex + 1}/{total}
+                  </Text>
+                </View>
               </View>
             )}
 

@@ -1,106 +1,45 @@
 /**
- * useWorkoutTTS — Voice coaching hook for the Workout Player
+ * useWorkoutTTS — Phrase-driven voice coaching for the Workout Player
  *
- * Audio pipeline (in priority order):
- *   1. Pre-generated movement voice clips (OpenAI TTS, stored at voiceUrl)
- *   2. Static platform cues (Firebase Storage MP3s)
- *   3. Web Speech API fallback for any movement without a voiceUrl
+ * Architecture:
+ *   1. On workout open: generate all unique phrases via batchGenerateVoice
+ *   2. Cache URLs in a local map keyed by cacheKey
+ *   3. Preload current + next 2 clips as Audio elements
+ *   4. On phase/state change: look up the correct phrase, play its cached clip
  *
- * Movement voice clips are generated via OpenAI TTS (voice: onyx) through
- * the generateVoice Cloud Function. Static platform cues were pre-generated
- * and stored in Firebase Storage. Web Speech is the real-time fallback.
+ * Phrase system (deterministic — no AI decides what to say):
+ *   PREP_NEXT        → "Next up, {movement}."
+ *   GO               → "Go."
+ *   HALFWAY          → "That's halfway."
+ *   SWAP_SIDES       → "Swap sides."
+ *   DEMO             → "Here's what's coming up."
+ *   WATER_BREAK      → "Rest. Grab some water."
+ *   TRANSITION       → "{instructionText}" or "Get ready."
+ *   WORKOUT_COMPLETE → "Your GoArrive workout is complete. Great job."
  *
- * Uses expo-speech on native, Web Audio API + Web Speech on web.
- * Respects the global audio mute toggle.
+ * Countdown "3, 2, 1" uses pre-generated static cues (unchanged).
+ * All dynamic phrases use OpenAI TTS (voice: onyx) via batchGenerateVoice.
  */
-import { useEffect, useRef, useCallback, useState } from 'react';
-import * as Speech from 'expo-speech';
+import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { Platform } from 'react-native';
-import type { StepType } from './useWorkoutFlatten';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import {
+  generateWorkoutPhrases,
+  getPhraseForEvent,
+  type TTSEvent,
+  type TTSPhrase,
+  type FlatStep,
+} from '../utils/ttsPhrase';
 
-// ── Static cue URL map ──────────────────────────────────────────────
+// ── Static countdown cues (pre-generated MP3s) ─────────────────────
 const BASE_URL =
   'https://firebasestorage.googleapis.com/v0/b/goarrive.firebasestorage.app/o/voice_cache%2Fplatform%2F';
 const CUE_URL = (name: string) => `${BASE_URL}${name}.mp3?alt=media`;
 
-const CUES = {
+const COUNTDOWN_CUES = {
   countdown_3: CUE_URL('countdown_3'),
   countdown_3_rest: CUE_URL('countdown_3_rest'),
-  countdown_4: CUE_URL('countdown_4'),
-  countdown_5: CUE_URL('countdown_5'),
-  countdown_10: CUE_URL('countdown_10'),
-  five_seconds: CUE_URL('five_seconds'),
-  ten_seconds: CUE_URL('ten_seconds'),
-  go: CUE_URL('go'),
-  begin: CUE_URL('begin'),
-  rest: CUE_URL('rest'),
-  rest_now: CUE_URL('rest_now'),
-  halfway: CUE_URL('halfway'),
-  workout_complete: CUE_URL('workout_complete'),
-  workout_complete_long: CUE_URL('workout_complete_long'),
-  workout_starting: CUE_URL('workout_starting'),
-  start_now: CUE_URL('start_now'),
-  next_up: CUE_URL('next_up'),
-  get_ready: CUE_URL('get_ready'),
-  switch_sides: CUE_URL('switch_sides'),
-  other_side: CUE_URL('other_side'),
-  water_break: CUE_URL('water_break'),
-  warm_up: CUE_URL('warm_up'),
-  cool_down: CUE_URL('cool_down'),
-  stretch: CUE_URL('stretch'),
-  shake_it_out: CUE_URL('shake_it_out'),
-  lets_get_started: CUE_URL('lets_get_started'),
-  lets_go: CUE_URL('lets_go'),
-  breathe: CUE_URL('breathe'),
-  take_a_breath: CUE_URL('take_a_breath'),
-  you_got_this: CUE_URL('you_got_this'),
-  keep_pushing: CUE_URL('keep_pushing'),
-  almost_there: CUE_URL('almost_there'),
-  last_round: CUE_URL('last_round'),
-  last_set: CUE_URL('last_set'),
-  final_rep: CUE_URL('final_rep'),
-  one_more: CUE_URL('one_more'),
-  push_through: CUE_URL('push_through'),
-  dig_deep: CUE_URL('dig_deep'),
-  dont_stop: CUE_URL('dont_stop'),
-  stay_strong: CUE_URL('stay_strong'),
-  looking_good: CUE_URL('looking_good'),
-  nice_form: CUE_URL('nice_form'),
-  great_work: CUE_URL('great_work'),
-  well_done: CUE_URL('well_done'),
-  fantastic_effort: CUE_URL('fantastic_effort'),
-  proud_of_you: CUE_URL('proud_of_you'),
-  nice_work_rest: CUE_URL('nice_work_rest'),
 } as const;
-
-type CueKey = keyof typeof CUES;
-
-// ── Audio pool for pre-loaded cues ──────────────────────────────────
-const audioPool: Record<string, HTMLAudioElement> = {};
-
-function preloadCue(key: CueKey): void {
-  if (Platform.OS !== 'web') return;
-  if (typeof window === 'undefined') return;
-  if (audioPool[key]) return;
-  try {
-    const audio = new (window as any).Audio(CUES[key]);
-    audio.preload = 'auto';
-    audioPool[key] = audio;
-  } catch {
-    // Audio API unavailable
-  }
-}
-
-// Pre-load the most commonly used cues immediately
-const PRIORITY_CUES: CueKey[] = [
-  'countdown_3', 'countdown_3_rest', 'rest', 'halfway',
-  'workout_complete', 'next_up', 'you_got_this', 'keep_pushing',
-  'almost_there', 'workout_starting', 'lets_get_started',
-];
-if (Platform.OS === 'web' && typeof window !== 'undefined') {
-  // Defer preloading slightly to not block initial render
-  setTimeout(() => PRIORITY_CUES.forEach(preloadCue), 2000);
-}
 
 // ── Types ────────────────────────────────────────────────────────────
 type Phase = 'ready' | 'work' | 'rest' | 'swap' | 'complete'
@@ -108,300 +47,274 @@ type Phase = 'ready' | 'work' | 'rest' | 'swap' | 'complete'
 
 interface UseWorkoutTTSOptions {
   phase: Phase;
-  current: {
-    name: string;
-    stepType?: StepType;
-    instructionText?: string;
-    demoMovements?: { name: string }[];
-    [key: string]: any;
-  } | null;
-  next: { name: string; [key: string]: any } | null;
+  current: { name: string; stepType?: string; instructionText?: string; weight?: string | number; [k: string]: any } | null;
+  next: { name: string; stepType?: string; weight?: string | number; [k: string]: any } | null;
   isMuted: boolean;
-  ttsDisabled?: boolean;
   currentIndex: number;
   total: number;
   timeLeft: number;
   currentDuration: number;
+  flatMovements: { name: string; stepType: string; instructionText?: string; weight?: string | number; [k: string]: any }[];
 }
 
+// ── Audio element pool ──────────────────────────────────────────────
+const audioPool: Record<string, HTMLAudioElement> = {};
+
+function getOrCreateAudio(key: string, url: string): HTMLAudioElement | null {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
+  try {
+    if (audioPool[key]) {
+      audioPool[key].currentTime = 0;
+      return audioPool[key];
+    }
+    const audio = new (window as any).Audio(url);
+    audio.preload = 'auto';
+    audioPool[key] = audio;
+    return audio;
+  } catch {
+    return null;
+  }
+}
+
+// ── Hook ─────────────────────────────────────────────────────────────
 export function useWorkoutTTS({
   phase,
   current,
   next,
   isMuted,
-  ttsDisabled = false,
   currentIndex,
   total,
   timeLeft,
   currentDuration,
+  flatMovements,
 }: UseWorkoutTTSOptions) {
-  const lastSpokenRef = useRef<string>('');
-  const [isTTSAvailable, setIsTTSAvailable] = useState(true);
-  const halfwaySpokenRef = useRef<boolean>(false);
-  const countdownSpokenRef = useRef<number>(-1);
-  const welcomeSpokenRef = useRef<boolean>(false);
+  // Map of cacheKey → download URL (populated by batch generation)
+  const [clipUrls, setClipUrls] = useState<Record<string, string>>({});
+  const [isPreloading, setIsPreloading] = useState(false);
+
+  // Guards to prevent duplicate playback
+  const lastPlayedRef = useRef<string>('');
+  const halfwayPlayedRef = useRef<boolean>(false);
+  const countdownPlayedRef = useRef<number>(-1);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // On web, we always have audio (our own files). On native, check expo-speech.
-  useEffect(() => {
-    if (Platform.OS === 'web') {
-      setIsTTSAvailable(typeof window !== 'undefined');
-    } else {
-      Speech.getAvailableVoicesAsync()
-        .then((voices) => setIsTTSAvailable(voices.length > 0))
-        .catch(() => setIsTTSAvailable(false));
-    }
-  }, []);
+  // ── Batch-generate all phrases on workout open ────────────────────
+  const allPhrases = useMemo(() => {
+    if (!flatMovements || flatMovements.length === 0) return [];
+    return generateWorkoutPhrases(flatMovements);
+  }, [flatMovements]);
 
-    // ── Play a dynamic audio URL (movement voice clips from Firebase Storage) ──
-  const playVoiceUrl = useCallback(
-    (url: string, onEnded?: () => void) => {
-      if (isMuted || ttsDisabled) return;
+  useEffect(() => {
+    if (allPhrases.length === 0) return;
+    if (phase === 'complete') return;
+    // Don't re-generate if we already have URLs
+    if (Object.keys(clipUrls).length > 0) return;
+
+    let cancelled = false;
+    setIsPreloading(true);
+
+    (async () => {
+      try {
+        const functions = getFunctions(undefined, 'us-central1');
+        const batchGenerate = httpsCallable<
+          { phrases: { text: string; cacheKey: string }[] },
+          { urls: Record<string, string>; generated: number; total: number }
+        >(functions, 'batchGenerateVoice');
+
+        const result = await batchGenerate({
+          phrases: allPhrases.map(p => ({ text: p.text, cacheKey: p.cacheKey })),
+        });
+
+        if (!cancelled) {
+          setClipUrls(result.data.urls);
+        }
+      } catch (err) {
+        console.warn('[useWorkoutTTS] Batch generation failed:', err);
+      } finally {
+        if (!cancelled) setIsPreloading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [allPhrases, phase]);
+
+  // ── Preload upcoming clips ────────────────────────────────────────
+  useEffect(() => {
+    if (Object.keys(clipUrls).length === 0) return;
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+
+    // Preload clips for current step, next step, and static phrases
+    const toPreload: TTSPhrase[] = [];
+
+    if (current?.stepType === 'exercise' && current.name !== 'Get Ready') {
+      toPreload.push(getPhraseForEvent('PREP_NEXT', current.name, current.weight));
+    }
+    if (next?.stepType === 'exercise' && next.name !== 'Get Ready') {
+      toPreload.push(getPhraseForEvent('PREP_NEXT', next.name, next.weight));
+    }
+
+    // Always preload static phrases
+    for (const event of ['GO', 'HALFWAY', 'SWAP_SIDES', 'WORKOUT_COMPLETE'] as TTSEvent[]) {
+      toPreload.push(getPhraseForEvent(event));
+    }
+
+    for (const phrase of toPreload) {
+      const url = clipUrls[phrase.cacheKey];
+      if (url) getOrCreateAudio(phrase.cacheKey, url);
+    }
+  }, [clipUrls, currentIndex, current?.name, next?.name]);
+
+  // ── Play a phrase by event type ───────────────────────────────────
+  const playPhrase = useCallback(
+    (event: TTSEvent, movementName?: string, weight?: string | number, instructionText?: string) => {
+      if (isMuted) return;
       if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+
+      const phrase = getPhraseForEvent(event, movementName, weight, instructionText);
+      const url = clipUrls[phrase.cacheKey];
       if (!url) return;
+
       try {
+        // Stop currently playing audio
         if (currentAudioRef.current) {
           currentAudioRef.current.pause();
           currentAudioRef.current.currentTime = 0;
         }
-        const audio = new (window as any).Audio(url);
-        currentAudioRef.current = audio;
-        if (onEnded) audio.addEventListener('ended', onEnded, { once: true });
-        audio.play().catch(() => {});
-      } catch {
-        // Audio API unavailable
-      }
+
+        const audio = getOrCreateAudio(phrase.cacheKey, url);
+        if (audio) {
+          currentAudioRef.current = audio;
+          audio.play().catch(() => {});
+        }
+      } catch {}
     },
-    [isMuted, ttsDisabled],
+    [isMuted, clipUrls],
   );
 
-  // ── Play a static cue from Firebase Storage ────────────────────
-  const playCue = useCallback(
-    (key: CueKey) => {
-      if (isMuted || ttsDisabled) return;
+  // ── Play a countdown cue ──────────────────────────────────────────
+  const playCountdown = useCallback(
+    (key: keyof typeof COUNTDOWN_CUES) => {
+      if (isMuted) return;
       if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+
       try {
-        // Stop any currently playing cue
         if (currentAudioRef.current) {
           currentAudioRef.current.pause();
           currentAudioRef.current.currentTime = 0;
         }
-        let audio = audioPool[key];
-        if (!audio) {
-          audio = new (window as any).Audio(CUES[key]);
-          audioPool[key] = audio;
-        } else {
-          audio.currentTime = 0;
+        const audio = getOrCreateAudio(key, COUNTDOWN_CUES[key]);
+        if (audio) {
+          currentAudioRef.current = audio;
+          audio.play().catch(() => {});
         }
-        currentAudioRef.current = audio;
-        audio.play().catch(() => {
-          // Autoplay blocked — silently fail
-        });
-      } catch {
-        // Audio API unavailable
-      }
+      } catch {}
     },
-    [isMuted, ttsDisabled],
+    [isMuted],
   );
 
-  // ── Speak dynamic text (movement names) via Web Speech API ──────
-  const speakWeb = useCallback((text: string) => {
-    try {
-      if (typeof window === 'undefined') return;
-      const synth = window.speechSynthesis;
-      if (!synth) return;
-      synth.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'en-US';
-      utterance.rate = 0.95;
-      utterance.pitch = 1.0;
-      synth.speak(utterance);
-    } catch {
-      // Web Speech API unavailable
-    }
-  }, []);
+  // ── Phase-driven playback ─────────────────────────────────────────
 
-  const speak = useCallback(
-    (text: string) => {
-      if (isMuted || ttsDisabled) return;
-      if (Platform.OS === 'web') {
-        speakWeb(text);
-        return;
-      }
-      try {
-        Speech.stop();
-        Speech.speak(text, {
-          language: 'en-US',
-          rate: 0.95,
-          pitch: 1.0,
-        });
-      } catch {
-        // TTS unavailable
-      }
-    },
-    [isMuted, ttsDisabled, speakWeb],
-  );
-
-  // ── Special block announcements ────────────────────────────────────
-  useEffect(() => {
-    if (!current) return;
-    const stepType = current.stepType;
-
-    // Intro block
-    if (phase === 'intro' || (phase === 'work' && stepType === 'intro')) {
-      const key = `intro_${currentIndex}`;
-      if (lastSpokenRef.current !== key) {
-        lastSpokenRef.current = key;
-        playCue('lets_get_started');
-      }
-      return;
-    }
-
-    // Outro block
-    if (phase === 'outro' || (phase === 'work' && stepType === 'outro')) {
-      const key = `outro_${currentIndex}`;
-      if (lastSpokenRef.current !== key) {
-        lastSpokenRef.current = key;
-        playCue('workout_complete_long');
-      }
-      return;
-    }
-
-    // Demo block
-    if (phase === 'demo' || (phase === 'work' && stepType === 'demo')) {
-      const key = `demo_${currentIndex}`;
-      if (lastSpokenRef.current !== key) {
-        lastSpokenRef.current = key;
-        const movements = current.demoMovements || [];
-        if (movements.length > 0) {
-          const names = movements.map((m: any) => m.name).join(', then ');
-          speak(`Here's what's coming up: ${names}`);
-        } else {
-          speak("Here's what's coming up");
-        }
-      }
-      return;
-    }
-
-    // Transition block
-    if (phase === 'transition' || (phase === 'work' && stepType === 'transition')) {
-      const key = `transition_${currentIndex}`;
-      if (lastSpokenRef.current !== key) {
-        lastSpokenRef.current = key;
-        const instruction = current.instructionText || current.description || '';
-        if (instruction) {
-          speak(instruction);
-        } else {
-          playCue('get_ready');
-        }
-      }
-      return;
-    }
-
-    // Water Break block
-    if (phase === 'waterBreak' || (phase === 'work' && stepType === 'waterBreak')) {
-      const key = `waterBreak_${currentIndex}`;
-      if (lastSpokenRef.current !== key) {
-        lastSpokenRef.current = key;
-        playCue('water_break');
-      }
-      return;
-    }
-  }, [phase, current?.stepType, currentIndex, speak, playCue]);
-
-  // ── Welcome message on first work phase ─────────────────────────────
-  useEffect(() => {
-    if (phase === 'work' && currentIndex === 0 && !welcomeSpokenRef.current) {
-      if (current?.stepType === 'exercise') {
-        welcomeSpokenRef.current = true;
-        playCue('workout_starting');
-      }
-    }
-  }, [phase, currentIndex, current?.stepType, playCue]);
-
-  // ── Exercise movement announcements ────────────────────────────────
+  // Exercise: announce movement on work phase entry
   useEffect(() => {
     if (!current || current.stepType !== 'exercise') return;
 
     if (phase === 'work') {
-      const key = `work_${currentIndex}_${current.name}`;
-      if (lastSpokenRef.current !== key) {
-        lastSpokenRef.current = key;
-        halfwaySpokenRef.current = false;
-        countdownSpokenRef.current = -1;
-        // Play "Next up" cue, then play movement name via ElevenLabs voice (or Web Speech fallback)
-        playCue('next_up');
-        const voiceUrl = current.voiceUrl;
-        if (voiceUrl) {
-          setTimeout(() => playVoiceUrl(voiceUrl), 900);
-        } else {
-          setTimeout(() => speak(current.name), 900);
+      const key = `work_${currentIndex}`;
+      if (lastPlayedRef.current !== key) {
+        lastPlayedRef.current = key;
+        halfwayPlayedRef.current = false;
+        countdownPlayedRef.current = -1;
+
+        if (current.name && current.name !== 'Get Ready') {
+          // Play "Next up, {movement}" then after a beat, play "Go"
+          playPhrase('PREP_NEXT', current.name, current.weight);
         }
       }
     } else if (phase === 'rest') {
-      const nextName = next?.name;
       const key = `rest_${currentIndex}`;
-      if (lastSpokenRef.current !== key) {
-        lastSpokenRef.current = key;
-        if (nextName) {
-          playCue('nice_work_rest');
-          const nextVoiceUrl = next?.voiceUrl;
-          if (nextVoiceUrl) {
-            setTimeout(() => playVoiceUrl(nextVoiceUrl), 1800);
-          } else {
-            setTimeout(() => speak(`Next up: ${nextName}`), 1800);
-          }
-        } else {
-          playCue('rest_now');
+      if (lastPlayedRef.current !== key) {
+        lastPlayedRef.current = key;
+        // During rest, announce the next movement
+        if (next?.stepType === 'exercise' && next.name && next.name !== 'Get Ready') {
+          playPhrase('PREP_NEXT', next.name, next.weight);
         }
       }
     } else if (phase === 'swap') {
       const key = `swap_${currentIndex}`;
-      if (lastSpokenRef.current !== key) {
-        lastSpokenRef.current = key;
-        playCue('switch_sides');
+      if (lastPlayedRef.current !== key) {
+        lastPlayedRef.current = key;
+        playPhrase('SWAP_SIDES');
       }
     } else if (phase === 'ready') {
-      lastSpokenRef.current = '';
-      welcomeSpokenRef.current = false;
-      halfwaySpokenRef.current = false;
-      countdownSpokenRef.current = -1;
+      lastPlayedRef.current = '';
+      halfwayPlayedRef.current = false;
+      countdownPlayedRef.current = -1;
     }
-  }, [phase, current?.name, current?.stepType, current?.voiceUrl, currentIndex, next?.name, next?.voiceUrl, speak, playCue, playVoiceUrl]);
+  }, [phase, currentIndex, current?.name, current?.stepType, next?.name, next?.stepType, playPhrase]);
 
-  // ── Halfway announcement (exercise only) ───────────────────────────
+  // Special blocks
+  useEffect(() => {
+    if (!current) return;
+
+    if (phase === 'demo') {
+      const key = `demo_${currentIndex}`;
+      if (lastPlayedRef.current !== key) {
+        lastPlayedRef.current = key;
+        playPhrase('DEMO');
+      }
+    } else if (phase === 'waterBreak') {
+      const key = `water_${currentIndex}`;
+      if (lastPlayedRef.current !== key) {
+        lastPlayedRef.current = key;
+        playPhrase('WATER_BREAK');
+      }
+    } else if (phase === 'transition' || phase === 'grabEquipment') {
+      const key = `trans_${currentIndex}`;
+      if (lastPlayedRef.current !== key) {
+        lastPlayedRef.current = key;
+        playPhrase('TRANSITION', undefined, undefined, current.instructionText);
+      }
+    } else if (phase === 'complete') {
+      const key = 'complete';
+      if (lastPlayedRef.current !== key) {
+        lastPlayedRef.current = key;
+        playPhrase('WORKOUT_COMPLETE');
+      }
+    }
+  }, [phase, currentIndex, current?.instructionText, playPhrase]);
+
+  // Halfway announcement
   useEffect(() => {
     if (phase !== 'work' || !current || current.stepType !== 'exercise') return;
     if (currentDuration <= 6) return;
     const halfway = Math.floor(currentDuration / 2);
-    if (timeLeft === halfway && !halfwaySpokenRef.current) {
-      halfwaySpokenRef.current = true;
-      playCue('halfway');
+    if (timeLeft === halfway && !halfwayPlayedRef.current) {
+      halfwayPlayedRef.current = true;
+      playPhrase('HALFWAY');
     }
-  }, [phase, timeLeft, currentDuration, current, playCue]);
+  }, [phase, timeLeft, currentDuration, current, playPhrase]);
 
-  // ── Countdown voice (exercise only) ────────────────────────────────
-  // At timeLeft === 3, plays the full pre-timed "3, 2, 1" countdown clip.
-  // At timeLeft === 0, plays rest or workout_complete.
+  // Countdown (3, 2, 1) at end of work phase
   useEffect(() => {
     if (phase !== 'work' || !current || current.stepType !== 'exercise') return;
     if (currentDuration <= 0) return;
 
-    if (timeLeft === 3 && countdownSpokenRef.current !== 3) {
-      countdownSpokenRef.current = 3;
-      playCue('countdown_3');
-    } else if (timeLeft === 0 && countdownSpokenRef.current !== 0) {
-      countdownSpokenRef.current = 0;
-      const isLastMovement = currentIndex >= total - 1;
-      if (isLastMovement) {
-        playCue('workout_complete');
-      } else {
-        playCue('rest');
-      }
+    if (timeLeft === 3 && countdownPlayedRef.current !== 3) {
+      countdownPlayedRef.current = 3;
+      playCountdown('countdown_3');
     }
-  }, [phase, timeLeft, current, currentDuration, currentIndex, total, playCue]);
+  }, [phase, timeLeft, current, currentDuration, playCountdown]);
 
-  // ── Cleanup ─────────────────────────────────────────────────────────
+  // Countdown at end of rest phase (use rest-specific countdown)
+  useEffect(() => {
+    if (phase !== 'rest' && phase !== 'swap') return;
+    if (timeLeft === 3 && countdownPlayedRef.current !== 3) {
+      countdownPlayedRef.current = 3;
+      playCountdown('countdown_3_rest');
+    }
+  }, [phase, timeLeft, playCountdown]);
+
+  // ── Cleanup ────────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
       try {
@@ -409,14 +322,9 @@ export function useWorkoutTTS({
           currentAudioRef.current.pause();
           currentAudioRef.current = null;
         }
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          window.speechSynthesis?.cancel();
-        } else {
-          Speech.stop();
-        }
       } catch {}
     };
   }, []);
 
-  return { isTTSAvailable };
+  return { isPreloading };
 }
