@@ -630,8 +630,8 @@ const s: any = StyleSheet.create({
     backgroundColor: '#0E1117',
     display: 'flex' as any,
     flexDirection: 'column',
-    minHeight: Platform.OS === 'web' ? '100dvh' : '100%' as any,
-    height: Platform.OS === 'web' ? '100dvh' : '100%' as any,
+    // Use 100% to fill the Modal overlay; avoid 100dvh which mis-sizes on Safari
+    height: '100%' as any,
   },
   progressBar: {
     paddingHorizontal: 16,
@@ -690,7 +690,12 @@ const s: any = StyleSheet.create({
   },
   scrollContainer: {
     flex: 1,
-    overflow: 'hidden' as any,
+    // height:0 forces flex item to start at 0 and grow via flex:1.
+    // Immune to the global !important min-height:auto CSS override that
+    // breaks Safari scroll containment.
+    height: Platform.OS === 'web' ? 0 : undefined,
+    minHeight: 0,
+    overflow: Platform.OS === 'web' ? ('auto' as any) : ('hidden' as any),
   },
   scroll: {
     flex: 1,

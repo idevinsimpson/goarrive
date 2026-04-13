@@ -5,7 +5,7 @@
  * labeled Email/Password fields, Sign In button, Forgot password flow,
  * and "New coaches: contact your GoArrive administrator" note.
  */
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import {
   KeyboardAvoidingView,
   ScrollView,
   Image,
+  Animated,
 } from 'react-native';
 import { router } from 'expo-router';
 import {
@@ -26,6 +27,7 @@ import {
 import { auth, db } from '../../lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { useAuth } from '../../lib/AuthContext';
+import { Icon } from '../../components/Icon';
 
 const FONT_HEADING =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -38,6 +40,20 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [emailFocused, setEmailFocused] = useState(false);
+  const [passwordFocused, setPasswordFocused] = useState(false);
+  const [forgotEmailFocused, setForgotEmailFocused] = useState(false);
+  const passwordRef = useRef<TextInput>(null);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 400,
+      useNativeDriver: true,
+    }).start();
+  }, []);
 
   // Forgot password state
   const [showForgot, setShowForgot] = useState(false);
@@ -55,21 +71,17 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
-      // Check role from token claims for routing.
-      // If claims are not yet set (bootstrap phase), fall back to Firestore
-      // to determine whether this user is a member or a coach.
       const tokenResult = await cred.user.getIdTokenResult();
       let role = tokenResult.claims?.role as string | undefined;
 
       if (!role) {
-        // No custom claims yet — check Firestore docs to determine role
         const uid = cred.user.uid;
         const memberSnap = await getDoc(doc(db, 'members', uid));
         if (memberSnap.exists()) {
           role = 'member';
         } else {
           const coachSnap = await getDoc(doc(db, 'coaches', uid));
-          role = coachSnap.exists() ? 'coach' : 'member'; // default to member if unknown
+          role = coachSnap.exists() ? 'coach' : 'member';
         }
       }
 
@@ -112,7 +124,6 @@ export default function LoginScreen() {
     } catch (err: any) {
       const code = err?.code ?? '';
       if (code === 'auth/user-not-found') {
-        // Security: show same success state
         setForgotSent(true);
       } else if (code === 'auth/invalid-email') {
         setForgotError('Please enter a valid email address.');
@@ -144,7 +155,7 @@ export default function LoginScreen() {
     return (
       <View style={s.root}>
         <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
-          <View style={s.card}>
+          <Animated.View style={[s.card, { opacity: fadeAnim }]}>
             <Image
               source={require('../../assets/logo.png')}
               style={s.logo}
@@ -158,10 +169,15 @@ export default function LoginScreen() {
               <Text style={s.sentEmail}>{forgotEmail || 'your email'}</Text>.{'\n\n'}
               Check your inbox and spam folder. The link expires in 1 hour.
             </Text>
-            <Pressable style={s.loginBtn} onPress={handleBackToLogin}>
+            <Pressable
+              style={({ pressed }) => [s.loginBtn, pressed && s.loginBtnPressed]}
+              onPress={handleBackToLogin}
+              accessibilityRole="button"
+              accessibilityLabel="Back to sign in"
+            >
               <Text style={s.loginText}>Back to Sign In</Text>
             </Pressable>
-          </View>
+          </Animated.View>
         </ScrollView>
       </View>
     );
@@ -175,7 +191,7 @@ export default function LoginScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
-          <View style={s.card}>
+          <Animated.View style={[s.card, { opacity: fadeAnim }]}>
             <Image
               source={require('../../assets/logo.png')}
               style={s.logo}
@@ -190,21 +206,24 @@ export default function LoginScreen() {
 
             <View style={s.fieldWrap}>
               <Text style={s.fieldLabel}>Email</Text>
-            <TextInput
-              style={s.input}
-              placeholder="coach@example.com"
-              placeholderTextColor="#4A5568"
-              value={forgotEmail}
-              onChangeText={setForgotEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoComplete="email"
-              textContentType="emailAddress"
-              importantForAutofill="yes"
-              editable={!forgotLoading}
-              onSubmitEditing={handleForgotPassword}
-            />
+              <TextInput
+                style={[s.input, forgotEmailFocused && s.inputFocused]}
+                placeholder="coach@example.com"
+                placeholderTextColor="#4A5568"
+                value={forgotEmail}
+                onChangeText={setForgotEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="email"
+                textContentType="emailAddress"
+                importantForAutofill="yes"
+                editable={!forgotLoading}
+                onSubmitEditing={handleForgotPassword}
+                onFocus={() => setForgotEmailFocused(true)}
+                onBlur={() => setForgotEmailFocused(false)}
+                accessibilityLabel="Email address"
+              />
             </View>
 
             {forgotError ? (
@@ -212,9 +231,15 @@ export default function LoginScreen() {
             ) : null}
 
             <Pressable
-              style={[s.loginBtn, forgotLoading && s.loginBtnDisabled]}
+              style={({ pressed }) => [
+                s.loginBtn,
+                forgotLoading && s.loginBtnDisabled,
+                pressed && !forgotLoading && s.loginBtnPressed,
+              ]}
               onPress={handleForgotPassword}
               disabled={forgotLoading}
+              accessibilityRole="button"
+              accessibilityLabel="Send password reset link"
             >
               {forgotLoading ? (
                 <ActivityIndicator color="#0E1117" size="small" />
@@ -223,10 +248,15 @@ export default function LoginScreen() {
               )}
             </Pressable>
 
-            <Pressable onPress={handleBackToLogin} style={s.backLink}>
-              <Text style={s.backLinkText}>← Back to Sign In</Text>
+            <Pressable
+              onPress={handleBackToLogin}
+              style={s.backLink}
+              accessibilityRole="button"
+              accessibilityLabel="Back to sign in"
+            >
+              <Text style={s.backLinkText}>Back to Sign In</Text>
             </Pressable>
-          </View>
+          </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
     );
@@ -242,8 +272,7 @@ export default function LoginScreen() {
         contentContainerStyle={s.content}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={s.card}>
-          {/* Logo */}
+        <Animated.View style={[s.card, { opacity: fadeAnim }]}>
           <Image
             source={require('../../assets/logo.png')}
             style={s.logo}
@@ -251,7 +280,6 @@ export default function LoginScreen() {
             accessibilityLabel="GoArrive"
           />
 
-          {/* Labels */}
           <Text style={s.portalLabel}>GOARRIVE</Text>
           <Text style={s.heading}>Welcome back</Text>
 
@@ -259,7 +287,7 @@ export default function LoginScreen() {
           <View style={s.fieldWrap}>
             <Text style={s.fieldLabel}>Email</Text>
             <TextInput
-              style={s.input}
+              style={[s.input, emailFocused && s.inputFocused]}
               placeholder="coach@example.com"
               placeholderTextColor="#4A5568"
               value={email}
@@ -271,33 +299,64 @@ export default function LoginScreen() {
               textContentType="emailAddress"
               importantForAutofill="yes"
               editable={!loading}
+              returnKeyType="next"
+              onSubmitEditing={() => passwordRef.current?.focus()}
+              onFocus={() => setEmailFocused(true)}
+              onBlur={() => setEmailFocused(false)}
+              accessibilityLabel="Email address"
             />
           </View>
 
-          {/* Password field */}
+          {/* Password field with visibility toggle */}
           <View style={s.fieldWrap}>
             <Text style={s.fieldLabel}>Password</Text>
-            <TextInput
-              style={s.input}
-              placeholder="••••••••"
-              placeholderTextColor="#4A5568"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              autoComplete="current-password"
-              textContentType="password"
-              importantForAutofill="yes"
-              editable={!loading}
-              onSubmitEditing={handleLogin}
-            />
+            <View style={[s.passwordWrap, passwordFocused && s.inputFocused]}>
+              <TextInput
+                ref={passwordRef}
+                style={s.passwordInput}
+                placeholder="••••••••"
+                placeholderTextColor="#4A5568"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!showPassword}
+                autoComplete="current-password"
+                textContentType="password"
+                importantForAutofill="yes"
+                editable={!loading}
+                returnKeyType="go"
+                onSubmitEditing={handleLogin}
+                onFocus={() => setPasswordFocused(true)}
+                onBlur={() => setPasswordFocused(false)}
+                accessibilityLabel="Password"
+              />
+              <Pressable
+                onPress={() => setShowPassword(!showPassword)}
+                style={s.eyeBtn}
+                accessibilityRole="button"
+                accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                hitSlop={8}
+              >
+                <Icon
+                  name={showPassword ? 'eye-off' : 'eye'}
+                  size={20}
+                  color="#4A5568"
+                />
+              </Pressable>
+            </View>
           </View>
 
           {error ? <Text style={s.error}>{error}</Text> : null}
 
           <Pressable
-            style={[s.loginBtn, loading && s.loginBtnDisabled]}
+            style={({ pressed }) => [
+              s.loginBtn,
+              loading && s.loginBtnDisabled,
+              pressed && !loading && s.loginBtnPressed,
+            ]}
             onPress={handleLogin}
             disabled={loading}
+            accessibilityRole="button"
+            accessibilityLabel="Sign in"
           >
             {loading ? (
               <ActivityIndicator color="#0E1117" size="small" />
@@ -306,17 +365,20 @@ export default function LoginScreen() {
             )}
           </Pressable>
 
-          {/* Forgot password */}
-          <Pressable onPress={handleShowForgot} style={s.forgotLink}>
+          <Pressable
+            onPress={handleShowForgot}
+            style={s.forgotLink}
+            accessibilityRole="button"
+            accessibilityLabel="Forgot password"
+          >
             <Text style={s.forgotText}>Forgot password?</Text>
           </Pressable>
 
-          {/* Admin note */}
           <Text style={s.adminNote}>
             Coaches: contact your GoArrive administrator for an invitation.{"\n"}
             Members: use the intake link from your coach to get started.
           </Text>
-        </View>
+        </Animated.View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -387,6 +449,29 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#2A3347',
   },
+  inputFocused: {
+    borderColor: '#F5A623',
+  },
+  passwordWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1A2035',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2A3347',
+  },
+  passwordInput: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    fontSize: 15,
+    color: '#F0F4F8',
+    fontFamily: FONT_BODY,
+  },
+  eyeBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
   error: {
     fontSize: 13,
     color: '#E05252',
@@ -404,6 +489,10 @@ const s = StyleSheet.create({
   },
   loginBtnDisabled: {
     opacity: 0.6,
+  },
+  loginBtnPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.98 }],
   },
   loginText: {
     fontSize: 16,
