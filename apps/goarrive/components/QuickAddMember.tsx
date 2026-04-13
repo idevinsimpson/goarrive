@@ -690,7 +690,8 @@ const s: any = StyleSheet.create({
   },
   scrollContainer: {
     flex: 1,
-    overflow: 'hidden' as any,
+    minHeight: 0,
+    overflow: Platform.OS === 'web' ? ('auto' as any) : ('hidden' as any),
   },
   scroll: {
     flex: 1,
