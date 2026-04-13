@@ -154,6 +154,12 @@ export default function MovementForm({
   const [contraindications, setContraindications] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // ── Auto-save state (edit mode) ───────────────────────────────────────
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dirtyRef = useRef(false);
+
   // ── GIF thumbnail generation state ────────────────────────────────────
   const [generatingGif, setGeneratingGif] = useState(false);
   const [gifProgress, setGifProgress] = useState(0);
@@ -642,7 +648,114 @@ export default function MovementForm({
     );
   };
 
-  // ── Edit mode submit ──────────────────────────────────────────────────
+  // ── Auto-save helpers (edit mode) ──────────────────────────────────────
+  const buildEditPayload = useCallback(() => ({
+    name: name.trim(),
+    category,
+    equipment,
+    difficulty,
+    description: description.trim(),
+    muscleGroups,
+    workSec: parseInt(workSec, 10) || 30,
+    restSec: parseInt(restSec, 10) || 15,
+    countdownSec: parseInt(countdownSec, 10) || 3,
+    swapSides,
+    swapMode: 'split' as const,
+    swapWindowSec: 5,
+    videoUrl: videoUrl.trim(),
+    thumbnailUrl: thumbnailUrl.trim(),
+    regression: regression.trim(),
+    progression: progression.trim(),
+    contraindications: contraindications.trim(),
+    cropScale,
+    cropTranslateX,
+    cropTranslateY,
+    cropFrameWidth,
+    cropFrameHeight,
+    updatedAt: serverTimestamp(),
+  }), [name, category, equipment, difficulty, description, muscleGroups, workSec, restSec, countdownSec, swapSides, videoUrl, thumbnailUrl, regression, progression, contraindications, cropScale, cropTranslateX, cropTranslateY, cropFrameWidth, cropFrameHeight]);
+
+  const autoSave = useCallback(() => {
+    if (!editMovement) return;
+    dirtyRef.current = true;
+    setSaveStatus('saving');
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        const data = buildEditPayload();
+        await updateDoc(doc(db, 'movements', editMovement.id), data);
+        dirtyRef.current = false;
+        setSaveStatus('saved');
+        savedTimerRef.current = setTimeout(() => setSaveStatus('idle'), 3000);
+      } catch (err: any) {
+        console.error('[MovementForm] Auto-save error:', err?.message ?? err);
+        setSaveStatus('idle');
+        dirtyRef.current = false;
+      }
+    }, 800);
+  }, [editMovement, buildEditPayload]);
+
+  const flushSave = useCallback(async () => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    if (!dirtyRef.current || !editMovement) return;
+
+    try {
+      const data = buildEditPayload();
+      await updateDoc(doc(db, 'movements', editMovement.id), data);
+
+      // Regenerate voice if name changed
+      const prevName = editMovement.name?.trim() ?? '';
+      const newName = name.trim();
+      if (prevName !== newName && newName) {
+        generateMovementVoice(editMovement.id, newName)
+          .then((voiceUrl) => {
+            if (voiceUrl) {
+              updateDoc(doc(db, 'movements', editMovement.id), { voiceUrl }).catch(() => {});
+            }
+          })
+          .catch(() => {});
+      }
+
+      dirtyRef.current = false;
+    } catch (err: any) {
+      console.error('[MovementForm] Flush-save error:', err?.message ?? err);
+    }
+  }, [editMovement, buildEditPayload, name]);
+
+  // Track whether initial population from editMovement is done
+  const initializedRef = useRef(false);
+
+  // Mark initialized after editMovement populates the form
+  useEffect(() => {
+    if (editMovement && visible) {
+      // Give the pre-populate effect a tick to run before arming auto-save
+      const t = setTimeout(() => { initializedRef.current = true; }, 50);
+      return () => clearTimeout(t);
+    } else {
+      initializedRef.current = false;
+    }
+  }, [editMovement, visible]);
+
+  // Auto-save whenever any editable field changes (edit mode only)
+  useEffect(() => {
+    if (!isEdit || !initializedRef.current) return;
+    autoSave();
+  }, [name, category, equipment, difficulty, description, muscleGroups, workSec, restSec, countdownSec, swapSides, videoUrl, thumbnailUrl, regression, progression, contraindications, cropScale, cropTranslateX, cropTranslateY, cropFrameWidth, cropFrameHeight]);
+
+  // Clean up timers on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
+
+  // ── Edit mode submit (legacy — kept for reference but no longer primary) ──
   const handleEditSubmit = async () => {
     if (!name.trim()) {
       Alert.alert('Error', 'Please enter a movement name.');
@@ -739,10 +852,10 @@ export default function MovementForm({
   if (isEdit) {
     return (
       <>
-        <ModalSheet visible={visible} onClose={onClose} maxHeightPct={0.9}>
+        <ModalSheet visible={visible} onClose={async () => { await flushSave(); initializedRef.current = false; onClose(); }} maxHeightPct={0.9}>
               <View style={st.header}>
                 <Text style={st.headerTitle}>Edit Movement</Text>
-                <Pressable onPress={onClose} hitSlop={8}>
+                <Pressable onPress={async () => { await flushSave(); initializedRef.current = false; onClose(); }} hitSlop={8}>
                   <Icon name="close" size={24} color="#8A95A3" />
                 </Pressable>
               </View>
@@ -955,19 +1068,31 @@ export default function MovementForm({
                 />
               </ScrollView>
 
-              {/* Footer */}
+              {/* Footer — auto-save status + done button */}
               <View style={st.footer}>
-                <Pressable style={st.cancelBtn} onPress={onClose}>
-                  <Text style={st.cancelBtnText}>Cancel</Text>
-                </Pressable>
+                <View style={st.autoSaveStatus}>
+                  {saveStatus === 'saving' && (
+                    <>
+                      <ActivityIndicator size="small" color="#F5A623" />
+                      <Text style={st.autoSaveText}>Saving...</Text>
+                    </>
+                  )}
+                  {saveStatus === 'saved' && (
+                    <>
+                      <Icon name="checkmark" size={14} color="#6EBB7A" />
+                      <Text style={[st.autoSaveText, { color: '#6EBB7A' }]}>Saved</Text>
+                    </>
+                  )}
+                </View>
                 <Pressable
-                  style={[st.saveBtn, submitting && st.saveBtnDisabled]}
-                  onPress={handleEditSubmit}
-                  disabled={submitting}
+                  style={st.doneBtn}
+                  onPress={async () => {
+                    await flushSave();
+                    initializedRef.current = false;
+                    onClose();
+                  }}
                 >
-                  <Text style={st.saveBtnText}>
-                    {submitting ? 'Saving...' : 'Save Changes'}
-                  </Text>
+                  <Text style={st.doneBtnText}>Done</Text>
                 </Pressable>
               </View>
         </ModalSheet>
@@ -1511,6 +1636,29 @@ const st = StyleSheet.create({
     opacity: 0.5,
   },
   saveBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0E1117',
+    fontFamily: FH,
+  },
+  autoSaveStatus: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  autoSaveText: {
+    fontSize: 13,
+    color: '#8A95A3',
+    fontFamily: FB,
+  },
+  doneBtn: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#F5A623',
+  },
+  doneBtnText: {
     fontSize: 14,
     fontWeight: '700',
     color: '#0E1117',
