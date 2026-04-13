@@ -438,7 +438,9 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
   onChange: (updates: Partial<MemberPlanData>) => void;
 }) {
   const [selected, setSelected] = useState<'monthly' | 'pay_in_full' | null>(null);
-  const [billingInterval, setBillingInterval] = useState<'month' | 'week' | 'year'>('month');
+  const [billingInterval, setBillingInterval] = useState<'month' | 'week' | 'year'>(
+    plan.overrideFrequency === 'week' || plan.overrideFrequency === 'year' ? plan.overrideFrequency : 'month'
+  );
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [error, setError] = useState('');
 

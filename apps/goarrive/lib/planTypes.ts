@@ -76,6 +76,7 @@ export interface SessionTypeGuidance {
 // ─── Pricing types ────────────────────────────────────────────────────────────
 
 export type ContractLength = 6 | 9 | 12;
+export type OverrideFrequency = 'week' | 'month' | 'year';
 
 export interface PricingInputs {
   hourlyRate: number;
@@ -120,6 +121,7 @@ export interface PricingResult {
   nutritionMonthlyCost: number;
   isManualOverride: boolean;
   manualMonthlyOverride?: number;
+  overrideFrequency?: OverrideFrequency;
   phaseBreakdown: PhaseHoursDetail[];
   selfReliantMinutesPerSession: number;
 }
@@ -422,6 +424,7 @@ export interface MemberPlanData {
   // Manual override
   isManualOverride?: boolean;
   monthlyPriceOverride?: number;
+  overrideFrequency?: OverrideFrequency;
 
   // Cached pricing result
   pricingResult?: PricingResult;
@@ -579,6 +582,7 @@ export function calculatePricing(
       p.sessionGuidanceProfiles || [],
       p.commitToSave?.active ?? p.commitToSaveAddOnActive ?? true,
       p.isManualOverride ? p.monthlyPriceOverride : undefined,
+      p.overrideFrequency,
       p.commitToSave?.monthlySavings ?? p.commitToSaveMonthlySavings ?? 100,
       p.commitToSave?.missedSessionFee ?? p.commitToSaveMissedSessionFee ?? 50,
       p.payInFullDiscountPercent ?? 10,
@@ -609,6 +613,7 @@ function _calculatePricing(
   guidanceProfiles: SessionTypeGuidance[],
   commitToSaveActive: boolean,
   manualMonthlyOverride?: number,
+  overrideFrequency?: OverrideFrequency,
   commitToSaveMonthlySavings: number = 100,
   commitToSaveMissedSessionFee: number = 50,
   payInFullDiscountPercent: number = 10,
@@ -675,7 +680,14 @@ function _calculatePricing(
 
   const isManualOverride = typeof manualMonthlyOverride === 'number' && manualMonthlyOverride > 0;
   if (isManualOverride) {
-    displayMonthlyPrice = manualMonthlyOverride;
+    const freq = overrideFrequency ?? 'month';
+    if (freq === 'week') {
+      displayMonthlyPrice = Math.round(manualMonthlyOverride * (52 / 12));
+    } else if (freq === 'year') {
+      displayMonthlyPrice = Math.round(manualMonthlyOverride / 12);
+    } else {
+      displayMonthlyPrice = manualMonthlyOverride;
+    }
   }
 
   const totalSessions = totalSessionsPerWeek * totalWeeks;
@@ -707,6 +719,7 @@ function _calculatePricing(
     nutritionMonthlyCost: nutritionActive ? nutritionMonthlyCost : 0,
     isManualOverride,
     manualMonthlyOverride,
+    overrideFrequency: isManualOverride ? (overrideFrequency ?? 'month') : undefined,
     phaseBreakdown,
     selfReliantMinutesPerSession,
   };

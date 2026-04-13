@@ -2236,11 +2236,15 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
   };
 
   const handleBasePriceOverride = (val: number) => {
-    onChange({ monthlyPriceOverride: val, isManualOverride: true });
+    onChange({ monthlyPriceOverride: val, isManualOverride: true, overrideFrequency: plan.overrideFrequency ?? 'month' });
+  };
+
+  const handleOverrideFrequencyChange = (freq: 'week' | 'month' | 'year') => {
+    onChange({ overrideFrequency: freq, isManualOverride: true });
   };
 
   const handleResetToCalculated = () => {
-    onChange({ monthlyPriceOverride: undefined, isManualOverride: false });
+    onChange({ monthlyPriceOverride: undefined, isManualOverride: false, overrideFrequency: undefined });
   };
 
   return (
@@ -2535,11 +2539,13 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
               </View>
             )}
 
-            {/* Monthly price override */}
+            {/* Price override */}
             <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: BORDER, paddingTop: 12 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <Text style={{ color: MUTED, fontSize: 14 }}>
-                  Monthly price {plan.isManualOverride ? '(override)' : ''}
+                  {plan.isManualOverride
+                    ? `${plan.overrideFrequency === 'week' ? 'Weekly' : plan.overrideFrequency === 'year' ? 'Yearly' : 'Monthly'} price (override)`
+                    : 'Monthly price'}
                 </Text>
                 {plan.isManualOverride && (
                   <Pressable onPress={handleResetToCalculated}>
@@ -2551,10 +2557,28 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                 <Text style={{ color: MUTED, fontSize: 16 }}>$</Text>
                 <TextInput
                   style={{ flex: 1, backgroundColor: BG, borderWidth: 1, borderColor: BORDER, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, color: '#FFF', fontSize: 18, fontWeight: '700' }}
-                  value={String(Math.round(pricing.displayMonthlyPrice))}
+                  value={plan.isManualOverride ? String(plan.monthlyPriceOverride ?? '') : String(Math.round(pricing.displayMonthlyPrice))}
                   onChangeText={t => { const n = parseInt(t); if (!isNaN(n)) handleBasePriceOverride(n); }}
                   keyboardType="number-pad" selectTextOnFocus
                 />
+                <Text style={{ color: MUTED, fontSize: 14 }}>
+                  {plan.overrideFrequency === 'week' ? '/wk' : plan.overrideFrequency === 'year' ? '/yr' : '/mo'}
+                </Text>
+              </View>
+              {/* Frequency toggle */}
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                {([['week', 'Weekly'], ['month', 'Monthly'], ['year', 'Yearly']] as const).map(([freq, label]) => {
+                  const active = (plan.overrideFrequency ?? 'month') === freq;
+                  return (
+                    <Pressable
+                      key={freq}
+                      onPress={() => handleOverrideFrequencyChange(freq)}
+                      style={{ flex: 1, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: active ? PRIMARY : BORDER, backgroundColor: active ? 'rgba(91,155,213,0.15)' : 'transparent', alignItems: 'center' }}
+                    >
+                      <Text style={{ color: active ? PRIMARY : MUTED, fontSize: 13, fontWeight: active ? '700' : '500' }}>{label}</Text>
+                    </Pressable>
+                  );
+                })}
               </View>
             </View>
 
