@@ -141,13 +141,13 @@ export default function LandingPage() {
       <View style={hero.glow} />
       <View style={hero.inner}>
         <Text style={[hero.headline, isMobile && { fontSize: 36, lineHeight: 43 }]}>
-          Online Fitness Coaching{'\n'}That Actually Works
+          A Coach in Your Pocket
         </Text>
         <Text style={[hero.sub, isMobile && { fontSize: 17 }]}>
-          A dedicated coach. A personalized plan. The accountability{'\n'}
-          you need to stay consistent and see real results.
+          Personal training — designed by a real coach,{'\n'}
+          delivered through your phone, built around your life.
         </Text>
-        <CtaButton label="Get Your Personalized Plan" onPress={goStart} />
+        <CtaButton label="Find Your Coach" onPress={goStart} />
         <Text style={hero.trust}>Takes 2 minutes. No commitment required.</Text>
       </View>
     </View>
@@ -258,7 +258,7 @@ export default function LandingPage() {
         <Text style={mcta.sub}>
           It takes two minutes to get started. Tell us about your goals and we will match you with a coach who builds your plan from scratch.
         </Text>
-        <CtaButton label="Get Your Personalized Plan" onPress={goStart} />
+        <CtaButton label="Find Your Coach" onPress={goStart} />
         <Text style={mcta.trust}>No spam. No commitment. Just a plan built for you.</Text>
       </View>
     </View>
