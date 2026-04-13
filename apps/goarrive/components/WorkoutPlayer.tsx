@@ -96,7 +96,7 @@ export default function WorkoutPlayer({
 
   // ── TTS voice coaching ─────────────────────────────
   const [ttsMuted, setTtsMuted] = useState(false);
-  const { isPreloading: ttsPreloading, unlockAudio } = useWorkoutTTS({
+  const { isPreloading: ttsPreloading, debugStatus: ttsDebug, playStartCue } = useWorkoutTTS({
     phase,
     current,
     next,
@@ -269,6 +269,12 @@ export default function WorkoutPlayer({
           <View style={[st.progressFill, { width: `${progressPct}%` }]} />
         </View>
       )}
+      {/* TTS debug badge — visible during testing */}
+      <View style={{ position: 'absolute', bottom: 2, right: 8, zIndex: 10 }}>
+        <Text style={{ fontSize: 9, color: '#6B7280', fontFamily: FB }}>
+          TTS: {ttsMuted ? 'MUTED' : ttsDebug}{ttsPreloading ? ' (loading)' : ''}
+        </Text>
+      </View>
     </>
   );
 
@@ -370,7 +376,7 @@ export default function WorkoutPlayer({
                   style={{ width: 140, height: 46, marginBottom: 12 }}
                   resizeMode="contain"
                 />
-                <TouchableOpacity style={st.readyPlayBtn} onPress={() => { unlockAudio(); handleStart(); }}>
+                <TouchableOpacity style={st.readyPlayBtn} onPress={() => { playStartCue(); handleStart(); }}>
                   <Icon name="play" size={32} color="#0E1117" />
                 </TouchableOpacity>
               </View>
