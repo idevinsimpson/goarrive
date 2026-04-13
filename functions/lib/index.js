@@ -71,8 +71,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
-exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = void 0;
+exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
+exports.batchGenerateVoice = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -405,9 +405,12 @@ exports.disconnectStripeAccount = (0, https_1.onCall)({ secrets: [stripeSecretKe
 exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey] }, async (request) => {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w;
     const { planId, memberId, paymentOption, commitToSave, nutritionAddOn, displayedMonthlyPrice: clientMonthly, displayedPayInFullTotal: clientPayInFull, billingInterval: clientBillingInterval } = request.data;
-    // Weekly billing: only applies to 'monthly' (recurring) payment option
-    const billingInterval = (paymentOption === 'monthly' && clientBillingInterval === 'week') ? 'week' : 'month';
+    // Billing interval: only applies to 'monthly' (recurring) payment option
+    const billingInterval = paymentOption === 'monthly' && (clientBillingInterval === 'week' || clientBillingInterval === 'year')
+        ? clientBillingInterval
+        : 'month';
     const isWeekly = billingInterval === 'week';
+    const isYearly = billingInterval === 'year';
     if (!planId || !memberId || !paymentOption) {
         throw new https_1.HttpsError('invalid-argument', 'planId, memberId, and paymentOption are required');
     }
@@ -613,8 +616,10 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
             // Phase 2: indefinite at continuationMonthlyPrice (monthly)
             const recurringAmount = isWeekly
                 ? Math.round(displayMonthlyPrice * 100 / (52 / 12)) // weekly in cents
-                : displayMonthlyPrice * 100; // monthly in cents
-            const intervalLabel = isWeekly ? 'Weekly' : 'Monthly';
+                : isYearly
+                    ? displayMonthlyPrice * 12 * 100 // yearly in cents
+                    : displayMonthlyPrice * 100; // monthly in cents
+            const intervalLabel = isWeekly ? 'Weekly' : isYearly ? 'Yearly' : 'Monthly';
             const session = await stripe.checkout.sessions.create({
                 customer: stripeCustomerId,
                 payment_method_types: ['card'],
@@ -737,7 +742,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
  *   coaches are not harmed by refunds on the platform fee portion.
  *   The ledger entry records the refund amount and marks the entry as refunded.
  */
-exports.stripeWebhook = (0, https_1.onRequest)({ secrets: [stripeSecretKey, stripeWebhookSecret, stripeWebhookSecretConnect] }, async (req, res) => {
+exports.stripeWebhook = (0, https_1.onRequest)({ secrets: [stripeSecretKey, stripeWebhookSecret] }, async (req, res) => {
     const sig = req.headers['stripe-signature'];
     if (!sig) {
         res.status(400).send('Missing stripe-signature header');
@@ -747,8 +752,8 @@ exports.stripeWebhook = (0, https_1.onRequest)({ secrets: [stripeSecretKey, stri
     let event;
     // Try platform webhook secret first, then connected account secret
     const secrets = [
-        stripeWebhookSecret.value(),
-        stripeWebhookSecretConnect.value(),
+        stripeWebhookSecret.value().trim(),
+        stripeWebhookSecretConnect.value().trim(),
     ].filter(Boolean);
     let verified = false;
     for (const secret of secrets) {
@@ -766,16 +771,48 @@ exports.stripeWebhook = (0, https_1.onRequest)({ secrets: [stripeSecretKey, stri
         res.status(400).send('Webhook signature error: verification failed');
         return;
     }
-    // Log connected account info if present
+    await processStripeEvent('stripeWebhook', event, res);
+});
+// ─── 6b. stripeConnectWebhook ─────────────────────────────────────────────────
+/**
+ * Handles Stripe webhook events from connected accounts (coach payouts via
+ * Stripe Connect). Uses STRIPE_WEBHOOK_SECRET_CONNECT for signature verification.
+ *
+ * Handles the same event types as stripeWebhook — both feed into the same
+ * idempotent processing pipeline.
+ */
+exports.stripeConnectWebhook = (0, https_1.onRequest)({ secrets: [stripeSecretKey, stripeWebhookSecretConnect] }, async (req, res) => {
+    const sig = req.headers['stripe-signature'];
+    if (!sig) {
+        res.status(400).send('Missing stripe-signature header');
+        return;
+    }
+    const stripe = getStripe(stripeSecretKey.value());
+    let event;
+    try {
+        event = stripe.webhooks.constructEvent(req.rawBody, sig, stripeWebhookSecretConnect.value().trim());
+    }
+    catch (err) {
+        console.error('[stripeConnectWebhook] Signature verification failed:', err);
+        res.status(400).send('Webhook signature error: verification failed');
+        return;
+    }
     const connectedAccountId = event.account;
     if (connectedAccountId) {
-        console.log(`[stripeWebhook] Connected account event from: ${connectedAccountId}`);
+        console.log(`[stripeConnectWebhook] Connected account event from: ${connectedAccountId}`);
     }
+    await processStripeEvent('stripeConnectWebhook', event, res);
+});
+/**
+ * Shared event processing for both platform and connected account webhooks.
+ * Idempotent: uses stripeEventId as Firestore doc ID.
+ */
+async function processStripeEvent(tag, event, res) {
     // ── Idempotency: check if already processed ──
     const eventRef = db.collection('billingEvents').doc(event.id);
     const existing = await eventRef.get();
     if (existing.exists) {
-        console.log('[stripeWebhook] Already processed event', event.id, '— skipping');
+        console.log(`[${tag}] Already processed event`, event.id, '— skipping');
         res.status(200).send('Already processed');
         return;
     }
@@ -791,7 +828,7 @@ exports.stripeWebhook = (0, https_1.onRequest)({ secrets: [stripeSecretKey, stri
         await eventRef.set(billingEvent);
     }
     catch (err) {
-        console.error('[stripeWebhook] Failed to store billing event:', err);
+        console.error(`[${tag}] Failed to store billing event:`, err);
         res.status(500).send('Failed to store event');
         return;
     }
@@ -818,16 +855,16 @@ exports.stripeWebhook = (0, https_1.onRequest)({ secrets: [stripeSecretKey, stri
                 await handleChargeRefunded(event.data.object, event.id);
                 break;
             default:
-                console.log('[stripeWebhook] Unhandled event type:', event.type);
+                console.log(`[${tag}] Unhandled event type:`, event.type);
         }
     }
     catch (err) {
-        console.error('[stripeWebhook] Error processing event', event.id, ':', err);
+        console.error(`[${tag}] Error processing event`, event.id, ':', err);
         // Don't return 500 — Stripe will retry. Log and return 200 to avoid retry loops
         // for non-transient errors. For transient errors, throw to trigger retry.
     }
     res.status(200).send('OK');
-});
+}
 // ── Webhook handlers ──────────────────────────────────────────────────────────
 async function handleCheckoutSessionCompleted(session, eventId) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
@@ -6213,25 +6250,33 @@ exports.retryFailedGifGeneration = (0, scheduler_1.onSchedule)({ schedule: '0 */
     }
 });
 // ─── 27. analyzeMovement — AI-powered movement analysis via GPT-4.1-mini ────
-// Accepts a GIF URL, sends it to GPT-4.1-mini vision, and returns structured
-// movement metadata (name, category, equipment, difficulty, muscleGroups,
-// description, regression, progression, contraindications, workSec, restSec).
+// Accepts either a contact sheet (base64 JPEG) or a GIF URL, sends it to
+// GPT-4.1-mini vision, and returns structured movement metadata plus a
+// confidence score (0-1). The contact sheet path is the default — it sends
+// 12 ordered frames in a single image, which is much cheaper than a full
+// animated GIF. Falls back to GIF URL if provided for backwards compat.
 //
 // ME-008: OPENAI_API_KEY must be set as a Firebase secret.
 //         firebase functions:secrets:set OPENAI_API_KEY
 // ─────────────────────────────────────────────────────────────────────────────
 const openaiApiKey = (0, params_1.defineSecret)('OPENAI_API_KEY');
-exports.analyzeMovement = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60 }, async (request) => {
-    var _a, _b, _c, _d;
-    const { gifUrl } = request.data;
-    if (!gifUrl || typeof gifUrl !== 'string') {
-        throw new https_1.HttpsError('invalid-argument', 'gifUrl is required');
+exports.analyzeMovement = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60, maxInstances: 20 }, async (request) => {
+    var _a, _b, _c, _d, _e;
+    const { gifUrl, contactSheet } = request.data;
+    if (!gifUrl && !contactSheet) {
+        throw new https_1.HttpsError('invalid-argument', 'Either contactSheet or gifUrl is required');
     }
-    const apiKey = openaiApiKey.value();
+    // Trim whitespace/newlines — secrets stored via CLI often have trailing \n
+    const apiKey = (_a = openaiApiKey.value()) === null || _a === void 0 ? void 0 : _a.trim();
     if (!apiKey) {
         throw new https_1.HttpsError('internal', 'OpenAI API key not configured');
     }
-    const systemPrompt = `You are a fitness movement analysis expert. You will be shown an animated GIF of a fitness/exercise movement. Analyze it carefully and return a JSON object with the following fields:
+    if (apiKey.length < 30) {
+        console.error('[analyzeMovement] API key appears truncated (length:', apiKey.length, ')');
+        throw new https_1.HttpsError('internal', 'OpenAI API key appears invalid — check Firebase secrets');
+    }
+    const isContactSheet = !!contactSheet;
+    const systemPrompt = `You are a fitness movement analysis expert. You will be shown ${isContactSheet ? 'a contact sheet of sequential frames extracted from a fitness/exercise movement video. The frames are ordered left-to-right, top-to-bottom, showing the movement progression over time.' : 'an animated GIF of a fitness/exercise movement.'} Analyze it carefully and return a JSON object with the following fields:
 
 - "name": string — the standard exercise name (e.g. "Barbell Back Squat", "Dumbbell Lateral Raise")
 - "category": string — one of: "Upper Body Push", "Upper Body Pull", "Lower Body Push", "Lower Body Pull", "Core", "Cardio", "Mobility"
@@ -6244,8 +6289,15 @@ exports.analyzeMovement = (0, https_1.onCall)({ region: 'us-central1', secrets: 
 - "contraindications": string — brief note on who should avoid this (e.g. "Avoid with lower back injury")
 - "workSec": number — recommended work duration in seconds (typically 30-45)
 - "restSec": number — recommended rest duration in seconds (typically 15-30)
+- "confidence": number — your confidence in the analysis from 0.0 to 1.0 (1.0 = certain, 0.7+ = good, below 0.7 = uncertain/ambiguous)
+
+Set confidence below 0.7 if: the movement is unclear, frames are too dark/blurry to identify, you are guessing between multiple possible movements, or the equipment/form cannot be determined.
 
 Return ONLY valid JSON, no markdown, no explanation.`;
+    // Build the image content block
+    const imageContent = contactSheet
+        ? { type: 'image_url', image_url: { url: contactSheet, detail: 'high' } }
+        : { type: 'image_url', image_url: { url: gifUrl, detail: 'high' } };
     try {
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
@@ -6260,18 +6312,15 @@ Return ONLY valid JSON, no markdown, no explanation.`;
                     {
                         role: 'user',
                         content: [
-                            {
-                                type: 'image_url',
-                                image_url: { url: gifUrl, detail: 'high' },
-                            },
+                            imageContent,
                             {
                                 type: 'text',
-                                text: 'Analyze this fitness movement and return the JSON metadata.',
+                                text: `Analyze this fitness movement${isContactSheet ? ' from the contact sheet frames' : ''} and return the JSON metadata.`,
                             },
                         ],
                     },
                 ],
-                max_tokens: 500,
+                max_tokens: 600,
                 temperature: 0.3,
             }),
         });
@@ -6281,7 +6330,7 @@ Return ONLY valid JSON, no markdown, no explanation.`;
             throw new https_1.HttpsError('internal', `OpenAI API error: ${response.status}`);
         }
         const result = await response.json();
-        const content = ((_d = (_c = (_b = (_a = result.choices) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.message) === null || _c === void 0 ? void 0 : _c.content) === null || _d === void 0 ? void 0 : _d.trim()) || '';
+        const content = ((_e = (_d = (_c = (_b = result.choices) === null || _b === void 0 ? void 0 : _b[0]) === null || _c === void 0 ? void 0 : _c.message) === null || _d === void 0 ? void 0 : _d.content) === null || _e === void 0 ? void 0 : _e.trim()) || '';
         // Parse JSON from the response (strip markdown fences if present)
         let jsonStr = content;
         if (jsonStr.startsWith('```')) {
@@ -6300,6 +6349,7 @@ Return ONLY valid JSON, no markdown, no explanation.`;
             contraindications: analysis.contraindications || '',
             workSec: typeof analysis.workSec === 'number' ? analysis.workSec : 30,
             restSec: typeof analysis.restSec === 'number' ? analysis.restSec : 15,
+            confidence: typeof analysis.confidence === 'number' ? analysis.confidence : 0.5,
         };
     }
     catch (err) {
@@ -6914,6 +6964,7 @@ exports.createMissingLedgerEntry = (0, https_1.onCall)({ secrets: [stripeSecretK
 // uploads to Firebase Storage, returns the download URL.
 // ─────────────────────────────────────────────────────────────────────────────
 exports.generateVoice = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 30 }, async (request) => {
+    var _a;
     const { text, voice, storagePath } = request.data;
     if (!text || typeof text !== 'string' || text.length === 0) {
         throw new https_1.HttpsError('invalid-argument', 'text is required');
@@ -6921,7 +6972,7 @@ exports.generateVoice = (0, https_1.onCall)({ region: 'us-central1', secrets: [o
     if (text.length > 500) {
         throw new https_1.HttpsError('invalid-argument', 'text must be under 500 characters');
     }
-    const apiKey = openaiApiKey.value();
+    const apiKey = (_a = openaiApiKey.value()) === null || _a === void 0 ? void 0 : _a.trim();
     if (!apiKey) {
         throw new https_1.HttpsError('internal', 'OpenAI API key not configured');
     }
@@ -6960,4 +7011,76 @@ exports.generateVoice = (0, https_1.onCall)({ region: 'us-central1', secrets: [o
         throw new https_1.HttpsError('internal', 'Voice generation failed');
     }
 });
+// ─── batchGenerateVoice — Batch TTS for workout phrase preloading ────────────
+// Accepts an array of {text, cacheKey} entries. For each entry, checks if the
+// audio already exists in Firebase Storage. If not, generates it via OpenAI TTS.
+// Returns a map of cacheKey → download URL for all entries.
+// ─────────────────────────────────────────────────────────────────────────────
+exports.batchGenerateVoice = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 120, maxInstances: 10 }, async (request) => {
+    var _a;
+    const { phrases } = request.data;
+    if (!phrases || !Array.isArray(phrases) || phrases.length === 0) {
+        throw new https_1.HttpsError('invalid-argument', 'phrases array is required');
+    }
+    if (phrases.length > 100) {
+        throw new https_1.HttpsError('invalid-argument', 'Maximum 100 phrases per batch');
+    }
+    const apiKey = (_a = openaiApiKey.value()) === null || _a === void 0 ? void 0 : _a.trim();
+    if (!apiKey) {
+        throw new https_1.HttpsError('internal', 'OpenAI API key not configured');
+    }
+    const bucket = admin.storage().bucket();
+    const results = {};
+    // Process in parallel with concurrency limit of 5
+    const CONCURRENCY = 5;
+    for (let i = 0; i < phrases.length; i += CONCURRENCY) {
+        const batch = phrases.slice(i, i + CONCURRENCY);
+        await Promise.all(batch.map(async ({ text, cacheKey }) => {
+            if (!text || !cacheKey)
+                return;
+            const storagePath = `voice_cache/phrases/${cacheKey}.mp3`;
+            const file = bucket.file(storagePath);
+            // Check if already cached
+            const [exists] = await file.exists();
+            if (exists) {
+                results[cacheKey] = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+                return;
+            }
+            // Generate via OpenAI TTS
+            try {
+                const response = await fetch('https://api.openai.com/v1/audio/speech', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        model: 'tts-1',
+                        voice: 'onyx',
+                        input: text,
+                    }),
+                });
+                if (!response.ok) {
+                    console.error(`[batchGenerateVoice] OpenAI error for "${cacheKey}":`, response.status);
+                    return;
+                }
+                const audioBuffer = Buffer.from(await response.arrayBuffer());
+                await file.save(audioBuffer, { contentType: 'audio/mpeg' });
+                await file.makePublic();
+                results[cacheKey] = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+            }
+            catch (err) {
+                console.error(`[batchGenerateVoice] Failed for "${cacheKey}":`, err);
+            }
+        }));
+    }
+    return { urls: results, generated: Object.keys(results).length, total: phrases.length };
+});
+// ─────────────────────────────────────────────
+// COACH APPLICATION EMAIL NOTIFICATION
+// Email notification is handled by the VM-based coach-app-watcher service
+// (~/agent-setup/shared/coach-app-watcher/) which uses Gmail API via
+// domain-wide delegation. The Resend EMAIL_API_KEY is a placeholder
+// so Cloud Functions cannot send email directly.
+// ─────────────────────────────────────────────
 //# sourceMappingURL=index.js.map

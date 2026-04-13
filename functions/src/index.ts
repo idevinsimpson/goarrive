@@ -8013,6 +8013,85 @@ export const generateVoice = onCall(
   }
 );
 
+// ─── batchGenerateVoice — Batch TTS for workout phrase preloading ────────────
+// Accepts an array of {text, cacheKey} entries. For each entry, checks if the
+// audio already exists in Firebase Storage. If not, generates it via OpenAI TTS.
+// Returns a map of cacheKey → download URL for all entries.
+// ─────────────────────────────────────────────────────────────────────────────
+export const batchGenerateVoice = onCall(
+  { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 120, maxInstances: 10 },
+  async (request) => {
+    const { phrases } = request.data as {
+      phrases?: { text: string; cacheKey: string }[];
+    };
+
+    if (!phrases || !Array.isArray(phrases) || phrases.length === 0) {
+      throw new HttpsError('invalid-argument', 'phrases array is required');
+    }
+    if (phrases.length > 100) {
+      throw new HttpsError('invalid-argument', 'Maximum 100 phrases per batch');
+    }
+
+    const apiKey = openaiApiKey.value()?.trim();
+    if (!apiKey) {
+      throw new HttpsError('internal', 'OpenAI API key not configured');
+    }
+
+    const bucket = admin.storage().bucket();
+    const results: Record<string, string> = {};
+
+    // Process in parallel with concurrency limit of 5
+    const CONCURRENCY = 5;
+    for (let i = 0; i < phrases.length; i += CONCURRENCY) {
+      const batch = phrases.slice(i, i + CONCURRENCY);
+      await Promise.all(batch.map(async ({ text, cacheKey }) => {
+        if (!text || !cacheKey) return;
+
+        const storagePath = `voice_cache/phrases/${cacheKey}.mp3`;
+        const file = bucket.file(storagePath);
+
+        // Check if already cached
+        const [exists] = await file.exists();
+        if (exists) {
+          results[cacheKey] = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+          return;
+        }
+
+        // Generate via OpenAI TTS
+        try {
+          const response = await fetch('https://api.openai.com/v1/audio/speech', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: 'tts-1',
+              voice: 'onyx',
+              input: text,
+            }),
+          });
+
+          if (!response.ok) {
+            console.error(`[batchGenerateVoice] OpenAI error for "${cacheKey}":`, response.status);
+            return;
+          }
+
+          const audioBuffer = Buffer.from(await response.arrayBuffer());
+          await file.save(audioBuffer, { contentType: 'audio/mpeg' });
+          await file.makePublic();
+
+          results[cacheKey] = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+        } catch (err) {
+          console.error(`[batchGenerateVoice] Failed for "${cacheKey}":`, err);
+        }
+      }));
+    }
+
+    return { urls: results, generated: Object.keys(results).length, total: phrases.length };
+  }
+);
+
 // ─────────────────────────────────────────────
 // COACH APPLICATION EMAIL NOTIFICATION
 // Email notification is handled by the VM-based coach-app-watcher service
