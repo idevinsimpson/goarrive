@@ -339,7 +339,7 @@ export default function LoginScreen() {
                 <Icon
                   name={showPassword ? 'eye-off' : 'eye'}
                   size={20}
-                  color="#4A5568"
+                  color="#8A95A3"
                 />
               </Pressable>
             </View>
