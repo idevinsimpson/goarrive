@@ -208,7 +208,7 @@ export default function LoginScreen() {
               <Text style={s.fieldLabel}>Email</Text>
               <TextInput
                 style={[s.input, forgotEmailFocused && s.inputFocused]}
-                placeholder="coach@example.com"
+                placeholder="you@email.com"
                 placeholderTextColor="#4A5568"
                 value={forgotEmail}
                 onChangeText={setForgotEmail}
@@ -288,7 +288,7 @@ export default function LoginScreen() {
             <Text style={s.fieldLabel}>Email</Text>
             <TextInput
               style={[s.input, emailFocused && s.inputFocused]}
-              placeholder="coach@example.com"
+              placeholder="you@email.com"
               placeholderTextColor="#4A5568"
               value={email}
               onChangeText={setEmail}
@@ -374,9 +374,21 @@ export default function LoginScreen() {
             <Text style={s.forgotText}>Forgot password?</Text>
           </Pressable>
 
+          {/* Member signup */}
+          <View style={s.signupWrap}>
+            <Text style={s.signupPrompt}>New member?</Text>
+            <Pressable
+              onPress={() => router.push('/intake')}
+              accessibilityRole="button"
+              accessibilityLabel="Sign up as a member"
+              hitSlop={8}
+            >
+              <Text style={s.signupLink}>Sign up</Text>
+            </Pressable>
+          </View>
+
           <Text style={s.adminNote}>
-            Coaches: contact your GoArrive administrator for an invitation.{"\n"}
-            Members: use the intake link from your coach to get started.
+            Coaches: contact your GoArrive administrator for an invitation.
           </Text>
         </Animated.View>
       </ScrollView>
@@ -509,6 +521,24 @@ const s = StyleSheet.create({
     color: '#F5A623',
     fontFamily: FONT_BODY,
     fontWeight: '500',
+  },
+  signupWrap: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+  },
+  signupPrompt: {
+    fontSize: 14,
+    color: '#8A95A3',
+    fontFamily: FONT_BODY,
+  },
+  signupLink: {
+    fontSize: 14,
+    color: '#F5A623',
+    fontFamily: FONT_BODY,
+    fontWeight: '600',
   },
   adminNote: {
     fontSize: 12,
