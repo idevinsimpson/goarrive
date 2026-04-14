@@ -1050,8 +1050,8 @@ const s: any = StyleSheet.create({
     backgroundColor: '#0E1117',
     display: 'flex',
     flexDirection: 'column',
-    minHeight: '100vh' as any,
-    height: '100vh' as any,
+    minHeight: '100dvh' as any,
+    height: '100dvh' as any,
   },
   progressBar: {
     paddingHorizontal: 16,
@@ -1092,7 +1092,6 @@ const s: any = StyleSheet.create({
   scrollContainer: {
     flex: 1,
     minHeight: 0,
-    overflow: 'hidden',
   },
   scroll: {
     flex: 1,
@@ -1100,7 +1099,7 @@ const s: any = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop: 20,
-    paddingBottom: 100,
+    paddingBottom: 32,
     maxWidth: 520,
     alignSelf: 'center',
     width: '100%',
@@ -1328,7 +1327,11 @@ const s: any = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    paddingBottom: Platform.OS === 'ios' ? 'max(12px, env(safe-area-inset-bottom))' : 12,
+    paddingBottom: Platform.OS === 'web'
+      ? 'max(12px, env(safe-area-inset-bottom))' as any
+      : Platform.OS === 'ios'
+        ? 'max(12px, env(safe-area-inset-bottom))' as any
+        : 12,
     backgroundColor: '#0E1117',
     borderTopWidth: 1,
     borderTopColor: '#1E2A3A',

@@ -10,6 +10,7 @@
  *  6. stripeWebhook               — HTTPS trigger: handle Stripe webhook events
  *  7. activateCtsOptIn             — HTTPS callable: activate Commit-to-Save subscription item
  *  8. addCoach                     — HTTPS callable: admin-only coach account creation
+ *  9. onMemberCreated             — Firestore trigger: set member claims + notify coach on signup
  * 26. enforceCtsAccountability     — Scheduled (hourly): auto-charge CTS missed session fees after 48h
  *
  * ME-001: STRIPE_SECRET_KEY must be set as a Firebase secret before functions 3–6 operate.
@@ -8009,6 +8010,118 @@ export const generateVoice = onCall(
       if (err.code) throw err;
       console.error('[generateVoice] Failed:', err);
       throw new HttpsError('internal', 'Voice generation failed');
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NEW MEMBER — Set custom claims + notify coach
+// Fires when a member self-signs up via the intake form. Sets role claims so
+// AuthContext picks up the correct role, and sends FCM push to the assigned coach.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export const onMemberCreated = onDocumentCreated(
+  'members/{memberId}',
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+
+    const data = snap.data() as {
+      uid?: string;
+      coachId?: string;
+      displayName?: string;
+      email?: string;
+      hasAccount?: boolean;
+    };
+
+    const memberId = event.params.memberId;
+    const TAG = '[onMemberCreated]';
+
+    // ── Set custom claims for self-signup members ──
+    // Only set claims when the member has a linked auth account (self-signup).
+    // Coach-created members (hasAccount: false) get claims via claimMemberAccount.
+    if (data.uid && data.hasAccount === true) {
+      try {
+        await admin.auth().setCustomUserClaims(data.uid, {
+          role: 'member',
+          coachId: data.coachId || 'unassigned',
+          memberId: memberId,
+        });
+        console.log(TAG, 'Custom claims set for', data.uid);
+      } catch (err) {
+        console.error(TAG, 'Failed to set custom claims:', err);
+      }
+    }
+
+    // ── Notify assigned coach via FCM push ──
+    const coachId = data.coachId;
+    if (!coachId || coachId === 'unassigned') {
+      console.log(TAG, 'No assigned coach — skipping notification for', memberId);
+      return;
+    }
+
+    const memberName = data.displayName || data.email || 'A new member';
+
+    try {
+      // Look up coach's FCM tokens
+      const tokensSnap = await db
+        .collection('coaches')
+        .doc(coachId)
+        .collection('fcmTokens')
+        .get();
+
+      // Also check legacy root-level token field
+      const coachDoc = await db.collection('coaches').doc(coachId).get();
+      const legacyToken = coachDoc.exists
+        ? (coachDoc.data()?.fcmToken as string | undefined)
+        : undefined;
+
+      const tokens: string[] = [];
+      tokensSnap.forEach((doc) => {
+        const t = doc.data()?.token as string | undefined;
+        if (t) tokens.push(t);
+      });
+      if (legacyToken && !tokens.includes(legacyToken)) {
+        tokens.push(legacyToken);
+      }
+
+      if (tokens.length === 0) {
+        console.log(TAG, 'No FCM tokens for coach', coachId, '— skipping push');
+        return;
+      }
+
+      const title = 'New Member Signed Up';
+      const body = `${memberName} just joined your roster.`;
+
+      for (const token of tokens) {
+        try {
+          await messaging.send({
+            token,
+            notification: { title, body },
+            webpush: {
+              notification: { icon: '/icon-192.png', badge: '/icon-192.png' },
+            },
+          });
+        } catch (sendErr: any) {
+          // Clean up stale tokens
+          if (
+            sendErr?.code === 'messaging/registration-token-not-registered' ||
+            sendErr?.code === 'messaging/invalid-registration-token'
+          ) {
+            console.log(TAG, 'Removing stale token for coach', coachId);
+            const staleDoc = tokensSnap.docs.find(
+              (d) => d.data()?.token === token
+            );
+            if (staleDoc) await staleDoc.ref.delete();
+          } else {
+            console.warn(TAG, 'FCM send failed:', sendErr);
+          }
+        }
+      }
+
+      console.log(TAG, 'Notified coach', coachId, 'about new member', memberId);
+    } catch (err) {
+      console.error(TAG, 'Error notifying coach:', err);
     }
   }
 );
