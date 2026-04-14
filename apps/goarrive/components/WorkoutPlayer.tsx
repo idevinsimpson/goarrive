@@ -96,7 +96,7 @@ export default function WorkoutPlayer({
 
   // ── TTS voice coaching ─────────────────────────────
   const [ttsMuted, setTtsMuted] = useState(false);
-  useWorkoutTTS({
+  const { unlockAndPlayFirst } = useWorkoutTTS({
     phase,
     current,
     next,
@@ -367,7 +367,7 @@ export default function WorkoutPlayer({
                   style={{ width: 140, height: 46, marginBottom: 12 }}
                   resizeMode="contain"
                 />
-                <TouchableOpacity style={st.readyPlayBtn} onPress={handleStart}>
+                <TouchableOpacity style={st.readyPlayBtn} onPress={() => { unlockAndPlayFirst(); handleStart(); }}>
                   <Icon name="play" size={32} color="#0E1117" />
                 </TouchableOpacity>
               </View>

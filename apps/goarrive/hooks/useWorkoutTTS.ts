@@ -86,6 +86,7 @@ function storagePath(text: string): string {
 
 // ── Module-level audio state ────────────────────────────────────────
 let currentAudio: HTMLAudioElement | null = null;
+let audioUnlocked = false;
 
 // ── Hook ─────────────────────────────────────────────────────────────
 export function useWorkoutTTS({
@@ -103,6 +104,7 @@ export function useWorkoutTTS({
   const [preloadStatus, setPreloadStatus] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
   const lastPlayedRef = useRef('');
   const halfwayFiredRef = useRef(false);
+  const firstCueHandledRef = useRef(false);
   const activeRef = useRef(true);
   const pendingTimers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
 
@@ -226,11 +228,61 @@ export function useWorkoutTTS({
       currentAudio = audio;
       const p = audio.play();
       if (p) {
-        p.then(() => console.log(`[TTS] Playing: ${source}`))
-         .catch((e: any) => console.error(`[TTS] Play failed (${source}):`, e?.name));
+        p.then(() => {
+          audioUnlocked = true;
+          console.log(`[TTS] Playing: ${source}`);
+        })
+        .catch((e: any) => console.error(`[TTS] Play failed (${source}):`, e?.name));
       }
     } catch (err) {
       console.error('[TTS] playClip error:', err);
+    }
+  }, [isMuted]);
+
+  // ── Safari unlock: called synchronously from Start Workout onPress ─
+  // Safari requires audio.play() in the same call stack as the user gesture.
+  // This function plays the first cue (GO) directly from the tap handler,
+  // which unlocks HTMLAudioElement for all subsequent programmatic plays.
+  const unlockAndPlayFirst = useCallback(() => {
+    if (isMuted) return;
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+
+    // Mark that the first cue is handled here (skip it in the useEffect)
+    firstCueHandledRef.current = true;
+
+    const goUrl = clipUrlsRef.current[STATIC_PHRASES.GO];
+    if (goUrl) {
+      try {
+        const audio = new (window as any).Audio(goUrl);
+        currentAudio = audio;
+        const p = audio.play();
+        if (p) {
+          p.then(() => {
+            audioUnlocked = true;
+            console.log('[TTS] Safari unlock: GO cue played from gesture');
+          }).catch((e: any) => {
+            console.error('[TTS] Safari unlock: play failed:', e?.name);
+          });
+        }
+      } catch (err) {
+        console.error('[TTS] Safari unlock error:', err);
+      }
+    } else {
+      // Clips not loaded yet — play a silent audio to at least unlock the API
+      console.log('[TTS] Clips not ready — playing silent unlock');
+      try {
+        const audio = new (window as any).Audio(
+          'data:audio/mpeg;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTGFTb25vdGhlcXVlLmNvbQBURU5DAAAAHQAAA1N3aXRjaCBQbHVzIMKpIE5DSCBTb2Z0d2FyZQBUSVQyAAAABgAAAzIyMzUAVFNTRQAAAA8AAANMYXZmNTcuODMuMTAwAAAAAAAAAAAAAAD/80DEAAAAA0gAAAAATEFNRTMuMTAwVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQsRbAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVQ==',
+        );
+        audio.volume = 0.01;
+        const p = audio.play();
+        if (p) {
+          p.then(() => {
+            audioUnlocked = true;
+            console.log('[TTS] Safari unlock: silent audio played from gesture');
+          }).catch(() => {});
+        }
+      } catch {}
     }
   }, [isMuted]);
 
@@ -248,8 +300,15 @@ export function useWorkoutTTS({
 
         if (current.name && current.name !== 'Get Ready') {
           if (currentIndex === 0) {
-            // First movement: just play GO
-            playClip(STATIC_PHRASES.GO, `go:first`);
+            // First movement: GO was already played by unlockAndPlayFirst
+            // from the Start Workout gesture handler (for Safari unlock).
+            // Skip it here to avoid double-play.
+            if (firstCueHandledRef.current) {
+              firstCueHandledRef.current = false; // reset for future use
+              console.log('[TTS] Skipping first GO (already played from gesture)');
+            } else {
+              playClip(STATIC_PHRASES.GO, `go:first`);
+            }
           } else {
             // Not first: "3, 2, 1. Next up, ..."  was already played during rest
             // Now play GO
@@ -339,5 +398,5 @@ export function useWorkoutTTS({
     };
   }, []);
 
-  return { preloadStatus };
+  return { preloadStatus, unlockAndPlayFirst };
 }
