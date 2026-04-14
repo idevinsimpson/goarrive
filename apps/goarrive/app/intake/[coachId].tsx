@@ -1092,7 +1092,6 @@ const s: any = StyleSheet.create({
   scrollContainer: {
     flex: 1,
     minHeight: 0,
-    overflow: 'hidden',
   },
   scroll: {
     flex: 1,
@@ -1100,7 +1099,7 @@ const s: any = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop: 20,
-    paddingBottom: 100,
+    paddingBottom: 32,
     maxWidth: 520,
     alignSelf: 'center',
     width: '100%',
