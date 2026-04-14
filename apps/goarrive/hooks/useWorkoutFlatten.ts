@@ -53,7 +53,7 @@ export interface FlatMovement {
   cropScale?: number;
   cropTranslateX?: number;
   cropTranslateY?: number;
-  /** GoArrive Coach voice clip URL for this movement name (ElevenLabs generated) */
+  /** Voice clip URL for this movement name (if pre-generated) */
   voiceUrl?: string;
 
   // ── Phase 3: Special block fields ───────────────────────────────
