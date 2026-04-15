@@ -45,7 +45,7 @@ import { useMovementSwap } from '../hooks/useMovementSwap';
 import { useMovementHydrate } from '../hooks/useMovementHydrate';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
-import { useWorkoutTTS, unlockAudioContext } from '../hooks/useWorkoutTTS';
+import { useWorkoutTTS } from '../hooks/useWorkoutTTS';
 import { FB, FH } from '../lib/theme';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -371,7 +371,7 @@ export default function WorkoutPlayer({
                   style={{ width: 140, height: 46, marginBottom: 12 }}
                   resizeMode="contain"
                 />
-                <TouchableOpacity style={st.readyPlayBtn} onPress={() => { unlockAudioContext(); handleStart(); }}>
+                <TouchableOpacity style={st.readyPlayBtn} onPress={handleStart}>
                   <Icon name="play" size={32} color="#0E1117" />
                 </TouchableOpacity>
               </View>
