@@ -130,11 +130,16 @@ export function useWorkoutTTS({
   const firstCueHandledRef = useRef(false);
   const activeRef = useRef(true);
   const pendingTimers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const preWarmStartedRef = useRef(false);
 
   // ── Mute the beep system when TTS is active ───────────────────────
   useEffect(() => {
+    console.log('[TTS] Hook mounted — suppressing beeps, isMuted=' + isMuted);
     setAudioMuted(true);
-    return () => { setAudioMuted(false); };
+    return () => {
+      console.log('[TTS] Hook unmounting — restoring beeps');
+      setAudioMuted(false);
+    };
   }, []);
 
   // ── Timer helper (tracked for cleanup) ────────────────────────────
@@ -147,8 +152,6 @@ export function useWorkoutTTS({
   }, []);
 
   // ── Compute ALL phrases for this workout ──────────────────────────
-  // Both static (always the same) and dynamic (from build data).
-  // Each phrase maps to a deterministic storage path via content hash.
   const allPhrases = useMemo(() => {
     const phrases: { text: string; path: string }[] = [];
     const seen = new Set<string>();
@@ -173,25 +176,22 @@ export function useWorkoutTTS({
       }
     }
 
+    console.log(`[TTS] Computed ${phrases.length} phrases (${Object.keys(STATIC_PHRASES).length} static + ${phrases.length - Object.keys(STATIC_PHRASES).length} dynamic)`);
     return phrases;
   }, [flatMovements]);
 
   // ── Pre-warm: generate all clips via generateVoice on mount ───────
-  // The cloud function checks cache first — cached clips return instantly
-  // without calling OpenAI. New clips are generated and cached.
-  //
-  // Each clip URL is stored as soon as it resolves (streaming), so cached
-  // static clips are available in ~0.5s while dynamic clips generate in
-  // the background. No clip waits for the full batch to complete.
+  // CRITICAL: This effect depends ONLY on allPhrases, NOT on phase.
+  // Previously depended on [allPhrases, phase], which caused the effect
+  // to be cancelled when the user pressed Start (phase: ready → work).
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     if (allPhrases.length === 0) return;
-    if (phase === 'complete') return;
-    if (Object.keys(clipsRef.current).length > 0) return;
+    if (preWarmStartedRef.current) return;
+    preWarmStartedRef.current = true;
 
-    let cancelled = false;
     setPreloadStatus('loading');
-    console.log(`[TTS] Pre-warming ${allPhrases.length} clips via generateVoice...`);
+    console.log(`[TTS] PRE-WARM START — ${allPhrases.length} clips via generateVoice`);
 
     (async () => {
       try {
@@ -200,51 +200,61 @@ export function useWorkoutTTS({
         let cached = 0;
         let failed = 0;
 
-        // Fire all requests in parallel, but store each URL as it resolves
         await Promise.allSettled(
           allPhrases.map(async ({ text, path }) => {
             try {
+              console.log(`[TTS] Generating: "${text.substring(0, 50)}" → ${path}`);
               const result = await fn({ text, voice: 'onyx', storagePath: path });
-              if (cancelled || !activeRef.current) return;
+              if (!activeRef.current) return;
 
-              // Store immediately — don't wait for batch
               clipsRef.current[text] = result.data.url;
               ok++;
               if (result.data.cached) cached++;
 
-              // Preload audio element for instant playback
               try { getOrCreateAudio(result.data.url); } catch {}
-
-              console.log(`[TTS] Ready: "${text.substring(0, 40)}" ${result.data.cached ? '(cached)' : '(generated)'}`);
+              console.log(`[TTS] READY: "${text.substring(0, 40)}" ${result.data.cached ? '(cached)' : '(generated)'} → ${result.data.url.substring(0, 80)}`);
             } catch (err: any) {
               failed++;
-              console.error('[TTS] Clip failed:', text.substring(0, 40), err?.message || err);
+              console.error(`[TTS] FAILED: "${text.substring(0, 40)}" — ${err?.code || ''} ${err?.message || err}`);
             }
           }),
         );
 
-        if (cancelled || !activeRef.current) return;
-        console.log(`[TTS] Pre-warm complete: ${ok} ready (${cached} cached), ${failed} failed`);
+        if (!activeRef.current) return;
+        console.log(`[TTS] PRE-WARM DONE: ${ok}/${allPhrases.length} ready (${cached} cached, ${failed} failed)`);
+        console.log(`[TTS] Loaded clips:`, Object.keys(clipsRef.current).map(k => k.substring(0, 30)));
         setPreloadStatus(ok === allPhrases.length ? 'ready' : ok > 0 ? 'partial' : 'failed');
       } catch (err) {
-        console.error('[TTS] Pre-warm failed:', err);
-        if (!cancelled && activeRef.current) setPreloadStatus('failed');
+        console.error('[TTS] PRE-WARM CRASHED:', err);
+        if (activeRef.current) setPreloadStatus('failed');
       }
     })();
-
-    return () => { cancelled = true; };
-  }, [allPhrases, phase]);
+  }, [allPhrases]);
 
   // ── Play a clip by phrase text ────────────────────────────────────
   const playPhrase = useCallback((text: string, source: string) => {
-    if (isMuted || !activeRef.current) return;
-    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    console.log(`[TTS] CUE: ${source} | muted=${isMuted} | active=${activeRef.current} | text="${text.substring(0, 40)}"`);
+
+    if (isMuted) {
+      console.log(`[TTS] SKIP (muted): ${source}`);
+      return;
+    }
+    if (!activeRef.current) {
+      console.log(`[TTS] SKIP (inactive): ${source}`);
+      return;
+    }
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      console.log(`[TTS] SKIP (not web): ${source}`);
+      return;
+    }
 
     const url = clipsRef.current[text];
     if (!url) {
-      console.log(`[TTS] Clip not ready, silent: ${source} ("${text.substring(0, 40)}")`);
+      console.warn(`[TTS] CLIP NOT LOADED: ${source} — "${text.substring(0, 40)}" | loaded clips: ${Object.keys(clipsRef.current).length}`);
       return;
     }
+
+    console.log(`[TTS] PLAY ATTEMPT: ${source} → ${url.substring(0, 80)}`);
 
     try {
       if (currentAudio) {
@@ -253,47 +263,65 @@ export function useWorkoutTTS({
       }
       const audio = getOrCreateAudio(url);
       currentAudio = audio;
+      console.log(`[TTS] Audio element: readyState=${audio.readyState}, paused=${audio.paused}, src=${audio.src.substring(0, 60)}`);
+
       const p = audio.play();
       if (p) {
         p.then(() => {
           audioUnlocked = true;
-          console.log(`[TTS] Playing: ${source}`);
+          console.log(`[TTS] PLAYING OK: ${source}`);
         })
-        .catch((e: any) => console.error(`[TTS] Play blocked (${source}): ${e?.name}`));
+        .catch((e: any) => {
+          console.error(`[TTS] PLAY BLOCKED: ${source} — ${e?.name}: ${e?.message}`);
+        });
+      } else {
+        console.log(`[TTS] play() returned no promise: ${source}`);
       }
-    } catch (err) {
-      console.error('[TTS] playPhrase error:', err);
+    } catch (err: any) {
+      console.error(`[TTS] PLAY ERROR: ${source} — ${err?.message || err}`);
     }
   }, [isMuted]);
 
   // ── Safari unlock: called synchronously from Start Workout onPress ─
-  // Plays GO clip from the user gesture to satisfy Safari autoplay policy.
   const unlockAndPlayFirst = useCallback(() => {
-    if (isMuted) return;
-    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    console.log(`[TTS] unlockAndPlayFirst called | muted=${isMuted} | platform=${Platform.OS} | clips loaded=${Object.keys(clipsRef.current).length} | audioUnlocked=${audioUnlocked}`);
+
+    if (isMuted) {
+      console.log('[TTS] unlockAndPlayFirst SKIP — muted');
+      return;
+    }
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      console.log('[TTS] unlockAndPlayFirst SKIP — not web');
+      return;
+    }
 
     firstCueHandledRef.current = true;
 
     const goUrl = clipsRef.current[STATIC_PHRASES.GO];
+    console.log(`[TTS] GO clip URL: ${goUrl ? goUrl.substring(0, 80) : 'NOT LOADED'}`);
+    console.log(`[TTS] All loaded clips: ${JSON.stringify(Object.keys(clipsRef.current).map(k => k.substring(0, 25)))}`);
+
     if (!goUrl) {
-      console.warn('[TTS] GO clip not pre-warmed yet — Safari unlock skipped');
+      console.warn('[TTS] GO clip not pre-warmed — Safari unlock skipped. Pre-warm may have failed or not completed.');
       return;
     }
 
     try {
       const audio = getOrCreateAudio(goUrl);
       currentAudio = audio;
+      console.log(`[TTS] GO audio element: readyState=${audio.readyState}, src=${audio.src.substring(0, 60)}`);
+
       const p = audio.play();
       if (p) {
         p.then(() => {
           audioUnlocked = true;
-          console.log('[TTS] Safari unlock: GO played from gesture');
+          console.log('[TTS] SAFARI UNLOCK OK — GO played from gesture');
         }).catch((e: any) => {
-          console.error('[TTS] Safari unlock failed:', e?.name);
+          console.error(`[TTS] SAFARI UNLOCK FAILED: ${e?.name}: ${e?.message}`);
         });
       }
-    } catch (err) {
-      console.error('[TTS] Safari unlock error:', err);
+    } catch (err: any) {
+      console.error(`[TTS] SAFARI UNLOCK ERROR: ${err?.message || err}`);
     }
   }, [isMuted]);
 
@@ -311,7 +339,6 @@ export function useWorkoutTTS({
 
         if (current.name && current.name !== 'Get Ready') {
           if (currentIndex === 0 && firstCueHandledRef.current) {
-            // First GO was already played by unlockAndPlayFirst
             firstCueHandledRef.current = false;
             console.log('[TTS] Skipping first GO (played from gesture)');
           } else {
@@ -324,7 +351,6 @@ export function useWorkoutTTS({
       if (lastPlayedRef.current !== key) {
         lastPlayedRef.current = key;
 
-        // Announce next movement during rest — directly from build data
         if (next?.stepType === 'exercise' && next.name && next.name !== 'Get Ready') {
           const phrase = buildPrepNextPhrase(next.name, next.weight);
           schedule(() => playPhrase(phrase, `prep:${currentIndex}`), 500);
@@ -362,7 +388,6 @@ export function useWorkoutTTS({
       const key = `equip_${currentIndex}`;
       if (lastPlayedRef.current !== key) {
         lastPlayedRef.current = key;
-        // Grab equipment uses the coach's instruction text from the build
         const phrase = buildGrabEquipmentPhrase(current.instructionText);
         playPhrase(phrase, `equip:${currentIndex}`);
       }
