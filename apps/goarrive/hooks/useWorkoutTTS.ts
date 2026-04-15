@@ -6,9 +6,9 @@
  *   2. Static platform cues (Firebase Storage MP3s)
  *   3. Web Speech API fallback for any movement without a voiceUrl
  *
- * Movement voice clips are generated via OpenAI TTS (voice: onyx) through
- * the generateVoice Cloud Function. Static platform cues were pre-generated
- * and stored in Firebase Storage. Web Speech is the real-time fallback.
+ * Movement voice clips are generated via OpenAI gpt-4o-mini-tts (voice: nova)
+ * through the generateVoice Cloud Function. Static platform cues were
+ * pre-generated and stored in Firebase Storage. Web Speech is the real-time fallback.
  *
  * Uses expo-speech on native, Web Audio API + Web Speech on web.
  * Respects the global audio mute toggle.
