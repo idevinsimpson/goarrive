@@ -50,17 +50,17 @@ const STATIC_CUES = {
 
 type StaticCueKey = keyof typeof STATIC_CUES;
 
-// ── In-memory audio cache: normalizedText → blob URL ────────────────────────
+/// ── In-memory audio cache: normalizedText → public URL ─────────────────────
+// The generateVoice Cloud Function calls file.makePublic() so the returned
+// storage.googleapis.com URL is directly playable — no fetch/blob conversion.
 const audioCache = new Map<string, string>();
 // Track in-flight requests to avoid duplicate Cloud Function calls
 const pendingRequests = new Map<string, Promise<string | null>>();
-
 // ── OpenAI TTS via Cloud Function ───────────────────────────────────────────
 async function generateAndCacheAudio(text: string): Promise<string | null> {
   const normalized = normalizeCueText(text);
   if (audioCache.has(normalized)) return audioCache.get(normalized)!;
   if (pendingRequests.has(normalized)) return pendingRequests.get(normalized)!;
-
   const request = (async () => {
     try {
       const functions = getFunctions(undefined, 'us-central1');
@@ -70,38 +70,37 @@ async function generateAndCacheAudio(text: string): Promise<string | null> {
       >(functions, 'generateVoice');
       const result = await generateVoice({ text: normalized, voice: 'onyx' });
       const url = result.data.url;
-      // Fetch and convert to blob URL so it plays offline after first load
-      const resp = await fetch(url);
-      const blob = await resp.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      audioCache.set(normalized, blobUrl);
-      return blobUrl;
-    } catch {
+      // The CF calls file.makePublic() so the URL is directly playable.
+      // No fetch/blob conversion needed — avoids Firebase Storage rules issues.
+      audioCache.set(normalized, url);
+      return url;
+    } catch (err) {
+      console.warn('[useWorkoutTTS] generateAndCacheAudio failed for:', normalized, err);
       return null;
     } finally {
       pendingRequests.delete(normalized);
     }
   })();
-
   pendingRequests.set(normalized, request);
-  return request;
+   return request;
 }
-
 // ── HTMLAudioElement playback ────────────────────────────────────────────────
 let currentAudio: HTMLAudioElement | null = null;
 
-function playBlobUrl(blobUrl: string): void {
+function playAudioUrl(url: string): void {
   if (typeof window === 'undefined') return;
   try {
     if (currentAudio) {
       currentAudio.pause();
       currentAudio.currentTime = 0;
     }
-    const audio = new (window as any).Audio(blobUrl);
+    const audio = new (window as any).Audio(url);
     currentAudio = audio;
-    audio.play().catch(() => {});
-  } catch {
-    // Audio API unavailable
+    audio.play().catch((err: any) => {
+      console.warn('[useWorkoutTTS] audio.play() failed:', err);
+    });
+  } catch (err) {
+    console.warn('[useWorkoutTTS] playAudioUrl error:', err);
   }
 }
 
@@ -187,9 +186,9 @@ export function useWorkoutTTS({
 
       // Web: OpenAI TTS
       if (typeof window === 'undefined') return;
-      const blobUrl = await generateAndCacheAudio(normalized);
-      if (blobUrl && !isMuted && !ttsDisabled) {
-        playBlobUrl(blobUrl);
+      const audioUrl = await generateAndCacheAudio(normalized);
+      if (audioUrl && !isMuted && !ttsDisabled) {
+        playAudioUrl(audioUrl);
       }
     },
     [isMuted, ttsDisabled],
