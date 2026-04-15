@@ -179,6 +179,10 @@ export function useWorkoutTTS({
   // ── Pre-warm: generate all clips via generateVoice on mount ───────
   // The cloud function checks cache first — cached clips return instantly
   // without calling OpenAI. New clips are generated and cached.
+  //
+  // Each clip URL is stored as soon as it resolves (streaming), so cached
+  // static clips are available in ~0.5s while dynamic clips generate in
+  // the background. No clip waits for the full batch to complete.
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     if (allPhrases.length === 0) return;
@@ -192,38 +196,36 @@ export function useWorkoutTTS({
     (async () => {
       try {
         const fn = getGenerateVoice();
-        const results = await Promise.allSettled(
+        let ok = 0;
+        let cached = 0;
+        let failed = 0;
+
+        // Fire all requests in parallel, but store each URL as it resolves
+        await Promise.allSettled(
           allPhrases.map(async ({ text, path }) => {
-            const result = await fn({ text, voice: 'onyx', storagePath: path });
-            return { text, url: result.data.url, cached: result.data.cached };
+            try {
+              const result = await fn({ text, voice: 'onyx', storagePath: path });
+              if (cancelled || !activeRef.current) return;
+
+              // Store immediately — don't wait for batch
+              clipsRef.current[text] = result.data.url;
+              ok++;
+              if (result.data.cached) cached++;
+
+              // Preload audio element for instant playback
+              try { getOrCreateAudio(result.data.url); } catch {}
+
+              console.log(`[TTS] Ready: "${text.substring(0, 40)}" ${result.data.cached ? '(cached)' : '(generated)'}`);
+            } catch (err: any) {
+              failed++;
+              console.error('[TTS] Clip failed:', text.substring(0, 40), err?.message || err);
+            }
           }),
         );
 
         if (cancelled || !activeRef.current) return;
-
-        const urls: Record<string, string> = {};
-        let ok = 0;
-        let cached = 0;
-        let failed = 0;
-        for (const r of results) {
-          if (r.status === 'fulfilled') {
-            urls[r.value.text] = r.value.url;
-            ok++;
-            if (r.value.cached) cached++;
-          } else {
-            failed++;
-            console.error('[TTS] Clip generation failed:', r.reason?.message || r.reason);
-          }
-        }
-
-        clipsRef.current = urls;
         console.log(`[TTS] Pre-warm complete: ${ok} ready (${cached} cached), ${failed} failed`);
         setPreloadStatus(ok === allPhrases.length ? 'ready' : ok > 0 ? 'partial' : 'failed');
-
-        // Preload audio elements for instant playback
-        Object.values(urls).forEach((url) => {
-          try { getOrCreateAudio(url); } catch {}
-        });
       } catch (err) {
         console.error('[TTS] Pre-warm failed:', err);
         if (!cancelled && activeRef.current) setPreloadStatus('failed');

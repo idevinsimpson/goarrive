@@ -100,7 +100,7 @@ export default function WorkoutPlayer({
     phase,
     current,
     next,
-    isMuted: ttsMuted || isPreview,
+    isMuted: ttsMuted,
     currentIndex,
     total,
     timeLeft,
