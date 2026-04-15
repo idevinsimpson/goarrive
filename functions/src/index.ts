@@ -7979,13 +7979,16 @@ export const generateVoice = onCall(
     const path = storagePath || `voice_cache/tts/${Date.now()}.mp3`;
 
     try {
-      // Cache check: if file already exists at this path, return URL immediately
+      // Firebase CDN URL (works with Storage security rules, no IAM ACL needed)
       const bucket = admin.storage().bucket();
+      const encodedPath = encodeURIComponent(path);
+      const cdnUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodedPath}?alt=media`;
+
+      // Cache check: if file already exists at this path, return URL immediately
       const file = bucket.file(path);
       const [exists] = await file.exists();
       if (exists) {
-        const url = `https://storage.googleapis.com/${bucket.name}/${path}`;
-        return { url, path, cached: true };
+        return { url: cdnUrl, path, cached: true };
       }
 
       const response = await fetch('https://api.openai.com/v1/audio/speech', {
@@ -8008,13 +8011,10 @@ export const generateVoice = onCall(
       }
 
       const audioBuffer = Buffer.from(await response.arrayBuffer());
-      // bucket and file already declared above for cache check
       const uploadFile = bucket.file(path);
       await uploadFile.save(audioBuffer, { contentType: 'audio/mpeg' });
-      await uploadFile.makePublic();
 
-      const url = `https://storage.googleapis.com/${bucket.name}/${path}`;
-      return { url, path };
+      return { url: cdnUrl, path };
     } catch (err: any) {
       if (err.code) throw err;
       console.error('[generateVoice] Failed:', err);

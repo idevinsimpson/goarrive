@@ -1,8 +1,13 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Platform voice cues — publicly readable (no auth required)
+    // Voice cues — publicly readable (no auth required)
+    // Includes platform cues and OpenAI TTS clips cached by content hash
     match /voice_cache/platform/{fileName} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /voice_cache/cues/{fileName} {
       allow read: if true;
       allow write: if false;
     }
