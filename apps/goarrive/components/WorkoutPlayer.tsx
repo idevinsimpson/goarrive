@@ -78,7 +78,7 @@ export default function WorkoutPlayer({
   const {
     phase, currentIndex, timeLeft, swapSide, isPaused,
     current, next, total, isRepBased, progressPct, isSpecialPhase,
-    handleStart, handlePauseResume, handleSkip, handleRepDone,
+    handleStart, handlePauseResume, handleSkip, handleRepDone, reset,
   } = timer;
 
   useWakeLock(phase !== 'ready' && phase !== 'complete');
@@ -97,6 +97,7 @@ export default function WorkoutPlayer({
   // ── TTS voice coaching ─────────────────────────────
   const [ttsMuted, setTtsMuted] = useState(false);
   const { unlockAndPlayFirst } = useWorkoutTTS({
+    enabled: visible,
     phase,
     current,
     next,
@@ -163,6 +164,15 @@ export default function WorkoutPlayer({
 
   useEffect(() => { setVideoReady(false); }, [currentIndex]);
   useEffect(() => { setShowControls(false); }, [currentIndex]);
+  useEffect(() => {
+    if (!visible) {
+      reset();
+      setTtsMuted(false);
+      setVideoReady(false);
+      setShowControls(false);
+      setSwapReason('');
+    }
+  }, [visible, reset]);
   useEffect(() => {
     return () => {
       if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);

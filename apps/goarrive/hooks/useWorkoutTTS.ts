@@ -1,23 +1,19 @@
 /**
  * useWorkoutTTS — Deterministic voice coaching for the Workout Player
  *
- * Single source of truth for all workout-player audio. Every spoken cue
- * is deterministic: derived from the player state machine + build data.
+ * Single source of truth for workout-player voice cues. Every spoken cue is
+ * derived from the workout player state machine plus flattened build data.
  *
- * Audio pipeline (uniform):
- *   ALL phrases → generateVoice cloud function → cached in Firebase Storage
- *   Static phrases ("Go", "Halfway", etc.) are generated once and cached forever.
- *   Dynamic phrases ("Next up, Goblet Squat, 50 pounds") are generated once
- *   per unique text and cached at voice_cache/cues/{hash}.mp3.
+ * Audio pipeline:
+ *   phrase text → generateVoice cloud function → Firebase Storage cache URL
  *
- * generateVoice checks Firebase Storage first: if the MP3 already exists at
- * the content-hash path, it returns the URL without calling OpenAI.
+ * The hook now keeps clip generation and clip playback separate:
+ *   - pre-warm eagerly resolves clip URLs
+ *   - HTMLAudioElement instances are only created at playback time
  *
- * This hook REPLACES the oscillator beeps from audioCues.ts.
- * Beeps are suppressed via setAudioMuted(true) on mount.
- *
- * Scoping: all audio gated on activeRef. On unmount, timers cancelled,
- * audio stopped. No global leakage.
+ * That separation matters on iPhone Safari because pre-creating Audio elements
+ * before the Start Workout tap can leave the first audible path effectively
+ * disconnected from the real user gesture.
  */
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { Platform } from 'react-native';
@@ -41,6 +37,7 @@ interface FlatStep {
 }
 
 interface UseWorkoutTTSOptions {
+  enabled: boolean;
   phase: Phase;
   current: FlatStep | null;
   next: FlatStep | null;
@@ -78,22 +75,55 @@ function phraseStoragePath(text: string): string {
   return `voice_cache/cues/${createHash(text)}.mp3`;
 }
 
+function createSilentUnlockUrl(): string {
+  const sampleRate = 8000;
+  const durationMs = 80;
+  const numSamples = Math.max(1, Math.floor(sampleRate * durationMs / 1000));
+  const buffer = new ArrayBuffer(44 + numSamples);
+  const view = new DataView(buffer);
+
+  const writeString = (offset: number, value: string) => {
+    for (let i = 0; i < value.length; i += 1) view.setUint8(offset + i, value.charCodeAt(i));
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + numSamples, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate, true);
+  view.setUint16(32, 1, true);
+  view.setUint16(34, 8, true);
+  writeString(36, 'data');
+  view.setUint32(40, numSamples, true);
+
+  const samples = new Uint8Array(buffer, 44);
+  samples.fill(128);
+
+  return URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }));
+}
+
 // ── Module-level audio state ────────────────────────────────────────
 let currentAudio: HTMLAudioElement | null = null;
 let audioUnlocked = false;
 
-// ── Audio pool for preloaded elements ───────────────────────────────
-const audioPool: Record<string, HTMLAudioElement> = {};
+function stopCurrentAudio() {
+  if (!currentAudio) return;
+  try {
+    currentAudio.pause();
+    currentAudio.currentTime = 0;
+  } catch {}
+  currentAudio = null;
+}
 
-function getOrCreateAudio(url: string): HTMLAudioElement {
-  if (audioPool[url]) {
-    audioPool[url].currentTime = 0;
-    return audioPool[url];
-  }
-  const a = new (window as any).Audio(url);
-  a.preload = 'auto';
-  audioPool[url] = a;
-  return a;
+function createPlaybackAudio(url: string): HTMLAudioElement {
+  const audio = new (window as any).Audio(url);
+  audio.preload = 'auto';
+  (audio as any).playsInline = true;
+  return audio;
 }
 
 // ── Cloud function reference (lazy) ─────────────────────────────────
@@ -112,6 +142,7 @@ function getGenerateVoice() {
 
 // ── Hook ─────────────────────────────────────────────────────────────
 export function useWorkoutTTS({
+  enabled,
   phase,
   current,
   next,
@@ -122,28 +153,24 @@ export function useWorkoutTTS({
   currentDuration,
   flatMovements,
 }: UseWorkoutTTSOptions) {
-  // All clip URLs keyed by phrase text
   const clipsRef = useRef<Record<string, string>>({});
+  const clipPromiseRef = useRef<Partial<Record<string, Promise<string | null>>>>({});
   const [preloadStatus, setPreloadStatus] = useState<'idle' | 'loading' | 'ready' | 'partial' | 'failed'>('idle');
   const lastPlayedRef = useRef('');
   const halfwayFiredRef = useRef(false);
   const firstCueHandledRef = useRef(false);
-  const activeRef = useRef(true);
+  const activeRef = useRef(false);
   const pendingTimers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
-  const preWarmStartedRef = useRef(false);
+  const preWarmKeyRef = useRef('');
+  const playSequenceRef = useRef(0);
 
-  // ── Mute the beep system when TTS is active ───────────────────────
-  useEffect(() => {
-    console.log('[TTS] Hook mounted — suppressing beeps, isMuted=' + isMuted);
-    setAudioMuted(true);
-    return () => {
-      console.log('[TTS] Hook unmounting — restoring beeps');
-      setAudioMuted(false);
-    };
+  const clearPendingTimers = useCallback(() => {
+    for (const id of pendingTimers.current) clearTimeout(id);
+    pendingTimers.current.clear();
   }, []);
 
-  // ── Timer helper (tracked for cleanup) ────────────────────────────
   const schedule = useCallback((fn: () => void, ms: number) => {
+    if (!activeRef.current) return;
     const id = setTimeout(() => {
       pendingTimers.current.delete(id);
       if (activeRef.current) fn();
@@ -151,7 +178,31 @@ export function useWorkoutTTS({
     pendingTimers.current.add(id);
   }, []);
 
-  // ── Compute ALL phrases for this workout ──────────────────────────
+  const resetSession = useCallback((restoreBeeps: boolean) => {
+    activeRef.current = false;
+    clearPendingTimers();
+    stopCurrentAudio();
+    playSequenceRef.current += 1;
+    lastPlayedRef.current = '';
+    halfwayFiredRef.current = false;
+    firstCueHandledRef.current = false;
+    if (restoreBeeps) setAudioMuted(false);
+  }, [clearPendingTimers]);
+
+  useEffect(() => {
+    if (enabled) {
+      activeRef.current = true;
+      console.log('[TTS] Player session active — suppressing legacy beeps');
+      setAudioMuted(true);
+      return () => resetSession(true);
+    }
+
+    console.log('[TTS] Player session inactive — restoring legacy beeps');
+    resetSession(true);
+    setPreloadStatus('idle');
+    return undefined;
+  }, [enabled, resetSession]);
+
   const allPhrases = useMemo(() => {
     const phrases: { text: string; path: string }[] = [];
     const seen = new Set<string>();
@@ -163,10 +214,8 @@ export function useWorkoutTTS({
       }
     };
 
-    // Static phrases — always needed
     Object.values(STATIC_PHRASES).forEach(add);
 
-    // Dynamic phrases — from the workout build data
     for (const step of flatMovements) {
       if (step.stepType === 'exercise' && step.name && step.name !== 'Get Ready') {
         add(buildPrepNextPhrase(step.name, step.weight));
@@ -180,67 +229,126 @@ export function useWorkoutTTS({
     return phrases;
   }, [flatMovements]);
 
-  // ── Pre-warm: generate all clips via generateVoice on mount ───────
-  // CRITICAL: This effect depends ONLY on allPhrases, NOT on phase.
-  // Previously depended on [allPhrases, phase], which caused the effect
-  // to be cancelled when the user pressed Start (phase: ready → work).
-  useEffect(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-    if (allPhrases.length === 0) return;
-    if (preWarmStartedRef.current) return;
-    preWarmStartedRef.current = true;
+  const ensureClip = useCallback(async (text: string): Promise<string | null> => {
+    if (clipsRef.current[text]) return clipsRef.current[text];
+    if (clipPromiseRef.current[text]) return clipPromiseRef.current[text];
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
 
+    const storagePath = phraseStoragePath(text);
+    const promise = (async () => {
+      try {
+        const fn = getGenerateVoice();
+        console.log(`[TTS] Generating: "${text.substring(0, 50)}" → ${storagePath}`);
+        const result = await fn({ text, voice: 'onyx', storagePath });
+        clipsRef.current[text] = result.data.url;
+        console.log(`[TTS] READY: "${text.substring(0, 40)}" ${result.data.cached ? '(cached)' : '(generated)'} → ${result.data.url.substring(0, 80)}`);
+        return result.data.url;
+      } catch (err: any) {
+        console.error(`[TTS] FAILED: "${text.substring(0, 40)}" — ${err?.code || ''} ${err?.message || err}`);
+        return null;
+      } finally {
+        delete clipPromiseRef.current[text];
+      }
+    })();
+
+    clipPromiseRef.current[text] = promise;
+    return promise;
+  }, []);
+
+  useEffect(() => {
+    if (!enabled || Platform.OS !== 'web' || typeof window === 'undefined') return;
+    if (allPhrases.length === 0) return;
+
+    const phraseKey = allPhrases.map(p => p.path).join('|');
+    const missing = allPhrases.filter(({ text }) => !clipsRef.current[text]);
+
+    if (missing.length === 0) {
+      preWarmKeyRef.current = phraseKey;
+      setPreloadStatus('ready');
+      console.log('[TTS] PRE-WARM SKIP — all clips already cached in session');
+      return;
+    }
+
+    if (preWarmKeyRef.current === phraseKey && preloadStatus === 'loading') {
+      return;
+    }
+
+    preWarmKeyRef.current = phraseKey;
     setPreloadStatus('loading');
-    console.log(`[TTS] PRE-WARM START — ${allPhrases.length} clips via generateVoice`);
+    console.log(`[TTS] PRE-WARM START — ${missing.length}/${allPhrases.length} clips missing for this workout session`);
+
+    let cancelled = false;
 
     (async () => {
       try {
-        const fn = getGenerateVoice();
-        let ok = 0;
-        let cached = 0;
-        let failed = 0;
+        const results = await Promise.allSettled(missing.map(({ text }) => ensureClip(text)));
+        if (cancelled) return;
 
-        await Promise.allSettled(
-          allPhrases.map(async ({ text, path }) => {
-            try {
-              console.log(`[TTS] Generating: "${text.substring(0, 50)}" → ${path}`);
-              const result = await fn({ text, voice: 'onyx', storagePath: path });
-              if (!activeRef.current) return;
-
-              clipsRef.current[text] = result.data.url;
-              ok++;
-              if (result.data.cached) cached++;
-
-              try { getOrCreateAudio(result.data.url); } catch {}
-              console.log(`[TTS] READY: "${text.substring(0, 40)}" ${result.data.cached ? '(cached)' : '(generated)'} → ${result.data.url.substring(0, 80)}`);
-            } catch (err: any) {
-              failed++;
-              console.error(`[TTS] FAILED: "${text.substring(0, 40)}" — ${err?.code || ''} ${err?.message || err}`);
-            }
-          }),
-        );
-
-        if (!activeRef.current) return;
-        console.log(`[TTS] PRE-WARM DONE: ${ok}/${allPhrases.length} ready (${cached} cached, ${failed} failed)`);
-        console.log(`[TTS] Loaded clips:`, Object.keys(clipsRef.current).map(k => k.substring(0, 30)));
-        setPreloadStatus(ok === allPhrases.length ? 'ready' : ok > 0 ? 'partial' : 'failed');
+        const ok = results.filter(r => r.status === 'fulfilled' && !!r.value).length;
+        const failed = missing.length - ok;
+        const loaded = Object.keys(clipsRef.current).length;
+        console.log(`[TTS] PRE-WARM DONE — loaded now=${loaded}, ok=${ok}, failed=${failed}`);
+        setPreloadStatus(failed === 0 ? 'ready' : ok > 0 ? 'partial' : 'failed');
       } catch (err) {
         console.error('[TTS] PRE-WARM CRASHED:', err);
-        if (activeRef.current) setPreloadStatus('failed');
+        if (!cancelled) setPreloadStatus('failed');
       }
     })();
-  }, [allPhrases]);
 
-  // ── Play a clip by phrase text ────────────────────────────────────
-  const playPhrase = useCallback((text: string, source: string) => {
-    console.log(`[TTS] CUE: ${source} | muted=${isMuted} | active=${activeRef.current} | text="${text.substring(0, 40)}"`);
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, allPhrases, ensureClip, preloadStatus]);
 
-    if (isMuted) {
-      console.log(`[TTS] SKIP (muted): ${source}`);
+  const playAudioUrl = useCallback(async (
+    url: string,
+    source: string,
+    opts?: { unlock?: boolean; revokeAfterPlay?: boolean },
+  ): Promise<boolean> => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      console.log(`[TTS] PLAY SKIP (not web): ${source}`);
+      return false;
+    }
+
+    try {
+      stopCurrentAudio();
+      const audio = createPlaybackAudio(url);
+      currentAudio = audio;
+      console.log(`[TTS] PLAY ATTEMPT: ${source} → ${url.substring(0, 80)}`);
+      const promise = audio.play();
+      if (promise) await promise;
+      audioUnlocked = true;
+      console.log(`[TTS] PLAYING OK: ${source}`);
+
+      if (opts?.revokeAfterPlay) {
+        const cleanup = () => {
+          try { URL.revokeObjectURL(url); } catch {}
+          audio.removeEventListener('ended', cleanup);
+          audio.removeEventListener('error', cleanup);
+        };
+        audio.addEventListener('ended', cleanup);
+        audio.addEventListener('error', cleanup);
+      }
+
+      return true;
+    } catch (err: any) {
+      console.error(`[TTS] PLAY BLOCKED: ${source} — ${err?.name || 'Error'}: ${err?.message || err}`);
+      if (opts?.revokeAfterPlay) {
+        try { URL.revokeObjectURL(url); } catch {}
+      }
+      return false;
+    }
+  }, []);
+
+  const playPhrase = useCallback(async (text: string, source: string) => {
+    console.log(`[TTS] CUE: ${source} | enabled=${enabled} | muted=${isMuted} | active=${activeRef.current} | text="${text.substring(0, 50)}"`);
+
+    if (!enabled || !activeRef.current) {
+      console.log(`[TTS] SKIP (inactive): ${source}`);
       return;
     }
-    if (!activeRef.current) {
-      console.log(`[TTS] SKIP (inactive): ${source}`);
+    if (isMuted) {
+      console.log(`[TTS] SKIP (muted): ${source}`);
       return;
     }
     if (Platform.OS !== 'web' || typeof window === 'undefined') {
@@ -248,44 +356,36 @@ export function useWorkoutTTS({
       return;
     }
 
-    const url = clipsRef.current[text];
+    const sequence = ++playSequenceRef.current;
+    const url = await ensureClip(text);
+
+    if (!enabled || !activeRef.current) {
+      console.log(`[TTS] SKIP after ensure (inactive): ${source}`);
+      return;
+    }
+    if (isMuted) {
+      console.log(`[TTS] SKIP after ensure (muted): ${source}`);
+      return;
+    }
+    if (sequence !== playSequenceRef.current) {
+      console.log(`[TTS] SKIP (superseded by newer cue): ${source}`);
+      return;
+    }
     if (!url) {
-      console.warn(`[TTS] CLIP NOT LOADED: ${source} — "${text.substring(0, 40)}" | loaded clips: ${Object.keys(clipsRef.current).length}`);
+      console.warn(`[TTS] CLIP NOT READY: ${source} — "${text.substring(0, 40)}"`);
       return;
     }
 
-    console.log(`[TTS] PLAY ATTEMPT: ${source} → ${url.substring(0, 80)}`);
+    await playAudioUrl(url, source);
+  }, [enabled, ensureClip, isMuted, playAudioUrl]);
 
-    try {
-      if (currentAudio) {
-        currentAudio.pause();
-        currentAudio.currentTime = 0;
-      }
-      const audio = getOrCreateAudio(url);
-      currentAudio = audio;
-      console.log(`[TTS] Audio element: readyState=${audio.readyState}, paused=${audio.paused}, src=${audio.src.substring(0, 60)}`);
+  const unlockAndPlayFirst = useCallback(async () => {
+    console.log(`[TTS] unlockAndPlayFirst called | enabled=${enabled} | muted=${isMuted} | clips loaded=${Object.keys(clipsRef.current).length} | audioUnlocked=${audioUnlocked}`);
 
-      const p = audio.play();
-      if (p) {
-        p.then(() => {
-          audioUnlocked = true;
-          console.log(`[TTS] PLAYING OK: ${source}`);
-        })
-        .catch((e: any) => {
-          console.error(`[TTS] PLAY BLOCKED: ${source} — ${e?.name}: ${e?.message}`);
-        });
-      } else {
-        console.log(`[TTS] play() returned no promise: ${source}`);
-      }
-    } catch (err: any) {
-      console.error(`[TTS] PLAY ERROR: ${source} — ${err?.message || err}`);
+    if (!enabled || !activeRef.current) {
+      console.log('[TTS] unlockAndPlayFirst SKIP — inactive player');
+      return;
     }
-  }, [isMuted]);
-
-  // ── Safari unlock: called synchronously from Start Workout onPress ─
-  const unlockAndPlayFirst = useCallback(() => {
-    console.log(`[TTS] unlockAndPlayFirst called | muted=${isMuted} | platform=${Platform.OS} | clips loaded=${Object.keys(clipsRef.current).length} | audioUnlocked=${audioUnlocked}`);
-
     if (isMuted) {
       console.log('[TTS] unlockAndPlayFirst SKIP — muted');
       return;
@@ -295,41 +395,21 @@ export function useWorkoutTTS({
       return;
     }
 
-    firstCueHandledRef.current = true;
-
     const goUrl = clipsRef.current[STATIC_PHRASES.GO];
-    console.log(`[TTS] GO clip URL: ${goUrl ? goUrl.substring(0, 80) : 'NOT LOADED'}`);
-    console.log(`[TTS] All loaded clips: ${JSON.stringify(Object.keys(clipsRef.current).map(k => k.substring(0, 25)))}`);
-
-    if (!goUrl) {
-      console.warn('[TTS] GO clip not pre-warmed — Safari unlock skipped. Pre-warm may have failed or not completed.');
+    if (goUrl) {
+      firstCueHandledRef.current = true;
+      await playAudioUrl(goUrl, 'start:go:gesture');
       return;
     }
 
-    try {
-      const audio = getOrCreateAudio(goUrl);
-      currentAudio = audio;
-      console.log(`[TTS] GO audio element: readyState=${audio.readyState}, src=${audio.src.substring(0, 60)}`);
+    firstCueHandledRef.current = false;
+    const silentUrl = createSilentUnlockUrl();
+    console.warn('[TTS] GO clip not ready on Start — unlocking audio with silent gesture clip, GO will follow via normal phase cue');
+    await playAudioUrl(silentUrl, 'start:silent-unlock', { revokeAfterPlay: true });
+  }, [enabled, isMuted, playAudioUrl]);
 
-      const p = audio.play();
-      if (p) {
-        p.then(() => {
-          audioUnlocked = true;
-          console.log('[TTS] SAFARI UNLOCK OK — GO played from gesture');
-        }).catch((e: any) => {
-          console.error(`[TTS] SAFARI UNLOCK FAILED: ${e?.name}: ${e?.message}`);
-        });
-      }
-    } catch (err: any) {
-      console.error(`[TTS] SAFARI UNLOCK ERROR: ${err?.message || err}`);
-    }
-  }, [isMuted]);
-
-  // ── Phase-driven cue dispatch ─────────────────────────────────────
-
-  // Work / Rest / Swap phases
   useEffect(() => {
-    if (!current || current.stepType !== 'exercise' || !activeRef.current) return;
+    if (!enabled || !current || current.stepType !== 'exercise' || !activeRef.current) return;
 
     if (phase === 'work') {
       const key = `work_${currentIndex}`;
@@ -340,9 +420,9 @@ export function useWorkoutTTS({
         if (current.name && current.name !== 'Get Ready') {
           if (currentIndex === 0 && firstCueHandledRef.current) {
             firstCueHandledRef.current = false;
-            console.log('[TTS] Skipping first GO (played from gesture)');
+            console.log('[TTS] Skipping first GO (already played from Start gesture)');
           } else {
-            playPhrase(STATIC_PHRASES.GO, `go:${currentIndex}`);
+            void playPhrase(STATIC_PHRASES.GO, `go:${currentIndex}`);
           }
         }
       }
@@ -353,79 +433,65 @@ export function useWorkoutTTS({
 
         if (next?.stepType === 'exercise' && next.name && next.name !== 'Get Ready') {
           const phrase = buildPrepNextPhrase(next.name, next.weight);
-          schedule(() => playPhrase(phrase, `prep:${currentIndex}`), 500);
+          schedule(() => { void playPhrase(phrase, `prep:${currentIndex}`); }, 500);
         }
       }
     } else if (phase === 'swap') {
       const key = `swap_${currentIndex}`;
       if (lastPlayedRef.current !== key) {
         lastPlayedRef.current = key;
-        playPhrase(STATIC_PHRASES.SWAP_SIDES, `swap:${currentIndex}`);
+        void playPhrase(STATIC_PHRASES.SWAP_SIDES, `swap:${currentIndex}`);
       }
     } else if (phase === 'ready') {
       lastPlayedRef.current = '';
       halfwayFiredRef.current = false;
     }
-  }, [phase, currentIndex, current?.name, current?.stepType, next?.name, next?.stepType, next?.weight, playPhrase, schedule]);
+  }, [enabled, phase, currentIndex, current?.name, current?.stepType, next?.name, next?.stepType, next?.weight, playPhrase, schedule]);
 
-  // Special blocks
   useEffect(() => {
-    if (!current || !activeRef.current) return;
+    if (!enabled || !current || !activeRef.current) return;
 
     if (phase === 'waterBreak') {
       const key = `water_${currentIndex}`;
       if (lastPlayedRef.current !== key) {
         lastPlayedRef.current = key;
-        playPhrase(STATIC_PHRASES.WATER_BREAK, `water:${currentIndex}`);
+        void playPhrase(STATIC_PHRASES.WATER_BREAK, `water:${currentIndex}`);
       }
     } else if (phase === 'demo') {
       const key = `demo_${currentIndex}`;
       if (lastPlayedRef.current !== key) {
         lastPlayedRef.current = key;
-        playPhrase(STATIC_PHRASES.DEMO, `demo:${currentIndex}`);
+        void playPhrase(STATIC_PHRASES.DEMO, `demo:${currentIndex}`);
       }
     } else if (phase === 'grabEquipment') {
       const key = `equip_${currentIndex}`;
       if (lastPlayedRef.current !== key) {
         lastPlayedRef.current = key;
         const phrase = buildGrabEquipmentPhrase(current.instructionText);
-        playPhrase(phrase, `equip:${currentIndex}`);
+        void playPhrase(phrase, `equip:${currentIndex}`);
       }
     } else if (phase === 'complete') {
       const key = 'complete';
       if (lastPlayedRef.current !== key) {
         lastPlayedRef.current = key;
-        playPhrase(STATIC_PHRASES.WORKOUT_COMPLETE, 'complete');
+        void playPhrase(STATIC_PHRASES.WORKOUT_COMPLETE, 'complete');
       }
     }
-  }, [phase, currentIndex, current?.instructionText, playPhrase]);
+  }, [enabled, phase, currentIndex, current?.instructionText, playPhrase]);
 
-  // Halfway
   useEffect(() => {
-    if (phase !== 'work' || !current || current.stepType !== 'exercise') return;
+    if (!enabled || phase !== 'work' || !current || current.stepType !== 'exercise') return;
     if (!activeRef.current) return;
     if (currentDuration <= 6) return;
+
     const hw = Math.floor(currentDuration / 2);
     if (timeLeft === hw && !halfwayFiredRef.current) {
       halfwayFiredRef.current = true;
-      playPhrase(STATIC_PHRASES.HALFWAY, `halfway:${currentIndex}`);
+      void playPhrase(STATIC_PHRASES.HALFWAY, `halfway:${currentIndex}`);
     }
-  }, [phase, timeLeft, currentDuration, current, playPhrase, currentIndex]);
+  }, [enabled, phase, timeLeft, currentDuration, current, playPhrase, currentIndex]);
 
-  // ── Cleanup ───────────────────────────────────────────────────────
-  useEffect(() => {
-    activeRef.current = true;
-    return () => {
-      activeRef.current = false;
-      for (const id of pendingTimers.current) clearTimeout(id);
-      pendingTimers.current.clear();
-      if (Platform.OS === 'web' && currentAudio) {
-        currentAudio.pause();
-        currentAudio = null;
-      }
-      setAudioMuted(false);
-    };
-  }, []);
+  useEffect(() => () => resetSession(true), [resetSession]);
 
   return { preloadStatus, unlockAndPlayFirst };
 }

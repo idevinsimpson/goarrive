@@ -44,6 +44,7 @@ export interface FlatMovement {
   description?: string;
   sets?: number;
   reps?: string;
+  weight?: string | number;
   videoUrl?: string;
   thumbnailUrl?: string;
   coachingCues?: string;
@@ -288,6 +289,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               description: mv.description || mv.coachingCues || mv.notes || '',
               sets: mv.sets,
               reps: mv.reps,
+              weight: mv.weight ?? mv.load ?? mv.targetWeight ?? mv.prescribedWeight ?? undefined,
               videoUrl: mv.videoUrl || mv.mediaUrl || '',
               thumbnailUrl: mv.thumbnailUrl || '',
               coachingCues: mv.coachingCues || mv.notes || '',
@@ -367,6 +369,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               description: mv.description || mv.coachingCues || mv.notes || '',
               sets: mv.sets,
               reps: mv.reps,
+              weight: mv.weight ?? mv.load ?? mv.targetWeight ?? mv.prescribedWeight ?? undefined,
               videoUrl: mv.videoUrl || mv.mediaUrl || '',
               thumbnailUrl: mv.thumbnailUrl || '',
               coachingCues: mv.coachingCues || mv.notes || '',
