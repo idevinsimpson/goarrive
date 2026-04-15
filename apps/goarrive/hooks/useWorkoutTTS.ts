@@ -162,6 +162,7 @@ export function useWorkoutTTS({
   const activeRef = useRef(false);
   const pendingTimers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const preWarmKeyRef = useRef('');
+  const preloadStatusRef = useRef<'idle' | 'loading' | 'ready' | 'partial' | 'failed'>('idle');
   const playSequenceRef = useRef(0);
 
   const clearPendingTimers = useCallback(() => {
@@ -199,6 +200,7 @@ export function useWorkoutTTS({
 
     console.log('[TTS] Player session inactive — restoring legacy beeps');
     resetSession(true);
+    preloadStatusRef.current = 'idle';
     setPreloadStatus('idle');
     return undefined;
   }, [enabled, resetSession]);
@@ -264,16 +266,20 @@ export function useWorkoutTTS({
 
     if (missing.length === 0) {
       preWarmKeyRef.current = phraseKey;
+      preloadStatusRef.current = 'ready';
       setPreloadStatus('ready');
       console.log('[TTS] PRE-WARM SKIP — all clips already cached in session');
       return;
     }
 
-    if (preWarmKeyRef.current === phraseKey && preloadStatus === 'loading') {
+    // Guard re-entry using ref (NOT state) to avoid the self-cancellation loop:
+    // setPreloadStatus('loading') would trigger re-render → cleanup → cancelled=true
+    if (preWarmKeyRef.current === phraseKey && preloadStatusRef.current === 'loading') {
       return;
     }
 
     preWarmKeyRef.current = phraseKey;
+    preloadStatusRef.current = 'loading';
     setPreloadStatus('loading');
     console.log(`[TTS] PRE-WARM START — ${missing.length}/${allPhrases.length} clips missing for this workout session`);
 
@@ -287,18 +293,23 @@ export function useWorkoutTTS({
         const ok = results.filter(r => r.status === 'fulfilled' && !!r.value).length;
         const failed = missing.length - ok;
         const loaded = Object.keys(clipsRef.current).length;
-        console.log(`[TTS] PRE-WARM DONE — loaded now=${loaded}, ok=${ok}, failed=${failed}`);
-        setPreloadStatus(failed === 0 ? 'ready' : ok > 0 ? 'partial' : 'failed');
+        const status = failed === 0 ? 'ready' : ok > 0 ? 'partial' : 'failed';
+        console.log(`[TTS] PRE-WARM DONE — loaded now=${loaded}, ok=${ok}, failed=${failed}, status=${status}`);
+        preloadStatusRef.current = status;
+        setPreloadStatus(status);
       } catch (err) {
         console.error('[TTS] PRE-WARM CRASHED:', err);
-        if (!cancelled) setPreloadStatus('failed');
+        if (!cancelled) {
+          preloadStatusRef.current = 'failed';
+          setPreloadStatus('failed');
+        }
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [enabled, allPhrases, ensureClip, preloadStatus]);
+  }, [enabled, allPhrases, ensureClip]);
 
   const playAudioUrl = useCallback(async (
     url: string,

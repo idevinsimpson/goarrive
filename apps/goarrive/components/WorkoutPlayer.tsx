@@ -377,7 +377,14 @@ export default function WorkoutPlayer({
                   style={{ width: 140, height: 46, marginBottom: 12 }}
                   resizeMode="contain"
                 />
-                <TouchableOpacity style={st.readyPlayBtn} onPress={async () => { await unlockAndPlayFirst(); handleStart(); }}>
+                <TouchableOpacity
+                  style={st.readyPlayBtn}
+                  onPress={handleStart}
+                  // Native onClick keeps audio.play() in Safari's synchronous
+                  // gesture call stack. RNW's onPress defers through the
+                  // Responder system which breaks Safari autoplay policy.
+                  {...(Platform.OS === 'web' ? { onClick: () => { unlockAndPlayFirst(); } } as any : {})}
+                >
                   <Icon name="play" size={32} color="#0E1117" />
                 </TouchableOpacity>
               </View>
