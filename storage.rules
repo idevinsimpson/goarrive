@@ -6,6 +6,16 @@ service firebase.storage {
       allow read: if true;
       allow write: if false;
     }
+    // OpenAI TTS generated cues — publicly readable (generated audio, no PII)
+    match /voice_cache/tts/{fileName} {
+      allow read: if true;
+      allow write: if false;
+    }
+    // Movement voice clips — publicly readable (generated audio, no PII)
+    match /voice_cache/movements/{fileName} {
+      allow read: if true;
+      allow write: if false;
+    }
     // Coach voice clones — readable by authenticated users only
     match /voice_cache/coaches/{coachId}/{fileName} {
       allow read: if request.auth != null;
