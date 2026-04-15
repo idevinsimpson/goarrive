@@ -2,14 +2,20 @@
  * useWorkoutTTS — Voice coaching hook for the Workout Player
  *
  * Audio pipeline:
- *   Web:    OpenAI TTS via generateVoice Cloud Function → cached blob URL → HTMLAudioElement
+ *   Web:    OpenAI TTS via generateVoice Cloud Function → AudioContext decode → play
+ *           AudioContext is unlocked on the user's first tap (workout start button).
+ *           This bypasses the browser autoplay policy that blocks audio triggered
+ *           by timers rather than direct user gestures.
  *   Native: expo-speech (same normalized text, no network call needed)
  *
- * All cue text is deterministic — derived directly from player/build state.
- * OpenAI is used only for speech generation, never for deciding what to say.
+ * Caching:
+ *   - audioCache: normalizedText → ArrayBuffer (persists for the session)
+ *   - Storage path is deterministic (hash of text) so the same phrase always
+ *     maps to the same file — enabling cross-session caching in Firebase Storage.
  *
- * Caching: in-memory Map<normalizedText, blobUrl> — persists for the session.
- * Preloading: static cues are generated and cached when the workout starts.
+ * Preloading:
+ *   - Static cues are fetched and cached as ArrayBuffers when the workout starts.
+ *   - This ensures zero latency on the first countdown/next-up cue.
  */
 import { useEffect, useRef, useCallback, useState } from 'react';
 import * as Speech from 'expo-speech';
@@ -47,20 +53,47 @@ const STATIC_CUES = {
   rest:             '3, 2, 1. Rest.',
   lets_go:          "Let's go.",
 } as const;
-
 type StaticCueKey = keyof typeof STATIC_CUES;
 
-/// ── In-memory audio cache: normalizedText → public URL ─────────────────────
-// The generateVoice Cloud Function calls file.makePublic() so the returned
-// storage.googleapis.com URL is directly playable — no fetch/blob conversion.
-const audioCache = new Map<string, string>();
+// ── AudioContext — one shared context, unlocked on first user gesture ────────
+// Must be module-level so it persists across re-renders.
+let sharedAudioContext: AudioContext | null = null;
+let audioContextUnlocked = false;
+
+/**
+ * Call this from a user gesture handler (e.g., the workout start button tap).
+ * Creates and resumes the AudioContext so subsequent timer-triggered audio plays.
+ */
+export function unlockAudioContext(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (!sharedAudioContext) {
+      sharedAudioContext = new (
+        (window as any).AudioContext || (window as any).webkitAudioContext
+      )();
+    }
+    const ctx = sharedAudioContext!;
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    audioContextUnlocked = true;
+  } catch {
+    // AudioContext unavailable (e.g., SSR)
+  }
+}
+
+// ── In-memory audio cache: normalizedText → ArrayBuffer ─────────────────────
+// ArrayBuffer is reusable — decode a new AudioBuffer from it each play.
+const audioCache = new Map<string, ArrayBuffer>();
 // Track in-flight requests to avoid duplicate Cloud Function calls
-const pendingRequests = new Map<string, Promise<string | null>>();
+const pendingRequests = new Map<string, Promise<ArrayBuffer | null>>();
+
 // ── OpenAI TTS via Cloud Function ───────────────────────────────────────────
-async function generateAndCacheAudio(text: string): Promise<string | null> {
+async function generateAndCacheAudio(text: string): Promise<ArrayBuffer | null> {
   const normalized = normalizeCueText(text);
   if (audioCache.has(normalized)) return audioCache.get(normalized)!;
   if (pendingRequests.has(normalized)) return pendingRequests.get(normalized)!;
+
   const request = (async () => {
     try {
       const functions = getFunctions(undefined, 'us-central1');
@@ -70,10 +103,17 @@ async function generateAndCacheAudio(text: string): Promise<string | null> {
       >(functions, 'generateVoice');
       const result = await generateVoice({ text: normalized, voice: 'onyx' });
       const url = result.data.url;
-      // The CF calls file.makePublic() so the URL is directly playable.
-      // No fetch/blob conversion needed — avoids Firebase Storage rules issues.
-      audioCache.set(normalized, url);
-      return url;
+
+      // Fetch the MP3 as an ArrayBuffer for AudioContext decoding.
+      // The CF calls file.makePublic() so this URL is publicly accessible.
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        console.warn('[useWorkoutTTS] fetch failed for:', url, resp.status);
+        return null;
+      }
+      const buffer = await resp.arrayBuffer();
+      audioCache.set(normalized, buffer);
+      return buffer;
     } catch (err) {
       console.warn('[useWorkoutTTS] generateAndCacheAudio failed for:', normalized, err);
       return null;
@@ -81,26 +121,40 @@ async function generateAndCacheAudio(text: string): Promise<string | null> {
       pendingRequests.delete(normalized);
     }
   })();
-  pendingRequests.set(normalized, request);
-   return request;
-}
-// ── HTMLAudioElement playback ────────────────────────────────────────────────
-let currentAudio: HTMLAudioElement | null = null;
 
-function playAudioUrl(url: string): void {
-  if (typeof window === 'undefined') return;
+  pendingRequests.set(normalized, request);
+  return request;
+}
+
+// ── AudioContext playback ────────────────────────────────────────────────────
+// Uses AudioContext.decodeAudioData + AudioBufferSourceNode.
+// This respects the unlocked AudioContext and is not subject to autoplay policy.
+let currentSource: AudioBufferSourceNode | null = null;
+
+async function playWithAudioContext(buffer: ArrayBuffer): Promise<void> {
+  if (!sharedAudioContext || !audioContextUnlocked) {
+    console.warn('[useWorkoutTTS] AudioContext not unlocked — skipping playback');
+    return;
+  }
   try {
-    if (currentAudio) {
-      currentAudio.pause();
-      currentAudio.currentTime = 0;
+    // Stop any currently playing audio
+    if (currentSource) {
+      try { currentSource.stop(); } catch {}
+      currentSource = null;
     }
-    const audio = new (window as any).Audio(url);
-    currentAudio = audio;
-    audio.play().catch((err: any) => {
-      console.warn('[useWorkoutTTS] audio.play() failed:', err);
-    });
+    // Clone the buffer — decodeAudioData detaches it in some browsers
+    const bufferCopy = buffer.slice(0);
+    const audioBuffer = await sharedAudioContext.decodeAudioData(bufferCopy);
+    const source = sharedAudioContext.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(sharedAudioContext.destination);
+    source.start(0);
+    currentSource = source;
+    source.onended = () => {
+      if (currentSource === source) currentSource = null;
+    };
   } catch (err) {
-    console.warn('[useWorkoutTTS] playAudioUrl error:', err);
+    console.warn('[useWorkoutTTS] AudioContext playback error:', err);
   }
 }
 
@@ -168,7 +222,7 @@ export function useWorkoutTTS({
   }, []);
 
   // ── Core speak function ─────────────────────────────────────────────
-  // On web: generates via OpenAI TTS (cached), plays as blob URL.
+  // On web: generates via OpenAI TTS (cached), plays via AudioContext.
   // On native: uses expo-speech with the same normalized text.
   const speakCue = useCallback(
     async (text: string) => {
@@ -184,11 +238,11 @@ export function useWorkoutTTS({
         return;
       }
 
-      // Web: OpenAI TTS
+      // Web: OpenAI TTS via AudioContext
       if (typeof window === 'undefined') return;
-      const audioUrl = await generateAndCacheAudio(normalized);
-      if (audioUrl && !isMuted && !ttsDisabled) {
-        playAudioUrl(audioUrl);
+      const buffer = await generateAndCacheAudio(normalized);
+      if (buffer && !isMuted && !ttsDisabled) {
+        await playWithAudioContext(buffer);
       }
     },
     [isMuted, ttsDisabled],
@@ -200,15 +254,13 @@ export function useWorkoutTTS({
     [speakCue],
   );
 
-  // ── Preload static cues when workout starts ─────────────────────────
-  // Only on web — native uses expo-speech which needs no preloading.
+  // ── Preload static cues on workout start ────────────────────────────
+  // Fire-and-forget: fetch all 9 static cue MP3s into audioCache so the
+  // first countdown fires instantly with no Cloud Function latency.
   useEffect(() => {
+    if (phase === 'ready' || preloadedRef.current) return;
     if (Platform.OS !== 'web') return;
-    if (typeof window === 'undefined') return;
-    if (preloadedRef.current) return;
-    if (phase === 'ready') return; // wait until workout actually starts
     preloadedRef.current = true;
-    // Fire-and-forget: generate and cache all static cues
     Object.values(STATIC_CUES).forEach((text) => {
       generateAndCacheAudio(text).catch(() => {});
     });
@@ -219,19 +271,12 @@ export function useWorkoutTTS({
     if (!current) return;
     const stepType = current.stepType;
 
-    // Intro block
-    if (phase === 'intro' || (phase === 'work' && stepType === 'intro')) {
-      const key = `intro_${currentIndex}`;
-      if (lastSpokenRef.current !== key) {
-        lastSpokenRef.current = key;
-        playCue('lets_go');
-      }
-      return;
-    }
+    // Intro / Outro — no voice cue (full-screen video experience)
+    if (phase === 'intro' || phase === 'outro') return;
 
-    // Outro block
-    if (phase === 'outro' || (phase === 'work' && stepType === 'outro')) {
-      const key = `outro_${currentIndex}`;
+    // Complete
+    if (phase === 'complete') {
+      const key = `complete_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
         playCue('workout_complete');
@@ -346,7 +391,6 @@ export function useWorkoutTTS({
   useEffect(() => {
     if (phase !== 'work' || !current || current.stepType !== 'exercise') return;
     if (currentDuration <= 0) return;
-
     if (timeLeft === 3 && countdownSpokenRef.current !== 3) {
       countdownSpokenRef.current = 3;
       playCue('countdown');
@@ -365,9 +409,9 @@ export function useWorkoutTTS({
   useEffect(() => {
     return () => {
       try {
-        if (currentAudio) {
-          currentAudio.pause();
-          currentAudio = null;
+        if (currentSource) {
+          try { currentSource.stop(); } catch {}
+          currentSource = null;
         }
         if (Platform.OS !== 'web') {
           Speech.stop();
