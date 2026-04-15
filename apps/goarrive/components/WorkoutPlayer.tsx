@@ -377,7 +377,7 @@ export default function WorkoutPlayer({
                   style={{ width: 140, height: 46, marginBottom: 12 }}
                   resizeMode="contain"
                 />
-                <TouchableOpacity style={st.readyPlayBtn} onPress={() => { unlockAndPlayFirst(); handleStart(); }}>
+                <TouchableOpacity style={st.readyPlayBtn} onPress={async () => { await unlockAndPlayFirst(); handleStart(); }}>
                   <Icon name="play" size={32} color="#0E1117" />
                 </TouchableOpacity>
               </View>

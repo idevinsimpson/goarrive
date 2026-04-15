@@ -395,17 +395,29 @@ export function useWorkoutTTS({
       return;
     }
 
+    firstCueHandledRef.current = false;
+
+    if (!audioUnlocked) {
+      const silentUrl = createSilentUnlockUrl();
+      console.log('[TTS] Priming web audio with silent gesture clip before first spoken cue');
+      const unlocked = await playAudioUrl(silentUrl, 'start:silent-unlock', { revokeAfterPlay: true });
+      if (!unlocked) {
+        console.warn('[TTS] Silent unlock failed on Start — leaving normal phase GO armed');
+        return;
+      }
+    }
+
     const goUrl = clipsRef.current[STATIC_PHRASES.GO];
-    if (goUrl) {
-      firstCueHandledRef.current = true;
-      await playAudioUrl(goUrl, 'start:go:gesture');
+    if (!goUrl) {
+      console.warn('[TTS] GO clip not ready on Start — audio unlocked, GO will follow via normal phase cue');
       return;
     }
 
-    firstCueHandledRef.current = false;
-    const silentUrl = createSilentUnlockUrl();
-    console.warn('[TTS] GO clip not ready on Start — unlocking audio with silent gesture clip, GO will follow via normal phase cue');
-    await playAudioUrl(silentUrl, 'start:silent-unlock', { revokeAfterPlay: true });
+    const playedGo = await playAudioUrl(goUrl, 'start:go:gesture');
+    firstCueHandledRef.current = playedGo;
+    if (!playedGo) {
+      console.warn('[TTS] Start-gesture GO failed — leaving normal phase GO armed');
+    }
   }, [enabled, isMuted, playAudioUrl]);
 
   useEffect(() => {
