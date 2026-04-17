@@ -135,14 +135,18 @@ export default function WorkoutPlayer({
   // ── Video ref ────────────────────────────────
   const videoRef = useRef<any>(null);
 
+  // Detached from `phase` on purpose: the displayed video must not restart
+  // when the timer rolls work→rest or rest→work. Playback state is driven by
+  // the user's pause/resume only; `shouldPlay` keeps the declarative side in
+  // sync, and this imperative mirror handles the toggle reliably on web.
   useEffect(() => {
     if (!videoRef.current) return;
     if (isPaused) {
       videoRef.current.pauseAsync?.().catch(() => {});
-    } else if (phase === 'work' || phase === 'rest') {
+    } else {
       videoRef.current.playAsync?.().catch(() => {});
     }
-  }, [isPaused, phase]);
+  }, [isPaused]);
 
   // ── Tap-to-show controls ──────────────────────────────
   const [showControls, setShowControls] = useState(false);
@@ -168,7 +172,6 @@ export default function WorkoutPlayer({
     });
   }, []);
 
-  useEffect(() => { setVideoReady(false); }, [currentIndex]);
   useEffect(() => { setShowControls(false); }, [currentIndex]);
   useEffect(() => {
     return () => {
@@ -260,6 +263,19 @@ export default function WorkoutPlayer({
 
     return pickAsset(displayItem, displayIndex);
   }, [phase, timeLeft, current, next, currentIndex, isRepBased, swapSide, flatMovements]);
+
+  // Stable object identity — a new {uri} each render can cause expo-av to
+  // re-evaluate the source and briefly flicker even when the URL is unchanged.
+  const videoSource = useMemo(
+    () => (activeVideoUrl ? { uri: activeVideoUrl } : null),
+    [activeVideoUrl],
+  );
+
+  // Tied to the actual asset, not the timeline index. Index advances on every
+  // phase rollover (e.g. rest→work for the same upcoming movement, where the
+  // video has been on screen since the reveal point). Resetting on index would
+  // re-show the poster over a still-playing Video.
+  useEffect(() => { setVideoReady(false); }, [activeVideoUrl]);
 
   // ── Shared header component ───────────────────────────────────────
   const renderHeader = (showProgress = true) => (
@@ -769,12 +785,12 @@ export default function WorkoutPlayer({
             <View style={st.videoArea}>
               <TouchableWithoutFeedback onPress={phase === 'work' ? handleVideoTap : undefined}>
                 <View style={st.videoInner}>
-                  {activeVideoUrl ? (
+                  {activeVideoUrl && videoSource ? (
                     <>
                       <Video
                         key={activeVideoUrl}
                         ref={videoRef}
-                        source={{ uri: activeVideoUrl }}
+                        source={videoSource}
                         resizeMode={ResizeMode.COVER}
                         isLooping
                         shouldPlay={!isPaused}
