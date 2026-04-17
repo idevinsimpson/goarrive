@@ -161,6 +161,9 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
       }
 
       // ── Auto-insert demo step when block.showDemo is true ─────────
+      // Demo duration comes from the coach's `demoDurationSec` setting on the block.
+      // Do NOT use `circuitStartRestSec` here — that is the beginning-rest value, a
+      // separate phase that plays AFTER the demo and before the first movement.
       if (block.showDemo) {
         const demoMvs = (block.movements || []).map((m: any) => ({
           name: m.movementName || m.name || 'Movement',
@@ -170,7 +173,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
         }));
         flat.push({
           name: block.label || block.name || `Block ${bi + 1}`,
-          duration: block.circuitStartRestSec ?? 20,
+          duration: block.demoDurationSec ?? 20,
           restAfter: 0,
           blockName: block.label || block.name || `Block ${bi + 1}`,
           blockIndex: bi,
@@ -224,16 +227,20 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
             ? circuitStartRest
             : firstMovementPrep;
 
-          // Insert a prep rest on the previous step if one exists,
-          // otherwise the ready screen / previous block's last step handles it.
-          // We set restAfter on the step that was just pushed (the last item in flat)
-          // so the player shows rest with "Next: [first movement name]".
-          if (prepDuration > 0 && flat.length > 0) {
-            // Attach prep rest to the previous step in the flat array
-            flat[flat.length - 1].restAfter = prepDuration;
-          } else if (prepDuration > 0 && flat.length === 0) {
-            // Very first step of the entire workout — no previous step exists.
-            // Insert a synthetic prep step so the player shows a rest screen first.
+          // Insert a prep rest before the first movement of this round.
+          // - If the previous flat step is a normal exercise step, attach prep to
+          //   its restAfter (rest-shift pattern — what was "rest on the next
+          //   movement" becomes "restAfter on the previous movement").
+          // - If there's no previous step OR the previous step is a special-block
+          //   phase (demo/intro/transition/etc.), those phases IGNORE restAfter and
+          //   just auto-advance. Attaching prep there would silently drop it. In
+          //   that case, insert a synthetic "Get Ready" prep step so the beginning
+          //   rest plays as its own phase.
+          const prevStep = flat.length > 0 ? flat[flat.length - 1] : null;
+          const prevIsSpecial = !!prevStep && prevStep.stepType !== 'exercise';
+          if (prepDuration > 0 && prevStep && !prevIsSpecial) {
+            prevStep.restAfter = prepDuration;
+          } else if (prepDuration > 0 && (!prevStep || prevIsSpecial)) {
             const firstMv = movements[0];
             flat.push({
               name: 'Get Ready',
@@ -311,11 +318,16 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
             calculateAdjustedRest(mv, block, workoutDifficulty),
           );
 
-          // Prep rest before first movement of this set
+          // Prep rest before first movement of this set.
+          // Same rule as circuit/superset: if previous step is a special-block
+          // phase (demo/intro/etc.), insert a synthetic Get Ready instead of
+          // attaching restAfter — special phases ignore restAfter.
           const firstPrep = ownRests[0] ?? 0;
-          if (firstPrep > 0 && flat.length > 0) {
-            flat[flat.length - 1].restAfter = firstPrep;
-          } else if (firstPrep > 0 && flat.length === 0) {
+          const prevStep = flat.length > 0 ? flat[flat.length - 1] : null;
+          const prevIsSpecial = !!prevStep && prevStep.stepType !== 'exercise';
+          if (firstPrep > 0 && prevStep && !prevIsSpecial) {
+            prevStep.restAfter = firstPrep;
+          } else if (firstPrep > 0 && (!prevStep || prevIsSpecial)) {
             const firstMv = movements[0];
             flat.push({
               name: 'Get Ready',
