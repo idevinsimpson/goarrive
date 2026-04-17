@@ -26,7 +26,6 @@ import {
   StyleSheet,
   Modal,
   TouchableOpacity,
-  TouchableWithoutFeedback,
   Platform,
   Dimensions,
   Image,
@@ -118,7 +117,7 @@ export default function WorkoutPlayer({
   // ── Movement swap ─────────────────────────────
   const {
     showSwap, alternatives, loadingAlts,
-    openSwap, closeSwap, swapMovement, getSwapLog,
+    closeSwap, swapMovement, getSwapLog,
   } = useMovementSwap(flatMovements, currentIndex, setFlatOverride);
   const [swapReason, setSwapReason] = useState('');
 
@@ -154,7 +153,7 @@ export default function WorkoutPlayer({
   const [videoReady, setVideoReady] = useState(false);
 
   // ── Playback speed ────────────────────────────
-  const { speed, speedLabel, cycleSpeed } = usePlaybackSpeed(current?.id);
+  const { speed } = usePlaybackSpeed(current?.id);
 
   useEffect(() => {
     if (!videoRef.current) return;
@@ -543,10 +542,6 @@ export default function WorkoutPlayer({
                 <View style={st.goldTimerBox}>
                   <Text style={st.goldTimerText}>{timeLeft}</Text>
                 </View>
-                <TouchableOpacity style={[st.skipPill, { marginTop: 16 }]} onPress={handleSkip}>
-                  <Icon name="skip-forward" size={16} color="#F5A623" />
-                  <Text style={st.skipPillText}>Skip</Text>
-                </TouchableOpacity>
               </View>
             </View>
           );
@@ -580,10 +575,6 @@ export default function WorkoutPlayer({
               <View style={st.goldTimerBox}>
                 <Text style={st.goldTimerText}>{timeLeft}</Text>
               </View>
-              <TouchableOpacity style={st.skipPill} onPress={handleSkip}>
-                <Icon name="skip-forward" size={16} color="#F5A623" />
-                <Text style={st.skipPillText}>Skip</Text>
-              </TouchableOpacity>
             </View>
           </View>
         )}
@@ -623,10 +614,6 @@ export default function WorkoutPlayer({
                     </View>
                   ))}
                 </View>
-                <TouchableOpacity style={[st.skipPill, { marginTop: 'auto' as any, marginBottom: 24 }]} onPress={handleSkip}>
-                  <Icon name="skip-forward" size={16} color="#F5A623" />
-                  <Text style={st.skipPillText}>Skip</Text>
-                </TouchableOpacity>
               </View>
             </>
           );
@@ -680,11 +667,6 @@ export default function WorkoutPlayer({
               </View>
             </View>
 
-            <TouchableOpacity style={[st.skipPill, { alignSelf: 'center', marginTop: 12 }]} onPress={handleSkip}>
-              <Icon name="skip-forward" size={16} color="#F5A623" />
-              <Text style={st.skipPillText}>Skip</Text>
-            </TouchableOpacity>
-
             {renderNextUp()}
           </View>
         )}
@@ -709,10 +691,6 @@ export default function WorkoutPlayer({
                 <View style={st.goldTimerBox}>
                   <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
                 </View>
-                <TouchableOpacity style={[st.skipPill, { marginTop: 8 }]} onPress={handleSkip}>
-                  <Icon name="skip-forward" size={16} color="#F5A623" />
-                  <Text style={st.skipPillText}>Skip</Text>
-                </TouchableOpacity>
               </View>
 
               {renderNextUp()}
@@ -773,11 +751,6 @@ export default function WorkoutPlayer({
                 </View>
               </View>
             </View>
-
-            <TouchableOpacity style={[st.skipPill, { alignSelf: 'center', marginTop: 12 }]} onPress={handleSkip}>
-              <Icon name="skip-forward" size={16} color="#F5A623" />
-              <Text style={st.skipPillText}>Skip</Text>
-            </TouchableOpacity>
           </View>
         )}
 
@@ -786,23 +759,8 @@ export default function WorkoutPlayer({
         {/* the same video, which already shows the next item per activeVideoUrl. */}
         {(phase === 'work' || phase === 'rest') && current && (
           <View style={st.workContainer}>
-            {/* Header (rest only — work uses a floating overlay) */}
+            {/* Header (rest only — work uses the shared overlay close button) */}
             {phase === 'rest' && renderHeader()}
-
-            {/* Floating header overlay (work only) */}
-            {phase === 'work' && showControls && (
-              <View style={st.floatingHeader}>
-                <TouchableOpacity onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-                  <Icon name="close" size={24} color="#8A95A3" />
-                </TouchableOpacity>
-                <Text style={st.floatingWorkoutName} numberOfLines={1}>
-                  {workout?.name ?? 'Workout'}
-                </Text>
-                <Text style={st.floatingProgress}>
-                  {currentIndex + 1}/{total}
-                </Text>
-              </View>
-            )}
 
             {/* GoArrive logo (work only) */}
             {phase === 'work' && (
@@ -860,112 +818,63 @@ export default function WorkoutPlayer({
               </View>
             )}
 
-            {/* Shared video area — Video stays mounted across work↔rest */}
+            {/* Shared video area — Video stays mounted across work↔rest.     */}
+            {/* Tap handling lives on the shared player-shell overlay below, */}
+            {/* not on the video element, so every phase behaves the same.   */}
             <View style={st.videoArea}>
-              <TouchableWithoutFeedback onPress={phase === 'work' ? handleVideoTap : undefined}>
-                <View style={st.videoInner}>
-                  {videoLayers.length > 0 ? (
-                    <>
-                      {videoLayers.map((layer) => {
-                        // The displayed layer is fully visible. The preload
-                        // layer stays at opacity 0 — loaded but invisible —
-                        // until the reveal point flips activeVideoUrl to it,
-                        // at which point displayedUrl promotes it instantly.
-                        const isDisplayed = layer.url === displayedUrl;
-                        const opacity = isDisplayed ? 1 : 0;
-                        return (
-                          <Video
-                            key={layer.url}
-                            ref={isDisplayed ? videoRef : undefined}
-                            source={getVideoSource(layer.url)}
-                            resizeMode={ResizeMode.COVER}
-                            isLooping
-                            shouldPlay={!isPaused}
-                            isMuted
-                            style={[st.videoPlayer, st.videoLayer, { opacity } as any]}
-                            videoStyle={
-                              Platform.OS === 'web'
-                                ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
-                                : undefined
-                            }
-                            onReadyForDisplay={() => handleLayerReady(layer.url)}
-                          />
-                        );
-                      })}
-                      {!displayedUrl && activeThumbUrl && (
-                        <Image
-                          source={{ uri: activeThumbUrl }}
-                          style={st.posterFallback}
-                          resizeMode="cover"
+              <View style={st.videoInner}>
+                {videoLayers.length > 0 ? (
+                  <>
+                    {videoLayers.map((layer) => {
+                      // The displayed layer is fully visible. The preload
+                      // layer stays at opacity 0 — loaded but invisible —
+                      // until the reveal point flips activeVideoUrl to it,
+                      // at which point displayedUrl promotes it instantly.
+                      const isDisplayed = layer.url === displayedUrl;
+                      const opacity = isDisplayed ? 1 : 0;
+                      return (
+                        <Video
+                          key={layer.url}
+                          ref={isDisplayed ? videoRef : undefined}
+                          source={getVideoSource(layer.url)}
+                          resizeMode={ResizeMode.COVER}
+                          isLooping
+                          shouldPlay={!isPaused}
+                          isMuted
+                          style={[st.videoPlayer, st.videoLayer, { opacity } as any]}
+                          videoStyle={
+                            Platform.OS === 'web'
+                              ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
+                              : undefined
+                          }
+                          onReadyForDisplay={() => handleLayerReady(layer.url)}
                         />
-                      )}
-                    </>
-                  ) : activeThumbUrl ? (
-                    <Image
-                      source={{ uri: activeThumbUrl }}
-                      style={st.videoPlayer}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <View style={[st.videoPlayer, st.videoPlaceholder]}>
-                      <Icon name="play-circle" size={48} color="#3A4050" />
-                    </View>
-                  )}
-
-                  {phase === 'work' && (
-                    <TouchableOpacity
-                      style={st.tapInterceptor}
-                      onPress={handleVideoTap}
-                      activeOpacity={1}
-                    />
-                  )}
-
-                  {phase === 'work' && showControls && (
-                    <View style={st.controlsOverlay}>
-                      {isRepBased ? (
-                        <TouchableOpacity style={st.overlayCenterBtn} onPress={handleRepDone}>
-                          <Icon name="check" size={32} color="#0E1117" />
-                          <Text style={st.overlayDoneBtnText}>Done</Text>
-                        </TouchableOpacity>
-                      ) : (
-                        <TouchableOpacity style={st.overlayCenterBtn} onPress={handlePauseResume}>
-                          <Icon name={isPaused ? 'play' : 'pause'} size={32} color="#0E1117" />
-                        </TouchableOpacity>
-                      )}
-                      <View style={st.overlaySecondaryRow}>
-                        <TouchableOpacity style={st.overlaySkipBtn} onPress={handleSkip}>
-                          <Icon name="skip-forward" size={18} color="#F5A623" />
-                          <Text style={st.overlaySkipText}>Skip</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={st.overlaySwapBtn} onPress={openSwap}>
-                          <Icon name="refresh-cw" size={14} color="#F5A623" />
-                          <Text style={st.overlaySwapText}>Swap Movement</Text>
-                        </TouchableOpacity>
-                      </View>
-                      <View style={st.speedRow}>
-                        <TouchableOpacity
-                          style={st.speedBtn}
-                          onPress={cycleSpeed}
-                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        >
-                          <Text style={st.speedBtnText}>{speedLabel}</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  )}
-                </View>
-              </TouchableWithoutFeedback>
+                      );
+                    })}
+                    {!displayedUrl && activeThumbUrl && (
+                      <Image
+                        source={{ uri: activeThumbUrl }}
+                        style={st.posterFallback}
+                        resizeMode="cover"
+                      />
+                    )}
+                  </>
+                ) : activeThumbUrl ? (
+                  <Image
+                    source={{ uri: activeThumbUrl }}
+                    style={st.videoPlayer}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={[st.videoPlayer, st.videoPlaceholder]}>
+                    <Icon name="play-circle" size={48} color="#3A4050" />
+                  </View>
+                )}
+              </View>
             </View>
 
-            {/* Footer */}
-            {phase === 'work' ? (
-              renderNextUp()
-            ) : (
-              <TouchableOpacity style={[st.skipPill, { alignSelf: 'center', marginTop: 12 }]} onPress={handleSkip}>
-                <Icon name="skip-forward" size={16} color="#F5A623" />
-                <Text style={st.skipPillText}>Skip Rest</Text>
-              </TouchableOpacity>
-            )}
+            {/* Footer (work only — next-up bar) */}
+            {phase === 'work' && renderNextUp()}
           </View>
         )}
 
@@ -1007,6 +916,52 @@ export default function WorkoutPlayer({
               </TouchableOpacity>
             </View>
           </>
+        )}
+
+        {/* ── Shared player-shell controls ─────────────────────── */}
+        {/* One tap-anywhere surface + one overlay for every active */}
+        {/* phase. Skip advances through the timeline via the hook, */}
+        {/* so each state advances to its own correct next item.    */}
+        {phase !== 'ready' && phase !== 'complete' && !showControls && (
+          <TouchableOpacity
+            style={st.sharedTapCatcher}
+            onPress={handleVideoTap}
+            activeOpacity={1}
+          />
+        )}
+
+        {phase !== 'ready' && phase !== 'complete' && showControls && (
+          <View style={st.sharedControlsOverlay}>
+            <TouchableOpacity
+              style={st.sharedOverlayBackdrop}
+              onPress={handleVideoTap}
+              activeOpacity={1}
+            />
+            <View style={st.sharedOverlayCloseRow} pointerEvents="box-none">
+              <TouchableOpacity
+                onPress={onClose}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              >
+                <Icon name="close" size={26} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+            <View style={st.sharedOverlayCenterStack} pointerEvents="box-none">
+              {phase === 'work' && isRepBased ? (
+                <TouchableOpacity style={st.sharedOverlayCenterBtn} onPress={handleRepDone}>
+                  <Icon name="check" size={32} color="#0E1117" />
+                  <Text style={st.sharedOverlayDoneText}>Done</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={st.sharedOverlayCenterBtn} onPress={handlePauseResume}>
+                  <Icon name={isPaused ? 'play' : 'pause'} size={36} color="#0E1117" />
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={st.sharedOverlaySkipBtn} onPress={handleSkip}>
+                <Icon name="skip-forward" size={18} color="#F5A623" />
+                <Text style={st.sharedOverlaySkipText}>Skip</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         )}
       </View>
       </View>
@@ -1234,18 +1189,6 @@ const st = StyleSheet.create({
     textAlign: 'center', marginBottom: 32,
   },
 
-  // ── Skip pill (shared by special blocks) ───────────────────────────
-  skipPill: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingVertical: 8, paddingHorizontal: 16,
-    borderRadius: 20, borderWidth: 1,
-    borderColor: 'rgba(245,166,35,0.3)',
-    marginTop: 8,
-  },
-  skipPillText: {
-    fontSize: 14, fontWeight: '600', color: '#F5A623', fontFamily: FH,
-  },
-
   // ── Special block shared styles ────────────────────────────────────
   specialContent: {
     flex: 1,
@@ -1340,24 +1283,6 @@ const st = StyleSheet.create({
   blockLabel: {
     fontSize: 14, fontWeight: '600', color: '#8A95A3', fontFamily: FB,
     marginBottom: 8,
-  },
-
-  // Floating header
-  floatingHeader: {
-    position: 'absolute', top: 0, left: 0, right: 0,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: Platform.select({ ios: 8, android: 4, web: 8, default: 8 }),
-    paddingBottom: 6,
-    backgroundColor: 'rgba(14,17,23,0.85)',
-    zIndex: 50,
-  } as any,
-  floatingWorkoutName: {
-    flex: 1, textAlign: 'center', color: '#8A95A3',
-    fontSize: 13, fontWeight: '600', fontFamily: FB, marginHorizontal: 8,
-  },
-  floatingProgress: {
-    color: '#F5A623', fontSize: 13, fontWeight: '700', fontFamily: FH,
   },
 
   // WORK phase
@@ -1458,53 +1383,45 @@ const st = StyleSheet.create({
     ...StyleSheet.absoluteFillObject, backgroundColor: '#000000',
   } as any,
 
-  tapInterceptor: {
-    ...StyleSheet.absoluteFillObject, backgroundColor: 'transparent', zIndex: 5,
+  // ── Shared player-shell overlay ──────────────────────────────────────
+  // Covers the whole player container so tap-anywhere + controls behave
+  // identically across every active phase (work/rest/demo/intro/etc.).
+  sharedTapCatcher: {
+    ...StyleSheet.absoluteFillObject, backgroundColor: 'transparent', zIndex: 90,
   } as any,
-
-  controlsOverlay: {
+  sharedControlsOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'center', alignItems: 'center', zIndex: 15,
+    zIndex: 100,
   } as any,
-  overlayCenterBtn: {
-    position: 'absolute' as any, top: '50%' as any, left: '50%' as any,
-    width: 72, height: 72, borderRadius: 36,
-    backgroundColor: '#F5A623', justifyContent: 'center', alignItems: 'center',
-    marginTop: -36, marginLeft: -36, zIndex: 2,
+  sharedOverlayBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  } as any,
+  sharedOverlayCloseRow: {
+    position: 'absolute' as any,
+    top: Platform.select({ ios: 44, android: 20, web: 16, default: 16 }),
+    left: 16,
   },
-  overlaySecondaryRow: {
-    position: 'absolute' as any, top: '50%' as any, left: 0, right: 0,
-    marginTop: 48, flexDirection: 'row', justifyContent: 'center',
-    alignItems: 'center', gap: 16,
+  sharedOverlayCenterStack: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center', alignItems: 'center', gap: 18,
+  } as any,
+  sharedOverlayCenterBtn: {
+    width: 84, height: 84, borderRadius: 42,
+    backgroundColor: '#F5A623',
+    justifyContent: 'center', alignItems: 'center',
   },
-  overlayDoneBtnText: {
+  sharedOverlayDoneText: {
     fontSize: 14, fontWeight: '700', color: '#0E1117', fontFamily: FH, marginTop: 2,
   },
-  overlaySkipBtn: {
+  sharedOverlaySkipBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingVertical: 10, paddingHorizontal: 14,
+    paddingVertical: 10, paddingHorizontal: 20,
+    borderRadius: 20, borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.5)',
   },
-  overlaySkipText: {
+  sharedOverlaySkipText: {
     fontSize: 15, fontWeight: '600', color: '#F5A623', fontFamily: FH,
-  },
-  overlaySwapBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingVertical: 8, paddingHorizontal: 14,
-    borderRadius: 16, borderWidth: 1, borderColor: 'rgba(245,166,35,0.4)',
-  },
-  overlaySwapText: {
-    fontSize: 13, color: '#F5A623', fontFamily: FB, fontWeight: '600',
-  },
-
-  // Playback speed
-  speedRow: { position: 'absolute' as any, bottom: 16, right: 16 },
-  speedBtn: {
-    backgroundColor: 'rgba(255,255,255,0.22)',
-    paddingVertical: 5, paddingHorizontal: 12, borderRadius: 10,
-  },
-  speedBtnText: {
-    color: '#FFFFFF', fontSize: 13, fontWeight: '700' as any, fontFamily: 'Archivo',
   },
 
   // Legacy styles
