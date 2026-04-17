@@ -18,10 +18,11 @@ import type { StepType } from './useWorkoutFlatten';
 export type Phase = 'ready' | 'work' | 'rest' | 'swap' | 'complete'
   | 'intro' | 'outro' | 'demo' | 'transition' | 'waterBreak' | 'grabEquipment';
 
-// Skip lands this many seconds before the next timeline item begins, aligning
-// with the visual reveal lead (see REVEAL_LEAD_SECONDS in WorkoutPlayer.tsx)
-// so the video swap and "3, 2, 1" cue play naturally instead of a hard cut.
-const SKIP_PRE_ENTRY_SECONDS = 3.5;
+// Integer seconds so the on-screen timer shows "4, 3, 2, 1" instead of a
+// fractional half-second. Paired with REVEAL_LEAD_SECONDS = 3.5 in
+// WorkoutPlayer.tsx: the reveal + "3, 2, 1" cue fire naturally once the
+// countdown ticks past 3.5 (i.e., at 3).
+const SKIP_PRE_ENTRY_SECONDS = 4;
 
 interface FlatMovement {
   name: string;
