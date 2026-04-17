@@ -264,41 +264,85 @@ export default function WorkoutPlayer({
     return pickAsset(displayItem, displayIndex);
   }, [phase, timeLeft, current, next, currentIndex, isRepBased, swapSide, flatMovements]);
 
-  // ── Double-buffered video layers ─────────────────────────────────────
-  // Cross-fade between the outgoing and incoming video so the reveal swap
-  // is seamless. New layers mount on top with opacity 0; once the new video
-  // signals onReadyForDisplay, it becomes opaque and the older layer is
-  // dropped. Until then, the previous layer keeps playing underneath, so the
-  // user never sees a poster flash or a transparent gap.
-  const [videoLayers, setVideoLayers] = useState<Array<{ url: string; ready: boolean }>>(
-    () => (activeVideoUrl ? [{ url: activeVideoUrl, ready: false }] : []),
-  );
-
-  useEffect(() => {
-    if (!activeVideoUrl) {
-      setVideoLayers([]);
-      return;
+  // ── Double-buffered video layers, with eager preload ─────────────────
+  // We render up to two Video elements at once: the one being shown, and
+  // the upcoming one mounted invisibly so it has time to fully decode
+  // before the reveal point. When activeVideoUrl flips at the 3.5s mark,
+  // the upcoming layer is already ready, so the visibility swap is
+  // instantaneous — no poster flash, no waiting on load.
+  //
+  // displayedUrl is the layer that's actually painted on screen. It only
+  // changes once a new layer reports ready, so the outgoing video keeps
+  // playing visibly until the incoming one can take over without a gap.
+  const preloadVideoUrl = useMemo<string | null>(() => {
+    // Walk forward until we find an exercise video URL that differs from
+    // the active one — that's what should be loading in the background.
+    if (!activeVideoUrl) return null;
+    let foundActive = false;
+    for (let i = 0; i < flatMovements.length; i++) {
+      const m = flatMovements[i];
+      const url = m?.videoUrl;
+      if (!url) continue;
+      if (foundActive && url !== activeVideoUrl) return url;
+      if (url === activeVideoUrl) foundActive = true;
     }
+    return null;
+  }, [activeVideoUrl, flatMovements]);
+
+  const [videoLayers, setVideoLayers] = useState<Array<{ url: string; ready: boolean }>>([]);
+  const [displayedUrl, setDisplayedUrl] = useState<string | null>(null);
+
+  // Mount the active layer if not already in the stack.
+  useEffect(() => {
+    if (!activeVideoUrl) return;
     setVideoLayers((prev) => {
-      const last = prev[prev.length - 1];
-      if (last && last.url === activeVideoUrl) return prev;
+      if (prev.some((l) => l.url === activeVideoUrl)) return prev;
       return [...prev, { url: activeVideoUrl, ready: false }];
     });
   }, [activeVideoUrl]);
 
-  const handleLayerReady = useCallback((url: string) => {
+  // Mount the preload layer ahead of time so it's decoded by reveal.
+  useEffect(() => {
+    if (!preloadVideoUrl) return;
     setVideoLayers((prev) => {
-      const idx = prev.findIndex((l) => l.url === url);
-      if (idx === -1) return prev;
-      const updated = prev.map((l, i) => (i === idx ? { ...l, ready: true } : l));
-      // If the topmost layer is now ready, drop everything below it.
-      if (idx === updated.length - 1) {
-        setVideoReady(true);
-        return [updated[idx]];
-      }
-      return updated;
+      if (prev.some((l) => l.url === preloadVideoUrl)) return prev;
+      return [...prev, { url: preloadVideoUrl, ready: false }];
     });
+  }, [preloadVideoUrl]);
+
+  const handleLayerReady = useCallback((url: string) => {
+    setVideoLayers((prev) => prev.map((l) => (l.url === url ? { ...l, ready: true } : l)));
   }, []);
+
+  // Promote the active layer to displayed as soon as it's ready. Until
+  // then, displayedUrl holds the previous URL so the outgoing layer stays
+  // visible. Initial mount: displayed flips from null → active on first ready.
+  useEffect(() => {
+    if (!activeVideoUrl) {
+      setDisplayedUrl(null);
+      return;
+    }
+    if (displayedUrl === activeVideoUrl) return;
+    const activeLayer = videoLayers.find((l) => l.url === activeVideoUrl);
+    if (activeLayer?.ready) setDisplayedUrl(activeVideoUrl);
+  }, [activeVideoUrl, displayedUrl, videoLayers]);
+
+  // Prune layers we no longer need: keep only active, preload, and the
+  // currently displayed (in case displayed is briefly different from active
+  // during a transition that's about to complete).
+  useEffect(() => {
+    setVideoLayers((prev) => {
+      const keep = new Set<string>();
+      if (activeVideoUrl) keep.add(activeVideoUrl);
+      if (preloadVideoUrl) keep.add(preloadVideoUrl);
+      if (displayedUrl) keep.add(displayedUrl);
+      const next = prev.filter((l) => keep.has(l.url));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [activeVideoUrl, preloadVideoUrl, displayedUrl]);
+
+  // videoReady drives the poster fallback — true once anything is on screen.
+  useEffect(() => { setVideoReady(displayedUrl !== null); }, [displayedUrl]);
 
   // Stable {uri} object per URL so expo-av doesn't re-evaluate the source
   // on every render of the same layer.
@@ -311,9 +355,6 @@ export default function WorkoutPlayer({
     }
     return cached;
   }, []);
-
-  const anyLayerReady = videoLayers.some((l) => l.ready);
-  useEffect(() => { setVideoReady(anyLayerReady); }, [anyLayerReady]);
 
   // ── Shared header component ───────────────────────────────────────
   const renderHeader = (showProgress = true) => (
@@ -825,17 +866,17 @@ export default function WorkoutPlayer({
                 <View style={st.videoInner}>
                   {videoLayers.length > 0 ? (
                     <>
-                      {videoLayers.map((layer, i) => {
-                        const isTop = i === videoLayers.length - 1;
-                        // Visible only once the layer has rendered its first
-                        // frame. Lower ready layers keep playing under any
-                        // not-yet-ready top layer, so the user sees continuous
-                        // motion through the swap.
-                        const opacity = layer.ready ? 1 : 0;
+                      {videoLayers.map((layer) => {
+                        // The displayed layer is fully visible. The preload
+                        // layer stays at opacity 0 — loaded but invisible —
+                        // until the reveal point flips activeVideoUrl to it,
+                        // at which point displayedUrl promotes it instantly.
+                        const isDisplayed = layer.url === displayedUrl;
+                        const opacity = isDisplayed ? 1 : 0;
                         return (
                           <Video
                             key={layer.url}
-                            ref={isTop ? videoRef : undefined}
+                            ref={isDisplayed ? videoRef : undefined}
                             source={getVideoSource(layer.url)}
                             resizeMode={ResizeMode.COVER}
                             isLooping
@@ -851,7 +892,7 @@ export default function WorkoutPlayer({
                           />
                         );
                       })}
-                      {!anyLayerReady && activeThumbUrl && (
+                      {!displayedUrl && activeThumbUrl && (
                         <Image
                           source={{ uri: activeThumbUrl }}
                           style={st.posterFallback}
