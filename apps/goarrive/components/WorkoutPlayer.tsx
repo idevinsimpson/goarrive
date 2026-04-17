@@ -264,18 +264,56 @@ export default function WorkoutPlayer({
     return pickAsset(displayItem, displayIndex);
   }, [phase, timeLeft, current, next, currentIndex, isRepBased, swapSide, flatMovements]);
 
-  // Stable object identity — a new {uri} each render can cause expo-av to
-  // re-evaluate the source and briefly flicker even when the URL is unchanged.
-  const videoSource = useMemo(
-    () => (activeVideoUrl ? { uri: activeVideoUrl } : null),
-    [activeVideoUrl],
+  // ── Double-buffered video layers ─────────────────────────────────────
+  // Cross-fade between the outgoing and incoming video so the reveal swap
+  // is seamless. New layers mount on top with opacity 0; once the new video
+  // signals onReadyForDisplay, it becomes opaque and the older layer is
+  // dropped. Until then, the previous layer keeps playing underneath, so the
+  // user never sees a poster flash or a transparent gap.
+  const [videoLayers, setVideoLayers] = useState<Array<{ url: string; ready: boolean }>>(
+    () => (activeVideoUrl ? [{ url: activeVideoUrl, ready: false }] : []),
   );
 
-  // Tied to the actual asset, not the timeline index. Index advances on every
-  // phase rollover (e.g. rest→work for the same upcoming movement, where the
-  // video has been on screen since the reveal point). Resetting on index would
-  // re-show the poster over a still-playing Video.
-  useEffect(() => { setVideoReady(false); }, [activeVideoUrl]);
+  useEffect(() => {
+    if (!activeVideoUrl) {
+      setVideoLayers([]);
+      return;
+    }
+    setVideoLayers((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && last.url === activeVideoUrl) return prev;
+      return [...prev, { url: activeVideoUrl, ready: false }];
+    });
+  }, [activeVideoUrl]);
+
+  const handleLayerReady = useCallback((url: string) => {
+    setVideoLayers((prev) => {
+      const idx = prev.findIndex((l) => l.url === url);
+      if (idx === -1) return prev;
+      const updated = prev.map((l, i) => (i === idx ? { ...l, ready: true } : l));
+      // If the topmost layer is now ready, drop everything below it.
+      if (idx === updated.length - 1) {
+        setVideoReady(true);
+        return [updated[idx]];
+      }
+      return updated;
+    });
+  }, []);
+
+  // Stable {uri} object per URL so expo-av doesn't re-evaluate the source
+  // on every render of the same layer.
+  const sourceCacheRef = useRef<Map<string, { uri: string }>>(new Map());
+  const getVideoSource = useCallback((url: string) => {
+    let cached = sourceCacheRef.current.get(url);
+    if (!cached) {
+      cached = { uri: url };
+      sourceCacheRef.current.set(url, cached);
+    }
+    return cached;
+  }, []);
+
+  const anyLayerReady = videoLayers.some((l) => l.ready);
+  useEffect(() => { setVideoReady(anyLayerReady); }, [anyLayerReady]);
 
   // ── Shared header component ───────────────────────────────────────
   const renderHeader = (showProgress = true) => (
@@ -785,25 +823,35 @@ export default function WorkoutPlayer({
             <View style={st.videoArea}>
               <TouchableWithoutFeedback onPress={phase === 'work' ? handleVideoTap : undefined}>
                 <View style={st.videoInner}>
-                  {activeVideoUrl && videoSource ? (
+                  {videoLayers.length > 0 ? (
                     <>
-                      <Video
-                        key={activeVideoUrl}
-                        ref={videoRef}
-                        source={videoSource}
-                        resizeMode={ResizeMode.COVER}
-                        isLooping
-                        shouldPlay={!isPaused}
-                        isMuted
-                        style={st.videoPlayer}
-                        videoStyle={
-                          Platform.OS === 'web'
-                            ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
-                            : undefined
-                        }
-                        onReadyForDisplay={() => setVideoReady(true)}
-                      />
-                      {!videoReady && activeThumbUrl && (
+                      {videoLayers.map((layer, i) => {
+                        const isTop = i === videoLayers.length - 1;
+                        // Visible only once the layer has rendered its first
+                        // frame. Lower ready layers keep playing under any
+                        // not-yet-ready top layer, so the user sees continuous
+                        // motion through the swap.
+                        const opacity = layer.ready ? 1 : 0;
+                        return (
+                          <Video
+                            key={layer.url}
+                            ref={isTop ? videoRef : undefined}
+                            source={getVideoSource(layer.url)}
+                            resizeMode={ResizeMode.COVER}
+                            isLooping
+                            shouldPlay={!isPaused}
+                            isMuted
+                            style={[st.videoPlayer, st.videoLayer, { opacity } as any]}
+                            videoStyle={
+                              Platform.OS === 'web'
+                                ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
+                                : undefined
+                            }
+                            onReadyForDisplay={() => handleLayerReady(layer.url)}
+                          />
+                        );
+                      })}
+                      {!anyLayerReady && activeThumbUrl && (
                         <Image
                           source={{ uri: activeThumbUrl }}
                           style={st.posterFallback}
@@ -1361,6 +1409,7 @@ const st = StyleSheet.create({
   },
   videoInner: { flex: 1, position: 'relative' },
   videoPlayer: { width: '100%', height: '100%' },
+  videoLayer: { ...StyleSheet.absoluteFillObject } as any,
   videoPlaceholder: {
     justifyContent: 'center', alignItems: 'center', backgroundColor: '#1A1E26',
   },
