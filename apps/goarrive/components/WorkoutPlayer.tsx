@@ -48,6 +48,12 @@ import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useWorkoutTTS } from '../hooks/useWorkoutTTS';
 import { FB, FH } from '../lib/theme';
 
+// ── Constants ───────────────────────────────────────────────────────────────
+// How many seconds before a timed phase ends should the visual switch to the
+// next timeline item. Aligns with the spoken "3, 2, 1" countdown cue at
+// timeLeft === 3 so the screen and audio reveal together.
+const REVEAL_LEAD_SECONDS = 3.5;
+
 // ── Types ──────────────────────────────────────────────────────────────────
 interface WorkoutPlayerProps {
   visible: boolean;
@@ -190,50 +196,70 @@ export default function WorkoutPlayer({
   const exerciseIndex = exerciseSteps.indexOf(current as any);
   const exerciseTotal = exerciseSteps.length;
 
-  // ── Persistent video URL — decoupled from phase transitions ────────
-  // Video swaps happen ONCE per movement cycle at timeLeft <= 4 during REST.
-  // Phase boundaries (work→rest, rest→work) do NOT trigger video changes.
-  const { activeVideoUrl, activeThumbUrl } = useMemo(() => {
+  // ── Single source of truth: which timeline item should be on screen now? ───
+  // Reveal-ahead pattern: the displayed item == the "current upcoming work item."
+  // It switches to the next timeline item at REVEAL_LEAD_SECONDS before the current
+  // phase ends, then stays through any rest + the next item's content, until 3.5s
+  // before that next item ends. Same rule covers movement→movement, movement→rest,
+  // movement→water break, movement→demo, movement→grab equipment.
+  //
+  // Exception: swap-sides movements stay on the current movement during the L-side
+  // lookahead (the R side of the same movement is coming next, not a new item).
+  const { activeVideoUrl, activeThumbUrl } = useMemo<{
+    activeVideoUrl: string | null;
+    activeThumbUrl: string | null;
+  }>(() => {
     if (!current) return { activeVideoUrl: null, activeThumbUrl: null };
 
-    const findNextExercise = () => {
-      for (let i = currentIndex + 1; i < flatMovements.length; i++) {
-        if (flatMovements[i].stepType === 'exercise') return flatMovements[i];
+    // Resolve a timeline item to a displayable {video, thumb} pair, falling back
+    // to the next exercise's media if the item itself has none (e.g. waterBreak,
+    // grabEquipment, transition often carry no media of their own).
+    const pickAsset = (item: any, indexOfItem: number) => {
+      if (!item) return { activeVideoUrl: null, activeThumbUrl: null };
+      if (item.videoUrl || item.thumbnailUrl) {
+        return {
+          activeVideoUrl: item.videoUrl ?? null,
+          activeThumbUrl: item.thumbnailUrl ?? null,
+        };
       }
-      return null;
+      for (let i = indexOfItem + 1; i < flatMovements.length; i++) {
+        const m = flatMovements[i];
+        if (m.stepType === 'exercise' && (m.videoUrl || m.thumbnailUrl)) {
+          return { activeVideoUrl: m.videoUrl ?? null, activeThumbUrl: m.thumbnailUrl ?? null };
+        }
+      }
+      return { activeVideoUrl: null, activeThumbUrl: null };
     };
 
-    const findPrevExercise = () => {
-      for (let i = currentIndex - 1; i >= 0; i--) {
-        if (flatMovements[i].stepType === 'exercise') return flatMovements[i];
-      }
-      return null;
-    };
+    let displayItem: any = current;
+    let displayIndex = currentIndex;
 
-    const currentExercise = current.stepType === 'exercise' ? current : null;
-    const nextExercise = findNextExercise();
-    const prevExercise = findPrevExercise();
+    const stayingOnSameMovement =
+      phase === 'work' && current?.swapSides === true && swapSide === 'L';
 
-    if (phase === 'work' && currentExercise) {
-      return { activeVideoUrl: currentExercise.videoUrl, activeThumbUrl: currentExercise.thumbnailUrl };
+    const isTimedRevealPhase =
+      phase === 'work' || phase === 'transition' || phase === 'waterBreak'
+      || phase === 'grabEquipment' || phase === 'demo';
+
+    if (phase === 'rest' && next) {
+      // Rest is the bridge between current and next; show next throughout.
+      displayItem = next;
+      displayIndex = currentIndex + 1;
+    } else if (
+      isTimedRevealPhase
+      && !isRepBased
+      && !stayingOnSameMovement
+      && timeLeft > 0
+      && timeLeft <= REVEAL_LEAD_SECONDS
+      && next
+    ) {
+      // Last 3.5s of any timed phase: preview the next timeline item.
+      displayItem = next;
+      displayIndex = currentIndex + 1;
     }
 
-    if (phase === 'rest') {
-      if (timeLeft <= 4 && nextExercise?.videoUrl) {
-        return { activeVideoUrl: nextExercise.videoUrl, activeThumbUrl: nextExercise.thumbnailUrl };
-      }
-      return {
-        activeVideoUrl: currentExercise?.videoUrl || prevExercise?.videoUrl || nextExercise?.videoUrl,
-        activeThumbUrl: currentExercise?.thumbnailUrl || prevExercise?.thumbnailUrl || nextExercise?.thumbnailUrl,
-      };
-    }
-
-    // Special phases (transition, water break, etc.) — use their own video or fallback
-    return {
-      activeVideoUrl: current.videoUrl || nextExercise?.videoUrl,
-      activeThumbUrl: current.thumbnailUrl || nextExercise?.thumbnailUrl,
-    };
-  }, [phase, timeLeft, current, currentIndex, flatMovements]);
+    return pickAsset(displayItem, displayIndex);
+  }, [phase, timeLeft, current, next, currentIndex, isRepBased, swapSide, flatMovements]);
 
   // ── Shared header component ───────────────────────────────────────
   const renderHeader = (showProgress = true) => (
@@ -512,72 +538,61 @@ export default function WorkoutPlayer({
         })()}
 
         {/* ── TRANSITION — Full-media with overlay text ───────── */}
-        {phase === 'transition' && current && (() => {
-          // Use transition block's own video, or fall back to next movement's video
-          const nextExForTrans = (() => {
-            for (let i = currentIndex + 1; i < flatMovements.length; i++) {
-              if (flatMovements[i].stepType === 'exercise') return flatMovements[i];
-            }
-            return next;
-          })();
-          const transVideoUrl = current.videoUrl || nextExForTrans?.videoUrl;
-          const transThumbUrl = nextExForTrans?.thumbnailUrl || current.thumbnailUrl;
-          return (
-            <View style={st.workContainer}>
-              {renderHeader()}
-              {/* TRANSITION label + timer */}
-              <View style={st.nameTimerRow}>
-                <View style={st.nameColumn}>
-                  <Text style={[st.restPhaseLabel, { color: '#94A3B8' }]}>TRANSITION</Text>
-                  <Text style={st.restNextName}>{current.name}</Text>
-                  {(current.instructionText || current.description) ? (
-                    <Text style={{ fontSize: 13, color: '#8A95A3', fontFamily: FB, marginTop: 2 }}>
-                      {current.instructionText || current.description}
-                    </Text>
-                  ) : null}
-                </View>
-                <View style={st.goldTimerBox}>
-                  <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
-                </View>
+        {phase === 'transition' && current && (
+          <View style={st.workContainer}>
+            {renderHeader()}
+            {/* TRANSITION label + timer */}
+            <View style={st.nameTimerRow}>
+              <View style={st.nameColumn}>
+                <Text style={[st.restPhaseLabel, { color: '#94A3B8' }]}>TRANSITION</Text>
+                <Text style={st.restNextName}>{current.name}</Text>
+                {(current.instructionText || current.description) ? (
+                  <Text style={{ fontSize: 13, color: '#8A95A3', fontFamily: FB, marginTop: 2 }}>
+                    {current.instructionText || current.description}
+                  </Text>
+                ) : null}
               </View>
-
-              {/* Video area — never empty */}
-              <View style={st.videoArea}>
-                <View style={st.videoInner}>
-                  {transVideoUrl ? (
-                    <Video
-                      key={`trans-${currentIndex}`}
-                      source={{ uri: transVideoUrl }}
-                      resizeMode={ResizeMode.COVER}
-                      isLooping
-                      shouldPlay
-                      isMuted
-                      style={st.videoPlayer}
-                      videoStyle={
-                        Platform.OS === 'web'
-                          ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
-                          : undefined
-                      }
-                    />
-                  ) : transThumbUrl ? (
-                    <Image source={{ uri: transThumbUrl }} style={st.videoPlayer} resizeMode="cover" />
-                  ) : (
-                    <View style={[st.videoPlayer, st.videoPlaceholder]}>
-                      <Icon name="arrow-right" size={48} color="#3A4050" />
-                    </View>
-                  )}
-                </View>
+              <View style={st.goldTimerBox}>
+                <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
               </View>
-
-              <TouchableOpacity style={[st.skipPill, { alignSelf: 'center', marginTop: 12 }]} onPress={handleSkip}>
-                <Icon name="skip-forward" size={16} color="#F5A623" />
-                <Text style={st.skipPillText}>Skip</Text>
-              </TouchableOpacity>
-
-              {renderNextUp()}
             </View>
-          );
-        })()}
+
+            {/* Video area — uses unified activeVideoUrl (reveal-ahead applied) */}
+            <View style={st.videoArea}>
+              <View style={st.videoInner}>
+                {activeVideoUrl ? (
+                  <Video
+                    key={activeVideoUrl}
+                    source={{ uri: activeVideoUrl }}
+                    resizeMode={ResizeMode.COVER}
+                    isLooping
+                    shouldPlay
+                    isMuted
+                    style={st.videoPlayer}
+                    videoStyle={
+                      Platform.OS === 'web'
+                        ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
+                        : undefined
+                    }
+                  />
+                ) : activeThumbUrl ? (
+                  <Image source={{ uri: activeThumbUrl }} style={st.videoPlayer} resizeMode="cover" />
+                ) : (
+                  <View style={[st.videoPlayer, st.videoPlaceholder]}>
+                    <Icon name="arrow-right" size={48} color="#3A4050" />
+                  </View>
+                )}
+              </View>
+            </View>
+
+            <TouchableOpacity style={[st.skipPill, { alignSelf: 'center', marginTop: 12 }]} onPress={handleSkip}>
+              <Icon name="skip-forward" size={16} color="#F5A623" />
+              <Text style={st.skipPillText}>Skip</Text>
+            </TouchableOpacity>
+
+            {renderNextUp()}
+          </View>
+        )}
 
         {/* ── GRAB EQUIPMENT — Equipment preparation ─────────── */}
         {phase === 'grabEquipment' && current && (
@@ -611,17 +626,7 @@ export default function WorkoutPlayer({
         )}
 
         {/* ── WATER BREAK — Hydration pause ───────────────────── */}
-        {phase === 'waterBreak' && current && (() => {
-          // Fall back to next exercise video if no water break video
-          const nextExForWB = (() => {
-            for (let i = currentIndex + 1; i < flatMovements.length; i++) {
-              if (flatMovements[i].stepType === 'exercise') return flatMovements[i];
-            }
-            return null;
-          })();
-          const wbVideoUrl = current.videoUrl || nextExForWB?.videoUrl;
-          const wbThumbUrl = nextExForWB?.thumbnailUrl;
-          return (
+        {phase === 'waterBreak' && current && (
           <View style={st.workContainer}>
             {renderHeader()}
             {/* Header row: WATER BREAK label + timer */}
@@ -634,13 +639,13 @@ export default function WorkoutPlayer({
               </View>
             </View>
 
-            {/* 4:5 video area with blue tint */}
+            {/* 4:5 video area — uses unified activeVideoUrl (reveal-ahead applied) */}
             <View style={st.videoArea}>
               <View style={st.videoInner}>
-                {wbVideoUrl ? (
+                {activeVideoUrl ? (
                   <Video
-                    key={`wb-${currentIndex}`}
-                    source={{ uri: wbVideoUrl }}
+                    key={activeVideoUrl}
+                    source={{ uri: activeVideoUrl }}
                     resizeMode={ResizeMode.COVER}
                     isLooping
                     shouldPlay
@@ -652,8 +657,8 @@ export default function WorkoutPlayer({
                         : undefined
                     }
                   />
-                ) : wbThumbUrl ? (
-                  <Image source={{ uri: wbThumbUrl }} style={st.videoPlayer} resizeMode="cover" />
+                ) : activeThumbUrl ? (
+                  <Image source={{ uri: activeThumbUrl }} style={st.videoPlayer} resizeMode="cover" />
                 ) : (
                   <View style={[st.videoPlayer, st.waterBreakPlaceholder]}>
                     <Image
@@ -679,14 +684,18 @@ export default function WorkoutPlayer({
               <Text style={st.skipPillText}>Skip</Text>
             </TouchableOpacity>
           </View>
-          );
-        })()}
+        )}
 
-        {/* ── WORK state — Stacked layout ──────────────────── */}
-        {phase === 'work' && current && (
+        {/* ── WORK + REST — share one Video element so the asset persists ── */}
+        {/* across the phase boundary. The rest UI overlays a REST label on   */}
+        {/* the same video, which already shows the next item per activeVideoUrl. */}
+        {(phase === 'work' || phase === 'rest') && current && (
           <View style={st.workContainer}>
-            {/* Floating header overlay */}
-            {showControls && (
+            {/* Header (rest only — work uses a floating overlay) */}
+            {phase === 'rest' && renderHeader()}
+
+            {/* Floating header overlay (work only) */}
+            {phase === 'work' && showControls && (
               <View style={st.floatingHeader}>
                 <TouchableOpacity onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
                   <Icon name="close" size={24} color="#8A95A3" />
@@ -700,38 +709,54 @@ export default function WorkoutPlayer({
               </View>
             )}
 
-            {/* GoArrive logo */}
-            <Image
-              source={require('../assets/logo.png')}
-              style={st.workLogo}
-              resizeMode="contain"
-            />
+            {/* GoArrive logo (work only) */}
+            {phase === 'work' && (
+              <Image
+                source={require('../assets/logo.png')}
+                style={st.workLogo}
+                resizeMode="contain"
+              />
+            )}
 
-            {/* Movement name + Timer */}
+            {/* Name/Timer row */}
             <View style={st.nameTimerRow}>
-              <View style={st.nameColumn}>
-                {current.supersetLabel && (
-                  <Text style={st.supersetLabel}>{current.supersetLabel}</Text>
-                )}
-                <Text style={st.workMovementName} numberOfLines={2}>
-                  {current.name}
-                </Text>
-                {current.reps ? (
-                  <Text style={st.workReps}>{current.reps} reps</Text>
-                ) : null}
-                {current.coachingCues ? (
-                  <Text style={st.workCues} numberOfLines={1}>{current.coachingCues}</Text>
-                ) : null}
-              </View>
-              {!isRepBased ? (
-                <View style={st.goldTimerBox}>
-                  <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
-                </View>
-              ) : null}
+              {phase === 'work' ? (
+                <>
+                  <View style={st.nameColumn}>
+                    {current.supersetLabel && (
+                      <Text style={st.supersetLabel}>{current.supersetLabel}</Text>
+                    )}
+                    <Text style={st.workMovementName} numberOfLines={2}>
+                      {current.name}
+                    </Text>
+                    {current.reps ? (
+                      <Text style={st.workReps}>{current.reps} reps</Text>
+                    ) : null}
+                    {current.coachingCues ? (
+                      <Text style={st.workCues} numberOfLines={1}>{current.coachingCues}</Text>
+                    ) : null}
+                  </View>
+                  {!isRepBased ? (
+                    <View style={st.goldTimerBox}>
+                      <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
+                    </View>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <View style={st.nameColumn}>
+                    <Text style={st.restPhaseLabel}>REST</Text>
+                    {next && <Text style={st.restNextName}>Next: {next.name}</Text>}
+                  </View>
+                  <View style={st.restTimerBox}>
+                    <Text style={st.restTimerText}>{formatTime(timeLeft)}</Text>
+                  </View>
+                </>
+              )}
             </View>
 
-            {/* SPLIT label */}
-            {current.swapSides && (
+            {/* SPLIT label (work, swap-sides only) */}
+            {phase === 'work' && current.swapSides && (
               <View style={st.splitLabelRow}>
                 <Text style={st.splitText}>SPLIT</Text>
                 <Text style={st.splitSep}> | </Text>
@@ -740,9 +765,9 @@ export default function WorkoutPlayer({
               </View>
             )}
 
-            {/* Video area — persistent video, overlay controls only */}
+            {/* Shared video area — Video stays mounted across work↔rest */}
             <View style={st.videoArea}>
-              <TouchableWithoutFeedback onPress={handleVideoTap}>
+              <TouchableWithoutFeedback onPress={phase === 'work' ? handleVideoTap : undefined}>
                 <View style={st.videoInner}>
                   {activeVideoUrl ? (
                     <>
@@ -782,13 +807,15 @@ export default function WorkoutPlayer({
                     </View>
                   )}
 
-                  <TouchableOpacity
-                    style={st.tapInterceptor}
-                    onPress={handleVideoTap}
-                    activeOpacity={1}
-                  />
+                  {phase === 'work' && (
+                    <TouchableOpacity
+                      style={st.tapInterceptor}
+                      onPress={handleVideoTap}
+                      activeOpacity={1}
+                    />
+                  )}
 
-                  {showControls && (
+                  {phase === 'work' && showControls && (
                     <View style={st.controlsOverlay}>
                       {isRepBased ? (
                         <TouchableOpacity style={st.overlayCenterBtn} onPress={handleRepDone}>
@@ -825,69 +852,17 @@ export default function WorkoutPlayer({
               </TouchableWithoutFeedback>
             </View>
 
-            {/* NEXT UP bar — always visible during work */}
-            {renderNextUp()}
+            {/* Footer */}
+            {phase === 'work' ? (
+              renderNextUp()
+            ) : (
+              <TouchableOpacity style={[st.skipPill, { alignSelf: 'center', marginTop: 12 }]} onPress={handleSkip}>
+                <Icon name="skip-forward" size={16} color="#F5A623" />
+                <Text style={st.skipPillText}>Skip Rest</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
-
-        {/* ── REST state — persistent video continues, overlay UI only ── */}
-        {phase === 'rest' && (() => {
-          const nextExForRest = (() => {
-            for (let i = currentIndex + 1; i < flatMovements.length; i++) {
-              if (flatMovements[i].stepType === 'exercise') return flatMovements[i];
-            }
-            return next;
-          })();
-          return (
-          <View style={st.workContainer}>
-            {renderHeader()}
-            {/* REST label + white timer */}
-            <View style={st.nameTimerRow}>
-              <View style={st.nameColumn}>
-                <Text style={st.restPhaseLabel}>REST</Text>
-                {nextExForRest && <Text style={st.restNextName}>Next: {nextExForRest.name}</Text>}
-              </View>
-              <View style={st.restTimerBox}>
-                <Text style={st.restTimerText}>{formatTime(timeLeft)}</Text>
-              </View>
-            </View>
-
-            {/* Persistent video — same component as work phase, keyed by activeVideoUrl */}
-            <View style={st.videoArea}>
-              <View style={st.videoInner}>
-                {activeVideoUrl ? (
-                  <Video
-                    key={activeVideoUrl}
-                    ref={videoRef}
-                    source={{ uri: activeVideoUrl }}
-                    resizeMode={ResizeMode.COVER}
-                    isLooping
-                    shouldPlay={!isPaused}
-                    isMuted
-                    style={st.videoPlayer}
-                    videoStyle={
-                      Platform.OS === 'web'
-                        ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
-                        : undefined
-                    }
-                  />
-                ) : activeThumbUrl ? (
-                  <Image source={{ uri: activeThumbUrl }} style={st.videoPlayer} resizeMode="cover" />
-                ) : (
-                  <View style={[st.videoPlayer, st.videoPlaceholder]}>
-                    <Icon name="play-circle" size={48} color="#3A4050" />
-                  </View>
-                )}
-              </View>
-            </View>
-
-            <TouchableOpacity style={[st.skipPill, { alignSelf: 'center', marginTop: 12 }]} onPress={handleSkip}>
-              <Icon name="skip-forward" size={16} color="#F5A623" />
-              <Text style={st.skipPillText}>Skip Rest</Text>
-            </TouchableOpacity>
-          </View>
-          );
-        })()}
 
         {/* ── SWAP state ──────────────────────────────────────── */}
         {phase === 'swap' && current && (

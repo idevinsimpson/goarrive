@@ -91,12 +91,13 @@ export function useMediaPrefetch(
   }, [isCountdown, isReady, currentIndex, movements]);
 
   // ── Aggressive video preload during rest periods ─────────────────────
-  // During rest, the member isn't watching video, so we use the bandwidth
-  // to fully buffer the next movement's video. On web, we create a hidden
-  // <video> element with preload="auto" which forces the browser to
-  // download the full file. On native, we use fetch to warm the cache.
+  // During rest (or while actively playing — we now reveal the next item
+  // 3.5s before the current phase ends), fully buffer the next movement's
+  // video. On web, we create a hidden <video> element with preload="auto"
+  // which forces the browser to download the full file. On native, we use
+  // fetch to warm the cache.
   useEffect(() => {
-    if (!isResting) return;
+    if (!isResting && !isActive) return;
 
     const nextMovement = movements[currentIndex + 1];
     const videoUrl = nextMovement?.videoUrl;
@@ -132,5 +133,5 @@ export function useMediaPrefetch(
       // expo-av will benefit from the cached response
       fetch(videoUrl, { method: 'GET' }).catch(() => {});
     }
-  }, [isResting, currentIndex, movements]);
+  }, [isResting, isActive, currentIndex, movements]);
 }
