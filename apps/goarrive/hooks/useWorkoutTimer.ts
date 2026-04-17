@@ -18,6 +18,11 @@ import type { StepType } from './useWorkoutFlatten';
 export type Phase = 'ready' | 'work' | 'rest' | 'swap' | 'complete'
   | 'intro' | 'outro' | 'demo' | 'transition' | 'waterBreak' | 'grabEquipment';
 
+// Skip lands this many seconds before the next timeline item begins, aligning
+// with the visual reveal lead (see REVEAL_LEAD_SECONDS in WorkoutPlayer.tsx)
+// so the video swap and "3, 2, 1" cue play naturally instead of a hard cut.
+const SKIP_PRE_ENTRY_SECONDS = 3.5;
+
 interface FlatMovement {
   name: string;
   duration: number;
@@ -52,6 +57,9 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
   const [timeLeft, setTimeLeft] = useState(0);
   const [swapSide, setSwapSide] = useState<'L' | 'R'>('L');
   const [isPaused, setIsPaused] = useState(false);
+  // Set when Skip is pressed during a rep-based work phase; bypasses the
+  // rep-guard in the hit-zero handler so the 3.5s skip countdown can transition.
+  const [isSkippingRep, setIsSkippingRep] = useState(false);
 
   const total = flatMovements.length;
   const current = flatMovements[currentIndex] ?? null;
@@ -145,7 +153,8 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     }
 
     if (phase === 'work') {
-      if (isRepBased) return;
+      if (isRepBased && !isSkippingRep) return;
+      if (isSkippingRep) setIsSkippingRep(false);
       if (current?.swapSides && swapSide === 'L') {
         setSwapSide('R');
         setPhase('swap');
@@ -169,6 +178,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
   // ── Controls ────────────────────────────────────────────────────────
   const handleStart = useCallback(() => {
     if (total === 0) return;
+    setIsSkippingRep(false);
 
     const firstStep = flatMovements[0];
     const firstStepType = firstStep?.stepType;
@@ -195,10 +205,26 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     setIsPaused((p) => !p);
   }, []);
 
+  // Skip is timeline-aware: it never hard-cuts to the next index. Instead, it
+  // compresses the current phase's remaining time to SKIP_PRE_ENTRY_SECONDS
+  // so the existing phase-transition logic fires naturally. That means:
+  //   work (restAfter>0) → rest, work (swapSides on L) → swap, work → next,
+  //   rest → next, swap → work(R), intro/outro/demo/transition/waterBreak/
+  //   grabEquipment → next. In every case we land 3.5s before the next real
+  //   timeline item, so the reveal video swap and "3, 2, 1" cue stay in sync.
   const handleSkip = useCallback(() => {
     if (phase === 'ready' || phase === 'complete') return;
-    advanceToNext();
-  }, [phase, advanceToNext]);
+
+    // Rep-based work has no countdown running — start a 3.5s skip window and
+    // let the hit-zero handler pick the correct next state (swap/rest/next).
+    if (phase === 'work' && isRepBased) {
+      setIsSkippingRep(true);
+      setTimeLeft(SKIP_PRE_ENTRY_SECONDS);
+      return;
+    }
+
+    setTimeLeft((prev) => (prev <= SKIP_PRE_ENTRY_SECONDS ? prev : SKIP_PRE_ENTRY_SECONDS));
+  }, [phase, isRepBased]);
 
   const handleRepDone = useCallback(() => {
     if (!current) return;
@@ -222,6 +248,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     setIsPaused(false);
     setSwapSide('L');
     setTimeLeft(0);
+    setIsSkippingRep(false);
   }, []);
 
   return {
