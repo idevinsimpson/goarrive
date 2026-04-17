@@ -83,6 +83,14 @@ const EQUIPMENT_OPTIONS = [
 
 const DIFFICULTY_OPTIONS = ['Beginner', 'Intermediate', 'Advanced'];
 
+// Title-case the first letter of each whitespace-separated word.
+// Length-preserving so the cursor stays put while typing. Only promotes
+// lowercase letters at word starts — never demotes user-typed uppercase
+// (e.g. "iPhone", "BarBell"), so it doesn't fight intentional casing.
+function toTitleCase(s: string): string {
+  return s.replace(/(^|\s)([a-z])/g, (_, lead, ch) => lead + ch.toUpperCase());
+}
+
 const MUSCLE_GROUP_OPTIONS = [
   'Chest',
   'Back',
@@ -870,9 +878,11 @@ export default function MovementForm({
                 <TextInput
                   style={st.input}
                   value={name}
-                  onChangeText={setName}
+                  onChangeText={(t) => setName(toTitleCase(t))}
+                  onBlur={() => setName((n) => toTitleCase(n))}
                   placeholder="e.g. Back Squat"
                   placeholderTextColor="#4A5568"
+                  autoCapitalize="words"
                 />
 
                 {/* Category */}
