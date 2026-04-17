@@ -343,15 +343,20 @@ export function useWorkoutTTS({
       const key = `rest_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
+        // Synthetic "Get Ready" prep-rest step (movementIndex === -1) plays BEFORE
+        // the first movement of a block, not after one. Don't say "Nice work. Rest."
+        // there — that cue only makes sense after completing a movement.
+        const isPrepRest = current?.movementIndex === -1;
         if (nextName) {
-          playCue('nice_work_rest');
+          if (!isPrepRest) playCue('nice_work_rest');
           const nextVoiceUrl = next?.voiceUrl;
+          const delay = isPrepRest ? 0 : 1800;
           if (nextVoiceUrl) {
-            setTimeout(() => playVoiceUrl(nextVoiceUrl), 1800);
+            setTimeout(() => playVoiceUrl(nextVoiceUrl), delay);
           } else {
-            setTimeout(() => speak(`Next up: ${nextName}`), 1800);
+            setTimeout(() => speak(`Next up: ${nextName}`), delay);
           }
-        } else {
+        } else if (!isPrepRest) {
           playCue('rest_now');
         }
       }
