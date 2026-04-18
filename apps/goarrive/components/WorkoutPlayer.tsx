@@ -127,13 +127,22 @@ export default function WorkoutPlayer({
   const dimsValid = winW > 0 && winH > 0;
   const isLandscape = dimsValid ? winW > winH : false;
   const isTablet = dimsValid ? Math.min(winW, winH) >= 600 : false;
-  // 9:16 player canvas. On narrow phones, the frame fills the viewport so we
-  // use every pixel. On wider screens (tablet/desktop), we constrain width to a
-  // 9:16 portrait column centered on a black backdrop so the player feels like
-  // a polished video canvas instead of a stretched layout.
+  // 9:16 player canvas — single source of truth for layout. The frame is the
+  // largest 9:16 portrait rectangle that fits inside the viewport. Anything
+  // outside the frame is the black `portraitLockOuter` backdrop (pillar-box on
+  // landscape, letterbox on tall portrait). All slots — logo, title/timer,
+  // media, next-up — live inside this frame so module positions stay locked
+  // regardless of viewport ratio.
   const isWideScreen = dimsValid && winW > 500;
-  const frameH = dimsValid ? winH : 0;
-  const frameW = isWideScreen ? Math.min(winW, frameH * (9 / 16)) : winW;
+  let frameW = 0;
+  let frameH = 0;
+  if (dimsValid) {
+    // Width-bound first (typical phone is taller than 9:16 → letterbox).
+    frameW = isWideScreen ? Math.min(winW, winH * (9 / 16)) : winW;
+    frameH = Math.min(winH, frameW * (16 / 9));
+    // If the height clamp shrank us, also shrink width so frame stays 9:16.
+    frameW = frameH * (9 / 16);
+  }
 
   // Movement media is always rendered at a fixed 4:5 aspect ratio. We compute
   // the largest 4:5 box that fits inside the available media slot — width is
@@ -146,15 +155,15 @@ export default function WorkoutPlayer({
   // pixel heights (not minHeight) so the centered media never shifts when
   // phase content changes — keep these constants in sync if you change the
   // slot styles.
-  const SLOT_LOGO_H = 64; // height 64 + marginTop 0 + marginBottom 0
+  const SLOT_LOGO_H = 56; // height 56 + marginTop 0 + marginBottom 0
   const SLOT_TITLE_H = 112; // height 112 + marginBottom 0
   const SLOT_NEXTUP_H = 64;
-  const SLOT_VERT_PAD = 24;
+  const SLOT_VERT_PAD = 8;
   const mediaAvailH = Math.max(
     180,
     (frameH || 600) - SLOT_LOGO_H - SLOT_TITLE_H - SLOT_NEXTUP_H - SLOT_VERT_PAD,
   );
-  const mediaAvailW = Math.max(160, (frameW || 360) - 8);
+  const mediaAvailW = Math.max(160, frameW || 360);
   let _mediaW = mediaAvailW;
   let _mediaH = _mediaW * (5 / 4);
   if (_mediaH > mediaAvailH) {
@@ -530,18 +539,22 @@ export default function WorkoutPlayer({
     </View>
   );
 
+  // Title/timer + next-up rows are width-matched to the media so the timer's
+  // right edge and the title module's left edge sit flush with the media's
+  // left/right edges respectively. Without this, the row spans full frame
+  // width and the timer can overhang past the media on letterboxed phones.
   const renderTitleTimerSlot = (
     title: React.ReactNode,
     timer: React.ReactNode | null,
   ) => (
-    <View style={st.titleTimerSlot}>
+    <View style={[st.titleTimerSlot, { width: _mediaW }]}>
       <View style={st.titleColumn}>{title}</View>
       {timer ? <View style={st.timerColumn}>{timer}</View> : null}
     </View>
   );
 
   const renderNextUpSlot = (content: React.ReactNode | null) => (
-    <View style={st.nextUpSlot}>{content}</View>
+    <View style={[st.nextUpSlot, { width: _mediaW }]}>{content}</View>
   );
 
   // ── Render ────────────────────────────────────────────────────────────
@@ -1400,13 +1413,13 @@ const st = StyleSheet.create({
   // Heights are stable across phases so logo / title / timer / media /
   // next-up never shift between work, rest, transition, etc.
   logoSlot: {
-    height: 64,
+    height: 56,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 0,
     marginBottom: 0,
   },
-  slotLogo: { width: 280, height: 60 },
+  slotLogo: { width: 260, height: 52 },
   // Title/timer row is locked to a fixed pixel height — NOT minHeight — so
   // the slot does not grow when content varies between phases (REST shows
   // 2 short lines, WORK can show superset + 2-line name + reps + cues). If
@@ -1422,6 +1435,7 @@ const st = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 0,
     marginBottom: 0,
+    alignSelf: 'center',
   },
   titleColumn: {
     flex: 1, height: 112, marginRight: 4,
@@ -1453,9 +1467,9 @@ const st = StyleSheet.create({
   // shrinking on work, which is what was visibly shifting the media up.
   nextUpSlot: {
     height: 64,
-    width: '100%',
     justifyContent: 'center',
     paddingTop: 0,
+    alignSelf: 'center',
   },
   splitLabelOverlay: {
     position: 'absolute',
