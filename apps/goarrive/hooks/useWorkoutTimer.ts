@@ -62,6 +62,11 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
   // rep-guard in the hit-zero handler so the 3.5s skip countdown can transition.
   const [isSkippingRep, setIsSkippingRep] = useState(false);
 
+  // Mirrored ref so cue gating inside useCallback bodies always sees the
+  // latest pause state without rebuilding the callback on every toggle.
+  const isPausedRef = useRef(isPaused);
+  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+
   const total = flatMovements.length;
   const current = flatMovements[currentIndex] ?? null;
   const next = currentIndex + 1 < total ? flatMovements[currentIndex + 1] : null;
@@ -73,12 +78,17 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
   const progressPct = total > 0 ? (currentIndex / total) * 100 : 0;
 
   // ── Advance to next step ────────────────────────────────────────────
+  // Cues/haptics are silenced when paused (e.g. tap-through Skip while
+  // paused) so audio only fires during active playback.
   const advanceToNext = useCallback(() => {
+    const silent = isPausedRef.current;
     const nextIdx = currentIndex + 1;
     if (nextIdx >= total) {
       setPhase('complete');
-      playCue('workoutComplete');
-      hapticSuccess();
+      if (!silent) {
+        playCue('workoutComplete');
+        hapticSuccess();
+      }
     } else {
       setCurrentIndex(nextIdx);
       setSwapSide('L');
@@ -95,13 +105,15 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
         // Synthetic "Get Ready" step — skip work, go straight to rest/prep
         setPhase('rest');
         setTimeLeft(nextStep.restAfter);
-        playCue('restStart');
+        if (!silent) playCue('restStart');
       } else {
         // Exercise — go directly to work
         setPhase('work');
         setTimeLeft(nextStep.duration ?? 30);
-        playCue('workStart');
-        hapticHeavy();
+        if (!silent) {
+          playCue('workStart');
+          hapticHeavy();
+        }
       }
     }
   }, [currentIndex, total, flatMovements]);
@@ -223,6 +235,9 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     if (phase === 'ready' || phase === 'complete') return;
 
     if (isPaused) {
+      // Paused Skip advances timeline state silently — no cues, no haptics.
+      // Audio resumes naturally when the user taps Play (TTS effects re-run
+      // on isPaused flip; timer countdown cues fire on normal ticks).
       setIsSkippingRep(false);
       if (phase === 'intro' || phase === 'outro' || phase === 'demo'
           || phase === 'transition' || phase === 'waterBreak' || phase === 'grabEquipment') {
@@ -235,14 +250,12 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
         } else if (current?.restAfter && current.restAfter > 0) {
           setPhase('rest');
           setTimeLeft(current.restAfter);
-          playCue('restStart');
         } else {
           advanceToNext();
         }
       } else if (phase === 'swap') {
         setPhase('work');
         setTimeLeft(current?.duration ?? 30);
-        playCue('workStart');
       } else if (phase === 'rest') {
         advanceToNext();
       }
