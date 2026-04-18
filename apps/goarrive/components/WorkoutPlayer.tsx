@@ -127,10 +127,13 @@ export default function WorkoutPlayer({
   const dimsValid = winW > 0 && winH > 0;
   const isLandscape = dimsValid ? winW > winH : false;
   const isTablet = dimsValid ? Math.min(winW, winH) >= 600 : false;
-  // Portrait column: on wide screens, constrain to 9:16 within 430px max
+  // 9:16 player canvas. On narrow phones, the frame fills the viewport so we
+  // use every pixel. On wider screens (tablet/desktop), we constrain width to a
+  // 9:16 portrait column centered on a black backdrop so the player feels like
+  // a polished video canvas instead of a stretched layout.
   const isWideScreen = dimsValid && winW > 500;
-  const portraitW = isWideScreen ? Math.min(PORTRAIT_MAX_W, winH * (9 / 16)) : winW;
-  const portraitH = isWideScreen ? winH : winH;
+  const frameH = dimsValid ? winH : 0;
+  const frameW = isWideScreen ? Math.min(winW, frameH * (9 / 16)) : winW;
 
   // ── Video ref ────────────────────────────────
   const videoRef = useRef<any>(null);
@@ -471,11 +474,42 @@ export default function WorkoutPlayer({
     );
   };
 
+  // ── Shared slot helpers ──────────────────────────────────────────
+  // Every "in-workout" phase (work, rest, transition, waterBreak, demo,
+  // grabEquipment, swap) uses the same vertical structure so modules stay
+  // in fixed positions across phase changes:
+  //   header → logoSlot → titleTimerSlot → mediaSlot → nextUpSlot
+  // Each slot has a stable height/flex; only the content inside changes.
+  const renderLogoSlot = () => (
+    <View style={st.logoSlot}>
+      <Image
+        source={require('../assets/logo.png')}
+        style={st.slotLogo}
+        resizeMode="contain"
+      />
+    </View>
+  );
+
+  const renderTitleTimerSlot = (
+    title: React.ReactNode,
+    timer: React.ReactNode | null,
+  ) => (
+    <View style={st.titleTimerSlot}>
+      <View style={st.titleColumn}>{title}</View>
+      {timer ? <View style={st.timerColumn}>{timer}</View> : null}
+    </View>
+  );
+
+  const renderNextUpSlot = (content: React.ReactNode | null) => (
+    <View style={st.nextUpSlot}>{content}</View>
+  );
+
   // ── Render ────────────────────────────────────────────────────────────
   return (
     <Modal visible={visible} animationType="fade" transparent={false}>
       <View style={st.portraitLockOuter}>
-      <View style={[st.container, isWideScreen && { width: portraitW, maxWidth: portraitW }]}>        {/* ── READY state — Block overview grid ─────────────────── */}
+      <View style={[st.container, dimsValid && { width: frameW, height: frameH, maxWidth: frameW }]}>
+        {/* ── READY state — Block overview grid ─────────────────── */}
         {phase === 'ready' && (() => {
           const exerciseBlocks = (workout?.blocks || []).filter(
             (b: any) => !['Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment'].includes(b.type || '')
@@ -631,23 +665,16 @@ export default function WorkoutPlayer({
           const demos = current.demoMovements || [];
           const cols = demos.length <= 4 ? 2 : 3;
           return (
-            <>
+            <View style={[st.workContainer, webSafeBottomStyle]}>
               {renderHeader()}
-              <View style={st.specialContent}>
-                {/* GoArrive Logo */}
-                <Image
-                  source={require('../assets/logo.png')}
-                  style={{ width: 200, height: 56, marginBottom: 12 }}
-                  resizeMode="contain"
-                />
-                {/* Block title + timer row */}
-                <View style={st.demoTitleRow}>
-                  <Text style={st.demoBlockTitle}>{current.name}</Text>
-                  <View style={st.goldTimerBox}>
-                    <Text style={st.goldTimerText}>{Math.max(0, Math.ceil(timeLeft))}</Text>
-                  </View>
-                </View>
-                {/* Thumbnail grid */}
+              {renderLogoSlot()}
+              {renderTitleTimerSlot(
+                <Text style={st.demoBlockTitle} numberOfLines={2}>{current.name}</Text>,
+                <View style={st.goldTimerBox}>
+                  <Text style={st.goldTimerText}>{Math.max(0, Math.ceil(timeLeft))}</Text>
+                </View>,
+              )}
+              <View style={st.mediaSlot}>
                 <View style={st.demoGrid}>
                   {demos.map((mv: any, i: number) => (
                     <View key={i} style={[st.demoGridCell, { width: `${Math.floor(100 / cols) - 2}%` as any }]}>
@@ -662,33 +689,32 @@ export default function WorkoutPlayer({
                   ))}
                 </View>
               </View>
-            </>
+              {renderNextUpSlot(null)}
+            </View>
           );
         })()}
 
         {/* ── TRANSITION — Full-media with overlay text ───────── */}
         {phase === 'transition' && current && (
-          <View style={st.workContainer}>
+          <View style={[st.workContainer, webSafeBottomStyle]}>
             {renderHeader()}
-            {/* TRANSITION label + timer */}
-            <View style={st.nameTimerRow}>
-              <View style={st.nameColumn}>
+            {renderLogoSlot()}
+            {renderTitleTimerSlot(
+              <>
                 <Text style={[st.restPhaseLabel, { color: '#94A3B8' }]}>TRANSITION</Text>
-                <Text style={st.restNextName}>{current.name}</Text>
+                <Text style={st.restNextName} numberOfLines={1}>{current.name}</Text>
                 {(current.instructionText || current.description) ? (
-                  <Text style={{ fontSize: 13, color: '#8A95A3', fontFamily: FB, marginTop: 2 }}>
+                  <Text style={st.transitionInstructionInline} numberOfLines={1}>
                     {current.instructionText || current.description}
                   </Text>
                 ) : null}
-              </View>
+              </>,
               <View style={st.goldTimerBox}>
                 <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
-              </View>
-            </View>
-
-            {/* Video area — uses unified activeVideoUrl (reveal-ahead applied) */}
-            <View style={st.videoArea}>
-              <View style={st.videoInner}>
+              </View>,
+            )}
+            <View style={st.mediaSlot}>
+              <View style={st.mediaInner}>
                 {activeVideoUrl ? (
                   <Video
                     ref={registerVideo}
@@ -714,55 +740,53 @@ export default function WorkoutPlayer({
                 )}
               </View>
             </View>
-
-            {renderNextUp()}
+            {renderNextUpSlot(renderNextUp())}
           </View>
         )}
 
         {/* ── GRAB EQUIPMENT — Equipment preparation ─────────── */}
         {phase === 'grabEquipment' && current && (
-          <>
+          <View style={[st.workContainer, webSafeBottomStyle]}>
             {renderHeader()}
-            <View style={st.specialContent}>
-              <View style={[st.specialIconCircle, { backgroundColor: 'rgba(251,146,60,0.15)' }]}>
-                <Icon name="briefcase" size={32} color="#FB923C" />
-              </View>
-              <Text style={[st.specialPhaseLabel, { color: '#FB923C' }]}>GRAB EQUIPMENT</Text>
-              <Text style={st.specialTitle}>{current.name}</Text>
-              {current.instructionText || current.description ? (
-                <Text style={st.transitionInstruction}>
-                  {current.instructionText || current.description}
-                </Text>
-              ) : null}
-
-              <View style={st.specialTimerRow}>
-                <View style={st.goldTimerBox}>
-                  <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
+            {renderLogoSlot()}
+            {renderTitleTimerSlot(
+              <>
+                <Text style={[st.restPhaseLabel, { color: '#FB923C' }]}>GRAB EQUIPMENT</Text>
+                <Text style={st.restNextName} numberOfLines={1}>{current.name}</Text>
+                {current.instructionText || current.description ? (
+                  <Text style={st.transitionInstructionInline} numberOfLines={1}>
+                    {current.instructionText || current.description}
+                  </Text>
+                ) : null}
+              </>,
+              <View style={st.goldTimerBox}>
+                <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
+              </View>,
+            )}
+            <View style={st.mediaSlot}>
+              <View style={[st.mediaInner, st.equipmentPanel]}>
+                <View style={[st.specialIconCircle, { backgroundColor: 'rgba(251,146,60,0.15)' }]}>
+                  <Icon name="briefcase" size={48} color="#FB923C" />
                 </View>
               </View>
-
-              {renderNextUp()}
             </View>
-          </>
+            {renderNextUpSlot(renderNextUp())}
+          </View>
         )}
 
         {/* ── WATER BREAK — Hydration pause ───────────────────── */}
         {phase === 'waterBreak' && current && (
-          <View style={st.workContainer}>
+          <View style={[st.workContainer, webSafeBottomStyle]}>
             {renderHeader()}
-            {/* Header row: WATER BREAK label + timer */}
-            <View style={st.nameTimerRow}>
-              <View style={st.nameColumn}>
-                <Text style={st.waterBreakLabel}>WATER BREAK</Text>
-              </View>
+            {renderLogoSlot()}
+            {renderTitleTimerSlot(
+              <Text style={st.waterBreakLabel}>WATER BREAK</Text>,
               <View style={st.goldTimerBox}>
                 <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
-              </View>
-            </View>
-
-            {/* 4:5 video area — uses unified activeVideoUrl (reveal-ahead applied) */}
-            <View style={st.videoArea}>
-              <View style={st.videoInner}>
+              </View>,
+            )}
+            <View style={st.mediaSlot}>
+              <View style={st.mediaInner}>
                 {activeVideoUrl ? (
                   <Video
                     ref={registerVideo}
@@ -783,12 +807,7 @@ export default function WorkoutPlayer({
                   <Image source={{ uri: activeThumbUrl }} style={st.videoPlayer} resizeMode="cover" />
                 ) : (
                   <View style={[st.videoPlayer, st.waterBreakPlaceholder]}>
-                    <Image
-                      source={require('../assets/logo.png')}
-                      style={{ width: 180, height: 60, marginBottom: 16 }}
-                      resizeMode="contain"
-                    />
-                    <Text style={st.waterBreakPlaceholderText}>WATER BREAK</Text>
+                    <Icon name="droplet" size={64} color="#38BDF8" />
                   </View>
                 )}
                 {/* Blue tint overlay */}
@@ -800,6 +819,7 @@ export default function WorkoutPlayer({
                 </View>
               </View>
             </View>
+            {renderNextUpSlot(null)}
           </View>
         )}
 
@@ -807,24 +827,12 @@ export default function WorkoutPlayer({
         {/* across the phase boundary. The rest UI overlays a REST label on   */}
         {/* the same video, which already shows the next item per activeVideoUrl. */}
         {(phase === 'work' || phase === 'rest') && current && (
-          <View style={st.workContainer}>
-            {/* Header (rest only — work uses the shared overlay close button) */}
-            {phase === 'rest' && renderHeader()}
-
-            {/* GoArrive logo (work only) */}
-            {phase === 'work' && (
-              <Image
-                source={require('../assets/logo.png')}
-                style={st.workLogo}
-                resizeMode="contain"
-              />
-            )}
-
-            {/* Name/Timer row */}
-            <View style={st.nameTimerRow}>
-              {phase === 'work' ? (
-                <>
-                  <View style={st.nameColumn}>
+          <View style={[st.workContainer, webSafeBottomStyle]}>
+            {renderHeader()}
+            {renderLogoSlot()}
+            {phase === 'work'
+              ? renderTitleTimerSlot(
+                  <>
                     {current.supersetLabel && (
                       <Text style={st.supersetLabel}>{current.supersetLabel}</Text>
                     )}
@@ -837,41 +845,35 @@ export default function WorkoutPlayer({
                     {current.coachingCues ? (
                       <Text style={st.workCues} numberOfLines={1}>{current.coachingCues}</Text>
                     ) : null}
-                  </View>
-                  {!isRepBased ? (
+                  </>,
+                  !isRepBased ? (
                     <View style={st.goldTimerBox}>
                       <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
                     </View>
-                  ) : null}
-                </>
-              ) : (
-                <>
-                  <View style={st.nameColumn}>
+                  ) : null,
+                )
+              : renderTitleTimerSlot(
+                  <>
                     <Text style={st.restPhaseLabel}>REST</Text>
-                    {next && <Text style={st.restNextName}>Next: {next.name}</Text>}
-                  </View>
+                    {next && <Text style={st.restNextName} numberOfLines={1}>Next: {next.name}</Text>}
+                  </>,
                   <View style={st.restTimerBox}>
                     <Text style={st.restTimerText}>{formatTime(timeLeft)}</Text>
-                  </View>
-                </>
+                  </View>,
+                )}
+
+            {/* Shared media slot — Video stays mounted across work↔rest. */}
+            <View style={st.mediaSlot}>
+              {/* SPLIT label overlays the media so it never alters slot height */}
+              {phase === 'work' && current.swapSides && (
+                <View style={st.splitLabelOverlay} pointerEvents="none">
+                  <Text style={st.splitText}>SPLIT</Text>
+                  <Text style={st.splitSep}> | </Text>
+                  <Text style={st.splitDuration}>5 sec</Text>
+                  <Text style={st.splitArrows}> ⇄</Text>
+                </View>
               )}
-            </View>
-
-            {/* SPLIT label (work, swap-sides only) */}
-            {phase === 'work' && current.swapSides && (
-              <View style={st.splitLabelRow}>
-                <Text style={st.splitText}>SPLIT</Text>
-                <Text style={st.splitSep}> | </Text>
-                <Text style={st.splitDuration}>5 sec</Text>
-                <Text style={st.splitArrows}> ⇄</Text>
-              </View>
-            )}
-
-            {/* Shared video area — Video stays mounted across work↔rest.     */}
-            {/* Tap handling lives on the shared player-shell overlay below, */}
-            {/* not on the video element, so every phase behaves the same.   */}
-            <View style={st.videoArea}>
-              <View style={st.videoInner}>
+              <View style={st.mediaInner}>
                 {videoLayers.length > 0 ? (
                   <>
                     {videoLayers.map((layer) => {
@@ -925,24 +927,35 @@ export default function WorkoutPlayer({
               </View>
             </View>
 
-            {/* Footer (work only — next-up bar) */}
-            {phase === 'work' && renderNextUp()}
+            {/* Next-up slot — work shows next item, rest leaves it empty */}
+            {/* (the rest layout already names the next item in the title slot). */}
+            {renderNextUpSlot(phase === 'work' ? renderNextUp() : null)}
           </View>
         )}
 
         {/* ── SWAP state ──────────────────────────────────────── */}
         {phase === 'swap' && current && (
-          <>
+          <View style={[st.workContainer, webSafeBottomStyle]}>
             {renderHeader()}
-            <View style={st.centerContent}>
-              <Text style={st.phaseLabel}>SWITCH SIDES</Text>
-              <View style={st.sideBadge}>
-                <Text style={st.sideBadgeText}>RIGHT SIDE</Text>
+            {renderLogoSlot()}
+            {renderTitleTimerSlot(
+              <>
+                <Text style={st.phaseLabel}>SWITCH SIDES</Text>
+                <Text style={st.restNextName} numberOfLines={1}>{current.name}</Text>
+              </>,
+              <View style={st.goldTimerBox}>
+                <Text style={st.goldTimerText}>{Math.max(0, Math.ceil(timeLeft))}</Text>
+              </View>,
+            )}
+            <View style={st.mediaSlot}>
+              <View style={[st.mediaInner, st.swapPanel]}>
+                <View style={st.sideBadge}>
+                  <Text style={st.sideBadgeText}>RIGHT SIDE</Text>
+                </View>
               </View>
-              <Text style={st.countdownNum}>{Math.max(0, Math.ceil(timeLeft))}</Text>
-              <Text style={st.movementName}>{current.name}</Text>
             </View>
-          </>
+            {renderNextUpSlot(null)}
+          </View>
         )}
 
         {/* ── COMPLETE state ──────────────────────────────────── */}
@@ -989,14 +1002,6 @@ export default function WorkoutPlayer({
               onPress={handleVideoTap}
               activeOpacity={1}
             />
-            <View style={st.sharedOverlayCloseRow} pointerEvents="box-none">
-              <TouchableOpacity
-                onPress={onClose}
-                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              >
-                <Icon name="close" size={26} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
             <View style={st.sharedOverlayCenterStack} pointerEvents="box-none">
               {phase === 'work' && isRepBased ? (
                 <TouchableOpacity style={st.sharedOverlayCenterBtn} onPress={handleRepDoneFromOverlay}>
@@ -1069,6 +1074,14 @@ const { width: SCREEN_W } = Dimensions.get('window');
 
 const PORTRAIT_MAX_W = 430;
 
+// On web (especially iOS PWA standalone), the viewport includes the home
+// indicator and any browser chrome at the bottom. env(safe-area-inset-bottom)
+// pushes the workContainer's bottom padding above that chrome so the next-up
+// slot is never clipped. max() guarantees a minimum visual gap.
+const webSafeBottomStyle: any = Platform.OS === 'web'
+  ? { paddingBottom: 'max(8px, env(safe-area-inset-bottom, 8px))' }
+  : null;
+
 const st = StyleSheet.create({
   portraitLockOuter: {
     flex: 1,
@@ -1086,9 +1099,9 @@ const st = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: Platform.select({ ios: 56, android: 44, web: 20, default: 20 }),
-    paddingBottom: 12,
+    paddingHorizontal: 16,
+    paddingTop: Platform.select({ ios: 44, android: 24, web: 8, default: 8 }),
+    paddingBottom: 6,
   },
   workoutName: {
     flex: 1,
@@ -1337,11 +1350,80 @@ const st = StyleSheet.create({
     marginBottom: 8,
   },
 
-  // WORK phase
+  // ── In-workout shared frame ────────────────────────────────────────
+  // Every active phase (work, rest, transition, waterBreak, demo,
+  // grabEquipment, swap) uses this container. Vertical padding is tight
+  // to push content up; bottom padding accounts for iOS home indicator
+  // and PWA browser chrome so the next-up slot is never clipped.
   workContainer: {
-    flex: 1, paddingHorizontal: 4, paddingTop: 8,
-    paddingBottom: Platform.select({ ios: 34, android: 16, web: 16, default: 16 }),
+    flex: 1, paddingHorizontal: 8, paddingTop: 0,
+    paddingBottom: Platform.select({ ios: 24, android: 8, web: 8, default: 8 }),
   },
+
+  // ── Fixed-position slots ───────────────────────────────────────────
+  // Heights are stable across phases so logo / title / timer / media /
+  // next-up never shift between work, rest, transition, etc.
+  logoSlot: {
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  slotLogo: { width: 200, height: 40 },
+  titleTimerSlot: {
+    minHeight: 72,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+    marginBottom: 6,
+  },
+  titleColumn: { flex: 1, marginRight: 12, justifyContent: 'center' },
+  timerColumn: { justifyContent: 'center' },
+  mediaSlot: {
+    flex: 1,
+    width: '100%',
+    minHeight: 200,
+    overflow: 'hidden',
+    backgroundColor: '#000000',
+    borderRadius: 12,
+    position: 'relative',
+  },
+  mediaInner: { flex: 1, position: 'relative' },
+  nextUpSlot: {
+    minHeight: 76,
+    width: '100%',
+    justifyContent: 'center',
+    paddingTop: 6,
+  },
+  splitLabelOverlay: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    zIndex: 5,
+  } as any,
+  equipmentPanel: {
+    backgroundColor: 'rgba(251,146,60,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swapPanel: {
+    backgroundColor: 'rgba(245,166,35,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  transitionInstructionInline: {
+    fontSize: 13, color: '#8A95A3', fontFamily: FB, marginTop: 2,
+  },
+
+  // Legacy aliases (kept for any leftover references)
   workLogo: { width: 260, height: 72, alignSelf: 'center', marginBottom: 6 },
   nameTimerRow: {
     flexDirection: 'row', alignItems: 'flex-start',
@@ -1547,19 +1629,19 @@ const st = StyleSheet.create({
   // Next up
   nextUpBar: {
     backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 12, paddingVertical: 10, paddingHorizontal: 16,
-    marginTop: 10, alignItems: 'center', width: '100%',
+    borderRadius: 12, paddingVertical: 8, paddingHorizontal: 14,
+    alignItems: 'center', width: '100%',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
     alignSelf: 'center',
   },
   nextUpLabel: {
-    fontSize: 11, fontWeight: '700', color: '#8A95A3', fontFamily: FH,
-    letterSpacing: 1, marginBottom: 4,
+    fontSize: 10, fontWeight: '700', color: '#8A95A3', fontFamily: FH,
+    letterSpacing: 1, marginBottom: 2,
   },
   nextUpContent: {
     flexDirection: 'row', alignItems: 'center', gap: 12, width: '100%',
   },
-  nextUpThumb: { width: 60, height: 75, borderRadius: 8, backgroundColor: '#1A2035' },
+  nextUpThumb: { width: 48, height: 60, borderRadius: 8, backgroundColor: '#1A2035' },
   nextUpInfo: { flex: 1 },
   nextUpName: {
     fontSize: 16, fontWeight: '600', color: '#F0F4F8', fontFamily: FH,
