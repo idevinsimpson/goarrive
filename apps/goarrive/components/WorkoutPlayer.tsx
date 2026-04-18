@@ -135,6 +135,29 @@ export default function WorkoutPlayer({
   const frameH = dimsValid ? winH : 0;
   const frameW = isWideScreen ? Math.min(winW, frameH * (9 / 16)) : winW;
 
+  // Movement media is always rendered at a fixed 4:5 aspect ratio. We compute
+  // the largest 4:5 box that fits inside the available media slot — width is
+  // bounded by frameW (minus a small horizontal pad) and height is bounded by
+  // the leftover frame height after the surrounding fixed slots take their
+  // space. If vertical room is tight, the surrounding layout (logo / title /
+  // next-up slots) is what flexes — the media stays exactly 4:5.
+  const SLOT_LOGO_H = 50;
+  const SLOT_TITLE_H = 78;
+  const SLOT_NEXTUP_H = 82;
+  const SLOT_VERT_PAD = 32;
+  const mediaAvailH = Math.max(
+    180,
+    (frameH || 600) - SLOT_LOGO_H - SLOT_TITLE_H - SLOT_NEXTUP_H - SLOT_VERT_PAD,
+  );
+  const mediaAvailW = Math.max(160, (frameW || 360) - 16);
+  let _mediaW = mediaAvailW;
+  let _mediaH = _mediaW * (5 / 4);
+  if (_mediaH > mediaAvailH) {
+    _mediaH = mediaAvailH;
+    _mediaW = _mediaH * (4 / 5);
+  }
+  const mediaInnerSize = { width: _mediaW, height: _mediaH };
+
   // ── Video ref ────────────────────────────────
   const videoRef = useRef<any>(null);
 
@@ -666,7 +689,6 @@ export default function WorkoutPlayer({
           const cols = demos.length <= 4 ? 2 : 3;
           return (
             <View style={[st.workContainer, webSafeBottomStyle]}>
-              {renderHeader()}
               {renderLogoSlot()}
               {renderTitleTimerSlot(
                 <Text style={st.demoBlockTitle} numberOfLines={2}>{current.name}</Text>,
@@ -675,7 +697,7 @@ export default function WorkoutPlayer({
                 </View>,
               )}
               <View style={st.mediaSlot}>
-                <View style={st.demoGrid}>
+                <View style={[st.demoGrid, mediaInnerSize]}>
                   {demos.map((mv: any, i: number) => (
                     <View key={i} style={[st.demoGridCell, { width: `${Math.floor(100 / cols) - 2}%` as any }]}>
                       {mv.thumbnailUrl ? (
@@ -697,7 +719,6 @@ export default function WorkoutPlayer({
         {/* ── TRANSITION — Full-media with overlay text ───────── */}
         {phase === 'transition' && current && (
           <View style={[st.workContainer, webSafeBottomStyle]}>
-            {renderHeader()}
             {renderLogoSlot()}
             {renderTitleTimerSlot(
               <>
@@ -714,7 +735,7 @@ export default function WorkoutPlayer({
               </View>,
             )}
             <View style={st.mediaSlot}>
-              <View style={st.mediaInner}>
+              <View style={[st.mediaInner, mediaInnerSize]}>
                 {activeVideoUrl ? (
                   <Video
                     ref={registerVideo}
@@ -747,7 +768,6 @@ export default function WorkoutPlayer({
         {/* ── GRAB EQUIPMENT — Equipment preparation ─────────── */}
         {phase === 'grabEquipment' && current && (
           <View style={[st.workContainer, webSafeBottomStyle]}>
-            {renderHeader()}
             {renderLogoSlot()}
             {renderTitleTimerSlot(
               <>
@@ -764,7 +784,7 @@ export default function WorkoutPlayer({
               </View>,
             )}
             <View style={st.mediaSlot}>
-              <View style={[st.mediaInner, st.equipmentPanel]}>
+              <View style={[st.mediaInner, st.equipmentPanel, mediaInnerSize]}>
                 <View style={[st.specialIconCircle, { backgroundColor: 'rgba(251,146,60,0.15)' }]}>
                   <Icon name="briefcase" size={48} color="#FB923C" />
                 </View>
@@ -777,7 +797,6 @@ export default function WorkoutPlayer({
         {/* ── WATER BREAK — Hydration pause ───────────────────── */}
         {phase === 'waterBreak' && current && (
           <View style={[st.workContainer, webSafeBottomStyle]}>
-            {renderHeader()}
             {renderLogoSlot()}
             {renderTitleTimerSlot(
               <Text style={st.waterBreakLabel}>WATER BREAK</Text>,
@@ -786,7 +805,7 @@ export default function WorkoutPlayer({
               </View>,
             )}
             <View style={st.mediaSlot}>
-              <View style={st.mediaInner}>
+              <View style={[st.mediaInner, mediaInnerSize]}>
                 {activeVideoUrl ? (
                   <Video
                     ref={registerVideo}
@@ -828,7 +847,6 @@ export default function WorkoutPlayer({
         {/* the same video, which already shows the next item per activeVideoUrl. */}
         {(phase === 'work' || phase === 'rest') && current && (
           <View style={[st.workContainer, webSafeBottomStyle]}>
-            {renderHeader()}
             {renderLogoSlot()}
             {phase === 'work'
               ? renderTitleTimerSlot(
@@ -873,7 +891,7 @@ export default function WorkoutPlayer({
                   <Text style={st.splitArrows}> ⇄</Text>
                 </View>
               )}
-              <View style={st.mediaInner}>
+              <View style={[st.mediaInner, mediaInnerSize]}>
                 {videoLayers.length > 0 ? (
                   <>
                     {videoLayers.map((layer) => {
@@ -936,7 +954,6 @@ export default function WorkoutPlayer({
         {/* ── SWAP state ──────────────────────────────────────── */}
         {phase === 'swap' && current && (
           <View style={[st.workContainer, webSafeBottomStyle]}>
-            {renderHeader()}
             {renderLogoSlot()}
             {renderTitleTimerSlot(
               <>
@@ -948,7 +965,7 @@ export default function WorkoutPlayer({
               </View>,
             )}
             <View style={st.mediaSlot}>
-              <View style={[st.mediaInner, st.swapPanel]}>
+              <View style={[st.mediaInner, st.swapPanel, mediaInnerSize]}>
                 <View style={st.sideBadge}>
                   <Text style={st.sideBadgeText}>RIGHT SIDE</Text>
                 </View>
@@ -984,10 +1001,11 @@ export default function WorkoutPlayer({
         )}
 
         {/* ── Shared player-shell controls ─────────────────────── */}
-        {/* One tap-anywhere surface + one overlay for every active */}
-        {/* phase. Skip advances through the timeline via the hook, */}
-        {/* so each state advances to its own correct next item.    */}
-        {phase !== 'ready' && phase !== 'complete' && !showControls && (
+        {/* The top header (close/title/mute/progress) lives INSIDE this   */}
+        {/* overlay so playback is clean — it appears with pause/skip on   */}
+        {/* tap and auto-hides 3s later. While paused the overlay sticks   */}
+        {/* (controls + header stay visible) so the user can resume.       */}
+        {phase !== 'ready' && phase !== 'complete' && !(showControls || isPaused) && (
           <TouchableOpacity
             style={st.sharedTapCatcher}
             onPress={handleVideoTap}
@@ -995,13 +1013,16 @@ export default function WorkoutPlayer({
           />
         )}
 
-        {phase !== 'ready' && phase !== 'complete' && showControls && (
+        {phase !== 'ready' && phase !== 'complete' && (showControls || isPaused) && (
           <View style={st.sharedControlsOverlay}>
             <TouchableOpacity
               style={st.sharedOverlayBackdrop}
               onPress={handleVideoTap}
               activeOpacity={1}
             />
+            <View style={st.sharedOverlayHeader} pointerEvents="box-none">
+              {renderHeader(true)}
+            </View>
             <View style={st.sharedOverlayCenterStack} pointerEvents="box-none">
               {phase === 'work' && isRepBased ? (
                 <TouchableOpacity style={st.sharedOverlayCenterBtn} onPress={handleRepDoneFromOverlay}>
@@ -1381,16 +1402,24 @@ const st = StyleSheet.create({
   },
   titleColumn: { flex: 1, marginRight: 12, justifyContent: 'center' },
   timerColumn: { justifyContent: 'center' },
+  // Media slot — outer reserves the vertical space between the title row
+  // and the next-up slot. The inner box (mediaInner) gets explicit pixel
+  // width/height passed inline so the ratio is always exactly 4:5; this
+  // avoids RN's ambiguous behavior when aspectRatio + percent dimensions
+  // collide. Surrounding layout shrinks/grows around it, never the ratio.
   mediaSlot: {
     flex: 1,
     width: '100%',
-    minHeight: 200,
+    minHeight: 180,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mediaInner: {
     overflow: 'hidden',
     backgroundColor: '#000000',
     borderRadius: 12,
     position: 'relative',
   },
-  mediaInner: { flex: 1, position: 'relative' },
   nextUpSlot: {
     minHeight: 76,
     width: '100%',
@@ -1531,6 +1560,11 @@ const st = StyleSheet.create({
   sharedOverlayBackdrop: {
     ...StyleSheet.absoluteFillObject,
   } as any,
+  sharedOverlayHeader: {
+    position: 'absolute' as any,
+    top: 0, left: 0, right: 0,
+    zIndex: 110,
+  },
   sharedOverlayCloseRow: {
     position: 'absolute' as any,
     top: Platform.select({ ios: 44, android: 20, web: 16, default: 16 }),
