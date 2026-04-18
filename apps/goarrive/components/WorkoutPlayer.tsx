@@ -146,15 +146,15 @@ export default function WorkoutPlayer({
   // pixel heights (not minHeight) so the centered media never shifts when
   // phase content changes — keep these constants in sync if you change the
   // slot styles.
-  const SLOT_LOGO_H = 58; // height 56 + marginTop 0 + marginBottom 2
-  const SLOT_TITLE_H = 126; // height 124 + marginBottom 2
+  const SLOT_LOGO_H = 64; // height 64 + marginTop 0 + marginBottom 0
+  const SLOT_TITLE_H = 120; // height 120 + marginBottom 0
   const SLOT_NEXTUP_H = 96;
   const SLOT_VERT_PAD = 24;
   const mediaAvailH = Math.max(
     180,
     (frameH || 600) - SLOT_LOGO_H - SLOT_TITLE_H - SLOT_NEXTUP_H - SLOT_VERT_PAD,
   );
-  const mediaAvailW = Math.max(160, (frameW || 360) - 16);
+  const mediaAvailW = Math.max(160, (frameW || 360) - 8);
   let _mediaW = mediaAvailW;
   let _mediaH = _mediaW * (5 / 4);
   if (_mediaH > mediaAvailH) {
@@ -1382,7 +1382,7 @@ const st = StyleSheet.create({
   // to push content up; bottom padding accounts for iOS home indicator
   // and PWA browser chrome so the next-up slot is never clipped.
   workContainer: {
-    flex: 1, paddingHorizontal: 8, paddingTop: 0,
+    flex: 1, paddingHorizontal: 4, paddingTop: 0,
     paddingBottom: Platform.select({ ios: 24, android: 8, web: 8, default: 8 }),
   },
 
@@ -1390,25 +1390,25 @@ const st = StyleSheet.create({
   // Heights are stable across phases so logo / title / timer / media /
   // next-up never shift between work, rest, transition, etc.
   logoSlot: {
-    height: 56,
+    height: 64,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 0,
-    marginBottom: 2,
+    marginBottom: 0,
   },
-  slotLogo: { width: 240, height: 52 },
+  slotLogo: { width: 280, height: 60 },
   // Title/timer row is locked to a fixed pixel height — NOT minHeight — so
   // the slot does not grow when content varies between phases (REST shows
   // 2 short lines, WORK can show superset + 2-line name + reps + cues). If
   // this height changed phase-to-phase the flex mediaSlot below would
   // shrink/grow with it and the centered media would visibly shift.
   titleTimerSlot: {
-    height: 124,
+    height: 120,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 4,
-    marginBottom: 2,
+    marginBottom: 0,
   },
   titleColumn: { flex: 1, marginRight: 12, justifyContent: 'center' },
   timerColumn: { justifyContent: 'center' },
@@ -1474,15 +1474,15 @@ const st = StyleSheet.create({
   },
   nameColumn: { flex: 1, marginRight: 12 },
   supersetLabel: {
-    fontSize: 14, fontWeight: '700', color: '#F5A623', fontFamily: FH,
-    letterSpacing: 1, marginBottom: 2,
+    fontSize: 16, fontWeight: '700', color: '#F5A623', fontFamily: FH,
+    letterSpacing: 1, marginBottom: 4,
   },
   workMovementName: {
-    fontSize: 32, fontWeight: '800', color: '#FFFFFF', fontFamily: FH,
-    lineHeight: 36,
+    fontSize: 42, fontWeight: '800', color: '#FFFFFF', fontFamily: FH,
+    lineHeight: 46,
   },
   workReps: {
-    fontSize: 17, fontWeight: '600', color: '#F5A623', fontFamily: FH, marginTop: 2,
+    fontSize: 18, fontWeight: '600', color: '#F5A623', fontFamily: FH, marginTop: 2,
   },
   workCues: {
     fontSize: 13, color: '#8A95A3', fontFamily: FB, marginTop: 2,
@@ -1490,49 +1490,50 @@ const st = StyleSheet.create({
   workTimer: {
     fontSize: 80, fontWeight: '700', color: '#FFFFFF', fontFamily: FH, lineHeight: 80,
   },
-  // Gold timer box (used across all screens). Fixed minWidth keeps box size
-  // identical across digit counts (e.g. 0:05 vs 10:00) so the layout never
-  // shifts as the timer counts down.
+  // Gold timer box (used across all screens). minWidth keeps the box size
+  // identical as the seconds count down 59→0 (formatTime drops to seconds-
+  // only when m === 0). For the rare M:SS case the box can grow to fit text
+  // — that only happens once per long interval.
   goldTimerBox: {
     backgroundColor: '#F5A623',
-    minWidth: 104,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
+    minWidth: 132,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   goldTimerText: {
-    fontSize: 56,
+    fontSize: 80,
     fontWeight: '800',
     color: '#0E1117',
     fontFamily: FH,
-    lineHeight: 60,
+    lineHeight: 84,
     textAlign: 'center',
   },
   // REST phase styles
   restPhaseLabel: {
-    fontSize: 16, fontWeight: '700', color: '#8A95A3', fontFamily: FH,
+    fontSize: 18, fontWeight: '700', color: '#8A95A3', fontFamily: FH,
     letterSpacing: 2,
   },
   restNextName: {
-    fontSize: 24, fontWeight: '800', color: '#F0F4F8', fontFamily: FH, marginTop: 2,
+    fontSize: 28, fontWeight: '800', color: '#F0F4F8', fontFamily: FH, marginTop: 2,
   },
   restTimerBox: {
     backgroundColor: '#1A2035',
-    minWidth: 104,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
+    minWidth: 132,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   restTimerText: {
-    fontSize: 56,
+    fontSize: 80,
     fontWeight: '800',
     color: '#FFFFFF',
     fontFamily: FH,
-    lineHeight: 60,
+    lineHeight: 84,
     textAlign: 'center',
   },
   sideBadgeRow: { alignItems: 'center', marginBottom: 4 },
