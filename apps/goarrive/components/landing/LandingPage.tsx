@@ -21,6 +21,7 @@ import {
   Linking,
   LayoutChangeEvent,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 
 /* ─── Brand Tokens ─── */
@@ -88,6 +89,11 @@ export default function LandingPage() {
   const scrollRef = useRef<ScrollView>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const insets = useSafeAreaInsets();
+  const navTopPad = Platform.OS === 'web' ? Math.max(14, insets.top + 6) : 14;
+  const navBottomPad = 14;
+  const heroTopBase = isMobile ? 110 : 150;
+  const heroTopPad = Platform.OS === 'web' ? heroTopBase + Math.max(0, insets.top) : heroTopBase;
 
   const goStart = () => router.push('/intake');
   const goLogin = () => router.push('/(auth)/login');
@@ -105,7 +111,7 @@ export default function LandingPage() {
   /* ─── NAV ─── */
   const Nav = (
     <View style={[nav.bar, Platform.OS === 'web' && ({ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 999 } as any)]}>
-      <View style={[nav.inner, { maxWidth: 1080 }]}>
+      <View style={[nav.inner, { maxWidth: 1080, paddingTop: navTopPad, paddingBottom: navBottomPad }]}>
         <Image source={require('../../assets/logo.png')} style={nav.logo} resizeMode="contain" accessibilityLabel="GoArrive" />
         {isMobile ? (
           <Pressable onPress={() => setMenuOpen(!menuOpen)} hitSlop={12}>
@@ -137,7 +143,7 @@ export default function LandingPage() {
 
   /* ─── HERO ─── */
   const Hero = (
-    <View style={[hero.wrap, { paddingTop: isMobile ? 110 : 150, paddingBottom: isMobile ? 70 : 100 }]}>
+    <View style={[hero.wrap, { paddingTop: heroTopPad, paddingBottom: isMobile ? 70 : 100 }]}>
       <View style={hero.glow} />
       <View style={hero.inner}>
         <Text style={[hero.headline, isMobile && { fontSize: 36, lineHeight: 43 }]}>
