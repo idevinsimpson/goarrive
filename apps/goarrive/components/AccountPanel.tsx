@@ -23,6 +23,7 @@ import {
   TextInput,
   ScrollView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from './Icon';
 import { useAuth } from '../lib/AuthContext';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -52,6 +53,13 @@ export default function AccountPanel({ visible, onClose }: Props) {
   const slideAnim = useRef(new Animated.Value(PANEL_WIDTH)).current;
   const [toastMsg, setToastMsg] = useState('');
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const insets = useSafeAreaInsets();
+  const profileTopPad =
+    Platform.OS === 'web'
+      ? Math.max(24, insets.top + 12)
+      : Platform.OS === 'ios'
+        ? 60
+        : 48;
 
   function showToast(msg: string) {
     setToastMsg(msg);
@@ -222,7 +230,7 @@ export default function AccountPanel({ visible, onClose }: Props) {
         style={[s.panel, { transform: [{ translateX: slideAnim }] }]}
       >
         {/* Profile section */}
-        <View style={s.profileSection}>
+        <View style={[s.profileSection, { paddingTop: profileTopPad }]}>
           <View style={s.avatarRow}>
             <View style={s.avatar}>
               <Text style={s.avatarText}>{initials}</Text>
@@ -388,7 +396,6 @@ const s = StyleSheet.create({
     zIndex: 2,
   },
   profileSection: {
-    paddingTop: Platform.OS === 'web' ? ('max(48px, env(safe-area-inset-top, 48px))' as any) : Platform.OS === 'ios' ? 60 : 48,
     paddingHorizontal: 20,
     paddingBottom: 20,
     backgroundColor: '#131A27',

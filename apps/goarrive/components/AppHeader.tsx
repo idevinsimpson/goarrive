@@ -4,10 +4,11 @@
  * Displays the real GoArrive logo image on the left and a user avatar on the right.
  * Tapping the logo navigates to the dashboard.
  * Tapping the avatar opens AccountPanel as a slide-over modal (not a page navigation).
- * Uses env(safe-area-inset-top) for PWA standalone mode on iOS.
+ * Uses useSafeAreaInsets() so iOS PWA standalone mode clears the status bar / Dynamic Island.
  */
 import React, { useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Platform, Image } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../lib/AuthContext';
 import { useRouter } from 'expo-router';
 import AccountPanel from './AccountPanel';
@@ -17,6 +18,13 @@ export function AppHeader() {
   const { user } = useAuth();
   const router = useRouter();
   const [showPanel, setShowPanel] = useState(false);
+  const insets = useSafeAreaInsets();
+  const topPad =
+    Platform.OS === 'web'
+      ? Math.max(12, insets.top)
+      : Platform.OS === 'ios'
+        ? 52
+        : 16;
 
   const initials = user?.displayName
     ? user.displayName
@@ -29,7 +37,7 @@ export function AppHeader() {
 
   return (
     <>
-      <View style={s.root}>
+      <View style={[s.root, { paddingTop: topPad }]}>
         {/* GoArrive Logo — tapping navigates to dashboard */}
         <Pressable
           onPress={() => router.push('/(app)/dashboard' as any)}
@@ -74,7 +82,6 @@ const s = StyleSheet.create({
     justifyContent: 'space-between',
     backgroundColor: '#0E1117',
     paddingHorizontal: 16,
-    paddingTop: Platform.select({ ios: 52, android: 16, web: 12, default: 16 }),
     paddingBottom: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#1E2A3A',
@@ -85,8 +92,6 @@ const s = StyleSheet.create({
           left: 0,
           right: 0,
           zIndex: 1000,
-          // Dynamically respect iPhone notch/Dynamic Island in PWA mode
-          paddingTop: 'max(12px, env(safe-area-inset-top, 12px))' as any,
         } as any)
       : {}),
   },
