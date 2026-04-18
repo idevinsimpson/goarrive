@@ -18,11 +18,11 @@ import type { StepType } from './useWorkoutFlatten';
 export type Phase = 'ready' | 'work' | 'rest' | 'swap' | 'complete'
   | 'intro' | 'outro' | 'demo' | 'transition' | 'waterBreak' | 'grabEquipment';
 
-// Integer seconds so the on-screen timer shows "4, 3, 2, 1" instead of a
-// fractional half-second. Paired with REVEAL_LEAD_SECONDS = 3.5 in
-// WorkoutPlayer.tsx: the reveal + "3, 2, 1" cue fire naturally once the
-// countdown ticks past 3.5 (i.e., at 3).
-const SKIP_PRE_ENTRY_SECONDS = 4;
+// Lands inside REVEAL_LEAD_SECONDS (3.5 in WorkoutPlayer.tsx) so the next
+// timeline item reveals immediately when Skip is pressed — important for the
+// paused case, otherwise a paused user would be stuck on the current movement.
+// The display side ceils timeLeft so the visible countdown is still 4,3,2,1.
+const SKIP_PRE_ENTRY_SECONDS = 3.5;
 
 interface FlatMovement {
   name: string;
@@ -116,23 +116,25 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
       setTimeLeft((prev) => {
         const n = prev - 1;
 
-        // Audio/haptic cues for rest countdown (3-2-1 heads-up)
+        // Audio/haptic cues. Use Math.ceil so a fractional Skip pre-entry
+        // (e.g. n=2.5 displayed as "3") still triggers the cue at the right
+        // perceived second. n<=0 catches both natural 0 and Skip overshoot.
+        const displayed = Math.max(0, Math.ceil(n));
         if (phase === 'rest' || phase === 'swap') {
-          if (n <= 3 && n > 0) {
+          if (displayed <= 3 && displayed > 0 && n > 0) {
             playCue('countdownTick');
             hapticLight();
           }
-          if (n === 0) {
+          if (n <= 0) {
             playCue('countdownFinal');
             hapticMedium();
           }
         } else if (phase === 'work') {
-          if (n <= 3 && n > 0) hapticLight();
-          if (n === 0) hapticMedium();
+          if (displayed <= 3 && displayed > 0 && n > 0) hapticLight();
+          if (n <= 0) hapticMedium();
         } else if (isSpecialPhase) {
-          // Gentle haptic at 3 seconds remaining for special blocks
-          if (n === 3) hapticLight();
-          if (n === 0) hapticMedium();
+          if (displayed === 3) hapticLight();
+          if (n <= 0) hapticMedium();
         }
 
         return n;
@@ -213,8 +215,39 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
   //   rest → next, swap → work(R), intro/outro/demo/transition/waterBreak/
   //   grabEquipment → next. In every case we land 3.5s before the next real
   //   timeline item, so the reveal video swap and "3, 2, 1" cue stay in sync.
+  //
+  // While paused: the tick + hit-zero effects are short-circuited, so we
+  // perform the phase transition inline. Player stays paused, letting the
+  // user step through phases one at a time without auto-resuming.
   const handleSkip = useCallback(() => {
     if (phase === 'ready' || phase === 'complete') return;
+
+    if (isPaused) {
+      setIsSkippingRep(false);
+      if (phase === 'intro' || phase === 'outro' || phase === 'demo'
+          || phase === 'transition' || phase === 'waterBreak' || phase === 'grabEquipment') {
+        advanceToNext();
+      } else if (phase === 'work') {
+        if (current?.swapSides && swapSide === 'L') {
+          setSwapSide('R');
+          setPhase('swap');
+          setTimeLeft(5);
+        } else if (current?.restAfter && current.restAfter > 0) {
+          setPhase('rest');
+          setTimeLeft(current.restAfter);
+          playCue('restStart');
+        } else {
+          advanceToNext();
+        }
+      } else if (phase === 'swap') {
+        setPhase('work');
+        setTimeLeft(current?.duration ?? 30);
+        playCue('workStart');
+      } else if (phase === 'rest') {
+        advanceToNext();
+      }
+      return;
+    }
 
     // Rep-based work has no countdown running — start a 3.5s skip window and
     // let the hit-zero handler pick the correct next state (swap/rest/next).
@@ -225,7 +258,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     }
 
     setTimeLeft((prev) => (prev <= SKIP_PRE_ENTRY_SECONDS ? prev : SKIP_PRE_ENTRY_SECONDS));
-  }, [phase, isRepBased]);
+  }, [phase, isPaused, isRepBased, current, swapSide, advanceToNext]);
 
   const handleRepDone = useCallback(() => {
     if (!current) return;

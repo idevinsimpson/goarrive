@@ -392,10 +392,14 @@ export function useWorkoutTTS({
     if (phase !== 'work' || !current || current.stepType !== 'exercise') return;
     if (currentDuration <= 0) return;
 
-    if (timeLeft === 3 && countdownSpokenRef.current !== 3) {
+    // Use Math.ceil so a fractional Skip pre-entry (e.g. timeLeft=2.5,
+    // displayed as "3") also triggers the "3, 2, 1" voice cue. timeLeft<=0
+    // catches both the natural 0 tick and the Skip overshoot at -0.5.
+    const displayed = Math.max(0, Math.ceil(timeLeft));
+    if (displayed === 3 && timeLeft > 0 && countdownSpokenRef.current !== 3) {
       countdownSpokenRef.current = 3;
       playCue('countdown_3');
-    } else if (timeLeft === 0 && countdownSpokenRef.current !== 0) {
+    } else if (timeLeft <= 0 && countdownSpokenRef.current !== 0) {
       countdownSpokenRef.current = 0;
       const isLastMovement = currentIndex >= total - 1;
       if (isLastMovement) {
