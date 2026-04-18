@@ -172,7 +172,29 @@ export default function WorkoutPlayer({
     });
   }, []);
 
-  useEffect(() => { setShowControls(false); }, [currentIndex]);
+  // Reset the auto-hide timer so the overlay stays visible while the user is
+  // actively interacting (e.g. repeated Skip taps). Phase/movement changes must
+  // NOT force-hide the overlay — it should fade only when the user stops.
+  const extendControlsTimer = useCallback(() => {
+    if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+    controlsTimerRef.current = setTimeout(() => setShowControls(false), 3000);
+  }, []);
+
+  const handleSkipFromOverlay = useCallback(() => {
+    handleSkip();
+    extendControlsTimer();
+  }, [handleSkip, extendControlsTimer]);
+
+  const handlePauseResumeFromOverlay = useCallback(() => {
+    handlePauseResume();
+    extendControlsTimer();
+  }, [handlePauseResume, extendControlsTimer]);
+
+  const handleRepDoneFromOverlay = useCallback(() => {
+    handleRepDone();
+    extendControlsTimer();
+  }, [handleRepDone, extendControlsTimer]);
+
   useEffect(() => {
     return () => {
       if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
@@ -951,16 +973,16 @@ export default function WorkoutPlayer({
             </View>
             <View style={st.sharedOverlayCenterStack} pointerEvents="box-none">
               {phase === 'work' && isRepBased ? (
-                <TouchableOpacity style={st.sharedOverlayCenterBtn} onPress={handleRepDone}>
+                <TouchableOpacity style={st.sharedOverlayCenterBtn} onPress={handleRepDoneFromOverlay}>
                   <Icon name="check" size={32} color="#0E1117" />
                   <Text style={st.sharedOverlayDoneText}>Done</Text>
                 </TouchableOpacity>
               ) : (
-                <TouchableOpacity style={st.sharedOverlayCenterBtn} onPress={handlePauseResume}>
+                <TouchableOpacity style={st.sharedOverlayCenterBtn} onPress={handlePauseResumeFromOverlay}>
                   <Icon name={isPaused ? 'play' : 'pause'} size={36} color="#0E1117" />
                 </TouchableOpacity>
               )}
-              <TouchableOpacity style={st.sharedOverlaySkipBtn} onPress={handleSkip}>
+              <TouchableOpacity style={st.sharedOverlaySkipBtn} onPress={handleSkipFromOverlay}>
                 <Icon name="skip-forward" size={18} color="#F5A623" />
                 <Text style={st.sharedOverlaySkipText}>Skip</Text>
               </TouchableOpacity>
