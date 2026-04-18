@@ -278,6 +278,20 @@ export default function WorkoutPlayer({
     return m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `${s}`;
   };
 
+  // Dominant-digit timer sizing. Box is fixed at 132×112 (see goldTimerBox /
+  // restTimerBox). For 1–2 char values ("9", "39") we go as large as fits with
+  // comfortable padding; 3+ char values ("1:30", "10:00") fall back so the
+  // colon+digits still fit without clipping. Returned style is applied after
+  // the base timer text style so it overrides fontSize/lineHeight.
+  const getTimerFontStyle = (
+    text: string,
+  ): { fontSize: number; lineHeight: number; letterSpacing: number } => {
+    const len = (text || '').length;
+    if (len <= 2) return { fontSize: 96, lineHeight: 96, letterSpacing: -2 };
+    if (len === 3) return { fontSize: 64, lineHeight: 68, letterSpacing: -1 };
+    return { fontSize: 48, lineHeight: 52, letterSpacing: 0 };
+  };
+
   // Auto-shrink the movement-name font so any reasonable name fits the
   // fixed-height title module (which sits flush with the media's left edge).
   // Tiers chosen empirically for a ~210px wide column at 3 lines max.
@@ -681,7 +695,7 @@ export default function WorkoutPlayer({
                   {current.name || current.label || 'WARM-UP & STRETCH'}
                 </Text>
                 <View style={st.goldTimerBox}>
-                  <Text style={st.goldTimerText}>{Math.max(0, Math.ceil(timeLeft))}</Text>
+                  <Text style={[st.goldTimerText, getTimerFontStyle(String(Math.max(0, Math.ceil(timeLeft))))]}>{Math.max(0, Math.ceil(timeLeft))}</Text>
                 </View>
               </View>
             </View>
@@ -715,7 +729,7 @@ export default function WorkoutPlayer({
               />
               <Text style={st.outroTitle}>WORKOUT</Text>
               <View style={st.goldTimerBox}>
-                <Text style={st.goldTimerText}>{Math.max(0, Math.ceil(timeLeft))}</Text>
+                <Text style={[st.goldTimerText, getTimerFontStyle(String(Math.max(0, Math.ceil(timeLeft))))]}>{Math.max(0, Math.ceil(timeLeft))}</Text>
               </View>
             </View>
           </View>
@@ -731,7 +745,7 @@ export default function WorkoutPlayer({
               {renderTitleTimerSlot(
                 <Text style={st.demoBlockTitle} numberOfLines={2}>{current.name}</Text>,
                 <View style={st.goldTimerBox}>
-                  <Text style={st.goldTimerText}>{Math.max(0, Math.ceil(timeLeft))}</Text>
+                  <Text style={[st.goldTimerText, getTimerFontStyle(String(Math.max(0, Math.ceil(timeLeft))))]}>{Math.max(0, Math.ceil(timeLeft))}</Text>
                 </View>,
               )}
               <View style={st.mediaSlot}>
@@ -769,7 +783,7 @@ export default function WorkoutPlayer({
                 ) : null}
               </>,
               <View style={st.goldTimerBox}>
-                <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
+                <Text style={[st.goldTimerText, getTimerFontStyle(formatTime(timeLeft))]}>{formatTime(timeLeft)}</Text>
               </View>,
             )}
             <View style={st.mediaSlot}>
@@ -818,7 +832,7 @@ export default function WorkoutPlayer({
                 ) : null}
               </>,
               <View style={st.goldTimerBox}>
-                <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
+                <Text style={[st.goldTimerText, getTimerFontStyle(formatTime(timeLeft))]}>{formatTime(timeLeft)}</Text>
               </View>,
             )}
             <View style={st.mediaSlot}>
@@ -839,7 +853,7 @@ export default function WorkoutPlayer({
             {renderTitleTimerSlot(
               <Text style={st.waterBreakLabel}>WATER BREAK</Text>,
               <View style={st.goldTimerBox}>
-                <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
+                <Text style={[st.goldTimerText, getTimerFontStyle(formatTime(timeLeft))]}>{formatTime(timeLeft)}</Text>
               </View>,
             )}
             <View style={st.mediaSlot}>
@@ -901,7 +915,7 @@ export default function WorkoutPlayer({
                   </>,
                   !isRepBased ? (
                     <View style={st.goldTimerBox}>
-                      <Text style={st.goldTimerText}>{formatTime(timeLeft)}</Text>
+                      <Text style={[st.goldTimerText, getTimerFontStyle(formatTime(timeLeft))]}>{formatTime(timeLeft)}</Text>
                     </View>
                   ) : null,
                 )
@@ -911,7 +925,7 @@ export default function WorkoutPlayer({
                     {next && <Text style={st.restNextName} numberOfLines={1}>Next: {next.name}</Text>}
                   </>,
                   <View style={st.restTimerBox}>
-                    <Text style={st.restTimerText}>{formatTime(timeLeft)}</Text>
+                    <Text style={[st.restTimerText, getTimerFontStyle(formatTime(timeLeft))]}>{formatTime(timeLeft)}</Text>
                   </View>,
                 )}
 
@@ -996,7 +1010,7 @@ export default function WorkoutPlayer({
                 <Text style={st.restNextName} numberOfLines={1}>{current.name}</Text>
               </>,
               <View style={st.goldTimerBox}>
-                <Text style={st.goldTimerText}>{Math.max(0, Math.ceil(timeLeft))}</Text>
+                <Text style={[st.goldTimerText, getTimerFontStyle(String(Math.max(0, Math.ceil(timeLeft))))]}>{Math.max(0, Math.ceil(timeLeft))}</Text>
               </View>,
             )}
             <View style={st.mediaSlot}>
@@ -1531,25 +1545,23 @@ const st = StyleSheet.create({
   workTimer: {
     fontSize: 80, fontWeight: '700', color: '#FFFFFF', fontFamily: FH, lineHeight: 80,
   },
-  // Gold timer box (used across all screens). minWidth keeps the box size
-  // identical as the seconds count down 59→0 (formatTime drops to seconds-
-  // only when m === 0). For the rare M:SS case the box can grow to fit text
-  // — that only happens once per long interval.
+  // Gold timer box (used across all screens). Width and height are fixed so
+  // the box never resizes when the digit count changes (9→10, 39→40, or when
+  // formatTime flips from "59" to "1:00"). Font size is controlled by
+  // getTimerFontStyle at the call site so 1–2 char values dominate the box
+  // and 3+ char values (M:SS) shrink to fit cleanly.
   goldTimerBox: {
     backgroundColor: '#F5A623',
-    minWidth: 132,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    width: 132,
+    height: 112,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   goldTimerText: {
-    fontSize: 80,
     fontWeight: '800',
     color: '#0E1117',
     fontFamily: FH,
-    lineHeight: 84,
     textAlign: 'center',
   },
   // REST phase styles
@@ -1563,19 +1575,16 @@ const st = StyleSheet.create({
   },
   restTimerBox: {
     backgroundColor: '#1A2035',
-    minWidth: 132,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    width: 132,
+    height: 112,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   restTimerText: {
-    fontSize: 80,
     fontWeight: '800',
     color: '#FFFFFF',
     fontFamily: FH,
-    lineHeight: 84,
     textAlign: 'center',
   },
   sideBadgeRow: { alignItems: 'center', marginBottom: 4 },
