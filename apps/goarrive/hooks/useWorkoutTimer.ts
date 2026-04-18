@@ -116,23 +116,25 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
       setTimeLeft((prev) => {
         const n = prev - 1;
 
-        // Audio/haptic cues for rest countdown (3-2-1 heads-up)
+        // Audio/haptic cues. Use Math.ceil so a fractional Skip pre-entry
+        // (e.g. n=2.5 displayed as "3") still triggers the cue at the right
+        // perceived second. n<=0 catches both natural 0 and Skip overshoot.
+        const displayed = Math.max(0, Math.ceil(n));
         if (phase === 'rest' || phase === 'swap') {
-          if (n <= 3 && n > 0) {
+          if (displayed <= 3 && displayed > 0 && n > 0) {
             playCue('countdownTick');
             hapticLight();
           }
-          if (n === 0) {
+          if (n <= 0) {
             playCue('countdownFinal');
             hapticMedium();
           }
         } else if (phase === 'work') {
-          if (n <= 3 && n > 0) hapticLight();
-          if (n === 0) hapticMedium();
+          if (displayed <= 3 && displayed > 0 && n > 0) hapticLight();
+          if (n <= 0) hapticMedium();
         } else if (isSpecialPhase) {
-          // Gentle haptic at 3 seconds remaining for special blocks
-          if (n === 3) hapticLight();
-          if (n === 0) hapticMedium();
+          if (displayed === 3) hapticLight();
+          if (n <= 0) hapticMedium();
         }
 
         return n;
@@ -215,6 +217,11 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
   //   timeline item, so the reveal video swap and "3, 2, 1" cue stay in sync.
   const handleSkip = useCallback(() => {
     if (phase === 'ready' || phase === 'complete') return;
+
+    // Skip is always a forward-advance gesture: if the player is paused, also
+    // resume so the countdown ticks and the natural transition fires. Without
+    // this, paused-skip would set timeLeft and freeze on the pre-entry frame.
+    setIsPaused(false);
 
     // Rep-based work has no countdown running — start a 3.5s skip window and
     // let the hit-zero handler pick the correct next state (swap/rest/next).

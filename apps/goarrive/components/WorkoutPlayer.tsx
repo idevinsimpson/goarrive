@@ -517,7 +517,7 @@ export default function WorkoutPlayer({
                     source={{ uri: introVideoUrl }}
                     resizeMode={ResizeMode.COVER}
                     isLooping
-                    shouldPlay
+                    shouldPlay={!isPaused}
                     isMuted
                     style={StyleSheet.absoluteFillObject}
                     videoStyle={
@@ -558,7 +558,7 @@ export default function WorkoutPlayer({
                 source={{ uri: current.videoUrl }}
                 resizeMode={ResizeMode.COVER}
                 isLooping
-                shouldPlay
+                shouldPlay={!isPaused}
                 isMuted
                 style={StyleSheet.absoluteFillObject}
                 videoStyle={
@@ -651,7 +651,7 @@ export default function WorkoutPlayer({
                     source={{ uri: activeVideoUrl }}
                     resizeMode={ResizeMode.COVER}
                     isLooping
-                    shouldPlay
+                    shouldPlay={!isPaused}
                     isMuted
                     style={st.videoPlayer}
                     videoStyle={
@@ -724,7 +724,7 @@ export default function WorkoutPlayer({
                     source={{ uri: activeVideoUrl }}
                     resizeMode={ResizeMode.COVER}
                     isLooping
-                    shouldPlay
+                    shouldPlay={!isPaused}
                     isMuted
                     style={st.videoPlayer}
                     videoStyle={
