@@ -108,6 +108,7 @@ export default function WorkoutPlayer({
     current,
     next,
     isMuted,
+    isPaused,
     currentIndex,
     total,
     timeLeft,

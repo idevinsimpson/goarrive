@@ -117,6 +117,7 @@ interface UseWorkoutTTSOptions {
   } | null;
   next: { name: string; [key: string]: any } | null;
   isMuted: boolean;
+  isPaused: boolean;
   ttsDisabled?: boolean;
   currentIndex: number;
   total: number;
@@ -129,6 +130,7 @@ export function useWorkoutTTS({
   current,
   next,
   isMuted,
+  isPaused,
   ttsDisabled = false,
   currentIndex,
   total,
@@ -141,6 +143,12 @@ export function useWorkoutTTS({
   const countdownSpokenRef = useRef<number>(-1);
   const welcomeSpokenRef = useRef<boolean>(false);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Mirror isPaused for use inside setTimeout-deferred callbacks. Without this
+  // a cue scheduled before pause (e.g. the 900ms gap between "next up" and the
+  // movement voice) would still fire after the user pauses.
+  const isPausedRef = useRef(isPaused);
+  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
 
   // On web, we always have audio (our own files). On native, check expo-speech.
   useEffect(() => {
@@ -156,7 +164,7 @@ export function useWorkoutTTS({
     // ── Play a dynamic audio URL (movement voice clips from Firebase Storage) ──
   const playVoiceUrl = useCallback(
     (url: string, onEnded?: () => void) => {
-      if (isMuted || ttsDisabled) return;
+      if (isMuted || ttsDisabled || isPausedRef.current) return;
       if (Platform.OS !== 'web' || typeof window === 'undefined') return;
       if (!url) return;
       try {
@@ -178,7 +186,7 @@ export function useWorkoutTTS({
   // ── Play a static cue from Firebase Storage ────────────────────
   const playCue = useCallback(
     (key: CueKey) => {
-      if (isMuted || ttsDisabled) return;
+      if (isMuted || ttsDisabled || isPausedRef.current) return;
       if (Platform.OS !== 'web' || typeof window === 'undefined') return;
       try {
         // Stop any currently playing cue
@@ -223,7 +231,7 @@ export function useWorkoutTTS({
 
   const speak = useCallback(
     (text: string) => {
-      if (isMuted || ttsDisabled) return;
+      if (isMuted || ttsDisabled || isPausedRef.current) return;
       if (Platform.OS === 'web') {
         speakWeb(text);
         return;
@@ -244,6 +252,7 @@ export function useWorkoutTTS({
 
   // ── Special block announcements ────────────────────────────────────
   useEffect(() => {
+    if (isPaused) return;
     if (!current) return;
     const stepType = current.stepType;
 
@@ -307,20 +316,22 @@ export function useWorkoutTTS({
       }
       return;
     }
-  }, [phase, current?.stepType, currentIndex, speak, playCue]);
+  }, [phase, current?.stepType, currentIndex, speak, playCue, isPaused]);
 
   // ── Welcome message on first work phase ─────────────────────────────
   useEffect(() => {
+    if (isPaused) return;
     if (phase === 'work' && currentIndex === 0 && !welcomeSpokenRef.current) {
       if (current?.stepType === 'exercise') {
         welcomeSpokenRef.current = true;
         playCue('workout_starting');
       }
     }
-  }, [phase, currentIndex, current?.stepType, playCue]);
+  }, [phase, currentIndex, current?.stepType, playCue, isPaused]);
 
   // ── Exercise movement announcements ────────────────────────────────
   useEffect(() => {
+    if (isPaused) return;
     if (!current || current.stepType !== 'exercise') return;
 
     if (phase === 'work') {
@@ -372,10 +383,11 @@ export function useWorkoutTTS({
       halfwaySpokenRef.current = false;
       countdownSpokenRef.current = -1;
     }
-  }, [phase, current?.name, current?.stepType, current?.voiceUrl, currentIndex, next?.name, next?.voiceUrl, speak, playCue, playVoiceUrl]);
+  }, [phase, current?.name, current?.stepType, current?.voiceUrl, currentIndex, next?.name, next?.voiceUrl, speak, playCue, playVoiceUrl, isPaused]);
 
   // ── Halfway announcement (exercise only) ───────────────────────────
   useEffect(() => {
+    if (isPaused) return;
     if (phase !== 'work' || !current || current.stepType !== 'exercise') return;
     if (currentDuration <= 6) return;
     const halfway = Math.floor(currentDuration / 2);
@@ -383,12 +395,13 @@ export function useWorkoutTTS({
       halfwaySpokenRef.current = true;
       playCue('halfway');
     }
-  }, [phase, timeLeft, currentDuration, current, playCue]);
+  }, [phase, timeLeft, currentDuration, current, playCue, isPaused]);
 
   // ── Countdown voice (exercise only) ────────────────────────────────
   // At timeLeft === 3, plays the full pre-timed "3, 2, 1" countdown clip.
   // At timeLeft === 0, plays rest or workout_complete.
   useEffect(() => {
+    if (isPaused) return;
     if (phase !== 'work' || !current || current.stepType !== 'exercise') return;
     if (currentDuration <= 0) return;
 
@@ -408,7 +421,25 @@ export function useWorkoutTTS({
         playCue('rest');
       }
     }
-  }, [phase, timeLeft, current, currentDuration, currentIndex, total, playCue]);
+  }, [phase, timeLeft, current, currentDuration, currentIndex, total, playCue, isPaused]);
+
+  // ── Pause → silence any audio in flight ─────────────────────────────
+  // Any MP3 cue or Web Speech utterance started just before the user paused
+  // would otherwise keep playing. Stop them so pause truly silences audio.
+  useEffect(() => {
+    if (!isPaused) return;
+    try {
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+        currentAudioRef.current.currentTime = 0;
+      }
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.speechSynthesis?.cancel();
+      } else {
+        Speech.stop();
+      }
+    } catch {}
+  }, [isPaused]);
 
   // ── Cleanup ─────────────────────────────────────────────────────────
   useEffect(() => {
