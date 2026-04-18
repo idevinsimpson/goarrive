@@ -179,9 +179,12 @@ export default function WorkoutPlayer({
   }, []);
 
   // ── Format time ───────────────────────────────────────────────────────
+  // Ceil so a fractional Skip pre-entry (e.g. timeLeft=3.5) still displays as
+  // a clean integer countdown (4,3,2,1) instead of "3.5, 2.5, 1.5".
   const formatTime = (sec: number): string => {
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
+    const total = Math.max(0, Math.ceil(sec));
+    const m = Math.floor(total / 60);
+    const s = total % 60;
     return m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `${s}`;
   };
 
@@ -540,7 +543,7 @@ export default function WorkoutPlayer({
                   {current.name || current.label || 'WARM-UP & STRETCH'}
                 </Text>
                 <View style={st.goldTimerBox}>
-                  <Text style={st.goldTimerText}>{timeLeft}</Text>
+                  <Text style={st.goldTimerText}>{Math.max(0, Math.ceil(timeLeft))}</Text>
                 </View>
               </View>
             </View>
@@ -573,7 +576,7 @@ export default function WorkoutPlayer({
               />
               <Text style={st.outroTitle}>WORKOUT</Text>
               <View style={st.goldTimerBox}>
-                <Text style={st.goldTimerText}>{timeLeft}</Text>
+                <Text style={st.goldTimerText}>{Math.max(0, Math.ceil(timeLeft))}</Text>
               </View>
             </View>
           </View>
@@ -597,7 +600,7 @@ export default function WorkoutPlayer({
                 <View style={st.demoTitleRow}>
                   <Text style={st.demoBlockTitle}>{current.name}</Text>
                   <View style={st.goldTimerBox}>
-                    <Text style={st.goldTimerText}>{timeLeft}</Text>
+                    <Text style={st.goldTimerText}>{Math.max(0, Math.ceil(timeLeft))}</Text>
                   </View>
                 </View>
                 {/* Thumbnail grid */}
@@ -887,7 +890,7 @@ export default function WorkoutPlayer({
               <View style={st.sideBadge}>
                 <Text style={st.sideBadgeText}>RIGHT SIDE</Text>
               </View>
-              <Text style={st.countdownNum}>{timeLeft}</Text>
+              <Text style={st.countdownNum}>{Math.max(0, Math.ceil(timeLeft))}</Text>
               <Text style={st.movementName}>{current.name}</Text>
             </View>
           </>
