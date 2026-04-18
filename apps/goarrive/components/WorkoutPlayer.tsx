@@ -147,8 +147,8 @@ export default function WorkoutPlayer({
   // phase content changes — keep these constants in sync if you change the
   // slot styles.
   const SLOT_LOGO_H = 64; // height 64 + marginTop 0 + marginBottom 0
-  const SLOT_TITLE_H = 120; // height 120 + marginBottom 0
-  const SLOT_NEXTUP_H = 96;
+  const SLOT_TITLE_H = 112; // height 112 + marginBottom 0
+  const SLOT_NEXTUP_H = 64;
   const SLOT_VERT_PAD = 24;
   const mediaAvailH = Math.max(
     180,
@@ -259,6 +259,18 @@ export default function WorkoutPlayer({
     const m = Math.floor(total / 60);
     const s = total % 60;
     return m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `${s}`;
+  };
+
+  // Auto-shrink the movement-name font so any reasonable name fits the
+  // fixed-height title module (which sits flush with the media's left edge).
+  // Tiers chosen empirically for a ~210px wide column at 3 lines max.
+  const getNameFontStyle = (text: string): { fontSize: number; lineHeight: number } => {
+    const len = (text || '').length;
+    if (len <= 12) return { fontSize: 40, lineHeight: 44 };
+    if (len <= 20) return { fontSize: 32, lineHeight: 36 };
+    if (len <= 32) return { fontSize: 26, lineHeight: 30 };
+    if (len <= 48) return { fontSize: 22, lineHeight: 26 };
+    return { fontSize: 18, lineHeight: 22 };
   };
 
   const handleFinish = () => {
@@ -470,6 +482,8 @@ export default function WorkoutPlayer({
   );
 
   // ── Shared next-up bar ────────────────────────────────────────────
+  // Single-row layout so the bar is short and the media slot can be tall:
+  //   [ NEXT UP | name + meta (flex) | thumb ]
   const renderNextUp = () => {
     if (!next) return null;
     const nextLabel = next.stepType === 'exercise' ? next.name
@@ -477,27 +491,25 @@ export default function WorkoutPlayer({
     return (
       <View style={st.nextUpBar}>
         <Text style={st.nextUpLabel}>NEXT UP</Text>
-        <View style={st.nextUpContent}>
-          {next.thumbnailUrl ? (
-            <Image source={{ uri: next.thumbnailUrl }} style={st.nextUpThumb} resizeMode="cover" />
-          ) : (
-            <View style={[st.nextUpThumb, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#1A2035' }]}>
-              <Icon name={
-                next.stepType === 'waterBreak' ? 'droplet' :
-                next.stepType === 'transition' ? 'arrow-right' :
-                next.stepType === 'grabEquipment' ? 'briefcase' :
-                next.stepType === 'demo' ? 'eye' :
-                'play-circle'
-              } size={20} color="#3A4050" />
-            </View>
-          )}
-          <View style={st.nextUpInfo}>
-            <Text style={st.nextUpName} numberOfLines={1}>{nextLabel}</Text>
-            <Text style={st.nextUpMeta}>
-              {next.blockName}{next.duration ? ` · ${next.duration}s` : ''}
-            </Text>
-          </View>
+        <View style={st.nextUpInfo}>
+          <Text style={st.nextUpName} numberOfLines={1}>{nextLabel}</Text>
+          <Text style={st.nextUpMeta} numberOfLines={1}>
+            {next.blockName}{next.duration ? ` · ${next.duration}s` : ''}
+          </Text>
         </View>
+        {next.thumbnailUrl ? (
+          <Image source={{ uri: next.thumbnailUrl }} style={st.nextUpThumb} resizeMode="cover" />
+        ) : (
+          <View style={[st.nextUpThumb, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#1A2035' }]}>
+            <Icon name={
+              next.stepType === 'waterBreak' ? 'droplet' :
+              next.stepType === 'transition' ? 'arrow-right' :
+              next.stepType === 'grabEquipment' ? 'briefcase' :
+              next.stepType === 'demo' ? 'eye' :
+              'play-circle'
+            } size={20} color="#3A4050" />
+          </View>
+        )}
       </View>
     );
   };
@@ -859,15 +871,12 @@ export default function WorkoutPlayer({
                     {current.supersetLabel && (
                       <Text style={st.supersetLabel}>{current.supersetLabel}</Text>
                     )}
-                    <Text style={st.workMovementName} numberOfLines={2}>
+                    <Text
+                      style={[st.workMovementName, getNameFontStyle(current.name)]}
+                      numberOfLines={3}
+                    >
                       {current.name}
                     </Text>
-                    {current.reps ? (
-                      <Text style={st.workReps}>{current.reps} reps</Text>
-                    ) : null}
-                    {current.coachingCues ? (
-                      <Text style={st.workCues} numberOfLines={1}>{current.coachingCues}</Text>
-                    ) : null}
                   </>,
                   !isRepBased ? (
                     <View style={st.goldTimerBox}>
@@ -1315,7 +1324,7 @@ const st = StyleSheet.create({
     width: '100%', paddingHorizontal: 4, marginBottom: 16,
   },
   demoBlockTitle: {
-    fontSize: 22, fontWeight: '700', color: '#F0F4F8', fontFamily: FH, flex: 1, marginRight: 12,
+    fontSize: 22, fontWeight: '700', color: '#F0F4F8', fontFamily: FH, textAlign: 'center',
   },
   demoGrid: {
     flex: 1, flexDirection: 'row', flexWrap: 'wrap',
@@ -1340,7 +1349,8 @@ const st = StyleSheet.create({
 
   // ── Water Break block ──────────────────────────────────────────────
   waterBreakLabel: {
-    fontSize: 20, fontWeight: '700', color: '#38BDF8', fontFamily: FH, letterSpacing: 2,
+    fontSize: 20, fontWeight: '700', color: '#38BDF8', fontFamily: FH,
+    letterSpacing: 2, textAlign: 'center',
   },
   waterBreakVideoOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -1369,7 +1379,7 @@ const st = StyleSheet.create({
   // Phase labels
   phaseLabel: {
     fontSize: 16, fontWeight: '700', color: '#F5A623', fontFamily: FH,
-    letterSpacing: 2, marginBottom: 16,
+    letterSpacing: 2, marginBottom: 16, textAlign: 'center',
   },
   blockLabel: {
     fontSize: 14, fontWeight: '600', color: '#8A95A3', fontFamily: FB,
@@ -1382,7 +1392,7 @@ const st = StyleSheet.create({
   // to push content up; bottom padding accounts for iOS home indicator
   // and PWA browser chrome so the next-up slot is never clipped.
   workContainer: {
-    flex: 1, paddingHorizontal: 4, paddingTop: 0,
+    flex: 1, paddingHorizontal: 0, paddingTop: 0,
     paddingBottom: Platform.select({ ios: 24, android: 8, web: 8, default: 8 }),
   },
 
@@ -1402,15 +1412,22 @@ const st = StyleSheet.create({
   // 2 short lines, WORK can show superset + 2-line name + reps + cues). If
   // this height changed phase-to-phase the flex mediaSlot below would
   // shrink/grow with it and the centered media would visibly shift.
+  // Title/timer row sits flush with the media's left/right edges. Title is a
+  // fixed-height transparent module with centered text (Devin's "title module"
+  // requirement). Timer pins to the right with a fixed minWidth.
   titleTimerSlot: {
-    height: 120,
+    height: 112,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 4,
+    paddingHorizontal: 0,
     marginBottom: 0,
   },
-  titleColumn: { flex: 1, marginRight: 12, justifyContent: 'center' },
+  titleColumn: {
+    flex: 1, height: 112, marginRight: 4,
+    alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 8, backgroundColor: 'transparent',
+  },
   timerColumn: { justifyContent: 'center' },
   // Media slot — outer reserves the vertical space between the title row
   // and the next-up slot. The inner box (mediaInner) gets explicit pixel
@@ -1435,10 +1452,10 @@ const st = StyleSheet.create({
   // bar (~92px). Locking the height stops the flex mediaSlot above from
   // shrinking on work, which is what was visibly shifting the media up.
   nextUpSlot: {
-    height: 96,
+    height: 64,
     width: '100%',
     justifyContent: 'center',
-    paddingTop: 2,
+    paddingTop: 0,
   },
   splitLabelOverlay: {
     position: 'absolute',
@@ -1463,7 +1480,7 @@ const st = StyleSheet.create({
     justifyContent: 'center',
   },
   transitionInstructionInline: {
-    fontSize: 13, color: '#8A95A3', fontFamily: FB, marginTop: 2,
+    fontSize: 13, color: '#8A95A3', fontFamily: FB, marginTop: 2, textAlign: 'center',
   },
 
   // Legacy aliases (kept for any leftover references)
@@ -1475,17 +1492,17 @@ const st = StyleSheet.create({
   nameColumn: { flex: 1, marginRight: 12 },
   supersetLabel: {
     fontSize: 16, fontWeight: '700', color: '#F5A623', fontFamily: FH,
-    letterSpacing: 1, marginBottom: 4,
+    letterSpacing: 1, marginBottom: 4, textAlign: 'center',
   },
   workMovementName: {
-    fontSize: 42, fontWeight: '800', color: '#FFFFFF', fontFamily: FH,
-    lineHeight: 46,
+    fontWeight: '800', color: '#FFFFFF', fontFamily: FH, textAlign: 'center',
   },
   workReps: {
-    fontSize: 18, fontWeight: '600', color: '#F5A623', fontFamily: FH, marginTop: 2,
+    fontSize: 18, fontWeight: '600', color: '#F5A623', fontFamily: FH,
+    marginTop: 2, textAlign: 'center',
   },
   workCues: {
-    fontSize: 13, color: '#8A95A3', fontFamily: FB, marginTop: 2,
+    fontSize: 13, color: '#8A95A3', fontFamily: FB, marginTop: 2, textAlign: 'center',
   },
   workTimer: {
     fontSize: 80, fontWeight: '700', color: '#FFFFFF', fontFamily: FH, lineHeight: 80,
@@ -1514,10 +1531,11 @@ const st = StyleSheet.create({
   // REST phase styles
   restPhaseLabel: {
     fontSize: 18, fontWeight: '700', color: '#8A95A3', fontFamily: FH,
-    letterSpacing: 2,
+    letterSpacing: 2, textAlign: 'center',
   },
   restNextName: {
-    fontSize: 28, fontWeight: '800', color: '#F0F4F8', fontFamily: FH, marginTop: 2,
+    fontSize: 28, fontWeight: '800', color: '#F0F4F8', fontFamily: FH,
+    marginTop: 2, textAlign: 'center',
   },
   restTimerBox: {
     backgroundColor: '#1A2035',
@@ -1686,28 +1704,28 @@ const st = StyleSheet.create({
     fontSize: 14, fontWeight: '600', color: '#F5A623', fontFamily: FH,
   },
 
-  // Next up
+  // Next up — short horizontal row: [LABEL | name+meta (flex) | thumb]
   nextUpBar: {
     backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 12, paddingVertical: 8, paddingHorizontal: 14,
-    alignItems: 'center', width: '100%',
+    borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12,
+    flexDirection: 'row', alignItems: 'center', width: '100%',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
-    alignSelf: 'center',
+    alignSelf: 'center', gap: 12,
   },
   nextUpLabel: {
-    fontSize: 10, fontWeight: '700', color: '#8A95A3', fontFamily: FH,
-    letterSpacing: 1, marginBottom: 2,
+    fontSize: 11, fontWeight: '700', color: '#8A95A3', fontFamily: FH,
+    letterSpacing: 1,
   },
   nextUpContent: {
     flexDirection: 'row', alignItems: 'center', gap: 12, width: '100%',
   },
-  nextUpThumb: { width: 48, height: 60, borderRadius: 8, backgroundColor: '#1A2035' },
+  nextUpThumb: { width: 40, height: 40, borderRadius: 8, backgroundColor: '#1A2035' },
   nextUpInfo: { flex: 1 },
   nextUpName: {
-    fontSize: 16, fontWeight: '600', color: '#F0F4F8', fontFamily: FH,
+    fontSize: 15, fontWeight: '600', color: '#F0F4F8', fontFamily: FH,
   },
   nextUpMeta: {
-    fontSize: 12, color: '#8A95A3', fontFamily: FB, marginTop: 2,
+    fontSize: 11, color: '#8A95A3', fontFamily: FB, marginTop: 1,
   },
 
   // Complete
