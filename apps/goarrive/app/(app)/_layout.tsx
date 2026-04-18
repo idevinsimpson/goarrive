@@ -6,6 +6,7 @@
  */
 import React from 'react';
 import { Tabs, Redirect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../lib/AuthContext';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { Icon } from '../../components/Icon';
@@ -17,6 +18,8 @@ const INACTIVE_COLOR = '#4A5568';
 
 export default function AppLayout() {
   const { user, claims, loading, adminCoachOverride, setAdminCoachOverride } = useAuth();
+  const insets = useSafeAreaInsets();
+  const bannerTopPad = Platform.OS === 'web' ? Math.max(6, insets.top) : 6;
 
   if (loading) {
     return (
@@ -38,7 +41,7 @@ export default function AppLayout() {
   return (
     <View style={{ flex: 1 }}>
       {adminCoachOverride && (
-        <View style={styles.overrideBanner}>
+        <View style={[styles.overrideBanner, { paddingTop: bannerTopPad }]}>
           <Text style={styles.overrideText}>
             Viewing as coach: {adminCoachOverride.coachName}
           </Text>
@@ -158,12 +161,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 6,
+    paddingBottom: 6,
     paddingHorizontal: 16,
     gap: 12,
-    ...(Platform.OS === 'web'
-      ? ({ paddingTop: 'max(6px, env(safe-area-inset-top, 0px))' } as any)
-      : {}),
   },
   overrideText: {
     fontSize: 12,

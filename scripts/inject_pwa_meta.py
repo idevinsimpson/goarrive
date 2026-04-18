@@ -57,24 +57,25 @@ HEAD_INJECT = """
       /* ═══════════════════════════════════════════════════════════════════
          1. BASE LAYOUT — Safari fix: ensure body and html take full viewport
          ═══════════════════════════════════════════════════════════════════ */
-      html, body { 
-        width: 100%; 
-        height: 100%; 
-        margin: 0; 
-        padding: 0; 
-        overflow: hidden; 
-        background: #0E1117;
+      html, body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background-color: #0E1117;
         -webkit-user-select: none;
         user-select: none;
       }
-      
-      #root { 
-        width: 100%; 
-        height: 100%; 
+
+      #root {
+        width: 100%;
+        height: 100%;
         display: flex;
         flex-direction: column;
         min-height: 100% !important;
         min-width: 100% !important;
+        background-color: #0E1117;
       }
       
       /* Safari fix: override Expo's problematic min-height: 0px on flex containers */
@@ -180,17 +181,12 @@ HEAD_INJECT = """
 
       /* ═══════════════════════════════════════════════════════════════════
          5. SAFE AREA & MISC
+         Each layout handles its own top/bottom safe-area via
+         useSafeAreaInsets(). We intentionally do NOT pad <body> — that
+         pushes the document below the safe-area and leaves a dark/white
+         band where fixed elements ignore the padding and iOS paints the
+         safe-area region with whatever background is underneath.
          ═══════════════════════════════════════════════════════════════════ */
-      
-      /* Safari: fix for position:fixed elements with safe-area-inset */
-      @supports (padding: max(0px)) {
-        body {
-          padding-left: max(0px, env(safe-area-inset-left));
-          padding-right: max(0px, env(safe-area-inset-right));
-          padding-top: max(0px, env(safe-area-inset-top));
-          padding-bottom: max(0px, env(safe-area-inset-bottom));
-        }
-      }
       
       /* Fallback message for when JS fails to load */
       #app-error {
