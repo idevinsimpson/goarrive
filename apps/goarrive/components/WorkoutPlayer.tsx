@@ -155,13 +155,21 @@ export default function WorkoutPlayer({
   // pixel heights (not minHeight) so the centered media never shifts when
   // phase content changes — keep these constants in sync if you change the
   // slot styles.
-  const SLOT_LOGO_H = 56; // height 56 + marginTop 0 + marginBottom 0
-  const SLOT_TITLE_H = 112; // height 112 + marginBottom 0
+  // Slot heights are FIXED so the title row never grows when text wraps to 2
+  // lines — text wraps inside the centered title module instead. Inter-slot
+  // gaps are also fixed pixel margins so modules never touch regardless of
+  // phase, title length, or timer width. The bottom pad matches workContainer.
+  const SLOT_LOGO_H = 56;
+  const SLOT_TITLE_H = 112;
   const SLOT_NEXTUP_H = 64;
-  const SLOT_VERT_PAD = 8;
+  const SLOT_GAP_LOGO = 4; // logo → title row
+  const SLOT_GAP_TITLE = 12; // title row → media (must always be visible)
+  const SLOT_GAP_MEDIA = 12; // media → next-up (must always be visible)
+  const SLOT_BOTTOM_PAD = Platform.select({ ios: 24, android: 8, web: 8, default: 8 }) as number;
   const mediaAvailH = Math.max(
     180,
-    (frameH || 600) - SLOT_LOGO_H - SLOT_TITLE_H - SLOT_NEXTUP_H - SLOT_VERT_PAD,
+    (frameH || 600) - SLOT_LOGO_H - SLOT_GAP_LOGO - SLOT_TITLE_H - SLOT_GAP_TITLE
+      - SLOT_GAP_MEDIA - SLOT_NEXTUP_H - SLOT_BOTTOM_PAD,
   );
   const mediaAvailW = Math.max(160, frameW || 360);
   let _mediaW = mediaAvailW;
@@ -1407,6 +1415,7 @@ const st = StyleSheet.create({
   workContainer: {
     flex: 1, paddingHorizontal: 0, paddingTop: 0,
     paddingBottom: Platform.select({ ios: 24, android: 8, web: 8, default: 8 }),
+    overflow: 'hidden',
   },
 
   // ── Fixed-position slots ───────────────────────────────────────────
@@ -1417,7 +1426,7 @@ const st = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 0,
-    marginBottom: 0,
+    marginBottom: 4, // SLOT_GAP_LOGO — gap to title row
   },
   slotLogo: { width: 260, height: 52 },
   // Title/timer row is locked to a fixed pixel height — NOT minHeight — so
@@ -1434,7 +1443,7 @@ const st = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 0,
-    marginBottom: 0,
+    marginBottom: 12, // SLOT_GAP_TITLE — gap to media (must always be visible)
     alignSelf: 'center',
   },
   titleColumn: {
@@ -1469,6 +1478,7 @@ const st = StyleSheet.create({
     height: 64,
     justifyContent: 'center',
     paddingTop: 0,
+    marginTop: 12, // SLOT_GAP_MEDIA — gap from media (must always be visible)
     alignSelf: 'center',
   },
   splitLabelOverlay: {
