@@ -215,13 +215,39 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
   //   rest → next, swap → work(R), intro/outro/demo/transition/waterBreak/
   //   grabEquipment → next. In every case we land 3.5s before the next real
   //   timeline item, so the reveal video swap and "3, 2, 1" cue stay in sync.
+  //
+  // While paused: the tick + hit-zero effects are short-circuited, so we
+  // perform the phase transition inline. Player stays paused, letting the
+  // user step through phases one at a time without auto-resuming.
   const handleSkip = useCallback(() => {
     if (phase === 'ready' || phase === 'complete') return;
 
-    // Skip is always a forward-advance gesture: if the player is paused, also
-    // resume so the countdown ticks and the natural transition fires. Without
-    // this, paused-skip would set timeLeft and freeze on the pre-entry frame.
-    setIsPaused(false);
+    if (isPaused) {
+      setIsSkippingRep(false);
+      if (phase === 'intro' || phase === 'outro' || phase === 'demo'
+          || phase === 'transition' || phase === 'waterBreak' || phase === 'grabEquipment') {
+        advanceToNext();
+      } else if (phase === 'work') {
+        if (current?.swapSides && swapSide === 'L') {
+          setSwapSide('R');
+          setPhase('swap');
+          setTimeLeft(5);
+        } else if (current?.restAfter && current.restAfter > 0) {
+          setPhase('rest');
+          setTimeLeft(current.restAfter);
+          playCue('restStart');
+        } else {
+          advanceToNext();
+        }
+      } else if (phase === 'swap') {
+        setPhase('work');
+        setTimeLeft(current?.duration ?? 30);
+        playCue('workStart');
+      } else if (phase === 'rest') {
+        advanceToNext();
+      }
+      return;
+    }
 
     // Rep-based work has no countdown running — start a 3.5s skip window and
     // let the hit-zero handler pick the correct next state (swap/rest/next).
@@ -232,7 +258,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     }
 
     setTimeLeft((prev) => (prev <= SKIP_PRE_ENTRY_SECONDS ? prev : SKIP_PRE_ENTRY_SECONDS));
-  }, [phase, isRepBased]);
+  }, [phase, isPaused, isRepBased, current, swapSide, advanceToNext]);
 
   const handleRepDone = useCallback(() => {
     if (!current) return;
