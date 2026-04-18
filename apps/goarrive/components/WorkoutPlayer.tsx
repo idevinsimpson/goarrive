@@ -141,10 +141,15 @@ export default function WorkoutPlayer({
   // the leftover frame height after the surrounding fixed slots take their
   // space. If vertical room is tight, the surrounding layout (logo / title /
   // next-up slots) is what flexes — the media stays exactly 4:5.
+  // These MUST match the fixed heights of `logoSlot`, `titleTimerSlot`, and
+  // `nextUpSlot` in the StyleSheet below. Those slots are locked to fixed
+  // pixel heights (not minHeight) so the centered media never shifts when
+  // phase content changes — keep these constants in sync if you change the
+  // slot styles.
   const SLOT_LOGO_H = 50;
-  const SLOT_TITLE_H = 78;
-  const SLOT_NEXTUP_H = 82;
-  const SLOT_VERT_PAD = 32;
+  const SLOT_TITLE_H = 130; // height 124 + marginBottom 6
+  const SLOT_NEXTUP_H = 96;
+  const SLOT_VERT_PAD = 24;
   const mediaAvailH = Math.max(
     180,
     (frameH || 600) - SLOT_LOGO_H - SLOT_TITLE_H - SLOT_NEXTUP_H - SLOT_VERT_PAD,
@@ -1392,8 +1397,13 @@ const st = StyleSheet.create({
     marginBottom: 4,
   },
   slotLogo: { width: 200, height: 40 },
+  // Title/timer row is locked to a fixed pixel height — NOT minHeight — so
+  // the slot does not grow when content varies between phases (REST shows
+  // 2 short lines, WORK can show superset + 2-line name + reps + cues). If
+  // this height changed phase-to-phase the flex mediaSlot below would
+  // shrink/grow with it and the centered media would visibly shift.
   titleTimerSlot: {
-    minHeight: 72,
+    height: 124,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1420,8 +1430,12 @@ const st = StyleSheet.create({
     borderRadius: 12,
     position: 'relative',
   },
+  // Next-up row is also locked to a fixed pixel height. REST passes null
+  // content (slot would be ~76px from minHeight) and WORK passes the next-up
+  // bar (~92px). Locking the height stops the flex mediaSlot above from
+  // shrinking on work, which is what was visibly shifting the media up.
   nextUpSlot: {
-    minHeight: 76,
+    height: 96,
     width: '100%',
     justifyContent: 'center',
     paddingTop: 6,
