@@ -103,7 +103,7 @@ export default function WorkoutPlayer({
   const [isMuted, setIsMuted] = useState(false);
 
   // ── Voice coaching ────────────────────────────────────
-  useWorkoutTTS({
+  const { stopAllAudio } = useWorkoutTTS({
     phase,
     current,
     next,
@@ -196,9 +196,13 @@ export default function WorkoutPlayer({
   }, []);
 
   const handleSkipFromOverlay = useCallback(() => {
+    // Cancel any audio from the skipped-from state BEFORE advancing. This
+    // stops the in-flight MP3/voice clip and clears pending deferred cues so
+    // they don't overlap with the new skip target's audio.
+    stopAllAudio();
     handleSkip();
     extendControlsTimer();
-  }, [handleSkip, extendControlsTimer]);
+  }, [handleSkip, extendControlsTimer, stopAllAudio]);
 
   const handlePauseResumeFromOverlay = useCallback(() => {
     handlePauseResume();

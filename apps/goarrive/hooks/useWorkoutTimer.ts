@@ -79,9 +79,11 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
 
   // ── Advance to next step ────────────────────────────────────────────
   // Cues/haptics are silenced when paused (e.g. tap-through Skip while
-  // paused) so audio only fires during active playback.
-  const advanceToNext = useCallback(() => {
-    const silent = isPausedRef.current;
+  // paused) so audio only fires during active playback. `forceSilent` also
+  // silences cues for rapid Skip scrubbing where the user is advancing
+  // through phases faster than cues can play cleanly.
+  const advanceToNext = useCallback((forceSilent = false) => {
+    const silent = isPausedRef.current || forceSilent;
     const nextIdx = currentIndex + 1;
     if (nextIdx >= total) {
       setPhase('complete');
@@ -220,58 +222,72 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     setIsPaused((p) => !p);
   }, []);
 
-  // Skip is timeline-aware: it never hard-cuts to the next index. Instead, it
-  // compresses the current phase's remaining time to SKIP_PRE_ENTRY_SECONDS
-  // so the existing phase-transition logic fires naturally. That means:
-  //   work (restAfter>0) → rest, work (swapSides on L) → swap, work → next,
-  //   rest → next, swap → work(R), intro/outro/demo/transition/waterBreak/
-  //   grabEquipment → next. In every case we land 3.5s before the next real
-  //   timeline item, so the reveal video swap and "3, 2, 1" cue stay in sync.
+  // Skip is timeline-aware and stays responsive like a video scrubber. Two
+  // regimes depending on where we are:
   //
-  // While paused: the tick + hit-zero effects are short-circuited, so we
-  // perform the phase transition inline. Player stays paused, letting the
-  // user step through phases one at a time without auto-resuming.
+  // 1. Outside the 3.5s lead-in: compress the current phase's remaining time
+  //    to SKIP_PRE_ENTRY_SECONDS and let the existing tick + hit-zero logic
+  //    run naturally. That means: work (restAfter>0) → rest, work (swapSides
+  //    on L) → swap, work → next, rest → next, swap → work(R),
+  //    intro/outro/demo/transition/waterBreak/grabEquipment → next. We land
+  //    3.5s before the next real timeline item, so the reveal video swap and
+  //    "3, 2, 1" cue stay in sync.
+  //
+  // 2. Already inside the 3.5s lead-in (or paused): advance the phase inline
+  //    immediately — don't wait for the existing countdown to finish. This is
+  //    what lets a user tap Skip repeatedly during the "3, 2, 1" to scrub
+  //    through the workout. During active playback we land at another 3.5s
+  //    lead-in so the next tap keeps scrubbing; when paused we land at the
+  //    phase's natural duration so the user can step through one at a time.
+  //
+  // Active-play cues from advanceToNext are suppressed (forceSilent=true)
+  // during rapid skip scrubbing — the tick's countdown cues in the new phase
+  // fire naturally via the useWorkoutTTS `countdown_3` effect.
   const handleSkip = useCallback(() => {
     if (phase === 'ready' || phase === 'complete') return;
 
-    if (isPaused) {
-      // Paused Skip advances timeline state silently — no cues, no haptics.
-      // Audio resumes naturally when the user taps Play (TTS effects re-run
-      // on isPaused flip; timer countdown cues fire on normal ticks).
-      setIsSkippingRep(false);
-      if (phase === 'intro' || phase === 'outro' || phase === 'demo'
-          || phase === 'transition' || phase === 'waterBreak' || phase === 'grabEquipment') {
-        advanceToNext();
-      } else if (phase === 'work') {
-        if (current?.swapSides && swapSide === 'L') {
-          setSwapSide('R');
-          setPhase('swap');
-          setTimeLeft(5);
-        } else if (current?.restAfter && current.restAfter > 0) {
-          setPhase('rest');
-          setTimeLeft(current.restAfter);
-        } else {
-          advanceToNext();
-        }
-      } else if (phase === 'swap') {
-        setPhase('work');
-        setTimeLeft(current?.duration ?? 30);
-      } else if (phase === 'rest') {
-        advanceToNext();
+    // Regime 1: active-play outside the lead-in. Compress and let the natural
+    // tick + hit-zero path handle the transition (with all its cues).
+    if (!isPaused && timeLeft > SKIP_PRE_ENTRY_SECONDS) {
+      // Rep-based work has no countdown running — start a 3.5s skip window
+      // so the hit-zero handler picks the correct next state.
+      if (phase === 'work' && isRepBased) {
+        setIsSkippingRep(true);
       }
-      return;
-    }
-
-    // Rep-based work has no countdown running — start a 3.5s skip window and
-    // let the hit-zero handler pick the correct next state (swap/rest/next).
-    if (phase === 'work' && isRepBased) {
-      setIsSkippingRep(true);
       setTimeLeft(SKIP_PRE_ENTRY_SECONDS);
       return;
     }
 
-    setTimeLeft((prev) => (prev <= SKIP_PRE_ENTRY_SECONDS ? prev : SKIP_PRE_ENTRY_SECONDS));
-  }, [phase, isPaused, isRepBased, current, swapSide, advanceToNext]);
+    // Regime 2: paused OR already inside the lead-in window. Advance phase
+    // inline so rapid taps stay responsive. During active play, land at
+    // another 3.5s lead-in; while paused, land at the phase's natural duration.
+    setIsSkippingRep(false);
+    const leadIn = SKIP_PRE_ENTRY_SECONDS;
+
+    if (phase === 'intro' || phase === 'outro' || phase === 'demo'
+        || phase === 'transition' || phase === 'waterBreak' || phase === 'grabEquipment') {
+      advanceToNext(true);
+      if (!isPaused) setTimeLeft(leadIn);
+    } else if (phase === 'work') {
+      if (current?.swapSides && swapSide === 'L') {
+        setSwapSide('R');
+        setPhase('swap');
+        setTimeLeft(isPaused ? 5 : leadIn);
+      } else if (current?.restAfter && current.restAfter > 0) {
+        setPhase('rest');
+        setTimeLeft(isPaused ? current.restAfter : leadIn);
+      } else {
+        advanceToNext(true);
+        if (!isPaused) setTimeLeft(leadIn);
+      }
+    } else if (phase === 'swap') {
+      setPhase('work');
+      setTimeLeft(isPaused ? (current?.duration ?? 30) : leadIn);
+    } else if (phase === 'rest') {
+      advanceToNext(true);
+      if (!isPaused) setTimeLeft(leadIn);
+    }
+  }, [phase, isPaused, isRepBased, current, swapSide, timeLeft, advanceToNext]);
 
   const handleRepDone = useCallback(() => {
     if (!current) return;

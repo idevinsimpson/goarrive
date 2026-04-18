@@ -150,6 +150,44 @@ export function useWorkoutTTS({
   const isPausedRef = useRef(isPaused);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
 
+  // Tracks every deferred voice/speak timer so Skip can cancel them before
+  // they fire. Without this, a Skip during the 900ms gap between "next up"
+  // and the movement voice would leave the old movement name queued and it
+  // would overlap with the next state's audio.
+  const pendingTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const scheduleAudio = useCallback((fn: () => void, ms: number) => {
+    const id = setTimeout(() => {
+      pendingTimersRef.current.delete(id);
+      fn();
+    }, ms);
+    pendingTimersRef.current.add(id);
+  }, []);
+
+  // Cancels every audio channel at once: pending deferred cues, the active
+  // MP3/voiceUrl clip, Web Speech utterance, and native expo-speech. Called
+  // from Skip (resetSpoken=true) so the new skip target's cues fire fresh,
+  // and from Pause (resetSpoken=false) where we want cues to resume where
+  // they left off on unpause.
+  const stopAllAudio = useCallback((resetSpoken = true) => {
+    for (const id of pendingTimersRef.current) clearTimeout(id);
+    pendingTimersRef.current.clear();
+    try {
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+        currentAudioRef.current.currentTime = 0;
+      }
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.speechSynthesis?.cancel();
+      } else {
+        Speech.stop();
+      }
+    } catch {}
+    if (resetSpoken) {
+      countdownSpokenRef.current = -1;
+      halfwaySpokenRef.current = false;
+    }
+  }, []);
+
   // On web, we always have audio (our own files). On native, check expo-speech.
   useEffect(() => {
     if (Platform.OS === 'web') {
@@ -344,9 +382,9 @@ export function useWorkoutTTS({
         playCue('next_up');
         const voiceUrl = current.voiceUrl;
         if (voiceUrl) {
-          setTimeout(() => playVoiceUrl(voiceUrl), 900);
+          scheduleAudio(() => playVoiceUrl(voiceUrl), 900);
         } else {
-          setTimeout(() => speak(current.name), 900);
+          scheduleAudio(() => speak(current.name), 900);
         }
       }
     } else if (phase === 'rest') {
@@ -363,9 +401,9 @@ export function useWorkoutTTS({
           const nextVoiceUrl = next?.voiceUrl;
           const delay = isPrepRest ? 0 : 1800;
           if (nextVoiceUrl) {
-            setTimeout(() => playVoiceUrl(nextVoiceUrl), delay);
+            scheduleAudio(() => playVoiceUrl(nextVoiceUrl), delay);
           } else {
-            setTimeout(() => speak(`Next up: ${nextName}`), delay);
+            scheduleAudio(() => speak(`Next up: ${nextName}`), delay);
           }
         } else if (!isPrepRest) {
           playCue('rest_now');
@@ -383,7 +421,7 @@ export function useWorkoutTTS({
       halfwaySpokenRef.current = false;
       countdownSpokenRef.current = -1;
     }
-  }, [phase, current?.name, current?.stepType, current?.voiceUrl, currentIndex, next?.name, next?.voiceUrl, speak, playCue, playVoiceUrl, isPaused]);
+  }, [phase, current?.name, current?.stepType, current?.voiceUrl, currentIndex, next?.name, next?.voiceUrl, speak, playCue, playVoiceUrl, scheduleAudio, isPaused]);
 
   // ── Halfway announcement (exercise only) ───────────────────────────
   useEffect(() => {
@@ -424,26 +462,19 @@ export function useWorkoutTTS({
   }, [phase, timeLeft, current, currentDuration, currentIndex, total, playCue, isPaused]);
 
   // ── Pause → silence any audio in flight ─────────────────────────────
-  // Any MP3 cue or Web Speech utterance started just before the user paused
-  // would otherwise keep playing. Stop them so pause truly silences audio.
+  // Any MP3 cue, Web Speech utterance, or deferred voice cue started just
+  // before the user paused would otherwise keep playing. stopAllAudio
+  // cancels all three at once.
   useEffect(() => {
     if (!isPaused) return;
-    try {
-      if (currentAudioRef.current) {
-        currentAudioRef.current.pause();
-        currentAudioRef.current.currentTime = 0;
-      }
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.speechSynthesis?.cancel();
-      } else {
-        Speech.stop();
-      }
-    } catch {}
-  }, [isPaused]);
+    stopAllAudio(false);
+  }, [isPaused, stopAllAudio]);
 
   // ── Cleanup ─────────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
+      for (const id of pendingTimersRef.current) clearTimeout(id);
+      pendingTimersRef.current.clear();
       try {
         if (currentAudioRef.current) {
           currentAudioRef.current.pause();
@@ -458,5 +489,5 @@ export function useWorkoutTTS({
     };
   }, []);
 
-  return { isTTSAvailable };
+  return { isTTSAvailable, stopAllAudio };
 }
