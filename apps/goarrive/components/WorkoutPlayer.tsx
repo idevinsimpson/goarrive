@@ -146,8 +146,8 @@ export default function WorkoutPlayer({
   // pixel heights (not minHeight) so the centered media never shifts when
   // phase content changes — keep these constants in sync if you change the
   // slot styles.
-  const SLOT_LOGO_H = 50;
-  const SLOT_TITLE_H = 130; // height 124 + marginBottom 6
+  const SLOT_LOGO_H = 58; // height 56 + marginTop 0 + marginBottom 2
+  const SLOT_TITLE_H = 126; // height 124 + marginBottom 2
   const SLOT_NEXTUP_H = 96;
   const SLOT_VERT_PAD = 24;
   const mediaAvailH = Math.max(
@@ -1390,13 +1390,13 @@ const st = StyleSheet.create({
   // Heights are stable across phases so logo / title / timer / media /
   // next-up never shift between work, rest, transition, etc.
   logoSlot: {
-    height: 44,
+    height: 56,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 2,
-    marginBottom: 4,
+    marginTop: 0,
+    marginBottom: 2,
   },
-  slotLogo: { width: 200, height: 40 },
+  slotLogo: { width: 240, height: 52 },
   // Title/timer row is locked to a fixed pixel height — NOT minHeight — so
   // the slot does not grow when content varies between phases (REST shows
   // 2 short lines, WORK can show superset + 2-line name + reps + cues). If
@@ -1408,7 +1408,7 @@ const st = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 4,
-    marginBottom: 6,
+    marginBottom: 2,
   },
   titleColumn: { flex: 1, marginRight: 12, justifyContent: 'center' },
   timerColumn: { justifyContent: 'center' },
@@ -1438,7 +1438,7 @@ const st = StyleSheet.create({
     height: 96,
     width: '100%',
     justifyContent: 'center',
-    paddingTop: 6,
+    paddingTop: 2,
   },
   splitLabelOverlay: {
     position: 'absolute',
@@ -1474,11 +1474,12 @@ const st = StyleSheet.create({
   },
   nameColumn: { flex: 1, marginRight: 12 },
   supersetLabel: {
-    fontSize: 13, fontWeight: '700', color: '#F5A623', fontFamily: FH,
+    fontSize: 14, fontWeight: '700', color: '#F5A623', fontFamily: FH,
     letterSpacing: 1, marginBottom: 2,
   },
   workMovementName: {
-    fontSize: 26, fontWeight: '700', color: '#FFFFFF', fontFamily: FH,
+    fontSize: 32, fontWeight: '800', color: '#FFFFFF', fontFamily: FH,
+    lineHeight: 36,
   },
   workReps: {
     fontSize: 17, fontWeight: '600', color: '#F5A623', fontFamily: FH, marginTop: 2,
@@ -1489,19 +1490,25 @@ const st = StyleSheet.create({
   workTimer: {
     fontSize: 80, fontWeight: '700', color: '#FFFFFF', fontFamily: FH, lineHeight: 80,
   },
-  // Gold timer box (used across all screens)
+  // Gold timer box (used across all screens). Fixed minWidth keeps box size
+  // identical across digit counts (e.g. 0:05 vs 10:00) so the layout never
+  // shifts as the timer counts down.
   goldTimerBox: {
     backgroundColor: '#F5A623',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
+    minWidth: 104,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   goldTimerText: {
-    fontSize: 48,
-    fontWeight: '700',
+    fontSize: 56,
+    fontWeight: '800',
     color: '#0E1117',
     fontFamily: FH,
-    lineHeight: 52,
+    lineHeight: 60,
+    textAlign: 'center',
   },
   // REST phase styles
   restPhaseLabel: {
@@ -1509,20 +1516,24 @@ const st = StyleSheet.create({
     letterSpacing: 2,
   },
   restNextName: {
-    fontSize: 20, fontWeight: '700', color: '#F0F4F8', fontFamily: FH, marginTop: 2,
+    fontSize: 24, fontWeight: '800', color: '#F0F4F8', fontFamily: FH, marginTop: 2,
   },
   restTimerBox: {
     backgroundColor: '#1A2035',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
+    minWidth: 104,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   restTimerText: {
-    fontSize: 48,
-    fontWeight: '700',
+    fontSize: 56,
+    fontWeight: '800',
     color: '#FFFFFF',
     fontFamily: FH,
-    lineHeight: 52,
+    lineHeight: 60,
+    textAlign: 'center',
   },
   sideBadgeRow: { alignItems: 'center', marginBottom: 4 },
   // SPLIT label
