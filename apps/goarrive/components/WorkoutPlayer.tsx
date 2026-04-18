@@ -135,16 +135,31 @@ export default function WorkoutPlayer({
   // ── Video ref ────────────────────────────────
   const videoRef = useRef<any>(null);
 
+  // Track every mounted <Video> so we can imperatively pause/play them all on
+  // isPaused changes. The declarative `shouldPlay` prop alone doesn't reliably
+  // pause an already-playing expo-av Video on web, so this imperative mirror
+  // is what actually stops the movement loop when the user taps Pause.
+  const videosRef = useRef<Set<any>>(new Set());
+  const isPausedRef = useRef(isPaused);
+  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+
+  const registerVideo = useCallback((el: any | null) => {
+    if (!el) return;
+    videosRef.current.add(el);
+    // Freshly-mounted Videos default to playing; if we're paused right now
+    // (e.g. Skip while paused swapped in a new video), pause it immediately.
+    if (isPausedRef.current) el.pauseAsync?.().catch(() => {});
+  }, []);
+
   // Detached from `phase` on purpose: the displayed video must not restart
   // when the timer rolls work→rest or rest→work. Playback state is driven by
-  // the user's pause/resume only; `shouldPlay` keeps the declarative side in
-  // sync, and this imperative mirror handles the toggle reliably on web.
+  // the user's pause/resume only; the imperative mirror handles the toggle
+  // reliably on web across every mounted Video (intro/outro/transition/
+  // waterBreak/shared work-rest layers).
   useEffect(() => {
-    if (!videoRef.current) return;
-    if (isPaused) {
-      videoRef.current.pauseAsync?.().catch(() => {});
-    } else {
-      videoRef.current.playAsync?.().catch(() => {});
+    for (const el of videosRef.current) {
+      if (isPaused) el?.pauseAsync?.().catch(() => {});
+      else el?.playAsync?.().catch(() => {});
     }
   }, [isPaused]);
 
@@ -515,6 +530,7 @@ export default function WorkoutPlayer({
               <View style={st.introVideoPanel}>
                 {introVideoUrl ? (
                   <Video
+                    ref={registerVideo}
                     source={{ uri: introVideoUrl }}
                     resizeMode={ResizeMode.COVER}
                     isLooping
@@ -556,6 +572,7 @@ export default function WorkoutPlayer({
           <View style={st.introOutroContainer}>
             {current.videoUrl ? (
               <Video
+                ref={registerVideo}
                 source={{ uri: current.videoUrl }}
                 resizeMode={ResizeMode.COVER}
                 isLooping
@@ -648,6 +665,7 @@ export default function WorkoutPlayer({
               <View style={st.videoInner}>
                 {activeVideoUrl ? (
                   <Video
+                    ref={registerVideo}
                     key={activeVideoUrl}
                     source={{ uri: activeVideoUrl }}
                     resizeMode={ResizeMode.COVER}
@@ -721,6 +739,7 @@ export default function WorkoutPlayer({
               <View style={st.videoInner}>
                 {activeVideoUrl ? (
                   <Video
+                    ref={registerVideo}
                     key={activeVideoUrl}
                     source={{ uri: activeVideoUrl }}
                     resizeMode={ResizeMode.COVER}
@@ -839,7 +858,10 @@ export default function WorkoutPlayer({
                       return (
                         <Video
                           key={layer.url}
-                          ref={isDisplayed ? videoRef : undefined}
+                          ref={(el: any) => {
+                            registerVideo(el);
+                            if (isDisplayed) videoRef.current = el;
+                          }}
                           source={getVideoSource(layer.url)}
                           resizeMode={ResizeMode.COVER}
                           isLooping
