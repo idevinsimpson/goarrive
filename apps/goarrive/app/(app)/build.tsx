@@ -841,7 +841,12 @@ function BuildScreenInner() {
       {isFilterOpen && (
         <View style={s.filterPanel}>
           <Text style={s.filterTitle}>Filter by Type</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.filterRow}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={s.filterRow}
+            contentContainerStyle={s.filterRowContent}
+          >
             {['All', ...TYPES].map((type) => (
               <Pressable
                 key={type}
@@ -1320,15 +1325,21 @@ const s = StyleSheet.create({
     textTransform: 'uppercase',
   },
   filterRow: {
-    flexDirection: 'row',
+    flexGrow: 0,
+    flexShrink: 0,
     marginBottom: 16,
+  },
+  filterRowContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   filterChip: {
     paddingHorizontal: 16,
     paddingVertical: 8,
     backgroundColor: '#1E2A3A',
     borderRadius: 20,
-    marginRight: 8,
+    alignSelf: 'flex-start',
   },
   filterChipActive: {
     backgroundColor: '#F5A623',
