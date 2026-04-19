@@ -167,6 +167,10 @@ export default function MovementForm({
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyRef = useRef(false);
+  // Tracks the last name we've already regenerated voice for. Initialized to
+  // editMovement.name when the form opens so a no-op rename doesn't trigger
+  // regeneration. Updated each time we kick off a new generateMovementVoice.
+  const lastVoiceNameRef = useRef<string>('');
 
   // ── GIF thumbnail generation state ────────────────────────────────────
   const [generatingGif, setGeneratingGif] = useState(false);
@@ -185,6 +189,7 @@ export default function MovementForm({
   // ── Pre-populate on edit ───────────────────────────────────────────────
   useEffect(() => {
     if (editMovement) {
+      lastVoiceNameRef.current = (editMovement.name || '').trim();
       setName(editMovement.name || '');
       setCategory(editMovement.category || '');
       setEquipment(editMovement.equipment || '');
@@ -686,6 +691,28 @@ export default function MovementForm({
     updatedAt: serverTimestamp(),
   }), [name, category, equipment, difficulty, description, muscleGroups, workSec, restSec, countdownSec, swapSides, videoUrl, thumbnailUrl, regression, progression, contraindications, cropScale, cropTranslateX, cropTranslateY, cropFrameWidth, cropFrameHeight]);
 
+  // Regenerate the OpenAI movement voice clip whenever the spoken name
+  // changes. Clears voiceUrl synchronously so the player can't speak the old
+  // name in the gap between rename and regenerate; on success writes the new
+  // URL, on failure leaves voiceUrl cleared so the player falls back to Web
+  // Speech reading the NEW name (better than playing the stale old clip).
+  const regenerateVoiceIfRenamed = useCallback((movementId: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (trimmed === lastVoiceNameRef.current) return;
+    lastVoiceNameRef.current = trimmed;
+    updateDoc(doc(db, 'movements', movementId), { voiceUrl: '', voiceText: '' }).catch(() => {});
+    generateMovementVoice(movementId, trimmed)
+      .then(({ url, text }) => {
+        if (url) {
+          updateDoc(doc(db, 'movements', movementId), { voiceUrl: url, voiceText: text }).catch(() => {});
+        } else {
+          console.warn('[MovementForm] Voice regeneration returned no URL for', trimmed);
+        }
+      })
+      .catch((err) => console.warn('[MovementForm] Voice regeneration failed:', err));
+  }, [name]);
+
   const autoSave = useCallback(() => {
     if (!editMovement) return;
     dirtyRef.current = true;
@@ -700,47 +727,37 @@ export default function MovementForm({
         dirtyRef.current = false;
         setSaveStatus('saved');
         savedTimerRef.current = setTimeout(() => setSaveStatus('idle'), 3000);
+        regenerateVoiceIfRenamed(editMovement.id);
       } catch (err: any) {
         console.error('[MovementForm] Auto-save error:', err?.message ?? err);
         setSaveStatus('idle');
         dirtyRef.current = false;
       }
     }, 800);
-  }, [editMovement, buildEditPayload]);
+  }, [editMovement, buildEditPayload, regenerateVoiceIfRenamed]);
 
   const flushSave = useCallback(async () => {
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = null;
     }
-    if (!dirtyRef.current || !editMovement) return;
+    if (!editMovement) return;
 
     try {
-      const data = buildEditPayload();
-      await updateDoc(doc(db, 'movements', editMovement.id), data);
-
-      // Regenerate voice if name changed.
-      // Clear voiceUrl immediately so the player can't speak the old name in
-      // the gap between rename and regenerate. On success, write the new URL;
-      // on failure, leave voiceUrl cleared so Web Speech reads the new name.
-      const prevName = editMovement.name?.trim() ?? '';
-      const newName = name.trim();
-      if (prevName !== newName && newName) {
-        updateDoc(doc(db, 'movements', editMovement.id), { voiceUrl: '', voiceText: '' }).catch(() => {});
-        generateMovementVoice(editMovement.id, newName)
-          .then(({ url, text }) => {
-            if (url) {
-              updateDoc(doc(db, 'movements', editMovement.id), { voiceUrl: url, voiceText: text }).catch(() => {});
-            }
-          })
-          .catch(() => {});
+      if (dirtyRef.current) {
+        const data = buildEditPayload();
+        await updateDoc(doc(db, 'movements', editMovement.id), data);
+        dirtyRef.current = false;
       }
-
-      dirtyRef.current = false;
+      // Always check for a pending rename, even when dirtyRef is already
+      // false (e.g. autoSave's debounced write committed before the user
+      // closed the modal). lastVoiceNameRef gates this so we only regenerate
+      // when the spoken name actually changed since the last generation.
+      regenerateVoiceIfRenamed(editMovement.id);
     } catch (err: any) {
       console.error('[MovementForm] Flush-save error:', err?.message ?? err);
     }
-  }, [editMovement, buildEditPayload, name]);
+  }, [editMovement, buildEditPayload, regenerateVoiceIfRenamed]);
 
   // Track whether initial population from editMovement is done
   const initializedRef = useRef(false);
