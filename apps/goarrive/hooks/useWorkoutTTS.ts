@@ -95,9 +95,13 @@ function preloadCue(key: CueKey): void {
   }
 }
 
-// Pre-load the most commonly used cues immediately
+// Pre-load the most commonly used cues immediately. `go` is critical: without
+// it preloaded, the first rest's "Go" cue has to fetch over network on first
+// use and can arrive after the work phase has already started, making the
+// first rest-to-work transition silent while later rests (with `go` cached in
+// audioPool) play cleanly.
 const PRIORITY_CUES: CueKey[] = [
-  'countdown_3', 'countdown_3_rest', 'rest', 'halfway',
+  'countdown_3', 'countdown_3_rest', 'rest', 'go', 'halfway',
   'workout_complete', 'next_up', 'you_got_this', 'keep_pushing',
   'almost_there', 'workout_starting', 'lets_get_started',
 ];
@@ -148,12 +152,30 @@ export function useWorkoutTTS({
   const restCountdownSpokenRef = useRef<number>(-1);
   const welcomeSpokenRef = useRef<boolean>(false);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Records which rest phase we've already spoken the movement name for, and
+  // the movementId we were expecting. If the next-movement voiceUrl isn't in
+  // Firestore yet at scheduled playback time (legacy doc being backfilled in
+  // the background), we leave this pending and a separate effect watches for
+  // the voiceUrl to arrive on the same rest phase and plays it retroactively.
+  // Cleared when we actually play the clip or when phase/key changes.
+  const pendingMovementVoiceRef = useRef<
+    { restKey: string; movementId: string; name: string; context: string } | null
+  >(null);
 
   // Mirror isPaused for use inside setTimeout-deferred callbacks. Without this
-  // a cue scheduled before pause (e.g. the 900ms gap between "next up" and the
+  // a cue scheduled before pause (e.g. the gap between "next up" and the
   // movement voice) would still fire after the user pauses.
   const isPausedRef = useRef(isPaused);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+
+  // Mirrors the latest `next` prop so scheduled callbacks (setTimeout-deferred
+  // voiceUrl playback) always read the freshest voiceUrl from Firestore, not
+  // the stale closure-captured value from when the rest-entry effect ran.
+  // When a legacy movement's voiceUrl is backfilled mid-rest via
+  // generateMovementVoice → updateDoc → onSnapshot, the new URL shows up on
+  // this ref immediately.
+  const nextRef = useRef(next);
+  useEffect(() => { nextRef.current = next; }, [next]);
 
   // Tracks every deferred voice/speak timer so Skip can cancel them before
   // they fire. Without this, a Skip during the 900ms gap between "next up"
@@ -288,11 +310,17 @@ export function useWorkoutTTS({
           audio.currentTime = 0;
         }
         currentAudioRef.current = audio;
-        audio.play().catch(() => {
-          // Autoplay blocked — silently fail
+        audio.play().catch((err: unknown) => {
+          // Autoplay blocked or other play() rejection — surface it so we
+          // can tell whether a missing cue (e.g. first rest "Go" silent) is
+          // an autoplay / load failure vs. the effect never firing at all.
+          console.warn(
+            '[useWorkoutTTS] playCue rejected',
+            { key, err },
+          );
         });
-      } catch {
-        // Audio API unavailable
+      } catch (err) {
+        console.warn('[useWorkoutTTS] playCue threw', { key, err });
       }
     },
     [isMuted, ttsDisabled],
@@ -423,25 +451,53 @@ export function useWorkoutTTS({
         lastSpokenRef.current = key;
         countdownSpokenRef.current = -1;
         restCountdownSpokenRef.current = -1;
+        pendingMovementVoiceRef.current = null;
         // Synthetic "Get Ready" prep-rest step (movementIndex === -1) plays BEFORE
         // the first movement of a block, so we skip the "Rest" framing and just
         // announce the upcoming movement immediately.
         const isPrepRest = current?.movementIndex === -1;
         if (nextName) {
-          // Open every rest screen with the "Next up" cue followed by the
-          // movement-name voice clip. Combined with the work countdown's
-          // "3, 2, 1. Rest." this lands the spec phrasing
-          // "3, 2, 1. Rest. Next up, {next movement}." on the rest screen.
-          // If the next movement doesn't have a generated voiceUrl yet, the
-          // rest screen says "Next up" alone and we log the gap — we do NOT
-          // let device speech fill in "Next up, {movement}" on top.
-          playCue('next_up');
-          const nextVoiceUrl = next?.voiceUrl;
-          const delay = isPrepRest ? 0 : 900;
-          scheduleAudio(
-            () => playVoiceUrl(nextVoiceUrl || '', `rest_next_up_${nextName}`),
-            delay,
-          );
+          // Sequencing target: "3, 2, 1. Rest." (end of previous work) →
+          // "Next up, {name}." (rest screen) without one clip stepping on the
+          // other. At work phase end we play `countdown_3` (~2s) then `rest`
+          // (~0.8s); the rest cue starts playing right as the rest phase
+          // begins, so firing `next_up` immediately here was pausing it mid
+          // word. We delay next_up past the rest cue's tail (1100ms) and the
+          // movement-name voice past next_up's tail (+700ms). For prep-rest
+          // there's no preceding work cue so we can open immediately.
+          const nextUpDelay = isPrepRest ? 0 : 1100;
+          const voiceDelay = nextUpDelay + 700;
+          scheduleAudio(() => playCue('next_up'), nextUpDelay);
+          const nextMovementId = (next as any)?.movementId || '';
+          const logContext = `rest_next_up_${nextName}`;
+          // Single "not yet played" token for this rest phase. Whichever
+          // fires first — the scheduled voiceDelay callback or the
+          // late-voiceUrl watcher — clears this ref so the other one skips,
+          // preventing a double-play when a backfill lands mid-delay.
+          pendingMovementVoiceRef.current = {
+            restKey: key,
+            movementId: nextMovementId,
+            name: nextName,
+            context: logContext,
+          };
+          scheduleAudio(() => {
+            const pending = pendingMovementVoiceRef.current;
+            if (!pending || pending.restKey !== key) return;
+            // Read from nextRef so a backfill that landed during the delay
+            // window (rest-entry closure had voiceUrl='' but
+            // useMovementHydrate's onSnapshot wrote the URL after) still gets
+            // played.
+            const latestVoiceUrl = nextRef.current?.voiceUrl || '';
+            if (latestVoiceUrl) {
+              pendingMovementVoiceRef.current = null;
+              playVoiceUrl(latestVoiceUrl, logContext);
+            } else {
+              console.warn(
+                '[useWorkoutTTS] movement-name voiceUrl not ready at rest start — leaving pending for late-arrival watcher',
+                { movementId: nextMovementId, name: nextName, context: logContext },
+              );
+            }
+          }, voiceDelay);
         } else if (!isPrepRest) {
           playCue('rest_now');
         }
@@ -533,9 +589,64 @@ export function useWorkoutTTS({
         && (!(next as any).stepType || (next as any).stepType === 'exercise');
       if (nextIsExercise) {
         playCue('go');
+      } else {
+        // Diagnostic: this branch is why the first-rest "Go" bug needs
+        // explicit logging. Prep-rest → first-exercise transition is
+        // supposed to land here with nextIsExercise=true. If we see this
+        // warn on the first rest, either `next` is null (end of list) or
+        // next.stepType is unexpectedly set to something other than
+        // 'exercise' for the first movement after a prep-rest.
+        console.warn(
+          '[useWorkoutTTS] rest→? "Go" suppressed (next is not a plain exercise)',
+          {
+            hasNext: !!next,
+            nextStepType: (next as any)?.stepType,
+            nextName: (next as any)?.name,
+            currentIndex,
+            timeLeft,
+          },
+        );
       }
     }
-  }, [phase, timeLeft, currentDuration, next, playCue, isPaused]);
+  }, [phase, timeLeft, currentDuration, next, currentIndex, playCue, isPaused]);
+
+  // ── Late-arriving movement-name voice clip ────────────────────────
+  // When a legacy movement's voiceUrl is generated mid-rest (OpenAI TTS
+  // round trip takes 2-5s), useMovementHydrate writes it to Firestore and
+  // onSnapshot pushes the new URL through props. The scheduled playback
+  // from the rest-entry effect has already fired by then and logged a gap.
+  // This effect watches for the URL to arrive and plays it, provided we're
+  // still on the same rest phase (pendingMovementVoiceRef is our anchor).
+  useEffect(() => {
+    if (isPaused) return;
+    if (phase !== 'rest') return;
+    const pending = pendingMovementVoiceRef.current;
+    if (!pending) return;
+    // Only the movement we were waiting on — never play a stale name.
+    const nextMovementId = (next as any)?.movementId || '';
+    if (pending.movementId && nextMovementId && pending.movementId !== nextMovementId) {
+      pendingMovementVoiceRef.current = null;
+      return;
+    }
+    const nextVoiceUrl = next?.voiceUrl || '';
+    if (!nextVoiceUrl) return;
+    // Don't interrupt the "3, 2, 1" rest countdown or "Go" if we're already
+    // in the final 3s — better to skip the late clip than clip the countdown.
+    if (timeLeft <= 3.5) {
+      console.warn(
+        '[useWorkoutTTS] late voiceUrl arrived inside rest countdown — skipping to keep 3,2,1,Go clean',
+        { name: pending.name, timeLeft },
+      );
+      pendingMovementVoiceRef.current = null;
+      return;
+    }
+    pendingMovementVoiceRef.current = null;
+    console.info(
+      '[useWorkoutTTS] late voiceUrl arrived — playing now',
+      { name: pending.name, timeLeft },
+    );
+    playVoiceUrl(nextVoiceUrl, `${pending.context}_late`);
+  }, [phase, timeLeft, next, playVoiceUrl, isPaused]);
 
   // ── Pause → silence any audio in flight ─────────────────────────────
   // Any MP3 cue, Web Speech utterance, or deferred voice cue started just
