@@ -122,67 +122,67 @@ export default function WorkoutPlayer({
   } = useMovementSwap(flatMovements, currentIndex, setFlatOverride);
   const [swapReason, setSwapReason] = useState('');
 
-  // ── Landscape / wide-screen detection ─────────────────────────────────
+  // ── 9:16 artboard scaling ─────────────────────────────────────────────
+  // The whole player is one composition designed at a fixed BASE_W × BASE_H
+  // artboard. At runtime we compute ONE uniform scale that's the largest
+  // value where the whole 9:16 artboard fits inside the available viewport
+  // (after reserving hardware safe-area). Every dimension inside the canvas
+  // — logo, title, timer box, media, next-up, fonts, gaps — is a constant in
+  // BASE units rendered through `fs(n) = n * scale`. This is the only source
+  // of truth: no per-module responsive logic, no flex reflow, no orientation
+  // special-cases. The composition behaves like a true vertical video.
   const { width: winW, height: winH } = useWindowDimensions();
   const dimsValid = winW > 0 && winH > 0;
-  const isLandscape = dimsValid ? winW > winH : false;
-  const isTablet = dimsValid ? Math.min(winW, winH) >= 600 : false;
-  // 9:16 player canvas — single source of truth for layout. The frame is the
-  // largest 9:16 portrait rectangle that fits inside the viewport. Anything
-  // outside the frame is the black `portraitLockOuter` backdrop (pillar-box on
-  // landscape, letterbox on tall portrait). All slots — logo, title/timer,
-  // media, next-up — live inside this frame so module positions stay locked
-  // regardless of viewport ratio.
-  const isWideScreen = dimsValid && winW > 500;
-  let frameW = 0;
-  let frameH = 0;
-  if (dimsValid) {
-    // Width-bound first (typical phone is taller than 9:16 → letterbox).
-    frameW = isWideScreen ? Math.min(winW, winH * (9 / 16)) : winW;
-    frameH = Math.min(winH, frameW * (16 / 9));
-    // If the height clamp shrank us, also shrink width so frame stays 9:16.
-    frameW = frameH * (9 / 16);
-  }
+  const BASE_W = 360;
+  const BASE_H = 640;
+  // Reserve hardware safe-area BELOW the canvas so the canvas itself never
+  // overlaps the home indicator / browser chrome. Conservative constant —
+  // the canvas centers in the remaining space, so a small overshoot just
+  // shifts the canvas up a few px (harmless).
+  const SAFE_BOTTOM = (Platform.select({ ios: 34, android: 24, web: 24, default: 16 }) ?? 16) as number;
+  const availW = winW;
+  const availH = Math.max(1, winH - SAFE_BOTTOM);
+  const scale = dimsValid
+    ? Math.max(0.0001, Math.min(availW / BASE_W, availH / BASE_H))
+    : 1;
+  // frameW / frameH are the rendered canvas dimensions — a 9:16 rectangle
+  // whose aspect is locked because both axes scale by the same factor.
+  const frameW = BASE_W * scale;
+  const frameH = BASE_H * scale;
+  const fs = (n: number) => n * scale;
 
-  // Frame-relative scale. The whole player is treated as a single 9:16 video
-  // composition: every internal module (logo, title, timer box, media,
-  // next-up, fonts, gaps) is sized as a multiple of this scale so the entire
-  // composition grows or shrinks together. Base width is a typical small
-  // phone (360px) — at 360 the values match the original phone-tuned design;
-  // on tablets/desktops the frame and everything inside scale up uniformly.
-  const BASE_FRAME_W = 360;
-  const frameScale = dimsValid && frameW > 0 ? frameW / BASE_FRAME_W : 1;
-  const fs = (n: number) => n * frameScale;
+  // Slot dimensions in BASE design units. Sum (260) + media slot (380)
+  // = BASE_H (640), so the canvas is exactly the design height with no
+  // leftover space.
+  const BASE_LOGO_H = 56;
+  const BASE_GAP_LOGO = 4;
+  const BASE_TITLE_H = 112;
+  const BASE_GAP_TITLE = 12;
+  const BASE_GAP_MEDIA = 12;
+  const BASE_NEXTUP_H = 64;
+  const SLOT_LOGO_H = fs(BASE_LOGO_H);
+  const SLOT_TITLE_H = fs(BASE_TITLE_H);
+  const SLOT_NEXTUP_H = fs(BASE_NEXTUP_H);
+  const SLOT_GAP_LOGO = fs(BASE_GAP_LOGO);
+  const SLOT_GAP_TITLE = fs(BASE_GAP_TITLE);
+  const SLOT_GAP_MEDIA = fs(BASE_GAP_MEDIA);
 
-  // Movement media is always rendered at a fixed 4:5 aspect ratio. We compute
-  // the largest 4:5 box that fits inside the available media slot — width is
-  // bounded by frameW (minus a small horizontal pad) and height is bounded by
-  // the leftover frame height after the surrounding fixed slots take their
-  // space. If vertical room is tight, the surrounding layout (logo / title /
-  // next-up slots) is what flexes — the media stays exactly 4:5.
-  // Slot heights and gaps are derived from frameScale so they grow with the
-  // frame; without scaling, modules stay phone-sized inside a larger canvas.
-  const SLOT_LOGO_H = fs(56);
-  const SLOT_TITLE_H = fs(112);
-  const SLOT_NEXTUP_H = fs(64);
-  const SLOT_GAP_LOGO = fs(4); // logo → title row
-  const SLOT_GAP_TITLE = fs(12); // title row → media (must always be visible)
-  const SLOT_GAP_MEDIA = fs(12); // media → next-up (must always be visible)
-  // Bottom pad accounts for iOS home indicator / PWA chrome — those are
-  // physical safe-areas, not composition; keep raw px.
-  const SLOT_BOTTOM_PAD = Platform.select({ ios: 24, android: 8, web: 8, default: 8 }) as number;
-  const mediaAvailH = Math.max(
-    180,
-    (frameH || 600) - SLOT_LOGO_H - SLOT_GAP_LOGO - SLOT_TITLE_H - SLOT_GAP_TITLE
-      - SLOT_GAP_MEDIA - SLOT_NEXTUP_H - SLOT_BOTTOM_PAD,
-  );
-  const mediaAvailW = Math.max(160, frameW || 360);
-  let _mediaW = mediaAvailW;
-  let _mediaH = _mediaW * (5 / 4);
-  if (_mediaH > mediaAvailH) {
-    _mediaH = mediaAvailH;
-    _mediaW = _mediaH * (4 / 5);
+  // 4:5 media — constant in BASE units (same proportion of the canvas on
+  // every screen size), then scaled at the call site. Computed once at
+  // module level would be cleaner, but keeping it here makes the math
+  // visible alongside the slot constants.
+  const baseVertSlots = BASE_LOGO_H + BASE_GAP_LOGO + BASE_TITLE_H
+    + BASE_GAP_TITLE + BASE_GAP_MEDIA + BASE_NEXTUP_H;
+  const baseMediaAvailH = BASE_H - baseVertSlots; // 380
+  const baseMediaAvailW = BASE_W;                  // 360
+  let baseMediaW = baseMediaAvailW;
+  let baseMediaH = baseMediaW * (5 / 4);
+  if (baseMediaH > baseMediaAvailH) {
+    baseMediaH = baseMediaAvailH;                  // 380
+    baseMediaW = baseMediaH * (4 / 5);             // 304
   }
+  const _mediaW = fs(baseMediaW);
+  const _mediaH = fs(baseMediaH);
   const mediaInnerSize = { width: _mediaW, height: _mediaH };
 
   // ── Video ref ────────────────────────────────
@@ -630,7 +630,9 @@ export default function WorkoutPlayer({
   // ── Render ────────────────────────────────────────────────────────────
   return (
     <Modal visible={visible} animationType="fade" transparent={false}>
-      <View style={st.portraitLockOuter}>
+      <View style={[st.portraitLockOuter, Platform.OS === 'web'
+        ? ({ paddingBottom: `max(${SAFE_BOTTOM}px, env(safe-area-inset-bottom, ${SAFE_BOTTOM}px))` } as any)
+        : { paddingBottom: SAFE_BOTTOM }]}>
       <View style={[st.container, dimsValid && { width: frameW, height: frameH, maxWidth: frameW }]}>
         {/* ── READY state — Block overview grid ─────────────────── */}
         {phase === 'ready' && (() => {
@@ -1170,15 +1172,11 @@ export default function WorkoutPlayer({
 // ── Styles ──────────────────────────────────────────────────────────────────
 const { width: SCREEN_W } = Dimensions.get('window');
 
-const PORTRAIT_MAX_W = 430;
-
-// On web (especially iOS PWA standalone), the viewport includes the home
-// indicator and any browser chrome at the bottom. env(safe-area-inset-bottom)
-// pushes the workContainer's bottom padding above that chrome so the next-up
-// slot is never clipped. max() guarantees a minimum visual gap.
-const webSafeBottomStyle: any = Platform.OS === 'web'
-  ? { paddingBottom: 'max(8px, env(safe-area-inset-bottom, 8px))' }
-  : null;
+// Safe-area is handled OUTSIDE the canvas (paddingBottom on portraitLockOuter)
+// so the canvas itself can be a clean 9:16 design surface with no inner bottom
+// padding fighting the artboard math. Anything that previously consumed inner
+// space at the bottom is now reserved by the centered outer wrapper instead.
+const webSafeBottomStyle: any = null;
 
 const st = StyleSheet.create({
   portraitLockOuter: {
@@ -1187,11 +1185,14 @@ const st = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Canvas — actual width/height/maxWidth applied inline from the artboard
+  // scale so the StyleSheet baseline doesn't fight the dynamic canvas size.
+  // The flex/width fallback only applies during the first render before
+  // useWindowDimensions resolves; once dims are valid the inline overrides win.
   container: {
     flex: 1,
     backgroundColor: '#0E1117',
     width: '100%',
-    maxWidth: PORTRAIT_MAX_W,
   },
   header: {
     flexDirection: 'row',
@@ -1451,12 +1452,11 @@ const st = StyleSheet.create({
 
   // ── In-workout shared frame ────────────────────────────────────────
   // Every active phase (work, rest, transition, waterBreak, demo,
-  // grabEquipment, swap) uses this container. Vertical padding is tight
-  // to push content up; bottom padding accounts for iOS home indicator
-  // and PWA browser chrome so the next-up slot is never clipped.
+  // grabEquipment, swap) uses this container. The canvas is sized to fit
+  // exactly inside the available viewport (after outer safe-area), so no
+  // inner padding is needed — the slots fill the canvas precisely.
   workContainer: {
-    flex: 1, paddingHorizontal: 0, paddingTop: 0,
-    paddingBottom: Platform.select({ ios: 24, android: 8, web: 8, default: 8 }),
+    flex: 1, paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0,
     overflow: 'hidden',
   },
 
