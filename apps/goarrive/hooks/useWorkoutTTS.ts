@@ -172,6 +172,7 @@ export function useWorkoutTTS({
   const [isTTSAvailable, setIsTTSAvailable] = useState(true);
   const halfwaySpokenRef = useRef<boolean>(false);
   const countdownSpokenRef = useRef<number>(-1);
+  const restCountdownSpokenRef = useRef<number>(-1);
   const welcomeSpokenRef = useRef<boolean>(false);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -230,57 +231,6 @@ export function useWorkoutTTS({
     }
   }, []);
 
-    // ── Play a dynamic audio URL (movement voice clips from Firebase Storage) ──
-  const playVoiceUrl = useCallback(
-    (url: string, onEnded?: () => void) => {
-      if (isMuted || ttsDisabled || isPausedRef.current) return;
-      if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-      if (!url) return;
-      try {
-        if (currentAudioRef.current) {
-          currentAudioRef.current.pause();
-          currentAudioRef.current.currentTime = 0;
-        }
-        const audio = new (window as any).Audio(url);
-        currentAudioRef.current = audio;
-        if (onEnded) audio.addEventListener('ended', onEnded, { once: true });
-        audio.play().catch(() => {});
-      } catch {
-        // Audio API unavailable
-      }
-    },
-    [isMuted, ttsDisabled],
-  );
-
-  // ── Play a static cue from Firebase Storage ────────────────────
-  const playCue = useCallback(
-    (key: CueKey) => {
-      if (isMuted || ttsDisabled || isPausedRef.current) return;
-      if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-      try {
-        // Stop any currently playing cue
-        if (currentAudioRef.current) {
-          currentAudioRef.current.pause();
-          currentAudioRef.current.currentTime = 0;
-        }
-        let audio = audioPool[key];
-        if (!audio) {
-          audio = new (window as any).Audio(CUES[key]);
-          audioPool[key] = audio;
-        } else {
-          audio.currentTime = 0;
-        }
-        currentAudioRef.current = audio;
-        audio.play().catch(() => {
-          // Autoplay blocked — silently fail
-        });
-      } catch {
-        // Audio API unavailable
-      }
-    },
-    [isMuted, ttsDisabled],
-  );
-
   // ── Speak dynamic text (movement names) via Web Speech API ──────
   const speakWeb = useCallback((text: string) => {
     try {
@@ -330,6 +280,75 @@ export function useWorkoutTTS({
       }
     },
     [isMuted, ttsDisabled, speakWeb],
+  );
+
+  // ── Play a dynamic audio URL (movement voice clips from Firebase Storage) ──
+  // Falls back to Web Speech with `fallbackText` when the MP3 can't be loaded
+  // or played (404, CORS, autoplay block, decode failure). The fallback path
+  // is logged with the failing URL so we can tell apart "OpenAI clip never
+  // generated" from "clip exists but failed to play". Without this the
+  // playback would silently degrade to nothing and the player would feel
+  // broken instead of just falling back to device speech.
+  const playVoiceUrl = useCallback(
+    (url: string, fallbackText: string, onEnded?: () => void) => {
+      if (isMuted || ttsDisabled || isPausedRef.current) return;
+      if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+      if (!url) {
+        if (fallbackText) speak(fallbackText);
+        return;
+      }
+      const fallback = (reason: string, err?: unknown) => {
+        console.warn('[useWorkoutTTS] voiceUrl fallback to Web Speech:', reason, { url, err });
+        if (fallbackText && !isPausedRef.current) speak(fallbackText);
+      };
+      try {
+        if (currentAudioRef.current) {
+          currentAudioRef.current.pause();
+          currentAudioRef.current.currentTime = 0;
+        }
+        const audio = new (window as any).Audio(url);
+        currentAudioRef.current = audio;
+        if (onEnded) audio.addEventListener('ended', onEnded, { once: true });
+        audio.addEventListener(
+          'error',
+          () => fallback('audio element error', audio.error),
+          { once: true },
+        );
+        audio.play().catch((err: unknown) => fallback('audio.play() rejected', err));
+      } catch (err) {
+        fallback('Audio() constructor threw', err);
+      }
+    },
+    [isMuted, ttsDisabled, speak],
+  );
+
+  // ── Play a static cue from Firebase Storage ────────────────────
+  const playCue = useCallback(
+    (key: CueKey) => {
+      if (isMuted || ttsDisabled || isPausedRef.current) return;
+      if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+      try {
+        // Stop any currently playing cue
+        if (currentAudioRef.current) {
+          currentAudioRef.current.pause();
+          currentAudioRef.current.currentTime = 0;
+        }
+        let audio = audioPool[key];
+        if (!audio) {
+          audio = new (window as any).Audio(CUES[key]);
+          audioPool[key] = audio;
+        } else {
+          audio.currentTime = 0;
+        }
+        currentAudioRef.current = audio;
+        audio.play().catch(() => {
+          // Autoplay blocked — silently fail
+        });
+      } catch {
+        // Audio API unavailable
+      }
+    },
+    [isMuted, ttsDisabled],
   );
 
   // ── Special block announcements ────────────────────────────────────
@@ -419,16 +438,27 @@ export function useWorkoutTTS({
     if (phase === 'work') {
       const key = `work_${currentIndex}_${current.name}`;
       if (lastSpokenRef.current !== key) {
+        const previousKey = lastSpokenRef.current;
         lastSpokenRef.current = key;
         halfwaySpokenRef.current = false;
         countdownSpokenRef.current = -1;
-        // Play "Next up" cue, then play movement name via OpenAI voice clip (or Web Speech fallback)
-        playCue('next_up');
-        const voiceUrl = current.voiceUrl;
-        if (voiceUrl) {
-          scheduleAudio(() => playVoiceUrl(voiceUrl), 900);
-        } else {
-          scheduleAudio(() => speak(current.name), 900);
+        restCountdownSpokenRef.current = -1;
+        // The "Next up, {name}" line normally plays on the rest screen leading
+        // into this movement, so work-start stays silent and the spoken "Go"
+        // closes the rest countdown. But if we arrived at work WITHOUT a
+        // preceding rest announcement (very first movement with no prep, or a
+        // movement with restAfter=0 chained straight into the next), nothing
+        // would have spoken the name — so announce it here as a fallback only
+        // in that case to avoid the overlap the prior "next_up at work start"
+        // pattern caused.
+        const announcedByPriorRest = previousKey === `rest_${currentIndex - 1}`
+          || previousKey === `rest_${currentIndex}`; // synthetic prep-rest pairs with the next movement
+        if (!announcedByPriorRest) {
+          const voiceUrl = current.voiceUrl;
+          // Delay past the welcome cue (currentIndex === 0) so it doesn't
+          // get cut off by the name clip.
+          const delay = currentIndex === 0 ? 1500 : 600;
+          scheduleAudio(() => playVoiceUrl(voiceUrl || '', current.name), delay);
         }
       }
     } else if (phase === 'rest') {
@@ -436,19 +466,21 @@ export function useWorkoutTTS({
       const key = `rest_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
+        countdownSpokenRef.current = -1;
+        restCountdownSpokenRef.current = -1;
         // Synthetic "Get Ready" prep-rest step (movementIndex === -1) plays BEFORE
-        // the first movement of a block, not after one. Don't say "Nice work. Rest."
-        // there — that cue only makes sense after completing a movement.
+        // the first movement of a block, so we skip the "Rest" framing and just
+        // announce the upcoming movement immediately.
         const isPrepRest = current?.movementIndex === -1;
         if (nextName) {
-          if (!isPrepRest) playCue('nice_work_rest');
+          // Open every rest screen with the "Next up" cue followed by the
+          // movement-name voice clip. Combined with the work countdown's
+          // "3, 2, 1. Rest." this lands the spec phrasing
+          // "3, 2, 1. Rest. Next up, {next movement}." on the rest screen.
+          playCue('next_up');
           const nextVoiceUrl = next?.voiceUrl;
-          const delay = isPrepRest ? 0 : 1800;
-          if (nextVoiceUrl) {
-            scheduleAudio(() => playVoiceUrl(nextVoiceUrl), delay);
-          } else {
-            scheduleAudio(() => speak(`Next up: ${nextName}`), delay);
-          }
+          const delay = isPrepRest ? 0 : 900;
+          scheduleAudio(() => playVoiceUrl(nextVoiceUrl || '', `Next up: ${nextName}`), delay);
         } else if (!isPrepRest) {
           playCue('rest_now');
         }
@@ -514,6 +546,35 @@ export function useWorkoutTTS({
       }
     }
   }, [phase, timeLeft, current, currentDuration, currentIndex, total, next, playCue, isPaused]);
+
+  // ── Rest countdown voice (rest → next exercise only) ───────────────
+  // Replaces the tone-based beeps in useWorkoutTimer for the rest phase
+  // with the spoken "3, 2, 1" + "Go" pair so transitioning from rest into
+  // the next movement feels like a coach counting you in instead of a timer.
+  // We only play "Go" when the next phase is actually an exercise — if rest
+  // bleeds into a special block (demo, transition, water break, outro), that
+  // block's own announcement fires immediately and "Go" would step on it.
+  useEffect(() => {
+    if (isPaused) return;
+    if (phase !== 'rest') return;
+    // No currentDuration guard — `currentDuration` is the WORK phase duration,
+    // and synthetic prep-rest steps (Get Ready) have current.duration === 0
+    // even though the rest itself runs for current.restAfter seconds. We rely
+    // on the phase + timeLeft checks here.
+
+    const displayed = Math.max(0, Math.ceil(timeLeft));
+    if (displayed === 3 && timeLeft > 0 && restCountdownSpokenRef.current !== 3) {
+      restCountdownSpokenRef.current = 3;
+      playCue('countdown_3');
+    } else if (timeLeft <= 0 && restCountdownSpokenRef.current !== 0) {
+      restCountdownSpokenRef.current = 0;
+      const nextIsExercise = next
+        && (!(next as any).stepType || (next as any).stepType === 'exercise');
+      if (nextIsExercise) {
+        playCue('go');
+      }
+    }
+  }, [phase, timeLeft, currentDuration, next, playCue, isPaused]);
 
   // ── Pause → silence any audio in flight ─────────────────────────────
   // Any MP3 cue, Web Speech utterance, or deferred voice cue started just

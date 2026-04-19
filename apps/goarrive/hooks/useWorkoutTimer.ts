@@ -138,7 +138,13 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
         // (e.g. n=2.5 displayed as "3") still triggers the cue at the right
         // perceived second. n<=0 catches both natural 0 and Skip overshoot.
         const displayed = Math.max(0, Math.ceil(n));
-        if (phase === 'rest' || phase === 'swap') {
+        if (phase === 'rest') {
+          // Audio for rest's last-3 countdown is owned by useWorkoutTTS
+          // (spoken "3, 2, 1" + "Go" replacing the beeps). Only the haptic
+          // pulse stays here so the wrist still confirms each tick.
+          if (displayed <= 3 && displayed > 0 && n > 0) hapticLight();
+          if (n <= 0) hapticMedium();
+        } else if (phase === 'swap') {
           if (displayed <= 3 && displayed > 0 && n > 0) {
             playCue('countdownTick');
             hapticLight();
