@@ -7013,14 +7013,28 @@ exports.generateVoice = (0, https_1.onCall)({ region: 'us-central1', secrets: [o
         const url = `https://storage.googleapis.com/${bucket.name}/${path}`;
         if (movementId && typeof movementId === 'string') {
             try {
-                await db.doc(`movements/${movementId}`).update({
-                    voiceUrl: url,
-                    voiceText: text,
-                });
+                const ref = db.doc(`movements/${movementId}`);
+                const snap = await ref.get();
+                if (!snap.exists) {
+                    console.error('[VOICE-AUDIT] generateVoice: canonical movement doc MISSING — writeback skipped', {
+                        movementId, uid: request.auth.uid, storedUrl: url,
+                    });
+                }
+                else {
+                    await ref.update({ voiceUrl: url, voiceText: text });
+                    console.info('[VOICE-AUDIT] generateVoice: Firestore writeback OK', {
+                        movementId, uid: request.auth.uid,
+                    });
+                }
             }
             catch (writeErr) {
-                console.error('[generateVoice] Firestore writeback failed', { movementId, uid: request.auth.uid }, writeErr);
+                console.error('[VOICE-AUDIT] generateVoice: Firestore writeback FAILED', { movementId, uid: request.auth.uid }, writeErr);
             }
+        }
+        else {
+            console.warn('[VOICE-AUDIT] generateVoice: no movementId supplied — skipping Firestore writeback', {
+                uid: request.auth.uid, textPreview: text.slice(0, 40),
+            });
         }
         return { url, path };
     }

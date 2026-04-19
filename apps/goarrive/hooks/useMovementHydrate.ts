@@ -133,6 +133,8 @@ export function useMovementHydrate(flatMovements: FlatMovement[]): FlatMovement[
             voiceUrlPresent: hasVoice,
             voiceUrlPreview: hasVoice ? String(data.voiceUrl).slice(0, 80) : '',
             voiceTextPresent: typeof data.voiceText === 'string' && data.voiceText.length > 0,
+            isGlobal: data.isGlobal === true,
+            coachId: typeof data.coachId === 'string' ? data.coachId : '',
             attempted: voiceGenAttemptedRef.current.has(id),
           });
           recomputeMerged();
