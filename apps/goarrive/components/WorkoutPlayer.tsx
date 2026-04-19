@@ -317,6 +317,7 @@ export default function WorkoutPlayer({
   const getNameFontStyle = (
     text: string,
     baseAvailWidth: number,
+    maxLines: number = NAME_MAX_LINES,
   ): { fontSize: number; lineHeight: number } => {
     const words = (text || '').trim().split(/\s+/).filter(Boolean);
     if (words.length === 0) {
@@ -334,7 +335,7 @@ export default function WorkoutPlayer({
         else if (curr + 1 + w.length <= maxCharsPerLine) curr += 1 + w.length;
         else { lines += 1; curr = w.length; }
       }
-      if (lines <= NAME_MAX_LINES) {
+      if (lines <= maxLines) {
         return { fontSize: fs(t.size), lineHeight: fs(t.line) };
       }
     }
@@ -349,6 +350,42 @@ export default function WorkoutPlayer({
   // overflows and never mid-word-breaks.
   const BASE_TITLE_INNER_W_WITH_TIMER = Math.max(0, baseMediaW - 132 - 4 - 16);
   const BASE_TITLE_INNER_W_NO_TIMER = Math.max(0, baseMediaW - 16);
+
+  // Shared auto-fit title text. Every state that renders content in the top
+  // title module uses this — work movement name, rest "Next: <name>",
+  // transition name, grab-equipment name, swap name, demo block name — so
+  // shrink rules (no mid-word breaks, no ellipses when the text can wrap or
+  // shrink, scale-invariant tiering) stay identical across phases. Phases
+  // that pair the title with a small label above (REST, TRANSITION, GRAB
+  // EQUIPMENT, SWITCH SIDES) pass maxLines=2 so both fit inside the fixed
+  // 112-unit title module; the work phase keeps the original 3-line budget.
+  const renderAutoFitTitle = (
+    text: string,
+    opts: { hasTimer?: boolean; maxLines?: number; color?: string; marginTop?: number } = {},
+  ): React.ReactNode => {
+    const hasTimer = opts.hasTimer ?? true;
+    const maxLines = opts.maxLines ?? NAME_MAX_LINES;
+    const color = opts.color ?? '#FFFFFF';
+    const baseWidth = hasTimer
+      ? BASE_TITLE_INNER_W_WITH_TIMER
+      : BASE_TITLE_INNER_W_NO_TIMER;
+    return (
+      <Text
+        style={[
+          st.workMovementName,
+          { color },
+          opts.marginTop != null ? { marginTop: fs(opts.marginTop) } : null,
+          getNameFontStyle(text, baseWidth, maxLines),
+          Platform.OS === 'web'
+            ? ({ wordBreak: 'normal', overflowWrap: 'break-word' } as any)
+            : null,
+        ]}
+        numberOfLines={maxLines}
+      >
+        {text}
+      </Text>
+    );
+  };
 
   // Frame-derived dimensions for every module that lives inside the player
   // frame. Apply these inline as override styles so the StyleSheet baselines
@@ -371,12 +408,11 @@ export default function WorkoutPlayer({
   const scaledNextUpThumb = { width: fs(40), height: fs(40), borderRadius: fs(8) };
   const scaledTitlePadH = fs(8);
 
-  // Title-slot label fonts (scale with frame).
+  // Title-slot label fonts (scale with frame). The main title text inside
+  // the title module is sized by renderAutoFitTitle, not by scaledLabels.
   const scaledLabels = {
     superset: fs(16),
     restPhase: fs(18),
-    restNextName: fs(28),
-    demoBlockTitle: fs(22),
     waterBreakLabel: fs(20),
     transitionInline: fs(13),
     phaseLabel: fs(16),
@@ -833,7 +869,7 @@ export default function WorkoutPlayer({
             <View style={[st.workContainer, webSafeBottomStyle]}>
               {renderLogoSlot()}
               {renderTitleTimerSlot(
-                <Text style={[st.demoBlockTitle, { fontSize: scaledLabels.demoBlockTitle }]} numberOfLines={2}>{current.name}</Text>,
+                renderAutoFitTitle(current.name, { hasTimer: true, maxLines: 3 }),
                 renderGoldTimer(String(Math.max(0, Math.ceil(timeLeft)))),
               )}
               <View style={st.mediaSlot}>
@@ -863,7 +899,12 @@ export default function WorkoutPlayer({
             {renderTitleTimerSlot(
               <>
                 <Text style={[st.restPhaseLabel, { color: '#94A3B8', fontSize: scaledLabels.restPhase }]}>TRANSITION</Text>
-                <Text style={[st.restNextName, { fontSize: scaledLabels.restNextName }]} numberOfLines={1}>{current.name}</Text>
+                {renderAutoFitTitle(current.name, {
+                  hasTimer: true,
+                  maxLines: 2,
+                  color: '#F0F4F8',
+                  marginTop: 2,
+                })}
                 {(current.instructionText || current.description) ? (
                   <Text style={[st.transitionInstructionInline, { fontSize: scaledLabels.transitionInline }]} numberOfLines={1}>
                     {current.instructionText || current.description}
@@ -910,7 +951,12 @@ export default function WorkoutPlayer({
             {renderTitleTimerSlot(
               <>
                 <Text style={[st.restPhaseLabel, { color: '#FB923C', fontSize: scaledLabels.restPhase }]}>GRAB EQUIPMENT</Text>
-                <Text style={[st.restNextName, { fontSize: scaledLabels.restNextName }]} numberOfLines={1}>{current.name}</Text>
+                {renderAutoFitTitle(current.name, {
+                  hasTimer: true,
+                  maxLines: 2,
+                  color: '#F0F4F8',
+                  marginTop: 2,
+                })}
                 {current.instructionText || current.description ? (
                   <Text style={[st.transitionInstructionInline, { fontSize: scaledLabels.transitionInline }]} numberOfLines={1}>
                     {current.instructionText || current.description}
@@ -988,28 +1034,22 @@ export default function WorkoutPlayer({
                     {current.supersetLabel && (
                       <Text style={[st.supersetLabel, { fontSize: scaledLabels.superset }]}>{current.supersetLabel}</Text>
                     )}
-                    <Text
-                      style={[
-                        st.workMovementName,
-                        getNameFontStyle(
-                          current.name,
-                          isRepBased ? BASE_TITLE_INNER_W_NO_TIMER : BASE_TITLE_INNER_W_WITH_TIMER,
-                        ),
-                        Platform.OS === 'web'
-                          ? ({ wordBreak: 'normal', overflowWrap: 'break-word' } as any)
-                          : null,
-                      ]}
-                      numberOfLines={NAME_MAX_LINES}
-                    >
-                      {current.name}
-                    </Text>
+                    {renderAutoFitTitle(current.name, {
+                      hasTimer: !isRepBased,
+                      maxLines: current.supersetLabel ? 2 : NAME_MAX_LINES,
+                    })}
                   </>,
                   !isRepBased ? renderGoldTimer(formatTime(timeLeft)) : null,
                 )
               : renderTitleTimerSlot(
                   <>
                     <Text style={[st.restPhaseLabel, { fontSize: scaledLabels.restPhase }]}>REST</Text>
-                    {next && <Text style={[st.restNextName, { fontSize: scaledLabels.restNextName }]} numberOfLines={1}>Next: {next.name}</Text>}
+                    {next && renderAutoFitTitle(`Next: ${next.name}`, {
+                      hasTimer: true,
+                      maxLines: 2,
+                      color: '#F0F4F8',
+                      marginTop: 2,
+                    })}
                   </>,
                   renderRestTimer(formatTime(timeLeft)),
                 )}
@@ -1092,7 +1132,12 @@ export default function WorkoutPlayer({
             {renderTitleTimerSlot(
               <>
                 <Text style={[st.phaseLabel, { fontSize: scaledLabels.phaseLabel }]}>SWITCH SIDES</Text>
-                <Text style={[st.restNextName, { fontSize: scaledLabels.restNextName }]} numberOfLines={1}>{current.name}</Text>
+                {renderAutoFitTitle(current.name, {
+                  hasTimer: true,
+                  maxLines: 2,
+                  color: '#F0F4F8',
+                  marginTop: 2,
+                })}
               </>,
               renderGoldTimer(String(Math.max(0, Math.ceil(timeLeft)))),
             )}
