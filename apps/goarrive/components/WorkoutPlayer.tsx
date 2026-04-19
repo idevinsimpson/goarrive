@@ -295,16 +295,60 @@ export default function WorkoutPlayer({
     return { fontSize: fs(48), lineHeight: fs(52), letterSpacing: 0 };
   };
 
-  // Auto-shrink the movement-name font so any reasonable name fits the title
-  // module. Tiers are scaled by frameScale so names grow with the frame.
-  const getNameFontStyle = (text: string): { fontSize: number; lineHeight: number } => {
-    const len = (text || '').length;
-    if (len <= 12) return { fontSize: fs(40), lineHeight: fs(44) };
-    if (len <= 20) return { fontSize: fs(32), lineHeight: fs(36) };
-    if (len <= 32) return { fontSize: fs(26), lineHeight: fs(30) };
-    if (len <= 48) return { fontSize: fs(22), lineHeight: fs(26) };
-    return { fontSize: fs(18), lineHeight: fs(22) };
+  // Auto-shrink the movement-name font so the name fits the fixed title
+  // module without mid-word breaks. Picks the largest tier where (a) the
+  // longest word fits on a single line at the available inner width and
+  // (b) greedy word-wrap produces ≤ NAME_MAX_LINES lines. Heuristic uses an
+  // estimated char-width factor for the FH bold headline font — deliberately
+  // a touch conservative so narrow characters aren't penalized. Scale-free:
+  // computed in BASE units (both font size and available width scale by the
+  // same factor), so the picked tier is identical on every screen size.
+  const NAME_MAX_LINES = 3;
+  const NAME_CHAR_W_FACTOR = 0.62;
+  const NAME_TIERS: readonly { size: number; line: number }[] = [
+    { size: 40, line: 44 },
+    { size: 34, line: 38 },
+    { size: 28, line: 32 },
+    { size: 24, line: 28 },
+    { size: 20, line: 24 },
+    { size: 17, line: 21 },
+    { size: 14, line: 18 },
+  ];
+  const getNameFontStyle = (
+    text: string,
+    baseAvailWidth: number,
+  ): { fontSize: number; lineHeight: number } => {
+    const words = (text || '').trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      return { fontSize: fs(NAME_TIERS[0].size), lineHeight: fs(NAME_TIERS[0].line) };
+    }
+    const longestWordLen = words.reduce((n, w) => (w.length > n ? w.length : n), 0);
+    for (const t of NAME_TIERS) {
+      const charW = t.size * NAME_CHAR_W_FACTOR;
+      if (longestWordLen * charW > baseAvailWidth) continue;
+      const maxCharsPerLine = Math.max(1, Math.floor(baseAvailWidth / charW));
+      let lines = 1;
+      let curr = 0;
+      for (const w of words) {
+        if (curr === 0) curr = w.length;
+        else if (curr + 1 + w.length <= maxCharsPerLine) curr += 1 + w.length;
+        else { lines += 1; curr = w.length; }
+      }
+      if (lines <= NAME_MAX_LINES) {
+        return { fontSize: fs(t.size), lineHeight: fs(t.line) };
+      }
+    }
+    const last = NAME_TIERS[NAME_TIERS.length - 1];
+    return { fontSize: fs(last.size), lineHeight: fs(last.line) };
   };
+
+  // Inner content width of titleColumn in BASE units. titleColumn has
+  // marginRight: 4 and paddingHorizontal: 8 (both unscaled in stylesheet,
+  // scaled at render via scaledTitlePadH). The timer column, when present,
+  // is a fixed BASE 132. Used by getNameFontStyle to pick a tier that never
+  // overflows and never mid-word-breaks.
+  const BASE_TITLE_INNER_W_WITH_TIMER = Math.max(0, baseMediaW - 132 - 4 - 16);
+  const BASE_TITLE_INNER_W_NO_TIMER = Math.max(0, baseMediaW - 16);
 
   // Frame-derived dimensions for every module that lives inside the player
   // frame. Apply these inline as override styles so the StyleSheet baselines
@@ -945,8 +989,17 @@ export default function WorkoutPlayer({
                       <Text style={[st.supersetLabel, { fontSize: scaledLabels.superset }]}>{current.supersetLabel}</Text>
                     )}
                     <Text
-                      style={[st.workMovementName, getNameFontStyle(current.name)]}
-                      numberOfLines={3}
+                      style={[
+                        st.workMovementName,
+                        getNameFontStyle(
+                          current.name,
+                          isRepBased ? BASE_TITLE_INNER_W_NO_TIMER : BASE_TITLE_INNER_W_WITH_TIMER,
+                        ),
+                        Platform.OS === 'web'
+                          ? ({ wordBreak: 'normal', overflowWrap: 'break-word' } as any)
+                          : null,
+                      ]}
+                      numberOfLines={NAME_MAX_LINES}
                     >
                       {current.name}
                     </Text>
