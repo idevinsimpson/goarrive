@@ -108,18 +108,19 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
         setPhase(specialPhase);
         setTimeLeft(nextStep.duration ?? 10);
       } else if (nextStep.duration <= 0 && nextStep.restAfter > 0) {
-        // Synthetic "Get Ready" step — skip work, go straight to rest/prep
+        // Synthetic "Get Ready" step — skip work, go straight to rest/prep.
+        // Phase-transition chimes are intentionally gone: all audible cues
+        // belong to the OpenAI/MP3 pipeline in useWorkoutTTS so a tone never
+        // overlaps the spoken "3, 2, 1. Rest." / "Go." countdown pair.
         setPhase('rest');
         setTimeLeft(nextStep.restAfter);
-        if (!silent) playCue('restStart');
       } else {
-        // Exercise — go directly to work
+        // Exercise — go directly to work. No workStart tone chime: it
+        // previously fired concurrently with the spoken "Go" MP3 and was
+        // heard as a beep BETWEEN "3, 2, 1" and "Go".
         setPhase('work');
         setTimeLeft(nextStep.duration ?? 30);
-        if (!silent) {
-          playCue('workStart');
-          hapticHeavy();
-        }
+        if (!silent) hapticHeavy();
       }
     }
   }, [currentIndex, total, flatMovements]);
@@ -189,14 +190,12 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
       } else if (current?.restAfter > 0) {
         setPhase('rest');
         setTimeLeft(current.restAfter);
-        playCue('restStart');
       } else {
         advanceToNext();
       }
     } else if (phase === 'swap') {
       setPhase('work');
       setTimeLeft(current?.duration ?? 30);
-      playCue('workStart');
     } else if (phase === 'rest') {
       advanceToNext();
     }
@@ -219,11 +218,9 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
       // Synthetic "Get Ready" step — skip work, go straight to rest/prep
       setPhase('rest');
       setTimeLeft(firstStep.restAfter);
-      playCue('restStart');
     } else {
       setPhase('work');
       setTimeLeft(firstStep.duration ?? 30);
-      playCue('workStart');
     }
     hapticHeavy();
   }, [total, flatMovements]);

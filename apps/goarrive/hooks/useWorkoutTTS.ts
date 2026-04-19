@@ -1,17 +1,19 @@
 /**
  * useWorkoutTTS — Voice coaching hook for the Workout Player
  *
- * Audio pipeline (in priority order):
+ * Audio pipeline:
  *   1. Pre-generated movement voice clips (OpenAI TTS, stored at voiceUrl)
  *   2. Static platform cues (Firebase Storage MP3s)
- *   3. Web Speech API fallback for any movement without a voiceUrl
  *
- * Movement voice clips are generated via OpenAI TTS (voice: onyx) through
- * the generateVoice Cloud Function. Static platform cues were pre-generated
- * and stored in Firebase Storage. Web Speech is the real-time fallback.
+ * Web Speech / expo-speech are intentionally NOT part of the normal audible
+ * path. When a voiceUrl is missing or fails to load, we log the gap and stay
+ * silent rather than speaking the text via device speech — the robotic device
+ * voice sounded cheap compared to the OpenAI clips and was overlapping the
+ * static cues (e.g. "Next up" MP3 + "Next up, {movement}" device speech).
  *
- * Uses expo-speech on native, Web Audio API + Web Speech on web.
- * Respects the global audio mute toggle.
+ * The stopAllAudio helper still cancels any in-flight Web Speech utterance so
+ * that if a future code path re-introduces device speech as an explicit opt-in,
+ * Skip/Pause/Mute continue to silence it cleanly.
  *
  * End-of-workout audio rule (single source of truth):
  *   - If the workout has an Outro block, the long completion clip
@@ -26,28 +28,6 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import * as Speech from 'expo-speech';
 import { Platform } from 'react-native';
 import type { StepType } from './useWorkoutFlatten';
-import { normalizeTtsText } from '../utils/normalizeTtsText';
-
-// Web Speech fallback safety cap. Web Speech is only ever used for short
-// dynamic phrases ("Bent over dumbbell row", "Next up: …"). Transition or
-// equipment instructions can be entire paragraphs of coach prose, which is
-// jarring to hear robotically read aloud. Cap to one sentence's worth.
-const WEB_SPEECH_MAX_CHARS = 140;
-
-function clampSpokenText(text: string): string {
-  const trimmed = text.trim();
-  if (trimmed.length <= WEB_SPEECH_MAX_CHARS) return trimmed;
-  // Cut at the last sentence boundary that fits, otherwise the last word.
-  const window = trimmed.slice(0, WEB_SPEECH_MAX_CHARS);
-  const lastPunct = Math.max(
-    window.lastIndexOf('. '),
-    window.lastIndexOf('! '),
-    window.lastIndexOf('? '),
-  );
-  if (lastPunct > 40) return window.slice(0, lastPunct + 1);
-  const lastSpace = window.lastIndexOf(' ');
-  return lastSpace > 0 ? window.slice(0, lastSpace) : window;
-}
 
 // ── Static cue URL map ──────────────────────────────────────────────
 const BASE_URL =
@@ -95,13 +75,6 @@ const CUES = {
   dig_deep: CUE_URL('dig_deep'),
   dont_stop: CUE_URL('dont_stop'),
   stay_strong: CUE_URL('stay_strong'),
-  looking_good: CUE_URL('looking_good'),
-  nice_form: CUE_URL('nice_form'),
-  great_work: CUE_URL('great_work'),
-  well_done: CUE_URL('well_done'),
-  fantastic_effort: CUE_URL('fantastic_effort'),
-  proud_of_you: CUE_URL('proud_of_you'),
-  nice_work_rest: CUE_URL('nice_work_rest'),
 } as const;
 
 type CueKey = keyof typeof CUES;
@@ -231,75 +204,49 @@ export function useWorkoutTTS({
     }
   }, []);
 
-  // ── Speak dynamic text (movement names) via Web Speech API ──────
-  const speakWeb = useCallback((text: string) => {
-    try {
-      if (typeof window === 'undefined') return;
-      const synth = window.speechSynthesis;
-      if (!synth) return;
-      synth.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'en-US';
-      utterance.rate = 0.95;
-      utterance.pitch = 1.0;
-      synth.speak(utterance);
-    } catch {
-      // Web Speech API unavailable
-    }
-  }, []);
-
-  const speak = useCallback(
-    (text: string) => {
+  // Device/Web Speech is no longer part of the normal audible path. We log
+  // any place we'd previously have used it so gaps in the OpenAI/MP3 coverage
+  // stay visible in the console (e.g. a legacy movement that never had a
+  // voiceUrl generated, or a coach transition block with custom prose) and
+  // can be backfilled. The workout stays silent for that cue instead of
+  // dropping into the robotic device voice.
+  const logSpeechSuppressed = useCallback(
+    (context: string, text: string) => {
       if (isMuted || ttsDisabled || isPausedRef.current) return;
-      // Normalize abbreviations (DB→dumbbell, lbs→pounds, etc.) and cap
-      // length so a long instruction paragraph doesn't get robotically
-      // read out by the fallback. Anything over the cap is logged so we
-      // can spot coaches accidentally relying on TTS for prose.
-      const normalized = normalizeTtsText(text);
-      if (!normalized) return;
-      const safe = clampSpokenText(normalized);
-      if (safe.length < normalized.length) {
-        console.warn('[useWorkoutTTS] Spoken fallback shortened:', {
-          originalLen: normalized.length,
-          spokenLen: safe.length,
-        });
-      }
-      if (Platform.OS === 'web') {
-        speakWeb(safe);
-        return;
-      }
-      try {
-        Speech.stop();
-        Speech.speak(safe, {
-          language: 'en-US',
-          rate: 0.95,
-          pitch: 1.0,
-        });
-      } catch {
-        // TTS unavailable
-      }
+      console.warn(
+        '[useWorkoutTTS] Web Speech suppressed (no OpenAI/MP3 cue available):',
+        context,
+        { text: text.slice(0, 120) },
+      );
     },
-    [isMuted, ttsDisabled, speakWeb],
+    [isMuted, ttsDisabled],
   );
 
   // ── Play a dynamic audio URL (movement voice clips from Firebase Storage) ──
-  // Falls back to Web Speech with `fallbackText` when the MP3 can't be loaded
-  // or played (404, CORS, autoplay block, decode failure). The fallback path
-  // is logged with the failing URL so we can tell apart "OpenAI clip never
-  // generated" from "clip exists but failed to play". Without this the
-  // playback would silently degrade to nothing and the player would feel
-  // broken instead of just falling back to device speech.
+  // When the MP3 can't be loaded or played (missing, 404, CORS, autoplay
+  // block, decode failure) we stay silent and log the gap. We used to fall
+  // back to Web Speech reading `fallbackText`, which caused two problems:
+  //   • "Next up" MP3 + "Next up, {movement}" Web Speech played back-to-back
+  //     so members heard the "Next up" phrase twice.
+  //   • The robotic device voice for movement names sounded cheap next to the
+  //     OpenAI clips for every other movement in the workout.
+  // Silent-with-log surfaces uncovered movements (legacy docs without a
+  // generated voiceUrl) so we can backfill them, without polluting the
+  // audible path in the meantime.
   const playVoiceUrl = useCallback(
-    (url: string, fallbackText: string, onEnded?: () => void) => {
+    (url: string, logContext: string, onEnded?: () => void) => {
       if (isMuted || ttsDisabled || isPausedRef.current) return;
       if (Platform.OS !== 'web' || typeof window === 'undefined') return;
       if (!url) {
-        if (fallbackText) speak(fallbackText);
+        logSpeechSuppressed(logContext, '');
         return;
       }
-      const fallback = (reason: string, err?: unknown) => {
-        console.warn('[useWorkoutTTS] voiceUrl fallback to Web Speech:', reason, { url, err });
-        if (fallbackText && !isPausedRef.current) speak(fallbackText);
+      const fail = (reason: string, err?: unknown) => {
+        console.warn(
+          '[useWorkoutTTS] voiceUrl playback failed (staying silent):',
+          reason,
+          { context: logContext, url, err },
+        );
       };
       try {
         if (currentAudioRef.current) {
@@ -311,15 +258,15 @@ export function useWorkoutTTS({
         if (onEnded) audio.addEventListener('ended', onEnded, { once: true });
         audio.addEventListener(
           'error',
-          () => fallback('audio element error', audio.error),
+          () => fail('audio element error', audio.error),
           { once: true },
         );
-        audio.play().catch((err: unknown) => fallback('audio.play() rejected', err));
+        audio.play().catch((err: unknown) => fail('audio.play() rejected', err));
       } catch (err) {
-        fallback('Audio() constructor threw', err);
+        fail('Audio() constructor threw', err);
       }
     },
-    [isMuted, ttsDisabled, speak],
+    [isMuted, ttsDisabled, logSpeechSuppressed],
   );
 
   // ── Play a static cue from Firebase Storage ────────────────────
@@ -377,30 +324,35 @@ export function useWorkoutTTS({
       return;
     }
 
-    // Demo block
+    // Demo block. Until there's an OpenAI/MP3 cue for "Here's what's coming
+    // up" + the demo movement names, we stay silent (visual list is shown on
+    // screen). Device speech would read the list aloud in the robotic voice,
+    // which clashes with the OpenAI-voiced rest of the player.
     if (phase === 'demo' || (phase === 'work' && stepType === 'demo')) {
       const key = `demo_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
         const movements = current.demoMovements || [];
-        if (movements.length > 0) {
-          const names = movements.map((m: any) => m.name).join(', then ');
-          speak(`Here's what's coming up: ${names}`);
-        } else {
-          speak("Here's what's coming up");
-        }
+        const names = movements.map((m: any) => m.name).join(', then ');
+        logSpeechSuppressed(
+          `demo_block_${currentIndex}`,
+          names ? `Here's what's coming up: ${names}` : "Here's what's coming up",
+        );
       }
       return;
     }
 
-    // Transition block
+    // Transition block. Coach-custom prose doesn't have an OpenAI clip per
+    // transition yet; stay silent and log so we can see which transitions
+    // need voice coverage. The `get_ready` MP3 is played for empty-instruction
+    // transitions since that's a safe static cue.
     if (phase === 'transition' || (phase === 'work' && stepType === 'transition')) {
       const key = `transition_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
         const instruction = current.instructionText || current.description || '';
         if (instruction) {
-          speak(instruction);
+          logSpeechSuppressed(`transition_${currentIndex}`, instruction);
         } else {
           playCue('get_ready');
         }
@@ -417,7 +369,7 @@ export function useWorkoutTTS({
       }
       return;
     }
-  }, [phase, current?.stepType, currentIndex, speak, playCue, isPaused]);
+  }, [phase, current?.stepType, currentIndex, logSpeechSuppressed, playCue, isPaused]);
 
   // ── Welcome message on first work phase ─────────────────────────────
   useEffect(() => {
@@ -458,7 +410,10 @@ export function useWorkoutTTS({
           // Delay past the welcome cue (currentIndex === 0) so it doesn't
           // get cut off by the name clip.
           const delay = currentIndex === 0 ? 1500 : 600;
-          scheduleAudio(() => playVoiceUrl(voiceUrl || '', current.name), delay);
+          scheduleAudio(
+            () => playVoiceUrl(voiceUrl || '', `work_${currentIndex}_${current.name}`),
+            delay,
+          );
         }
       }
     } else if (phase === 'rest') {
@@ -477,10 +432,16 @@ export function useWorkoutTTS({
           // movement-name voice clip. Combined with the work countdown's
           // "3, 2, 1. Rest." this lands the spec phrasing
           // "3, 2, 1. Rest. Next up, {next movement}." on the rest screen.
+          // If the next movement doesn't have a generated voiceUrl yet, the
+          // rest screen says "Next up" alone and we log the gap — we do NOT
+          // let device speech fill in "Next up, {movement}" on top.
           playCue('next_up');
           const nextVoiceUrl = next?.voiceUrl;
           const delay = isPrepRest ? 0 : 900;
-          scheduleAudio(() => playVoiceUrl(nextVoiceUrl || '', `Next up: ${nextName}`), delay);
+          scheduleAudio(
+            () => playVoiceUrl(nextVoiceUrl || '', `rest_next_up_${nextName}`),
+            delay,
+          );
         } else if (!isPrepRest) {
           playCue('rest_now');
         }
@@ -497,7 +458,7 @@ export function useWorkoutTTS({
       halfwaySpokenRef.current = false;
       countdownSpokenRef.current = -1;
     }
-  }, [phase, current?.name, current?.stepType, current?.voiceUrl, currentIndex, next?.name, next?.voiceUrl, speak, playCue, playVoiceUrl, scheduleAudio, isPaused]);
+  }, [phase, current?.name, current?.stepType, current?.voiceUrl, currentIndex, next?.name, next?.voiceUrl, playCue, playVoiceUrl, scheduleAudio, isPaused]);
 
   // ── Halfway announcement (exercise only) ───────────────────────────
   useEffect(() => {

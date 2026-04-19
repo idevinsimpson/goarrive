@@ -25,14 +25,16 @@
  */
 import { useEffect, useState, useRef } from 'react';
 import { db } from '../lib/firebase';
-import { doc, onSnapshot, type Unsubscribe } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, type Unsubscribe } from 'firebase/firestore';
 import type { FlatMovement } from './useWorkoutFlatten';
+import { generateMovementVoice } from '../utils/generateMovementVoice';
 
 function mergeFromCache(fm: FlatMovement, cached: any): FlatMovement {
   // Canonical wins for identity + audio so a rename always propagates.
   // For voiceUrl specifically: if the canonical doc has been cleared (e.g.
-  // mid-regeneration after a rename), we WANT '' so the player falls back
-  // to fresh Web Speech instead of speaking the stale block snapshot's clip.
+  // mid-regeneration after a rename), we WANT '' so the player stays silent
+  // for the name rather than speaking the stale block snapshot's clip. The
+  // backfill effect below kicks off generation so the next phase has audio.
   const canonicalName = typeof cached.name === 'string' && cached.name.trim()
     ? cached.name
     : fm.name;
@@ -58,6 +60,13 @@ export function useMovementHydrate(flatMovements: FlatMovement[]): FlatMovement[
   const cacheRef = useRef<Record<string, any>>({});
   const subsRef = useRef<Map<string, Unsubscribe>>(new Map());
   const flatRef = useRef<FlatMovement[]>(flatMovements);
+  // Movements we've already kicked off voice generation for in this session.
+  // Legacy movements created before OpenAI voice generation shipped don't have
+  // a voiceUrl on their doc — on first play we trigger generateMovementVoice
+  // so the onSnapshot subscription picks up the new URL for the next phase.
+  // Without this, those movements stay voiceless forever and the "Next up, …"
+  // portion of the rest screen is silent.
+  const voiceGenAttemptedRef = useRef<Set<string>>(new Set());
 
   // Always have the latest flat list available to the snapshot callback so
   // updates merge against the right source array even between renders.
@@ -97,8 +106,35 @@ export function useMovementHydrate(flatMovements: FlatMovement[]): FlatMovement[
         doc(db, 'movements', id),
         (snap) => {
           if (snap.exists()) {
-            cacheRef.current[id] = snap.data();
+            const data = snap.data();
+            cacheRef.current[id] = data;
             recomputeMerged();
+            // Backfill voiceUrl for legacy movements. We only run once per
+            // (session, movement) so a coach mid-regenerate (voiceUrl === '')
+            // doesn't get a redundant call — MovementForm already owns that
+            // flow. We also require a name to send to OpenAI.
+            const name = typeof data.name === 'string' ? data.name.trim() : '';
+            const hasVoice = typeof data.voiceUrl === 'string' && data.voiceUrl.length > 0;
+            if (!hasVoice && name && !voiceGenAttemptedRef.current.has(id)) {
+              voiceGenAttemptedRef.current.add(id);
+              generateMovementVoice(id, name)
+                .then(({ url, text }) => {
+                  if (url) {
+                    updateDoc(doc(db, 'movements', id), {
+                      voiceUrl: url,
+                      voiceText: text,
+                    }).catch(() => {});
+                  } else {
+                    console.warn(
+                      '[useMovementHydrate] voice backfill returned no URL for',
+                      name,
+                    );
+                  }
+                })
+                .catch((err) => {
+                  console.warn('[useMovementHydrate] voice backfill failed:', err);
+                });
+            }
           }
         },
         (err) => {
