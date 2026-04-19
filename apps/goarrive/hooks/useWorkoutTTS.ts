@@ -195,6 +195,37 @@ interface UseWorkoutTTSOptions {
    * restCountdownUrl but for the rest→work transition.
    */
   goCountdownUrl?: string | null;
+  /**
+   * Pre-warmed combined "3, 2, 1. Swap sides." OpenAI clip URL. Plays in
+   * the last seconds of the L-side work phase for bilateral exercises, so
+   * the swap transition matches the rest/go countdowns instead of popping
+   * a different-voice static switch_sides MP3.
+   */
+  swapCountdownUrl?: string | null;
+  /**
+   * Pre-warmed OpenAI "That's halfway." clip URL. Replaces the static
+   * halfway.mp3 at the midpoint tick so the check-in matches the rest of
+   * the coach voice.
+   */
+  halfwayUrl?: string | null;
+  /**
+   * Pre-warmed OpenAI "Grab some water." clip URL. Replaces the static
+   * water_break.mp3 on Water Break blocks.
+   */
+  waterUrl?: string | null;
+  /**
+   * Pre-warmed OpenAI "Here's what's coming up." clip URL. Plays once at
+   * the start of a Demo block so the member hears the same coach intro
+   * the visual list of upcoming movements, instead of the block being
+   * silent.
+   */
+  demoUrl?: string | null;
+  /**
+   * 'L' or 'R' — which side of a bilateral exercise the member is on. Used
+   * to pick "3, 2, 1. Swap sides." as the countdown when the current work
+   * phase is the L-side of a swapSides movement.
+   */
+  swapSide?: 'L' | 'R';
 }
 
 export function useWorkoutTTS({
@@ -210,6 +241,11 @@ export function useWorkoutTTS({
   currentDuration,
   restCountdownUrl = null,
   goCountdownUrl = null,
+  swapCountdownUrl = null,
+  halfwayUrl = null,
+  waterUrl = null,
+  demoUrl = null,
+  swapSide = 'L',
 }: UseWorkoutTTSOptions) {
   const lastSpokenRef = useRef<string>('');
   const [isTTSAvailable, setIsTTSAvailable] = useState(true);
@@ -224,6 +260,9 @@ export function useWorkoutTTS({
   const combinedRestFiredRef = useRef<boolean>(false);
   // Same idea for the rest→work countdown suppressing the separate `go` cue.
   const combinedGoFiredRef = useRef<boolean>(false);
+  // And again for the work→swap countdown suppressing the separate
+  // switch_sides cue that would otherwise re-announce at swap phase entry.
+  const combinedSwapFiredRef = useRef<boolean>(false);
 
   // Records the rest phase we're waiting on a combined "Next up, {name}."
   // phrase clip for. Pre-warm normally has it ready by rest-entry, but on
@@ -461,20 +500,27 @@ export function useWorkoutTTS({
       return;
     }
 
-    // Demo block. Until there's an OpenAI/MP3 cue for "Here's what's coming
-    // up" + the demo movement names, we stay silent (visual list is shown on
-    // screen). Device speech would read the list aloud in the robotic voice,
-    // which clashes with the OpenAI-voiced rest of the player.
+    // Demo block. Plays the OpenAI-generated "Here's what's coming up." cue
+    // (same nova fitness-instructor voice as every other cue). The visual
+    // list of upcoming movements is shown on screen; we don't read the
+    // names aloud because they'd each need their own generated clip and the
+    // intro phrase alone is enough to anchor the block. Falls back to a
+    // silent log if the generated URL hasn't arrived yet on first-ever
+    // load.
     if (phase === 'demo' || (phase === 'work' && stepType === 'demo')) {
       const key = `demo_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
-        const movements = current.demoMovements || [];
-        const names = movements.map((m: any) => m.name).join(', then ');
-        logSpeechSuppressed(
-          `demo_block_${currentIndex}`,
-          names ? `Here's what's coming up: ${names}` : "Here's what's coming up",
-        );
+        if (demoUrl) {
+          enqueueVoice(demoUrl, `demo_block_${currentIndex}`);
+        } else {
+          const movements = current.demoMovements || [];
+          const names = movements.map((m: any) => m.name).join(', then ');
+          logSpeechSuppressed(
+            `demo_block_${currentIndex}`,
+            names ? `Here's what's coming up: ${names}` : "Here's what's coming up",
+          );
+        }
       }
       return;
     }
@@ -497,16 +543,22 @@ export function useWorkoutTTS({
       return;
     }
 
-    // Water Break block
+    // Water Break block. Prefers the generated OpenAI "Grab some water."
+    // clip (nova, shared style) and falls back to the static water_break
+    // MP3 if the generated URL isn't ready on first-ever load.
     if (phase === 'waterBreak' || (phase === 'work' && stepType === 'waterBreak')) {
       const key = `waterBreak_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
-        enqueueCue('water_break', key);
+        if (waterUrl) {
+          enqueueVoice(waterUrl, key);
+        } else {
+          enqueueCue('water_break', key);
+        }
       }
       return;
     }
-  }, [phase, current?.stepType, currentIndex, logSpeechSuppressed, enqueueCue, isPaused]);
+  }, [phase, current?.stepType, currentIndex, logSpeechSuppressed, enqueueCue, enqueueVoice, waterUrl, demoUrl, isPaused]);
 
   // ── Welcome message on first work phase ─────────────────────────────
   useEffect(() => {
@@ -539,6 +591,7 @@ export function useWorkoutTTS({
         // flags shouldn't carry over and accidentally suppress the next cue.
         combinedRestFiredRef.current = false;
         combinedGoFiredRef.current = false;
+        combinedSwapFiredRef.current = false;
         // The "Next up, {name}" line normally plays on the rest screen leading
         // into this movement, so work-start stays silent and the spoken "Go"
         // closes the rest countdown. But if we arrived at work WITHOUT a
@@ -563,6 +616,7 @@ export function useWorkoutTTS({
         restCountdownSpokenRef.current = -1;
         combinedRestFiredRef.current = false;
         combinedGoFiredRef.current = false;
+        combinedSwapFiredRef.current = false;
         pendingNextUpPhraseRef.current = null;
         // Synthetic "Get Ready" prep-rest step (movementIndex === -1) plays BEFORE
         // the first movement of a block.
@@ -611,7 +665,14 @@ export function useWorkoutTTS({
       const key = `swap_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
-        enqueueCue('switch_sides', key);
+        // The combined "3, 2, 1. Swap sides." countdown clip normally fires
+        // at the end of the L-side work phase (see work-end countdown
+        // effect), so the swap phase itself stays silent. Only fall back to
+        // the static switch_sides MP3 when the combined clip didn't fire
+        // (first-ever load or swapCountdownUrl not ready in time).
+        if (!combinedSwapFiredRef.current) {
+          enqueueCue('switch_sides', key);
+        }
       }
     } else if (phase === 'ready') {
       lastSpokenRef.current = '';
@@ -622,6 +683,10 @@ export function useWorkoutTTS({
   }, [phase, current?.name, current?.stepType, current?.voiceUrl, currentIndex, next?.name, nextNextUpVoiceUrl, enqueueCue, enqueueVoice, isPaused]);
 
   // ── Halfway announcement (exercise only) ───────────────────────────
+  // Prefers the OpenAI-generated "That's halfway." clip (nova voice, shared
+  // coach style) so the mid-set check-in matches the rest of the player.
+  // Falls back to the static halfway.mp3 when the generated URL isn't ready
+  // (first-ever load).
   useEffect(() => {
     if (isPaused) return;
     if (phase !== 'work' || !current || current.stepType !== 'exercise') return;
@@ -629,9 +694,13 @@ export function useWorkoutTTS({
     const halfway = Math.floor(currentDuration / 2);
     if (timeLeft === halfway && !halfwaySpokenRef.current) {
       halfwaySpokenRef.current = true;
-      enqueueCue('halfway', `halfway_${currentIndex}`);
+      if (halfwayUrl) {
+        enqueueVoice(halfwayUrl, `halfway_${currentIndex}`);
+      } else {
+        enqueueCue('halfway', `halfway_${currentIndex}`);
+      }
     }
-  }, [phase, timeLeft, currentDuration, current, enqueueCue, isPaused, currentIndex]);
+  }, [phase, timeLeft, currentDuration, current, enqueueCue, enqueueVoice, halfwayUrl, isPaused, currentIndex]);
 
   // ── Countdown voice (exercise only) ────────────────────────────────
   // At the final countdown tick, enqueue either:
@@ -658,15 +727,25 @@ export function useWorkoutTTS({
 
     const isLastMovement = currentIndex >= total - 1;
     const nextIsSpecial = next && (next as any).stepType && (next as any).stepType !== 'exercise';
-    const enterRestNext = !isLastMovement && !nextIsSpecial;
+    // Bilateral L-side: the next phase is the intra-movement swap, not the
+    // next FlatMovement. Takes precedence over rest even when restAfter>0
+    // because the swap phase fires first in useWorkoutTimer.
+    const enterSwapNext = (current as any)?.swapSides === true && swapSide === 'L';
+    const enterRestNext = !isLastMovement && !nextIsSpecial && !enterSwapNext;
 
     if (timeLeft <= 3.5 && timeLeft > 0 && countdownSpokenRef.current !== 3) {
       countdownSpokenRef.current = 3;
-      if (enterRestNext && restCountdownUrl) {
+      if (enterSwapNext && swapCountdownUrl) {
+        combinedSwapFiredRef.current = true;
+        combinedRestFiredRef.current = false;
+        enqueueVoice(swapCountdownUrl, `work_swap_countdown_${currentIndex}`);
+      } else if (enterRestNext && restCountdownUrl) {
         combinedRestFiredRef.current = true;
+        combinedSwapFiredRef.current = false;
         enqueueVoice(restCountdownUrl, `work_rest_countdown_${currentIndex}`);
       } else {
         combinedRestFiredRef.current = false;
+        combinedSwapFiredRef.current = false;
         enqueueCue('countdown_3', `work_countdown_${currentIndex}`);
       }
     } else if (timeLeft <= 0 && countdownSpokenRef.current !== 0) {
@@ -674,13 +753,18 @@ export function useWorkoutTTS({
       // End-of-workout audio rule: see header comment for the full table.
       if (isLastMovement) {
         enqueueCue('workout_complete', `work_end_${currentIndex}`);
+      } else if (enterSwapNext && !combinedSwapFiredRef.current) {
+        // Swap landing fallback — the swap phase entry effect already plays
+        // switch_sides when combinedSwapFiredRef is false, so we stay
+        // silent here to avoid double-announce.
       } else if (enterRestNext && !combinedRestFiredRef.current) {
         enqueueCue('rest', `work_end_${currentIndex}`);
       }
-      // If combinedRestFiredRef is true, the combined clip already spoke
-      // "Rest" — staying silent here prevents the double-Rest stutter.
+      // If combinedRest/SwapFiredRef is true, the combined clip already spoke
+      // the final word — staying silent here prevents a double-stutter across
+      // the phase boundary.
     }
-  }, [phase, timeLeft, current, currentDuration, currentIndex, total, next, restCountdownUrl, enqueueCue, enqueueVoice, isPaused]);
+  }, [phase, timeLeft, current, currentDuration, currentIndex, total, next, restCountdownUrl, swapCountdownUrl, swapSide, enqueueCue, enqueueVoice, isPaused]);
 
   // ── Rest countdown voice (rest → next exercise only) ───────────────
   // Same pattern as the work-end countdown. Combined "3, 2, 1. Go." OpenAI

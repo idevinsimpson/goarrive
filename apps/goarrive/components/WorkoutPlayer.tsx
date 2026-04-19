@@ -44,6 +44,7 @@ import { useMovementSwap } from '../hooks/useMovementSwap';
 import { useMovementHydrate } from '../hooks/useMovementHydrate';
 import { useNextUpPhrases } from '../hooks/useNextUpPhrases';
 import { useCountdownPhrases } from '../hooks/useCountdownPhrases';
+import { usePlatformCuePhrases } from '../hooks/usePlatformCuePhrases';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useWorkoutTTS } from '../hooks/useWorkoutTTS';
@@ -91,10 +92,15 @@ export default function WorkoutPlayer({
   // Pre-warm combined "Next up, {name}." phrase clips so the rest screen can
   // play one cohesive cue instead of next_up MP3 + standalone movement voice.
   const phrasedMovements = useNextUpPhrases(hydratedMovements);
-  // Pre-warm combined "3, 2, 1. Rest." / "3, 2, 1. Go." countdown clips so
-  // the phase-boundary cue matches the "Next up" coach vibe instead of the
-  // older static countdown_3 + rest.mp3 pair.
-  const { restCountdownUrl, goCountdownUrl } = useCountdownPhrases();
+  // Pre-warm combined "3, 2, 1. {Rest|Go|Swap sides}." countdown clips so
+  // every phase-boundary cue matches the "Next up" coach vibe instead of
+  // the older static countdown_3 + rest/go/switch_sides MP3 pair.
+  const { restCountdownUrl, goCountdownUrl, swapCountdownUrl } = useCountdownPhrases();
+  // Pre-warm OpenAI "That's halfway." / "Grab some water." / "Here's what's
+  // coming up." clips so the halfway tick, water-break block, and demo
+  // block all use the same nova fitness-instructor voice as the rest of
+  // the player.
+  const { halfwayUrl, waterUrl, demoUrl } = usePlatformCuePhrases();
   const [flatOverride, setFlatOverride] = useState<any[] | null>(null);
   const flatMovements = flatOverride || phrasedMovements;
 
@@ -140,6 +146,11 @@ export default function WorkoutPlayer({
     currentDuration: current?.duration ?? 0,
     restCountdownUrl,
     goCountdownUrl,
+    swapCountdownUrl,
+    halfwayUrl,
+    waterUrl,
+    demoUrl,
+    swapSide,
   });
 
   // ── Movement swap ─────────────────────────────
