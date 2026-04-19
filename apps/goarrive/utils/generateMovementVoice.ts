@@ -15,11 +15,20 @@
  * The cache key is derived from the *normalized* spoken text so abbreviation
  * fixes ("DB" → "dumbbell") don't generate two clips for the same phrase.
  *
+ * We pass `movementId` to the Cloud Function so it writes voiceUrl/voiceText
+ * back to /movements/{id} with admin creds. Member-session lazy backfill from
+ * useMovementHydrate depends on this — members can't update /movements from
+ * the client. Coach write paths still updateDoc themselves (to handle the
+ * failure-clear branch and to stay atomic with other field updates), and the
+ * server write is idempotent with whatever the coach writes.
+ *
  * Returns:
- *   { url, text }   — generation succeeded; caller writes both to Firestore
+ *   { url, text }   — generation succeeded; server has already persisted
+ *                     voiceUrl/voiceText. Coach callers may still updateDoc
+ *                     to bundle with other field writes.
  *   { url: null }   — generation failed; caller should clear voiceUrl so the
- *                     player falls back to Web Speech instead of speaking the
- *                     stale clip's old movement name.
+ *                     player stays silent for that movement instead of
+ *                     speaking a stale clip.
  */
 
 import { getFunctions, httpsCallable } from 'firebase/functions';
@@ -32,13 +41,6 @@ export interface GenerateMovementVoiceResult {
   text: string;
 }
 
-/**
- * Generate a voice clip for a movement name via OpenAI TTS.
- *
- * The caller is responsible for the Firestore write so the same path can
- * write both `voiceUrl` (on success) or clear it (on failure) — see
- * MovementForm and BulkMovementUpload for the canonical pattern.
- */
 export async function generateMovementVoice(
   movementId: string,
   movementName: string,
@@ -52,7 +54,7 @@ export async function generateMovementVoice(
   try {
     const functions = getFunctions(undefined, 'us-central1');
     const generateVoice = httpsCallable<
-      { text: string; voice: string; storagePath: string },
+      { text: string; voice: string; storagePath: string; movementId: string },
       { url: string; path: string }
     >(functions, 'generateVoice');
 
@@ -63,6 +65,7 @@ export async function generateMovementVoice(
       text: normalized,
       voice: 'onyx',
       storagePath,
+      movementId,
     });
 
     return { url: result.data.url, text: normalized };

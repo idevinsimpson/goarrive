@@ -7952,15 +7952,25 @@ export const createMissingLedgerEntry = onCall(
 
 // ─── generateVoice — OpenAI TTS for workout cues and movement names ─────────
 // Accepts text + optional voice (onyx, nova), generates MP3 via OpenAI TTS,
-// uploads to Firebase Storage, returns the download URL.
+// uploads to Firebase Storage, returns the download URL. When `movementId` is
+// supplied the function also writes { voiceUrl, voiceText } to movements/{id}
+// with admin creds — members lack Firestore update permission on /movements,
+// so lazy-backfill from the player can't persist the URL client-side. Coach
+// write paths (MovementForm, BulkMovementUpload) still overwrite with their
+// own updateDoc for the rename/clear flows.
 // ─────────────────────────────────────────────────────────────────────────────
 export const generateVoice = onCall(
   { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 30 },
   async (request) => {
-    const { text, voice, storagePath } = request.data as {
+    if (!request.auth?.uid) {
+      throw new HttpsError('unauthenticated', 'Sign in required');
+    }
+
+    const { text, voice, storagePath, movementId } = request.data as {
       text?: string;
       voice?: string;
       storagePath?: string;
+      movementId?: string;
     };
 
     if (!text || typeof text !== 'string' || text.length === 0) {
@@ -8005,6 +8015,22 @@ export const generateVoice = onCall(
       await file.makePublic();
 
       const url = `https://storage.googleapis.com/${bucket.name}/${path}`;
+
+      if (movementId && typeof movementId === 'string') {
+        try {
+          await db.doc(`movements/${movementId}`).update({
+            voiceUrl: url,
+            voiceText: text,
+          });
+        } catch (writeErr) {
+          console.error(
+            '[generateVoice] Firestore writeback failed',
+            { movementId, uid: request.auth.uid },
+            writeErr,
+          );
+        }
+      }
+
       return { url, path };
     } catch (err: any) {
       if (err.code) throw err;

@@ -25,7 +25,7 @@
  */
 import { useEffect, useState, useRef } from 'react';
 import { db } from '../lib/firebase';
-import { doc, onSnapshot, updateDoc, type Unsubscribe } from 'firebase/firestore';
+import { doc, onSnapshot, type Unsubscribe } from 'firebase/firestore';
 import type { FlatMovement } from './useWorkoutFlatten';
 import { generateMovementVoice } from '../utils/generateMovementVoice';
 
@@ -113,26 +113,29 @@ export function useMovementHydrate(flatMovements: FlatMovement[]): FlatMovement[
             // (session, movement) so a coach mid-regenerate (voiceUrl === '')
             // doesn't get a redundant call — MovementForm already owns that
             // flow. We also require a name to send to OpenAI.
+            // The Cloud Function writes voiceUrl/voiceText back to the doc
+            // with admin creds (members can't update /movements from the
+            // client). onSnapshot then pushes the new URL in for the next
+            // rest cue.
             const name = typeof data.name === 'string' ? data.name.trim() : '';
             const hasVoice = typeof data.voiceUrl === 'string' && data.voiceUrl.length > 0;
             if (!hasVoice && name && !voiceGenAttemptedRef.current.has(id)) {
               voiceGenAttemptedRef.current.add(id);
               generateMovementVoice(id, name)
-                .then(({ url, text }) => {
-                  if (url) {
-                    updateDoc(doc(db, 'movements', id), {
-                      voiceUrl: url,
-                      voiceText: text,
-                    }).catch(() => {});
-                  } else {
+                .then(({ url }) => {
+                  if (!url) {
                     console.warn(
                       '[useMovementHydrate] voice backfill returned no URL for',
-                      name,
+                      { movementId: id, name },
                     );
                   }
                 })
                 .catch((err) => {
-                  console.warn('[useMovementHydrate] voice backfill failed:', err);
+                  console.warn(
+                    '[useMovementHydrate] voice backfill failed:',
+                    { movementId: id, name },
+                    err,
+                  );
                 });
             }
           }
