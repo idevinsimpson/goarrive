@@ -609,10 +609,10 @@ export default function MovementForm({
       if (aiData.name) {
         setProcessingStatus('Generating voice...');
         generateMovementVoice(docId, aiData.name)
-          .then(({ url, text }) => {
+          .then(({ url, text, voiceName }) => {
             const update: Record<string, any> = url
-              ? { voiceUrl: url, voiceText: text }
-              : { voiceUrl: '', voiceText: '' };
+              ? { voiceUrl: url, voiceText: text, voiceName }
+              : { voiceUrl: '', voiceText: '', voiceName: '' };
             updateDoc(doc(db, 'movements', docId), update).catch(() => {});
           })
           .catch(() => {});
@@ -701,11 +701,11 @@ export default function MovementForm({
     if (!trimmed) return;
     if (trimmed === lastVoiceNameRef.current) return;
     lastVoiceNameRef.current = trimmed;
-    updateDoc(doc(db, 'movements', movementId), { voiceUrl: '', voiceText: '' }).catch(() => {});
+    updateDoc(doc(db, 'movements', movementId), { voiceUrl: '', voiceText: '', voiceName: '' }).catch(() => {});
     generateMovementVoice(movementId, trimmed)
-      .then(({ url, text }) => {
+      .then(({ url, text, voiceName }) => {
         if (url) {
-          updateDoc(doc(db, 'movements', movementId), { voiceUrl: url, voiceText: text }).catch(() => {});
+          updateDoc(doc(db, 'movements', movementId), { voiceUrl: url, voiceText: text, voiceName }).catch(() => {});
         } else {
           console.warn('[MovementForm] Voice regeneration returned no URL for', trimmed);
         }
@@ -862,11 +862,11 @@ export default function MovementForm({
       const prevName = editMovement?.name?.trim() ?? null;
       const newName = name.trim();
       if (prevName !== newName) {
-        updateDoc(doc(db, 'movements', docId), { voiceUrl: '', voiceText: '' }).catch(() => {});
+        updateDoc(doc(db, 'movements', docId), { voiceUrl: '', voiceText: '', voiceName: '' }).catch(() => {});
         generateMovementVoice(docId, newName)
-          .then(({ url, text }) => {
+          .then(({ url, text, voiceName }) => {
             if (url) {
-              updateDoc(doc(db, 'movements', docId), { voiceUrl: url, voiceText: text }).catch(() => {});
+              updateDoc(doc(db, 'movements', docId), { voiceUrl: url, voiceText: text, voiceName }).catch(() => {});
             }
           })
           .catch(() => {});

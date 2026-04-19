@@ -7951,13 +7951,18 @@ export const createMissingLedgerEntry = onCall(
 );
 
 // ─── generateVoice — OpenAI TTS for workout cues and movement names ─────────
-// Accepts text + optional voice (onyx, nova), generates MP3 via OpenAI TTS,
-// uploads to Firebase Storage, returns the download URL. When `movementId` is
-// supplied the function also writes { voiceUrl, voiceText } to movements/{id}
-// with admin creds — members lack Firestore update permission on /movements,
-// so lazy-backfill from the player can't persist the URL client-side. Coach
-// write paths (MovementForm, BulkMovementUpload) still overwrite with their
-// own updateDoc for the rename/clear flows.
+// Accepts text + optional voice (default "nova" — fitness-instructor vibe),
+// generates MP3 via OpenAI TTS, uploads to Firebase Storage, returns the
+// download URL. When `movementId` is supplied the function also writes
+// { voiceUrl, voiceText, voiceName } to movements/{id} with admin creds —
+// members lack Firestore update permission on /movements, so lazy-backfill
+// from the player can't persist the URL client-side. Coach write paths
+// (MovementForm, BulkMovementUpload) still overwrite with their own updateDoc
+// for the rename/clear flows.
+//
+// voiceName is stored on the doc so the player can detect wrong-voice legacy
+// clips and trigger regeneration (useMovementHydrate). Without it, an older
+// onyx-generated clip would be reused indefinitely after the default changed.
 // ─────────────────────────────────────────────────────────────────────────────
 export const generateVoice = onCall(
   { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 30 },
@@ -7989,7 +7994,7 @@ export const generateVoice = onCall(
       });
     }
 
-    const selectedVoice = voice || 'onyx';
+    const selectedVoice = voice || 'nova';
     const path = storagePath || `voice_cache/tts/${Date.now()}.mp3`;
 
     // ── Layer 1: OpenAI TTS ────────────────────────────────────────────────
@@ -8078,7 +8083,7 @@ export const generateVoice = onCall(
             movementId, uid: request.auth.uid, storedUrl: cdnUrl,
           });
         } else {
-          await ref.update({ voiceUrl: cdnUrl, voiceText: text });
+          await ref.update({ voiceUrl: cdnUrl, voiceText: text, voiceName: selectedVoice });
           writeback = 'ok';
           console.info('[VOICE-AUDIT] generateVoice: firestore layer — writeback OK', {
             movementId, uid: request.auth.uid,
