@@ -599,13 +599,16 @@ export default function MovementForm({
       setProcessingProgress(0.85);
 
       // Step 4: Voice generation (non-blocking)
+      // On failure, clear voiceUrl so the player falls back to Web Speech
+      // for the new name instead of speaking a stale clip's old name.
       if (aiData.name) {
         setProcessingStatus('Generating voice...');
         generateMovementVoice(docId, aiData.name)
-          .then((voiceUrl) => {
-            if (voiceUrl) {
-              updateDoc(doc(db, 'movements', docId), { voiceUrl }).catch(() => {});
-            }
+          .then(({ url, text }) => {
+            const update: Record<string, any> = url
+              ? { voiceUrl: url, voiceText: text }
+              : { voiceUrl: '', voiceText: '' };
+            updateDoc(doc(db, 'movements', docId), update).catch(() => {});
           })
           .catch(() => {});
       }
@@ -716,14 +719,18 @@ export default function MovementForm({
       const data = buildEditPayload();
       await updateDoc(doc(db, 'movements', editMovement.id), data);
 
-      // Regenerate voice if name changed
+      // Regenerate voice if name changed.
+      // Clear voiceUrl immediately so the player can't speak the old name in
+      // the gap between rename and regenerate. On success, write the new URL;
+      // on failure, leave voiceUrl cleared so Web Speech reads the new name.
       const prevName = editMovement.name?.trim() ?? '';
       const newName = name.trim();
       if (prevName !== newName && newName) {
+        updateDoc(doc(db, 'movements', editMovement.id), { voiceUrl: '', voiceText: '' }).catch(() => {});
         generateMovementVoice(editMovement.id, newName)
-          .then((voiceUrl) => {
-            if (voiceUrl) {
-              updateDoc(doc(db, 'movements', editMovement.id), { voiceUrl }).catch(() => {});
+          .then(({ url, text }) => {
+            if (url) {
+              updateDoc(doc(db, 'movements', editMovement.id), { voiceUrl: url, voiceText: text }).catch(() => {});
             }
           })
           .catch(() => {});
@@ -831,14 +838,18 @@ export default function MovementForm({
       await updateDoc(doc(db, 'movements', docId), data);
       savedDocIdRef.current = docId;
 
-      // Regenerate voice if name changed
+      // Regenerate voice if name changed.
+      // Clear voiceUrl immediately so the player can't speak the old name in
+      // the gap between rename and regenerate. On success, write the new URL;
+      // on failure, leave voiceUrl cleared so Web Speech reads the new name.
       const prevName = editMovement?.name?.trim() ?? null;
       const newName = name.trim();
       if (prevName !== newName) {
+        updateDoc(doc(db, 'movements', docId), { voiceUrl: '', voiceText: '' }).catch(() => {});
         generateMovementVoice(docId, newName)
-          .then((voiceUrl) => {
-            if (voiceUrl) {
-              updateDoc(doc(db, 'movements', docId), { voiceUrl }).catch(() => {});
+          .then(({ url, text }) => {
+            if (url) {
+              updateDoc(doc(db, 'movements', docId), { voiceUrl: url, voiceText: text }).catch(() => {});
             }
           })
           .catch(() => {});

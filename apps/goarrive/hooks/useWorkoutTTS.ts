@@ -12,11 +12,42 @@
  *
  * Uses expo-speech on native, Web Audio API + Web Speech on web.
  * Respects the global audio mute toggle.
+ *
+ * End-of-workout audio rule (single source of truth):
+ *   - If the workout has an Outro block, the long completion clip
+ *     (`workout_complete_long`) plays once when the outro phase begins, and
+ *     the per-exercise countdown does NOT also fire `workout_complete` for
+ *     the last exercise (the outro itself is the last step).
+ *   - If there is no Outro block, the short `workout_complete` MP3 plays
+ *     once when the last exercise's timer hits 0. The arpeggio tone in
+ *     audioCues.ts is no longer used for end-of-workout to avoid stacking.
  */
 import { useEffect, useRef, useCallback, useState } from 'react';
 import * as Speech from 'expo-speech';
 import { Platform } from 'react-native';
 import type { StepType } from './useWorkoutFlatten';
+import { normalizeTtsText } from '../utils/normalizeTtsText';
+
+// Web Speech fallback safety cap. Web Speech is only ever used for short
+// dynamic phrases ("Bent over dumbbell row", "Next up: …"). Transition or
+// equipment instructions can be entire paragraphs of coach prose, which is
+// jarring to hear robotically read aloud. Cap to one sentence's worth.
+const WEB_SPEECH_MAX_CHARS = 140;
+
+function clampSpokenText(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= WEB_SPEECH_MAX_CHARS) return trimmed;
+  // Cut at the last sentence boundary that fits, otherwise the last word.
+  const window = trimmed.slice(0, WEB_SPEECH_MAX_CHARS);
+  const lastPunct = Math.max(
+    window.lastIndexOf('. '),
+    window.lastIndexOf('! '),
+    window.lastIndexOf('? '),
+  );
+  if (lastPunct > 40) return window.slice(0, lastPunct + 1);
+  const lastSpace = window.lastIndexOf(' ');
+  return lastSpace > 0 ? window.slice(0, lastSpace) : window;
+}
 
 // ── Static cue URL map ──────────────────────────────────────────────
 const BASE_URL =
@@ -270,13 +301,26 @@ export function useWorkoutTTS({
   const speak = useCallback(
     (text: string) => {
       if (isMuted || ttsDisabled || isPausedRef.current) return;
+      // Normalize abbreviations (DB→dumbbell, lbs→pounds, etc.) and cap
+      // length so a long instruction paragraph doesn't get robotically
+      // read out by the fallback. Anything over the cap is logged so we
+      // can spot coaches accidentally relying on TTS for prose.
+      const normalized = normalizeTtsText(text);
+      if (!normalized) return;
+      const safe = clampSpokenText(normalized);
+      if (safe.length < normalized.length) {
+        console.warn('[useWorkoutTTS] Spoken fallback shortened:', {
+          originalLen: normalized.length,
+          spokenLen: safe.length,
+        });
+      }
       if (Platform.OS === 'web') {
-        speakWeb(text);
+        speakWeb(safe);
         return;
       }
       try {
         Speech.stop();
-        Speech.speak(text, {
+        Speech.speak(safe, {
           language: 'en-US',
           rate: 0.95,
           pitch: 1.0,
@@ -378,7 +422,7 @@ export function useWorkoutTTS({
         lastSpokenRef.current = key;
         halfwaySpokenRef.current = false;
         countdownSpokenRef.current = -1;
-        // Play "Next up" cue, then play movement name via ElevenLabs voice (or Web Speech fallback)
+        // Play "Next up" cue, then play movement name via OpenAI voice clip (or Web Speech fallback)
         playCue('next_up');
         const voiceUrl = current.voiceUrl;
         if (voiceUrl) {
@@ -453,13 +497,23 @@ export function useWorkoutTTS({
     } else if (timeLeft <= 0 && countdownSpokenRef.current !== 0) {
       countdownSpokenRef.current = 0;
       const isLastMovement = currentIndex >= total - 1;
+      // End-of-workout audio rule:
+      //   • If next step is the outro block → stay silent here. The outro
+      //     phase plays `workout_complete_long` once when it begins; we
+      //     don't want `workout_complete` MP3 stacked on top.
+      //   • If next step is any other special block (demo, transition, etc.)
+      //     → stay silent; the special block's own announcement fires next.
+      //   • If this is the truly last step (no outro block at all) → play
+      //     the short `workout_complete` MP3 once.
+      //   • Otherwise → play the rest cue as before.
+      const nextIsSpecial = next && (next as any).stepType && (next as any).stepType !== 'exercise';
       if (isLastMovement) {
         playCue('workout_complete');
-      } else {
+      } else if (!nextIsSpecial) {
         playCue('rest');
       }
     }
-  }, [phase, timeLeft, current, currentDuration, currentIndex, total, playCue, isPaused]);
+  }, [phase, timeLeft, current, currentDuration, currentIndex, total, next, playCue, isPaused]);
 
   // ── Pause → silence any audio in flight ─────────────────────────────
   // Any MP3 cue, Web Speech utterance, or deferred voice cue started just

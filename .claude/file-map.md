@@ -76,7 +76,7 @@ The frontend application lives in `apps/goarrive/` and follows Expo Router's fil
 |---|---|
 | `utils/analyzeMovementMedia.ts` | Client-side wrapper for the AI movement analysis Cloud Function. |
 | `utils/generateCroppedGif.ts` | Generates cropped GIF thumbnails from video. |
-| `utils/generateMovementVoice.ts` | Generates voice audio for movement names via ElevenLabs. |
+| `utils/generateMovementVoice.ts` | Generates voice audio for movement names via OpenAI TTS (`generateVoice` Cloud Function). |
 | `hooks/useMovementFilters.ts` | Hook for filtering movements by category, equipment, etc. |
 | `hooks/useMovementSwap.ts` | Hook for swapping movements (regression/progression). |
 | `hooks/useWorkoutTimer.ts` | Hook for workout timer logic. |

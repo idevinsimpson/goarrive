@@ -50,5 +50,5 @@ The `processReminders` scheduled function handles sending reminders through the 
 ## AI Integration (OpenAI)
 The `analyzeMovement` Cloud Function uses OpenAI's GPT-4.1-mini model to analyze uploaded movement media. When a coach uploads a video or GIF of a movement, the function analyzes the media and returns structured metadata including the movement name, category, equipment used, muscle groups targeted, difficulty level, and coaching cues. This powers the bulk movement upload feature in the `BulkMovementUpload.tsx` component.
 
-## Voice Generation (ElevenLabs)
-The `generateMovementVoice.ts` utility generates voice audio for movement names using ElevenLabs. This is used for audio cues during workout playback, where the system announces movement names and transitions. Audio cues must incorporate appropriate pauses for natural timing (e.g., "3, 2, 1, GO!") and maintain a consistent, genuine tone.
+## Voice Generation (OpenAI TTS)
+The `generateMovementVoice.ts` utility generates voice audio for movement names using OpenAI's TTS API (`tts-1`, voice: `onyx`) via the `generateVoice` Cloud Function. Text is normalized through `normalizeTtsText` before generation so abbreviations like "DB" or "lbs" are spoken as "dumbbell" / "pounds". The cache key is the movement ID plus a hash of the normalized text, so renaming a movement produces a fresh storage path and the player never speaks the old name. Audio cues must incorporate appropriate pauses for natural timing (e.g., "3, 2, 1, GO!") and maintain a consistent, genuine tone.

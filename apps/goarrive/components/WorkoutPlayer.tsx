@@ -45,6 +45,7 @@ import { useMovementHydrate } from '../hooks/useMovementHydrate';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useWorkoutTTS } from '../hooks/useWorkoutTTS';
+import { setAudioMuted } from '../lib/audioCues';
 import { FB, FH } from '../lib/theme';
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -100,7 +101,12 @@ export default function WorkoutPlayer({
   const { isOffline, queueSize } = useNetworkStatus();
 
   // ── Mute toggle ───────────────────────────────────────
+  // Single source of truth for every audio layer: MP3 cues + voiceUrl clips
+  // (gated inside useWorkoutTTS), Web Speech / expo-speech (gated in `speak`),
+  // and the audioCues.ts tone module (gated by setAudioMuted below). Player
+  // <Video> elements are always `isMuted` so video has no audio layer to gate.
   const [isMuted, setIsMuted] = useState(false);
+  useEffect(() => { setAudioMuted(isMuted); }, [isMuted]);
 
   // ── Voice coaching ────────────────────────────────────
   const { stopAllAudio } = useWorkoutTTS({

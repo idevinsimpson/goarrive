@@ -87,8 +87,12 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     const nextIdx = currentIndex + 1;
     if (nextIdx >= total) {
       setPhase('complete');
+      // End-of-workout audio is owned by useWorkoutTTS — either the outro's
+      // `workout_complete_long` MP3 (if the workout has an Outro block) or
+      // the short `workout_complete` MP3 fired when the last exercise hits 0.
+      // The arpeggio used to also fire here, which stacked on top. Keep the
+      // success haptic so members still feel the finish.
       if (!silent) {
-        playCue('workoutComplete');
         hapticSuccess();
       }
     } else {
