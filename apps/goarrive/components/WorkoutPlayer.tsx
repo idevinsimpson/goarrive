@@ -122,62 +122,67 @@ export default function WorkoutPlayer({
   } = useMovementSwap(flatMovements, currentIndex, setFlatOverride);
   const [swapReason, setSwapReason] = useState('');
 
-  // ── Landscape / wide-screen detection ─────────────────────────────────
+  // ── 9:16 artboard scaling ─────────────────────────────────────────────
+  // The whole player is one composition designed at a fixed BASE_W × BASE_H
+  // artboard. At runtime we compute ONE uniform scale that's the largest
+  // value where the whole 9:16 artboard fits inside the available viewport
+  // (after reserving hardware safe-area). Every dimension inside the canvas
+  // — logo, title, timer box, media, next-up, fonts, gaps — is a constant in
+  // BASE units rendered through `fs(n) = n * scale`. This is the only source
+  // of truth: no per-module responsive logic, no flex reflow, no orientation
+  // special-cases. The composition behaves like a true vertical video.
   const { width: winW, height: winH } = useWindowDimensions();
   const dimsValid = winW > 0 && winH > 0;
-  const isLandscape = dimsValid ? winW > winH : false;
-  const isTablet = dimsValid ? Math.min(winW, winH) >= 600 : false;
-  // 9:16 player canvas — single source of truth for layout. The frame is the
-  // largest 9:16 portrait rectangle that fits inside the viewport. Anything
-  // outside the frame is the black `portraitLockOuter` backdrop (pillar-box on
-  // landscape, letterbox on tall portrait). All slots — logo, title/timer,
-  // media, next-up — live inside this frame so module positions stay locked
-  // regardless of viewport ratio.
-  const isWideScreen = dimsValid && winW > 500;
-  let frameW = 0;
-  let frameH = 0;
-  if (dimsValid) {
-    // Width-bound first (typical phone is taller than 9:16 → letterbox).
-    frameW = isWideScreen ? Math.min(winW, winH * (9 / 16)) : winW;
-    frameH = Math.min(winH, frameW * (16 / 9));
-    // If the height clamp shrank us, also shrink width so frame stays 9:16.
-    frameW = frameH * (9 / 16);
-  }
+  const BASE_W = 360;
+  const BASE_H = 640;
+  // Reserve hardware safe-area BELOW the canvas so the canvas itself never
+  // overlaps the home indicator / browser chrome. Conservative constant —
+  // the canvas centers in the remaining space, so a small overshoot just
+  // shifts the canvas up a few px (harmless).
+  const SAFE_BOTTOM = (Platform.select({ ios: 34, android: 24, web: 24, default: 16 }) ?? 16) as number;
+  const availW = winW;
+  const availH = Math.max(1, winH - SAFE_BOTTOM);
+  const scale = dimsValid
+    ? Math.max(0.0001, Math.min(availW / BASE_W, availH / BASE_H))
+    : 1;
+  // frameW / frameH are the rendered canvas dimensions — a 9:16 rectangle
+  // whose aspect is locked because both axes scale by the same factor.
+  const frameW = BASE_W * scale;
+  const frameH = BASE_H * scale;
+  const fs = (n: number) => n * scale;
 
-  // Movement media is always rendered at a fixed 4:5 aspect ratio. We compute
-  // the largest 4:5 box that fits inside the available media slot — width is
-  // bounded by frameW (minus a small horizontal pad) and height is bounded by
-  // the leftover frame height after the surrounding fixed slots take their
-  // space. If vertical room is tight, the surrounding layout (logo / title /
-  // next-up slots) is what flexes — the media stays exactly 4:5.
-  // These MUST match the fixed heights of `logoSlot`, `titleTimerSlot`, and
-  // `nextUpSlot` in the StyleSheet below. Those slots are locked to fixed
-  // pixel heights (not minHeight) so the centered media never shifts when
-  // phase content changes — keep these constants in sync if you change the
-  // slot styles.
-  // Slot heights are FIXED so the title row never grows when text wraps to 2
-  // lines — text wraps inside the centered title module instead. Inter-slot
-  // gaps are also fixed pixel margins so modules never touch regardless of
-  // phase, title length, or timer width. The bottom pad matches workContainer.
-  const SLOT_LOGO_H = 56;
-  const SLOT_TITLE_H = 112;
-  const SLOT_NEXTUP_H = 64;
-  const SLOT_GAP_LOGO = 4; // logo → title row
-  const SLOT_GAP_TITLE = 12; // title row → media (must always be visible)
-  const SLOT_GAP_MEDIA = 12; // media → next-up (must always be visible)
-  const SLOT_BOTTOM_PAD = Platform.select({ ios: 24, android: 8, web: 8, default: 8 }) as number;
-  const mediaAvailH = Math.max(
-    180,
-    (frameH || 600) - SLOT_LOGO_H - SLOT_GAP_LOGO - SLOT_TITLE_H - SLOT_GAP_TITLE
-      - SLOT_GAP_MEDIA - SLOT_NEXTUP_H - SLOT_BOTTOM_PAD,
-  );
-  const mediaAvailW = Math.max(160, frameW || 360);
-  let _mediaW = mediaAvailW;
-  let _mediaH = _mediaW * (5 / 4);
-  if (_mediaH > mediaAvailH) {
-    _mediaH = mediaAvailH;
-    _mediaW = _mediaH * (4 / 5);
+  // Slot dimensions in BASE design units. Sum (260) + media slot (380)
+  // = BASE_H (640), so the canvas is exactly the design height with no
+  // leftover space.
+  const BASE_LOGO_H = 56;
+  const BASE_GAP_LOGO = 4;
+  const BASE_TITLE_H = 112;
+  const BASE_GAP_TITLE = 12;
+  const BASE_GAP_MEDIA = 12;
+  const BASE_NEXTUP_H = 64;
+  const SLOT_LOGO_H = fs(BASE_LOGO_H);
+  const SLOT_TITLE_H = fs(BASE_TITLE_H);
+  const SLOT_NEXTUP_H = fs(BASE_NEXTUP_H);
+  const SLOT_GAP_LOGO = fs(BASE_GAP_LOGO);
+  const SLOT_GAP_TITLE = fs(BASE_GAP_TITLE);
+  const SLOT_GAP_MEDIA = fs(BASE_GAP_MEDIA);
+
+  // 4:5 media — constant in BASE units (same proportion of the canvas on
+  // every screen size), then scaled at the call site. Computed once at
+  // module level would be cleaner, but keeping it here makes the math
+  // visible alongside the slot constants.
+  const baseVertSlots = BASE_LOGO_H + BASE_GAP_LOGO + BASE_TITLE_H
+    + BASE_GAP_TITLE + BASE_GAP_MEDIA + BASE_NEXTUP_H;
+  const baseMediaAvailH = BASE_H - baseVertSlots; // 380
+  const baseMediaAvailW = BASE_W;                  // 360
+  let baseMediaW = baseMediaAvailW;
+  let baseMediaH = baseMediaW * (5 / 4);
+  if (baseMediaH > baseMediaAvailH) {
+    baseMediaH = baseMediaAvailH;                  // 380
+    baseMediaW = baseMediaH * (4 / 5);             // 304
   }
+  const _mediaW = fs(baseMediaW);
+  const _mediaH = fs(baseMediaH);
   const mediaInnerSize = { width: _mediaW, height: _mediaH };
 
   // ── Video ref ────────────────────────────────
@@ -278,30 +283,59 @@ export default function WorkoutPlayer({
     return m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `${s}`;
   };
 
-  // Dominant-digit timer sizing. Box is fixed at 132×112 (see goldTimerBox /
-  // restTimerBox). For 1–2 char values ("9", "39") we go as large as fits with
-  // comfortable padding; 3+ char values ("1:30", "10:00") fall back so the
-  // colon+digits still fit without clipping. Returned style is applied after
-  // the base timer text style so it overrides fontSize/lineHeight.
+  // Dominant-digit timer sizing. Char-count tiers are scaled by frameScale so
+  // the timer text grows with the player frame. Box is also scaled (see
+  // scaledTimerBox below) so the box/font ratio stays the same on every size.
   const getTimerFontStyle = (
     text: string,
   ): { fontSize: number; lineHeight: number; letterSpacing: number } => {
     const len = (text || '').length;
-    if (len <= 2) return { fontSize: 96, lineHeight: 96, letterSpacing: -2 };
-    if (len === 3) return { fontSize: 64, lineHeight: 68, letterSpacing: -1 };
-    return { fontSize: 48, lineHeight: 52, letterSpacing: 0 };
+    if (len <= 2) return { fontSize: fs(96), lineHeight: fs(96), letterSpacing: fs(-2) };
+    if (len === 3) return { fontSize: fs(64), lineHeight: fs(68), letterSpacing: fs(-1) };
+    return { fontSize: fs(48), lineHeight: fs(52), letterSpacing: 0 };
   };
 
-  // Auto-shrink the movement-name font so any reasonable name fits the
-  // fixed-height title module (which sits flush with the media's left edge).
-  // Tiers chosen empirically for a ~210px wide column at 3 lines max.
+  // Auto-shrink the movement-name font so any reasonable name fits the title
+  // module. Tiers are scaled by frameScale so names grow with the frame.
   const getNameFontStyle = (text: string): { fontSize: number; lineHeight: number } => {
     const len = (text || '').length;
-    if (len <= 12) return { fontSize: 40, lineHeight: 44 };
-    if (len <= 20) return { fontSize: 32, lineHeight: 36 };
-    if (len <= 32) return { fontSize: 26, lineHeight: 30 };
-    if (len <= 48) return { fontSize: 22, lineHeight: 26 };
-    return { fontSize: 18, lineHeight: 22 };
+    if (len <= 12) return { fontSize: fs(40), lineHeight: fs(44) };
+    if (len <= 20) return { fontSize: fs(32), lineHeight: fs(36) };
+    if (len <= 32) return { fontSize: fs(26), lineHeight: fs(30) };
+    if (len <= 48) return { fontSize: fs(22), lineHeight: fs(26) };
+    return { fontSize: fs(18), lineHeight: fs(22) };
+  };
+
+  // Frame-derived dimensions for every module that lives inside the player
+  // frame. Apply these inline as override styles so the StyleSheet baselines
+  // (phone-tuned) are replaced by frame-relative pixel values.
+  const scaledLogoImg = { width: fs(260), height: fs(52) };
+  const scaledTimerBox = {
+    width: fs(132),
+    height: fs(112),
+    borderRadius: fs(12),
+  };
+  const scaledNextUpBar = {
+    borderRadius: fs(12),
+    paddingVertical: fs(8),
+    paddingHorizontal: fs(12),
+    gap: fs(12),
+  };
+  const scaledNextUpLabelFs = fs(11);
+  const scaledNextUpNameFs = fs(15);
+  const scaledNextUpMetaFs = fs(11);
+  const scaledNextUpThumb = { width: fs(40), height: fs(40), borderRadius: fs(8) };
+  const scaledTitlePadH = fs(8);
+
+  // Title-slot label fonts (scale with frame).
+  const scaledLabels = {
+    superset: fs(16),
+    restPhase: fs(18),
+    restNextName: fs(28),
+    demoBlockTitle: fs(22),
+    waterBreakLabel: fs(20),
+    transitionInline: fs(13),
+    phaseLabel: fs(16),
   };
 
   const handleFinish = () => {
@@ -520,25 +554,25 @@ export default function WorkoutPlayer({
     const nextLabel = next.stepType === 'exercise' ? next.name
       : next.originalBlockType || next.name;
     return (
-      <View style={st.nextUpBar}>
-        <Text style={st.nextUpLabel}>NEXT UP</Text>
+      <View style={[st.nextUpBar, scaledNextUpBar]}>
+        <Text style={[st.nextUpLabel, { fontSize: scaledNextUpLabelFs }]}>NEXT UP</Text>
         <View style={st.nextUpInfo}>
-          <Text style={st.nextUpName} numberOfLines={1}>{nextLabel}</Text>
-          <Text style={st.nextUpMeta} numberOfLines={1}>
+          <Text style={[st.nextUpName, { fontSize: scaledNextUpNameFs }]} numberOfLines={1}>{nextLabel}</Text>
+          <Text style={[st.nextUpMeta, { fontSize: scaledNextUpMetaFs }]} numberOfLines={1}>
             {next.blockName}{next.duration ? ` · ${next.duration}s` : ''}
           </Text>
         </View>
         {next.thumbnailUrl ? (
-          <Image source={{ uri: next.thumbnailUrl }} style={st.nextUpThumb} resizeMode="cover" />
+          <Image source={{ uri: next.thumbnailUrl }} style={[st.nextUpThumb, scaledNextUpThumb]} resizeMode="cover" />
         ) : (
-          <View style={[st.nextUpThumb, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#1A2035' }]}>
+          <View style={[st.nextUpThumb, scaledNextUpThumb, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#1A2035' }]}>
             <Icon name={
               next.stepType === 'waterBreak' ? 'droplet' :
               next.stepType === 'transition' ? 'arrow-right' :
               next.stepType === 'grabEquipment' ? 'briefcase' :
               next.stepType === 'demo' ? 'eye' :
               'play-circle'
-            } size={20} color="#3A4050" />
+            } size={Math.round(fs(20))} color="#3A4050" />
           </View>
         )}
       </View>
@@ -552,10 +586,10 @@ export default function WorkoutPlayer({
   //   header → logoSlot → titleTimerSlot → mediaSlot → nextUpSlot
   // Each slot has a stable height/flex; only the content inside changes.
   const renderLogoSlot = () => (
-    <View style={st.logoSlot}>
+    <View style={[st.logoSlot, { height: SLOT_LOGO_H, marginBottom: SLOT_GAP_LOGO }]}>
       <Image
         source={require('../assets/logo.png')}
-        style={st.slotLogo}
+        style={[st.slotLogo, scaledLogoImg]}
         resizeMode="contain"
       />
     </View>
@@ -569,20 +603,36 @@ export default function WorkoutPlayer({
     title: React.ReactNode,
     timer: React.ReactNode | null,
   ) => (
-    <View style={[st.titleTimerSlot, { width: _mediaW }]}>
-      <View style={st.titleColumn}>{title}</View>
+    <View style={[st.titleTimerSlot, { height: SLOT_TITLE_H, marginBottom: SLOT_GAP_TITLE, width: _mediaW }]}>
+      <View style={[st.titleColumn, { height: SLOT_TITLE_H, paddingHorizontal: scaledTitlePadH }]}>{title}</View>
       {timer ? <View style={st.timerColumn}>{timer}</View> : null}
     </View>
   );
 
   const renderNextUpSlot = (content: React.ReactNode | null) => (
-    <View style={[st.nextUpSlot, { width: _mediaW }]}>{content}</View>
+    <View style={[st.nextUpSlot, { height: SLOT_NEXTUP_H, marginTop: SLOT_GAP_MEDIA, width: _mediaW }]}>{content}</View>
+  );
+
+  // Timer box helpers — keep box and font scale in lockstep so the digit
+  // never crops or floats on a larger frame. Used by every phase that shows
+  // a countdown (work/rest/demo/transition/grabEquipment/waterBreak/swap/outro).
+  const renderGoldTimer = (text: string) => (
+    <View style={[st.goldTimerBox, scaledTimerBox]}>
+      <Text style={[st.goldTimerText, getTimerFontStyle(text)]}>{text}</Text>
+    </View>
+  );
+  const renderRestTimer = (text: string) => (
+    <View style={[st.restTimerBox, scaledTimerBox]}>
+      <Text style={[st.restTimerText, getTimerFontStyle(text)]}>{text}</Text>
+    </View>
   );
 
   // ── Render ────────────────────────────────────────────────────────────
   return (
     <Modal visible={visible} animationType="fade" transparent={false}>
-      <View style={st.portraitLockOuter}>
+      <View style={[st.portraitLockOuter, Platform.OS === 'web'
+        ? ({ paddingBottom: `max(${SAFE_BOTTOM}px, env(safe-area-inset-bottom, ${SAFE_BOTTOM}px))` } as any)
+        : { paddingBottom: SAFE_BOTTOM }]}>
       <View style={[st.container, dimsValid && { width: frameW, height: frameH, maxWidth: frameW }]}>
         {/* ── READY state — Block overview grid ─────────────────── */}
         {phase === 'ready' && (() => {
@@ -694,9 +744,7 @@ export default function WorkoutPlayer({
                 <Text style={st.introBlockLabel}>
                   {current.name || current.label || 'WARM-UP & STRETCH'}
                 </Text>
-                <View style={st.goldTimerBox}>
-                  <Text style={[st.goldTimerText, getTimerFontStyle(String(Math.max(0, Math.ceil(timeLeft))))]}>{Math.max(0, Math.ceil(timeLeft))}</Text>
-                </View>
+                {renderGoldTimer(String(Math.max(0, Math.ceil(timeLeft))))}
               </View>
             </View>
           );
@@ -728,9 +776,7 @@ export default function WorkoutPlayer({
                 resizeMode="contain"
               />
               <Text style={st.outroTitle}>WORKOUT</Text>
-              <View style={st.goldTimerBox}>
-                <Text style={[st.goldTimerText, getTimerFontStyle(String(Math.max(0, Math.ceil(timeLeft))))]}>{Math.max(0, Math.ceil(timeLeft))}</Text>
-              </View>
+              {renderGoldTimer(String(Math.max(0, Math.ceil(timeLeft))))}
             </View>
           </View>
         )}
@@ -743,10 +789,8 @@ export default function WorkoutPlayer({
             <View style={[st.workContainer, webSafeBottomStyle]}>
               {renderLogoSlot()}
               {renderTitleTimerSlot(
-                <Text style={st.demoBlockTitle} numberOfLines={2}>{current.name}</Text>,
-                <View style={st.goldTimerBox}>
-                  <Text style={[st.goldTimerText, getTimerFontStyle(String(Math.max(0, Math.ceil(timeLeft))))]}>{Math.max(0, Math.ceil(timeLeft))}</Text>
-                </View>,
+                <Text style={[st.demoBlockTitle, { fontSize: scaledLabels.demoBlockTitle }]} numberOfLines={2}>{current.name}</Text>,
+                renderGoldTimer(String(Math.max(0, Math.ceil(timeLeft)))),
               )}
               <View style={st.mediaSlot}>
                 <View style={[st.demoGrid, mediaInnerSize]}>
@@ -774,17 +818,15 @@ export default function WorkoutPlayer({
             {renderLogoSlot()}
             {renderTitleTimerSlot(
               <>
-                <Text style={[st.restPhaseLabel, { color: '#94A3B8' }]}>TRANSITION</Text>
-                <Text style={st.restNextName} numberOfLines={1}>{current.name}</Text>
+                <Text style={[st.restPhaseLabel, { color: '#94A3B8', fontSize: scaledLabels.restPhase }]}>TRANSITION</Text>
+                <Text style={[st.restNextName, { fontSize: scaledLabels.restNextName }]} numberOfLines={1}>{current.name}</Text>
                 {(current.instructionText || current.description) ? (
-                  <Text style={st.transitionInstructionInline} numberOfLines={1}>
+                  <Text style={[st.transitionInstructionInline, { fontSize: scaledLabels.transitionInline }]} numberOfLines={1}>
                     {current.instructionText || current.description}
                   </Text>
                 ) : null}
               </>,
-              <View style={st.goldTimerBox}>
-                <Text style={[st.goldTimerText, getTimerFontStyle(formatTime(timeLeft))]}>{formatTime(timeLeft)}</Text>
-              </View>,
+              renderGoldTimer(formatTime(timeLeft)),
             )}
             <View style={st.mediaSlot}>
               <View style={[st.mediaInner, mediaInnerSize]}>
@@ -823,17 +865,15 @@ export default function WorkoutPlayer({
             {renderLogoSlot()}
             {renderTitleTimerSlot(
               <>
-                <Text style={[st.restPhaseLabel, { color: '#FB923C' }]}>GRAB EQUIPMENT</Text>
-                <Text style={st.restNextName} numberOfLines={1}>{current.name}</Text>
+                <Text style={[st.restPhaseLabel, { color: '#FB923C', fontSize: scaledLabels.restPhase }]}>GRAB EQUIPMENT</Text>
+                <Text style={[st.restNextName, { fontSize: scaledLabels.restNextName }]} numberOfLines={1}>{current.name}</Text>
                 {current.instructionText || current.description ? (
-                  <Text style={st.transitionInstructionInline} numberOfLines={1}>
+                  <Text style={[st.transitionInstructionInline, { fontSize: scaledLabels.transitionInline }]} numberOfLines={1}>
                     {current.instructionText || current.description}
                   </Text>
                 ) : null}
               </>,
-              <View style={st.goldTimerBox}>
-                <Text style={[st.goldTimerText, getTimerFontStyle(formatTime(timeLeft))]}>{formatTime(timeLeft)}</Text>
-              </View>,
+              renderGoldTimer(formatTime(timeLeft)),
             )}
             <View style={st.mediaSlot}>
               <View style={[st.mediaInner, st.equipmentPanel, mediaInnerSize]}>
@@ -851,10 +891,8 @@ export default function WorkoutPlayer({
           <View style={[st.workContainer, webSafeBottomStyle]}>
             {renderLogoSlot()}
             {renderTitleTimerSlot(
-              <Text style={st.waterBreakLabel}>WATER BREAK</Text>,
-              <View style={st.goldTimerBox}>
-                <Text style={[st.goldTimerText, getTimerFontStyle(formatTime(timeLeft))]}>{formatTime(timeLeft)}</Text>
-              </View>,
+              <Text style={[st.waterBreakLabel, { fontSize: scaledLabels.waterBreakLabel }]}>WATER BREAK</Text>,
+              renderGoldTimer(formatTime(timeLeft)),
             )}
             <View style={st.mediaSlot}>
               <View style={[st.mediaInner, mediaInnerSize]}>
@@ -904,7 +942,7 @@ export default function WorkoutPlayer({
               ? renderTitleTimerSlot(
                   <>
                     {current.supersetLabel && (
-                      <Text style={st.supersetLabel}>{current.supersetLabel}</Text>
+                      <Text style={[st.supersetLabel, { fontSize: scaledLabels.superset }]}>{current.supersetLabel}</Text>
                     )}
                     <Text
                       style={[st.workMovementName, getNameFontStyle(current.name)]}
@@ -913,20 +951,14 @@ export default function WorkoutPlayer({
                       {current.name}
                     </Text>
                   </>,
-                  !isRepBased ? (
-                    <View style={st.goldTimerBox}>
-                      <Text style={[st.goldTimerText, getTimerFontStyle(formatTime(timeLeft))]}>{formatTime(timeLeft)}</Text>
-                    </View>
-                  ) : null,
+                  !isRepBased ? renderGoldTimer(formatTime(timeLeft)) : null,
                 )
               : renderTitleTimerSlot(
                   <>
-                    <Text style={st.restPhaseLabel}>REST</Text>
-                    {next && <Text style={st.restNextName} numberOfLines={1}>Next: {next.name}</Text>}
+                    <Text style={[st.restPhaseLabel, { fontSize: scaledLabels.restPhase }]}>REST</Text>
+                    {next && <Text style={[st.restNextName, { fontSize: scaledLabels.restNextName }]} numberOfLines={1}>Next: {next.name}</Text>}
                   </>,
-                  <View style={st.restTimerBox}>
-                    <Text style={[st.restTimerText, getTimerFontStyle(formatTime(timeLeft))]}>{formatTime(timeLeft)}</Text>
-                  </View>,
+                  renderRestTimer(formatTime(timeLeft)),
                 )}
 
             {/* Shared media slot — Video stays mounted across work↔rest. */}
@@ -1006,12 +1038,10 @@ export default function WorkoutPlayer({
             {renderLogoSlot()}
             {renderTitleTimerSlot(
               <>
-                <Text style={st.phaseLabel}>SWITCH SIDES</Text>
-                <Text style={st.restNextName} numberOfLines={1}>{current.name}</Text>
+                <Text style={[st.phaseLabel, { fontSize: scaledLabels.phaseLabel }]}>SWITCH SIDES</Text>
+                <Text style={[st.restNextName, { fontSize: scaledLabels.restNextName }]} numberOfLines={1}>{current.name}</Text>
               </>,
-              <View style={st.goldTimerBox}>
-                <Text style={[st.goldTimerText, getTimerFontStyle(String(Math.max(0, Math.ceil(timeLeft))))]}>{Math.max(0, Math.ceil(timeLeft))}</Text>
-              </View>,
+              renderGoldTimer(String(Math.max(0, Math.ceil(timeLeft)))),
             )}
             <View style={st.mediaSlot}>
               <View style={[st.mediaInner, st.swapPanel, mediaInnerSize]}>
@@ -1142,15 +1172,11 @@ export default function WorkoutPlayer({
 // ── Styles ──────────────────────────────────────────────────────────────────
 const { width: SCREEN_W } = Dimensions.get('window');
 
-const PORTRAIT_MAX_W = 430;
-
-// On web (especially iOS PWA standalone), the viewport includes the home
-// indicator and any browser chrome at the bottom. env(safe-area-inset-bottom)
-// pushes the workContainer's bottom padding above that chrome so the next-up
-// slot is never clipped. max() guarantees a minimum visual gap.
-const webSafeBottomStyle: any = Platform.OS === 'web'
-  ? { paddingBottom: 'max(8px, env(safe-area-inset-bottom, 8px))' }
-  : null;
+// Safe-area is handled OUTSIDE the canvas (paddingBottom on portraitLockOuter)
+// so the canvas itself can be a clean 9:16 design surface with no inner bottom
+// padding fighting the artboard math. Anything that previously consumed inner
+// space at the bottom is now reserved by the centered outer wrapper instead.
+const webSafeBottomStyle: any = null;
 
 const st = StyleSheet.create({
   portraitLockOuter: {
@@ -1159,11 +1185,14 @@ const st = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Canvas — actual width/height/maxWidth applied inline from the artboard
+  // scale so the StyleSheet baseline doesn't fight the dynamic canvas size.
+  // The flex/width fallback only applies during the first render before
+  // useWindowDimensions resolves; once dims are valid the inline overrides win.
   container: {
     flex: 1,
     backgroundColor: '#0E1117',
     width: '100%',
-    maxWidth: PORTRAIT_MAX_W,
   },
   header: {
     flexDirection: 'row',
@@ -1423,12 +1452,11 @@ const st = StyleSheet.create({
 
   // ── In-workout shared frame ────────────────────────────────────────
   // Every active phase (work, rest, transition, waterBreak, demo,
-  // grabEquipment, swap) uses this container. Vertical padding is tight
-  // to push content up; bottom padding accounts for iOS home indicator
-  // and PWA browser chrome so the next-up slot is never clipped.
+  // grabEquipment, swap) uses this container. The canvas is sized to fit
+  // exactly inside the available viewport (after outer safe-area), so no
+  // inner padding is needed — the slots fill the canvas precisely.
   workContainer: {
-    flex: 1, paddingHorizontal: 0, paddingTop: 0,
-    paddingBottom: Platform.select({ ios: 24, android: 8, web: 8, default: 8 }),
+    flex: 1, paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0,
     overflow: 'hidden',
   },
 
