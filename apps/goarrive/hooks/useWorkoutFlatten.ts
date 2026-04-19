@@ -55,6 +55,13 @@ export interface FlatMovement {
   cropTranslateY?: number;
   /** GoArrive Coach voice clip URL for this movement name (OpenAI TTS generated) */
   voiceUrl?: string;
+  /**
+   * Combined "Next up, {movement name}." phrase clip URL (gpt-4o-mini-tts with
+   * style instructions). Injected by useNextUpPhrases. The workout player
+   * enqueues this single clip on rest-entry instead of the static next_up cue
+   * + the standalone voiceUrl, eliminating the gap and unifying the delivery.
+   */
+  nextUpVoiceUrl?: string;
 
   // ── Phase 3: Special block fields ───────────────────────────────
   /** What kind of step this is — determines which player screen renders */

@@ -42,6 +42,7 @@ import { useWorkoutTimer } from '../hooks/useWorkoutTimer';
 import { useMediaPrefetch } from '../hooks/useMediaPrefetch';
 import { useMovementSwap } from '../hooks/useMovementSwap';
 import { useMovementHydrate } from '../hooks/useMovementHydrate';
+import { useNextUpPhrases } from '../hooks/useNextUpPhrases';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useWorkoutTTS } from '../hooks/useWorkoutTTS';
@@ -86,8 +87,11 @@ export default function WorkoutPlayer({
   // ── Hooks ────────────────────────────────────────────────────────────
   const flatFromBlocks = useWorkoutFlatten(workout);
   const hydratedMovements = useMovementHydrate(flatFromBlocks);
+  // Pre-warm combined "Next up, {name}." phrase clips so the rest screen can
+  // play one cohesive cue instead of next_up MP3 + standalone movement voice.
+  const phrasedMovements = useNextUpPhrases(hydratedMovements);
   const [flatOverride, setFlatOverride] = useState<any[] | null>(null);
-  const flatMovements = flatOverride || hydratedMovements;
+  const flatMovements = flatOverride || phrasedMovements;
 
   const timer = useWorkoutTimer({ flatMovements });
 

@@ -16,6 +16,11 @@ service firebase.storage {
       allow read: if true;
       allow write: if false;
     }
+    // Combined cue phrases (e.g. "Next up, Barbell Curl.") — publicly readable
+    match /voice_cache/phrases/{fileName} {
+      allow read: if true;
+      allow write: if false;
+    }
     // Coach voice clones — readable by authenticated users only
     match /voice_cache/coaches/{coachId}/{fileName} {
       allow read: if request.auth != null;
