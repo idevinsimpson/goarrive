@@ -56,7 +56,12 @@ export async function generateMovementVoice(
     const functions = getFunctions(undefined, 'us-central1');
     const generateVoice = httpsCallable<
       { text: string; voice: string; storagePath: string; movementId: string },
-      { url: string; path: string }
+      {
+        url: string;
+        path: string;
+        writeback?: 'ok' | 'skipped' | 'missing_doc' | 'failed' | 'no_id';
+        writebackError?: string | null;
+      }
     >(functions, 'generateVoice');
 
     const textHash = hashTtsText(normalized);
@@ -72,13 +77,29 @@ export async function generateMovementVoice(
       movementId,
     });
     console.info('[VOICE-AUDIT] generateMovementVoice resolved', {
-      movementId, movementName, urlPresent: !!result.data?.url, urlLen: result.data?.url?.length ?? 0,
+      movementId,
+      movementName,
+      urlPresent: !!result.data?.url,
+      urlLen: result.data?.url?.length ?? 0,
+      writeback: result.data?.writeback ?? null,
+      writebackError: result.data?.writebackError ?? null,
     });
 
     return { url: result.data.url, text: normalized };
   } catch (err: any) {
+    // Firebase callable SDK surfaces server-side HttpsError details on err.details.
+    // Our server throws structured details like { layer, status, message, ... }
+    // so the in-app VOICE-AUDIT panel shows the exact failing layer instead of
+    // the generic "internal" message.
+    const details = err?.details ?? null;
+    const layer = details && typeof details === 'object' ? (details as any).layer : null;
     console.warn('[VOICE-AUDIT] generateMovementVoice THREW', {
-      movementId, movementName, code: err?.code, message: err?.message,
+      movementId,
+      movementName,
+      code: err?.code,
+      message: err?.message,
+      layer,
+      details,
     });
     return { url: null, text: normalized };
   }

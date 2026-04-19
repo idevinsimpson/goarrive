@@ -6970,7 +6970,7 @@ exports.createMissingLedgerEntry = (0, https_1.onCall)({ secrets: [stripeSecretK
 // own updateDoc for the rename/clear flows.
 // ─────────────────────────────────────────────────────────────────────────────
 exports.generateVoice = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 30 }, async (request) => {
-    var _a, _b;
+    var _a, _b, _c, _d;
     if (!((_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid)) {
         throw new https_1.HttpsError('unauthenticated', 'Sign in required');
     }
@@ -6983,10 +6983,16 @@ exports.generateVoice = (0, https_1.onCall)({ region: 'us-central1', secrets: [o
     }
     const apiKey = (_b = openaiApiKey.value()) === null || _b === void 0 ? void 0 : _b.trim();
     if (!apiKey) {
-        throw new https_1.HttpsError('internal', 'OpenAI API key not configured');
+        console.error('[VOICE-AUDIT] generateVoice: apikey layer — OPENAI_API_KEY secret empty');
+        throw new https_1.HttpsError('failed-precondition', 'voice:apikey:missing', {
+            layer: 'apikey',
+            reason: 'OPENAI_API_KEY secret is unset or empty on deployed function',
+        });
     }
     const selectedVoice = voice || 'onyx';
     const path = storagePath || `voice_cache/tts/${Date.now()}.mp3`;
+    // ── Layer 1: OpenAI TTS ────────────────────────────────────────────────
+    let audioBuffer;
     try {
         const response = await fetch('https://api.openai.com/v1/audio/speech', {
             method: 'POST',
@@ -7001,49 +7007,98 @@ exports.generateVoice = (0, https_1.onCall)({ region: 'us-central1', secrets: [o
             }),
         });
         if (!response.ok) {
-            const errorText = await response.text();
-            console.error('[generateVoice] OpenAI TTS error:', response.status, errorText);
-            throw new https_1.HttpsError('internal', `OpenAI TTS error: ${response.status}`);
-        }
-        const audioBuffer = Buffer.from(await response.arrayBuffer());
-        const bucket = admin.storage().bucket();
-        const file = bucket.file(path);
-        await file.save(audioBuffer, { contentType: 'audio/mpeg' });
-        await file.makePublic();
-        const url = `https://storage.googleapis.com/${bucket.name}/${path}`;
-        if (movementId && typeof movementId === 'string') {
-            try {
-                const ref = db.doc(`movements/${movementId}`);
-                const snap = await ref.get();
-                if (!snap.exists) {
-                    console.error('[VOICE-AUDIT] generateVoice: canonical movement doc MISSING — writeback skipped', {
-                        movementId, uid: request.auth.uid, storedUrl: url,
-                    });
-                }
-                else {
-                    await ref.update({ voiceUrl: url, voiceText: text });
-                    console.info('[VOICE-AUDIT] generateVoice: Firestore writeback OK', {
-                        movementId, uid: request.auth.uid,
-                    });
-                }
-            }
-            catch (writeErr) {
-                console.error('[VOICE-AUDIT] generateVoice: Firestore writeback FAILED', { movementId, uid: request.auth.uid }, writeErr);
-            }
-        }
-        else {
-            console.warn('[VOICE-AUDIT] generateVoice: no movementId supplied — skipping Firestore writeback', {
-                uid: request.auth.uid, textPreview: text.slice(0, 40),
+            const errorBody = (await response.text()).slice(0, 500);
+            console.error('[VOICE-AUDIT] generateVoice: openai layer FAILED', {
+                status: response.status, body: errorBody,
+            });
+            throw new https_1.HttpsError('internal', `voice:openai:${response.status}`, {
+                layer: 'openai',
+                status: response.status,
+                body: errorBody,
             });
         }
-        return { url, path };
+        audioBuffer = Buffer.from(await response.arrayBuffer());
     }
     catch (err) {
-        if (err.code)
+        if (err instanceof https_1.HttpsError)
             throw err;
-        console.error('[generateVoice] Failed:', err);
-        throw new https_1.HttpsError('internal', 'Voice generation failed');
+        const detail = String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 300);
+        console.error('[VOICE-AUDIT] generateVoice: openai layer THREW', { detail }, err);
+        throw new https_1.HttpsError('internal', `voice:openai:fetch_failed`, {
+            layer: 'openai',
+            message: detail,
+        });
     }
+    // ── Layer 2: Storage upload ────────────────────────────────────────────
+    // NOTE: The bucket has Uniform Bucket-Level Access enabled, so ACL-based
+    // makePublic() throws. Public read is granted via storage.rules instead
+    // (see voice_cache/movements match block). We return the Firebase Storage
+    // download URL, which respects security rules and does not require object
+    // ACLs. Do NOT reintroduce makePublic() or storage.googleapis.com URLs.
+    let cdnUrl;
+    const bucket = admin.storage().bucket();
+    try {
+        const file = bucket.file(path);
+        await file.save(audioBuffer, { contentType: 'audio/mpeg' });
+        const encodedPath = encodeURIComponent(path);
+        cdnUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodedPath}?alt=media`;
+    }
+    catch (err) {
+        const detail = String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 300);
+        const code = (_d = (_c = err === null || err === void 0 ? void 0 : err.code) !== null && _c !== void 0 ? _c : err === null || err === void 0 ? void 0 : err.status) !== null && _d !== void 0 ? _d : null;
+        console.error('[VOICE-AUDIT] generateVoice: storage layer FAILED', {
+            bucket: bucket.name, path, code, detail,
+        }, err);
+        throw new https_1.HttpsError('internal', `voice:storage:upload_failed`, {
+            layer: 'storage',
+            bucket: bucket.name,
+            path,
+            code,
+            message: detail,
+        });
+    }
+    // ── Layer 3: Firestore writeback (non-fatal) ───────────────────────────
+    // Failure here must NOT poison the response — the audio is already
+    // uploaded, and the player can still fetch the URL if we return it.
+    // But we do surface the failure in the response payload so the client
+    // can log it and the next test shows exactly why the backfill didn't
+    // stick. Missing-doc is surfaced as a distinct signal from permission
+    // failure.
+    let writeback = 'no_id';
+    let writebackError = null;
+    if (movementId && typeof movementId === 'string') {
+        try {
+            const ref = db.doc(`movements/${movementId}`);
+            const snap = await ref.get();
+            if (!snap.exists) {
+                writeback = 'missing_doc';
+                console.error('[VOICE-AUDIT] generateVoice: firestore layer — movement doc MISSING', {
+                    movementId, uid: request.auth.uid, storedUrl: cdnUrl,
+                });
+            }
+            else {
+                await ref.update({ voiceUrl: cdnUrl, voiceText: text });
+                writeback = 'ok';
+                console.info('[VOICE-AUDIT] generateVoice: firestore layer — writeback OK', {
+                    movementId, uid: request.auth.uid,
+                });
+            }
+        }
+        catch (writeErr) {
+            writeback = 'failed';
+            writebackError = String((writeErr === null || writeErr === void 0 ? void 0 : writeErr.message) || writeErr).slice(0, 300);
+            console.error('[VOICE-AUDIT] generateVoice: firestore layer FAILED', {
+                movementId, uid: request.auth.uid, error: writebackError,
+            }, writeErr);
+        }
+    }
+    else {
+        writeback = 'skipped';
+        console.warn('[VOICE-AUDIT] generateVoice: firestore layer — skipped (no movementId)', {
+            uid: request.auth.uid, textPreview: text.slice(0, 40),
+        });
+    }
+    return { url: cdnUrl, path, writeback, writebackError };
 });
 // ═══════════════════════════════════════════════════════════════════════════════
 // NEW MEMBER — Set custom claims + notify coach
