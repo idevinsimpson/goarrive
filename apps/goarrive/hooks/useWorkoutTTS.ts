@@ -321,12 +321,17 @@ export function useWorkoutTTS({
   // gap and does not enqueue (nothing would play anyway).
   const enqueueVoice = useCallback(
     (url: string, context: string) => {
-      if (isMuted || ttsDisabled) return;
+      if (isMuted || ttsDisabled) {
+        console.warn('[VOICE-AUDIT] enqueueVoice dropped — muted/ttsDisabled', { context, isMuted, ttsDisabled });
+        return;
+      }
       if (Platform.OS !== 'web' || typeof window === 'undefined') return;
       if (!url) {
+        console.warn('[VOICE-AUDIT] enqueueVoice dropped — empty url', { context });
         logSpeechSuppressed(context, '');
         return;
       }
+      console.info('[VOICE-AUDIT] enqueueVoice queued', { context, urlPreview: url.slice(0, 80) });
       queueRef.current.push({ kind: 'voice', url, context, runId: runIdRef.current });
       pumpQueue();
     },
@@ -507,6 +512,13 @@ export function useWorkoutTTS({
           const nextMovementId = (next as any)?.movementId || '';
           const logContext = `rest_next_up_${nextName}`;
           const voiceUrl = next?.voiceUrl || '';
+          console.info('[VOICE-AUDIT] rest entry — next-up voice state', {
+            currentIndex,
+            nextName,
+            nextMovementId: nextMovementId || '(MISSING)',
+            voiceUrlPresent: !!voiceUrl,
+            voiceUrlPreview: voiceUrl ? voiceUrl.slice(0, 80) : '',
+          });
           if (voiceUrl) {
             enqueueVoice(voiceUrl, logContext);
           } else {
@@ -521,8 +533,8 @@ export function useWorkoutTTS({
               context: logContext,
             };
             console.warn(
-              '[useWorkoutTTS] movement-name voiceUrl not ready at rest start — pending late-arrival watcher',
-              { movementId: nextMovementId, name: nextName, context: logContext },
+              '[VOICE-AUDIT] pending late-arrival watcher armed',
+              { movementId: nextMovementId || '(MISSING)', name: nextName, context: logContext },
             );
           }
         } else if (!isPrepRest) {
@@ -630,6 +642,9 @@ export function useWorkoutTTS({
     // Only the movement we were waiting on — never play a stale name.
     const nextMovementId = (next as any)?.movementId || '';
     if (pending.movementId && nextMovementId && pending.movementId !== nextMovementId) {
+      console.warn('[VOICE-AUDIT] late-arrival: movementId mismatch — clearing pending', {
+        pendingId: pending.movementId, nextMovementId,
+      });
       pendingMovementVoiceRef.current = null;
       return;
     }
@@ -638,7 +653,7 @@ export function useWorkoutTTS({
     // Don't enqueue a long voice clip into the rest→work countdown window.
     if (timeLeft <= 3.5) {
       console.warn(
-        '[useWorkoutTTS] late voiceUrl arrived inside rest countdown — skipping',
+        '[VOICE-AUDIT] late voiceUrl arrived inside rest countdown — skipping',
         { name: pending.name, timeLeft },
       );
       pendingMovementVoiceRef.current = null;
@@ -646,8 +661,8 @@ export function useWorkoutTTS({
     }
     pendingMovementVoiceRef.current = null;
     console.info(
-      '[useWorkoutTTS] late voiceUrl arrived — enqueuing',
-      { name: pending.name, timeLeft },
+      '[VOICE-AUDIT] late voiceUrl arrived — enqueuing',
+      { name: pending.name, timeLeft, urlPreview: nextVoiceUrl.slice(0, 80) },
     );
     enqueueVoice(nextVoiceUrl, `${pending.context}_late`);
   }, [phase, timeLeft, next, enqueueVoice, isPaused]);

@@ -48,6 +48,7 @@ export async function generateMovementVoice(
   const normalized = normalizeTtsText(movementName);
 
   if (!normalized) {
+    console.warn('[VOICE-AUDIT] generateMovementVoice skipped — empty normalized text', { movementId, movementName });
     return { url: null, text: '' };
   }
 
@@ -61,16 +62,24 @@ export async function generateMovementVoice(
     const textHash = hashTtsText(normalized);
     const storagePath = `voice_cache/movements/${movementId}-${textHash}.mp3`;
 
+    console.info('[VOICE-AUDIT] generateMovementVoice calling generateVoice', {
+      movementId, movementName, normalized, storagePath,
+    });
     const result = await generateVoice({
       text: normalized,
       voice: 'onyx',
       storagePath,
       movementId,
     });
+    console.info('[VOICE-AUDIT] generateMovementVoice resolved', {
+      movementId, movementName, urlPresent: !!result.data?.url, urlLen: result.data?.url?.length ?? 0,
+    });
 
     return { url: result.data.url, text: normalized };
-  } catch (err) {
-    console.warn('[generateMovementVoice] Failed:', err);
+  } catch (err: any) {
+    console.warn('[VOICE-AUDIT] generateMovementVoice THREW', {
+      movementId, movementName, code: err?.code, message: err?.message,
+    });
     return { url: null, text: normalized };
   }
 }

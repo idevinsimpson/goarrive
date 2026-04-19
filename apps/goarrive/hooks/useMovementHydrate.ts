@@ -96,6 +96,20 @@ export function useMovementHydrate(flatMovements: FlatMovement[]): FlatMovement[
       if (fm.movementId) desiredIds.add(fm.movementId);
     }
 
+    // Forensic: dump initial block-snapshot state so we can diff against
+    // canonical docs as they arrive via onSnapshot below.
+    try {
+      const table = flatMovements
+        .filter((fm) => fm.stepType === 'exercise' && fm.movementIndex !== -1)
+        .map((fm) => ({
+          name: fm.name,
+          movementId: fm.movementId || '(MISSING)',
+          blockVoiceUrl: fm.voiceUrl ? 'present' : 'empty',
+        }));
+      console.info('[VOICE-AUDIT] useMovementHydrate mount — block snapshot', table);
+      console.info('[VOICE-AUDIT] useMovementHydrate desiredIds to subscribe', Array.from(desiredIds));
+    } catch {}
+
     // Subscribe to any new movement docs we don't already watch. We never
     // tear down on flatMovements changes here — only at unmount — because
     // the same movement can disappear and reappear (swap/un-swap) and we
@@ -105,43 +119,53 @@ export function useMovementHydrate(flatMovements: FlatMovement[]): FlatMovement[
       const unsub = onSnapshot(
         doc(db, 'movements', id),
         (snap) => {
-          if (snap.exists()) {
-            const data = snap.data();
-            cacheRef.current[id] = data;
-            recomputeMerged();
-            // Backfill voiceUrl for legacy movements. We only run once per
-            // (session, movement) so a coach mid-regenerate (voiceUrl === '')
-            // doesn't get a redundant call — MovementForm already owns that
-            // flow. We also require a name to send to OpenAI.
-            // The Cloud Function writes voiceUrl/voiceText back to the doc
-            // with admin creds (members can't update /movements from the
-            // client). onSnapshot then pushes the new URL in for the next
-            // rest cue.
-            const name = typeof data.name === 'string' ? data.name.trim() : '';
-            const hasVoice = typeof data.voiceUrl === 'string' && data.voiceUrl.length > 0;
-            if (!hasVoice && name && !voiceGenAttemptedRef.current.has(id)) {
-              voiceGenAttemptedRef.current.add(id);
-              generateMovementVoice(id, name)
-                .then(({ url }) => {
-                  if (!url) {
-                    console.warn(
-                      '[useMovementHydrate] voice backfill returned no URL for',
-                      { movementId: id, name },
-                    );
-                  }
-                })
-                .catch((err) => {
-                  console.warn(
-                    '[useMovementHydrate] voice backfill failed:',
-                    { movementId: id, name },
-                    err,
-                  );
-                });
-            }
+          if (!snap.exists()) {
+            console.warn('[VOICE-AUDIT] canonical movement doc MISSING', { movementId: id });
+            return;
+          }
+          const data = snap.data();
+          cacheRef.current[id] = data;
+          const name = typeof data.name === 'string' ? data.name.trim() : '';
+          const hasVoice = typeof data.voiceUrl === 'string' && data.voiceUrl.length > 0;
+          console.info('[VOICE-AUDIT] onSnapshot movement doc', {
+            movementId: id,
+            name,
+            voiceUrlPresent: hasVoice,
+            voiceUrlPreview: hasVoice ? String(data.voiceUrl).slice(0, 80) : '',
+            voiceTextPresent: typeof data.voiceText === 'string' && data.voiceText.length > 0,
+            attempted: voiceGenAttemptedRef.current.has(id),
+          });
+          recomputeMerged();
+          // Backfill voiceUrl for legacy movements. We only run once per
+          // (session, movement) so a coach mid-regenerate (voiceUrl === '')
+          // doesn't get a redundant call — MovementForm already owns that
+          // flow. We also require a name to send to OpenAI.
+          // The Cloud Function writes voiceUrl/voiceText back to the doc
+          // with admin creds (members can't update /movements from the
+          // client). onSnapshot then pushes the new URL in for the next
+          // rest cue.
+          if (!hasVoice && name && !voiceGenAttemptedRef.current.has(id)) {
+            voiceGenAttemptedRef.current.add(id);
+            console.info('[VOICE-AUDIT] triggering voice backfill', { movementId: id, name });
+            generateMovementVoice(id, name)
+              .then(({ url }) => {
+                if (!url) {
+                  console.warn('[VOICE-AUDIT] backfill returned NO URL', { movementId: id, name });
+                } else {
+                  console.info('[VOICE-AUDIT] backfill returned URL (awaiting Firestore onSnapshot push)', {
+                    movementId: id, name, urlPreview: url.slice(0, 80),
+                  });
+                }
+              })
+              .catch((err) => {
+                console.warn('[VOICE-AUDIT] backfill REJECTED', { movementId: id, name, err });
+              });
+          } else if (!hasVoice && !name) {
+            console.warn('[VOICE-AUDIT] cannot backfill — canonical doc missing name', { movementId: id });
           }
         },
         (err) => {
-          console.warn('[useMovementHydrate] onSnapshot error for', id, err);
+          console.warn('[VOICE-AUDIT] onSnapshot ERROR', { movementId: id, err });
         },
       );
       subsRef.current.set(id, unsub);
