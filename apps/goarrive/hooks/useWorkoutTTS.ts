@@ -1,17 +1,49 @@
 /**
  * useWorkoutTTS — Voice coaching hook for the Workout Player
  *
- * Audio pipeline (in priority order):
+ * Audio pipeline:
  *   1. Pre-generated movement voice clips (OpenAI TTS, stored at voiceUrl)
  *   2. Static platform cues (Firebase Storage MP3s)
- *   3. Web Speech API fallback for any movement without a voiceUrl
  *
- * Movement voice clips are generated via OpenAI TTS (voice: onyx) through
- * the generateVoice Cloud Function. Static platform cues were pre-generated
- * and stored in Firebase Storage. Web Speech is the real-time fallback.
+ * Web Speech / expo-speech are intentionally NOT part of the normal audible
+ * path. When a voiceUrl is missing or fails to load, we log the gap and stay
+ * silent rather than speaking the text via device speech — the robotic device
+ * voice sounded cheap compared to the OpenAI clips and was overlapping the
+ * static cues (e.g. "Next up" MP3 + "Next up, {movement}" device speech).
  *
- * Uses expo-speech on native, Web Audio API + Web Speech on web.
- * Respects the global audio mute toggle.
+ * Sequencing model (queue-based, not timer-based):
+ *   Every cue and voice clip is pushed onto a single FIFO queue and played
+ *   one at a time. Each clip's natural `ended` event (plus a small fixed
+ *   QUEUE_GAP_MS gap) triggers the next dequeue. This replaces the old
+ *   setTimeout ladder (1100ms → 1800ms) that was guessing at clip lengths —
+ *   under the old approach, a long movement-name voice clip would overlap
+ *   with the subsequent "next up" or rest countdown because the next cue
+ *   fired on a fixed timer instead of waiting for the previous audio to end.
+ *
+ *   Expected sequence when work → rest:
+ *     [countdown_3] → [rest] → [next_up] → [movement voice]
+ *     (each item waits for the previous `ended` event + QUEUE_GAP_MS)
+ *   Expected sequence when rest → work:
+ *     [countdown_3 (rest)] → [go] → work phase begins
+ *
+ *   Invalidation rules:
+ *     • Skip:  stopAllAudio() bumps runIdRef, flushes queue, stops current audio.
+ *     • Pause: flushes queue + stops current audio (runIdRef NOT bumped so that
+ *              anything already spoken stays tracked via lastSpokenRef).
+ *     • Mute:  flushes queue; future enqueues are silently dropped.
+ *     • Phase change: no forced flush — queued items from the previous phase
+ *       (e.g. "rest" cue enqueued at end of work) are allowed to complete
+ *       naturally. The late-voiceUrl watcher gates on `timeLeft > 3.5` so we
+ *       never enqueue a long voice clip into the rest→work countdown window.
+ *
+ * End-of-workout audio rule (single source of truth):
+ *   - If the workout has an Outro block, the long completion clip
+ *     (`workout_complete_long`) plays once when the outro phase begins, and
+ *     the per-exercise countdown does NOT also fire `workout_complete` for
+ *     the last exercise (the outro itself is the last step).
+ *   - If there is no Outro block, the short `workout_complete` MP3 plays
+ *     once when the last exercise's timer hits 0. The arpeggio tone in
+ *     audioCues.ts is no longer used for end-of-workout to avoid stacking.
  */
 import { useEffect, useRef, useCallback, useState } from 'react';
 import * as Speech from 'expo-speech';
@@ -64,13 +96,6 @@ const CUES = {
   dig_deep: CUE_URL('dig_deep'),
   dont_stop: CUE_URL('dont_stop'),
   stay_strong: CUE_URL('stay_strong'),
-  looking_good: CUE_URL('looking_good'),
-  nice_form: CUE_URL('nice_form'),
-  great_work: CUE_URL('great_work'),
-  well_done: CUE_URL('well_done'),
-  fantastic_effort: CUE_URL('fantastic_effort'),
-  proud_of_you: CUE_URL('proud_of_you'),
-  nice_work_rest: CUE_URL('nice_work_rest'),
 } as const;
 
 type CueKey = keyof typeof CUES;
@@ -91,9 +116,13 @@ function preloadCue(key: CueKey): void {
   }
 }
 
-// Pre-load the most commonly used cues immediately
+// Pre-load the most commonly used cues immediately. `go` is critical: without
+// it preloaded, the first rest's "Go" cue has to fetch over network on first
+// use and can arrive after the work phase has already started, making the
+// first rest-to-work transition silent while later rests (with `go` cached in
+// audioPool) play cleanly.
 const PRIORITY_CUES: CueKey[] = [
-  'countdown_3', 'countdown_3_rest', 'rest', 'halfway',
+  'countdown_3', 'countdown_3_rest', 'rest', 'go', 'halfway',
   'workout_complete', 'next_up', 'you_got_this', 'keep_pushing',
   'almost_there', 'workout_starting', 'lets_get_started',
 ];
@@ -102,9 +131,18 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
   setTimeout(() => PRIORITY_CUES.forEach(preloadCue), 2000);
 }
 
+// Natural gap between consecutive clips. Not a guess at clip length — the
+// queue already waits for the previous clip's `ended` event before starting
+// this gap. Just enough breathing room so cues don't feel smushed together.
+const QUEUE_GAP_MS = 220;
+
 // ── Types ────────────────────────────────────────────────────────────
 type Phase = 'ready' | 'work' | 'rest' | 'swap' | 'complete'
   | 'intro' | 'outro' | 'demo' | 'transition' | 'waterBreak' | 'grabEquipment';
+
+type QueueItem =
+  | { kind: 'cue'; key: CueKey; context: string; runId: number }
+  | { kind: 'voice'; url: string; context: string; runId: number };
 
 interface UseWorkoutTTSOptions {
   phase: Phase;
@@ -141,40 +179,182 @@ export function useWorkoutTTS({
   const [isTTSAvailable, setIsTTSAvailable] = useState(true);
   const halfwaySpokenRef = useRef<boolean>(false);
   const countdownSpokenRef = useRef<number>(-1);
+  const restCountdownSpokenRef = useRef<number>(-1);
   const welcomeSpokenRef = useRef<boolean>(false);
-  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Mirror isPaused for use inside setTimeout-deferred callbacks. Without this
-  // a cue scheduled before pause (e.g. the 900ms gap between "next up" and the
-  // movement voice) would still fire after the user pauses.
+  // Records which rest phase we've already spoken the movement name for, and
+  // the movementId we were expecting. If the next-movement voiceUrl isn't in
+  // Firestore yet at rest start (legacy doc being backfilled in the
+  // background), we leave this pending and a separate effect enqueues the
+  // clip retroactively when the URL shows up via onSnapshot.
+  const pendingMovementVoiceRef = useRef<
+    { restKey: string; movementId: string; name: string; context: string } | null
+  >(null);
+
+  // Mirror isPaused for synchronous use inside the queue pump callbacks.
   const isPausedRef = useRef(isPaused);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
 
-  // Tracks every deferred voice/speak timer so Skip can cancel them before
-  // they fire. Without this, a Skip during the 900ms gap between "next up"
-  // and the movement voice would leave the old movement name queued and it
-  // would overlap with the next state's audio.
-  const pendingTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
-  const scheduleAudio = useCallback((fn: () => void, ms: number) => {
-    const id = setTimeout(() => {
-      pendingTimersRef.current.delete(id);
-      fn();
-    }, ms);
-    pendingTimersRef.current.add(id);
-  }, []);
+  // ── Audio queue state ───────────────────────────────────────────────
+  // One-item-at-a-time FIFO. Every cue and voice clip goes through this
+  // queue; nothing plays out-of-band. The queue guarantees:
+  //   1. Only one audio element is playing at any moment (no overlap).
+  //   2. The next item starts only after the previous one's `ended` event
+  //      fires (no cutoffs — we never guess at clip length).
+  //   3. Skip / Mute flushes the queue atomically via a runId bump so any
+  //      already-enqueued items that have become stale are discarded.
+  const queueRef = useRef<QueueItem[]>([]);
+  const isPlayingRef = useRef<boolean>(false);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Monotonic counter; bumped by stopAllAudio() to invalidate in-flight items.
+  const runIdRef = useRef<number>(0);
+  // setTimeout handle for the QUEUE_GAP_MS gap between clips — tracked so we
+  // can cancel it on flush (otherwise a pending gap-timer would fire pumpQueue
+  // just after a flush and start playing whatever arrived next).
+  const gapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Cancels every audio channel at once: pending deferred cues, the active
-  // MP3/voiceUrl clip, Web Speech utterance, and native expo-speech. Called
-  // from Skip (resetSpoken=true) so the new skip target's cues fire fresh,
-  // and from Pause (resetSpoken=false) where we want cues to resume where
-  // they left off on unpause.
+  const logSpeechSuppressed = useCallback(
+    (context: string, text: string) => {
+      if (isMuted || ttsDisabled || isPausedRef.current) return;
+      console.warn(
+        '[useWorkoutTTS] Web Speech suppressed (no OpenAI/MP3 cue available):',
+        context,
+        { text: text.slice(0, 120) },
+      );
+    },
+    [isMuted, ttsDisabled],
+  );
+
+  // Plays the next queued item. Called after each `ended` event + gap, and
+  // whenever a new item is enqueued while the queue is idle. Idempotent — if
+  // already playing, does nothing. Drops stale items (bumped runId) without
+  // playing them.
+  const pumpQueue = useCallback(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    if (isPlayingRef.current) return;
+    if (isPausedRef.current || isMuted || ttsDisabled) return;
+
+    // Drop stale items from the head of the queue.
+    while (queueRef.current.length > 0 && queueRef.current[0].runId !== runIdRef.current) {
+      queueRef.current.shift();
+    }
+    if (queueRef.current.length === 0) return;
+
+    const item = queueRef.current.shift()!;
+    const url = item.kind === 'cue' ? CUES[item.key] : item.url;
+    if (!url) {
+      if (item.kind === 'voice') logSpeechSuppressed(item.context, '');
+      pumpQueue();
+      return;
+    }
+
+    let audio: HTMLAudioElement;
+    try {
+      if (item.kind === 'cue') {
+        const pooled = audioPool[item.key];
+        if (pooled) {
+          audio = pooled;
+          try { audio.currentTime = 0; } catch {}
+        } else {
+          audio = new (window as any).Audio(CUES[item.key]);
+          audioPool[item.key] = audio;
+        }
+      } else {
+        audio = new (window as any).Audio(item.url);
+      }
+    } catch (err) {
+      console.warn('[useWorkoutTTS] audio setup threw', { item, err });
+      pumpQueue();
+      return;
+    }
+
+    isPlayingRef.current = true;
+    currentAudioRef.current = audio;
+    const myRunId = item.runId;
+    let settled = false;
+    const onDone = (reason: string, detail?: unknown) => {
+      if (settled) return;
+      settled = true;
+      if (reason !== 'ended') {
+        console.warn('[useWorkoutTTS] queue item ended early', { item, reason, detail });
+      }
+      if (currentAudioRef.current === audio) currentAudioRef.current = null;
+      isPlayingRef.current = false;
+      // If a flush happened (runId bumped) while we were playing, don't pump —
+      // the flush already cleared the queue and we should stay quiet until the
+      // next enqueue.
+      if (myRunId !== runIdRef.current) return;
+      if (gapTimerRef.current) clearTimeout(gapTimerRef.current);
+      gapTimerRef.current = setTimeout(() => {
+        gapTimerRef.current = null;
+        pumpQueue();
+      }, QUEUE_GAP_MS);
+    };
+    audio.addEventListener('ended', () => onDone('ended'), { once: true });
+    audio.addEventListener(
+      'error',
+      () => onDone('error', (audio as any).error),
+      { once: true },
+    );
+    try {
+      const p = audio.play();
+      if (p && typeof p.then === 'function') {
+        p.catch((err: unknown) => onDone('play-rejected', err));
+      }
+    } catch (err) {
+      onDone('play-threw', err);
+    }
+  }, [isMuted, ttsDisabled, logSpeechSuppressed]);
+
+  // ── Queue API ───────────────────────────────────────────────────────
+  const enqueueCue = useCallback(
+    (key: CueKey, context: string = '') => {
+      if (isMuted || ttsDisabled) return;
+      if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+      queueRef.current.push({ kind: 'cue', key, context, runId: runIdRef.current });
+      pumpQueue();
+    },
+    [isMuted, ttsDisabled, pumpQueue],
+  );
+
+  // Enqueue a dynamic voice URL (OpenAI movement clips). Empty URL logs the
+  // gap and does not enqueue (nothing would play anyway).
+  const enqueueVoice = useCallback(
+    (url: string, context: string) => {
+      if (isMuted || ttsDisabled) {
+        console.warn('[VOICE-AUDIT] enqueueVoice dropped — muted/ttsDisabled', { context, isMuted, ttsDisabled });
+        return;
+      }
+      if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+      if (!url) {
+        console.warn('[VOICE-AUDIT] enqueueVoice dropped — empty url', { context });
+        logSpeechSuppressed(context, '');
+        return;
+      }
+      console.info('[VOICE-AUDIT] enqueueVoice queued', { context, urlPreview: url.slice(0, 80) });
+      queueRef.current.push({ kind: 'voice', url, context, runId: runIdRef.current });
+      pumpQueue();
+    },
+    [isMuted, ttsDisabled, logSpeechSuppressed, pumpQueue],
+  );
+
+  // Flush everything: bump runId so in-flight play()s drop their post-ended
+  // pump, stop the currently playing audio, clear pending items, cancel the
+  // inter-clip gap timer. Called from Skip (resetSpoken=true) so the new skip
+  // target's cues fire fresh, and from Pause (resetSpoken=false) where we
+  // keep track of what was already announced so cues don't double up on
+  // resume.
   const stopAllAudio = useCallback((resetSpoken = true) => {
-    for (const id of pendingTimersRef.current) clearTimeout(id);
-    pendingTimersRef.current.clear();
+    runIdRef.current += 1;
+    queueRef.current.length = 0;
+    if (gapTimerRef.current) {
+      clearTimeout(gapTimerRef.current);
+      gapTimerRef.current = null;
+    }
     try {
       if (currentAudioRef.current) {
         currentAudioRef.current.pause();
-        currentAudioRef.current.currentTime = 0;
+        try { currentAudioRef.current.currentTime = 0; } catch {}
       }
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
         window.speechSynthesis?.cancel();
@@ -182,6 +362,8 @@ export function useWorkoutTTS({
         Speech.stop();
       }
     } catch {}
+    currentAudioRef.current = null;
+    isPlayingRef.current = false;
     if (resetSpoken) {
       countdownSpokenRef.current = -1;
       halfwaySpokenRef.current = false;
@@ -199,95 +381,6 @@ export function useWorkoutTTS({
     }
   }, []);
 
-    // ── Play a dynamic audio URL (movement voice clips from Firebase Storage) ──
-  const playVoiceUrl = useCallback(
-    (url: string, onEnded?: () => void) => {
-      if (isMuted || ttsDisabled || isPausedRef.current) return;
-      if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-      if (!url) return;
-      try {
-        if (currentAudioRef.current) {
-          currentAudioRef.current.pause();
-          currentAudioRef.current.currentTime = 0;
-        }
-        const audio = new (window as any).Audio(url);
-        currentAudioRef.current = audio;
-        if (onEnded) audio.addEventListener('ended', onEnded, { once: true });
-        audio.play().catch(() => {});
-      } catch {
-        // Audio API unavailable
-      }
-    },
-    [isMuted, ttsDisabled],
-  );
-
-  // ── Play a static cue from Firebase Storage ────────────────────
-  const playCue = useCallback(
-    (key: CueKey) => {
-      if (isMuted || ttsDisabled || isPausedRef.current) return;
-      if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-      try {
-        // Stop any currently playing cue
-        if (currentAudioRef.current) {
-          currentAudioRef.current.pause();
-          currentAudioRef.current.currentTime = 0;
-        }
-        let audio = audioPool[key];
-        if (!audio) {
-          audio = new (window as any).Audio(CUES[key]);
-          audioPool[key] = audio;
-        } else {
-          audio.currentTime = 0;
-        }
-        currentAudioRef.current = audio;
-        audio.play().catch(() => {
-          // Autoplay blocked — silently fail
-        });
-      } catch {
-        // Audio API unavailable
-      }
-    },
-    [isMuted, ttsDisabled],
-  );
-
-  // ── Speak dynamic text (movement names) via Web Speech API ──────
-  const speakWeb = useCallback((text: string) => {
-    try {
-      if (typeof window === 'undefined') return;
-      const synth = window.speechSynthesis;
-      if (!synth) return;
-      synth.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'en-US';
-      utterance.rate = 0.95;
-      utterance.pitch = 1.0;
-      synth.speak(utterance);
-    } catch {
-      // Web Speech API unavailable
-    }
-  }, []);
-
-  const speak = useCallback(
-    (text: string) => {
-      if (isMuted || ttsDisabled || isPausedRef.current) return;
-      if (Platform.OS === 'web') {
-        speakWeb(text);
-        return;
-      }
-      try {
-        Speech.stop();
-        Speech.speak(text, {
-          language: 'en-US',
-          rate: 0.95,
-          pitch: 1.0,
-        });
-      } catch {
-        // TTS unavailable
-      }
-    },
-    [isMuted, ttsDisabled, speakWeb],
-  );
-
   // ── Special block announcements ────────────────────────────────────
   useEffect(() => {
     if (isPaused) return;
@@ -299,7 +392,7 @@ export function useWorkoutTTS({
       const key = `intro_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
-        playCue('lets_get_started');
+        enqueueCue('lets_get_started', key);
       }
       return;
     }
@@ -309,37 +402,42 @@ export function useWorkoutTTS({
       const key = `outro_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
-        playCue('workout_complete_long');
+        enqueueCue('workout_complete_long', key);
       }
       return;
     }
 
-    // Demo block
+    // Demo block. Until there's an OpenAI/MP3 cue for "Here's what's coming
+    // up" + the demo movement names, we stay silent (visual list is shown on
+    // screen). Device speech would read the list aloud in the robotic voice,
+    // which clashes with the OpenAI-voiced rest of the player.
     if (phase === 'demo' || (phase === 'work' && stepType === 'demo')) {
       const key = `demo_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
         const movements = current.demoMovements || [];
-        if (movements.length > 0) {
-          const names = movements.map((m: any) => m.name).join(', then ');
-          speak(`Here's what's coming up: ${names}`);
-        } else {
-          speak("Here's what's coming up");
-        }
+        const names = movements.map((m: any) => m.name).join(', then ');
+        logSpeechSuppressed(
+          `demo_block_${currentIndex}`,
+          names ? `Here's what's coming up: ${names}` : "Here's what's coming up",
+        );
       }
       return;
     }
 
-    // Transition block
+    // Transition block. Coach-custom prose doesn't have an OpenAI clip per
+    // transition yet; stay silent and log so we can see which transitions
+    // need voice coverage. The `get_ready` MP3 is played for empty-instruction
+    // transitions since that's a safe static cue.
     if (phase === 'transition' || (phase === 'work' && stepType === 'transition')) {
       const key = `transition_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
         const instruction = current.instructionText || current.description || '';
         if (instruction) {
-          speak(instruction);
+          logSpeechSuppressed(`transition_${currentIndex}`, instruction);
         } else {
-          playCue('get_ready');
+          enqueueCue('get_ready', key);
         }
       }
       return;
@@ -350,11 +448,11 @@ export function useWorkoutTTS({
       const key = `waterBreak_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
-        playCue('water_break');
+        enqueueCue('water_break', key);
       }
       return;
     }
-  }, [phase, current?.stepType, currentIndex, speak, playCue, isPaused]);
+  }, [phase, current?.stepType, currentIndex, logSpeechSuppressed, enqueueCue, isPaused]);
 
   // ── Welcome message on first work phase ─────────────────────────────
   useEffect(() => {
@@ -362,10 +460,10 @@ export function useWorkoutTTS({
     if (phase === 'work' && currentIndex === 0 && !welcomeSpokenRef.current) {
       if (current?.stepType === 'exercise') {
         welcomeSpokenRef.current = true;
-        playCue('workout_starting');
+        enqueueCue('workout_starting', 'welcome');
       }
     }
-  }, [phase, currentIndex, current?.stepType, playCue, isPaused]);
+  }, [phase, currentIndex, current?.stepType, enqueueCue, isPaused]);
 
   // ── Exercise movement announcements ────────────────────────────────
   useEffect(() => {
@@ -375,16 +473,24 @@ export function useWorkoutTTS({
     if (phase === 'work') {
       const key = `work_${currentIndex}_${current.name}`;
       if (lastSpokenRef.current !== key) {
+        const previousKey = lastSpokenRef.current;
         lastSpokenRef.current = key;
         halfwaySpokenRef.current = false;
         countdownSpokenRef.current = -1;
-        // Play "Next up" cue, then play movement name via ElevenLabs voice (or Web Speech fallback)
-        playCue('next_up');
-        const voiceUrl = current.voiceUrl;
-        if (voiceUrl) {
-          scheduleAudio(() => playVoiceUrl(voiceUrl), 900);
-        } else {
-          scheduleAudio(() => speak(current.name), 900);
+        restCountdownSpokenRef.current = -1;
+        // The "Next up, {name}" line normally plays on the rest screen leading
+        // into this movement, so work-start stays silent and the spoken "Go"
+        // closes the rest countdown. But if we arrived at work WITHOUT a
+        // preceding rest announcement (very first movement with no prep, or a
+        // movement with restAfter=0 chained straight into the next), nothing
+        // would have spoken the name — so enqueue it here as a fallback only
+        // in that case. The queue serializes it behind the welcome cue (on
+        // index 0) so no clipping.
+        const announcedByPriorRest = previousKey === `rest_${currentIndex - 1}`
+          || previousKey === `rest_${currentIndex}`;
+        if (!announcedByPriorRest) {
+          const voiceUrl = current.voiceUrl;
+          enqueueVoice(voiceUrl || '', `work_${currentIndex}_${current.name}`);
         }
       }
     } else if (phase === 'rest') {
@@ -392,28 +498,54 @@ export function useWorkoutTTS({
       const key = `rest_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
+        countdownSpokenRef.current = -1;
+        restCountdownSpokenRef.current = -1;
+        pendingMovementVoiceRef.current = null;
         // Synthetic "Get Ready" prep-rest step (movementIndex === -1) plays BEFORE
-        // the first movement of a block, not after one. Don't say "Nice work. Rest."
-        // there — that cue only makes sense after completing a movement.
+        // the first movement of a block.
         const isPrepRest = current?.movementIndex === -1;
         if (nextName) {
-          if (!isPrepRest) playCue('nice_work_rest');
-          const nextVoiceUrl = next?.voiceUrl;
-          const delay = isPrepRest ? 0 : 1800;
-          if (nextVoiceUrl) {
-            scheduleAudio(() => playVoiceUrl(nextVoiceUrl), delay);
+          // Queue order: [rest (enqueued at end of previous work phase)] →
+          // next_up → movement voice. Each waits for the previous `ended`
+          // event + QUEUE_GAP_MS — no fixed-delay guessing, no overlap.
+          enqueueCue('next_up', `rest_${currentIndex}_next_up`);
+          const nextMovementId = (next as any)?.movementId || '';
+          const logContext = `rest_next_up_${nextName}`;
+          const voiceUrl = next?.voiceUrl || '';
+          console.info('[VOICE-AUDIT] rest entry — next-up voice state', {
+            currentIndex,
+            nextName,
+            nextMovementId: nextMovementId || '(MISSING)',
+            voiceUrlPresent: !!voiceUrl,
+            voiceUrlPreview: voiceUrl ? voiceUrl.slice(0, 80) : '',
+          });
+          if (voiceUrl) {
+            enqueueVoice(voiceUrl, logContext);
           } else {
-            scheduleAudio(() => speak(`Next up: ${nextName}`), delay);
+            // Leave pending so the late-voiceUrl watcher enqueues the clip
+            // when useMovementHydrate's onSnapshot backfill lands. No
+            // pre-queued silent placeholder — the queue would drain through
+            // next_up with nothing to announce afterwards and move on.
+            pendingMovementVoiceRef.current = {
+              restKey: key,
+              movementId: nextMovementId,
+              name: nextName,
+              context: logContext,
+            };
+            console.warn(
+              '[VOICE-AUDIT] pending late-arrival watcher armed',
+              { movementId: nextMovementId || '(MISSING)', name: nextName, context: logContext },
+            );
           }
         } else if (!isPrepRest) {
-          playCue('rest_now');
+          enqueueCue('rest_now', `rest_${currentIndex}_rest_now`);
         }
       }
     } else if (phase === 'swap') {
       const key = `swap_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
-        playCue('switch_sides');
+        enqueueCue('switch_sides', key);
       }
     } else if (phase === 'ready') {
       lastSpokenRef.current = '';
@@ -421,7 +553,7 @@ export function useWorkoutTTS({
       halfwaySpokenRef.current = false;
       countdownSpokenRef.current = -1;
     }
-  }, [phase, current?.name, current?.stepType, current?.voiceUrl, currentIndex, next?.name, next?.voiceUrl, speak, playCue, playVoiceUrl, scheduleAudio, isPaused]);
+  }, [phase, current?.name, current?.stepType, current?.voiceUrl, currentIndex, next?.name, next?.voiceUrl, enqueueCue, enqueueVoice, isPaused]);
 
   // ── Halfway announcement (exercise only) ───────────────────────────
   useEffect(() => {
@@ -431,50 +563,134 @@ export function useWorkoutTTS({
     const halfway = Math.floor(currentDuration / 2);
     if (timeLeft === halfway && !halfwaySpokenRef.current) {
       halfwaySpokenRef.current = true;
-      playCue('halfway');
+      enqueueCue('halfway', `halfway_${currentIndex}`);
     }
-  }, [phase, timeLeft, currentDuration, current, playCue, isPaused]);
+  }, [phase, timeLeft, currentDuration, current, enqueueCue, isPaused, currentIndex]);
 
   // ── Countdown voice (exercise only) ────────────────────────────────
-  // At timeLeft === 3, plays the full pre-timed "3, 2, 1" countdown clip.
-  // At timeLeft === 0, plays rest or workout_complete.
+  // At timeLeft === 3, enqueues the full pre-timed "3, 2, 1" countdown clip.
+  // At timeLeft === 0, enqueues rest (or workout_complete).
   useEffect(() => {
     if (isPaused) return;
     if (phase !== 'work' || !current || current.stepType !== 'exercise') return;
     if (currentDuration <= 0) return;
 
-    // Use Math.ceil so a fractional Skip pre-entry (e.g. timeLeft=2.5,
-    // displayed as "3") also triggers the "3, 2, 1" voice cue. timeLeft<=0
-    // catches both the natural 0 tick and the Skip overshoot at -0.5.
     const displayed = Math.max(0, Math.ceil(timeLeft));
     if (displayed === 3 && timeLeft > 0 && countdownSpokenRef.current !== 3) {
       countdownSpokenRef.current = 3;
-      playCue('countdown_3');
+      enqueueCue('countdown_3', `work_countdown_${currentIndex}`);
     } else if (timeLeft <= 0 && countdownSpokenRef.current !== 0) {
       countdownSpokenRef.current = 0;
       const isLastMovement = currentIndex >= total - 1;
+      // End-of-workout audio rule: see header comment for the full table.
+      const nextIsSpecial = next && (next as any).stepType && (next as any).stepType !== 'exercise';
       if (isLastMovement) {
-        playCue('workout_complete');
-      } else {
-        playCue('rest');
+        enqueueCue('workout_complete', `work_end_${currentIndex}`);
+      } else if (!nextIsSpecial) {
+        enqueueCue('rest', `work_end_${currentIndex}`);
       }
     }
-  }, [phase, timeLeft, current, currentDuration, currentIndex, total, playCue, isPaused]);
+  }, [phase, timeLeft, current, currentDuration, currentIndex, total, next, enqueueCue, isPaused]);
+
+  // ── Rest countdown voice (rest → next exercise only) ───────────────
+  // Spoken "3, 2, 1" + "Go" for the rest-exit transition. We only play "Go"
+  // when the next phase is actually an exercise — if rest bleeds into a
+  // special block (demo, transition, water break, outro), that block's own
+  // announcement fires immediately and "Go" would step on it.
+  useEffect(() => {
+    if (isPaused) return;
+    if (phase !== 'rest') return;
+
+    const displayed = Math.max(0, Math.ceil(timeLeft));
+    if (displayed === 3 && timeLeft > 0 && restCountdownSpokenRef.current !== 3) {
+      restCountdownSpokenRef.current = 3;
+      enqueueCue('countdown_3', `rest_countdown_${currentIndex}`);
+    } else if (timeLeft <= 0 && restCountdownSpokenRef.current !== 0) {
+      restCountdownSpokenRef.current = 0;
+      const nextIsExercise = next
+        && (!(next as any).stepType || (next as any).stepType === 'exercise');
+      if (nextIsExercise) {
+        enqueueCue('go', `rest_end_${currentIndex}`);
+      } else {
+        console.warn(
+          '[useWorkoutTTS] rest→? "Go" suppressed (next is not a plain exercise)',
+          {
+            hasNext: !!next,
+            nextStepType: (next as any)?.stepType,
+            nextName: (next as any)?.name,
+            currentIndex,
+            timeLeft,
+          },
+        );
+      }
+    }
+  }, [phase, timeLeft, currentDuration, next, currentIndex, enqueueCue, isPaused]);
+
+  // ── Late-arriving movement-name voice clip ────────────────────────
+  // When a legacy movement's voiceUrl is generated mid-rest (OpenAI TTS
+  // round trip takes 2-5s), useMovementHydrate writes it to Firestore and
+  // onSnapshot pushes the new URL through props. If we already passed the
+  // rest-entry effect (voiceUrl was empty then), this watcher enqueues the
+  // clip when it finally arrives — but only if we still have enough time
+  // left before the rest countdown that the voice can finish without
+  // clipping "3, 2, 1, Go".
+  useEffect(() => {
+    if (isPaused) return;
+    if (phase !== 'rest') return;
+    const pending = pendingMovementVoiceRef.current;
+    if (!pending) return;
+    // Only the movement we were waiting on — never play a stale name.
+    const nextMovementId = (next as any)?.movementId || '';
+    if (pending.movementId && nextMovementId && pending.movementId !== nextMovementId) {
+      console.warn('[VOICE-AUDIT] late-arrival: movementId mismatch — clearing pending', {
+        pendingId: pending.movementId, nextMovementId,
+      });
+      pendingMovementVoiceRef.current = null;
+      return;
+    }
+    const nextVoiceUrl = next?.voiceUrl || '';
+    if (!nextVoiceUrl) return;
+    // Don't enqueue a long voice clip into the rest→work countdown window.
+    if (timeLeft <= 3.5) {
+      console.warn(
+        '[VOICE-AUDIT] late voiceUrl arrived inside rest countdown — skipping',
+        { name: pending.name, timeLeft },
+      );
+      pendingMovementVoiceRef.current = null;
+      return;
+    }
+    pendingMovementVoiceRef.current = null;
+    console.info(
+      '[VOICE-AUDIT] late voiceUrl arrived — enqueuing',
+      { name: pending.name, timeLeft, urlPreview: nextVoiceUrl.slice(0, 80) },
+    );
+    enqueueVoice(nextVoiceUrl, `${pending.context}_late`);
+  }, [phase, timeLeft, next, enqueueVoice, isPaused]);
 
   // ── Pause → silence any audio in flight ─────────────────────────────
-  // Any MP3 cue, Web Speech utterance, or deferred voice cue started just
-  // before the user paused would otherwise keep playing. stopAllAudio
-  // cancels all three at once.
   useEffect(() => {
     if (!isPaused) return;
     stopAllAudio(false);
   }, [isPaused, stopAllAudio]);
 
+  // ── Mute → silence any audio in flight ─────────────────────────────
+  // The `isMuted || ttsDisabled` guards in enqueue/pump prevent *new* cues
+  // from starting, but the currently playing clip and anything already
+  // queued need to be stopped / dropped immediately on mute.
+  useEffect(() => {
+    if (!isMuted) return;
+    stopAllAudio(false);
+  }, [isMuted, stopAllAudio]);
+
   // ── Cleanup ─────────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
-      for (const id of pendingTimersRef.current) clearTimeout(id);
-      pendingTimersRef.current.clear();
+      runIdRef.current += 1;
+      queueRef.current.length = 0;
+      if (gapTimerRef.current) {
+        clearTimeout(gapTimerRef.current);
+        gapTimerRef.current = null;
+      }
       try {
         if (currentAudioRef.current) {
           currentAudioRef.current.pause();

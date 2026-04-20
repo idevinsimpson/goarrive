@@ -87,8 +87,12 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     const nextIdx = currentIndex + 1;
     if (nextIdx >= total) {
       setPhase('complete');
+      // End-of-workout audio is owned by useWorkoutTTS — either the outro's
+      // `workout_complete_long` MP3 (if the workout has an Outro block) or
+      // the short `workout_complete` MP3 fired when the last exercise hits 0.
+      // The arpeggio used to also fire here, which stacked on top. Keep the
+      // success haptic so members still feel the finish.
       if (!silent) {
-        playCue('workoutComplete');
         hapticSuccess();
       }
     } else {
@@ -104,18 +108,19 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
         setPhase(specialPhase);
         setTimeLeft(nextStep.duration ?? 10);
       } else if (nextStep.duration <= 0 && nextStep.restAfter > 0) {
-        // Synthetic "Get Ready" step — skip work, go straight to rest/prep
+        // Synthetic "Get Ready" step — skip work, go straight to rest/prep.
+        // Phase-transition chimes are intentionally gone: all audible cues
+        // belong to the OpenAI/MP3 pipeline in useWorkoutTTS so a tone never
+        // overlaps the spoken "3, 2, 1. Rest." / "Go." countdown pair.
         setPhase('rest');
         setTimeLeft(nextStep.restAfter);
-        if (!silent) playCue('restStart');
       } else {
-        // Exercise — go directly to work
+        // Exercise — go directly to work. No workStart tone chime: it
+        // previously fired concurrently with the spoken "Go" MP3 and was
+        // heard as a beep BETWEEN "3, 2, 1" and "Go".
         setPhase('work');
         setTimeLeft(nextStep.duration ?? 30);
-        if (!silent) {
-          playCue('workStart');
-          hapticHeavy();
-        }
+        if (!silent) hapticHeavy();
       }
     }
   }, [currentIndex, total, flatMovements]);
@@ -134,7 +139,13 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
         // (e.g. n=2.5 displayed as "3") still triggers the cue at the right
         // perceived second. n<=0 catches both natural 0 and Skip overshoot.
         const displayed = Math.max(0, Math.ceil(n));
-        if (phase === 'rest' || phase === 'swap') {
+        if (phase === 'rest') {
+          // Audio for rest's last-3 countdown is owned by useWorkoutTTS
+          // (spoken "3, 2, 1" + "Go" replacing the beeps). Only the haptic
+          // pulse stays here so the wrist still confirms each tick.
+          if (displayed <= 3 && displayed > 0 && n > 0) hapticLight();
+          if (n <= 0) hapticMedium();
+        } else if (phase === 'swap') {
           if (displayed <= 3 && displayed > 0 && n > 0) {
             playCue('countdownTick');
             hapticLight();
@@ -179,14 +190,12 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
       } else if (current?.restAfter > 0) {
         setPhase('rest');
         setTimeLeft(current.restAfter);
-        playCue('restStart');
       } else {
         advanceToNext();
       }
     } else if (phase === 'swap') {
       setPhase('work');
       setTimeLeft(current?.duration ?? 30);
-      playCue('workStart');
     } else if (phase === 'rest') {
       advanceToNext();
     }
@@ -209,11 +218,9 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
       // Synthetic "Get Ready" step — skip work, go straight to rest/prep
       setPhase('rest');
       setTimeLeft(firstStep.restAfter);
-      playCue('restStart');
     } else {
       setPhase('work');
       setTimeLeft(firstStep.duration ?? 30);
-      playCue('workStart');
     }
     hapticHeavy();
   }, [total, flatMovements]);

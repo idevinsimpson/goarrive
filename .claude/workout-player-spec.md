@@ -24,7 +24,7 @@ Nothing in the player is hardcoded. Every screen the member sees is a direct out
 | Toggles `swapSides` on a movement | "SPLIT \| 5 sec ⇄" label + auto side-switch |
 | Uploads movement video | Looping demo video during the work phase |
 | Sets `cropScale` / `cropTranslateX/Y` | Video framing/zoom in the player |
-| Generates `voiceUrl` (ElevenLabs TTS) | Voice announcement of movement name |
+| Generates `voiceUrl` (OpenAI TTS) | Voice announcement of movement name |
 
 ---
 
@@ -276,7 +276,7 @@ The player has a multi-layer audio system driven by coach configuration:
 
 | Audio Type | Source | When It Plays |
 |---|---|---|
-| Movement name announcement | `voiceUrl` (ElevenLabs) | At the start of each movement (during countdown or first second of work) |
+| Movement name announcement | `voiceUrl` (OpenAI TTS) | At the start of each movement (during countdown or first second of work) |
 | Countdown beeps | `audioCues.ts` | 3, 2, 1 before work starts; 3, 2, 1 before rest ends |
 | "Rest... next up, [name]" | TTS via `useWorkoutTTS` | When entering rest phase |
 | "3, 2, 1, go" | `audioCues.ts` | End of countdown phase |
@@ -291,7 +291,7 @@ The following hooks and pipeline are already built and working. The spec changes
 
 - **`useWorkoutFlatten`** — Converts blocks → flat step sequence. Handles Intro/Outro reordering, Demo lookahead, circuit/superset round expansion, swap sides carry-through. ✅ Correct.
 - **`useWorkoutTimer`** — State machine: ready → [special or countdown] → work → [rest/swap] → next. ✅ Correct.
-- **`useWorkoutTTS`** — Voice coaching with ElevenLabs. ✅ Correct.
+- **`useWorkoutTTS`** — Voice coaching with OpenAI TTS (movement clips) + Web Speech / expo-speech fallback. ✅ Correct.
 - **`useMediaPrefetch`** — Prefetches next 1-3 movement videos. ✅ Correct.
 - **`useMovementHydrate`** — Enriches flat steps with movement library data. ✅ Correct.
 - **`useMovementSwap`** — Lets members swap a movement for an alternative. ✅ Correct.

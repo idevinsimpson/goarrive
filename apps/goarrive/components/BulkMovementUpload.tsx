@@ -265,14 +265,19 @@ export default function BulkMovementUpload({
 
       updateItem(item.id, { progress: 0.85 });
 
-      // Step 5: Voice generation (non-blocking)
+      // Step 5: Voice generation (non-blocking).
+      // On failure, write empty voiceUrl so the player falls back to Web
+      // Speech for the new name instead of leaving voiceUrl unset (which
+      // would be fine here for a fresh doc, but keeps the rename path
+      // explicit and consistent).
       if (aiData.name) {
         updateItem(item.id, { status: 'voice', statusText: 'Generating voice...', progress: 0.85 });
         try {
-          const voiceUrl = await generateMovementVoice(docId, aiData.name);
-          if (voiceUrl) {
-            await updateDoc(doc(db, 'movements', docId), { voiceUrl });
-          }
+          const { url, text } = await generateMovementVoice(docId, aiData.name);
+          const update: Record<string, any> = url
+            ? { voiceUrl: url, voiceText: text }
+            : { voiceUrl: '', voiceText: '' };
+          await updateDoc(doc(db, 'movements', docId), update);
         } catch (voiceErr) {
           console.warn('[BulkUpload] Voice generation failed for', item.fileName, voiceErr);
         }
