@@ -29,7 +29,7 @@ export async function generateMovementVoice(
 
     const result = await generateVoice({
       text: movementName,
-      voice: 'onyx',
+      voice: 'nova',
       storagePath: `voice_cache/movements/${movementId}.mp3`,
     });
 

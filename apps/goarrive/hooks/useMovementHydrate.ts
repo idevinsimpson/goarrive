@@ -1,5 +1,5 @@
 /**
- * useMovementHydrate — Enriches flat movements with video/thumbnail data
+ * useMovementHydrate — Enriches flat movements with video/thumbnail/voice data
  *
  * Workout blocks store only movementId, movementName, reps, and sets.
  * The actual videoUrl, thumbnailUrl, coachingCues, and description live
@@ -41,6 +41,7 @@ export function useMovementHydrate(flatMovements: FlatMovement[]): FlatMovement[
             ...fm,
             videoUrl: fm.videoUrl || cached.videoUrl || '',
             thumbnailUrl: fm.thumbnailUrl || cached.thumbnailUrl || '',
+            voiceUrl: fm.voiceUrl || cached.voiceUrl || '',
             description: fm.description || cached.description || '',
             coachingCues: fm.coachingCues || cached.coachingCues || '',
             cropScale: fm.cropScale ?? cached.cropScale ?? 1,
@@ -89,6 +90,7 @@ export function useMovementHydrate(flatMovements: FlatMovement[]): FlatMovement[
             ...fm,
             videoUrl: fm.videoUrl || cached.videoUrl || '',
             thumbnailUrl: fm.thumbnailUrl || cached.thumbnailUrl || '',
+            voiceUrl: fm.voiceUrl || cached.voiceUrl || '',
             description: fm.description || cached.description || '',
             coachingCues: fm.coachingCues || cached.coachingCues || '',
             cropScale: fm.cropScale ?? cached.cropScale ?? 1,

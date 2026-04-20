@@ -7951,7 +7951,7 @@ export const createMissingLedgerEntry = onCall(
 );
 
 // ─── generateVoice — OpenAI TTS for workout cues and movement names ─────────
-// Accepts text + optional voice (onyx, nova), generates MP3 via OpenAI TTS,
+// Accepts text + optional voice (default nova), generates MP3 via gpt-4o-mini-tts,
 // uploads to Firebase Storage, returns the download URL.
 // ─────────────────────────────────────────────────────────────────────────────
 export const generateVoice = onCall(
@@ -7975,7 +7975,7 @@ export const generateVoice = onCall(
       throw new HttpsError('internal', 'OpenAI API key not configured');
     }
 
-    const selectedVoice = voice || 'onyx';
+    const selectedVoice = voice || 'nova';
     const path = storagePath || `voice_cache/tts/${Date.now()}.mp3`;
 
     try {
@@ -7986,9 +7986,10 @@ export const generateVoice = onCall(
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'tts-1',
+          model: 'gpt-4o-mini-tts',
           voice: selectedVoice,
           input: text,
+          instructions: 'Speak clearly and energetically, like a personal trainer coaching a workout.',
         }),
       });
 
@@ -8002,8 +8003,6 @@ export const generateVoice = onCall(
       const bucket = admin.storage().bucket();
       const file = bucket.file(path);
       await file.save(audioBuffer, { contentType: 'audio/mpeg' });
-      await file.makePublic();
-
       const url = `https://storage.googleapis.com/${bucket.name}/${path}`;
       return { url, path };
     } catch (err: any) {
