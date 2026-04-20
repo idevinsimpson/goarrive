@@ -7268,7 +7268,7 @@ Return ONLY valid JSON, no markdown, no explanation.`;
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const analyzeMovementReps = onCall(
-  { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60 },
+  { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60, invoker: 'public' },
   async (request) => {
     const { gifUrl } = request.data as { gifUrl?: string };
 
@@ -7965,7 +7965,7 @@ export const createMissingLedgerEntry = onCall(
 // onyx-generated clip would be reused indefinitely after the default changed.
 // ─────────────────────────────────────────────────────────────────────────────
 export const generateVoice = onCall(
-  { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 30 },
+  { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 30, invoker: 'public' },
   async (request) => {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required');
