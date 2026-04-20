@@ -62,6 +62,14 @@ export interface FlatMovement {
    * + the standalone voiceUrl, eliminating the gap and unifying the delivery.
    */
   nextUpVoiceUrl?: string;
+  /**
+   * Combined "3, 2, 1. Rest. Next up, {name}." phrase clip URL (Voicemaker
+   * ai3-Aria with break tags). Injected by useTransitionPhrases, keyed on
+   * this movement's own name. The player looks up `next.workRestNextUpVoiceUrl`
+   * at the end of the previous work phase and enqueues it at timeLeft===3
+   * instead of countdown_3 + rest + next-up phrase.
+   */
+  workRestNextUpVoiceUrl?: string;
 
   // ── Phase 3: Special block fields ───────────────────────────────
   /** What kind of step this is — determines which player screen renders */

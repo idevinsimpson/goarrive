@@ -27,7 +27,34 @@ import { useEffect, useState, useRef } from 'react';
 import { db } from '../lib/firebase';
 import { doc, onSnapshot, type Unsubscribe } from 'firebase/firestore';
 import type { FlatMovement } from './useWorkoutFlatten';
-import { generateMovementVoice, MOVEMENT_VOICE_NAME } from '../utils/generateMovementVoice';
+import { generateMovementVoice } from '../utils/generateMovementVoice';
+import {
+  TTS_PROVIDER,
+  TTS_VOICE_ID,
+  TTS_VOICE_EFFECT,
+} from '../utils/ttsProviderConfig';
+
+/**
+ * Returns true when the doc's stored TTS metadata matches the current active
+ * provider/voice/effect. Falls back to the legacy `voiceName === voiceId`
+ * check for clips written before ttsProvider/voiceEffect existed (those are
+ * almost certainly OpenAI nova and should regen onto Voicemaker).
+ */
+function isStoredVoiceCurrent(cached: any): boolean {
+  const storedProvider = typeof cached?.ttsProvider === 'string' ? cached.ttsProvider : '';
+  const storedVoiceId = typeof cached?.voiceId === 'string'
+    ? cached.voiceId
+    : (typeof cached?.voiceName === 'string' ? cached.voiceName : '');
+  const storedEffect = typeof cached?.voiceEffect === 'string' ? cached.voiceEffect : '';
+  // Legacy clips have no ttsProvider field → treat as wrong provider so they
+  // regenerate under Voicemaker. Effect missing on legacy is fine because the
+  // provider mismatch already forces regen.
+  if (!storedProvider) return false;
+  if (storedProvider !== TTS_PROVIDER) return false;
+  if (storedVoiceId !== TTS_VOICE_ID) return false;
+  if (storedEffect !== TTS_VOICE_EFFECT) return false;
+  return true;
+}
 
 function mergeFromCache(fm: FlatMovement, cached: any): FlatMovement {
   // Canonical wins for identity + audio so a rename always propagates.
@@ -36,18 +63,19 @@ function mergeFromCache(fm: FlatMovement, cached: any): FlatMovement {
   // for the name rather than speaking the stale block snapshot's clip. The
   // backfill effect below kicks off generation so the next phase has audio.
   //
-  // Wrong-voice guard: when the canonical doc's voiceName doesn't match the
-  // current MOVEMENT_VOICE_NAME, we blank the local voiceUrl so the player
-  // won't play the stale wrong-voice clip. The backfill effect below triggers
-  // regeneration; onSnapshot pushes the nova URL back when the server writes
-  // it, and the next rest cue picks it up.
+  // Wrong-provider/voice/effect guard: when the canonical doc's stored TTS
+  // metadata doesn't match the current active provider+voice+effect, we
+  // blank the local voiceUrl so the player won't play the stale wrong-voice
+  // clip. The backfill effect below triggers regeneration; onSnapshot pushes
+  // the new URL back when the server writes it, and the next rest cue picks
+  // it up.
   const canonicalName = typeof cached.name === 'string' && cached.name.trim()
     ? cached.name
     : fm.name;
-  const voiceNameOk = typeof cached.voiceName === 'string' && cached.voiceName === MOVEMENT_VOICE_NAME;
-  const canonicalVoiceUrl = typeof cached.voiceUrl === 'string' && voiceNameOk
+  const voiceCurrent = isStoredVoiceCurrent(cached);
+  const canonicalVoiceUrl = typeof cached.voiceUrl === 'string' && voiceCurrent
     ? cached.voiceUrl
-    : (voiceNameOk ? (fm.voiceUrl || '') : '');
+    : (voiceCurrent ? (fm.voiceUrl || '') : '');
   return {
     ...fm,
     name: canonicalName,
@@ -134,22 +162,27 @@ export function useMovementHydrate(flatMovements: FlatMovement[]): FlatMovement[
           cacheRef.current[id] = data;
           const name = typeof data.name === 'string' ? data.name.trim() : '';
           const hasVoice = typeof data.voiceUrl === 'string' && data.voiceUrl.length > 0;
-          const storedVoiceName = typeof data.voiceName === 'string' ? data.voiceName : '';
-          const voiceNameOk = storedVoiceName === MOVEMENT_VOICE_NAME;
+          const storedProvider = typeof data.ttsProvider === 'string' ? data.ttsProvider : '';
+          const storedVoiceId = typeof data.voiceId === 'string'
+            ? data.voiceId
+            : (typeof data.voiceName === 'string' ? data.voiceName : '');
+          const storedEffect = typeof data.voiceEffect === 'string' ? data.voiceEffect : '';
+          const voiceCurrent = isStoredVoiceCurrent(data);
           // Regenerate when either (a) the movement has no clip at all (legacy
-          // backfill), or (b) it has a clip from a different voice than the
-          // current canonical one — e.g. movements cached with "onyx" before
-          // nova shipped. mergeFromCache blanks the local voiceUrl in case (b)
-          // so the wrong-voice clip doesn't play in the meantime.
-          const needsRegen = !hasVoice || !voiceNameOk;
+          // backfill), or (b) it has a clip from a different provider/voice/
+          // effect than the current canonical one — e.g. movements cached with
+          // OpenAI nova before Voicemaker ai3-Aria shipped. mergeFromCache
+          // blanks the local voiceUrl in case (b) so the stale clip doesn't
+          // play in the meantime.
+          const needsRegen = !hasVoice || !voiceCurrent;
           console.info('[VOICE-AUDIT] onSnapshot movement doc', {
             movementId: id,
             name,
             voiceUrlPresent: hasVoice,
             voiceUrlPreview: hasVoice ? String(data.voiceUrl).slice(0, 80) : '',
             voiceTextPresent: typeof data.voiceText === 'string' && data.voiceText.length > 0,
-            storedVoiceName,
-            voiceNameOk,
+            storedProvider, storedVoiceId, storedEffect,
+            voiceCurrent,
             needsRegen,
             isGlobal: data.isGlobal === true,
             coachId: typeof data.coachId === 'string' ? data.coachId : '',
@@ -159,14 +192,16 @@ export function useMovementHydrate(flatMovements: FlatMovement[]): FlatMovement[
           // Backfill voiceUrl for legacy movements OR correct wrong-voice clips.
           // We only run once per (session, movement) so a coach mid-regenerate
           // (voiceUrl === '') doesn't get a redundant call — MovementForm
-          // already owns that flow. We also require a name to send to OpenAI.
-          // The Cloud Function writes voiceUrl/voiceText/voiceName back to
-          // the doc with admin creds (members can't update /movements from
-          // the client). onSnapshot then pushes the new URL in for the next
-          // rest cue.
+          // already owns that flow. We also require a name to send to the
+          // provider. The Cloud Function writes voiceUrl/voiceText/voiceName/
+          // ttsProvider/voiceId/voiceEffect back to the doc with admin creds
+          // (members can't update /movements from the client). onSnapshot
+          // then pushes the new URL in for the next rest cue.
           if (needsRegen && name && !voiceGenAttemptedRef.current.has(id)) {
             voiceGenAttemptedRef.current.add(id);
-            const reason = !hasVoice ? 'missing' : `wrong-voice:${storedVoiceName || 'unknown'}`;
+            const reason = !hasVoice
+              ? 'missing'
+              : `wrong-voice:${storedProvider || '?'}/${storedVoiceId || '?'}/${storedEffect || '?'}`;
             console.info('[VOICE-AUDIT] triggering voice backfill', { movementId: id, name, reason });
             generateMovementVoice(id, name)
               .then(({ url }) => {

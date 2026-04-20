@@ -7141,8 +7141,16 @@ export const retryFailedGifGeneration = onSchedule(
 //
 // ME-008: OPENAI_API_KEY must be set as a Firebase secret.
 //         firebase functions:secrets:set OPENAI_API_KEY
+//
+// VOICEMAKER_API_KEY is the alternative TTS provider (Voicemaker.in / ai3-Aria).
+// When generateVoice receives `provider: 'voicemaker'`, it calls Voicemaker
+// instead of OpenAI, downloads the resulting MP3 from the temporary Voicemaker
+// URL (which expires after FileStore hours, default 1h), and writes it into
+// our Firebase Storage cache. The player still consumes Storage URLs only.
+//         firebase functions:secrets:set VOICEMAKER_API_KEY
 // ─────────────────────────────────────────────────────────────────────────────
 const openaiApiKey = defineSecret('OPENAI_API_KEY');
+const voicemakerApiKey = defineSecret('VOICEMAKER_API_KEY');
 
 export const analyzeMovement = onCall(
   { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60, maxInstances: 20, invoker: 'public' },
@@ -7958,56 +7966,91 @@ export const createMissingLedgerEntry = onCall(
   }
 );
 
-// ─── generateVoice — OpenAI TTS for workout cues and movement names ─────────
-// Accepts text + optional voice (default "nova" — fitness-instructor vibe),
-// generates MP3 via OpenAI TTS, uploads to Firebase Storage, returns the
+// ─── generateVoice — provider-pluggable TTS for workout cues + movement names
+// Accepts text + provider/voice config, generates MP3 via the chosen TTS
+// provider (OpenAI or Voicemaker), uploads to Firebase Storage, returns the
 // download URL. When `movementId` is supplied the function also writes
-// { voiceUrl, voiceText, voiceName } to movements/{id} with admin creds —
-// members lack Firestore update permission on /movements, so lazy-backfill
-// from the player can't persist the URL client-side. Coach write paths
-// (MovementForm, BulkMovementUpload) still overwrite with their own updateDoc
-// for the rename/clear flows.
+// { voiceUrl, voiceText, voiceName, ttsProvider, voiceId, voiceEffect } to
+// movements/{id} with admin creds — members lack Firestore update permission
+// on /movements, so lazy-backfill from the player can't persist the URL
+// client-side. Coach write paths (MovementForm, BulkMovementUpload) still
+// overwrite with their own updateDoc for the rename/clear flows.
 //
-// voiceName is stored on the doc so the player can detect wrong-voice legacy
-// clips and trigger regeneration (useMovementHydrate). Without it, an older
-// onyx-generated clip would be reused indefinitely after the default changed.
+// Provider switching:
+//   • provider === 'voicemaker' → calls https://developer.voicemaker.in/api/v1/voice/convert,
+//     downloads the temporary MP3 URL (path field) into our Storage. Voicemaker's
+//     hosted URL expires (FileStore hours, default 1h) so we MUST own the bytes.
+//     Break tags like <break time="700ms"/> are passed through unmodified —
+//     Voicemaker honors them for countdown pacing.
+//   • provider !== 'voicemaker' (default for back-compat) → calls OpenAI TTS
+//     with the existing tts-1 / gpt-4o-mini-tts flow. Break tags MUST NOT be
+//     sent to OpenAI; helpers should build OpenAI text without them.
+//
+// The metadata fields (ttsProvider, voiceId, voiceEffect) let the player
+// invalidate stale clips when any provider/voice/effect setting changes,
+// the same way voiceName previously caught wrong-voice legacy onyx clips.
 // ─────────────────────────────────────────────────────────────────────────────
+type TtsProvider = 'openai' | 'voicemaker';
+
 export const generateVoice = onCall(
-  { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 30, invoker: 'public' },
+  {
+    region: 'us-central1',
+    secrets: [openaiApiKey, voicemakerApiKey],
+    timeoutSeconds: 30,
+    invoker: 'public',
+  },
   async (request) => {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required');
     }
 
-    const { text, voice, storagePath, movementId, model, instructions } = request.data as {
+    const {
+      text,
+      voice,
+      storagePath,
+      movementId,
+      model,
+      instructions,
+      provider,
+      engine,
+      languageCode,
+      sampleRate,
+      effect,
+      masterSpeed,
+      masterPitch,
+      masterVolume,
+      fileStore,
+    } = request.data as {
       text?: string;
       voice?: string;
       storagePath?: string;
       movementId?: string;
       model?: string;
       instructions?: string;
+      provider?: TtsProvider;
+      engine?: string;
+      languageCode?: string;
+      sampleRate?: string;
+      effect?: string;
+      masterSpeed?: string;
+      masterPitch?: string;
+      masterVolume?: string;
+      fileStore?: number;
     };
 
     if (!text || typeof text !== 'string' || text.length === 0) {
       throw new HttpsError('invalid-argument', 'text is required');
     }
-    if (text.length > 500) {
-      throw new HttpsError('invalid-argument', 'text must be under 500 characters');
+    if (text.length > 800) {
+      throw new HttpsError('invalid-argument', 'text must be under 800 characters');
     }
 
-    const apiKey = openaiApiKey.value()?.trim();
-    if (!apiKey) {
-      console.error('[VOICE-AUDIT] generateVoice: apikey layer — OPENAI_API_KEY secret empty');
-      throw new HttpsError('failed-precondition', 'voice:apikey:missing', {
-        layer: 'apikey',
-        reason: 'OPENAI_API_KEY secret is unset or empty on deployed function',
-      });
-    }
-
-    const selectedVoice = voice || 'nova';
+    const selectedProvider: TtsProvider = provider === 'voicemaker' ? 'voicemaker' : 'openai';
+    const selectedVoice = voice || (selectedProvider === 'voicemaker' ? 'ai3-Aria' : 'nova');
+    const selectedEffect = effect || (selectedProvider === 'voicemaker' ? 'friendly' : '');
     // tts-1 / tts-1-hd ignore `instructions`. gpt-4o-mini-tts (and audio
-    // models) honor it for delivery-style control. Caller picks the model;
-    // default stays tts-1 so existing movement-name calls are unchanged.
+    // models) honor it for delivery-style control. Only meaningful for
+    // provider === 'openai'; ignored for Voicemaker.
     const selectedModel = model || 'tts-1';
     const supportsInstructions = selectedModel === 'gpt-4o-mini-tts';
     const path = storagePath || `voice_cache/tts/${Date.now()}.mp3`;
@@ -8016,89 +8059,218 @@ export const generateVoice = onCall(
     const encodedPath = encodeURIComponent(path);
     const cdnUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodedPath}?alt=media`;
 
+    // Helper: writeback movement metadata. Inlined twice (cache hit + post-upload).
+    const runWriteback = async (): Promise<{
+      writeback: 'ok' | 'skipped' | 'missing_doc' | 'failed' | 'no_id';
+      writebackError: string | null;
+    }> => {
+      if (!movementId || typeof movementId !== 'string') {
+        return { writeback: 'skipped', writebackError: null };
+      }
+      try {
+        const ref = db.doc(`movements/${movementId}`);
+        const snap = await ref.get();
+        if (!snap.exists) {
+          console.error('[VOICE-AUDIT] generateVoice: firestore layer — movement doc MISSING', {
+            movementId, uid: request.auth?.uid, storedUrl: cdnUrl,
+          });
+          return { writeback: 'missing_doc', writebackError: null };
+        }
+        // voiceName preserved for back-compat with the existing player guard;
+        // ttsProvider / voiceId / voiceEffect are the new authoritative fields
+        // the wrong-voice guard checks against.
+        await ref.update({
+          voiceUrl: cdnUrl,
+          voiceText: text,
+          voiceName: selectedVoice,
+          ttsProvider: selectedProvider,
+          voiceId: selectedVoice,
+          voiceEffect: selectedEffect || null,
+        });
+        return { writeback: 'ok', writebackError: null };
+      } catch (writeErr: any) {
+        const detail = String(writeErr?.message || writeErr).slice(0, 300);
+        console.error('[VOICE-AUDIT] generateVoice: firestore layer FAILED', {
+          movementId, uid: request.auth?.uid, error: detail,
+        }, writeErr);
+        return { writeback: 'failed', writebackError: detail };
+      }
+    };
+
     // ── Layer 0: Storage cache hit ─────────────────────────────────────────
-    // Path-keyed cache. Phrase / movement helpers hash voice+model+text(+style)
-    // into the storagePath, so a hit here means the exact same generation
-    // already exists. Skip OpenAI to save quota and latency.
+    // Path-keyed cache. Caller hashes provider+voice+effect+model+text into
+    // storagePath, so a hit here means the exact same generation already
+    // exists. Skip the provider call entirely to save quota + latency.
     if (storagePath) {
       try {
         const [exists] = await file.exists();
         if (exists) {
-          console.info('[VOICE-AUDIT] generateVoice: cache hit — skipping OpenAI', {
-            path, model: selectedModel, voice: selectedVoice,
+          console.info('[VOICE-AUDIT] generateVoice: cache hit — skipping provider', {
+            path, provider: selectedProvider, voice: selectedVoice, effect: selectedEffect,
           });
-          // Still run writeback so a freshly hydrated movement doc gets the URL.
-          let writeback: 'ok' | 'skipped' | 'missing_doc' | 'failed' | 'no_id' = 'no_id';
-          let writebackError: string | null = null;
-          if (movementId && typeof movementId === 'string') {
-            try {
-              const ref = db.doc(`movements/${movementId}`);
-              const snap = await ref.get();
-              if (!snap.exists) writeback = 'missing_doc';
-              else {
-                await ref.update({ voiceUrl: cdnUrl, voiceText: text, voiceName: selectedVoice });
-                writeback = 'ok';
-              }
-            } catch (writeErr: any) {
-              writeback = 'failed';
-              writebackError = String(writeErr?.message || writeErr).slice(0, 300);
-            }
-          } else {
-            writeback = 'skipped';
-          }
-          return { url: cdnUrl, path, writeback, writebackError, cached: true };
+          const { writeback, writebackError } = await runWriteback();
+          return {
+            url: cdnUrl,
+            path,
+            writeback,
+            writebackError,
+            cached: true,
+            provider: selectedProvider,
+          };
         }
       } catch (err: any) {
-        // Cache check failure is non-fatal — fall through and regenerate.
         console.warn('[VOICE-AUDIT] generateVoice: cache check failed — regenerating', {
           path, message: String(err?.message || err).slice(0, 200),
         });
       }
     }
 
-    // ── Layer 1: OpenAI TTS ────────────────────────────────────────────────
+    // ── Layer 1: Provider TTS (OpenAI or Voicemaker) ───────────────────────
     let audioBuffer: Buffer;
     try {
-      const openaiBody: Record<string, unknown> = {
-        model: selectedModel,
-        voice: selectedVoice,
-        input: text,
-      };
-      if (instructions && supportsInstructions) {
-        openaiBody.instructions = instructions;
-      } else if (instructions && !supportsInstructions) {
-        console.warn('[VOICE-AUDIT] generateVoice: instructions ignored — model does not support it', {
+      if (selectedProvider === 'voicemaker') {
+        const apiKey = voicemakerApiKey.value()?.trim();
+        if (!apiKey) {
+          console.error('[VOICE-AUDIT] generateVoice: apikey layer — VOICEMAKER_API_KEY secret empty');
+          throw new HttpsError('failed-precondition', 'voice:apikey:missing', {
+            layer: 'apikey',
+            provider: 'voicemaker',
+            reason: 'VOICEMAKER_API_KEY secret is unset or empty on deployed function',
+          });
+        }
+
+        // Voicemaker request body. Break tags inside `Text` are preserved —
+        // the helpers wrap countdown phrasing in <break time="..."/> and
+        // Voicemaker reads them as SSML pauses.
+        const vmBody: Record<string, unknown> = {
+          Engine: engine || 'neural',
+          VoiceId: selectedVoice,
+          LanguageCode: languageCode || 'en-US',
+          Text: text,
+          OutputFormat: 'mp3',
+          SampleRate: sampleRate || '48000',
+          Effect: selectedEffect || 'default',
+          MasterVolume: masterVolume || '0',
+          MasterSpeed: masterSpeed || '0',
+          MasterPitch: masterPitch || '0',
+          // FileStore: hours Voicemaker keeps the temporary URL alive. We
+          // download immediately, but a generous window protects against
+          // transient retry latency. Default 24h matches helper config.
+          FileStore: typeof fileStore === 'number' ? fileStore : 24,
+          ResponseType: 'file',
+        };
+
+        const vmResp = await fetch('https://developer.voicemaker.in/api/v1/voice/convert', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(vmBody),
+        });
+
+        if (!vmResp.ok) {
+          const errBody = (await vmResp.text()).slice(0, 500);
+          console.error('[VOICE-AUDIT] generateVoice: voicemaker layer FAILED', {
+            status: vmResp.status, body: errBody, voice: selectedVoice, effect: selectedEffect,
+          });
+          throw new HttpsError('internal', `voice:voicemaker:${vmResp.status}`, {
+            layer: 'voicemaker',
+            status: vmResp.status,
+            body: errBody,
+          });
+        }
+
+        const vmJson = (await vmResp.json()) as {
+          success?: boolean;
+          path?: string;
+          message?: string;
+          usedChars?: number;
+          remainChars?: number;
+        };
+        if (!vmJson.success || !vmJson.path) {
+          console.error('[VOICE-AUDIT] generateVoice: voicemaker layer — bad response', {
+            body: JSON.stringify(vmJson).slice(0, 400),
+          });
+          throw new HttpsError('internal', 'voice:voicemaker:bad_response', {
+            layer: 'voicemaker',
+            body: JSON.stringify(vmJson).slice(0, 400),
+          });
+        }
+
+        // Download the temporary MP3 from Voicemaker into a Buffer.
+        const downloadResp = await fetch(vmJson.path);
+        if (!downloadResp.ok) {
+          console.error('[VOICE-AUDIT] generateVoice: voicemaker download FAILED', {
+            status: downloadResp.status, srcUrl: vmJson.path,
+          });
+          throw new HttpsError('internal', `voice:voicemaker:download_${downloadResp.status}`, {
+            layer: 'voicemaker',
+            status: downloadResp.status,
+            srcUrl: vmJson.path,
+          });
+        }
+        audioBuffer = Buffer.from(await downloadResp.arrayBuffer());
+        console.info('[VOICE-AUDIT] generateVoice: voicemaker OK', {
+          voice: selectedVoice,
+          effect: selectedEffect,
+          usedChars: vmJson.usedChars,
+          remainChars: vmJson.remainChars,
+          bytes: audioBuffer.length,
+        });
+      } else {
+        const apiKey = openaiApiKey.value()?.trim();
+        if (!apiKey) {
+          console.error('[VOICE-AUDIT] generateVoice: apikey layer — OPENAI_API_KEY secret empty');
+          throw new HttpsError('failed-precondition', 'voice:apikey:missing', {
+            layer: 'apikey',
+            provider: 'openai',
+            reason: 'OPENAI_API_KEY secret is unset or empty on deployed function',
+          });
+        }
+        const openaiBody: Record<string, unknown> = {
           model: selectedModel,
+          voice: selectedVoice,
+          input: text,
+        };
+        if (instructions && supportsInstructions) {
+          openaiBody.instructions = instructions;
+        } else if (instructions && !supportsInstructions) {
+          console.warn('[VOICE-AUDIT] generateVoice: instructions ignored — model does not support it', {
+            model: selectedModel,
+          });
+        }
+        const response = await fetch('https://api.openai.com/v1/audio/speech', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(openaiBody),
         });
-      }
-      const response = await fetch('https://api.openai.com/v1/audio/speech', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(openaiBody),
-      });
 
-      if (!response.ok) {
-        const errorBody = (await response.text()).slice(0, 500);
-        console.error('[VOICE-AUDIT] generateVoice: openai layer FAILED', {
-          status: response.status, body: errorBody, model: selectedModel,
-        });
-        throw new HttpsError('internal', `voice:openai:${response.status}`, {
-          layer: 'openai',
-          status: response.status,
-          body: errorBody,
-        });
-      }
+        if (!response.ok) {
+          const errorBody = (await response.text()).slice(0, 500);
+          console.error('[VOICE-AUDIT] generateVoice: openai layer FAILED', {
+            status: response.status, body: errorBody, model: selectedModel,
+          });
+          throw new HttpsError('internal', `voice:openai:${response.status}`, {
+            layer: 'openai',
+            status: response.status,
+            body: errorBody,
+          });
+        }
 
-      audioBuffer = Buffer.from(await response.arrayBuffer());
+        audioBuffer = Buffer.from(await response.arrayBuffer());
+      }
     } catch (err: any) {
       if (err instanceof HttpsError) throw err;
       const detail = String(err?.message || err).slice(0, 300);
-      console.error('[VOICE-AUDIT] generateVoice: openai layer THREW', { detail }, err);
-      throw new HttpsError('internal', `voice:openai:fetch_failed`, {
-        layer: 'openai',
+      console.error('[VOICE-AUDIT] generateVoice: provider layer THREW', {
+        provider: selectedProvider, detail,
+      }, err);
+      throw new HttpsError('internal', `voice:${selectedProvider}:fetch_failed`, {
+        layer: selectedProvider,
         message: detail,
       });
     }
@@ -8133,39 +8305,19 @@ export const generateVoice = onCall(
     // can log it and the next test shows exactly why the backfill didn't
     // stick. Missing-doc is surfaced as a distinct signal from permission
     // failure.
-    let writeback: 'ok' | 'skipped' | 'missing_doc' | 'failed' | 'no_id' = 'no_id';
-    let writebackError: string | null = null;
-    if (movementId && typeof movementId === 'string') {
-      try {
-        const ref = db.doc(`movements/${movementId}`);
-        const snap = await ref.get();
-        if (!snap.exists) {
-          writeback = 'missing_doc';
-          console.error('[VOICE-AUDIT] generateVoice: firestore layer — movement doc MISSING', {
-            movementId, uid: request.auth.uid, storedUrl: cdnUrl,
-          });
-        } else {
-          await ref.update({ voiceUrl: cdnUrl, voiceText: text, voiceName: selectedVoice });
-          writeback = 'ok';
-          console.info('[VOICE-AUDIT] generateVoice: firestore layer — writeback OK', {
-            movementId, uid: request.auth.uid,
-          });
-        }
-      } catch (writeErr: any) {
-        writeback = 'failed';
-        writebackError = String(writeErr?.message || writeErr).slice(0, 300);
-        console.error('[VOICE-AUDIT] generateVoice: firestore layer FAILED', {
-          movementId, uid: request.auth.uid, error: writebackError,
-        }, writeErr);
-      }
-    } else {
-      writeback = 'skipped';
+    const { writeback, writebackError } = await runWriteback();
+    if (writeback === 'ok') {
+      console.info('[VOICE-AUDIT] generateVoice: firestore layer — writeback OK', {
+        movementId, uid: request.auth.uid, provider: selectedProvider,
+      });
+    }
+    if (!movementId) {
       console.warn('[VOICE-AUDIT] generateVoice: firestore layer — skipped (no movementId)', {
         uid: request.auth.uid, textPreview: text.slice(0, 40),
       });
     }
 
-    return { url: cdnUrl, path, writeback, writebackError };
+    return { url: cdnUrl, path, writeback, writebackError, provider: selectedProvider };
   }
 );
 
