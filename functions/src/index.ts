@@ -220,7 +220,7 @@ export const cleanupReadNotifications = onSchedule(
  * ME-001: Requires STRIPE_SECRET_KEY secret.
  */
 export const createStripeConnectLink = onCall(
-  { secrets: [stripeSecretKey] },
+  { secrets: [stripeSecretKey], invoker: 'public' },
   async (request) => {
     const coachId = request.data?.coachId as string | undefined;
     if (!coachId) throw new HttpsError('invalid-argument', 'coachId is required');
@@ -286,7 +286,7 @@ export const createStripeConnectLink = onCall(
  * ME-001: Requires STRIPE_SECRET_KEY secret.
  */
 export const refreshStripeAccountStatus = onCall(
-  { secrets: [stripeSecretKey] },
+  { secrets: [stripeSecretKey], invoker: 'public' },
   async (request) => {
     const coachId = request.data?.coachId as string | undefined;
     if (!coachId) throw new HttpsError('invalid-argument', 'coachId is required');
@@ -345,7 +345,7 @@ export const refreshStripeAccountStatus = onCall(
  * ME-001: Requires STRIPE_SECRET_KEY secret.
  */
 export const disconnectStripeAccount = onCall(
-  { secrets: [stripeSecretKey] },
+  { secrets: [stripeSecretKey], invoker: 'public' },
   async (request) => {
     const coachId = request.data?.coachId as string | undefined;
     if (!coachId) throw new HttpsError('invalid-argument', 'coachId is required');
@@ -429,7 +429,7 @@ export const disconnectStripeAccount = onCall(
  * RISK-001: CTS + pay-in-full stacking order is unresolved; both amounts stored in snapshot.
  */
 export const createCheckoutSession = onCall(
-  { secrets: [stripeSecretKey] },
+  { secrets: [stripeSecretKey], invoker: 'public' },
   async (request) => {
     const { planId, memberId, paymentOption, commitToSave, nutritionAddOn, displayedMonthlyPrice: clientMonthly, displayedPayInFullTotal: clientPayInFull, billingInterval: clientBillingInterval } = request.data as {
       planId: string;
@@ -1452,7 +1452,7 @@ async function handleChargeRefunded(charge: Stripe.Charge, eventId: string) {
  * ME-005: This function requires STRIPE_SECRET_KEY secret (same as createCheckoutSession).
  */
 export const activateCtsOptIn = onCall(
-  { secrets: [stripeSecretKey] },
+  { secrets: [stripeSecretKey], invoker: 'public' },
   async (request) => {
     const { consentId, planId, memberId } = request.data as {
       consentId: string;
@@ -1722,7 +1722,7 @@ export const addCoach = onCall(
  * Output: { inviteUrl: string, token: string, expiresAt: number }
  */
 export const inviteCoach = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', invoker: 'public' },
   async (request) => {
     // Auth guard: caller must be signed in with admin claim
     const callerUid = request.auth?.uid;
@@ -1790,7 +1790,7 @@ export const inviteCoach = onCall(
  * Output: { success: boolean, coachId: string }
  */
 export const activateCoachInvite = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -1978,7 +1978,7 @@ async function writeAuditLog(entry: {
 
 // ─── 13. manageZoomRoom — Add/update/deactivate Zoom room resources ─────────
 export const manageZoomRoom = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -2118,7 +2118,7 @@ export const manageZoomRoom = onCall(
 
 // ─── 14. createRecurringSlot — Coach assigns a recurring time slot to a member ──
 export const createRecurringSlot = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -2322,7 +2322,7 @@ export const createRecurringSlot = onCall(
 
 // ─── 15. updateRecurringSlot — Pause/cancel/modify a recurring slot ──────────
 export const updateRecurringSlot = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -2834,7 +2834,7 @@ export const generateUpcomingInstances = onSchedule(
 
 // ─── 17. allocateSessionInstance — Assign a Zoom room to a session instance ──
 export const allocateSessionInstance = onCall(
-  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber] },
+  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber], invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -3060,7 +3060,7 @@ export const allocateSessionInstance = onCall(
 
 // ─── 18. allocateAllPendingInstances — Batch allocate all unallocated instances ──
 export const allocateAllPendingInstances = onCall(
-  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber] },
+  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber], invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -3198,7 +3198,7 @@ export const allocateAllPendingInstances = onCall(
 
 // ─── 19. rescheduleInstance — Move a single occurrence to a different date/time ──
 export const rescheduleInstance = onCall(
-  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber] },
+  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber], invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -3306,7 +3306,7 @@ export const rescheduleInstance = onCall(
 
 // ─── 20. cancelInstance — Cancel a single session instance ───────────────────
 export const cancelInstance = onCall(
-  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret] },
+  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret], invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -3636,7 +3636,7 @@ import { MockZoomProvider } from './zoom';
 
 // ─── 22. getSystemHealth — Provider health check for admin dashboard ────────
 export const getSystemHealth = onCall(
-  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber] },
+  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber], invoker: 'public' },
   async () => {
     // Reset cached providers so health check reflects current secret availability
     resetNotificationProviders();
@@ -3740,7 +3740,7 @@ export const processReminders = onSchedule(
 
 // ─── 24. retryDeadLetter — Admin: retry a specific dead-letter item ─────────
 export const retryDeadLetter = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -3802,7 +3802,7 @@ export const retryDeadLetter = onCall(
 
 // ─── 25. getDeadLetterItems — Admin: list unresolved dead-letter items ──────
 export const getDeadLetterItems = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -3824,7 +3824,7 @@ export const getDeadLetterItems = onCall(
 
 // ─── 26. getSessionEventLog — Admin: list session events with filters ───────
 export const getSessionEventLog = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -3993,7 +3993,7 @@ const PHASE_HOSTING_RULES: Record<string, {
 };
 
 export const updateMemberGuidancePhase = onCall(
-  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret] },
+  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret], invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -4196,7 +4196,7 @@ export const getSharedPlan = onRequest(
  * has a corresponding document in the `coaches` collection.
  */
 export const seedMissingCoachDocs = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -4241,7 +4241,7 @@ export const seedMissingCoachDocs = onCall(
  * Input: { targetUid: string }
  */
 export const setAdminRole = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -4283,7 +4283,7 @@ export const setAdminRole = onCall(
  * Output: { members: Array<{ id, name, email, phone, isArchived, planId, planStatus, checkoutStatus, contractMonths, displayMonthlyPrice }> }
  */
 export const adminGetCoachData = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -4717,7 +4717,7 @@ export const enforceCtsAccountability = onSchedule(
  * Auth: caller must be the coach who owns the plan, or a platformAdmin.
  */
 export const waiveCtsFee = onCall(
-  { region: 'us-central1', secrets: [stripeSecretKey] },
+  { region: 'us-central1', secrets: [stripeSecretKey], invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -5237,7 +5237,7 @@ export const detectNoShows = onSchedule(
 
 // ─── requestSkipInstance — Member requests a skip (with coach approval) ──────
 export const requestSkipInstance = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -5408,7 +5408,7 @@ export const requestSkipInstance = onCall(
 // Called during slot creation to catch race conditions where two coaches
 // create overlapping slots simultaneously.
 export const checkSlotConflicts = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -5510,7 +5510,7 @@ export const checkSlotConflicts = onCall(
 // Zoom recording play_url and download_url contain time-limited tokens.
 // This CF fetches a fresh URL via the Zoom API using S2S OAuth.
 export const refreshRecordingUrl = onCall(
-  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret] },
+  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret], invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -5647,7 +5647,7 @@ export const refreshRecordingUrl = onCall(
 
 // ─── regenerateIcalToken — Coach regenerates their iCal feed token ───────────
 export const regenerateIcalToken = onCall(
-  { region: 'us-central1' },
+  { region: 'us-central1', invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -5733,7 +5733,7 @@ function getGoogleOAuth2Client(redirectUri?: string) {
  * Coach calls this to start the OAuth flow.
  */
 export const initGoogleCalendarAuth = onCall(
-  { secrets: [googleClientId, googleClientSecret] },
+  { secrets: [googleClientId, googleClientSecret], invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -5808,7 +5808,7 @@ export const googleCalendarCallback = onRequest(
  * Coach calls this manually or it can be triggered after slot creation.
  */
 export const syncToGoogleCalendar = onCall(
-  { secrets: [googleClientId, googleClientSecret] },
+  { secrets: [googleClientId, googleClientSecret], invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -5897,6 +5897,7 @@ export const syncToGoogleCalendar = onCall(
  * disconnectGoogleCalendar — Remove Google Calendar OAuth tokens from coach document.
  */
 export const disconnectGoogleCalendar = onCall(
+  { invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -5925,7 +5926,7 @@ export const disconnectGoogleCalendar = onCall(
  * The state encodes "coachId:conflict" so the callback knows to store it as a conflict account.
  */
 export const initGcalConflictAuth = onCall(
-  { secrets: [googleClientId, googleClientSecret] },
+  { secrets: [googleClientId, googleClientSecret], invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -6030,7 +6031,7 @@ export const gcalConflictCallback = onRequest(
  * Returns the calendar list so the coach can pick which sub-calendars to check.
  */
 export const listGcalConflictCalendars = onCall(
-  { secrets: [googleClientId, googleClientSecret] },
+  { secrets: [googleClientId, googleClientSecret], invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -6063,7 +6064,7 @@ export const listGcalConflictCalendars = onCall(
  * updateGcalConflictCalendars — Save the selected sub-calendar IDs for a conflict-check account.
  */
 export const updateGcalConflictCalendars = onCall(
-  { secrets: [googleClientId, googleClientSecret] },
+  { secrets: [googleClientId, googleClientSecret], invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -6097,6 +6098,7 @@ export const updateGcalConflictCalendars = onCall(
  * removeGcalConflictAccount — Remove a conflict-check Google account from the coach's list.
  */
 export const removeGcalConflictAccount = onCall(
+  { invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
@@ -7143,7 +7145,7 @@ export const retryFailedGifGeneration = onSchedule(
 const openaiApiKey = defineSecret('OPENAI_API_KEY');
 
 export const analyzeMovement = onCall(
-  { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60, maxInstances: 20 },
+  { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60, maxInstances: 20, invoker: 'public' },
   async (request) => {
     const { gifUrl, contactSheet } = request.data as {
       gifUrl?: string;
@@ -7384,7 +7386,7 @@ No markdown, no explanation.`;
  * ME-001: Requires STRIPE_SECRET_KEY secret.
  */
 export const reconcileConnectedAccountPayments = onCall(
-  { secrets: [stripeSecretKey], timeoutSeconds: 540 },
+  { secrets: [stripeSecretKey], timeoutSeconds: 540, invoker: 'public' },
   async (request) => {
     // Admin-only guard
     const callerUid = request.auth?.uid;
@@ -7671,6 +7673,7 @@ export const reconcileConnectedAccountPayments = onCall(
  * to be calculated and pro-rated.
  */
 export const setProfitShareStartDate = onCall(
+  { invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be logged in');
@@ -7713,6 +7716,7 @@ export const setProfitShareStartDate = onCall(
  * Cap resets January 1 each year.
  */
 export const setYearlyEarningsCap = onCall(
+  { invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be logged in');
@@ -7761,7 +7765,7 @@ export const setYearlyEarningsCap = onCall(
  * ME-001: Requires STRIPE_SECRET_KEY secret.
  */
 export const getConnectedAccountData = onCall(
-  { secrets: [stripeSecretKey] },
+  { secrets: [stripeSecretKey], invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be logged in');
