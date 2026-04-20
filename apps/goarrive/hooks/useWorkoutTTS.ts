@@ -21,12 +21,18 @@
  *   fired on a fixed timer instead of waiting for the previous audio to end.
  *
  *   Expected sequence when work → rest:
- *     [countdown_3] → [rest] → [combined "Next up, {name}." phrase clip]
- *     (each item waits for the previous `ended` event + QUEUE_GAP_MS)
- *     The combined phrase replaces the old next_up MP3 + standalone
- *     movement-name voiceUrl pair — see useNextUpPhrases / generateNextUpPhrase.
+ *     Preferred (combined clip ready):
+ *       [combined "3, 2, 1. Rest. Next up, {name}." Voicemaker clip]
+ *       — one breath, enqueued at work timeLeft===3 via enqueueVoice.
+ *     Fallback (combined clip not ready, swap sides pending, or last movement):
+ *       [countdown_3] → [rest] → [combined "Next up, {name}." phrase clip]
+ *       (each item waits for the previous `ended` event + QUEUE_GAP_MS)
+ *     See useTransitionPhrases / generateTransitionPhrase.
  *   Expected sequence when rest → work:
- *     [countdown_3 (rest)] → [go] → work phase begins
+ *     Preferred (combined clip ready):
+ *       [combined "3, 2, 1. Go." Voicemaker clip]
+ *     Fallback:
+ *       [countdown_3 (rest)] → [go]
  *
  *   Invalidation rules:
  *     • Skip:  stopAllAudio() bumps runIdRef, flushes queue, stops current audio.
@@ -173,6 +179,13 @@ interface UseWorkoutTTSOptions {
   total: number;
   timeLeft: number;
   currentDuration: number;
+  /**
+   * Pre-warmed combined "3, 2, 1. Go." clip URL. When present, the player
+   * enqueues this single clip at rest timeLeft===3 instead of countdown_3
+   * at rest timeLeft===3 + separate `go` at rest timeLeft<=0. When null
+   * (clip still generating or failed), the old two-clip sequence plays.
+   */
+  restGoVoiceUrl?: string | null;
 }
 
 export function useWorkoutTTS({
@@ -186,6 +199,7 @@ export function useWorkoutTTS({
   total,
   timeLeft,
   currentDuration,
+  restGoVoiceUrl = null,
 }: UseWorkoutTTSOptions) {
   const lastSpokenRef = useRef<string>('');
   const [isTTSAvailable, setIsTTSAvailable] = useState(true);
@@ -202,6 +216,17 @@ export function useWorkoutTTS({
   const pendingNextUpPhraseRef = useRef<
     { restKey: string; movementId: string; name: string; context: string } | null
   >(null);
+
+  // When the combined "3, 2, 1. Rest. Next up, {name}." clip fires at work
+  // timeLeft===3, stores the currentIndex. Checked at work timeLeft<=0 to
+  // suppress the standalone `rest` cue, and at rest-entry to suppress the
+  // standalone next-up phrase. Cleared by skip (via stopAllAudio) so a fresh
+  // skip target runs the combined-or-fallback decision again.
+  const combinedWorkRestFiredIndexRef = useRef<number>(-1);
+  // When the combined "3, 2, 1. Go." clip fires at rest timeLeft===3, stores
+  // the currentIndex. Checked at rest timeLeft<=0 to suppress the standalone
+  // `go` cue.
+  const combinedRestGoFiredIndexRef = useRef<number>(-1);
 
   // Mirror isPaused for synchronous use inside the queue pump callbacks.
   const isPausedRef = useRef(isPaused);
@@ -379,6 +404,8 @@ export function useWorkoutTTS({
     if (resetSpoken) {
       countdownSpokenRef.current = -1;
       halfwaySpokenRef.current = false;
+      combinedWorkRestFiredIndexRef.current = -1;
+      combinedRestGoFiredIndexRef.current = -1;
     }
   }, []);
 
@@ -519,7 +546,16 @@ export function useWorkoutTTS({
         // Synthetic "Get Ready" prep-rest step (movementIndex === -1) plays BEFORE
         // the first movement of a block.
         const isPrepRest = current?.movementIndex === -1;
-        if (nextName) {
+        // If the work→rest combined clip already played, it included
+        // "Rest. Next up, {name}." — do not also enqueue the standalone
+        // next-up phrase.
+        const combinedWorkRestFired = combinedWorkRestFiredIndexRef.current === currentIndex;
+        if (combinedWorkRestFired) {
+          console.info(
+            '[VOICE-AUDIT] rest entry — suppressing standalone next-up phrase (combined work→rest→next-up clip already fired)',
+            { currentIndex, nextName },
+          );
+        } else if (nextName) {
           // Queue order: [rest (enqueued at end of previous work phase)] →
           // [combined "Next up, {name}." phrase clip]. One OpenAI clip with
           // style instructions replaces the old next_up MP3 + standalone
@@ -586,8 +622,17 @@ export function useWorkoutTTS({
   }, [phase, timeLeft, currentDuration, current, enqueueCue, isPaused, currentIndex]);
 
   // ── Countdown voice (exercise only) ────────────────────────────────
-  // At timeLeft === 3, enqueues the full pre-timed "3, 2, 1" countdown clip.
-  // At timeLeft === 0, enqueues rest (or workout_complete).
+  // At timeLeft === 3:
+  //   Prefer the combined "3, 2, 1. Rest. Next up, {name}." Voicemaker clip
+  //   (one breath). Falls back to the static countdown_3 MP3 when the
+  //   combined clip isn't ready, the next step isn't a plain exercise, the
+  //   current movement has swapSides (next transition is swap not rest),
+  //   or it's the last movement.
+  // At timeLeft === 0:
+  //   If the combined clip fired, the `rest` word is already in that clip —
+  //   skip the standalone `rest` cue. Otherwise enqueue `rest`. Last movement
+  //   always fires `workout_complete` (no transition clip applies).
+  const nextWorkRestNextUpVoiceUrl = (next as any)?.workRestNextUpVoiceUrl as string | undefined;
   useEffect(() => {
     if (isPaused) return;
     if (phase !== 'work' || !current || current.stepType !== 'exercise') return;
@@ -596,25 +641,44 @@ export function useWorkoutTTS({
     const displayed = Math.max(0, Math.ceil(timeLeft));
     if (displayed === 3 && timeLeft > 0 && countdownSpokenRef.current !== 3) {
       countdownSpokenRef.current = 3;
-      enqueueCue('countdown_3', `work_countdown_${currentIndex}`);
+      const isLastMovement = currentIndex >= total - 1;
+      const nextIsExercise = !!next
+        && (!(next as any).stepType || (next as any).stepType === 'exercise');
+      const hasSwapSidesOngoing = !!current?.swapSides;
+      const combinedUrl = nextWorkRestNextUpVoiceUrl || '';
+      if (!isLastMovement && nextIsExercise && !hasSwapSidesOngoing && combinedUrl) {
+        console.info(
+          '[VOICE-AUDIT] work→rest combined clip — enqueueing one-breath transition',
+          { currentIndex, nextName: (next as any)?.name, urlPreview: combinedUrl.slice(0, 80) },
+        );
+        enqueueVoice(combinedUrl, `work_rest_next_combined_${currentIndex}`);
+        combinedWorkRestFiredIndexRef.current = currentIndex;
+      } else {
+        enqueueCue('countdown_3', `work_countdown_${currentIndex}`);
+      }
     } else if (timeLeft <= 0 && countdownSpokenRef.current !== 0) {
       countdownSpokenRef.current = 0;
       const isLastMovement = currentIndex >= total - 1;
       // End-of-workout audio rule: see header comment for the full table.
       const nextIsSpecial = next && (next as any).stepType && (next as any).stepType !== 'exercise';
+      const combinedFired = combinedWorkRestFiredIndexRef.current === currentIndex;
       if (isLastMovement) {
         enqueueCue('workout_complete', `work_end_${currentIndex}`);
-      } else if (!nextIsSpecial) {
+      } else if (!nextIsSpecial && !combinedFired) {
         enqueueCue('rest', `work_end_${currentIndex}`);
       }
     }
-  }, [phase, timeLeft, current, currentDuration, currentIndex, total, next, enqueueCue, isPaused]);
+  }, [phase, timeLeft, current, currentDuration, currentIndex, total, next, nextWorkRestNextUpVoiceUrl, enqueueCue, enqueueVoice, isPaused]);
 
   // ── Rest countdown voice (rest → next exercise only) ───────────────
-  // Spoken "3, 2, 1" + "Go" for the rest-exit transition. We only play "Go"
-  // when the next phase is actually an exercise — if rest bleeds into a
-  // special block (demo, transition, water break, outro), that block's own
-  // announcement fires immediately and "Go" would step on it.
+  // Spoken "3, 2, 1. Go." for the rest-exit transition.
+  //   At timeLeft === 3: prefer the combined "3, 2, 1. Go." Voicemaker clip
+  //     so the digits and "Go" come from the same breath. Falls back to the
+  //     standalone countdown_3 + separate go cues when the combined clip
+  //     isn't ready or the next step isn't a plain exercise.
+  //   At timeLeft === 0: suppress the standalone `go` cue when the combined
+  //     clip fired (it already said "Go"). Still suppresses when next isn't
+  //     an exercise (demo/transition/waterBreak handle their own cue).
   useEffect(() => {
     if (isPaused) return;
     if (phase !== 'rest') return;
@@ -622,14 +686,26 @@ export function useWorkoutTTS({
     const displayed = Math.max(0, Math.ceil(timeLeft));
     if (displayed === 3 && timeLeft > 0 && restCountdownSpokenRef.current !== 3) {
       restCountdownSpokenRef.current = 3;
-      enqueueCue('countdown_3', `rest_countdown_${currentIndex}`);
+      const nextIsExercise = !!next
+        && (!(next as any).stepType || (next as any).stepType === 'exercise');
+      if (nextIsExercise && restGoVoiceUrl) {
+        console.info(
+          '[VOICE-AUDIT] rest→go combined clip — enqueueing one-breath transition',
+          { currentIndex, urlPreview: restGoVoiceUrl.slice(0, 80) },
+        );
+        enqueueVoice(restGoVoiceUrl, `rest_go_combined_${currentIndex}`);
+        combinedRestGoFiredIndexRef.current = currentIndex;
+      } else {
+        enqueueCue('countdown_3', `rest_countdown_${currentIndex}`);
+      }
     } else if (timeLeft <= 0 && restCountdownSpokenRef.current !== 0) {
       restCountdownSpokenRef.current = 0;
       const nextIsExercise = next
         && (!(next as any).stepType || (next as any).stepType === 'exercise');
-      if (nextIsExercise) {
+      const combinedFired = combinedRestGoFiredIndexRef.current === currentIndex;
+      if (nextIsExercise && !combinedFired) {
         enqueueCue('go', `rest_end_${currentIndex}`);
-      } else {
+      } else if (!nextIsExercise) {
         console.warn(
           '[useWorkoutTTS] rest→? "Go" suppressed (next is not a plain exercise)',
           {
@@ -642,7 +718,7 @@ export function useWorkoutTTS({
         );
       }
     }
-  }, [phase, timeLeft, currentDuration, next, currentIndex, enqueueCue, isPaused]);
+  }, [phase, timeLeft, currentDuration, next, currentIndex, restGoVoiceUrl, enqueueCue, enqueueVoice, isPaused]);
 
   // ── Late-arriving combined "Next up, {name}." phrase clip ────────
   // Pre-warm normally has the phrase URL injected before rest-entry, but

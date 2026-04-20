@@ -43,6 +43,7 @@ import { useMediaPrefetch } from '../hooks/useMediaPrefetch';
 import { useMovementSwap } from '../hooks/useMovementSwap';
 import { useMovementHydrate } from '../hooks/useMovementHydrate';
 import { useNextUpPhrases } from '../hooks/useNextUpPhrases';
+import { useTransitionPhrases } from '../hooks/useTransitionPhrases';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useWorkoutTTS } from '../hooks/useWorkoutTTS';
@@ -90,8 +91,14 @@ export default function WorkoutPlayer({
   // Pre-warm combined "Next up, {name}." phrase clips so the rest screen can
   // play one cohesive cue instead of next_up MP3 + standalone movement voice.
   const phrasedMovements = useNextUpPhrases(hydratedMovements);
+  // Pre-warm combined transition clips: one "3, 2, 1. Rest. Next up, {name}."
+  // per upcoming movement, plus the shared "3, 2, 1. Go." When ready, the
+  // player enqueues a single Voicemaker clip per transition instead of
+  // stitching countdown_3 + rest/go + next-up at playback time.
+  const { flatMovements: transitionPhrasedMovements, restGoVoiceUrl } =
+    useTransitionPhrases(phrasedMovements);
   const [flatOverride, setFlatOverride] = useState<any[] | null>(null);
-  const flatMovements = flatOverride || phrasedMovements;
+  const flatMovements = flatOverride || transitionPhrasedMovements;
 
   const timer = useWorkoutTimer({ flatMovements });
 
@@ -133,6 +140,7 @@ export default function WorkoutPlayer({
     total,
     timeLeft,
     currentDuration: current?.duration ?? 0,
+    restGoVoiceUrl,
   });
 
   // ── Movement swap ─────────────────────────────
