@@ -114,17 +114,34 @@ const CUES = {
 
 type CueKey = keyof typeof CUES;
 
-// ── Audio pool for pre-loaded cues ──────────────────────────────────
+// ── Audio pool for pre-loaded cues AND voice clips ────────────────────
+// Keyed: cue items use `cue:<key>`, voice items use `voice:<url>`. Pooling
+// voice clips matters as much as pooling cues — iOS Safari throttles or
+// silently fails new HTMLAudioElement creations after several elements are
+// alive on the page. The combined transition phrase clips are reused every
+// round (per movement name + the shared restGo); without pooling, each round
+// allocated a fresh element until Safari refused to actually start playback,
+// the `ended` event never fired, and the queue deadlocked while still
+// accepting enqueues. Pool size in a workout is bounded by unique movement
+// count + the static cue keys, so unbounded growth isn't a concern.
 const audioPool: Record<string, HTMLAudioElement> = {};
+
+function poolKeyForCue(key: CueKey): string {
+  return `cue:${key}`;
+}
+function poolKeyForVoice(url: string): string {
+  return `voice:${url}`;
+}
 
 function preloadCue(key: CueKey): void {
   if (Platform.OS !== 'web') return;
   if (typeof window === 'undefined') return;
-  if (audioPool[key]) return;
+  const poolKey = poolKeyForCue(key);
+  if (audioPool[poolKey]) return;
   try {
     const audio = new (window as any).Audio(CUES[key]);
     audio.preload = 'auto';
-    audioPool[key] = audio;
+    audioPool[poolKey] = audio;
   } catch {
     // Audio API unavailable
   }
@@ -267,53 +284,113 @@ export function useWorkoutTTS({
   // already playing, does nothing. Drops stale items (bumped runId) without
   // playing them.
   const pumpQueue = useCallback(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-    if (isPlayingRef.current) return;
-    if (isPausedRef.current || isMuted || ttsDisabled) return;
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      console.info('[VOICE-AUDIT] pumpQueue skipped — non-web platform');
+      return;
+    }
+    if (isPlayingRef.current) {
+      console.info('[VOICE-AUDIT] pumpQueue skipped — isPlayingRef=true', {
+        queueLen: queueRef.current.length,
+        nextContext: queueRef.current[0]?.context,
+      });
+      return;
+    }
+    if (isPausedRef.current || isMuted || ttsDisabled) {
+      console.info('[VOICE-AUDIT] pumpQueue skipped — paused/muted/disabled', {
+        isPaused: isPausedRef.current, isMuted, ttsDisabled,
+        queueLen: queueRef.current.length,
+      });
+      return;
+    }
 
     // Drop stale items from the head of the queue.
+    let droppedStale = 0;
     while (queueRef.current.length > 0 && queueRef.current[0].runId !== runIdRef.current) {
       queueRef.current.shift();
+      droppedStale++;
     }
-    if (queueRef.current.length === 0) return;
+    if (droppedStale > 0) {
+      console.info('[VOICE-AUDIT] pumpQueue dropped stale items', { droppedStale });
+    }
+    if (queueRef.current.length === 0) {
+      console.info('[VOICE-AUDIT] pumpQueue idle — queue empty');
+      return;
+    }
 
+    const queueLenBefore = queueRef.current.length;
     const item = queueRef.current.shift()!;
+    const queueLenAfter = queueRef.current.length;
     const url = item.kind === 'cue' ? CUES[item.key] : item.url;
     if (!url) {
+      console.warn('[VOICE-AUDIT] pumpQueue dequeued empty url — skipping', {
+        context: item.context, queueLenBefore, queueLenAfter,
+      });
       if (item.kind === 'voice') logSpeechSuppressed(item.context, '');
       pumpQueue();
       return;
     }
 
+    const poolKey = item.kind === 'cue' ? poolKeyForCue(item.key) : poolKeyForVoice(item.url);
     let audio: HTMLAudioElement;
+    let pooledHit = false;
     try {
-      if (item.kind === 'cue') {
-        const pooled = audioPool[item.key];
-        if (pooled) {
-          audio = pooled;
-          try { audio.currentTime = 0; } catch {}
-        } else {
-          audio = new (window as any).Audio(CUES[item.key]);
-          audioPool[item.key] = audio;
-        }
+      const pooled = audioPool[poolKey];
+      if (pooled) {
+        audio = pooled;
+        pooledHit = true;
+        try { audio.currentTime = 0; } catch {}
       } else {
-        audio = new (window as any).Audio(item.url);
+        audio = new (window as any).Audio(url);
+        audio.preload = 'auto';
+        audioPool[poolKey] = audio;
       }
     } catch (err) {
-      console.warn('[useWorkoutTTS] audio setup threw', { item, err });
+      console.warn('[VOICE-AUDIT] PLAY SETUP THREW', { context: item.context, err });
       pumpQueue();
       return;
     }
+
+    // Use AbortController to remove ended/error/playing listeners on flush so
+    // a pooled element can't accumulate stale listeners across rounds (an old
+    // listener firing late would mutate isPlayingRef out from under a fresh
+    // play and re-pump the queue mid-clip).
+    const ac =
+      typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const listenerOpts: AddEventListenerOptions = ac
+      ? { once: true, signal: ac.signal }
+      : { once: true };
 
     isPlayingRef.current = true;
     currentAudioRef.current = audio;
     const myRunId = item.runId;
     let settled = false;
+    let started = false;
+    let watchdog: ReturnType<typeof setTimeout> | null = null;
+    console.info('[VOICE-AUDIT] PLAY ATTEMPT', {
+      context: item.context,
+      kind: item.kind,
+      pooledHit,
+      queueLenBefore,
+      queueLenAfter,
+      isPlayingRef: true,
+      readyState: audio.readyState,
+    });
+
     const onDone = (reason: string, detail?: unknown) => {
       if (settled) return;
       settled = true;
-      if (reason !== 'ended') {
-        console.warn('[useWorkoutTTS] queue item ended early', { item, reason, detail });
+      if (watchdog) { clearTimeout(watchdog); watchdog = null; }
+      if (ac) {
+        try { ac.abort(); } catch {}
+      }
+      if (reason === 'ended') {
+        console.info('[VOICE-AUDIT] PLAY ENDED', { context: item.context, started });
+      } else {
+        console.warn('[VOICE-AUDIT] PLAY ENDED EARLY', {
+          context: item.context, reason, started,
+          mediaError: (audio as any).error?.code,
+          detail,
+        });
       }
       if (currentAudioRef.current === audio) currentAudioRef.current = null;
       isPlayingRef.current = false;
@@ -327,20 +404,65 @@ export function useWorkoutTTS({
         pumpQueue();
       }, QUEUE_GAP_MS);
     };
-    audio.addEventListener('ended', () => onDone('ended'), { once: true });
+
+    audio.addEventListener('ended', () => onDone('ended'), listenerOpts);
     audio.addEventListener(
       'error',
       () => onDone('error', (audio as any).error),
-      { once: true },
+      listenerOpts,
     );
+    audio.addEventListener(
+      'playing',
+      () => {
+        started = true;
+        console.info('[VOICE-AUDIT] PLAY STARTED', {
+          context: item.context,
+          duration: audio.duration,
+        });
+      },
+      listenerOpts,
+    );
+
     try {
       const p = audio.play();
       if (p && typeof p.then === 'function') {
-        p.catch((err: unknown) => onDone('play-rejected', err));
+        p.then(
+          () => {
+            console.info('[VOICE-AUDIT] PLAY RESOLVED', {
+              context: item.context, paused: audio.paused, started,
+            });
+          },
+          (err: unknown) => onDone('play-rejected', err),
+        );
       }
     } catch (err) {
       onDone('play-threw', err);
+      return;
     }
+
+    // Watchdog: if play() resolved but the 'playing' event never fires within
+    // 5s, the audio element is wedged (iOS Safari can resolve play() without
+    // actually starting playback after several elements have been created).
+    // Drop the pooled element so the next play creates a fresh one, and pump
+    // the next item so the queue doesn't deadlock.
+    watchdog = setTimeout(() => {
+      if (settled || started) return;
+      console.warn('[VOICE-AUDIT] PLAY STALLED — no `playing` event in 5s', {
+        context: item.context,
+        readyState: audio.readyState,
+        networkState: audio.networkState,
+        paused: audio.paused,
+        currentTime: audio.currentTime,
+        mediaError: (audio as any).error?.code,
+      });
+      // Evict the wedged element from the pool so the next attempt for this
+      // URL/cue creates a fresh HTMLAudioElement.
+      if (audioPool[poolKey] === audio) {
+        try { audio.pause(); } catch {}
+        delete audioPool[poolKey];
+      }
+      onDone('play-stalled');
+    }, 5000);
   }, [isMuted, ttsDisabled, logSpeechSuppressed]);
 
   // ── Queue API ───────────────────────────────────────────────────────
@@ -622,12 +744,24 @@ export function useWorkoutTTS({
   }, [phase, timeLeft, currentDuration, current, enqueueCue, isPaused, currentIndex]);
 
   // ── Countdown voice (exercise only) ────────────────────────────────
-  // At timeLeft === 3:
-  //   Prefer the combined "3, 2, 1. Rest. Next up, {name}." Voicemaker clip
-  //   (one breath). Falls back to the static countdown_3 MP3 when the
-  //   combined clip isn't ready, the next step isn't a plain exercise, the
-  //   current movement has swapSides (next transition is swap not rest),
-  //   or it's the last movement.
+  // Trigger timing rationale (Devin reported the combined clip felt ~1s late):
+  //   The combined clip's SSML opens with a 200ms <break/> lead and ~700ms
+  //   between digits (matched to the visual 1s tick). On iOS Safari the first
+  //   `play()` for a fresh URL adds another ~300–800ms of decode + start
+  //   latency. Triggering at `displayed===3` (timeLeft hits 3) made the audio
+  //   "3" word land ~600–1200ms after the visual "3" appeared — exactly the
+  //   "about a second late" Devin heard. Firing one tick earlier (timeLeft
+  //   hits 4) absorbs that startup latency so the audio digits land in sync.
+  //
+  // At timeLeft === 4 (combined clip path):
+  //   Prefer the combined "3, 2, 1. Rest. Next up, {name}." Voicemaker clip.
+  //   Fires once per movement index (gated by combinedWorkRestFiredIndexRef).
+  //   Falls through to displayed===3 when the combined URL isn't ready, the
+  //   current movement has swapSides (next is swap not rest), the next step
+  //   isn't a plain exercise, or it's the last movement.
+  // At timeLeft === 3 (standalone fallback):
+  //   Enqueue countdown_3 ONLY when the combined clip didn't fire at
+  //   displayed===4 (we'd double up otherwise).
   // At timeLeft === 0:
   //   If the combined clip fired, the `rest` word is already in that clip —
   //   skip the standalone `rest` cue. Otherwise enqueue `rest`. Last movement
@@ -639,23 +773,39 @@ export function useWorkoutTTS({
     if (currentDuration <= 0) return;
 
     const displayed = Math.max(0, Math.ceil(timeLeft));
-    if (displayed === 3 && timeLeft > 0 && countdownSpokenRef.current !== 3) {
-      countdownSpokenRef.current = 3;
+    // displayed===4 is the EARLIEST tick where we can fire the combined clip
+    // and still have ~1s of head start. Guard with countdownSpokenRef so it
+    // only fires once per countdown window. Skip when the work duration is
+    // <=4s (the visual countdown won't have a clean "4,3,2,1" sequence and we
+    // shouldn't pre-empt the cue at workout-start).
+    if (displayed === 4 && timeLeft > 0 && currentDuration > 4 && countdownSpokenRef.current < 0) {
       const isLastMovement = currentIndex >= total - 1;
       const nextIsExercise = !!next
         && (!(next as any).stepType || (next as any).stepType === 'exercise');
       const hasSwapSidesOngoing = !!current?.swapSides;
       const combinedUrl = nextWorkRestNextUpVoiceUrl || '';
       if (!isLastMovement && nextIsExercise && !hasSwapSidesOngoing && combinedUrl) {
+        countdownSpokenRef.current = 4;
         console.info(
-          '[VOICE-AUDIT] work→rest combined clip — enqueueing one-breath transition',
-          { currentIndex, nextName: (next as any)?.name, urlPreview: combinedUrl.slice(0, 80) },
+          '[VOICE-AUDIT] work→rest combined clip — enqueueing one-breath transition (early trigger)',
+          { currentIndex, nextName: (next as any)?.name, urlPreview: combinedUrl.slice(0, 80), timeLeft },
         );
         enqueueVoice(combinedUrl, `work_rest_next_combined_${currentIndex}`);
         combinedWorkRestFiredIndexRef.current = currentIndex;
-      } else {
-        enqueueCue('countdown_3', `work_countdown_${currentIndex}`);
       }
+      // If we didn't fire the combined clip, leave countdownSpokenRef untouched
+      // so the displayed===3 branch below still fires the standalone countdown.
+    }
+    if (displayed === 3 && timeLeft > 0 && countdownSpokenRef.current !== 3 && countdownSpokenRef.current !== 4) {
+      countdownSpokenRef.current = 3;
+      // Combined clip didn't fire at displayed===4 (no URL, swap-sides, last
+      // movement, or special-block next) — fall back to the static countdown.
+      enqueueCue('countdown_3', `work_countdown_${currentIndex}`);
+    } else if (displayed === 3 && timeLeft > 0 && countdownSpokenRef.current === 4) {
+      // Combined clip already fired one second ago — mark the 3-spoken slot
+      // so the timeLeft<=0 branch below correctly identifies that the "3"
+      // window has passed without re-entering this branch.
+      countdownSpokenRef.current = 3;
     } else if (timeLeft <= 0 && countdownSpokenRef.current !== 0) {
       countdownSpokenRef.current = 0;
       const isLastMovement = currentIndex >= total - 1;
@@ -671,11 +821,14 @@ export function useWorkoutTTS({
   }, [phase, timeLeft, current, currentDuration, currentIndex, total, next, nextWorkRestNextUpVoiceUrl, enqueueCue, enqueueVoice, isPaused]);
 
   // ── Rest countdown voice (rest → next exercise only) ───────────────
-  // Spoken "3, 2, 1. Go." for the rest-exit transition.
-  //   At timeLeft === 3: prefer the combined "3, 2, 1. Go." Voicemaker clip
-  //     so the digits and "Go" come from the same breath. Falls back to the
-  //     standalone countdown_3 + separate go cues when the combined clip
-  //     isn't ready or the next step isn't a plain exercise.
+  // Spoken "3, 2, 1. Go." for the rest-exit transition. Same lateness fix as
+  // the work→rest path: trigger the combined clip at displayed===4 (one tick
+  // earlier) so the SSML lead break and iOS Safari decode latency are
+  // absorbed before the audio "3" word needs to land.
+  //   At timeLeft === 4: prefer the combined "3, 2, 1. Go." Voicemaker clip.
+  //     Skipped when the rest duration is <=4s (no clean countdown window).
+  //   At timeLeft === 3: standalone countdown_3 fallback when the combined
+  //     clip didn't fire at the early trigger.
   //   At timeLeft === 0: suppress the standalone `go` cue when the combined
   //     clip fired (it already said "Go"). Still suppresses when next isn't
   //     an exercise (demo/transition/waterBreak handle their own cue).
@@ -684,20 +837,27 @@ export function useWorkoutTTS({
     if (phase !== 'rest') return;
 
     const displayed = Math.max(0, Math.ceil(timeLeft));
-    if (displayed === 3 && timeLeft > 0 && restCountdownSpokenRef.current !== 3) {
-      restCountdownSpokenRef.current = 3;
+    // Note: `currentDuration` here is the just-finished work duration, not the
+    // rest duration — so we can't use it as a "rest is long enough" gate. Just
+    // require timeLeft > 0 and rely on the spoken-ref for once-per-phase guard.
+    if (displayed === 4 && timeLeft > 0 && restCountdownSpokenRef.current < 0) {
       const nextIsExercise = !!next
         && (!(next as any).stepType || (next as any).stepType === 'exercise');
       if (nextIsExercise && restGoVoiceUrl) {
+        restCountdownSpokenRef.current = 4;
         console.info(
-          '[VOICE-AUDIT] rest→go combined clip — enqueueing one-breath transition',
-          { currentIndex, urlPreview: restGoVoiceUrl.slice(0, 80) },
+          '[VOICE-AUDIT] rest→go combined clip — enqueueing one-breath transition (early trigger)',
+          { currentIndex, urlPreview: restGoVoiceUrl.slice(0, 80), timeLeft },
         );
         enqueueVoice(restGoVoiceUrl, `rest_go_combined_${currentIndex}`);
         combinedRestGoFiredIndexRef.current = currentIndex;
-      } else {
-        enqueueCue('countdown_3', `rest_countdown_${currentIndex}`);
       }
+    }
+    if (displayed === 3 && timeLeft > 0 && restCountdownSpokenRef.current !== 3 && restCountdownSpokenRef.current !== 4) {
+      restCountdownSpokenRef.current = 3;
+      enqueueCue('countdown_3', `rest_countdown_${currentIndex}`);
+    } else if (displayed === 3 && timeLeft > 0 && restCountdownSpokenRef.current === 4) {
+      restCountdownSpokenRef.current = 3;
     } else if (timeLeft <= 0 && restCountdownSpokenRef.current !== 0) {
       restCountdownSpokenRef.current = 0;
       const nextIsExercise = next
