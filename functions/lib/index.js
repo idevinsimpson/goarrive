@@ -225,7 +225,7 @@ exports.cleanupReadNotifications = (0, scheduler_1.onSchedule)({ schedule: '0 3 
  *
  * ME-001: Requires STRIPE_SECRET_KEY secret.
  */
-exports.createStripeConnectLink = (0, https_1.onCall)({ secrets: [stripeSecretKey] }, async (request) => {
+exports.createStripeConnectLink = (0, https_1.onCall)({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
     var _a, _b, _c;
     const coachId = (_a = request.data) === null || _a === void 0 ? void 0 : _a.coachId;
     if (!coachId)
@@ -282,7 +282,7 @@ exports.createStripeConnectLink = (0, https_1.onCall)({ secrets: [stripeSecretKe
  * Fetches the latest Stripe account status and syncs it to Firestore.
  * ME-001: Requires STRIPE_SECRET_KEY secret.
  */
-exports.refreshStripeAccountStatus = (0, https_1.onCall)({ secrets: [stripeSecretKey] }, async (request) => {
+exports.refreshStripeAccountStatus = (0, https_1.onCall)({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
     var _a, _b, _c, _d;
     const coachId = (_a = request.data) === null || _a === void 0 ? void 0 : _a.coachId;
     if (!coachId)
@@ -333,7 +333,7 @@ exports.refreshStripeAccountStatus = (0, https_1.onCall)({ secrets: [stripeSecre
  *
  * ME-001: Requires STRIPE_SECRET_KEY secret.
  */
-exports.disconnectStripeAccount = (0, https_1.onCall)({ secrets: [stripeSecretKey] }, async (request) => {
+exports.disconnectStripeAccount = (0, https_1.onCall)({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
     var _a, _b, _c, _d, _e;
     const coachId = (_a = request.data) === null || _a === void 0 ? void 0 : _a.coachId;
     if (!coachId)
@@ -403,7 +403,7 @@ exports.disconnectStripeAccount = (0, https_1.onCall)({ secrets: [stripeSecretKe
  * ME-001: Requires STRIPE_SECRET_KEY secret.
  * RISK-001: CTS + pay-in-full stacking order is unresolved; both amounts stored in snapshot.
  */
-exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey] }, async (request) => {
+exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w;
     const { planId, memberId, paymentOption, commitToSave, nutritionAddOn, displayedMonthlyPrice: clientMonthly, displayedPayInFullTotal: clientPayInFull, billingInterval: clientBillingInterval } = request.data;
     // Billing interval: only applies to 'monthly' (recurring) payment option
@@ -1274,7 +1274,7 @@ async function handleChargeRefunded(charge, eventId) {
  *
  * ME-005: This function requires STRIPE_SECRET_KEY secret (same as createCheckoutSession).
  */
-exports.activateCtsOptIn = (0, https_1.onCall)({ secrets: [stripeSecretKey] }, async (request) => {
+exports.activateCtsOptIn = (0, https_1.onCall)({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
     var _a, _b, _c;
     const { consentId, planId, memberId } = request.data;
     if (!consentId || !planId || !memberId) {
@@ -1482,7 +1482,7 @@ exports.addCoach = (0, https_1.onCall)({ region: 'us-central1' }, async (request
  * Input:  { email: string, displayName: string }
  * Output: { inviteUrl: string, token: string, expiresAt: number }
  */
-exports.inviteCoach = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+exports.inviteCoach = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
     var _a, _b, _c;
     // Auth guard: caller must be signed in with admin claim
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
@@ -1543,7 +1543,7 @@ exports.inviteCoach = (0, https_1.onCall)({ region: 'us-central1' }, async (requ
  * Input:  { token: string }
  * Output: { success: boolean, coachId: string }
  */
-exports.activateCoachInvite = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+exports.activateCoachInvite = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
     var _a, _b, _c;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -1685,7 +1685,7 @@ async function writeAuditLog(entry) {
     await db.collection('scheduling_audit_log').add(Object.assign(Object.assign({}, entry), { createdAt: firestore_2.FieldValue.serverTimestamp() }));
 }
 // ─── 13. manageZoomRoom — Add/update/deactivate Zoom room resources ─────────
-exports.manageZoomRoom = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+exports.manageZoomRoom = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -1808,7 +1808,7 @@ exports.manageZoomRoom = (0, https_1.onCall)({ region: 'us-central1' }, async (r
     throw new https_1.HttpsError('invalid-argument', `Unknown action: ${action}`);
 });
 // ─── 14. createRecurringSlot — Coach assigns a recurring time slot to a member ──
-exports.createRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+exports.createRecurringSlot = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
     var _a, _b;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -1967,7 +1967,7 @@ exports.createRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, asy
     return { success: true, slotId: slotRef.id, instancesGenerated: instances.length };
 });
 // ─── 15. updateRecurringSlot — Pause/cancel/modify a recurring slot ──────────
-exports.updateRecurringSlot = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+exports.updateRecurringSlot = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -2479,7 +2479,7 @@ exports.generateUpcomingInstances = (0, scheduler_1.onSchedule)({ schedule: '0 2
     console.log(`[generateUpcomingInstances] Generated ${totalGenerated} new instances for ${slotsSnap.size} active slots`);
 });
 // ─── 17. allocateSessionInstance — Assign a Zoom room to a session instance ──
-exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber] }, async (request) => {
+exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber], invoker: 'public' }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -2679,7 +2679,7 @@ exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1', s
     return { success: true, roomLabel: allocatedRoom.label, meetingId: meeting.meetingId, providerMode: zoomProvider.mode };
 });
 // ─── 18. allocateAllPendingInstances — Batch allocate all unallocated instances ──
-exports.allocateAllPendingInstances = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber] }, async (request) => {
+exports.allocateAllPendingInstances = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber], invoker: 'public' }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -2801,7 +2801,7 @@ exports.allocateAllPendingInstances = (0, https_1.onCall)({ region: 'us-central1
     return { success: true, allocated, failed, total: instances.length };
 });
 // ─── 19. rescheduleInstance — Move a single occurrence to a different date/time ──
-exports.rescheduleInstance = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber] }, async (request) => {
+exports.rescheduleInstance = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber], invoker: 'public' }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -2893,7 +2893,7 @@ exports.rescheduleInstance = (0, https_1.onCall)({ region: 'us-central1', secret
     return { success: true };
 });
 // ─── 20. cancelInstance — Cancel a single session instance ───────────────────
-exports.cancelInstance = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret] }, async (request) => {
+exports.cancelInstance = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret], invoker: 'public' }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -3191,7 +3191,7 @@ const notifications_1 = require("./notifications");
 const reminders_1 = require("./reminders");
 const zoom_2 = require("./zoom");
 // ─── 22. getSystemHealth — Provider health check for admin dashboard ────────
-exports.getSystemHealth = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber] }, async () => {
+exports.getSystemHealth = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber], invoker: 'public' }, async () => {
     var _a, _b, _c;
     // Reset cached providers so health check reflects current secret availability
     (0, notifications_1.resetNotificationProviders)();
@@ -3289,7 +3289,7 @@ exports.processReminders = (0, scheduler_1.onSchedule)({ schedule: 'every 5 minu
     console.log(`[processReminders] Done: ${stats.processed} processed, ${stats.sent} sent, ${stats.failed} failed, ${stats.skipped} skipped`);
 });
 // ─── 24. retryDeadLetter — Admin: retry a specific dead-letter item ─────────
-exports.retryDeadLetter = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+exports.retryDeadLetter = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
     var _a, _b;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -3348,7 +3348,7 @@ exports.retryDeadLetter = (0, https_1.onCall)({ region: 'us-central1' }, async (
     }
 });
 // ─── 25. getDeadLetterItems — Admin: list unresolved dead-letter items ──────
-exports.getDeadLetterItems = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+exports.getDeadLetterItems = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -3364,7 +3364,7 @@ exports.getDeadLetterItems = (0, https_1.onCall)({ region: 'us-central1' }, asyn
     return snap.docs.map(d => (Object.assign({ id: d.id }, d.data())));
 });
 // ─── 26. getSessionEventLog — Admin: list session events with filters ───────
-exports.getSessionEventLog = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+exports.getSessionEventLog = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -3506,7 +3506,7 @@ const PHASE_HOSTING_RULES = {
         personalZoomRequired: false,
     },
 };
-exports.updateMemberGuidancePhase = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret] }, async (request) => {
+exports.updateMemberGuidancePhase = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret], invoker: 'public' }, async (request) => {
     var _a, _b;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -3686,7 +3686,7 @@ exports.getSharedPlan = (0, https_1.onRequest)({ cors: true, region: 'us-central
  * Iterates all Firebase Auth users with role=coach claims and ensures each
  * has a corresponding document in the `coaches` collection.
  */
-exports.seedMissingCoachDocs = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+exports.seedMissingCoachDocs = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
     var _a, _b, _c, _d, _e;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -3728,7 +3728,7 @@ exports.seedMissingCoachDocs = (0, https_1.onCall)({ region: 'us-central1' }, as
  *
  * Input: { targetUid: string }
  */
-exports.setAdminRole = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+exports.setAdminRole = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
     var _a, _b, _c;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -3760,7 +3760,7 @@ exports.setAdminRole = (0, https_1.onCall)({ region: 'us-central1' }, async (req
  * Input: { coachUid: string }
  * Output: { members: Array<{ id, name, email, phone, isArchived, planId, planStatus, checkoutStatus, contractMonths, displayMonthlyPrice }> }
  */
-exports.adminGetCoachData = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+exports.adminGetCoachData = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
     var _a, _b, _c;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -4134,7 +4134,7 @@ exports.enforceCtsAccountability = (0, scheduler_1.onSchedule)({ schedule: 'ever
  * Input: { feeId: string }
  * Auth: caller must be the coach who owns the plan, or a platformAdmin.
  */
-exports.waiveCtsFee = (0, https_1.onCall)({ region: 'us-central1', secrets: [stripeSecretKey] }, async (request) => {
+exports.waiveCtsFee = (0, https_1.onCall)({ region: 'us-central1', secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
     var _a, _b, _c;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -4603,7 +4603,7 @@ exports.detectNoShows = (0, scheduler_1.onSchedule)({ schedule: '*/30 * * * *', 
     console.log(`[detectNoShows] Done. checked=${checked} marked=${marked} skipped=${skipped}`);
 });
 // ─── requestSkipInstance — Member requests a skip (with coach approval) ──────
-exports.requestSkipInstance = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+exports.requestSkipInstance = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -4756,7 +4756,7 @@ exports.requestSkipInstance = (0, https_1.onCall)({ region: 'us-central1' }, asy
 // ─── checkSlotConflicts — Server-side real-time conflict detection ───────────
 // Called during slot creation to catch race conditions where two coaches
 // create overlapping slots simultaneously.
-exports.checkSlotConflicts = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+exports.checkSlotConflicts = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -4838,7 +4838,7 @@ exports.checkSlotConflicts = (0, https_1.onCall)({ region: 'us-central1' }, asyn
 // ─── refreshRecordingUrl — Proxy to get fresh Zoom recording download URL ───
 // Zoom recording play_url and download_url contain time-limited tokens.
 // This CF fetches a fresh URL via the Zoom API using S2S OAuth.
-exports.refreshRecordingUrl = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret] }, async (request) => {
+exports.refreshRecordingUrl = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret], invoker: 'public' }, async (request) => {
     var _a, _b, _c, _d, _e;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -4953,7 +4953,7 @@ exports.refreshRecordingUrl = (0, https_1.onCall)({ region: 'us-central1', secre
     }
 });
 // ─── regenerateIcalToken — Coach regenerates their iCal feed token ───────────
-exports.regenerateIcalToken = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
+exports.regenerateIcalToken = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -5019,7 +5019,7 @@ function getGoogleOAuth2Client(redirectUri) {
  * initGoogleCalendarAuth — Generate OAuth2 consent URL for Google Calendar.
  * Coach calls this to start the OAuth flow.
  */
-exports.initGoogleCalendarAuth = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret] }, async (request) => {
+exports.initGoogleCalendarAuth = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret], invoker: 'public' }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -5089,7 +5089,7 @@ exports.googleCalendarCallback = (0, https_1.onRequest)({ secrets: [googleClient
  * syncToGoogleCalendar — Push upcoming sessions to Google Calendar as events.
  * Coach calls this manually or it can be triggered after slot creation.
  */
-exports.syncToGoogleCalendar = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret] }, async (request) => {
+exports.syncToGoogleCalendar = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret], invoker: 'public' }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -5172,7 +5172,7 @@ exports.syncToGoogleCalendar = (0, https_1.onCall)({ secrets: [googleClientId, g
 /**
  * disconnectGoogleCalendar — Remove Google Calendar OAuth tokens from coach document.
  */
-exports.disconnectGoogleCalendar = (0, https_1.onCall)(async (request) => {
+exports.disconnectGoogleCalendar = (0, https_1.onCall)({ invoker: 'public' }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -5197,7 +5197,7 @@ exports.disconnectGoogleCalendar = (0, https_1.onCall)(async (request) => {
  * initGcalConflictAuth — Generate OAuth2 consent URL for a conflict-check Google account.
  * The state encodes "coachId:conflict" so the callback knows to store it as a conflict account.
  */
-exports.initGcalConflictAuth = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret] }, async (request) => {
+exports.initGcalConflictAuth = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret], invoker: 'public' }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -5289,7 +5289,7 @@ exports.gcalConflictCallback = (0, https_1.onRequest)({ secrets: [googleClientId
  * listGcalConflictCalendars — List all calendars for a specific conflict-check account.
  * Returns the calendar list so the coach can pick which sub-calendars to check.
  */
-exports.listGcalConflictCalendars = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret] }, async (request) => {
+exports.listGcalConflictCalendars = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret], invoker: 'public' }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -5319,7 +5319,7 @@ exports.listGcalConflictCalendars = (0, https_1.onCall)({ secrets: [googleClient
 /**
  * updateGcalConflictCalendars — Save the selected sub-calendar IDs for a conflict-check account.
  */
-exports.updateGcalConflictCalendars = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret] }, async (request) => {
+exports.updateGcalConflictCalendars = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret], invoker: 'public' }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -5348,7 +5348,7 @@ exports.updateGcalConflictCalendars = (0, https_1.onCall)({ secrets: [googleClie
 /**
  * removeGcalConflictAccount — Remove a conflict-check Google account from the coach's list.
  */
-exports.removeGcalConflictAccount = (0, https_1.onCall)(async (request) => {
+exports.removeGcalConflictAccount = (0, https_1.onCall)({ invoker: 'public' }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -6261,7 +6261,7 @@ exports.retryFailedGifGeneration = (0, scheduler_1.onSchedule)({ schedule: '0 */
 //         firebase functions:secrets:set OPENAI_API_KEY
 // ─────────────────────────────────────────────────────────────────────────────
 const openaiApiKey = (0, params_1.defineSecret)('OPENAI_API_KEY');
-exports.analyzeMovement = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60, maxInstances: 20 }, async (request) => {
+exports.analyzeMovement = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60, maxInstances: 20, invoker: 'public' }, async (request) => {
     var _a, _b, _c, _d, _e;
     const { gifUrl, contactSheet } = request.data;
     if (!gifUrl && !contactSheet) {
@@ -6367,8 +6367,11 @@ Return ONLY valid JSON, no markdown, no explanation.`;
 //
 // Used by the client to create a trimmed one-rep loop GIF derivative.
 // ─────────────────────────────────────────────────────────────────────────────
-exports.analyzeMovementReps = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60 }, async (request) => {
-    var _a, _b, _c, _d;
+exports.analyzeMovementReps = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60, invoker: 'public' }, async (request) => {
+    var _a, _b, _c, _d, _e;
+    if (!((_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid)) {
+        throw new https_1.HttpsError('unauthenticated', 'Authentication required.');
+    }
     const { gifUrl } = request.data;
     if (!gifUrl || typeof gifUrl !== 'string') {
         throw new https_1.HttpsError('invalid-argument', 'gifUrl is required');
@@ -6433,7 +6436,7 @@ No markdown, no explanation.`;
             throw new https_1.HttpsError('internal', `OpenAI API error: ${response.status}`);
         }
         const result = await response.json();
-        const content = ((_d = (_c = (_b = (_a = result.choices) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.message) === null || _c === void 0 ? void 0 : _c.content) === null || _d === void 0 ? void 0 : _d.trim()) || '';
+        const content = ((_e = (_d = (_c = (_b = result.choices) === null || _b === void 0 ? void 0 : _b[0]) === null || _c === void 0 ? void 0 : _c.message) === null || _d === void 0 ? void 0 : _d.content) === null || _e === void 0 ? void 0 : _e.trim()) || '';
         let jsonStr = content;
         if (jsonStr.startsWith('```')) {
             jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
@@ -6470,7 +6473,7 @@ No markdown, no explanation.`;
  *
  * ME-001: Requires STRIPE_SECRET_KEY secret.
  */
-exports.reconcileConnectedAccountPayments = (0, https_1.onCall)({ secrets: [stripeSecretKey], timeoutSeconds: 540 }, async (request) => {
+exports.reconcileConnectedAccountPayments = (0, https_1.onCall)({ secrets: [stripeSecretKey], timeoutSeconds: 540, invoker: 'public' }, async (request) => {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10;
     // Admin-only guard
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
@@ -6709,7 +6712,7 @@ exports.reconcileConnectedAccountPayments = (0, https_1.onCall)({ secrets: [stri
  * This date determines when the coach's profit share earnings begin
  * to be calculated and pro-rated.
  */
-exports.setProfitShareStartDate = (0, https_1.onCall)(async (request) => {
+exports.setProfitShareStartDate = (0, https_1.onCall)({ invoker: 'public' }, async (request) => {
     var _a, _b;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -6746,7 +6749,7 @@ exports.setProfitShareStartDate = (0, https_1.onCall)(async (request) => {
  * If no cap is set for a year, the previous year's cap carries over.
  * Cap resets January 1 each year.
  */
-exports.setYearlyEarningsCap = (0, https_1.onCall)(async (request) => {
+exports.setYearlyEarningsCap = (0, https_1.onCall)({ invoker: 'public' }, async (request) => {
     var _a;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -6788,7 +6791,7 @@ exports.setYearlyEarningsCap = (0, https_1.onCall)(async (request) => {
  *
  * ME-001: Requires STRIPE_SECRET_KEY secret.
  */
-exports.getConnectedAccountData = (0, https_1.onCall)({ secrets: [stripeSecretKey] }, async (request) => {
+exports.getConnectedAccountData = (0, https_1.onCall)({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
     var _a, _b, _c;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -6974,7 +6977,7 @@ exports.createMissingLedgerEntry = (0, https_1.onCall)({ secrets: [stripeSecretK
 // clips and trigger regeneration (useMovementHydrate). Without it, an older
 // onyx-generated clip would be reused indefinitely after the default changed.
 // ─────────────────────────────────────────────────────────────────────────────
-exports.generateVoice = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 30 }, async (request) => {
+exports.generateVoice = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 30, invoker: 'public' }, async (request) => {
     var _a, _b, _c, _d;
     if (!((_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid)) {
         throw new https_1.HttpsError('unauthenticated', 'Sign in required');
