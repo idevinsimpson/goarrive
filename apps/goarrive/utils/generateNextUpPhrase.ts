@@ -32,7 +32,6 @@
 
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { normalizeTtsText, hashTtsText } from './normalizeTtsText';
-import { COACH_STYLE_V, NEXT_UP_STYLE_INSTRUCTIONS } from './coachStyleInstructions';
 
 /** OpenAI voice — must match MOVEMENT_VOICE_NAME for cohesion across the player. */
 export const NEXT_UP_VOICE = 'nova' as const;
@@ -44,18 +43,22 @@ export const NEXT_UP_VOICE = 'nova' as const;
 export const NEXT_UP_MODEL = 'gpt-4o-mini-tts' as const;
 
 /**
- * Cache-invalidation version for the "Next up" clip path. Derived from the
- * shared COACH_STYLE_V so tweaks to the base style brief invalidate every
- * phrase clip across the player in one move.
+ * Bump on any change to NEXT_UP_INSTRUCTIONS to force a cache refresh. Old
+ * clips remain in storage at their old hash but are no longer referenced.
  */
-export const NEXT_UP_INSTRUCTIONS_V = COACH_STYLE_V;
+export const NEXT_UP_INSTRUCTIONS_V = 'v1';
 
 /**
- * Delivery instructions sent to gpt-4o-mini-tts for the "Next up" phrase.
- * Shared coach style brief + "Next up"-specific pacing, so this phrase
- * matches the delivery of the countdown phrase and every other cue.
+ * Delivery instructions sent to gpt-4o-mini-tts. Phrased as a coaching brief
+ * the model can act on, not just adjectives. Read the full string into the
+ * cache hash so any tuning here invalidates old clips.
  */
-export const NEXT_UP_INSTRUCTIONS = NEXT_UP_STYLE_INSTRUCTIONS;
+export const NEXT_UP_INSTRUCTIONS = [
+  'Voice: a female fitness instructor — premium online coach guiding a member through a workout.',
+  'Tone: clear, confident, upbeat, warm, encouraging, energetic but not hype, polished and professional.',
+  'Avoid: robotic, flat, overly dramatic, overly cheerful, generic-assistant, meditation-narrator.',
+  'Pacing: speak as one smooth phrase — no hard pause between "Next up," and the movement name.',
+].join(' ');
 
 export interface NextUpPhraseResult {
   url: string | null;
