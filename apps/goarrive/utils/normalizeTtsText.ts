@@ -4,9 +4,16 @@
  * The same input text must produce the same spoken phrase AND the same cache
  * key, so cache-busting and pronunciation share this single normalization.
  *
- * Handles fitness abbreviations OpenAI mispronounces (DB → dumbbell, KB →
- * kettlebell, etc.), unit words (lbs → pounds), hyphenated terms that read
- * as compounds (T-spine → T spine), duplicated words, and stray punctuation.
+ * Handles fitness abbreviations TTS providers mispronounce (DB → dumbbell, KB
+ * → kettlebell, RDL → Romanian deadlift, etc.), unit words (lbs → pounds),
+ * hyphenated terms that read as compounds (T-spine → T spine), duplicated
+ * words, and stray punctuation.
+ *
+ * Note: stripping the `<` and `>` characters in the punctuation pass would
+ * destroy Voicemaker SSML break tags (<break time="700ms"/>), so this helper
+ * is only safe to call on the *raw movement/cue name* — never on text that
+ * already has break tags spliced in. Helpers that build break-tag phrases
+ * normalize the bare name first, then splice break tags around it.
  */
 
 // Word-boundary substitutions. Order matters: longer/more-specific phrases
@@ -19,6 +26,14 @@ const SUBSTITUTIONS: [RegExp, string][] = [
   [/\bU-handle\b/gi, 'U handle'],
   [/\bV-up\b/gi, 'V up'],
   [/\bX-band\b/gi, 'X band'],
+  [/\bpush-up\b/gi, 'push up'],
+  [/\bpush-ups\b/gi, 'push ups'],
+
+  // Compound spellings TTS slurs ("Pushup" → "Push up" so the verb reads naturally).
+  // Case-preserving: "Pushup" → "push up" (lowercased — TTS pronunciation is the
+  // only consumer of this text, never display).
+  [/\bpushups\b/gi, 'push ups'],
+  [/\bpushup\b/gi, 'push up'],
 
   // Equipment abbreviations (case-insensitive but match as standalone tokens)
   [/\bDB\b/g, 'dumbbell'],
@@ -29,6 +44,11 @@ const SUBSTITUTIONS: [RegExp, string][] = [
   [/\bKBs\b/g, 'kettlebells'],
   [/\bSA\b/g, 'single arm'],
   [/\bSL\b/g, 'single leg'],
+  [/\bOH\b/g, 'overhead'],
+
+  // Lift abbreviations
+  [/\bRDL\b/g, 'Romanian deadlift'],
+  [/\bRDLs\b/g, 'Romanian deadlifts'],
 
   // Units
   [/\blbs?\b/gi, 'pounds'],
@@ -40,7 +60,10 @@ const SUBSTITUTIONS: [RegExp, string][] = [
 
 /**
  * Normalize text for TTS pronunciation and cache key generation.
- * Returns a clean, lowercase-comparable phrase suitable for hashing.
+ * Returns a clean phrase suitable for hashing and for sending to the TTS
+ * provider. Safe to call on bare movement/cue names — NOT safe to call on
+ * text that already contains <break .../> SSML tags (the punctuation pass
+ * strips angle brackets).
  */
 export function normalizeTtsText(input: string): string {
   if (!input) return '';
