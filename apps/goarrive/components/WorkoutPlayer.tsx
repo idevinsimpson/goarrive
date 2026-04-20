@@ -168,8 +168,11 @@ export default function WorkoutPlayer({
   // the canvas centers in the remaining space, so a small overshoot just
   // shifts the canvas up a few px (harmless).
   const SAFE_BOTTOM = (Platform.select({ ios: 34, android: 24, web: 24, default: 16 }) ?? 16) as number;
+  // Mirror SAFE_BOTTOM for the status bar / notch / Dynamic Island at the top.
+  // Without this, PWA + iOS native overlap the logo with the status bar.
+  const SAFE_TOP = (Platform.select({ ios: 47, android: 24, web: 0, default: 0 }) ?? 0) as number;
   const availW = winW;
-  const availH = Math.max(1, winH - SAFE_BOTTOM);
+  const availH = Math.max(1, winH - SAFE_BOTTOM - SAFE_TOP);
   const scale = dimsValid
     ? Math.max(0.0001, Math.min(availW / BASE_W, availH / BASE_H))
     : 1;
@@ -739,8 +742,11 @@ export default function WorkoutPlayer({
   return (
     <Modal visible={visible} animationType="fade" transparent={false}>
       <View style={[st.portraitLockOuter, Platform.OS === 'web'
-        ? ({ paddingBottom: `max(${SAFE_BOTTOM}px, env(safe-area-inset-bottom, ${SAFE_BOTTOM}px))` } as any)
-        : { paddingBottom: SAFE_BOTTOM }]}>
+        ? ({
+            paddingTop: `max(${SAFE_TOP}px, env(safe-area-inset-top, ${SAFE_TOP}px))`,
+            paddingBottom: `max(${SAFE_BOTTOM}px, env(safe-area-inset-bottom, ${SAFE_BOTTOM}px))`,
+          } as any)
+        : { paddingTop: SAFE_TOP, paddingBottom: SAFE_BOTTOM }]}>
       <View style={[st.container, dimsValid && { width: frameW, height: frameH, maxWidth: frameW }]}>
         {/* ── READY state — Block overview grid ─────────────────── */}
         {phase === 'ready' && (() => {
