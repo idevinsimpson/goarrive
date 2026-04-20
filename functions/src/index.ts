@@ -7272,6 +7272,10 @@ Return ONLY valid JSON, no markdown, no explanation.`;
 export const analyzeMovementReps = onCall(
   { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60, invoker: 'public' },
   async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError('unauthenticated', 'Authentication required.');
+    }
+
     const { gifUrl } = request.data as { gifUrl?: string };
 
     if (!gifUrl || typeof gifUrl !== 'string') {
