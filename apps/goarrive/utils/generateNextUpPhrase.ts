@@ -32,12 +32,30 @@
 
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { normalizeTtsText, hashTtsText } from './normalizeTtsText';
-import {
-  COACH_MODEL,
-  COACH_STYLE_V,
-  COACH_VOICE,
-  NEXT_UP_STYLE_INSTRUCTIONS,
-} from './coachStyleInstructions';
+import { COACH_STYLE_V, NEXT_UP_STYLE_INSTRUCTIONS } from './coachStyleInstructions';
+
+/** OpenAI voice — must match MOVEMENT_VOICE_NAME for cohesion across the player. */
+export const NEXT_UP_VOICE = 'nova' as const;
+
+/**
+ * gpt-4o-mini-tts is the smallest OpenAI TTS model that honors `instructions`
+ * for style/delivery control. tts-1 / tts-1-hd ignore instructions entirely.
+ */
+export const NEXT_UP_MODEL = 'gpt-4o-mini-tts' as const;
+
+/**
+ * Cache-invalidation version for the "Next up" clip path. Derived from the
+ * shared COACH_STYLE_V so tweaks to the base style brief invalidate every
+ * phrase clip across the player in one move.
+ */
+export const NEXT_UP_INSTRUCTIONS_V = COACH_STYLE_V;
+
+/**
+ * Delivery instructions sent to gpt-4o-mini-tts for the "Next up" phrase.
+ * Shared coach style brief + "Next up"-specific pacing, so this phrase
+ * matches the delivery of the countdown phrase and every other cue.
+ */
+export const NEXT_UP_INSTRUCTIONS = NEXT_UP_STYLE_INSTRUCTIONS;
 
 export interface NextUpPhraseResult {
   url: string | null;
@@ -57,9 +75,9 @@ export function buildNextUpPhrase(movementName: string): string {
 export function buildNextUpStoragePath(movementName: string): string | null {
   const phrase = buildNextUpPhrase(movementName);
   if (!phrase) return null;
-  const cacheKey = `${COACH_VOICE}|${COACH_MODEL}|${COACH_STYLE_V}|${phrase}`;
+  const cacheKey = `${NEXT_UP_VOICE}|${NEXT_UP_MODEL}|${NEXT_UP_INSTRUCTIONS_V}|${phrase}`;
   const hash = hashTtsText(cacheKey);
-  return `voice_cache/phrases/nextup-${COACH_VOICE}-${hash}.mp3`;
+  return `voice_cache/phrases/nextup-${NEXT_UP_VOICE}-${hash}.mp3`;
 }
 
 export async function generateNextUpPhrase(
@@ -80,13 +98,13 @@ export async function generateNextUpPhrase(
     >(functions, 'generateVoice');
 
     console.info('[VOICE-AUDIT] generateNextUpPhrase calling generateVoice', {
-      movementName, phrase, voice: COACH_VOICE, model: COACH_MODEL, storagePath,
+      movementName, phrase, voice: NEXT_UP_VOICE, model: NEXT_UP_MODEL, storagePath,
     });
     const result = await generateVoice({
       text: phrase,
-      voice: COACH_VOICE,
-      model: COACH_MODEL,
-      instructions: NEXT_UP_STYLE_INSTRUCTIONS,
+      voice: NEXT_UP_VOICE,
+      model: NEXT_UP_MODEL,
+      instructions: NEXT_UP_INSTRUCTIONS,
       storagePath,
     });
     console.info('[VOICE-AUDIT] generateNextUpPhrase resolved', {

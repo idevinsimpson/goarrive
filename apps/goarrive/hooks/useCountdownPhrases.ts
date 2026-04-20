@@ -31,7 +31,6 @@ import {
 export interface CountdownPhraseUrls {
   restCountdownUrl: string | null;
   goCountdownUrl: string | null;
-  swapCountdownUrl: string | null;
 }
 
 // Module-level cache so a second mount of WorkoutPlayer in the same session
@@ -66,9 +65,6 @@ export function useCountdownPhrases(): CountdownPhraseUrls {
   const [goCountdownUrl, setGoCountdownUrl] = useState<string | null>(
     sessionUrlCache.go ?? null,
   );
-  const [swapCountdownUrl, setSwapCountdownUrl] = useState<string | null>(
-    sessionUrlCache.swap ?? null,
-  );
   const startedRef = useRef<boolean>(false);
 
   useEffect(() => {
@@ -96,8 +92,7 @@ export function useCountdownPhrases(): CountdownPhraseUrls {
 
     kickoff('rest', setRestCountdownUrl);
     kickoff('go', setGoCountdownUrl);
-    kickoff('swap', setSwapCountdownUrl);
   }, []);
 
-  return { restCountdownUrl, goCountdownUrl, swapCountdownUrl };
+  return { restCountdownUrl, goCountdownUrl };
 }
