@@ -21,8 +21,10 @@
  *   fired on a fixed timer instead of waiting for the previous audio to end.
  *
  *   Expected sequence when work → rest:
- *     [countdown_3] → [rest] → [next_up] → [movement voice]
+ *     [countdown_3] → [rest] → [combined "Next up, {name}." phrase clip]
  *     (each item waits for the previous `ended` event + QUEUE_GAP_MS)
+ *     The combined phrase replaces the old next_up MP3 + standalone
+ *     movement-name voiceUrl pair — see useNextUpPhrases / generateNextUpPhrase.
  *   Expected sequence when rest → work:
  *     [countdown_3 (rest)] → [go] → work phase begins
  *
@@ -133,8 +135,12 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
 
 // Natural gap between consecutive clips. Not a guess at clip length — the
 // queue already waits for the previous clip's `ended` event before starting
-// this gap. Just enough breathing room so cues don't feel smushed together.
-const QUEUE_GAP_MS = 220;
+// this gap. Tightened from 220ms after the rest flow consolidated to one
+// "Next up, {name}." phrase clip — the long silence between separate
+// "Next up" and movement-name clips was the main offender, and 220ms
+// between [rest]→[combined phrase] still felt awkward. 90ms reads as a
+// natural sentence boundary without bleeding clips into each other.
+const QUEUE_GAP_MS = 90;
 
 // ── Types ────────────────────────────────────────────────────────────
 type Phase = 'ready' | 'work' | 'rest' | 'swap' | 'complete'
@@ -182,12 +188,12 @@ export function useWorkoutTTS({
   const restCountdownSpokenRef = useRef<number>(-1);
   const welcomeSpokenRef = useRef<boolean>(false);
 
-  // Records which rest phase we've already spoken the movement name for, and
-  // the movementId we were expecting. If the next-movement voiceUrl isn't in
-  // Firestore yet at rest start (legacy doc being backfilled in the
-  // background), we leave this pending and a separate effect enqueues the
-  // clip retroactively when the URL shows up via onSnapshot.
-  const pendingMovementVoiceRef = useRef<
+  // Records the rest phase we're waiting on a combined "Next up, {name}."
+  // phrase clip for. Pre-warm normally has it ready by rest-entry, but on
+  // first-ever encounter the phrase generation may still be in flight — in
+  // that case we rest silent and a separate effect enqueues the clip when
+  // its URL arrives via state, provided we still have enough rest time left.
+  const pendingNextUpPhraseRef = useRef<
     { restKey: string; movementId: string; name: string; context: string } | null
   >(null);
 
@@ -466,6 +472,9 @@ export function useWorkoutTTS({
   }, [phase, currentIndex, current?.stepType, enqueueCue, isPaused]);
 
   // ── Exercise movement announcements ────────────────────────────────
+  // Extracted ahead of the effect so the dep array references a flat
+  // identifier (eslint react-hooks rule rejects complex expressions there).
+  const nextNextUpVoiceUrl = (next as any)?.nextUpVoiceUrl as string | undefined;
   useEffect(() => {
     if (isPaused) return;
     if (!current || current.stepType !== 'exercise') return;
@@ -500,40 +509,43 @@ export function useWorkoutTTS({
         lastSpokenRef.current = key;
         countdownSpokenRef.current = -1;
         restCountdownSpokenRef.current = -1;
-        pendingMovementVoiceRef.current = null;
+        pendingNextUpPhraseRef.current = null;
         // Synthetic "Get Ready" prep-rest step (movementIndex === -1) plays BEFORE
         // the first movement of a block.
         const isPrepRest = current?.movementIndex === -1;
         if (nextName) {
           // Queue order: [rest (enqueued at end of previous work phase)] →
-          // next_up → movement voice. Each waits for the previous `ended`
-          // event + QUEUE_GAP_MS — no fixed-delay guessing, no overlap.
-          enqueueCue('next_up', `rest_${currentIndex}_next_up`);
+          // [combined "Next up, {name}." phrase clip]. One OpenAI clip with
+          // style instructions replaces the old next_up MP3 + standalone
+          // movement-name voiceUrl pair so the cue sounds like one coherent
+          // sentence with no audible seam. Pre-warm runs at workout-open;
+          // the URL arrives on the FlatMovement as nextUpVoiceUrl.
           const nextMovementId = (next as any)?.movementId || '';
           const logContext = `rest_next_up_${nextName}`;
-          const voiceUrl = next?.voiceUrl || '';
-          console.info('[VOICE-AUDIT] rest entry — next-up voice state', {
+          const phraseUrl = nextNextUpVoiceUrl || '';
+          console.info('[VOICE-AUDIT] rest entry — combined next-up phrase state', {
             currentIndex,
             nextName,
             nextMovementId: nextMovementId || '(MISSING)',
-            voiceUrlPresent: !!voiceUrl,
-            voiceUrlPreview: voiceUrl ? voiceUrl.slice(0, 80) : '',
+            phraseUrlPresent: !!phraseUrl,
+            phraseUrlPreview: phraseUrl ? phraseUrl.slice(0, 80) : '',
           });
-          if (voiceUrl) {
-            enqueueVoice(voiceUrl, logContext);
+          if (phraseUrl) {
+            enqueueVoice(phraseUrl, logContext);
           } else {
-            // Leave pending so the late-voiceUrl watcher enqueues the clip
-            // when useMovementHydrate's onSnapshot backfill lands. No
-            // pre-queued silent placeholder — the queue would drain through
-            // next_up with nothing to announce afterwards and move on.
-            pendingMovementVoiceRef.current = {
+            // Phrase not ready yet (first encounter, generation still in
+            // flight). Stay silent for this rest per product decision —
+            // device speech is off-brand and the old two-clip fallback is
+            // gone. Late-arrival effect picks it up if it shows up before
+            // the rest countdown window.
+            pendingNextUpPhraseRef.current = {
               restKey: key,
               movementId: nextMovementId,
               name: nextName,
               context: logContext,
             };
             console.warn(
-              '[VOICE-AUDIT] pending late-arrival watcher armed',
+              '[VOICE-AUDIT] next-up phrase not ready — late-arrival watcher armed',
               { movementId: nextMovementId || '(MISSING)', name: nextName, context: logContext },
             );
           }
@@ -553,7 +565,7 @@ export function useWorkoutTTS({
       halfwaySpokenRef.current = false;
       countdownSpokenRef.current = -1;
     }
-  }, [phase, current?.name, current?.stepType, current?.voiceUrl, currentIndex, next?.name, next?.voiceUrl, enqueueCue, enqueueVoice, isPaused]);
+  }, [phase, current?.name, current?.stepType, current?.voiceUrl, currentIndex, next?.name, nextNextUpVoiceUrl, enqueueCue, enqueueVoice, isPaused]);
 
   // ── Halfway announcement (exercise only) ───────────────────────────
   useEffect(() => {
@@ -626,18 +638,16 @@ export function useWorkoutTTS({
     }
   }, [phase, timeLeft, currentDuration, next, currentIndex, enqueueCue, isPaused]);
 
-  // ── Late-arriving movement-name voice clip ────────────────────────
-  // When a legacy movement's voiceUrl is generated mid-rest (OpenAI TTS
-  // round trip takes 2-5s), useMovementHydrate writes it to Firestore and
-  // onSnapshot pushes the new URL through props. If we already passed the
-  // rest-entry effect (voiceUrl was empty then), this watcher enqueues the
-  // clip when it finally arrives — but only if we still have enough time
-  // left before the rest countdown that the voice can finish without
-  // clipping "3, 2, 1, Go".
+  // ── Late-arriving combined "Next up, {name}." phrase clip ────────
+  // Pre-warm normally has the phrase URL injected before rest-entry, but
+  // first-ever encounter of a phrase has to wait on OpenAI (~1-3s). When
+  // useNextUpPhrases pushes the URL into state mid-rest, this watcher
+  // enqueues it — provided we still have enough time before the rest
+  // countdown that the clip can finish without clipping "3, 2, 1, Go".
   useEffect(() => {
     if (isPaused) return;
     if (phase !== 'rest') return;
-    const pending = pendingMovementVoiceRef.current;
+    const pending = pendingNextUpPhraseRef.current;
     if (!pending) return;
     // Only the movement we were waiting on — never play a stale name.
     const nextMovementId = (next as any)?.movementId || '';
@@ -645,26 +655,26 @@ export function useWorkoutTTS({
       console.warn('[VOICE-AUDIT] late-arrival: movementId mismatch — clearing pending', {
         pendingId: pending.movementId, nextMovementId,
       });
-      pendingMovementVoiceRef.current = null;
+      pendingNextUpPhraseRef.current = null;
       return;
     }
-    const nextVoiceUrl = next?.voiceUrl || '';
-    if (!nextVoiceUrl) return;
-    // Don't enqueue a long voice clip into the rest→work countdown window.
+    const phraseUrl = (next as any)?.nextUpVoiceUrl || '';
+    if (!phraseUrl) return;
+    // Don't enqueue a phrase clip into the rest→work countdown window.
     if (timeLeft <= 3.5) {
       console.warn(
-        '[VOICE-AUDIT] late voiceUrl arrived inside rest countdown — skipping',
+        '[VOICE-AUDIT] late next-up phrase arrived inside rest countdown — skipping',
         { name: pending.name, timeLeft },
       );
-      pendingMovementVoiceRef.current = null;
+      pendingNextUpPhraseRef.current = null;
       return;
     }
-    pendingMovementVoiceRef.current = null;
+    pendingNextUpPhraseRef.current = null;
     console.info(
-      '[VOICE-AUDIT] late voiceUrl arrived — enqueuing',
-      { name: pending.name, timeLeft, urlPreview: nextVoiceUrl.slice(0, 80) },
+      '[VOICE-AUDIT] late next-up phrase arrived — enqueuing',
+      { name: pending.name, timeLeft, urlPreview: phraseUrl.slice(0, 80) },
     );
-    enqueueVoice(nextVoiceUrl, `${pending.context}_late`);
+    enqueueVoice(phraseUrl, `${pending.context}_late`);
   }, [phase, timeLeft, next, enqueueVoice, isPaused]);
 
   // ── Pause → silence any audio in flight ─────────────────────────────

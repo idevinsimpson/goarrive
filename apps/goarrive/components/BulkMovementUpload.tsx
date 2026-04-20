@@ -273,10 +273,10 @@ export default function BulkMovementUpload({
       if (aiData.name) {
         updateItem(item.id, { status: 'voice', statusText: 'Generating voice...', progress: 0.85 });
         try {
-          const { url, text } = await generateMovementVoice(docId, aiData.name);
+          const { url, text, voiceName } = await generateMovementVoice(docId, aiData.name);
           const update: Record<string, any> = url
-            ? { voiceUrl: url, voiceText: text }
-            : { voiceUrl: '', voiceText: '' };
+            ? { voiceUrl: url, voiceText: text, voiceName }
+            : { voiceUrl: '', voiceText: '', voiceName: '' };
           await updateDoc(doc(db, 'movements', docId), update);
         } catch (voiceErr) {
           console.warn('[BulkUpload] Voice generation failed for', item.fileName, voiceErr);

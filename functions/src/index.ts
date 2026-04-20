@@ -7951,13 +7951,18 @@ export const createMissingLedgerEntry = onCall(
 );
 
 // ─── generateVoice — OpenAI TTS for workout cues and movement names ─────────
-// Accepts text + optional voice (onyx, nova), generates MP3 via OpenAI TTS,
-// uploads to Firebase Storage, returns the download URL. When `movementId` is
-// supplied the function also writes { voiceUrl, voiceText } to movements/{id}
-// with admin creds — members lack Firestore update permission on /movements,
-// so lazy-backfill from the player can't persist the URL client-side. Coach
-// write paths (MovementForm, BulkMovementUpload) still overwrite with their
-// own updateDoc for the rename/clear flows.
+// Accepts text + optional voice (default "nova" — fitness-instructor vibe),
+// generates MP3 via OpenAI TTS, uploads to Firebase Storage, returns the
+// download URL. When `movementId` is supplied the function also writes
+// { voiceUrl, voiceText, voiceName } to movements/{id} with admin creds —
+// members lack Firestore update permission on /movements, so lazy-backfill
+// from the player can't persist the URL client-side. Coach write paths
+// (MovementForm, BulkMovementUpload) still overwrite with their own updateDoc
+// for the rename/clear flows.
+//
+// voiceName is stored on the doc so the player can detect wrong-voice legacy
+// clips and trigger regeneration (useMovementHydrate). Without it, an older
+// onyx-generated clip would be reused indefinitely after the default changed.
 // ─────────────────────────────────────────────────────────────────────────────
 export const generateVoice = onCall(
   { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 30 },
@@ -7966,11 +7971,13 @@ export const generateVoice = onCall(
       throw new HttpsError('unauthenticated', 'Sign in required');
     }
 
-    const { text, voice, storagePath, movementId } = request.data as {
+    const { text, voice, storagePath, movementId, model, instructions } = request.data as {
       text?: string;
       voice?: string;
       storagePath?: string;
       movementId?: string;
+      model?: string;
+      instructions?: string;
     };
 
     if (!text || typeof text !== 'string' || text.length === 0) {
@@ -7982,73 +7989,175 @@ export const generateVoice = onCall(
 
     const apiKey = openaiApiKey.value()?.trim();
     if (!apiKey) {
-      throw new HttpsError('internal', 'OpenAI API key not configured');
+      console.error('[VOICE-AUDIT] generateVoice: apikey layer — OPENAI_API_KEY secret empty');
+      throw new HttpsError('failed-precondition', 'voice:apikey:missing', {
+        layer: 'apikey',
+        reason: 'OPENAI_API_KEY secret is unset or empty on deployed function',
+      });
     }
 
-    const selectedVoice = voice || 'onyx';
+    const selectedVoice = voice || 'nova';
+    // tts-1 / tts-1-hd ignore `instructions`. gpt-4o-mini-tts (and audio
+    // models) honor it for delivery-style control. Caller picks the model;
+    // default stays tts-1 so existing movement-name calls are unchanged.
+    const selectedModel = model || 'tts-1';
+    const supportsInstructions = selectedModel === 'gpt-4o-mini-tts';
     const path = storagePath || `voice_cache/tts/${Date.now()}.mp3`;
+    const bucket = admin.storage().bucket();
+    const file = bucket.file(path);
+    const encodedPath = encodeURIComponent(path);
+    const cdnUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodedPath}?alt=media`;
 
+    // ── Layer 0: Storage cache hit ─────────────────────────────────────────
+    // Path-keyed cache. Phrase / movement helpers hash voice+model+text(+style)
+    // into the storagePath, so a hit here means the exact same generation
+    // already exists. Skip OpenAI to save quota and latency.
+    if (storagePath) {
+      try {
+        const [exists] = await file.exists();
+        if (exists) {
+          console.info('[VOICE-AUDIT] generateVoice: cache hit — skipping OpenAI', {
+            path, model: selectedModel, voice: selectedVoice,
+          });
+          // Still run writeback so a freshly hydrated movement doc gets the URL.
+          let writeback: 'ok' | 'skipped' | 'missing_doc' | 'failed' | 'no_id' = 'no_id';
+          let writebackError: string | null = null;
+          if (movementId && typeof movementId === 'string') {
+            try {
+              const ref = db.doc(`movements/${movementId}`);
+              const snap = await ref.get();
+              if (!snap.exists) writeback = 'missing_doc';
+              else {
+                await ref.update({ voiceUrl: cdnUrl, voiceText: text, voiceName: selectedVoice });
+                writeback = 'ok';
+              }
+            } catch (writeErr: any) {
+              writeback = 'failed';
+              writebackError = String(writeErr?.message || writeErr).slice(0, 300);
+            }
+          } else {
+            writeback = 'skipped';
+          }
+          return { url: cdnUrl, path, writeback, writebackError, cached: true };
+        }
+      } catch (err: any) {
+        // Cache check failure is non-fatal — fall through and regenerate.
+        console.warn('[VOICE-AUDIT] generateVoice: cache check failed — regenerating', {
+          path, message: String(err?.message || err).slice(0, 200),
+        });
+      }
+    }
+
+    // ── Layer 1: OpenAI TTS ────────────────────────────────────────────────
+    let audioBuffer: Buffer;
     try {
+      const openaiBody: Record<string, unknown> = {
+        model: selectedModel,
+        voice: selectedVoice,
+        input: text,
+      };
+      if (instructions && supportsInstructions) {
+        openaiBody.instructions = instructions;
+      } else if (instructions && !supportsInstructions) {
+        console.warn('[VOICE-AUDIT] generateVoice: instructions ignored — model does not support it', {
+          model: selectedModel,
+        });
+      }
       const response = await fetch('https://api.openai.com/v1/audio/speech', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          model: 'tts-1',
-          voice: selectedVoice,
-          input: text,
-        }),
+        body: JSON.stringify(openaiBody),
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[generateVoice] OpenAI TTS error:', response.status, errorText);
-        throw new HttpsError('internal', `OpenAI TTS error: ${response.status}`);
-      }
-
-      const audioBuffer = Buffer.from(await response.arrayBuffer());
-      const bucket = admin.storage().bucket();
-      const file = bucket.file(path);
-      await file.save(audioBuffer, { contentType: 'audio/mpeg' });
-      await file.makePublic();
-
-      const url = `https://storage.googleapis.com/${bucket.name}/${path}`;
-
-      if (movementId && typeof movementId === 'string') {
-        try {
-          const ref = db.doc(`movements/${movementId}`);
-          const snap = await ref.get();
-          if (!snap.exists) {
-            console.error('[VOICE-AUDIT] generateVoice: canonical movement doc MISSING — writeback skipped', {
-              movementId, uid: request.auth.uid, storedUrl: url,
-            });
-          } else {
-            await ref.update({ voiceUrl: url, voiceText: text });
-            console.info('[VOICE-AUDIT] generateVoice: Firestore writeback OK', {
-              movementId, uid: request.auth.uid,
-            });
-          }
-        } catch (writeErr) {
-          console.error(
-            '[VOICE-AUDIT] generateVoice: Firestore writeback FAILED',
-            { movementId, uid: request.auth.uid },
-            writeErr,
-          );
-        }
-      } else {
-        console.warn('[VOICE-AUDIT] generateVoice: no movementId supplied — skipping Firestore writeback', {
-          uid: request.auth.uid, textPreview: text.slice(0, 40),
+        const errorBody = (await response.text()).slice(0, 500);
+        console.error('[VOICE-AUDIT] generateVoice: openai layer FAILED', {
+          status: response.status, body: errorBody, model: selectedModel,
+        });
+        throw new HttpsError('internal', `voice:openai:${response.status}`, {
+          layer: 'openai',
+          status: response.status,
+          body: errorBody,
         });
       }
 
-      return { url, path };
+      audioBuffer = Buffer.from(await response.arrayBuffer());
     } catch (err: any) {
-      if (err.code) throw err;
-      console.error('[generateVoice] Failed:', err);
-      throw new HttpsError('internal', 'Voice generation failed');
+      if (err instanceof HttpsError) throw err;
+      const detail = String(err?.message || err).slice(0, 300);
+      console.error('[VOICE-AUDIT] generateVoice: openai layer THREW', { detail }, err);
+      throw new HttpsError('internal', `voice:openai:fetch_failed`, {
+        layer: 'openai',
+        message: detail,
+      });
     }
+
+    // ── Layer 2: Storage upload ────────────────────────────────────────────
+    // NOTE: The bucket has Uniform Bucket-Level Access enabled, so ACL-based
+    // makePublic() throws. Public read is granted via storage.rules instead
+    // (see voice_cache/movements match block). We return the Firebase Storage
+    // download URL, which respects security rules and does not require object
+    // ACLs. Do NOT reintroduce makePublic() or storage.googleapis.com URLs.
+    try {
+      await file.save(audioBuffer, { contentType: 'audio/mpeg' });
+    } catch (err: any) {
+      const detail = String(err?.message || err).slice(0, 300);
+      const code = err?.code ?? err?.status ?? null;
+      console.error('[VOICE-AUDIT] generateVoice: storage layer FAILED', {
+        bucket: bucket.name, path, code, detail,
+      }, err);
+      throw new HttpsError('internal', `voice:storage:upload_failed`, {
+        layer: 'storage',
+        bucket: bucket.name,
+        path,
+        code,
+        message: detail,
+      });
+    }
+
+    // ── Layer 3: Firestore writeback (non-fatal) ───────────────────────────
+    // Failure here must NOT poison the response — the audio is already
+    // uploaded, and the player can still fetch the URL if we return it.
+    // But we do surface the failure in the response payload so the client
+    // can log it and the next test shows exactly why the backfill didn't
+    // stick. Missing-doc is surfaced as a distinct signal from permission
+    // failure.
+    let writeback: 'ok' | 'skipped' | 'missing_doc' | 'failed' | 'no_id' = 'no_id';
+    let writebackError: string | null = null;
+    if (movementId && typeof movementId === 'string') {
+      try {
+        const ref = db.doc(`movements/${movementId}`);
+        const snap = await ref.get();
+        if (!snap.exists) {
+          writeback = 'missing_doc';
+          console.error('[VOICE-AUDIT] generateVoice: firestore layer — movement doc MISSING', {
+            movementId, uid: request.auth.uid, storedUrl: cdnUrl,
+          });
+        } else {
+          await ref.update({ voiceUrl: cdnUrl, voiceText: text, voiceName: selectedVoice });
+          writeback = 'ok';
+          console.info('[VOICE-AUDIT] generateVoice: firestore layer — writeback OK', {
+            movementId, uid: request.auth.uid,
+          });
+        }
+      } catch (writeErr: any) {
+        writeback = 'failed';
+        writebackError = String(writeErr?.message || writeErr).slice(0, 300);
+        console.error('[VOICE-AUDIT] generateVoice: firestore layer FAILED', {
+          movementId, uid: request.auth.uid, error: writebackError,
+        }, writeErr);
+      }
+    } else {
+      writeback = 'skipped';
+      console.warn('[VOICE-AUDIT] generateVoice: firestore layer — skipped (no movementId)', {
+        uid: request.auth.uid, textPreview: text.slice(0, 40),
+      });
+    }
+
+    return { url: cdnUrl, path, writeback, writebackError };
   }
 );
 

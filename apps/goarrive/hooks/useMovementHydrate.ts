@@ -27,7 +27,7 @@ import { useEffect, useState, useRef } from 'react';
 import { db } from '../lib/firebase';
 import { doc, onSnapshot, type Unsubscribe } from 'firebase/firestore';
 import type { FlatMovement } from './useWorkoutFlatten';
-import { generateMovementVoice } from '../utils/generateMovementVoice';
+import { generateMovementVoice, MOVEMENT_VOICE_NAME } from '../utils/generateMovementVoice';
 
 function mergeFromCache(fm: FlatMovement, cached: any): FlatMovement {
   // Canonical wins for identity + audio so a rename always propagates.
@@ -35,12 +35,19 @@ function mergeFromCache(fm: FlatMovement, cached: any): FlatMovement {
   // mid-regeneration after a rename), we WANT '' so the player stays silent
   // for the name rather than speaking the stale block snapshot's clip. The
   // backfill effect below kicks off generation so the next phase has audio.
+  //
+  // Wrong-voice guard: when the canonical doc's voiceName doesn't match the
+  // current MOVEMENT_VOICE_NAME, we blank the local voiceUrl so the player
+  // won't play the stale wrong-voice clip. The backfill effect below triggers
+  // regeneration; onSnapshot pushes the nova URL back when the server writes
+  // it, and the next rest cue picks it up.
   const canonicalName = typeof cached.name === 'string' && cached.name.trim()
     ? cached.name
     : fm.name;
-  const canonicalVoiceUrl = typeof cached.voiceUrl === 'string'
+  const voiceNameOk = typeof cached.voiceName === 'string' && cached.voiceName === MOVEMENT_VOICE_NAME;
+  const canonicalVoiceUrl = typeof cached.voiceUrl === 'string' && voiceNameOk
     ? cached.voiceUrl
-    : (fm.voiceUrl || '');
+    : (voiceNameOk ? (fm.voiceUrl || '') : '');
   return {
     ...fm,
     name: canonicalName,
@@ -127,26 +134,40 @@ export function useMovementHydrate(flatMovements: FlatMovement[]): FlatMovement[
           cacheRef.current[id] = data;
           const name = typeof data.name === 'string' ? data.name.trim() : '';
           const hasVoice = typeof data.voiceUrl === 'string' && data.voiceUrl.length > 0;
+          const storedVoiceName = typeof data.voiceName === 'string' ? data.voiceName : '';
+          const voiceNameOk = storedVoiceName === MOVEMENT_VOICE_NAME;
+          // Regenerate when either (a) the movement has no clip at all (legacy
+          // backfill), or (b) it has a clip from a different voice than the
+          // current canonical one — e.g. movements cached with "onyx" before
+          // nova shipped. mergeFromCache blanks the local voiceUrl in case (b)
+          // so the wrong-voice clip doesn't play in the meantime.
+          const needsRegen = !hasVoice || !voiceNameOk;
           console.info('[VOICE-AUDIT] onSnapshot movement doc', {
             movementId: id,
             name,
             voiceUrlPresent: hasVoice,
             voiceUrlPreview: hasVoice ? String(data.voiceUrl).slice(0, 80) : '',
             voiceTextPresent: typeof data.voiceText === 'string' && data.voiceText.length > 0,
+            storedVoiceName,
+            voiceNameOk,
+            needsRegen,
+            isGlobal: data.isGlobal === true,
+            coachId: typeof data.coachId === 'string' ? data.coachId : '',
             attempted: voiceGenAttemptedRef.current.has(id),
           });
           recomputeMerged();
-          // Backfill voiceUrl for legacy movements. We only run once per
-          // (session, movement) so a coach mid-regenerate (voiceUrl === '')
-          // doesn't get a redundant call — MovementForm already owns that
-          // flow. We also require a name to send to OpenAI.
-          // The Cloud Function writes voiceUrl/voiceText back to the doc
-          // with admin creds (members can't update /movements from the
-          // client). onSnapshot then pushes the new URL in for the next
+          // Backfill voiceUrl for legacy movements OR correct wrong-voice clips.
+          // We only run once per (session, movement) so a coach mid-regenerate
+          // (voiceUrl === '') doesn't get a redundant call — MovementForm
+          // already owns that flow. We also require a name to send to OpenAI.
+          // The Cloud Function writes voiceUrl/voiceText/voiceName back to
+          // the doc with admin creds (members can't update /movements from
+          // the client). onSnapshot then pushes the new URL in for the next
           // rest cue.
-          if (!hasVoice && name && !voiceGenAttemptedRef.current.has(id)) {
+          if (needsRegen && name && !voiceGenAttemptedRef.current.has(id)) {
             voiceGenAttemptedRef.current.add(id);
-            console.info('[VOICE-AUDIT] triggering voice backfill', { movementId: id, name });
+            const reason = !hasVoice ? 'missing' : `wrong-voice:${storedVoiceName || 'unknown'}`;
+            console.info('[VOICE-AUDIT] triggering voice backfill', { movementId: id, name, reason });
             generateMovementVoice(id, name)
               .then(({ url }) => {
                 if (!url) {
@@ -160,7 +181,7 @@ export function useMovementHydrate(flatMovements: FlatMovement[]): FlatMovement[
               .catch((err) => {
                 console.warn('[VOICE-AUDIT] backfill REJECTED', { movementId: id, name, err });
               });
-          } else if (!hasVoice && !name) {
+          } else if (needsRegen && !name) {
             console.warn('[VOICE-AUDIT] cannot backfill — canonical doc missing name', { movementId: id });
           }
         },

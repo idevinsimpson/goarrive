@@ -42,11 +42,22 @@ import { useWorkoutTimer } from '../hooks/useWorkoutTimer';
 import { useMediaPrefetch } from '../hooks/useMediaPrefetch';
 import { useMovementSwap } from '../hooks/useMovementSwap';
 import { useMovementHydrate } from '../hooks/useMovementHydrate';
+import { useNextUpPhrases } from '../hooks/useNextUpPhrases';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useWorkoutTTS } from '../hooks/useWorkoutTTS';
 import { setAudioMuted } from '../lib/audioCues';
 import { FB, FH } from '../lib/theme';
+import VoiceAuditPanel from './VoiceAuditPanel';
+import { isStagingHost } from '../lib/runtimeEnv';
+import { installVoiceAuditCapture } from '../lib/voiceAuditLog';
+
+// Install [VOICE-AUDIT] console capture at module load on staging only so the
+// in-app debug panel can mirror the forensic trace without DevTools. Has zero
+// effect in production where isStagingHost() returns false.
+if (isStagingHost()) {
+  installVoiceAuditCapture();
+}
 
 // ── Constants ───────────────────────────────────────────────────────────────
 // How many seconds before a timed phase ends should the visual switch to the
@@ -76,8 +87,11 @@ export default function WorkoutPlayer({
   // ── Hooks ────────────────────────────────────────────────────────────
   const flatFromBlocks = useWorkoutFlatten(workout);
   const hydratedMovements = useMovementHydrate(flatFromBlocks);
+  // Pre-warm combined "Next up, {name}." phrase clips so the rest screen can
+  // play one cohesive cue instead of next_up MP3 + standalone movement voice.
+  const phrasedMovements = useNextUpPhrases(hydratedMovements);
   const [flatOverride, setFlatOverride] = useState<any[] | null>(null);
-  const flatMovements = flatOverride || hydratedMovements;
+  const flatMovements = flatOverride || phrasedMovements;
 
   const timer = useWorkoutTimer({ flatMovements });
 
@@ -1226,6 +1240,20 @@ export default function WorkoutPlayer({
         )}
       </View>
       </View>
+
+      {/* VOICE-AUDIT panel — staging only, mirrors [VOICE-AUDIT] console trace */}
+      {isStagingHost() && (
+        <VoiceAuditPanel
+          workoutId={workout?.id || workout?.workoutId}
+          workoutTitle={workout?.title || workout?.name}
+          isMuted={isMuted}
+          phase={phase}
+          currentIndex={currentIndex}
+          current={current}
+          next={next}
+          hydratedMovements={flatMovements}
+        />
+      )}
 
       {/* Swap movement modal */}
       <Modal visible={showSwap} transparent animationType="slide">
