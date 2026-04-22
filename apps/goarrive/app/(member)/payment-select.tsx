@@ -56,6 +56,7 @@ export default function PaymentSelectScreen() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<PaymentOption | null>(null);
   const [billingInterval, setBillingInterval] = useState<BillingInterval>('month');
+  const [intervalInitialized, setIntervalInitialized] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,6 +76,17 @@ export default function PaymentSelectScreen() {
       }
     })();
   }, [planId]);
+
+  // ── Default billing interval to coach's chosen override frequency ──────────
+  useEffect(() => {
+    if (plan && !intervalInitialized) {
+      const freq = plan.overrideFrequency;
+      if (freq === 'week' || freq === 'year') {
+        setBillingInterval(freq);
+      }
+      setIntervalInitialized(true);
+    }
+  }, [plan, intervalInitialized]);
 
   // ── Read pricing from plan (auto-synced from plan builder) ─────────────────
   const contractMonths = plan?.contractMonths ?? 12;
