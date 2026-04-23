@@ -73,6 +73,7 @@ import {
   type RtmsSessionDoc,
 } from './zoomRtms';
 import WebSocket from 'ws';
+import { CloudTasksClient } from '@google-cloud/tasks';
 
 admin.initializeApp();
 
@@ -3444,8 +3445,11 @@ export const zoomWebhook = onRequest(
       return;
     }
 
-    const rawBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
-    if (!verifyWebhookSignature(signature, timestamp, rawBody, secret)) {
+    // Use req.rawBody so the bytes match what Zoom signed (re-stringifying
+    // a parsed body can introduce whitespace/key-order drift).
+    const rawBody = req.rawBody ? req.rawBody.toString('utf8')
+      : typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    if (!verifyWebhookSignature(rawBody, timestamp, signature, secret)) {
       console.warn('[zoomWebhook] Invalid webhook signature');
       res.status(401).send('Invalid signature');
       return;
@@ -3836,20 +3840,29 @@ export const zoomRtmsWebhook = onRequest(
           };
           await db.collection('rtms_sessions').doc(meetingId).set(sessionDoc, { merge: true });
 
-          // Fire-and-forget dispatch to the long-running worker. The worker has
-          // its own auth (it reads the stored OAuth token + RTMS secrets) and
-          // self-cancels on rtms_stopped / meeting.ended via the Firestore doc.
+          // Dispatch the long-running worker. Prefer Cloud Tasks for built-in
+          // retries with backoff; fall back to fire-and-forget HTTP if the
+          // queue isn't provisioned yet (so the feature still works in fresh
+          // environments). The worker self-cancels on rtms_stopped / meeting.
+          // ended via the Firestore session doc.
           const workerUrl = resolveStartRtmsStreamUrl();
-          if (workerUrl) {
+          if (!workerUrl) {
+            console.warn('[zoomRtmsWebhook] startRtmsStream URL unresolved — worker not dispatched');
+            break;
+          }
+          const dispatched = await dispatchViaCloudTasks({
+            workerUrl,
+            payload: { meetingId, streamId, meetingUuid },
+          });
+          if (!dispatched) {
+            console.warn('[zoomRtmsWebhook] Cloud Tasks unavailable — falling back to fire-and-forget HTTP');
             fetch(workerUrl, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ meetingId, streamId, meetingUuid }),
             }).catch((err) => {
-              console.error('[zoomRtmsWebhook] Failed to dispatch startRtmsStream:', err?.message || err);
+              console.error('[zoomRtmsWebhook] Fallback dispatch also failed:', err?.message || err);
             });
-          } else {
-            console.warn('[zoomRtmsWebhook] startRtmsStream URL unresolved — worker not dispatched');
           }
           break;
         }
@@ -3896,6 +3909,57 @@ function resolveStartRtmsStreamUrl(): string | null {
   const project = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
   if (!project) return null;
   return `https://us-central1-${project}.cloudfunctions.net/startRtmsStream`;
+}
+
+// Lazy-init Cloud Tasks client (only created when needed).
+let cloudTasksClient: CloudTasksClient | null = null;
+function getCloudTasksClient(): CloudTasksClient {
+  if (!cloudTasksClient) cloudTasksClient = new CloudTasksClient();
+  return cloudTasksClient;
+}
+
+const RTMS_TASK_QUEUE = process.env.RTMS_TASK_QUEUE || 'rtms-dispatch';
+const RTMS_TASK_LOCATION = process.env.RTMS_TASK_LOCATION || 'us-central1';
+
+// Dispatch the RTMS worker via Cloud Tasks (auto-retries + backoff). Returns
+// false if the queue isn't reachable / doesn't exist so the caller can fall
+// back. Never throws — all errors are logged.
+async function dispatchViaCloudTasks(args: {
+  workerUrl: string;
+  payload: { meetingId: string; streamId: string; meetingUuid?: string };
+}): Promise<boolean> {
+  const project = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
+  if (!project) return false;
+
+  try {
+    const client = getCloudTasksClient();
+    const queuePath = client.queuePath(project, RTMS_TASK_LOCATION, RTMS_TASK_QUEUE);
+    const sa = process.env.RTMS_TASK_INVOKER_SA || `${project}@appspot.gserviceaccount.com`;
+
+    await client.createTask({
+      parent: queuePath,
+      task: {
+        httpRequest: {
+          httpMethod: 'POST',
+          url: args.workerUrl,
+          headers: { 'Content-Type': 'application/json' },
+          body: Buffer.from(JSON.stringify(args.payload)).toString('base64'),
+          oidcToken: { serviceAccountEmail: sa, audience: args.workerUrl },
+        },
+      },
+    });
+    console.log(`[dispatchViaCloudTasks] Enqueued worker for meeting ${args.payload.meetingId}`);
+    return true;
+  } catch (err: any) {
+    const code = err?.code;
+    // NOT_FOUND (5) = queue missing; PERMISSION_DENIED (7) = IAM not granted.
+    if (code === 5 || code === 7) {
+      console.warn(`[dispatchViaCloudTasks] Queue/IAM not provisioned (code ${code}): ${err.message}`);
+    } else {
+      console.error('[dispatchViaCloudTasks] Enqueue failed:', err?.message || err);
+    }
+    return false;
+  }
 }
 
 // ─── 21c. startRtmsStream — long-running RTMS WebSocket worker ──────────────
