@@ -13,16 +13,44 @@ the native mobile dev-client; do not do that work yet.
 ## Context: how this fits with existing Zoom apps
 
 GoArrive already uses two separate Zoom Marketplace apps. The Meeting SDK app is a
-**third, distinct** Marketplace app — it does not replace either of the existing ones.
+**third, distinct** Marketplace app type — it does not replace either of the existing ones.
 
 | Marketplace app | Purpose | Secrets in Firebase | Status |
 |---|---|---|---|
 | Server-to-Server OAuth | Meeting CRUD (create/update/cancel meetings, recordings) | `ZOOM_ACCOUNT_ID`, `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`, `ZOOM_WEBHOOK_SECRET` | Live |
 | General App (RTMS) | Real-Time Media Streaming (WebSocket transcripts) | `ZOOM_RTMS_CLIENT_ID`, `ZOOM_RTMS_CLIENT_SECRET`, `ZOOM_RTMS_SECRET_TOKEN`, `ZOOM_RTMS_OAUTH_REDIRECT` | Live |
-| **Meeting SDK (new)** | **Signing embedded join payloads for the web client SDK** | **`ZOOM_MEETING_SDK_KEY`, `ZOOM_MEETING_SDK_SECRET`** | **To be created (Phase 1)** |
+| **Meeting SDK — staging** | **Signs embedded join payloads for goarrive-staging** | **`ZOOM_MEETING_SDK_KEY`, `ZOOM_MEETING_SDK_SECRET` (staging project only)** | **To be created (Phase 1)** |
+| **Meeting SDK — production** | **Signs embedded join payloads for goarrive (prod)** | **`ZOOM_MEETING_SDK_KEY`, `ZOOM_MEETING_SDK_SECRET` (prod project only)** | **To be created (Phase 1)** |
 
 None of the existing app credentials can be reused for the Meeting SDK signature — Zoom
 requires a Meeting SDK app type for that key/secret pair.
+
+### Staging vs production: two apps preferred, one-app fallback
+
+**Preferred:** create **two separate Meeting SDK apps** in the Zoom Marketplace — one
+dedicated to `goarrive-staging`, one dedicated to `goarrive` (prod). Each Firebase
+project stores its own app's SDK Key / SDK Secret in Secret Manager. Rationale:
+
+- Cleaner blast radius: a compromised or revoked staging key does not affect prod.
+- No risk that a staging test connects to Zoom telemetry tagged against the prod app.
+- Easier to reason about in Zoom admin + troubleshooting (two app rows, clearly named).
+- Either app can be rotated, disabled, or deleted without touching the other.
+
+**Fallback (only if Zoom blocks two Meeting SDK apps on this account):** create one
+Meeting SDK app and keep staging vs prod separated strictly at the Firebase Secret
+Manager / project level (same SDK Key / SDK Secret values in both projects). This is
+still functionally correct — the signature flow does not care what project it runs in
+— but loses the isolation benefits above.
+
+Zoom's current Marketplace policy generally permits multiple Meeting SDK apps per
+account, but account tier and admin settings can restrict this. If the Marketplace UI
+blocks creating a second Meeting SDK app, switch to the fallback and note it in the
+ship report.
+
+**The code path is identical either way.** Both paths resolve the same two secret
+names (`ZOOM_MEETING_SDK_KEY`, `ZOOM_MEETING_SDK_SECRET`) from the project-scoped
+Secret Manager. No callable, export, or client code changes based on which path is
+used — only the values in Secret Manager differ.
 
 ---
 
@@ -48,16 +76,22 @@ Phase 1 explicitly does **not** need:
 
 ## Phase 1 — Required Zoom Marketplace setup
 
-### 1. Create a Meeting SDK app
+### 1. Create the Meeting SDK app(s)
+
+**Preferred path — two apps.** Repeat these steps twice, once per environment:
 
 1. Sign in to `https://marketplace.zoom.us/` with the GoArrive Zoom admin account (same
    account used by the existing S2S OAuth and RTMS apps).
 2. Develop → Build App → choose **Meeting SDK**.
-3. App name: `GoArrive Meeting SDK` (internal; members never see this string).
+3. App name:
+   - Staging app: `GoArrive Meeting SDK — staging`
+   - Production app: `GoArrive Meeting SDK — production`
+   (Internal names only; members never see these strings.)
 4. Company: `GoArrive`. Contact: the current Zoom admin email.
 5. On the **App Credentials** page, copy the values labeled `SDK Key` (a.k.a. Client ID)
    and `SDK Secret` (a.k.a. Client Secret). These are what the callable uses to sign
-   the JWT payload.
+   the JWT payload. Keep the staging pair and the production pair clearly labeled —
+   they must not be swapped.
 6. **Scopes:** leave empty. Signature-only flows do not need scopes. Adding scopes here
    would force an OAuth install step that Phase 1 does not use.
 7. **Redirect URL for OAuth:** leave blank. Not used for the signature flow.
@@ -65,20 +99,29 @@ Phase 1 explicitly does **not** need:
    View is not required.)
 9. Activate the app.
 
+**Fallback path — one app.** If Zoom Marketplace blocks creating the second Meeting
+SDK app (e.g. account tier or admin policy limit), create just one app named
+`GoArrive Meeting SDK` and use its SDK Key / SDK Secret for both environments. Flag
+this on the ship report so the isolation tradeoff is explicit.
+
 ### 2. Add the secrets to Firebase
 
-From the repo root on a machine with Firebase CLI access:
+From the repo root on a machine with Firebase CLI access. **Paste the staging app's
+values into the staging project and the production app's values into the prod
+project** — never cross them.
 
 ```bash
+# Staging — paste the STAGING Meeting SDK app's SDK Key / SDK Secret
 firebase functions:secrets:set ZOOM_MEETING_SDK_KEY    --project goarrive-staging
 firebase functions:secrets:set ZOOM_MEETING_SDK_SECRET --project goarrive-staging
+
+# Production — paste the PRODUCTION Meeting SDK app's SDK Key / SDK Secret
 firebase functions:secrets:set ZOOM_MEETING_SDK_KEY    --project goarrive
 firebase functions:secrets:set ZOOM_MEETING_SDK_SECRET --project goarrive
 ```
 
-Paste the SDK Key / SDK Secret when prompted. Both environments can use the same
-Meeting SDK app credentials (Zoom does not require separate apps per environment for
-signature generation).
+If the one-app fallback is in effect, paste the same SDK Key / SDK Secret into both
+projects. The command sequence is unchanged.
 
 ### 3. Wire the secrets into the new callable
 
@@ -141,8 +184,10 @@ Android embedded join:
   produce a custom dev client.
 - Configure iOS `Info.plist` entries (camera, microphone, local network) and Android
   permissions (`CAMERA`, `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS`, bluetooth as needed).
-- No additional Zoom Marketplace changes: the same **Meeting SDK app** (same SDK Key /
-  SDK Secret) signs payloads for both web and native clients.
+- No additional Zoom Marketplace changes: the same Meeting SDK app for that environment
+  (same SDK Key / SDK Secret stored in that project's Secret Manager) signs payloads
+  for both web and native clients. Under the two-app setup, staging native clients use
+  the staging app and prod native clients use the prod app, same as web.
 - The same `getEmbeddedSessionJoinConfig` callable serves both — the only difference is
   which SDK the frontend hands the payload to.
 
