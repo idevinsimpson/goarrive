@@ -85,7 +85,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
-exports.onMemberCreated = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = void 0;
+exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -110,6 +110,10 @@ const zoomAccountId = (0, params_1.defineSecret)('ZOOM_ACCOUNT_ID');
 const zoomClientId = (0, params_1.defineSecret)('ZOOM_CLIENT_ID');
 const zoomClientSecret = (0, params_1.defineSecret)('ZOOM_CLIENT_SECRET');
 // ZOOM_WEBHOOK_SECRET is defined near zoomWebhook CF (line ~2858)
+// Meeting SDK app (third Zoom Marketplace app) — signs embedded join payloads.
+// See docs/ZOOM_MEETING_SDK_SETUP.md. Only used by getEmbeddedSessionJoinConfig.
+const zoomMeetingSdkKey = (0, params_1.defineSecret)('ZOOM_MEETING_SDK_KEY');
+const zoomMeetingSdkSecret = (0, params_1.defineSecret)('ZOOM_MEETING_SDK_SECRET');
 // ── Notification Secrets ─────────────────────────────────────────────────────
 const emailApiKey = (0, params_1.defineSecret)('EMAIL_API_KEY');
 const twilioAccountSid = (0, params_1.defineSecret)('TWILIO_ACCOUNT_SID');
@@ -7911,4 +7915,93 @@ exports.onMemberCreated = (0, firestore_1.onDocumentCreated)('members/{memberId}
 // domain-wide delegation. The Resend EMAIL_API_KEY is a placeholder
 // so Cloud Functions cannot send email directly.
 // ─────────────────────────────────────────────
+// ─── getEmbeddedSessionJoinConfig — Zoom Meeting SDK join payload ────────────
+/**
+ * Returns a short-lived Zoom Meeting SDK signature + metadata so the caller can
+ * join a session through the embedded Zoom Web Meeting SDK Client View.
+ *
+ * Phase 1 (member beta — see docs/ZOOM_MEETING_SDK_SETUP.md):
+ *   - role is always 0 (participant). No host-start UI yet.
+ *   - zak is always null. Scaffolded in the return shape so host-start can be
+ *     added later without a breaking change.
+ *   - Caller must be the member on the session_instance (platformAdmin allowed
+ *     for testing).
+ *   - Instance must be allocated (has zoomMeetingId + zoomJoinUrl).
+ *
+ * The existing Linking.openURL(inst.zoomJoinUrl) flow remains the default join
+ * path. This callable powers the secondary "Join in app (beta)" button only.
+ */
+exports.getEmbeddedSessionJoinConfig = (0, https_1.onCall)({
+    region: 'us-central1',
+    secrets: [zoomMeetingSdkKey, zoomMeetingSdkSecret],
+    invoker: 'public',
+}, async (request) => {
+    var _a, _b, _c;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const { sessionInstanceId } = ((_b = request.data) !== null && _b !== void 0 ? _b : {});
+    if (!sessionInstanceId) {
+        throw new https_1.HttpsError('invalid-argument', 'sessionInstanceId is required');
+    }
+    const instanceSnap = await db
+        .collection('session_instances')
+        .doc(sessionInstanceId)
+        .get();
+    if (!instanceSnap.exists) {
+        throw new https_1.HttpsError('not-found', 'Session instance not found');
+    }
+    const instance = instanceSnap.data();
+    const callerToken = (_c = request.auth) === null || _c === void 0 ? void 0 : _c.token;
+    const callerIsAdmin = (callerToken === null || callerToken === void 0 ? void 0 : callerToken.role) === 'platformAdmin' || (callerToken === null || callerToken === void 0 ? void 0 : callerToken.admin) === true;
+    if (!callerIsAdmin && callerUid !== instance.memberId) {
+        throw new https_1.HttpsError('permission-denied', 'Only the assigned member can join this session');
+    }
+    const meetingNumber = instance.zoomMeetingId;
+    if (!meetingNumber || !instance.zoomJoinUrl) {
+        throw new https_1.HttpsError('failed-precondition', 'Session has not been allocated to a Zoom room yet');
+    }
+    if (instance.status !== 'allocated' && instance.status !== 'in_progress') {
+        throw new https_1.HttpsError('failed-precondition', `Session is in status "${instance.status}", cannot join`);
+    }
+    let userName = instance.memberName || '';
+    let userEmail = '';
+    try {
+        const userDoc = await db
+            .collection('users')
+            .doc(instance.memberId)
+            .get();
+        const udata = userDoc.data() || {};
+        if (!userName) {
+            userName =
+                udata.displayName || udata.name || 'Member';
+        }
+        userEmail = udata.email || '';
+    }
+    catch (_d) {
+        if (!userName)
+            userName = 'Member';
+    }
+    const sdkKey = zoomMeetingSdkKey.value().trim();
+    const sdkSecret = zoomMeetingSdkSecret.value().trim();
+    if (!sdkKey || !sdkSecret) {
+        throw new https_1.HttpsError('failed-precondition', 'Meeting SDK credentials are not configured');
+    }
+    const signature = (0, zoom_1.buildMeetingSdkSignature)({
+        sdkKey,
+        sdkSecret,
+        meetingNumber,
+        role: 0,
+    });
+    return {
+        meetingNumber: String(meetingNumber),
+        signature,
+        sdkKey,
+        userName,
+        userEmail,
+        password: instance.zoomMeetingPassword || '',
+        role: 0,
+        zak: null,
+    };
+});
 //# sourceMappingURL=index.js.map

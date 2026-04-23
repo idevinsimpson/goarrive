@@ -59,6 +59,7 @@ import {
   getZoomProvider,
   verifyWebhookSignature,
   generateCrcResponse,
+  buildMeetingSdkSignature,
   type SessionEvent,
   type SessionRecording,
 } from './zoom';
@@ -90,6 +91,11 @@ const zoomAccountId = defineSecret('ZOOM_ACCOUNT_ID');
 const zoomClientId = defineSecret('ZOOM_CLIENT_ID');
 const zoomClientSecret = defineSecret('ZOOM_CLIENT_SECRET');
 // ZOOM_WEBHOOK_SECRET is defined near zoomWebhook CF (line ~2858)
+
+// Meeting SDK app (third Zoom Marketplace app) — signs embedded join payloads.
+// See docs/ZOOM_MEETING_SDK_SETUP.md. Only used by getEmbeddedSessionJoinConfig.
+const zoomMeetingSdkKey = defineSecret('ZOOM_MEETING_SDK_KEY');
+const zoomMeetingSdkSecret = defineSecret('ZOOM_MEETING_SDK_SECRET');
 
 // ── Notification Secrets ─────────────────────────────────────────────────────
 const emailApiKey = defineSecret('EMAIL_API_KEY');
@@ -9083,3 +9089,115 @@ export const onMemberCreated = onDocumentCreated(
 // domain-wide delegation. The Resend EMAIL_API_KEY is a placeholder
 // so Cloud Functions cannot send email directly.
 // ─────────────────────────────────────────────
+
+// ─── getEmbeddedSessionJoinConfig — Zoom Meeting SDK join payload ────────────
+/**
+ * Returns a short-lived Zoom Meeting SDK signature + metadata so the caller can
+ * join a session through the embedded Zoom Web Meeting SDK Client View.
+ *
+ * Phase 1 (member beta — see docs/ZOOM_MEETING_SDK_SETUP.md):
+ *   - role is always 0 (participant). No host-start UI yet.
+ *   - zak is always null. Scaffolded in the return shape so host-start can be
+ *     added later without a breaking change.
+ *   - Caller must be the member on the session_instance (platformAdmin allowed
+ *     for testing).
+ *   - Instance must be allocated (has zoomMeetingId + zoomJoinUrl).
+ *
+ * The existing Linking.openURL(inst.zoomJoinUrl) flow remains the default join
+ * path. This callable powers the secondary "Join in app (beta)" button only.
+ */
+export const getEmbeddedSessionJoinConfig = onCall(
+  {
+    region: 'us-central1',
+    secrets: [zoomMeetingSdkKey, zoomMeetingSdkSecret],
+    invoker: 'public',
+  },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const { sessionInstanceId } = (request.data ?? {}) as {
+      sessionInstanceId?: string;
+    };
+    if (!sessionInstanceId) {
+      throw new HttpsError('invalid-argument', 'sessionInstanceId is required');
+    }
+
+    const instanceSnap = await db
+      .collection('session_instances')
+      .doc(sessionInstanceId)
+      .get();
+    if (!instanceSnap.exists) {
+      throw new HttpsError('not-found', 'Session instance not found');
+    }
+    const instance = instanceSnap.data()!;
+
+    const callerToken = request.auth?.token as Record<string, any> | undefined;
+    const callerIsAdmin =
+      callerToken?.role === 'platformAdmin' || callerToken?.admin === true;
+    if (!callerIsAdmin && callerUid !== instance.memberId) {
+      throw new HttpsError(
+        'permission-denied',
+        'Only the assigned member can join this session'
+      );
+    }
+
+    const meetingNumber = instance.zoomMeetingId as string | undefined;
+    if (!meetingNumber || !instance.zoomJoinUrl) {
+      throw new HttpsError(
+        'failed-precondition',
+        'Session has not been allocated to a Zoom room yet'
+      );
+    }
+    if (instance.status !== 'allocated' && instance.status !== 'in_progress') {
+      throw new HttpsError(
+        'failed-precondition',
+        `Session is in status "${instance.status}", cannot join`
+      );
+    }
+
+    let userName = (instance.memberName as string) || '';
+    let userEmail = '';
+    try {
+      const userDoc = await db
+        .collection('users')
+        .doc(instance.memberId as string)
+        .get();
+      const udata = userDoc.data() || {};
+      if (!userName) {
+        userName =
+          (udata.displayName as string) || (udata.name as string) || 'Member';
+      }
+      userEmail = (udata.email as string) || '';
+    } catch {
+      if (!userName) userName = 'Member';
+    }
+
+    const sdkKey = zoomMeetingSdkKey.value().trim();
+    const sdkSecret = zoomMeetingSdkSecret.value().trim();
+    if (!sdkKey || !sdkSecret) {
+      throw new HttpsError(
+        'failed-precondition',
+        'Meeting SDK credentials are not configured'
+      );
+    }
+
+    const signature = buildMeetingSdkSignature({
+      sdkKey,
+      sdkSecret,
+      meetingNumber,
+      role: 0,
+    });
+
+    return {
+      meetingNumber: String(meetingNumber),
+      signature,
+      sdkKey,
+      userName,
+      userEmail,
+      password: (instance.zoomMeetingPassword as string) || '',
+      role: 0 as const,
+      zak: null as string | null,
+    };
+  }
+);

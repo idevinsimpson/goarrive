@@ -53,6 +53,7 @@ exports.MockZoomProvider = exports.RealZoomProvider = void 0;
 exports.getZoomProvider = getZoomProvider;
 exports.verifyWebhookSignature = verifyWebhookSignature;
 exports.generateCrcResponse = generateCrcResponse;
+exports.buildMeetingSdkSignature = buildMeetingSdkSignature;
 const crypto = __importStar(require("crypto"));
 let tokenCache = null;
 /**
@@ -287,5 +288,42 @@ function generateCrcResponse(plainToken, webhookSecret) {
         .update(plainToken)
         .digest('hex');
     return { plainToken, encryptedToken };
+}
+// ─── Meeting SDK Signature (HS256 JWT) ──────────────────────────────────────
+/**
+ * Build a Zoom Meeting SDK signature JWT (HS256) for the embedded Web/Native
+ * Meeting SDK client join. This is distinct from Zoom S2S OAuth (meeting CRUD)
+ * and from webhook HMAC — it is a self-signed JWT the client hands to the
+ * Meeting SDK's join() call.
+ *
+ * Shape follows Zoom's current Signature v2 spec:
+ *   header:  { alg: 'HS256', typ: 'JWT' }
+ *   payload: { sdkKey, appKey: sdkKey, mn, role, iat, exp, tokenExp }
+ *   signed with HS256(sdkSecret) over base64url(header) + "." + base64url(payload)
+ *
+ * Docs: https://developers.zoom.us/docs/meeting-sdk/auth/
+ */
+function buildMeetingSdkSignature(params) {
+    var _a;
+    const { sdkKey, sdkSecret, meetingNumber, role } = params;
+    const ttl = (_a = params.ttlSeconds) !== null && _a !== void 0 ? _a : 7200; // 2 hours; Zoom max is 48h
+    const iat = Math.floor(Date.now() / 1000) - 30; // skew tolerance
+    const exp = iat + ttl;
+    const header = { alg: 'HS256', typ: 'JWT' };
+    const payload = {
+        sdkKey,
+        appKey: sdkKey,
+        mn: String(meetingNumber),
+        role,
+        iat,
+        exp,
+        tokenExp: exp,
+    };
+    const b64url = (buf) => buf.toString('base64').replace(/=+$/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+    const headerB64 = b64url(Buffer.from(JSON.stringify(header)));
+    const payloadB64 = b64url(Buffer.from(JSON.stringify(payload)));
+    const signingInput = `${headerB64}.${payloadB64}`;
+    const sigB64 = b64url(crypto.createHmac('sha256', sdkSecret).update(signingInput).digest());
+    return `${signingInput}.${sigB64}`;
 }
 //# sourceMappingURL=zoom.js.map
