@@ -39,6 +39,7 @@ export default function RootLayout() {
             <Stack.Screen name="coach-apply" />
             <Stack.Screen name="checkout-success" />
             <Stack.Screen name="shared-plan/[memberId]" />
+            <Stack.Screen name="join/[sessionInstanceId]" />
           </Stack>
         </AuthProvider>
       </GestureHandlerRootView>

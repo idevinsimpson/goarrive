@@ -20,6 +20,7 @@ import {
   TextInput,
   RefreshControl,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { AppHeader } from '../../components/AppHeader';
 import { Icon } from '../../components/Icon';
@@ -137,6 +138,7 @@ function canRequestSkip(inst: SessionInstance): boolean {
 
 export default function MySessionsScreen() {
   const { user } = useAuth();
+  const router = useRouter();
   const [sessions, setSessions] = useState<SessionInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -195,6 +197,14 @@ export default function MySessionsScreen() {
     } catch {
       Alert.alert('Unable to Open', 'Please copy the link and open it in your browser.');
     }
+  }
+
+  // ─── Join in app (beta) — routes to the embedded Zoom Meeting SDK flow ────
+  // Primary Join handler above is untouched. This is a secondary entry point
+  // gated to allocated/in-progress sessions only.
+  function handleJoinInApp(inst: SessionInstance) {
+    if (!canJoin(inst)) return;
+    router.push(`/join/${inst.id}` as any);
   }
 
   // ─── Cancel handler ───────────────────────────────────────────────────────
@@ -323,6 +333,10 @@ export default function MySessionsScreen() {
           inst={selectedSession}
           onClose={() => setSelectedSession(null)}
           onJoin={() => handleJoin(selectedSession)}
+          onJoinInApp={() => {
+            setSelectedSession(null);
+            handleJoinInApp(selectedSession);
+          }}
           onCancel={() => handleCancel(selectedSession)}
           onReschedule={() => {
             setShowReschedule(true);
@@ -598,6 +612,7 @@ function SessionDetailModal({
   inst,
   onClose,
   onJoin,
+  onJoinInApp,
   onCancel,
   onReschedule,
   onSkipRequest,
@@ -605,6 +620,7 @@ function SessionDetailModal({
   inst: SessionInstance;
   onClose: () => void;
   onJoin: () => void;
+  onJoinInApp: () => void;
   onCancel: () => void;
   onReschedule: () => void;
   onSkipRequest: () => void;
@@ -758,6 +774,12 @@ function SessionDetailModal({
                 <Pressable style={s.primaryBtn} onPress={onJoin}>
                   <Icon name="video" size={18} color="#FFF" />
                   <Text style={s.primaryBtnText}>Join Session</Text>
+                </Pressable>
+              )}
+              {showJoin && (
+                <Pressable style={s.secondaryBtn} onPress={onJoinInApp}>
+                  <Icon name="video" size={16} color={GOLD} />
+                  <Text style={s.secondaryBtnText}>Join in app (beta)</Text>
                 </Pressable>
               )}
               {showReschedule && (
