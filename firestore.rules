@@ -746,6 +746,34 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
+    // ZOOM RTMS — server-only writes (Cloud Functions / Admin SDK)
+    // zoom_tokens stores OAuth credentials for the Marketplace RTMS app.
+    // rtms_sessions tracks per-meeting RTMS lifecycle.
+    // rtms_transcripts holds captured transcript segments per meeting.
+    // No client writes; reads gated to platformAdmin only — coach/member
+    // surfaces will be added in a follow-up PR alongside that UI.
+    // ─────────────────────────────────────────────
+    match /zoom_tokens/{accountId} {
+      allow read: if isPlatformAdmin();
+      allow write: if false;
+    }
+
+    match /rtms_sessions/{meetingId} {
+      allow read: if isPlatformAdmin();
+      allow write: if false;
+    }
+
+    match /rtms_transcripts/{meetingId} {
+      allow read: if isPlatformAdmin();
+      allow write: if false;
+
+      match /segments/{segmentId} {
+        allow read: if isPlatformAdmin();
+        allow write: if false;
+      }
+    }
+
+    // ─────────────────────────────────────────────
     // ACCEPTED PLAN SNAPSHOTS (Cloud Functions only — immutable)
     // Created at checkout time by createCheckoutSession. Contains locked-in
     // pricing, tier split, and contract terms. MUST NOT be modified after
