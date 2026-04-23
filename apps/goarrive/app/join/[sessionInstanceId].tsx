@@ -37,12 +37,10 @@ const BG = '#0E1117';
 const CARD_BG = '#151B26';
 const BORDER = '#2A3347';
 const GOLD = '#F5A623';
-const GREEN = '#48BB78';
 const RED = '#E05252';
 const BLUE = '#4A90D9';
 const TEXT_PRIMARY = '#F0F4F8';
 const TEXT_SECONDARY = '#A0AEC0';
-const TEXT_MUTED = '#718096';
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
@@ -283,7 +281,7 @@ export default function JoinBetaScreen() {
         <Text style={s.title}>Join in app</Text>
         <Text style={s.subtitle}>
           An embedded, in-app way to join your session. Still in beta — if anything
-          doesn't work, you can always join in your browser.
+          doesn&apos;t work, you can always join in your browser.
         </Text>
 
         {phase === 'loading' && (
@@ -309,7 +307,7 @@ export default function JoinBetaScreen() {
               <View style={s.infoBox}>
                 <Text style={s.infoText}>
                   In-app join on mobile is coming soon. For now, please use the
-                  primary "Join Session" button or open the browser.
+                  primary &ldquo;Join Session&rdquo; button or open the browser.
                 </Text>
               </View>
             )}
@@ -346,7 +344,7 @@ export default function JoinBetaScreen() {
         {phase === 'error' && (
           <View style={[s.card, { borderColor: RED }]}>
             <Text style={[s.cardLabel, { color: RED }]}>
-              Couldn't start the in-app join
+              Couldn&apos;t start the in-app join
             </Text>
             {errorMsg ? <Text style={s.cardSub}>{errorMsg}</Text> : null}
             {inst?.zoomJoinUrl && (
