@@ -2000,11 +2000,8 @@ export const sendMemberInvite = onCall(
 
       // If member already has an account, just generate a reset link
       if (member.hasAccount === true && member.uid) {
-        const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
-        const resetLink = await admin.auth().generatePasswordResetLink(
-          memberEmail,
-          { url: appUrl, handleCodeInApp: false }
-        );
+        // No actionCodeSettings — avoids domain-allowlist requirement; Firebase uses its default continue URL
+        const resetLink = await admin.auth().generatePasswordResetLink(memberEmail);
         console.log('[sendMemberInvite] Reset link for existing account:', memberId, memberEmail);
         return { success: true, resetLink };
       }
@@ -2043,12 +2040,8 @@ export const sendMemberInvite = onCall(
         updatedAt: FieldValue.serverTimestamp(),
       });
 
-      // Generate password reset link
-      const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
-      const resetLink = await admin.auth().generatePasswordResetLink(
-        memberEmail,
-        { url: appUrl, handleCodeInApp: false }
-      );
+      // Generate password reset link (no actionCodeSettings — avoids domain-allowlist requirement)
+      const resetLink = await admin.auth().generatePasswordResetLink(memberEmail);
 
       console.log('[sendMemberInvite] Created auth + reset link:', userRecord.uid, memberEmail, 'by', callerUid);
       return { success: true, resetLink };
