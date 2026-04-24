@@ -180,15 +180,19 @@ export const slackEvents = onRequest(
 
       console.log(TAG, `app_mention from ${userId} in ${channel}: ${userText}`);
 
-      // 1. Immediately set the loading status in the thread
-      await setSlackStatus(botToken, channel, threadTs, 'Manus is thinking...');
-
-      // 2. Post an immediate acknowledgment in the thread
+      // 1. Post acknowledgment reply immediately (critical — must succeed)
       await postSlackMessage(
         botToken,
         channel,
         `👋 Got it, <@${userId}>. I'm on it — give me a moment.`,
         threadTs
+      );
+
+      // 2. Fire setStatus in background — don't await, it may not work in
+      //    regular channels (only works in assistant/DM threads), and we
+      //    don't want it to block the reply
+      setSlackStatus(botToken, channel, threadTs, 'Manus is thinking...').catch(
+        (err) => console.warn(TAG, 'setStatus failed (non-fatal):', err)
       );
 
       // 3. Log the mention to Firestore for Manus to pick up
@@ -206,9 +210,6 @@ export const slackEvents = onRequest(
         console.error(TAG, 'Failed to write mention to Firestore:', err);
       }
 
-      // 4. Clear the status now that we've acknowledged it
-      // (In the future, we might leave this on until the actual task is done)
-      await setSlackStatus(botToken, channel, threadTs, '');
       res.status(200).send('');
       return;
     }
