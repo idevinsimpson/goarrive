@@ -1954,6 +1954,112 @@ export const claimMemberAccount = onCall(
 );
 
 
+/**
+ * sendMemberInvite – Coach-initiated: ensure a Firebase Auth account exists
+ * for a coach-created member and return a password-reset / first-time-setup
+ * link they can share.
+ *
+ * Handles both cases:
+ *   - Member has no Auth user yet → creates one, sets member claims, links
+ *     the member doc, returns a reset link for the member to set a password.
+ *   - Member already has an Auth user → just returns a fresh reset link.
+ *
+ * Tenant isolation: caller must be the member's coach (or a platformAdmin).
+ *
+ * Input:  { memberId: string }
+ * Output: { success, resetLink, email, authCreated }
+ */
+export const sendMemberInvite = onCall(
+  { region: 'us-central1', invoker: 'public' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const token = request.auth?.token;
+    const callerRole = token?.role;
+    const callerCoachId = (token?.coachId as string | undefined) ?? callerUid;
+    const isAdmin = token?.admin === true || callerRole === 'platformAdmin';
+    if (callerRole !== 'coach' && !isAdmin) {
+      throw new HttpsError('permission-denied', 'Only coaches can send member invites');
+    }
+
+    const { memberId } = request.data as { memberId?: string };
+    if (!memberId) throw new HttpsError('invalid-argument', 'memberId is required');
+
+    const memberRef = db.collection('members').doc(memberId);
+    const memberSnap = await memberRef.get();
+    if (!memberSnap.exists) {
+      throw new HttpsError('not-found', 'Member record not found');
+    }
+    const member = memberSnap.data()!;
+
+    if (!isAdmin && member.coachId !== callerCoachId) {
+      throw new HttpsError('permission-denied', 'This member belongs to a different coach');
+    }
+
+    const email = String(member.email ?? '').trim().toLowerCase();
+    if (!email) {
+      throw new HttpsError(
+        'failed-precondition',
+        'This member has no email on file. Add one before sending an invite.'
+      );
+    }
+
+    // Ensure a Firebase Auth user exists for this email
+    let userRecord: admin.auth.UserRecord;
+    let authCreated = false;
+    try {
+      userRecord = await admin.auth().getUserByEmail(email);
+    } catch (err: any) {
+      if (err.code !== 'auth/user-not-found') {
+        throw new HttpsError('internal', err.message ?? 'Failed to look up user');
+      }
+      const cryptoMod = require('crypto');
+      const tempPassword = cryptoMod.randomBytes(24).toString('base64');
+      userRecord = await admin.auth().createUser({
+        email,
+        password: tempPassword,
+        displayName: member.displayName || member.name || '',
+      });
+      authCreated = true;
+    }
+
+    // Set member custom claims so role-gated UI and rules resolve correctly
+    await admin.auth().setCustomUserClaims(userRecord.uid, {
+      role: 'member',
+      coachId: member.coachId,
+      tenantId: member.tenantId ?? member.coachId,
+      memberId: memberId,
+    });
+
+    // Link the auth account to the member doc if not already linked
+    if (!member.uid || member.uid !== userRecord.uid || member.hasAccount !== true) {
+      await memberRef.update({
+        uid: userRecord.uid,
+        hasAccount: true,
+        email,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
+    const actionCodeSettings = { url: appUrl, handleCodeInApp: false };
+    const resetLink = await admin.auth().generatePasswordResetLink(email, actionCodeSettings);
+
+    console.log(
+      `[sendMemberInvite] ${authCreated ? 'Created' : 'Found'} auth for ${email} memberId=${memberId} by ${callerUid}`
+    );
+
+    return {
+      success: true,
+      resetLink,
+      email,
+      authCreated,
+    };
+  }
+);
+
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SCHEDULING BACKBONE — Recurring Slots, Session Instances, Zoom Allocation
 // ═══════════════════════════════════════════════════════════════════════════════

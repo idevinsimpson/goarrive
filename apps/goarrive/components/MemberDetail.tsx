@@ -14,9 +14,13 @@ import {
   Modal,
   TouchableOpacity,
   ScrollView,
+  Platform,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { db } from '../lib/firebase';
 import { doc, onSnapshot, collection, query, where, addDoc } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Icon } from './Icon';
 import { router } from 'expo-router';
 import { useAuth } from '../lib/AuthContext';
@@ -69,6 +73,12 @@ export default function MemberDetail({
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteText, setNoteText] = useState('');
 
+  // Invite / password reset modal state
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteResult, setInviteResult] = useState<{ link: string; email: string; authCreated: boolean } | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteCopied, setInviteCopied] = useState(false);
+
   // ── Load member data ──────────────────────────────────────────────────────
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, 'members', member.id), (snapshot) => {
@@ -104,6 +114,53 @@ export default function MemberDetail({
   function navigateToPlan() {
     onClose();
     router.push(`/(app)/member-plan/${currentMember.id}` as any);
+  }
+
+  async function handleSendInvite() {
+    if (inviteLoading) return;
+    setInviteError(null);
+    setInviteCopied(false);
+
+    if (!currentMember?.email || !String(currentMember.email).trim()) {
+      const msg = 'This member has no email on file. Add one before sending an invite.';
+      if (Platform.OS === 'web') window.alert(msg);
+      else Alert.alert('No email on file', msg);
+      return;
+    }
+
+    setInviteLoading(true);
+    try {
+      const functions = getFunctions();
+      const callable = httpsCallable(functions, 'sendMemberInvite');
+      const resp = await callable({ memberId: currentMember.id });
+      const data = (resp.data ?? {}) as { resetLink?: string; email?: string; authCreated?: boolean };
+      if (!data.resetLink) {
+        throw new Error('No link returned from server');
+      }
+      setInviteResult({
+        link: data.resetLink,
+        email: data.email ?? currentMember.email,
+        authCreated: !!data.authCreated,
+      });
+    } catch (err: any) {
+      console.error('[sendMemberInvite] failed', err);
+      setInviteError(err?.message || 'Failed to create invite link. Please try again.');
+    } finally {
+      setInviteLoading(false);
+    }
+  }
+
+  async function copyInviteLink() {
+    if (!inviteResult?.link) return;
+    try {
+      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(inviteResult.link);
+      }
+      setInviteCopied(true);
+      setTimeout(() => setInviteCopied(false), 2000);
+    } catch (err) {
+      console.warn('[copyInviteLink] clipboard unavailable', err);
+    }
   }
 
   const activeSlots = existingSlots.filter(s => s.status === 'active' || s.status === 'paused');
@@ -225,11 +282,12 @@ export default function MemberDetail({
     },
     {
       icon: 'lock',
-      label: 'Password Reset',
-      sublabel: 'Send reset link',
-      color: MUTED,
-      bgColor: 'rgba(138,149,163,0.1)',
-      live: false,
+      label: currentMember.hasAccount ? 'Password Reset' : 'Send Invite',
+      sublabel: currentMember.hasAccount ? 'Send reset link' : 'Create login link',
+      color: GOLD,
+      bgColor: 'rgba(245,166,35,0.1)',
+      live: true,
+      onPress: handleSendInvite,
     },
   ];
 
@@ -415,9 +473,145 @@ export default function MemberDetail({
         memberName={member.name || member.displayName || 'Member'}
         onClose={() => setShowWorkoutHistory(false)}
       />
+
+      {/* Invite / reset-link modal */}
+      <Modal
+        visible={inviteLoading || !!inviteResult || !!inviteError}
+        animationType="fade"
+        transparent
+        onRequestClose={() => { setInviteResult(null); setInviteError(null); }}
+      >
+        <View style={inviteStyles.overlay}>
+          <View style={inviteStyles.sheet}>
+            {inviteLoading ? (
+              <View style={{ alignItems: 'center', paddingVertical: 16 }}>
+                <ActivityIndicator size="large" color={GOLD} />
+                <Text style={inviteStyles.loadingText}>Creating invite link…</Text>
+              </View>
+            ) : inviteError ? (
+              <>
+                <Text style={inviteStyles.title}>Couldn&apos;t create invite</Text>
+                <Text style={inviteStyles.body}>{inviteError}</Text>
+                <TouchableOpacity
+                  style={[inviteStyles.cta, inviteStyles.ctaSecondary]}
+                  onPress={() => setInviteError(null)}
+                >
+                  <Text style={inviteStyles.ctaTextSecondary}>Close</Text>
+                </TouchableOpacity>
+              </>
+            ) : inviteResult ? (
+              <>
+                <Text style={inviteStyles.title}>
+                  {inviteResult.authCreated ? 'Invite link ready' : 'Password reset link ready'}
+                </Text>
+                <Text style={inviteStyles.body}>
+                  {inviteResult.authCreated
+                    ? `We created an account for ${inviteResult.email}. Send them this link so they can set a password and log in.`
+                    : `Send ${inviteResult.email} this link so they can reset their password and log in.`}
+                </Text>
+                <View style={inviteStyles.linkBox}>
+                  <Text style={inviteStyles.linkText} numberOfLines={3}>
+                    {inviteResult.link}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={[inviteStyles.cta, inviteCopied && inviteStyles.ctaCopied]}
+                  onPress={copyInviteLink}
+                >
+                  <Text style={inviteStyles.ctaText}>
+                    {inviteCopied ? 'Copied!' : 'Copy link'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[inviteStyles.cta, inviteStyles.ctaSecondary]}
+                  onPress={() => { setInviteResult(null); setInviteCopied(false); }}
+                >
+                  <Text style={inviteStyles.ctaTextSecondary}>Done</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
+
+const inviteStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  sheet: {
+    width: '100%',
+    maxWidth: 440,
+    backgroundColor: CARD,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+    padding: 22,
+    gap: 12,
+  },
+  loadingText: {
+    marginTop: 12,
+    color: MUTED,
+    fontFamily: FB,
+    fontSize: 14,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: FG,
+    fontFamily: FH,
+  },
+  body: {
+    fontSize: 14,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 20,
+  },
+  linkBox: {
+    backgroundColor: CARD2,
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  linkText: {
+    fontSize: 12,
+    color: FG,
+    fontFamily: FB,
+  },
+  cta: {
+    backgroundColor: GOLD,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  ctaCopied: {
+    backgroundColor: GREEN,
+  },
+  ctaText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: BG,
+    fontFamily: FH,
+  },
+  ctaSecondary: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  ctaTextSecondary: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: FG,
+    fontFamily: FH,
+  },
+});
 
 // ── Main Styles ─────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
