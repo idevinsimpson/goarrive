@@ -39,6 +39,10 @@
  * ME-010: ZOOM_RTMS_OAUTH_REDIRECT must match the redirect URI registered in
  *         the Zoom Marketplace app config.
  *         firebase functions:secrets:set ZOOM_RTMS_OAUTH_REDIRECT
+ * ME-011: SLACK_SIGNING_SECRET must be set for Slack webhook signature verification.
+ *         firebase functions:secrets:set SLACK_SIGNING_SECRET
+ * ME-012: SLACK_BOT_TOKEN must be set for posting Slack messages.
+ *         firebase functions:secrets:set SLACK_BOT_TOKEN
  *
  * RISK-001: CTS + pay-in-full discount stacking order is unresolved.
  *           Do not hardcode stacking. Both amounts are stored in the snapshot;
@@ -75,6 +79,9 @@ import {
 } from './zoomRtms';
 import WebSocket from 'ws';
 import { CloudTasksClient } from '@google-cloud/tasks';
+
+// ── Slack Bot (ME-011, ME-012) ────────────────────────────────────────────────
+export { slackEvents } from './slack';
 
 admin.initializeApp();
 
