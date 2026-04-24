@@ -245,20 +245,12 @@ export const slackEvents = onRequest(
       // Strip the @Manus mention to get the clean user message
       const cleanMessage = stripMention(userText);
 
-      // 1. Post acknowledgment immediately so user knows we're working
-      await postSlackMessage(
-        botToken,
-        channel,
-        `👋 On it, <@${userId}>...`,
-        threadTs
-      );
-
-      // 2. Fire setStatus in background (non-blocking — only works in DM threads)
+      // 1. Fire setStatus in background (non-blocking — only works in DM threads)
       setSlackStatus(botToken, channel, threadTs, 'Manus is thinking...').catch(
         (err) => console.warn(TAG, 'setStatus failed (non-fatal):', err)
       );
 
-      // 3. Get OpenAI reply
+      // 2. Get OpenAI reply and post it directly (no pre-ack message)
       let aiReply = '';
       try {
         aiReply = await getOpenAIReply(openaiKey, cleanMessage || 'Hello!');
@@ -267,7 +259,7 @@ export const slackEvents = onRequest(
         aiReply = "Sorry, I had trouble processing that. Please try again.";
       }
 
-      // 4. Post the AI reply in the thread
+      // 3. Post the AI reply in the thread
       await postSlackMessage(botToken, channel, aiReply, threadTs);
 
       // 5. Log the mention to Firestore
@@ -323,21 +315,56 @@ export const slackEvents = onRequest(
       return;
     }
 
-    // ── message.im: Direct message to the bot ────────────────────────────────
-    if (eventType === 'message' && !event.bot_id) {
+     // ── message: channel message or DM (including thread replies) ─────────────
+    if (eventType === 'message' && !event.bot_id && !event.subtype) {
       const channel = event.channel as string;
-      const threadTs = (event.thread_ts ?? event.ts) as string;
+      const threadTs = event.thread_ts as string | undefined;
       const userId = event.user as string;
       const text = (event.text as string) ?? '';
 
-      console.log(TAG, `DM from ${userId}: ${text}`);
+      // Only respond to thread replies (thread_ts present and different from event.ts)
+      // This handles replies in Manus threads without needing @mention.
+      // For top-level channel messages, we rely on app_mention instead.
+      const isThreadReply = threadTs && threadTs !== event.ts;
 
-      // Get AI reply for DMs too
+      if (!isThreadReply) {
+        // Top-level channel message without @mention — ignore
+        res.status(200).send('');
+        return;
+      }
+
+      // Only respond if this is a thread Manus has already posted in
+      // (tracked in Firestore as slack_mentions). This prevents Manus from
+      // jumping into every thread in the channel.
+      let isManusThread = false;
+      try {
+        const snapshot = await admin
+          .firestore()
+          .collection('slack_mentions')
+          .where('channel', '==', channel)
+          .where('threadTs', '==', threadTs)
+          .limit(1)
+          .get();
+        isManusThread = !snapshot.empty;
+      } catch (err) {
+        console.error(TAG, 'Firestore thread check failed:', err);
+      }
+
+      if (!isManusThread) {
+        console.log(TAG, `Thread reply in non-Manus thread ${threadTs} — ignoring`);
+        res.status(200).send('');
+        return;
+      }
+
+      console.log(TAG, `Thread reply from ${userId} in ${channel} (thread: ${threadTs}): ${text}`);
+
+      // Get AI reply
       let aiReply = '';
       try {
         aiReply = await getOpenAIReply(openaiKey, text || 'Hello!');
       } catch (err) {
-        aiReply = `Hi <@${userId}>! I'm Manus — I handle browser-based tasks for GoArrive. Mention me in #dev-goarrive with what you need.`;
+        console.error(TAG, 'OpenAI call failed in thread reply:', err);
+        aiReply = "Sorry, I had trouble with that. Please try again.";
       }
 
       await postSlackMessage(botToken, channel, aiReply, threadTs);
