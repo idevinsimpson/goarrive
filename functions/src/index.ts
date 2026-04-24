@@ -1970,7 +1970,7 @@ export const sendMemberInvite = onCall(
 
     // Only coaches (or admins) may send invites
     const callerRole = request.auth?.token?.role;
-    const callerAdmin = request.auth?.token?.admin === true;
+    const callerAdmin = request.auth?.token?.admin === true || callerRole === 'platformAdmin';
     if (callerRole !== 'coach' && !callerAdmin) {
       throw new HttpsError('permission-denied', 'Only coaches can send member invites');
     }
