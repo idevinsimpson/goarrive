@@ -28,6 +28,18 @@
  *         firebase functions:secrets:set ZOOM_CLIENT_SECRET
  * ME-007: ZOOM_WEBHOOK_SECRET must be set for Zoom webhook signature verification.
  *         firebase functions:secrets:set ZOOM_WEBHOOK_SECRET
+ * ME-008: ZOOM_RTMS_CLIENT_ID + ZOOM_RTMS_CLIENT_SECRET must be set for the RTMS
+ *         Marketplace app (separate from the S2S OAuth meeting-management app).
+ *         Staging uses the Zoom Dev credentials; production uses Prod.
+ *         firebase functions:secrets:set ZOOM_RTMS_CLIENT_ID
+ *         firebase functions:secrets:set ZOOM_RTMS_CLIENT_SECRET
+ * ME-009: ZOOM_RTMS_SECRET_TOKEN must be set for RTMS webhook HMAC verification
+ *         (different from ZOOM_WEBHOOK_SECRET — this token is shared by both
+ *         envs since the Marketplace app has a single secret token).
+ *         firebase functions:secrets:set ZOOM_RTMS_SECRET_TOKEN
+ * ME-010: ZOOM_RTMS_OAUTH_REDIRECT must match the redirect URI registered in
+ *         the Zoom Marketplace app config.
+ *         firebase functions:secrets:set ZOOM_RTMS_OAUTH_REDIRECT
  *
  * RISK-001: CTS + pay-in-full discount stacking order is unresolved.
  *           Do not hardcode stacking. Both amounts are stored in the snapshot;
@@ -72,8 +84,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
-exports.onMemberCreated = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = void 0;
+exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = void 0;
+exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -83,6 +95,9 @@ const firestore_2 = require("firebase-admin/firestore");
 const stripe_1 = __importDefault(require("stripe"));
 const googleapis_1 = require("googleapis");
 const zoom_1 = require("./zoom");
+const zoomRtms_1 = require("./zoomRtms");
+const ws_1 = __importDefault(require("ws"));
+const tasks_1 = require("@google-cloud/tasks");
 admin.initializeApp();
 const db = admin.firestore(); // IAM: datastore.user granted 2026-03-22
 const messaging = admin.messaging();
@@ -95,6 +110,10 @@ const zoomAccountId = (0, params_1.defineSecret)('ZOOM_ACCOUNT_ID');
 const zoomClientId = (0, params_1.defineSecret)('ZOOM_CLIENT_ID');
 const zoomClientSecret = (0, params_1.defineSecret)('ZOOM_CLIENT_SECRET');
 // ZOOM_WEBHOOK_SECRET is defined near zoomWebhook CF (line ~2858)
+// Meeting SDK app (third Zoom Marketplace app) — signs embedded join payloads.
+// See docs/ZOOM_MEETING_SDK_SETUP.md. Only used by getEmbeddedSessionJoinConfig.
+const zoomMeetingSdkKey = (0, params_1.defineSecret)('ZOOM_MEETING_SDK_KEY');
+const zoomMeetingSdkSecret = (0, params_1.defineSecret)('ZOOM_MEETING_SDK_SECRET');
 // ── Notification Secrets ─────────────────────────────────────────────────────
 const emailApiKey = (0, params_1.defineSecret)('EMAIL_API_KEY');
 const twilioAccountSid = (0, params_1.defineSecret)('TWILIO_ACCOUNT_SID');
@@ -2994,8 +3013,11 @@ exports.zoomWebhook = (0, https_1.onRequest)({ region: 'us-central1', secrets: [
         res.status(401).send('Unauthorized');
         return;
     }
-    const rawBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
-    if (!(0, zoom_1.verifyWebhookSignature)(signature, timestamp, rawBody, secret)) {
+    // Use req.rawBody so the bytes match what Zoom signed (re-stringifying
+    // a parsed body can introduce whitespace/key-order drift).
+    const rawBody = req.rawBody ? req.rawBody.toString('utf8')
+        : typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    if (!(0, zoom_1.verifyWebhookSignature)(rawBody, timestamp, signature, secret)) {
         console.warn('[zoomWebhook] Invalid webhook signature');
         res.status(401).send('Invalid signature');
         return;
@@ -3184,6 +3206,550 @@ exports.zoomWebhook = (0, https_1.onRequest)({ region: 'us-central1', secrets: [
     console.log(`[zoomWebhook] Processed ${eventType} for meeting ${meetingId} (instance: ${occurrenceId || 'unlinked'})`);
     res.status(200).json({ status: 'ok' });
 });
+// ═══════════════════════════════════════════════════════════════════════════════
+// ZOOM RTMS (Real-Time Media Streaming) — separate Marketplace app
+// ───────────────────────────────────────────────────────────────────────────────
+// The S2S OAuth app above can manage meetings but cannot open RTMS WebSocket
+// connections. RTMS requires a Zoom Marketplace "General App" with its own
+// OAuth flow + webhook secret. These three functions wire that app:
+//
+//   zoomRtmsOauthCallback — OAuth code → token, persists to zoom_tokens/{accountId}
+//   zoomRtmsWebhook       — receives endpoint.url_validation, meeting.rtms_started,
+//                           meeting.rtms_stopped, meeting.ended; dispatches the
+//                           WebSocket worker on rtms_started
+//   startRtmsStream       — long-running (≤60min) HTTP worker that opens the
+//                           RTMS signaling + media WebSockets and writes
+//                           transcript segments to Firestore
+//
+// Firestore collections (see firestore.rules — server-only writes):
+//   zoom_tokens/{accountId}
+//   rtms_sessions/{meetingId}
+//   rtms_transcripts/{meetingId}/segments/{ts}
+// ═══════════════════════════════════════════════════════════════════════════════
+const ZOOM_RTMS_CLIENT_ID = (0, params_1.defineSecret)('ZOOM_RTMS_CLIENT_ID');
+const ZOOM_RTMS_CLIENT_SECRET = (0, params_1.defineSecret)('ZOOM_RTMS_CLIENT_SECRET');
+const ZOOM_RTMS_SECRET_TOKEN = (0, params_1.defineSecret)('ZOOM_RTMS_SECRET_TOKEN');
+const ZOOM_RTMS_OAUTH_REDIRECT = (0, params_1.defineSecret)('ZOOM_RTMS_OAUTH_REDIRECT');
+// ─── 21a. zoomRtmsOauthCallback — OAuth code → tokens ───────────────────────
+exports.zoomRtmsOauthCallback = (0, https_1.onRequest)({
+    region: 'us-central1',
+    invoker: 'public',
+    secrets: [ZOOM_RTMS_CLIENT_ID, ZOOM_RTMS_CLIENT_SECRET, ZOOM_RTMS_OAUTH_REDIRECT],
+}, async (req, res) => {
+    if (req.method !== 'GET') {
+        res.status(405).send('Method Not Allowed');
+        return;
+    }
+    const code = req.query.code || '';
+    const errorParam = req.query.error;
+    if (errorParam) {
+        console.warn('[zoomRtmsOauthCallback] OAuth error from Zoom:', errorParam);
+        res.status(400).send(`Zoom OAuth error: ${errorParam}`);
+        return;
+    }
+    if (!code) {
+        res.status(400).send('Missing required query param: code');
+        return;
+    }
+    const clientId = ZOOM_RTMS_CLIENT_ID.value();
+    const clientSecret = ZOOM_RTMS_CLIENT_SECRET.value();
+    const redirectUri = ZOOM_RTMS_OAUTH_REDIRECT.value();
+    if (!clientId || !clientSecret || !redirectUri) {
+        console.error('[zoomRtmsOauthCallback] Missing required Zoom RTMS secrets');
+        res.status(500).send('Server misconfigured');
+        return;
+    }
+    try {
+        const tokens = await (0, zoomRtms_1.exchangeOAuthCode)({ code, clientId, clientSecret, redirectUri });
+        // Resolve which Zoom user/account installed by calling /users/me.
+        let installedBy;
+        let accountId;
+        try {
+            const meResp = await fetch('https://api.zoom.us/v2/users/me', {
+                headers: { Authorization: `Bearer ${tokens.access_token}` },
+            });
+            if (meResp.ok) {
+                const me = (await meResp.json());
+                installedBy = me.id;
+                accountId = me.account_id;
+            }
+        }
+        catch (meErr) {
+            console.warn('[zoomRtmsOauthCallback] /users/me lookup failed (non-fatal):', meErr);
+        }
+        const docId = accountId || installedBy || 'default';
+        const stored = {
+            accessToken: tokens.access_token,
+            refreshToken: tokens.refresh_token,
+            tokenType: tokens.token_type,
+            scope: tokens.scope,
+            expiresAt: Date.now() + tokens.expires_in * 1000,
+            apiUrl: tokens.api_url,
+            installedBy,
+            accountId,
+        };
+        await db.collection('zoom_tokens').doc(docId).set(Object.assign(Object.assign({}, stored), { updatedAt: firestore_2.FieldValue.serverTimestamp(), createdAt: firestore_2.FieldValue.serverTimestamp() }), { merge: true });
+        console.log(`[zoomRtmsOauthCallback] Tokens stored for account ${docId} (scopes: ${tokens.scope})`);
+        res.status(200).send('Zoom RTMS app installed. You can close this window.');
+    }
+    catch (err) {
+        console.error('[zoomRtmsOauthCallback] Token exchange failed:', (err === null || err === void 0 ? void 0 : err.message) || err);
+        res.status(500).send('OAuth token exchange failed.');
+    }
+});
+// ─── 21b. zoomRtmsWebhook — receives RTMS lifecycle events ──────────────────
+// Handles: endpoint.url_validation, meeting.rtms_started, meeting.rtms_stopped,
+//          meeting.ended. Dispatches the WebSocket worker on rtms_started.
+exports.zoomRtmsWebhook = (0, https_1.onRequest)({
+    region: 'us-central1',
+    invoker: 'public',
+    secrets: [
+        ZOOM_RTMS_SECRET_TOKEN,
+        ZOOM_RTMS_CLIENT_ID,
+        ZOOM_RTMS_CLIENT_SECRET,
+    ],
+}, async (req, res) => {
+    var _a, _b;
+    if (req.method !== 'POST') {
+        res.status(405).send('Method Not Allowed');
+        return;
+    }
+    const secretToken = ZOOM_RTMS_SECRET_TOKEN.value();
+    if (!secretToken) {
+        console.error('[zoomRtmsWebhook] ZOOM_RTMS_SECRET_TOKEN not set');
+        res.status(500).send('Server misconfigured');
+        return;
+    }
+    const body = req.body || {};
+    // ── CRC validation (also used by Zoom every 72h) ──
+    if (body.event === 'endpoint.url_validation') {
+        const plainToken = (_a = body.payload) === null || _a === void 0 ? void 0 : _a.plainToken;
+        if (!plainToken) {
+            res.status(400).json({ error: 'Missing plainToken' });
+            return;
+        }
+        res.status(200).json((0, zoomRtms_1.buildRtmsCrcResponse)(plainToken, secretToken));
+        return;
+    }
+    // ── Signature verification ──
+    const signature = req.headers['x-zm-signature'];
+    const timestamp = req.headers['x-zm-request-timestamp'];
+    const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(body);
+    if (!signature || !timestamp || !(0, zoomRtms_1.verifyRtmsWebhookSignature)({
+        rawBody, timestamp, signature, secretToken,
+    })) {
+        console.warn('[zoomRtmsWebhook] Invalid or missing signature');
+        res.status(401).send('Invalid signature');
+        return;
+    }
+    const eventType = body.event;
+    const payload = ((_b = body.payload) === null || _b === void 0 ? void 0 : _b.object) || {};
+    const meetingId = String(payload.id || payload.meeting_id || '');
+    const meetingUuid = payload.uuid;
+    const streamId = payload.rtms_stream_id || payload.stream_id || '';
+    try {
+        switch (eventType) {
+            case 'meeting.rtms_started': {
+                if (!meetingId || !streamId) {
+                    console.warn('[zoomRtmsWebhook] rtms_started missing meetingId/streamId', payload);
+                    break;
+                }
+                const sessionDoc = {
+                    meetingId,
+                    meetingUuid,
+                    streamId,
+                    hostId: payload.host_id,
+                    topic: payload.topic,
+                    status: 'pending_connect',
+                    startedAt: firestore_2.FieldValue.serverTimestamp(),
+                    endedAt: null,
+                    segmentCount: 0,
+                };
+                await db.collection('rtms_sessions').doc(meetingId).set(sessionDoc, { merge: true });
+                // Dispatch the long-running worker. Prefer Cloud Tasks for built-in
+                // retries with backoff; fall back to fire-and-forget HTTP if the
+                // queue isn't provisioned yet (so the feature still works in fresh
+                // environments). The worker self-cancels on rtms_stopped / meeting.
+                // ended via the Firestore session doc.
+                const workerUrl = resolveStartRtmsStreamUrl();
+                if (!workerUrl) {
+                    console.warn('[zoomRtmsWebhook] startRtmsStream URL unresolved — worker not dispatched');
+                    break;
+                }
+                const dispatched = await dispatchViaCloudTasks({
+                    workerUrl,
+                    payload: { meetingId, streamId, meetingUuid },
+                });
+                if (!dispatched) {
+                    console.warn('[zoomRtmsWebhook] Cloud Tasks unavailable — falling back to fire-and-forget HTTP');
+                    fetch(workerUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ meetingId, streamId, meetingUuid }),
+                    }).catch((err) => {
+                        console.error('[zoomRtmsWebhook] Fallback dispatch also failed:', (err === null || err === void 0 ? void 0 : err.message) || err);
+                    });
+                }
+                break;
+            }
+            case 'meeting.rtms_stopped': {
+                if (meetingId) {
+                    await db.collection('rtms_sessions').doc(meetingId).set({
+                        status: 'ended',
+                        endedAt: firestore_2.FieldValue.serverTimestamp(),
+                    }, { merge: true });
+                }
+                break;
+            }
+            case 'meeting.ended': {
+                if (meetingId) {
+                    await db.collection('rtms_sessions').doc(meetingId).set({
+                        status: 'ended',
+                        endedAt: firestore_2.FieldValue.serverTimestamp(),
+                    }, { merge: true });
+                }
+                break;
+            }
+            default: {
+                console.log('[zoomRtmsWebhook] Unhandled event:', eventType);
+                break;
+            }
+        }
+        res.status(200).json({ status: 'ok' });
+    }
+    catch (err) {
+        console.error('[zoomRtmsWebhook] Handler error:', (err === null || err === void 0 ? void 0 : err.message) || err);
+        res.status(500).json({ error: 'internal' });
+    }
+});
+// Resolve the public URL of the startRtmsStream function for in-region dispatch.
+// Falls back to the standard Cloud Functions hostname pattern when no override
+// is set, which works for both staging and production projects.
+function resolveStartRtmsStreamUrl() {
+    if (process.env.START_RTMS_STREAM_URL)
+        return process.env.START_RTMS_STREAM_URL;
+    const project = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
+    if (!project)
+        return null;
+    return `https://us-central1-${project}.cloudfunctions.net/startRtmsStream`;
+}
+// Lazy-init Cloud Tasks client (only created when needed).
+let cloudTasksClient = null;
+function getCloudTasksClient() {
+    if (!cloudTasksClient)
+        cloudTasksClient = new tasks_1.CloudTasksClient();
+    return cloudTasksClient;
+}
+const RTMS_TASK_QUEUE = process.env.RTMS_TASK_QUEUE || 'rtms-dispatch';
+const RTMS_TASK_LOCATION = process.env.RTMS_TASK_LOCATION || 'us-central1';
+// Dispatch the RTMS worker via Cloud Tasks (auto-retries + backoff). Returns
+// false if the queue isn't reachable / doesn't exist so the caller can fall
+// back. Never throws — all errors are logged.
+async function dispatchViaCloudTasks(args) {
+    const project = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
+    if (!project)
+        return false;
+    try {
+        const client = getCloudTasksClient();
+        const queuePath = client.queuePath(project, RTMS_TASK_LOCATION, RTMS_TASK_QUEUE);
+        const sa = process.env.RTMS_TASK_INVOKER_SA || `${project}@appspot.gserviceaccount.com`;
+        await client.createTask({
+            parent: queuePath,
+            task: {
+                httpRequest: {
+                    httpMethod: 'POST',
+                    url: args.workerUrl,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: Buffer.from(JSON.stringify(args.payload)).toString('base64'),
+                    oidcToken: { serviceAccountEmail: sa, audience: args.workerUrl },
+                },
+            },
+        });
+        console.log(`[dispatchViaCloudTasks] Enqueued worker for meeting ${args.payload.meetingId}`);
+        return true;
+    }
+    catch (err) {
+        const code = err === null || err === void 0 ? void 0 : err.code;
+        // NOT_FOUND (5) = queue missing; PERMISSION_DENIED (7) = IAM not granted.
+        if (code === 5 || code === 7) {
+            console.warn(`[dispatchViaCloudTasks] Queue/IAM not provisioned (code ${code}): ${err.message}`);
+        }
+        else {
+            console.error('[dispatchViaCloudTasks] Enqueue failed:', (err === null || err === void 0 ? void 0 : err.message) || err);
+        }
+        return false;
+    }
+}
+// ─── 21c. startRtmsStream — long-running RTMS WebSocket worker ──────────────
+// Triggered by zoomRtmsWebhook after meeting.rtms_started. Opens the signaling
+// WebSocket, completes the data handshake, subscribes to audio + transcript,
+// and writes transcript segments to Firestore until the meeting ends or the
+// Cloud Functions timeout (60 min) is hit.
+exports.startRtmsStream = (0, https_1.onRequest)({
+    region: 'us-central1',
+    invoker: 'public',
+    timeoutSeconds: 3600,
+    memory: '512MiB',
+    concurrency: 1,
+    secrets: [ZOOM_RTMS_CLIENT_ID, ZOOM_RTMS_CLIENT_SECRET],
+}, async (req, res) => {
+    var _a, _b, _c;
+    if (req.method !== 'POST') {
+        res.status(405).send('Method Not Allowed');
+        return;
+    }
+    const meetingId = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.meetingId) || '');
+    const streamId = String(((_b = req.body) === null || _b === void 0 ? void 0 : _b.streamId) || '');
+    const meetingUuid = String(((_c = req.body) === null || _c === void 0 ? void 0 : _c.meetingUuid) || '');
+    if (!meetingId || !streamId || !meetingUuid) {
+        res.status(400).send('Missing meetingId, streamId, or meetingUuid');
+        return;
+    }
+    const sessionRef = db.collection('rtms_sessions').doc(meetingId);
+    await sessionRef.set({ status: 'connecting' }, { merge: true });
+    const clientId = ZOOM_RTMS_CLIENT_ID.value();
+    const clientSecret = ZOOM_RTMS_CLIENT_SECRET.value();
+    try {
+        // Look up signaling URL for this stream. (Some RTMS payloads include it
+        // inline; if absent, fetch via the REST endpoint.)
+        const signalingUrl = await resolveSignalingUrl({ meetingId, streamId });
+        if (!signalingUrl) {
+            throw new Error('No signaling URL available for stream');
+        }
+        const segmentsCol = db.collection('rtms_transcripts').doc(meetingId).collection('segments');
+        await runRtmsWorker({
+            signalingUrl,
+            meetingUuid,
+            streamId,
+            clientId,
+            clientSecret,
+            onTranscriptSegment: async (seg) => {
+                const ts = Date.now();
+                await segmentsCol.doc(String(ts)).set({
+                    speaker: seg.speaker || 'unknown',
+                    text: seg.text || '',
+                    confidence: typeof seg.confidence === 'number' ? seg.confidence : null,
+                    ts,
+                    startMs: typeof seg.startMs === 'number' ? seg.startMs : null,
+                    endMs: typeof seg.endMs === 'number' ? seg.endMs : null,
+                });
+                await sessionRef.set({
+                    segmentCount: firestore_2.FieldValue.increment(1),
+                }, { merge: true });
+            },
+            isCanceled: async () => {
+                var _a;
+                const snap = await sessionRef.get();
+                const status = (_a = snap.data()) === null || _a === void 0 ? void 0 : _a.status;
+                return status === 'ended' || status === 'failed';
+            },
+            onActive: async () => {
+                await sessionRef.set({ status: 'active' }, { merge: true });
+            },
+        });
+        await sessionRef.set({
+            status: 'ended',
+            endedAt: firestore_2.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        res.status(200).json({ status: 'completed' });
+    }
+    catch (err) {
+        const message = (err === null || err === void 0 ? void 0 : err.message) || String(err);
+        console.error(`[startRtmsStream] Worker failed for meeting ${meetingId}:`, message);
+        await sessionRef.set({
+            status: 'failed',
+            lastError: message,
+            endedAt: firestore_2.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        res.status(500).json({ error: 'worker_failed', message });
+    }
+});
+// Resolve the signaling WebSocket URL for an RTMS stream. The webhook payload
+// usually includes `signaling_url` directly, but we also support fetching it
+// from the documented REST endpoint when needed.
+async function resolveSignalingUrl(args) {
+    var _a;
+    // 1) If the webhook stored a signaling URL on the session doc, use that.
+    const snap = await db.collection('rtms_sessions').doc(args.meetingId).get();
+    const fromDoc = (_a = snap.data()) === null || _a === void 0 ? void 0 : _a.signalingUrl;
+    if (fromDoc)
+        return fromDoc;
+    // 2) Fallback: REST lookup. Requires an OAuth access token from zoom_tokens.
+    const tokenSnap = await db.collection('zoom_tokens').limit(1).get();
+    if (tokenSnap.empty)
+        return null;
+    const token = tokenSnap.docs[0].data().accessToken;
+    if (!token)
+        return null;
+    const url = `https://api.zoom.us/v2/meetings/${encodeURIComponent(args.meetingId)}/rtms/streams/${encodeURIComponent(args.streamId)}`;
+    const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!resp.ok) {
+        console.warn(`[resolveSignalingUrl] REST lookup failed (${resp.status})`);
+        return null;
+    }
+    const data = (await resp.json());
+    return data.signaling_url || null;
+}
+// Core RTMS worker: signaling handshake → media handshake → subscribe → drain.
+async function runRtmsWorker(args) {
+    const signature = (0, zoomRtms_1.buildRtmsHandshakeSignature)({
+        clientId: args.clientId,
+        clientSecret: args.clientSecret,
+        meetingUuid: args.meetingUuid,
+        streamId: args.streamId,
+    });
+    await new Promise((resolve, reject) => {
+        const ws = new ws_1.default(args.signalingUrl);
+        let mediaWs = null;
+        let keepalive = null;
+        let cancelPoll = null;
+        let resolved = false;
+        const cleanup = () => {
+            if (keepalive)
+                clearInterval(keepalive);
+            if (cancelPoll)
+                clearInterval(cancelPoll);
+            try {
+                mediaWs === null || mediaWs === void 0 ? void 0 : mediaWs.close();
+            }
+            catch ( /* ignore */_a) { /* ignore */ }
+            try {
+                ws.close();
+            }
+            catch ( /* ignore */_b) { /* ignore */ }
+        };
+        const finish = (err) => {
+            if (resolved)
+                return;
+            resolved = true;
+            cleanup();
+            if (err)
+                reject(err);
+            else
+                resolve();
+        };
+        ws.on('open', () => {
+            const handshake = {
+                msg_type: zoomRtms_1.RTMS_MSG_TYPE.SIGNALING_HAND_SHAKE_REQ,
+                protocol_version: 1,
+                meeting_uuid: args.meetingUuid,
+                rtms_stream_id: args.streamId,
+                signature,
+            };
+            ws.send(JSON.stringify(handshake));
+        });
+        ws.on('message', (raw) => {
+            var _a;
+            let msg;
+            try {
+                msg = JSON.parse(raw.toString());
+            }
+            catch (_b) {
+                return;
+            }
+            if (msg.msg_type === zoomRtms_1.RTMS_MSG_TYPE.SIGNALING_HAND_SHAKE_RESP) {
+                if (msg.status_code && msg.status_code !== 0) {
+                    finish(new Error(`Signaling handshake rejected: ${msg.reason || msg.status_code}`));
+                    return;
+                }
+                const mediaUrl = ((_a = msg.media_server_address) === null || _a === void 0 ? void 0 : _a.audio) || msg.media_url;
+                if (!mediaUrl) {
+                    finish(new Error('Signaling response missing media URL'));
+                    return;
+                }
+                mediaWs = openMediaWs({
+                    url: mediaUrl,
+                    meetingUuid: args.meetingUuid,
+                    streamId: args.streamId,
+                    signature,
+                    onTranscriptSegment: args.onTranscriptSegment,
+                    onActive: args.onActive,
+                    onError: (e) => finish(e),
+                    onClose: () => finish(),
+                });
+            }
+        });
+        ws.on('error', (err) => finish(err instanceof Error ? err : new Error(String(err))));
+        ws.on('close', () => finish());
+        // App-level keepalive on the signaling channel (per Zoom docs).
+        keepalive = setInterval(() => {
+            try {
+                ws.send(JSON.stringify({
+                    msg_type: zoomRtms_1.RTMS_MSG_TYPE.KEEP_ALIVE_REQ,
+                    timestamp: Date.now(),
+                }));
+            }
+            catch ( /* ignore */_a) { /* ignore */ }
+        }, 25000);
+        // Honor Firestore-driven cancellation (rtms_stopped or meeting.ended).
+        cancelPoll = setInterval(() => {
+            args.isCanceled().then((canceled) => {
+                if (canceled)
+                    finish();
+            }).catch(() => { });
+        }, 5000);
+    });
+}
+// Open the media-channel WebSocket and route transcript frames.
+function openMediaWs(args) {
+    const media = new ws_1.default(args.url);
+    media.on('open', () => {
+        const dataHandshake = {
+            msg_type: zoomRtms_1.RTMS_MSG_TYPE.DATA_HAND_SHAKE_REQ,
+            protocol_version: 1,
+            meeting_uuid: args.meetingUuid,
+            rtms_stream_id: args.streamId,
+            signature: args.signature,
+            media_type: (0, zoomRtms_1.mediaTypeBitmask)(['audio', 'transcript']),
+            payload_encryption: false,
+        };
+        media.send(JSON.stringify(dataHandshake));
+    });
+    media.on('message', async (raw) => {
+        let msg;
+        try {
+            msg = JSON.parse(raw.toString());
+        }
+        catch (_a) {
+            return;
+        }
+        if (msg.msg_type === zoomRtms_1.RTMS_MSG_TYPE.DATA_HAND_SHAKE_RESP) {
+            if (msg.status_code && msg.status_code !== 0) {
+                args.onError(new Error(`Data handshake rejected: ${msg.reason || msg.status_code}`));
+                return;
+            }
+            await args.onActive();
+            // Acknowledge readiness.
+            media.send(JSON.stringify({
+                msg_type: zoomRtms_1.RTMS_MSG_TYPE.CLIENT_READY_ACK,
+                rtms_stream_id: args.streamId,
+            }));
+            return;
+        }
+        if (msg.msg_type === zoomRtms_1.RTMS_MSG_TYPE.MEDIA_DATA_TRANSCRIPT) {
+            const content = msg.content || msg.transcript || {};
+            try {
+                await args.onTranscriptSegment({
+                    speaker: content.user_name || content.speaker,
+                    text: content.text || content.content,
+                    confidence: content.confidence,
+                    startMs: content.timestamp || content.start_ms,
+                    endMs: content.end_ms,
+                });
+            }
+            catch (err) {
+                console.warn('[rtms media] transcript persist failed:', err.message);
+            }
+            return;
+        }
+        if (msg.msg_type === zoomRtms_1.RTMS_MSG_TYPE.STREAM_STATE_UPDATE && msg.state === 'TERMINATED') {
+            args.onClose();
+        }
+    });
+    media.on('error', (err) => args.onError(err instanceof Error ? err : new Error(String(err))));
+    media.on('close', () => args.onClose());
+    return media;
+}
 // ─── Prompt 4: Admin Operations & Communications Layer ──────────────────────
 // Provider health, reminder scheduler, dead-letter handling, event log, iCal feed
 // ─────────────────────────────────────────────────────────────────────────────
@@ -6259,8 +6825,16 @@ exports.retryFailedGifGeneration = (0, scheduler_1.onSchedule)({ schedule: '0 */
 //
 // ME-008: OPENAI_API_KEY must be set as a Firebase secret.
 //         firebase functions:secrets:set OPENAI_API_KEY
+//
+// VOICEMAKER_API_KEY is the alternative TTS provider (Voicemaker.in / ai3-Aria).
+// When generateVoice receives `provider: 'voicemaker'`, it calls Voicemaker
+// instead of OpenAI, downloads the resulting MP3 from the temporary Voicemaker
+// URL (which expires after FileStore hours, default 1h), and writes it into
+// our Firebase Storage cache. The player still consumes Storage URLs only.
+//         firebase functions:secrets:set VOICEMAKER_API_KEY
 // ─────────────────────────────────────────────────────────────────────────────
 const openaiApiKey = (0, params_1.defineSecret)('OPENAI_API_KEY');
+const voicemakerApiKey = (0, params_1.defineSecret)('VOICEMAKER_API_KEY');
 exports.analyzeMovement = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60, maxInstances: 20, invoker: 'public' }, async (request) => {
     var _a, _b, _c, _d, _e;
     const { gifUrl, contactSheet } = request.data;
@@ -6963,44 +7537,29 @@ exports.createMissingLedgerEntry = (0, https_1.onCall)({ secrets: [stripeSecretK
     }
     return { created, entries };
 });
-// ─── generateVoice — OpenAI TTS for workout cues and movement names ─────────
-// Accepts text + optional voice (default "nova" — fitness-instructor vibe),
-// generates MP3 via OpenAI TTS, uploads to Firebase Storage, returns the
-// download URL. When `movementId` is supplied the function also writes
-// { voiceUrl, voiceText, voiceName } to movements/{id} with admin creds —
-// members lack Firestore update permission on /movements, so lazy-backfill
-// from the player can't persist the URL client-side. Coach write paths
-// (MovementForm, BulkMovementUpload) still overwrite with their own updateDoc
-// for the rename/clear flows.
-//
-// voiceName is stored on the doc so the player can detect wrong-voice legacy
-// clips and trigger regeneration (useMovementHydrate). Without it, an older
-// onyx-generated clip would be reused indefinitely after the default changed.
-// ─────────────────────────────────────────────────────────────────────────────
-exports.generateVoice = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 30, invoker: 'public' }, async (request) => {
-    var _a, _b, _c, _d;
+exports.generateVoice = (0, https_1.onCall)({
+    region: 'us-central1',
+    secrets: [openaiApiKey, voicemakerApiKey],
+    timeoutSeconds: 30,
+    invoker: 'public',
+}, async (request) => {
+    var _a, _b, _c, _d, _e;
     if (!((_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid)) {
         throw new https_1.HttpsError('unauthenticated', 'Sign in required');
     }
-    const { text, voice, storagePath, movementId, model, instructions } = request.data;
+    const { text, voice, storagePath, movementId, model, instructions, provider, engine, languageCode, sampleRate, effect, masterSpeed, masterPitch, masterVolume, fileStore, } = request.data;
     if (!text || typeof text !== 'string' || text.length === 0) {
         throw new https_1.HttpsError('invalid-argument', 'text is required');
     }
-    if (text.length > 500) {
-        throw new https_1.HttpsError('invalid-argument', 'text must be under 500 characters');
+    if (text.length > 800) {
+        throw new https_1.HttpsError('invalid-argument', 'text must be under 800 characters');
     }
-    const apiKey = (_b = openaiApiKey.value()) === null || _b === void 0 ? void 0 : _b.trim();
-    if (!apiKey) {
-        console.error('[VOICE-AUDIT] generateVoice: apikey layer — OPENAI_API_KEY secret empty');
-        throw new https_1.HttpsError('failed-precondition', 'voice:apikey:missing', {
-            layer: 'apikey',
-            reason: 'OPENAI_API_KEY secret is unset or empty on deployed function',
-        });
-    }
-    const selectedVoice = voice || 'nova';
+    const selectedProvider = provider === 'voicemaker' ? 'voicemaker' : 'openai';
+    const selectedVoice = voice || (selectedProvider === 'voicemaker' ? 'ai3-Aria' : 'nova');
+    const selectedEffect = effect || (selectedProvider === 'voicemaker' ? 'friendly' : '');
     // tts-1 / tts-1-hd ignore `instructions`. gpt-4o-mini-tts (and audio
-    // models) honor it for delivery-style control. Caller picks the model;
-    // default stays tts-1 so existing movement-name calls are unchanged.
+    // models) honor it for delivery-style control. Only meaningful for
+    // provider === 'openai'; ignored for Voicemaker.
     const selectedModel = model || 'tts-1';
     const supportsInstructions = selectedModel === 'gpt-4o-mini-tts';
     const path = storagePath || `voice_cache/tts/${Date.now()}.mp3`;
@@ -7008,93 +7567,207 @@ exports.generateVoice = (0, https_1.onCall)({ region: 'us-central1', secrets: [o
     const file = bucket.file(path);
     const encodedPath = encodeURIComponent(path);
     const cdnUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodedPath}?alt=media`;
+    // Helper: writeback movement metadata. Inlined twice (cache hit + post-upload).
+    const runWriteback = async () => {
+        var _a, _b;
+        if (!movementId || typeof movementId !== 'string') {
+            return { writeback: 'skipped', writebackError: null };
+        }
+        try {
+            const ref = db.doc(`movements/${movementId}`);
+            const snap = await ref.get();
+            if (!snap.exists) {
+                console.error('[VOICE-AUDIT] generateVoice: firestore layer — movement doc MISSING', {
+                    movementId, uid: (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid, storedUrl: cdnUrl,
+                });
+                return { writeback: 'missing_doc', writebackError: null };
+            }
+            // voiceName preserved for back-compat with the existing player guard;
+            // ttsProvider / voiceId / voiceEffect are the new authoritative fields
+            // the wrong-voice guard checks against.
+            await ref.update({
+                voiceUrl: cdnUrl,
+                voiceText: text,
+                voiceName: selectedVoice,
+                ttsProvider: selectedProvider,
+                voiceId: selectedVoice,
+                voiceEffect: selectedEffect || null,
+            });
+            return { writeback: 'ok', writebackError: null };
+        }
+        catch (writeErr) {
+            const detail = String((writeErr === null || writeErr === void 0 ? void 0 : writeErr.message) || writeErr).slice(0, 300);
+            console.error('[VOICE-AUDIT] generateVoice: firestore layer FAILED', {
+                movementId, uid: (_b = request.auth) === null || _b === void 0 ? void 0 : _b.uid, error: detail,
+            }, writeErr);
+            return { writeback: 'failed', writebackError: detail };
+        }
+    };
     // ── Layer 0: Storage cache hit ─────────────────────────────────────────
-    // Path-keyed cache. Phrase / movement helpers hash voice+model+text(+style)
-    // into the storagePath, so a hit here means the exact same generation
-    // already exists. Skip OpenAI to save quota and latency.
+    // Path-keyed cache. Caller hashes provider+voice+effect+model+text into
+    // storagePath, so a hit here means the exact same generation already
+    // exists. Skip the provider call entirely to save quota + latency.
     if (storagePath) {
         try {
             const [exists] = await file.exists();
             if (exists) {
-                console.info('[VOICE-AUDIT] generateVoice: cache hit — skipping OpenAI', {
-                    path, model: selectedModel, voice: selectedVoice,
+                console.info('[VOICE-AUDIT] generateVoice: cache hit — skipping provider', {
+                    path, provider: selectedProvider, voice: selectedVoice, effect: selectedEffect,
                 });
-                // Still run writeback so a freshly hydrated movement doc gets the URL.
-                let writeback = 'no_id';
-                let writebackError = null;
-                if (movementId && typeof movementId === 'string') {
-                    try {
-                        const ref = db.doc(`movements/${movementId}`);
-                        const snap = await ref.get();
-                        if (!snap.exists)
-                            writeback = 'missing_doc';
-                        else {
-                            await ref.update({ voiceUrl: cdnUrl, voiceText: text, voiceName: selectedVoice });
-                            writeback = 'ok';
-                        }
-                    }
-                    catch (writeErr) {
-                        writeback = 'failed';
-                        writebackError = String((writeErr === null || writeErr === void 0 ? void 0 : writeErr.message) || writeErr).slice(0, 300);
-                    }
-                }
-                else {
-                    writeback = 'skipped';
-                }
-                return { url: cdnUrl, path, writeback, writebackError, cached: true };
+                const { writeback, writebackError } = await runWriteback();
+                return {
+                    url: cdnUrl,
+                    path,
+                    writeback,
+                    writebackError,
+                    cached: true,
+                    provider: selectedProvider,
+                };
             }
         }
         catch (err) {
-            // Cache check failure is non-fatal — fall through and regenerate.
             console.warn('[VOICE-AUDIT] generateVoice: cache check failed — regenerating', {
                 path, message: String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 200),
             });
         }
     }
-    // ── Layer 1: OpenAI TTS ────────────────────────────────────────────────
+    // ── Layer 1: Provider TTS (OpenAI or Voicemaker) ───────────────────────
     let audioBuffer;
     try {
-        const openaiBody = {
-            model: selectedModel,
-            voice: selectedVoice,
-            input: text,
-        };
-        if (instructions && supportsInstructions) {
-            openaiBody.instructions = instructions;
+        if (selectedProvider === 'voicemaker') {
+            const apiKey = (_b = voicemakerApiKey.value()) === null || _b === void 0 ? void 0 : _b.trim();
+            if (!apiKey) {
+                console.error('[VOICE-AUDIT] generateVoice: apikey layer — VOICEMAKER_API_KEY secret empty');
+                throw new https_1.HttpsError('failed-precondition', 'voice:apikey:missing', {
+                    layer: 'apikey',
+                    provider: 'voicemaker',
+                    reason: 'VOICEMAKER_API_KEY secret is unset or empty on deployed function',
+                });
+            }
+            // Voicemaker request body. Break tags inside `Text` are preserved —
+            // the helpers wrap countdown phrasing in <break time="..."/> and
+            // Voicemaker reads them as SSML pauses.
+            const vmBody = {
+                Engine: engine || 'neural',
+                VoiceId: selectedVoice,
+                LanguageCode: languageCode || 'en-US',
+                Text: text,
+                OutputFormat: 'mp3',
+                SampleRate: sampleRate || '48000',
+                Effect: selectedEffect || 'default',
+                MasterVolume: masterVolume || '0',
+                MasterSpeed: masterSpeed || '0',
+                MasterPitch: masterPitch || '0',
+                // FileStore: hours Voicemaker keeps the temporary URL alive. We
+                // download immediately, but a generous window protects against
+                // transient retry latency. Default 24h matches helper config.
+                FileStore: typeof fileStore === 'number' ? fileStore : 24,
+                ResponseType: 'file',
+            };
+            const vmResp = await fetch('https://developer.voicemaker.in/api/v1/voice/convert', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(vmBody),
+            });
+            if (!vmResp.ok) {
+                const errBody = (await vmResp.text()).slice(0, 500);
+                console.error('[VOICE-AUDIT] generateVoice: voicemaker layer FAILED', {
+                    status: vmResp.status, body: errBody, voice: selectedVoice, effect: selectedEffect,
+                });
+                throw new https_1.HttpsError('internal', `voice:voicemaker:${vmResp.status}`, {
+                    layer: 'voicemaker',
+                    status: vmResp.status,
+                    body: errBody,
+                });
+            }
+            const vmJson = (await vmResp.json());
+            if (!vmJson.success || !vmJson.path) {
+                console.error('[VOICE-AUDIT] generateVoice: voicemaker layer — bad response', {
+                    body: JSON.stringify(vmJson).slice(0, 400),
+                });
+                throw new https_1.HttpsError('internal', 'voice:voicemaker:bad_response', {
+                    layer: 'voicemaker',
+                    body: JSON.stringify(vmJson).slice(0, 400),
+                });
+            }
+            // Download the temporary MP3 from Voicemaker into a Buffer.
+            const downloadResp = await fetch(vmJson.path);
+            if (!downloadResp.ok) {
+                console.error('[VOICE-AUDIT] generateVoice: voicemaker download FAILED', {
+                    status: downloadResp.status, srcUrl: vmJson.path,
+                });
+                throw new https_1.HttpsError('internal', `voice:voicemaker:download_${downloadResp.status}`, {
+                    layer: 'voicemaker',
+                    status: downloadResp.status,
+                    srcUrl: vmJson.path,
+                });
+            }
+            audioBuffer = Buffer.from(await downloadResp.arrayBuffer());
+            console.info('[VOICE-AUDIT] generateVoice: voicemaker OK', {
+                voice: selectedVoice,
+                effect: selectedEffect,
+                usedChars: vmJson.usedChars,
+                remainChars: vmJson.remainChars,
+                bytes: audioBuffer.length,
+            });
         }
-        else if (instructions && !supportsInstructions) {
-            console.warn('[VOICE-AUDIT] generateVoice: instructions ignored — model does not support it', {
+        else {
+            const apiKey = (_c = openaiApiKey.value()) === null || _c === void 0 ? void 0 : _c.trim();
+            if (!apiKey) {
+                console.error('[VOICE-AUDIT] generateVoice: apikey layer — OPENAI_API_KEY secret empty');
+                throw new https_1.HttpsError('failed-precondition', 'voice:apikey:missing', {
+                    layer: 'apikey',
+                    provider: 'openai',
+                    reason: 'OPENAI_API_KEY secret is unset or empty on deployed function',
+                });
+            }
+            const openaiBody = {
                 model: selectedModel,
+                voice: selectedVoice,
+                input: text,
+            };
+            if (instructions && supportsInstructions) {
+                openaiBody.instructions = instructions;
+            }
+            else if (instructions && !supportsInstructions) {
+                console.warn('[VOICE-AUDIT] generateVoice: instructions ignored — model does not support it', {
+                    model: selectedModel,
+                });
+            }
+            const response = await fetch('https://api.openai.com/v1/audio/speech', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(openaiBody),
             });
+            if (!response.ok) {
+                const errorBody = (await response.text()).slice(0, 500);
+                console.error('[VOICE-AUDIT] generateVoice: openai layer FAILED', {
+                    status: response.status, body: errorBody, model: selectedModel,
+                });
+                throw new https_1.HttpsError('internal', `voice:openai:${response.status}`, {
+                    layer: 'openai',
+                    status: response.status,
+                    body: errorBody,
+                });
+            }
+            audioBuffer = Buffer.from(await response.arrayBuffer());
         }
-        const response = await fetch('https://api.openai.com/v1/audio/speech', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(openaiBody),
-        });
-        if (!response.ok) {
-            const errorBody = (await response.text()).slice(0, 500);
-            console.error('[VOICE-AUDIT] generateVoice: openai layer FAILED', {
-                status: response.status, body: errorBody, model: selectedModel,
-            });
-            throw new https_1.HttpsError('internal', `voice:openai:${response.status}`, {
-                layer: 'openai',
-                status: response.status,
-                body: errorBody,
-            });
-        }
-        audioBuffer = Buffer.from(await response.arrayBuffer());
     }
     catch (err) {
         if (err instanceof https_1.HttpsError)
             throw err;
         const detail = String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 300);
-        console.error('[VOICE-AUDIT] generateVoice: openai layer THREW', { detail }, err);
-        throw new https_1.HttpsError('internal', `voice:openai:fetch_failed`, {
-            layer: 'openai',
+        console.error('[VOICE-AUDIT] generateVoice: provider layer THREW', {
+            provider: selectedProvider, detail,
+        }, err);
+        throw new https_1.HttpsError('internal', `voice:${selectedProvider}:fetch_failed`, {
+            layer: selectedProvider,
             message: detail,
         });
     }
@@ -7109,7 +7782,7 @@ exports.generateVoice = (0, https_1.onCall)({ region: 'us-central1', secrets: [o
     }
     catch (err) {
         const detail = String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 300);
-        const code = (_d = (_c = err === null || err === void 0 ? void 0 : err.code) !== null && _c !== void 0 ? _c : err === null || err === void 0 ? void 0 : err.status) !== null && _d !== void 0 ? _d : null;
+        const code = (_e = (_d = err === null || err === void 0 ? void 0 : err.code) !== null && _d !== void 0 ? _d : err === null || err === void 0 ? void 0 : err.status) !== null && _e !== void 0 ? _e : null;
         console.error('[VOICE-AUDIT] generateVoice: storage layer FAILED', {
             bucket: bucket.name, path, code, detail,
         }, err);
@@ -7128,41 +7801,18 @@ exports.generateVoice = (0, https_1.onCall)({ region: 'us-central1', secrets: [o
     // can log it and the next test shows exactly why the backfill didn't
     // stick. Missing-doc is surfaced as a distinct signal from permission
     // failure.
-    let writeback = 'no_id';
-    let writebackError = null;
-    if (movementId && typeof movementId === 'string') {
-        try {
-            const ref = db.doc(`movements/${movementId}`);
-            const snap = await ref.get();
-            if (!snap.exists) {
-                writeback = 'missing_doc';
-                console.error('[VOICE-AUDIT] generateVoice: firestore layer — movement doc MISSING', {
-                    movementId, uid: request.auth.uid, storedUrl: cdnUrl,
-                });
-            }
-            else {
-                await ref.update({ voiceUrl: cdnUrl, voiceText: text, voiceName: selectedVoice });
-                writeback = 'ok';
-                console.info('[VOICE-AUDIT] generateVoice: firestore layer — writeback OK', {
-                    movementId, uid: request.auth.uid,
-                });
-            }
-        }
-        catch (writeErr) {
-            writeback = 'failed';
-            writebackError = String((writeErr === null || writeErr === void 0 ? void 0 : writeErr.message) || writeErr).slice(0, 300);
-            console.error('[VOICE-AUDIT] generateVoice: firestore layer FAILED', {
-                movementId, uid: request.auth.uid, error: writebackError,
-            }, writeErr);
-        }
+    const { writeback, writebackError } = await runWriteback();
+    if (writeback === 'ok') {
+        console.info('[VOICE-AUDIT] generateVoice: firestore layer — writeback OK', {
+            movementId, uid: request.auth.uid, provider: selectedProvider,
+        });
     }
-    else {
-        writeback = 'skipped';
+    if (!movementId) {
         console.warn('[VOICE-AUDIT] generateVoice: firestore layer — skipped (no movementId)', {
             uid: request.auth.uid, textPreview: text.slice(0, 40),
         });
     }
-    return { url: cdnUrl, path, writeback, writebackError };
+    return { url: cdnUrl, path, writeback, writebackError, provider: selectedProvider };
 });
 // ═══════════════════════════════════════════════════════════════════════════════
 // NEW MEMBER — Set custom claims + notify coach
@@ -7265,4 +7915,93 @@ exports.onMemberCreated = (0, firestore_1.onDocumentCreated)('members/{memberId}
 // domain-wide delegation. The Resend EMAIL_API_KEY is a placeholder
 // so Cloud Functions cannot send email directly.
 // ─────────────────────────────────────────────
+// ─── getEmbeddedSessionJoinConfig — Zoom Meeting SDK join payload ────────────
+/**
+ * Returns a short-lived Zoom Meeting SDK signature + metadata so the caller can
+ * join a session through the embedded Zoom Web Meeting SDK Client View.
+ *
+ * Phase 1 (member beta — see docs/ZOOM_MEETING_SDK_SETUP.md):
+ *   - role is always 0 (participant). No host-start UI yet.
+ *   - zak is always null. Scaffolded in the return shape so host-start can be
+ *     added later without a breaking change.
+ *   - Caller must be the member on the session_instance (platformAdmin allowed
+ *     for testing).
+ *   - Instance must be allocated (has zoomMeetingId + zoomJoinUrl).
+ *
+ * The existing Linking.openURL(inst.zoomJoinUrl) flow remains the default join
+ * path. This callable powers the secondary "Join in app (beta)" button only.
+ */
+exports.getEmbeddedSessionJoinConfig = (0, https_1.onCall)({
+    region: 'us-central1',
+    secrets: [zoomMeetingSdkKey, zoomMeetingSdkSecret],
+    invoker: 'public',
+}, async (request) => {
+    var _a, _b, _c;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const { sessionInstanceId } = ((_b = request.data) !== null && _b !== void 0 ? _b : {});
+    if (!sessionInstanceId) {
+        throw new https_1.HttpsError('invalid-argument', 'sessionInstanceId is required');
+    }
+    const instanceSnap = await db
+        .collection('session_instances')
+        .doc(sessionInstanceId)
+        .get();
+    if (!instanceSnap.exists) {
+        throw new https_1.HttpsError('not-found', 'Session instance not found');
+    }
+    const instance = instanceSnap.data();
+    const callerToken = (_c = request.auth) === null || _c === void 0 ? void 0 : _c.token;
+    const callerIsAdmin = (callerToken === null || callerToken === void 0 ? void 0 : callerToken.role) === 'platformAdmin' || (callerToken === null || callerToken === void 0 ? void 0 : callerToken.admin) === true;
+    if (!callerIsAdmin && callerUid !== instance.memberId) {
+        throw new https_1.HttpsError('permission-denied', 'Only the assigned member can join this session');
+    }
+    const meetingNumber = instance.zoomMeetingId;
+    if (!meetingNumber || !instance.zoomJoinUrl) {
+        throw new https_1.HttpsError('failed-precondition', 'Session has not been allocated to a Zoom room yet');
+    }
+    if (instance.status !== 'allocated' && instance.status !== 'in_progress') {
+        throw new https_1.HttpsError('failed-precondition', `Session is in status "${instance.status}", cannot join`);
+    }
+    let userName = instance.memberName || '';
+    let userEmail = '';
+    try {
+        const userDoc = await db
+            .collection('users')
+            .doc(instance.memberId)
+            .get();
+        const udata = userDoc.data() || {};
+        if (!userName) {
+            userName =
+                udata.displayName || udata.name || 'Member';
+        }
+        userEmail = udata.email || '';
+    }
+    catch (_d) {
+        if (!userName)
+            userName = 'Member';
+    }
+    const sdkKey = zoomMeetingSdkKey.value().trim();
+    const sdkSecret = zoomMeetingSdkSecret.value().trim();
+    if (!sdkKey || !sdkSecret) {
+        throw new https_1.HttpsError('failed-precondition', 'Meeting SDK credentials are not configured');
+    }
+    const signature = (0, zoom_1.buildMeetingSdkSignature)({
+        sdkKey,
+        sdkSecret,
+        meetingNumber,
+        role: 0,
+    });
+    return {
+        meetingNumber: String(meetingNumber),
+        signature,
+        sdkKey,
+        userName,
+        userEmail,
+        password: instance.zoomMeetingPassword || '',
+        role: 0,
+        zak: null,
+    };
+});
 //# sourceMappingURL=index.js.map

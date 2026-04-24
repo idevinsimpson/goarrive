@@ -27,6 +27,18 @@
  *         firebase functions:secrets:set ZOOM_CLIENT_SECRET
  * ME-007: ZOOM_WEBHOOK_SECRET must be set for Zoom webhook signature verification.
  *         firebase functions:secrets:set ZOOM_WEBHOOK_SECRET
+ * ME-008: ZOOM_RTMS_CLIENT_ID + ZOOM_RTMS_CLIENT_SECRET must be set for the RTMS
+ *         Marketplace app (separate from the S2S OAuth meeting-management app).
+ *         Staging uses the Zoom Dev credentials; production uses Prod.
+ *         firebase functions:secrets:set ZOOM_RTMS_CLIENT_ID
+ *         firebase functions:secrets:set ZOOM_RTMS_CLIENT_SECRET
+ * ME-009: ZOOM_RTMS_SECRET_TOKEN must be set for RTMS webhook HMAC verification
+ *         (different from ZOOM_WEBHOOK_SECRET — this token is shared by both
+ *         envs since the Marketplace app has a single secret token).
+ *         firebase functions:secrets:set ZOOM_RTMS_SECRET_TOKEN
+ * ME-010: ZOOM_RTMS_OAUTH_REDIRECT must match the redirect URI registered in
+ *         the Zoom Marketplace app config.
+ *         firebase functions:secrets:set ZOOM_RTMS_OAUTH_REDIRECT
  *
  * RISK-001: CTS + pay-in-full discount stacking order is unresolved.
  *           Do not hardcode stacking. Both amounts are stored in the snapshot;
@@ -47,9 +59,22 @@ import {
   getZoomProvider,
   verifyWebhookSignature,
   generateCrcResponse,
+  buildMeetingSdkSignature,
   type SessionEvent,
   type SessionRecording,
 } from './zoom';
+import {
+  exchangeOAuthCode,
+  verifyRtmsWebhookSignature,
+  buildRtmsCrcResponse,
+  buildRtmsHandshakeSignature,
+  mediaTypeBitmask,
+  RTMS_MSG_TYPE,
+  type StoredOAuthTokens,
+  type RtmsSessionDoc,
+} from './zoomRtms';
+import WebSocket from 'ws';
+import { CloudTasksClient } from '@google-cloud/tasks';
 
 admin.initializeApp();
 
@@ -66,6 +91,11 @@ const zoomAccountId = defineSecret('ZOOM_ACCOUNT_ID');
 const zoomClientId = defineSecret('ZOOM_CLIENT_ID');
 const zoomClientSecret = defineSecret('ZOOM_CLIENT_SECRET');
 // ZOOM_WEBHOOK_SECRET is defined near zoomWebhook CF (line ~2858)
+
+// Meeting SDK app (third Zoom Marketplace app) — signs embedded join payloads.
+// See docs/ZOOM_MEETING_SDK_SETUP.md. Only used by getEmbeddedSessionJoinConfig.
+const zoomMeetingSdkKey = defineSecret('ZOOM_MEETING_SDK_KEY');
+const zoomMeetingSdkSecret = defineSecret('ZOOM_MEETING_SDK_SECRET');
 
 // ── Notification Secrets ─────────────────────────────────────────────────────
 const emailApiKey = defineSecret('EMAIL_API_KEY');
@@ -3421,8 +3451,11 @@ export const zoomWebhook = onRequest(
       return;
     }
 
-    const rawBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
-    if (!verifyWebhookSignature(signature, timestamp, rawBody, secret)) {
+    // Use req.rawBody so the bytes match what Zoom signed (re-stringifying
+    // a parsed body can introduce whitespace/key-order drift).
+    const rawBody = req.rawBody ? req.rawBody.toString('utf8')
+      : typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    if (!verifyWebhookSignature(rawBody, timestamp, signature, secret)) {
       console.warn('[zoomWebhook] Invalid webhook signature');
       res.status(401).send('Invalid signature');
       return;
@@ -3624,6 +3657,622 @@ export const zoomWebhook = onRequest(
     res.status(200).json({ status: 'ok' });
   }
 );
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ZOOM RTMS (Real-Time Media Streaming) — separate Marketplace app
+// ───────────────────────────────────────────────────────────────────────────────
+// The S2S OAuth app above can manage meetings but cannot open RTMS WebSocket
+// connections. RTMS requires a Zoom Marketplace "General App" with its own
+// OAuth flow + webhook secret. These three functions wire that app:
+//
+//   zoomRtmsOauthCallback — OAuth code → token, persists to zoom_tokens/{accountId}
+//   zoomRtmsWebhook       — receives endpoint.url_validation, meeting.rtms_started,
+//                           meeting.rtms_stopped, meeting.ended; dispatches the
+//                           WebSocket worker on rtms_started
+//   startRtmsStream       — long-running (≤60min) HTTP worker that opens the
+//                           RTMS signaling + media WebSockets and writes
+//                           transcript segments to Firestore
+//
+// Firestore collections (see firestore.rules — server-only writes):
+//   zoom_tokens/{accountId}
+//   rtms_sessions/{meetingId}
+//   rtms_transcripts/{meetingId}/segments/{ts}
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const ZOOM_RTMS_CLIENT_ID = defineSecret('ZOOM_RTMS_CLIENT_ID');
+const ZOOM_RTMS_CLIENT_SECRET = defineSecret('ZOOM_RTMS_CLIENT_SECRET');
+const ZOOM_RTMS_SECRET_TOKEN = defineSecret('ZOOM_RTMS_SECRET_TOKEN');
+const ZOOM_RTMS_OAUTH_REDIRECT = defineSecret('ZOOM_RTMS_OAUTH_REDIRECT');
+
+// ─── 21a. zoomRtmsOauthCallback — OAuth code → tokens ───────────────────────
+export const zoomRtmsOauthCallback = onRequest(
+  {
+    region: 'us-central1',
+    invoker: 'public',
+    secrets: [ZOOM_RTMS_CLIENT_ID, ZOOM_RTMS_CLIENT_SECRET, ZOOM_RTMS_OAUTH_REDIRECT],
+  },
+  async (req, res) => {
+    if (req.method !== 'GET') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const code = (req.query.code as string | undefined) || '';
+    const errorParam = req.query.error as string | undefined;
+
+    if (errorParam) {
+      console.warn('[zoomRtmsOauthCallback] OAuth error from Zoom:', errorParam);
+      res.status(400).send(`Zoom OAuth error: ${errorParam}`);
+      return;
+    }
+
+    if (!code) {
+      res.status(400).send('Missing required query param: code');
+      return;
+    }
+
+    const clientId = ZOOM_RTMS_CLIENT_ID.value();
+    const clientSecret = ZOOM_RTMS_CLIENT_SECRET.value();
+    const redirectUri = ZOOM_RTMS_OAUTH_REDIRECT.value();
+
+    if (!clientId || !clientSecret || !redirectUri) {
+      console.error('[zoomRtmsOauthCallback] Missing required Zoom RTMS secrets');
+      res.status(500).send('Server misconfigured');
+      return;
+    }
+
+    try {
+      const tokens = await exchangeOAuthCode({ code, clientId, clientSecret, redirectUri });
+
+      // Resolve which Zoom user/account installed by calling /users/me.
+      let installedBy: string | undefined;
+      let accountId: string | undefined;
+      try {
+        const meResp = await fetch('https://api.zoom.us/v2/users/me', {
+          headers: { Authorization: `Bearer ${tokens.access_token}` },
+        });
+        if (meResp.ok) {
+          const me = (await meResp.json()) as { id?: string; account_id?: string };
+          installedBy = me.id;
+          accountId = me.account_id;
+        }
+      } catch (meErr) {
+        console.warn('[zoomRtmsOauthCallback] /users/me lookup failed (non-fatal):', meErr);
+      }
+
+      const docId = accountId || installedBy || 'default';
+      const stored: StoredOAuthTokens = {
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        tokenType: tokens.token_type,
+        scope: tokens.scope,
+        expiresAt: Date.now() + tokens.expires_in * 1000,
+        apiUrl: tokens.api_url,
+        installedBy,
+        accountId,
+      };
+
+      await db.collection('zoom_tokens').doc(docId).set({
+        ...stored,
+        updatedAt: FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      console.log(`[zoomRtmsOauthCallback] Tokens stored for account ${docId} (scopes: ${tokens.scope})`);
+      res.status(200).send('Zoom RTMS app installed. You can close this window.');
+    } catch (err: any) {
+      console.error('[zoomRtmsOauthCallback] Token exchange failed:', err?.message || err);
+      res.status(500).send('OAuth token exchange failed.');
+    }
+  }
+);
+
+// ─── 21b. zoomRtmsWebhook — receives RTMS lifecycle events ──────────────────
+// Handles: endpoint.url_validation, meeting.rtms_started, meeting.rtms_stopped,
+//          meeting.ended. Dispatches the WebSocket worker on rtms_started.
+export const zoomRtmsWebhook = onRequest(
+  {
+    region: 'us-central1',
+    invoker: 'public',
+    secrets: [
+      ZOOM_RTMS_SECRET_TOKEN,
+      ZOOM_RTMS_CLIENT_ID,
+      ZOOM_RTMS_CLIENT_SECRET,
+    ],
+  },
+  async (req, res) => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const secretToken = ZOOM_RTMS_SECRET_TOKEN.value();
+    if (!secretToken) {
+      console.error('[zoomRtmsWebhook] ZOOM_RTMS_SECRET_TOKEN not set');
+      res.status(500).send('Server misconfigured');
+      return;
+    }
+
+    const body = req.body || {};
+
+    // ── CRC validation (also used by Zoom every 72h) ──
+    if (body.event === 'endpoint.url_validation') {
+      const plainToken = body.payload?.plainToken;
+      if (!plainToken) {
+        res.status(400).json({ error: 'Missing plainToken' });
+        return;
+      }
+      res.status(200).json(buildRtmsCrcResponse(plainToken, secretToken));
+      return;
+    }
+
+    // ── Signature verification ──
+    const signature = req.headers['x-zm-signature'] as string | undefined;
+    const timestamp = req.headers['x-zm-request-timestamp'] as string | undefined;
+    const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(body);
+
+    if (!signature || !timestamp || !verifyRtmsWebhookSignature({
+      rawBody, timestamp, signature, secretToken,
+    })) {
+      console.warn('[zoomRtmsWebhook] Invalid or missing signature');
+      res.status(401).send('Invalid signature');
+      return;
+    }
+
+    const eventType = body.event as string;
+    const payload = body.payload?.object || {};
+    const meetingId = String(payload.id || payload.meeting_id || '');
+    const meetingUuid: string | undefined = payload.uuid;
+    const streamId: string = payload.rtms_stream_id || payload.stream_id || '';
+
+    try {
+      switch (eventType) {
+        case 'meeting.rtms_started': {
+          if (!meetingId || !streamId) {
+            console.warn('[zoomRtmsWebhook] rtms_started missing meetingId/streamId', payload);
+            break;
+          }
+          const sessionDoc: RtmsSessionDoc = {
+            meetingId,
+            meetingUuid,
+            streamId,
+            hostId: payload.host_id,
+            topic: payload.topic,
+            status: 'pending_connect',
+            startedAt: FieldValue.serverTimestamp(),
+            endedAt: null,
+            segmentCount: 0,
+          };
+          await db.collection('rtms_sessions').doc(meetingId).set(sessionDoc, { merge: true });
+
+          // Dispatch the long-running worker. Prefer Cloud Tasks for built-in
+          // retries with backoff; fall back to fire-and-forget HTTP if the
+          // queue isn't provisioned yet (so the feature still works in fresh
+          // environments). The worker self-cancels on rtms_stopped / meeting.
+          // ended via the Firestore session doc.
+          const workerUrl = resolveStartRtmsStreamUrl();
+          if (!workerUrl) {
+            console.warn('[zoomRtmsWebhook] startRtmsStream URL unresolved — worker not dispatched');
+            break;
+          }
+          const dispatched = await dispatchViaCloudTasks({
+            workerUrl,
+            payload: { meetingId, streamId, meetingUuid },
+          });
+          if (!dispatched) {
+            console.warn('[zoomRtmsWebhook] Cloud Tasks unavailable — falling back to fire-and-forget HTTP');
+            fetch(workerUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ meetingId, streamId, meetingUuid }),
+            }).catch((err) => {
+              console.error('[zoomRtmsWebhook] Fallback dispatch also failed:', err?.message || err);
+            });
+          }
+          break;
+        }
+
+        case 'meeting.rtms_stopped': {
+          if (meetingId) {
+            await db.collection('rtms_sessions').doc(meetingId).set({
+              status: 'ended',
+              endedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
+          }
+          break;
+        }
+
+        case 'meeting.ended': {
+          if (meetingId) {
+            await db.collection('rtms_sessions').doc(meetingId).set({
+              status: 'ended',
+              endedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
+          }
+          break;
+        }
+
+        default: {
+          console.log('[zoomRtmsWebhook] Unhandled event:', eventType);
+          break;
+        }
+      }
+
+      res.status(200).json({ status: 'ok' });
+    } catch (err: any) {
+      console.error('[zoomRtmsWebhook] Handler error:', err?.message || err);
+      res.status(500).json({ error: 'internal' });
+    }
+  }
+);
+
+// Resolve the public URL of the startRtmsStream function for in-region dispatch.
+// Falls back to the standard Cloud Functions hostname pattern when no override
+// is set, which works for both staging and production projects.
+function resolveStartRtmsStreamUrl(): string | null {
+  if (process.env.START_RTMS_STREAM_URL) return process.env.START_RTMS_STREAM_URL;
+  const project = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
+  if (!project) return null;
+  return `https://us-central1-${project}.cloudfunctions.net/startRtmsStream`;
+}
+
+// Lazy-init Cloud Tasks client (only created when needed).
+let cloudTasksClient: CloudTasksClient | null = null;
+function getCloudTasksClient(): CloudTasksClient {
+  if (!cloudTasksClient) cloudTasksClient = new CloudTasksClient();
+  return cloudTasksClient;
+}
+
+const RTMS_TASK_QUEUE = process.env.RTMS_TASK_QUEUE || 'rtms-dispatch';
+const RTMS_TASK_LOCATION = process.env.RTMS_TASK_LOCATION || 'us-central1';
+
+// Dispatch the RTMS worker via Cloud Tasks (auto-retries + backoff). Returns
+// false if the queue isn't reachable / doesn't exist so the caller can fall
+// back. Never throws — all errors are logged.
+async function dispatchViaCloudTasks(args: {
+  workerUrl: string;
+  payload: { meetingId: string; streamId: string; meetingUuid?: string };
+}): Promise<boolean> {
+  const project = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
+  if (!project) return false;
+
+  try {
+    const client = getCloudTasksClient();
+    const queuePath = client.queuePath(project, RTMS_TASK_LOCATION, RTMS_TASK_QUEUE);
+    const sa = process.env.RTMS_TASK_INVOKER_SA || `${project}@appspot.gserviceaccount.com`;
+
+    await client.createTask({
+      parent: queuePath,
+      task: {
+        httpRequest: {
+          httpMethod: 'POST',
+          url: args.workerUrl,
+          headers: { 'Content-Type': 'application/json' },
+          body: Buffer.from(JSON.stringify(args.payload)).toString('base64'),
+          oidcToken: { serviceAccountEmail: sa, audience: args.workerUrl },
+        },
+      },
+    });
+    console.log(`[dispatchViaCloudTasks] Enqueued worker for meeting ${args.payload.meetingId}`);
+    return true;
+  } catch (err: any) {
+    const code = err?.code;
+    // NOT_FOUND (5) = queue missing; PERMISSION_DENIED (7) = IAM not granted.
+    if (code === 5 || code === 7) {
+      console.warn(`[dispatchViaCloudTasks] Queue/IAM not provisioned (code ${code}): ${err.message}`);
+    } else {
+      console.error('[dispatchViaCloudTasks] Enqueue failed:', err?.message || err);
+    }
+    return false;
+  }
+}
+
+// ─── 21c. startRtmsStream — long-running RTMS WebSocket worker ──────────────
+// Triggered by zoomRtmsWebhook after meeting.rtms_started. Opens the signaling
+// WebSocket, completes the data handshake, subscribes to audio + transcript,
+// and writes transcript segments to Firestore until the meeting ends or the
+// Cloud Functions timeout (60 min) is hit.
+export const startRtmsStream = onRequest(
+  {
+    region: 'us-central1',
+    invoker: 'public',
+    timeoutSeconds: 3600,
+    memory: '512MiB',
+    concurrency: 1,
+    secrets: [ZOOM_RTMS_CLIENT_ID, ZOOM_RTMS_CLIENT_SECRET],
+  },
+  async (req, res) => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const meetingId = String(req.body?.meetingId || '');
+    const streamId = String(req.body?.streamId || '');
+    const meetingUuid = String(req.body?.meetingUuid || '');
+
+    if (!meetingId || !streamId || !meetingUuid) {
+      res.status(400).send('Missing meetingId, streamId, or meetingUuid');
+      return;
+    }
+
+    const sessionRef = db.collection('rtms_sessions').doc(meetingId);
+    await sessionRef.set({ status: 'connecting' }, { merge: true });
+
+    const clientId = ZOOM_RTMS_CLIENT_ID.value();
+    const clientSecret = ZOOM_RTMS_CLIENT_SECRET.value();
+
+    try {
+      // Look up signaling URL for this stream. (Some RTMS payloads include it
+      // inline; if absent, fetch via the REST endpoint.)
+      const signalingUrl = await resolveSignalingUrl({ meetingId, streamId });
+      if (!signalingUrl) {
+        throw new Error('No signaling URL available for stream');
+      }
+
+      const segmentsCol = db.collection('rtms_transcripts').doc(meetingId).collection('segments');
+
+      await runRtmsWorker({
+        signalingUrl,
+        meetingUuid,
+        streamId,
+        clientId,
+        clientSecret,
+        onTranscriptSegment: async (seg) => {
+          const ts = Date.now();
+          await segmentsCol.doc(String(ts)).set({
+            speaker: seg.speaker || 'unknown',
+            text: seg.text || '',
+            confidence: typeof seg.confidence === 'number' ? seg.confidence : null,
+            ts,
+            startMs: typeof seg.startMs === 'number' ? seg.startMs : null,
+            endMs: typeof seg.endMs === 'number' ? seg.endMs : null,
+          });
+          await sessionRef.set({
+            segmentCount: FieldValue.increment(1),
+          }, { merge: true });
+        },
+        isCanceled: async () => {
+          const snap = await sessionRef.get();
+          const status = snap.data()?.status as string | undefined;
+          return status === 'ended' || status === 'failed';
+        },
+        onActive: async () => {
+          await sessionRef.set({ status: 'active' }, { merge: true });
+        },
+      });
+
+      await sessionRef.set({
+        status: 'ended',
+        endedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      res.status(200).json({ status: 'completed' });
+    } catch (err: any) {
+      const message = err?.message || String(err);
+      console.error(`[startRtmsStream] Worker failed for meeting ${meetingId}:`, message);
+      await sessionRef.set({
+        status: 'failed',
+        lastError: message,
+        endedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      res.status(500).json({ error: 'worker_failed', message });
+    }
+  }
+);
+
+// Resolve the signaling WebSocket URL for an RTMS stream. The webhook payload
+// usually includes `signaling_url` directly, but we also support fetching it
+// from the documented REST endpoint when needed.
+async function resolveSignalingUrl(args: {
+  meetingId: string;
+  streamId: string;
+}): Promise<string | null> {
+  // 1) If the webhook stored a signaling URL on the session doc, use that.
+  const snap = await db.collection('rtms_sessions').doc(args.meetingId).get();
+  const fromDoc = snap.data()?.signalingUrl as string | undefined;
+  if (fromDoc) return fromDoc;
+
+  // 2) Fallback: REST lookup. Requires an OAuth access token from zoom_tokens.
+  const tokenSnap = await db.collection('zoom_tokens').limit(1).get();
+  if (tokenSnap.empty) return null;
+  const token = tokenSnap.docs[0].data().accessToken as string | undefined;
+  if (!token) return null;
+
+  const url = `https://api.zoom.us/v2/meetings/${encodeURIComponent(args.meetingId)}/rtms/streams/${encodeURIComponent(args.streamId)}`;
+  const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!resp.ok) {
+    console.warn(`[resolveSignalingUrl] REST lookup failed (${resp.status})`);
+    return null;
+  }
+  const data = (await resp.json()) as { signaling_url?: string };
+  return data.signaling_url || null;
+}
+
+// Core RTMS worker: signaling handshake → media handshake → subscribe → drain.
+async function runRtmsWorker(args: {
+  signalingUrl: string;
+  meetingUuid: string;
+  streamId: string;
+  clientId: string;
+  clientSecret: string;
+  onTranscriptSegment: (seg: {
+    speaker?: string;
+    text?: string;
+    confidence?: number;
+    startMs?: number;
+    endMs?: number;
+  }) => Promise<void>;
+  isCanceled: () => Promise<boolean>;
+  onActive: () => Promise<void>;
+}): Promise<void> {
+  const signature = buildRtmsHandshakeSignature({
+    clientId: args.clientId,
+    clientSecret: args.clientSecret,
+    meetingUuid: args.meetingUuid,
+    streamId: args.streamId,
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    const ws = new WebSocket(args.signalingUrl);
+    let mediaWs: WebSocket | null = null;
+    let keepalive: NodeJS.Timeout | null = null;
+    let cancelPoll: NodeJS.Timeout | null = null;
+    let resolved = false;
+
+    const cleanup = () => {
+      if (keepalive) clearInterval(keepalive);
+      if (cancelPoll) clearInterval(cancelPoll);
+      try { mediaWs?.close(); } catch { /* ignore */ }
+      try { ws.close(); } catch { /* ignore */ }
+    };
+
+    const finish = (err?: Error) => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      if (err) reject(err); else resolve();
+    };
+
+    ws.on('open', () => {
+      const handshake = {
+        msg_type: RTMS_MSG_TYPE.SIGNALING_HAND_SHAKE_REQ,
+        protocol_version: 1,
+        meeting_uuid: args.meetingUuid,
+        rtms_stream_id: args.streamId,
+        signature,
+      };
+      ws.send(JSON.stringify(handshake));
+    });
+
+    ws.on('message', (raw) => {
+      let msg: any;
+      try { msg = JSON.parse(raw.toString()); } catch { return; }
+
+      if (msg.msg_type === RTMS_MSG_TYPE.SIGNALING_HAND_SHAKE_RESP) {
+        if (msg.status_code && msg.status_code !== 0) {
+          finish(new Error(`Signaling handshake rejected: ${msg.reason || msg.status_code}`));
+          return;
+        }
+        const mediaUrl = msg.media_server_address?.audio || msg.media_url;
+        if (!mediaUrl) {
+          finish(new Error('Signaling response missing media URL'));
+          return;
+        }
+        mediaWs = openMediaWs({
+          url: mediaUrl,
+          meetingUuid: args.meetingUuid,
+          streamId: args.streamId,
+          signature,
+          onTranscriptSegment: args.onTranscriptSegment,
+          onActive: args.onActive,
+          onError: (e) => finish(e),
+          onClose: () => finish(),
+        });
+      }
+    });
+
+    ws.on('error', (err) => finish(err instanceof Error ? err : new Error(String(err))));
+    ws.on('close', () => finish());
+
+    // App-level keepalive on the signaling channel (per Zoom docs).
+    keepalive = setInterval(() => {
+      try {
+        ws.send(JSON.stringify({
+          msg_type: RTMS_MSG_TYPE.KEEP_ALIVE_REQ,
+          timestamp: Date.now(),
+        }));
+      } catch { /* ignore */ }
+    }, 25_000);
+
+    // Honor Firestore-driven cancellation (rtms_stopped or meeting.ended).
+    cancelPoll = setInterval(() => {
+      args.isCanceled().then((canceled) => {
+        if (canceled) finish();
+      }).catch(() => { /* ignore */ });
+    }, 5_000);
+  });
+}
+
+// Open the media-channel WebSocket and route transcript frames.
+function openMediaWs(args: {
+  url: string;
+  meetingUuid: string;
+  streamId: string;
+  signature: string;
+  onTranscriptSegment: (seg: {
+    speaker?: string;
+    text?: string;
+    confidence?: number;
+    startMs?: number;
+    endMs?: number;
+  }) => Promise<void>;
+  onActive: () => Promise<void>;
+  onError: (err: Error) => void;
+  onClose: () => void;
+}): WebSocket {
+  const media = new WebSocket(args.url);
+
+  media.on('open', () => {
+    const dataHandshake = {
+      msg_type: RTMS_MSG_TYPE.DATA_HAND_SHAKE_REQ,
+      protocol_version: 1,
+      meeting_uuid: args.meetingUuid,
+      rtms_stream_id: args.streamId,
+      signature: args.signature,
+      media_type: mediaTypeBitmask(['audio', 'transcript']),
+      payload_encryption: false,
+    };
+    media.send(JSON.stringify(dataHandshake));
+  });
+
+  media.on('message', async (raw) => {
+    let msg: any;
+    try { msg = JSON.parse(raw.toString()); } catch { return; }
+
+    if (msg.msg_type === RTMS_MSG_TYPE.DATA_HAND_SHAKE_RESP) {
+      if (msg.status_code && msg.status_code !== 0) {
+        args.onError(new Error(`Data handshake rejected: ${msg.reason || msg.status_code}`));
+        return;
+      }
+      await args.onActive();
+      // Acknowledge readiness.
+      media.send(JSON.stringify({
+        msg_type: RTMS_MSG_TYPE.CLIENT_READY_ACK,
+        rtms_stream_id: args.streamId,
+      }));
+      return;
+    }
+
+    if (msg.msg_type === RTMS_MSG_TYPE.MEDIA_DATA_TRANSCRIPT) {
+      const content = msg.content || msg.transcript || {};
+      try {
+        await args.onTranscriptSegment({
+          speaker: content.user_name || content.speaker,
+          text: content.text || content.content,
+          confidence: content.confidence,
+          startMs: content.timestamp || content.start_ms,
+          endMs: content.end_ms,
+        });
+      } catch (err) {
+        console.warn('[rtms media] transcript persist failed:', (err as Error).message);
+      }
+      return;
+    }
+
+    if (msg.msg_type === RTMS_MSG_TYPE.STREAM_STATE_UPDATE && msg.state === 'TERMINATED') {
+      args.onClose();
+    }
+  });
+
+  media.on('error', (err) =>
+    args.onError(err instanceof Error ? err : new Error(String(err)))
+  );
+  media.on('close', () => args.onClose());
+
+  return media;
+}
 
 
 // ─── Prompt 4: Admin Operations & Communications Layer ──────────────────────
@@ -8440,3 +9089,115 @@ export const onMemberCreated = onDocumentCreated(
 // domain-wide delegation. The Resend EMAIL_API_KEY is a placeholder
 // so Cloud Functions cannot send email directly.
 // ─────────────────────────────────────────────
+
+// ─── getEmbeddedSessionJoinConfig — Zoom Meeting SDK join payload ────────────
+/**
+ * Returns a short-lived Zoom Meeting SDK signature + metadata so the caller can
+ * join a session through the embedded Zoom Web Meeting SDK Client View.
+ *
+ * Phase 1 (member beta — see docs/ZOOM_MEETING_SDK_SETUP.md):
+ *   - role is always 0 (participant). No host-start UI yet.
+ *   - zak is always null. Scaffolded in the return shape so host-start can be
+ *     added later without a breaking change.
+ *   - Caller must be the member on the session_instance (platformAdmin allowed
+ *     for testing).
+ *   - Instance must be allocated (has zoomMeetingId + zoomJoinUrl).
+ *
+ * The existing Linking.openURL(inst.zoomJoinUrl) flow remains the default join
+ * path. This callable powers the secondary "Join in app (beta)" button only.
+ */
+export const getEmbeddedSessionJoinConfig = onCall(
+  {
+    region: 'us-central1',
+    secrets: [zoomMeetingSdkKey, zoomMeetingSdkSecret],
+    invoker: 'public',
+  },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const { sessionInstanceId } = (request.data ?? {}) as {
+      sessionInstanceId?: string;
+    };
+    if (!sessionInstanceId) {
+      throw new HttpsError('invalid-argument', 'sessionInstanceId is required');
+    }
+
+    const instanceSnap = await db
+      .collection('session_instances')
+      .doc(sessionInstanceId)
+      .get();
+    if (!instanceSnap.exists) {
+      throw new HttpsError('not-found', 'Session instance not found');
+    }
+    const instance = instanceSnap.data()!;
+
+    const callerToken = request.auth?.token as Record<string, any> | undefined;
+    const callerIsAdmin =
+      callerToken?.role === 'platformAdmin' || callerToken?.admin === true;
+    if (!callerIsAdmin && callerUid !== instance.memberId) {
+      throw new HttpsError(
+        'permission-denied',
+        'Only the assigned member can join this session'
+      );
+    }
+
+    const meetingNumber = instance.zoomMeetingId as string | undefined;
+    if (!meetingNumber || !instance.zoomJoinUrl) {
+      throw new HttpsError(
+        'failed-precondition',
+        'Session has not been allocated to a Zoom room yet'
+      );
+    }
+    if (instance.status !== 'allocated' && instance.status !== 'in_progress') {
+      throw new HttpsError(
+        'failed-precondition',
+        `Session is in status "${instance.status}", cannot join`
+      );
+    }
+
+    let userName = (instance.memberName as string) || '';
+    let userEmail = '';
+    try {
+      const userDoc = await db
+        .collection('users')
+        .doc(instance.memberId as string)
+        .get();
+      const udata = userDoc.data() || {};
+      if (!userName) {
+        userName =
+          (udata.displayName as string) || (udata.name as string) || 'Member';
+      }
+      userEmail = (udata.email as string) || '';
+    } catch {
+      if (!userName) userName = 'Member';
+    }
+
+    const sdkKey = zoomMeetingSdkKey.value().trim();
+    const sdkSecret = zoomMeetingSdkSecret.value().trim();
+    if (!sdkKey || !sdkSecret) {
+      throw new HttpsError(
+        'failed-precondition',
+        'Meeting SDK credentials are not configured'
+      );
+    }
+
+    const signature = buildMeetingSdkSignature({
+      sdkKey,
+      sdkSecret,
+      meetingNumber,
+      role: 0,
+    });
+
+    return {
+      meetingNumber: String(meetingNumber),
+      signature,
+      sdkKey,
+      userName,
+      userEmail,
+      password: (instance.zoomMeetingPassword as string) || '',
+      role: 0 as const,
+      zak: null as string | null,
+    };
+  }
+);

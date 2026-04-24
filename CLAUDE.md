@@ -39,7 +39,7 @@ The "Build" tab serves as a unified visual workspace, replacing the formerly sep
 For performance, `FlatList` or `react-native-draggable-flatlist` must be used for rendering large lists exceeding 500 items. When handling media, prioritize preloading videos over GIFs, and use lightweight thumbnails (`thumbnailUrl`) for initial loads to conserve memory.
 
 ## Knowledge Base
-For deep dives into specific areas, consult the files in the `.claude/` directory:
+For deep dives into specific areas, consult the files in the `.claude/` directory. Operational setup guides (Zoom apps, deploy steps, env conventions) live in `docs/` — see also `docs/ZOOM_APPS_MAP.md`, `docs/ZOOM_RTMS_MARKETPLACE_SETUP.md`, `docs/ZOOM_MEETING_SDK_SETUP.md`. New architectural notes go in `.claude/`; new operational/setup guides go in `docs/`.
 
 | Document | Description |
 |---|---|
@@ -52,6 +52,7 @@ For deep dives into specific areas, consult the files in the `.claude/` director
 | `.claude/build-system-vision.md` | The Build tab vision including workout creation, playbooks, and member playback. |
 | `.claude/billing-and-business-rules.md` | Stripe Connect, earnings caps, CTS, and financial guardrails. |
 | `.claude/scheduling-and-integrations.md` | Scheduling system, Zoom, Google Calendar, notifications, and AI/voice integrations. |
+| `docs/ZOOM_APPS_MAP.md` | Source of truth for the three Zoom Marketplace apps (S2S, RTMS General App, Meeting SDK) — secret prefixes, scopes, webhook URLs, no-cross-wire rules. |
 | `.claude/design-system.md` | Brand colors, typography, layout conventions, and UX principles. |
 | `.claude/deployment-and-build.md` | Build process, deployment workflow, and Firebase Hosting configuration. |
 | `.claude/multi-agent-workflow-guide.md` | Staging-first protocol and agent coordination. |

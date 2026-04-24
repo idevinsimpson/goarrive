@@ -355,6 +355,9 @@ export function verifyWebhookSignature(
     .update(message)
     .digest('hex');
   const expectedSignature = `v0=${hash}`;
+  // Guard against RangeError: timingSafeEqual requires equal-length buffers.
+  // Return false immediately if lengths differ (avoids 500 on malformed signatures).
+  if (signature.length !== expectedSignature.length) return false;
   return crypto.timingSafeEqual(
     Buffer.from(signature),
     Buffer.from(expectedSignature)
@@ -373,6 +376,56 @@ export function generateCrcResponse(
     .update(plainToken)
     .digest('hex');
   return { plainToken, encryptedToken };
+}
+
+// ─── Meeting SDK Signature (HS256 JWT) ──────────────────────────────────────
+
+/**
+ * Build a Zoom Meeting SDK signature JWT (HS256) for the embedded Web/Native
+ * Meeting SDK client join. This is distinct from Zoom S2S OAuth (meeting CRUD)
+ * and from webhook HMAC — it is a self-signed JWT the client hands to the
+ * Meeting SDK's join() call.
+ *
+ * Shape follows Zoom's current Signature v2 spec:
+ *   header:  { alg: 'HS256', typ: 'JWT' }
+ *   payload: { sdkKey, appKey: sdkKey, mn, role, iat, exp, tokenExp }
+ *   signed with HS256(sdkSecret) over base64url(header) + "." + base64url(payload)
+ *
+ * Docs: https://developers.zoom.us/docs/meeting-sdk/auth/
+ */
+export function buildMeetingSdkSignature(params: {
+  sdkKey: string;
+  sdkSecret: string;
+  meetingNumber: string | number;
+  role: 0 | 1;
+  ttlSeconds?: number;
+}): string {
+  const { sdkKey, sdkSecret, meetingNumber, role } = params;
+  const ttl = params.ttlSeconds ?? 7200; // 2 hours; Zoom max is 48h
+  const iat = Math.floor(Date.now() / 1000) - 30; // skew tolerance
+  const exp = iat + ttl;
+
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const payload = {
+    sdkKey,
+    appKey: sdkKey,
+    mn: String(meetingNumber),
+    role,
+    iat,
+    exp,
+    tokenExp: exp,
+  };
+
+  const b64url = (buf: Buffer) =>
+    buf.toString('base64').replace(/=+$/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+
+  const headerB64 = b64url(Buffer.from(JSON.stringify(header)));
+  const payloadB64 = b64url(Buffer.from(JSON.stringify(payload)));
+  const signingInput = `${headerB64}.${payloadB64}`;
+  const sigB64 = b64url(
+    crypto.createHmac('sha256', sdkSecret).update(signingInput).digest()
+  );
+  return `${signingInput}.${sigB64}`;
 }
 
 // ─── Session Event Types ────────────────────────────────────────────────────
