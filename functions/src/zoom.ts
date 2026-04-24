@@ -355,6 +355,9 @@ export function verifyWebhookSignature(
     .update(message)
     .digest('hex');
   const expectedSignature = `v0=${hash}`;
+  // Guard against RangeError: timingSafeEqual requires equal-length buffers.
+  // Return false immediately if lengths differ (avoids 500 on malformed signatures).
+  if (signature.length !== expectedSignature.length) return false;
   return crypto.timingSafeEqual(
     Buffer.from(signature),
     Buffer.from(expectedSignature)
