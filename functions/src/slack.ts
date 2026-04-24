@@ -81,6 +81,35 @@ async function postSlackMessage(
   }
 }
 
+// ─── Set Slack Assistant Status (Loading Indicator) ──────────────────────────
+
+async function setSlackStatus(
+  botToken: string,
+  channel: string,
+  threadTs: string,
+  status: string
+): Promise<void> {
+  const body = {
+    channel_id: channel,
+    thread_ts: threadTs,
+    status,
+  };
+
+  const res = await fetch(`${SLACK_API}/assistant.threads.setStatus`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      Authorization: `Bearer ${botToken}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  const json = (await res.json()) as { ok: boolean; error?: string };
+  if (!json.ok) {
+    console.error('[slackEvents] assistant.threads.setStatus error:', json.error);
+  }
+}
+
 // ─── Cloud Function ───────────────────────────────────────────────────────────
 
 export const slackEvents = onRequest(
@@ -129,13 +158,11 @@ export const slackEvents = onRequest(
       return;
     }
 
-    // ── Acknowledge immediately (Slack requires 200 within 3s) ───────────────
-    res.status(200).send('');
-
-    // ── Process events asynchronously after ack ───────────────────────────────
+    // ── Process events asynchronously ───────────────────────────────
     const event = payload.event as Record<string, any> | undefined;
     if (!event) {
       console.log(TAG, 'No event in payload, ignoring');
+      res.status(200).send('');
       return;
     }
 
@@ -153,7 +180,18 @@ export const slackEvents = onRequest(
 
       console.log(TAG, `app_mention from ${userId} in ${channel}: ${userText}`);
 
-      // Log the mention to Firestore for Manus to pick up
+      // 1. Immediately set the loading status in the thread
+      await setSlackStatus(botToken, channel, threadTs, 'Manus is thinking...');
+
+      // 2. Post an immediate acknowledgment in the thread
+      await postSlackMessage(
+        botToken,
+        channel,
+        `👋 Got it, <@${userId}>. I'm on it — give me a moment.`,
+        threadTs
+      );
+
+      // 3. Log the mention to Firestore for Manus to pick up
       try {
         await admin.firestore().collection('slack_mentions').add({
           channel,
@@ -168,13 +206,10 @@ export const slackEvents = onRequest(
         console.error(TAG, 'Failed to write mention to Firestore:', err);
       }
 
-      // Post an immediate acknowledgment in the thread
-      await postSlackMessage(
-        botToken,
-        channel,
-        `👋 Got it, <@${userId}>. I'm on it — give me a moment.`,
-        threadTs
-      );
+      // 4. Clear the status now that we've acknowledged it
+      // (In the future, we might leave this on until the actual task is done)
+      await setSlackStatus(botToken, channel, threadTs, '');
+      res.status(200).send('');
       return;
     }
 
@@ -206,6 +241,7 @@ export const slackEvents = onRequest(
       } catch (err) {
         console.error(TAG, 'Failed to set suggested prompts:', err);
       }
+      res.status(200).send('');
       return;
     }
 
@@ -224,9 +260,11 @@ export const slackEvents = onRequest(
         `Hi <@${userId}>! I received your message. I'm Manus — I handle browser-based tasks for GoArrive. Mention me in #dev-goarrive with what you need.`,
         threadTs
       );
+      res.status(200).send('');
       return;
     }
 
     console.log(TAG, `Unhandled event type: ${eventType} — ignoring`);
+    res.status(200).send('');
   }
 );
