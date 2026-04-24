@@ -5,15 +5,18 @@
  *         firebase functions:secrets:set SLACK_SIGNING_SECRET
  * ME-012: SLACK_BOT_TOKEN must be set as a Firebase secret.
  *         firebase functions:secrets:set SLACK_BOT_TOKEN
+ * ME-013: OPENAI_API_KEY must be set as a Firebase secret.
+ *         firebase functions:secrets:set OPENAI_API_KEY
  *
  * This function:
  *  1. Handles Slack URL verification challenge (required for event subscription setup)
  *  2. Verifies the Slack request signature (HMAC-SHA256) to reject spoofed requests
- *  3. Handles app_mention events — logs them and posts an acknowledgment reply
+ *  3. Handles app_mention events — acknowledges immediately, then calls OpenAI and
+ *     posts a real AI reply in the thread
  *  4. Handles assistant_thread_started events (AI agent thread creation)
  *
- * Deployed URL format (staging):
- *   https://us-central1-goarrive-staging.cloudfunctions.net/slackEvents
+ * Deployed URL:
+ *   https://us-central1-goarrive.cloudfunctions.net/slackEvents
  *
  * Register this URL in:
  *   https://api.slack.com/apps/A0AUQ8SCVQF/event-subscriptions
@@ -26,8 +29,10 @@ import * as admin from 'firebase-admin';
 
 const slackSigningSecret = defineSecret('SLACK_SIGNING_SECRET');
 const slackBotToken = defineSecret('SLACK_BOT_TOKEN');
+const openaiApiKey = defineSecret('OPENAI_API_KEY');
 
 const SLACK_API = 'https://slack.com/api';
+const OPENAI_API = 'https://api.openai.com/v1';
 
 // ─── Signature Verification ──────────────────────────────────────────────────
 
@@ -110,14 +115,63 @@ async function setSlackStatus(
   }
 }
 
+// ─── Call OpenAI to generate a reply ─────────────────────────────────────────
+
+async function getOpenAIReply(apiKey: string, userMessage: string): Promise<string> {
+  const systemPrompt = `You are Manus, an AI agent embedded in the GoArrive Slack workspace.
+GoArrive is a fitness coaching platform. You help the dev team (Devin, Ben/Maia) with tasks like:
+- Browser-based QA and testing of the staging app
+- Checking dashboards (Firebase, Stripe, GCP)
+- Answering questions about the product and codebase
+- Coordinating with Maia (the code/deploy agent) on tasks
+
+Keep replies concise and practical. If asked to do something that requires browsing or checking a dashboard, say you're on it and will report back. If you can answer directly, do so.`;
+
+  const res = await fetch(`${OPENAI_API}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'gpt-4.1-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      max_tokens: 500,
+      temperature: 0.7,
+    }),
+  });
+
+  const json = (await res.json()) as {
+    choices?: Array<{ message: { content: string } }>;
+    error?: { message: string };
+  };
+
+  if (json.error) {
+    console.error('[slackEvents] OpenAI error:', json.error.message);
+    return "Sorry, I ran into an issue processing that. Try again in a moment.";
+  }
+
+  return json.choices?.[0]?.message?.content?.trim() ?? "I didn't get a response. Try again?";
+}
+
+// ─── Strip @mention from message text ────────────────────────────────────────
+
+function stripMention(text: string): string {
+  // Remove all <@USERID> mentions from the text and trim
+  return text.replace(/<@[A-Z0-9]+>/g, '').trim();
+}
+
 // ─── Cloud Function ───────────────────────────────────────────────────────────
 
 export const slackEvents = onRequest(
   {
     region: 'us-central1',
-    secrets: [slackSigningSecret, slackBotToken],
-    // Slack requires responses within 3 seconds — keep timeout tight
-    timeoutSeconds: 10,
+    secrets: [slackSigningSecret, slackBotToken, openaiApiKey],
+    // OpenAI call adds latency — give enough time but stay reasonable
+    timeoutSeconds: 30,
     invoker: 'public',
   },
   async (req, res) => {
@@ -158,7 +212,7 @@ export const slackEvents = onRequest(
       return;
     }
 
-    // ── Process events asynchronously ───────────────────────────────
+    // ── Process events ────────────────────────────────────────────────────────
     const event = payload.event as Record<string, any> | undefined;
     if (!event) {
       console.log(TAG, 'No event in payload, ignoring');
@@ -167,6 +221,7 @@ export const slackEvents = onRequest(
     }
 
     const botToken = slackBotToken.value();
+    const openaiKey = openaiApiKey.value();
     const eventType = event.type as string;
 
     console.log(TAG, `Received event type: ${eventType}`);
@@ -178,33 +233,55 @@ export const slackEvents = onRequest(
       const userText = (event.text as string) ?? '';
       const userId = event.user as string;
 
+      // Ignore messages from bots (prevents loops)
+      if (event.bot_id) {
+        console.log(TAG, 'Ignoring bot message in app_mention');
+        res.status(200).send('');
+        return;
+      }
+
       console.log(TAG, `app_mention from ${userId} in ${channel}: ${userText}`);
 
-      // 1. Post acknowledgment reply immediately (critical — must succeed)
+      // Strip the @Manus mention to get the clean user message
+      const cleanMessage = stripMention(userText);
+
+      // 1. Post acknowledgment immediately so user knows we're working
       await postSlackMessage(
         botToken,
         channel,
-        `👋 Got it, <@${userId}>. I'm on it — give me a moment.`,
+        `👋 On it, <@${userId}>...`,
         threadTs
       );
 
-      // 2. Fire setStatus in background — don't await, it may not work in
-      //    regular channels (only works in assistant/DM threads), and we
-      //    don't want it to block the reply
+      // 2. Fire setStatus in background (non-blocking — only works in DM threads)
       setSlackStatus(botToken, channel, threadTs, 'Manus is thinking...').catch(
         (err) => console.warn(TAG, 'setStatus failed (non-fatal):', err)
       );
 
-      // 3. Log the mention to Firestore for Manus to pick up
+      // 3. Get OpenAI reply
+      let aiReply = '';
+      try {
+        aiReply = await getOpenAIReply(openaiKey, cleanMessage || 'Hello!');
+      } catch (err) {
+        console.error(TAG, 'OpenAI call failed:', err);
+        aiReply = "Sorry, I had trouble processing that. Please try again.";
+      }
+
+      // 4. Post the AI reply in the thread
+      await postSlackMessage(botToken, channel, aiReply, threadTs);
+
+      // 5. Log the mention to Firestore
       try {
         await admin.firestore().collection('slack_mentions').add({
           channel,
           threadTs,
           userId,
           text: userText,
+          cleanMessage,
+          aiReply,
           eventTs: event.ts,
           processedAt: admin.firestore.FieldValue.serverTimestamp(),
-          status: 'pending',
+          status: 'completed',
         });
       } catch (err) {
         console.error(TAG, 'Failed to write mention to Firestore:', err);
@@ -255,12 +332,15 @@ export const slackEvents = onRequest(
 
       console.log(TAG, `DM from ${userId}: ${text}`);
 
-      await postSlackMessage(
-        botToken,
-        channel,
-        `Hi <@${userId}>! I received your message. I'm Manus — I handle browser-based tasks for GoArrive. Mention me in #dev-goarrive with what you need.`,
-        threadTs
-      );
+      // Get AI reply for DMs too
+      let aiReply = '';
+      try {
+        aiReply = await getOpenAIReply(openaiKey, text || 'Hello!');
+      } catch (err) {
+        aiReply = `Hi <@${userId}>! I'm Manus — I handle browser-based tasks for GoArrive. Mention me in #dev-goarrive with what you need.`;
+      }
+
+      await postSlackMessage(botToken, channel, aiReply, threadTs);
       res.status(200).send('');
       return;
     }
