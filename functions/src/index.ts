@@ -1953,6 +1953,107 @@ export const claimMemberAccount = onCall(
   }
 );
 
+// ── sendMemberInvite — Coach-triggered: create Auth user + send password reset ──
+/**
+ * Allows a coach to send an account invite to a member they added via QuickAdd.
+ * If the member has no Firebase Auth account, one is created with a temp password.
+ * A password-reset link is generated so the member can set their own password.
+ *
+ * Input:  { memberId: string }
+ * Output: { success: boolean, resetLink: string }
+ */
+export const sendMemberInvite = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    // Only coaches (or admins) may send invites
+    const callerRole = request.auth?.token?.role;
+    const callerAdmin = request.auth?.token?.admin === true;
+    if (callerRole !== 'coach' && !callerAdmin) {
+      throw new HttpsError('permission-denied', 'Only coaches can send member invites');
+    }
+
+    const { memberId } = request.data as { memberId?: string };
+    if (!memberId) throw new HttpsError('invalid-argument', 'memberId is required');
+
+    // Fetch member doc
+    const memberRef = db.collection('members').doc(memberId);
+    const memberSnap = await memberRef.get();
+    if (!memberSnap.exists) {
+      throw new HttpsError('not-found', 'Member record not found');
+    }
+
+    const member = memberSnap.data()!;
+
+    // Coach-scope guard: caller must own this member (unless admin)
+    if (!callerAdmin && member.coachId !== callerUid) {
+      throw new HttpsError('permission-denied', 'You can only invite your own members');
+    }
+
+    const memberEmail = (member.email || '').trim().toLowerCase();
+    if (!memberEmail) {
+      throw new HttpsError('failed-precondition', 'Member has no email address on file');
+    }
+
+    // If member already has an account, just generate a reset link
+    if (member.hasAccount === true && member.uid) {
+      const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
+      const resetLink = await admin.auth().generatePasswordResetLink(
+        memberEmail,
+        { url: appUrl, handleCodeInApp: false }
+      );
+      console.log('[sendMemberInvite] Reset link for existing account:', memberId, memberEmail);
+      return { success: true, resetLink };
+    }
+
+    // Create Firebase Auth user with a temp password
+    const tempPassword = `GA-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    let userRecord;
+    try {
+      userRecord = await admin.auth().createUser({
+        email: memberEmail,
+        displayName: member.name || member.displayName || '',
+        password: tempPassword,
+      });
+    } catch (err: any) {
+      if (err.code === 'auth/email-already-exists') {
+        // Auth user exists but member doc wasn't linked — link it now
+        const existingUser = await admin.auth().getUserByEmail(memberEmail);
+        userRecord = existingUser;
+      } else {
+        throw new HttpsError('internal', err.message ?? 'Failed to create auth user');
+      }
+    }
+
+    // Set custom claims for the member
+    await admin.auth().setCustomUserClaims(userRecord.uid, {
+      role: 'member',
+      coachId: member.coachId,
+      tenantId: member.tenantId,
+      memberId: memberId,
+    });
+
+    // Update member doc to link the auth account
+    await memberRef.update({
+      uid: userRecord.uid,
+      hasAccount: true,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    // Generate password reset link
+    const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
+    const resetLink = await admin.auth().generatePasswordResetLink(
+      memberEmail,
+      { url: appUrl, handleCodeInApp: false }
+    );
+
+    console.log('[sendMemberInvite] Created auth + reset link:', userRecord.uid, memberEmail, 'by', callerUid);
+    return { success: true, resetLink };
+  }
+);
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SCHEDULING BACKBONE — Recurring Slots, Session Instances, Zoom Allocation

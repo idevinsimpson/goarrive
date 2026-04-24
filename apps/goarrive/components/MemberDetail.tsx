@@ -14,9 +14,13 @@ import {
   Modal,
   TouchableOpacity,
   ScrollView,
+  Alert,
+  Platform,
+  ActivityIndicator,
 } from 'react-native';
-import { db } from '../lib/firebase';
+import { db, functions } from '../lib/firebase';
 import { doc, onSnapshot, collection, query, where, addDoc } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import { Icon } from './Icon';
 import { router } from 'expo-router';
 import { useAuth } from '../lib/AuthContext';
@@ -64,6 +68,10 @@ export default function MemberDetail({
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showLogReview, setShowLogReview] = useState(false);
   const [showWorkoutHistory, setShowWorkoutHistory] = useState(false);
+  // Send account invite state
+  const [inviteSending, setInviteSending] = useState(false);
+  const [inviteResult, setInviteResult] = useState<'idle' | 'sent' | 'error'>('idle');
+
   // Item 7: Session notes per instance
   const [instanceNotes, setInstanceNotes] = useState<Record<string, string>>({});
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -110,6 +118,54 @@ export default function MemberDetail({
   const scheduleSubLabel = activeSlots.length > 0
     ? `${activeSlots.length} active slot${activeSlots.length !== 1 ? 's' : ''}`
     : 'Assign recurring time';
+
+  // ── Send account invite handler ──────────────────────────────────────────
+  async function handleSendInvite() {
+    if (inviteSending) return;
+    setInviteSending(true);
+    setInviteResult('idle');
+    try {
+      const sendInviteFn = httpsCallable<{ memberId: string }, { success: boolean; resetLink: string }>(
+        functions,
+        'sendMemberInvite'
+      );
+      const result = await sendInviteFn({ memberId: currentMember.id });
+      if (result.data.success) {
+        setInviteResult('sent');
+        // Copy reset link to clipboard on web
+        if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard && result.data.resetLink) {
+          navigator.clipboard.writeText(result.data.resetLink);
+        }
+        const msg = `Account invite sent to ${currentMember.email || 'member'}. A password reset link has been generated.${Platform.OS === 'web' ? ' Link copied to clipboard.' : ''}`;
+        if (Platform.OS === 'web') {
+          window.alert(msg);
+        } else {
+          Alert.alert('Invite Sent', msg);
+        }
+      }
+    } catch (err: any) {
+      setInviteResult('error');
+      const errMsg = err?.message || 'Failed to send invite. Please try again.';
+      if (Platform.OS === 'web') {
+        window.alert(errMsg);
+      } else {
+        Alert.alert('Error', errMsg);
+      }
+    } finally {
+      setInviteSending(false);
+    }
+  }
+
+  // Determine invite tile label based on member state
+  const hasAccount = currentMember.hasAccount === true;
+  const inviteTileLabel = hasAccount ? 'Reset Password' : 'Send Invite';
+  const inviteTileSublabel = inviteSending
+    ? 'Sending...'
+    : inviteResult === 'sent'
+      ? 'Sent!'
+      : hasAccount
+        ? 'Send reset link'
+        : 'Create account & send link';
 
   const tiles: HubTile[] = [
     {
@@ -225,11 +281,12 @@ export default function MemberDetail({
     },
     {
       icon: 'lock',
-      label: 'Password Reset',
-      sublabel: 'Send reset link',
-      color: MUTED,
-      bgColor: 'rgba(138,149,163,0.1)',
-      live: false,
+      label: inviteTileLabel,
+      sublabel: inviteTileSublabel,
+      color: inviteResult === 'sent' ? GREEN : GOLD,
+      bgColor: inviteResult === 'sent' ? 'rgba(110,187,122,0.1)' : 'rgba(245,166,35,0.1)',
+      live: true,
+      onPress: handleSendInvite,
     },
   ];
 
