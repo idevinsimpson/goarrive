@@ -134,7 +134,7 @@ Keep replies concise and practical. If asked to do something that requires brows
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'gpt-4.1-mini',
+      model: 'gpt-5.5',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage },
