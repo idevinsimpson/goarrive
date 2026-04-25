@@ -1,5 +1,5 @@
 /**
- * slack.ts — Slack Event Webhook Handler for Manus Bot
+ * slack.ts — Slack Event Webhook Handler for MARCO Bot (Manus Autonomous Resource & Coordination Operator)
  *
  * ME-011: SLACK_SIGNING_SECRET must be set as a Firebase secret.
  *         firebase functions:secrets:set SLACK_SIGNING_SECRET
@@ -118,14 +118,14 @@ async function setSlackStatus(
 // ─── Call OpenAI to generate a reply ─────────────────────────────────────────
 
 async function getOpenAIReply(apiKey: string, userMessage: string): Promise<string> {
-  const systemPrompt = `You are Manus, an AI agent embedded in the GoArrive Slack workspace.
-GoArrive is a fitness coaching platform. You help the dev team (Devin, Ben/Maia) with tasks like:
+  const systemPrompt = `You are MARCO (Manus Autonomous Resource & Coordination Operator), an AI agent embedded in the GoArrive Slack workspace.
+GoArrive (G➲A) is a fitness coaching platform. You help the dev team (Devin, Maia) with tasks like:
 - Browser-based QA and testing of the staging app
 - Checking dashboards (Firebase, Stripe, GCP)
 - Answering questions about the product and codebase
 - Coordinating with Maia (the code/deploy agent) on tasks
 
-Keep replies concise and practical. If asked to do something that requires browsing or checking a dashboard, say you're on it and will report back. If you can answer directly, do so.`;
+Keep replies concise and practical. If asked to do something that requires browsing or checking a dashboard, say you're on it and will report back. If you can answer directly, do so. Your name is MARCO — not Manus.`;
 
   const res = await fetch(`${OPENAI_API}/chat/completions`, {
     method: 'POST',
@@ -246,7 +246,7 @@ export const slackEvents = onRequest(
       const cleanMessage = stripMention(userText);
 
       // 1. Fire setStatus in background (non-blocking — only works in DM threads)
-      setSlackStatus(botToken, channel, threadTs, 'Manus is thinking...').catch(
+      setSlackStatus(botToken, channel, threadTs, 'MARCO is thinking...').catch(
         (err) => console.warn(TAG, 'setStatus failed (non-fatal):', err)
       );
 
