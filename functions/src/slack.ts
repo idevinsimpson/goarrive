@@ -222,8 +222,47 @@ async function downloadSlackImage(url: string, botToken: string): Promise<string
   }
 }
 
-// ─── Build OpenAI messages from thread history ────────────────────────────────
+// ─── Load shared brain rules from Firestore ─────────────────────────────────
+let cachedSharedBrain: string | null = null;
+let cachedSharedBrainAt = 0;
+const BRAIN_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+async function loadSharedBrain(): Promise<string> {
+  const now = Date.now();
+  if (cachedSharedBrain && now - cachedSharedBrainAt < BRAIN_CACHE_TTL_MS) {
+    return cachedSharedBrain;
+  }
+  try {
+    const snapshot = await admin.firestore().collection('agent_shared_brain').get();
+    const sections: string[] = [];
+    // Priority docs first
+    const priority = ['interaction_rules', 'agent_task_routing', 'product_identity', 'do_not_build', 'current_state_and_roadmap'];
+    const docs = new Map<string, string>();
+    snapshot.forEach((doc) => {
+      if (doc.id !== '_meta') {
+        const data = doc.data();
+        docs.set(doc.id, `## ${data.filename || doc.id}\n${data.content || ''}`);
+      }
+    });
+    // Add priority docs first
+    for (const id of priority) {
+      if (docs.has(id)) sections.push(docs.get(id)!);
+    }
+    // Then the rest
+    docs.forEach((content, id) => {
+      if (!priority.includes(id)) sections.push(content);
+    });
+    cachedSharedBrain = sections.join('\n\n---\n\n');
+    cachedSharedBrainAt = now;
+    console.log('[slackEvents] Loaded shared brain:', docs.size, 'docs');
+  } catch (err) {
+    console.warn('[slackEvents] Failed to load shared brain:', err);
+    cachedSharedBrain = '';
+  }
+  return cachedSharedBrain!;
+}
+
+// ─── Build OpenAI messages from thread history ────────────────────────────────
 type OpenAIContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string; detail: 'high' | 'low' | 'auto' } };
@@ -238,7 +277,13 @@ async function buildMessagesFromThread(
   threadMessages: SlackMessage[],
   currentEventTs: string
 ): Promise<OpenAIMessage[]> {
-  const systemPrompt = `You are Marco (My Autonomous Resource & Coordination Operator), an AI agent embedded in the GoArrive Slack workspace.
+  // Load shared brain rules from Firestore (cached)
+  const sharedBrain = await loadSharedBrain();
+  const sharedBrainSection = sharedBrain
+    ? `\n\n## GoArrive Shared Knowledge Base\nThe following documents contain all product rules, architecture decisions, routing protocols, and interaction guidelines. Both you (Marco) and Maia operate from this same knowledge base.\n\n${sharedBrain}`
+    : '';
+
+  const systemPrompt = `You are Marco (My Autonomous Resource & Coordination Operator), an AI agent embedded in the GoArrive Slack workspace.${sharedBrainSection}\n\n---\n\nCore Identity:
 GoArrive (G➢A) is a fitness coaching platform. You help the dev team (Devin, Maia) with tasks like:
 - Browser-based QA and testing of the staging app
 - Checking dashboards (Firebase, Stripe, GCP)
@@ -810,7 +855,7 @@ async function handleMention(
     await postSlackMessage(botToken, channel, finalReply, threadTs);
   }
 
-  // 8. Log to Firestore
+  // 8. Log to slack_mentions Firestore (existing)
   try {
     await admin.firestore().collection('slack_mentions').add({
       channel,
@@ -826,6 +871,49 @@ async function handleMention(
     });
   } catch (err) {
     console.error(TAG, 'Failed to write mention to Firestore:', err);
+  }
+  // 9. Write to shared agent_memory log
+  try {
+    const isMaiaTask = finalReply.includes('queued this for Maia') || aiReply.includes('MAIA_TASK:');
+    await admin.firestore().collection('agent_memory').add({
+      agent: 'marco',
+      eventType: isMaiaTask ? 'task_delegated' : 'message_handled',
+      summary: `Marco responded to: "${currentText.slice(0, 80)}${currentText.length > 80 ? '...' : ''}"`,
+      details: {
+        userMessage: currentText,
+        aiReply: finalReply.slice(0, 500),
+        hasImages,
+        channel,
+        threadTs,
+        userId,
+      },
+      slackChannel: channel,
+      slackThreadTs: threadTs,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (err) {
+    console.error(TAG, 'Failed to write to agent_memory:', err);
+  }
+  // 10. Check agent_messages inbox for messages from Maia
+  try {
+    const inbox = await admin.firestore().collection('agent_messages')
+      .where('to', '==', 'marco')
+      .where('status', '==', 'pending')
+      .orderBy('createdAt', 'asc')
+      .limit(3)
+      .get();
+    if (!inbox.empty) {
+      const maiaMessages = inbox.docs.map(d => d.data().message as string).join('\n');
+      console.log(TAG, `Found ${inbox.size} pending messages from Maia`);
+      // Mark them as read
+      const batch = admin.firestore().batch();
+      inbox.docs.forEach(d => batch.update(d.ref, { status: 'read', readAt: admin.firestore.FieldValue.serverTimestamp() }));
+      await batch.commit();
+      // Post Maia's messages to the current thread
+      await postSlackMessage(botToken, channel, `📬 *Message from Maia:*\n${maiaMessages}`, threadTs);
+    }
+  } catch (err) {
+    console.warn(TAG, 'Failed to check agent_messages inbox:', err);
   }
 }
 
