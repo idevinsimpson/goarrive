@@ -214,7 +214,7 @@ async function downloadSlackImage(url, botToken) {
 async function buildMessagesFromThread(botToken, threadMessages, currentEventTs) {
     var _a, _b;
     const systemPrompt = `You are Marco (My Autonomous Resource & Coordination Operator), an AI agent embedded in the GoArrive Slack workspace.
-GoArrive (G➲A) is a fitness coaching platform. You help the dev team (Devin, Maia) with tasks like:
+GoArrive (G➢A) is a fitness coaching platform. You help the dev team (Devin, Maia) with tasks like:
 - Browser-based QA and testing of the staging app
 - Checking dashboards (Firebase, Stripe, GCP)
 - Answering questions about the product and codebase
@@ -222,6 +222,9 @@ GoArrive (G➲A) is a fitness coaching platform. You help the dev team (Devin, M
 - Analyzing screenshots, images, and visual content shared in Slack
 - Managing Linear issues (create, list, update) for the Goa team
 - Querying Sentry for recent app errors and crash reports
+- Routing code/deploy tasks to Maia via the task queue
+
+You and Maia are one unified brain. You handle coordination, dashboards, and communication. Maia handles code, deploys, and repository changes. When a request is clearly a code task (writing code, fixing bugs, deploying, creating/modifying files, running tests, updating the app), you should hand it off to Maia rather than trying to answer it yourself.
 
 You have full thread context — you can see the entire conversation history above. Keep replies concise and practical. Your name is Marco — not Manus. You can see and analyze images.
 
@@ -241,7 +244,16 @@ When someone asks about errors, crashes, or recent issues in the app, use these 
 - To list recent unresolved errors: respond with a line starting with "SENTRY_ISSUES:" followed by optional filter ("unresolved", "all", or a search query)
   Example: "SENTRY_ISSUES:unresolved" or "SENTRY_ISSUES:all"
 
-When you detect a Sentry query intent, include the appropriate SENTRY_* line in your response, then explain what you're doing.`;
+When you detect a Sentry query intent, include the appropriate SENTRY_* line in your response, then explain what you're doing.
+
+## Maia Task Handoff
+When someone asks you to do a CODE task (write/fix/deploy code, modify files, create components, run builds, update the app), you should hand it off to Maia. Use this format:
+- Respond with a line starting with "MAIA_TASK:" followed by the full task description
+  Example: "MAIA_TASK:Fix the login screen crash on Android — the error is in AuthContext.tsx line 42"
+
+After the MAIA_TASK line, tell the user: "I've queued this for Maia — she'll pick it up and handle the code changes."
+
+Do NOT use MAIA_TASK for questions, explanations, or dashboard lookups — only for actual code/deploy work.`;
     const messages = [{ role: 'system', content: systemPrompt }];
     for (const msg of threadMessages) {
         // Skip the current event (it'll be added as the last user message)
@@ -550,6 +562,38 @@ async function executeLinearCommands(linearKey, aiReply) {
     }
     return cleanReply || aiReply;
 }
+// ─── Parse and queue Maia tasks from AI reply ─────────────────────────────────
+async function executeMaiaTaskCommands(aiReply, channel, threadTs, requestedByUserId) {
+    const lines = aiReply.split('\n');
+    const resultLines = [];
+    let taskQueued = false;
+    for (const line of lines) {
+        if (line.startsWith('MAIA_TASK:')) {
+            const taskDescription = line.slice('MAIA_TASK:'.length).trim();
+            if (taskDescription) {
+                // Write to the maia_task_queue Firestore collection
+                await admin.firestore().collection('maia_task_queue').add({
+                    taskDescription,
+                    requestedByUserId,
+                    slackChannel: channel,
+                    slackThreadTs: threadTs,
+                    status: 'pending',
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                });
+                taskQueued = true;
+                console.log('[slackEvents] Queued Maia task:', taskDescription);
+            }
+        }
+        else {
+            resultLines.push(line);
+        }
+    }
+    const cleanReply = resultLines.join('\n').trim();
+    if (taskQueued) {
+        return cleanReply || aiReply;
+    }
+    return cleanReply || aiReply;
+}
 // ─── Parse and execute Sentry commands from AI reply ────────────────────────
 async function executeSentryCommands(dsn, aiReply) {
     const lines = aiReply.split('\n');
@@ -644,6 +688,14 @@ async function handleMention(botToken, openaiKey, linearKey, sentryDsnValue, cha
     }
     catch (err) {
         console.error(TAG, 'Sentry command execution failed:', err);
+        // Don't fail the whole response
+    }
+    // 6c. Execute any Maia task queue commands embedded in the AI reply
+    try {
+        finalReply = await executeMaiaTaskCommands(finalReply, channel, threadTs, userId);
+    }
+    catch (err) {
+        console.error(TAG, 'Maia task queue failed:', err);
         // Don't fail the whole response
     }
     // 7. Stop the stream with the final reply (or post directly if stream failed)
