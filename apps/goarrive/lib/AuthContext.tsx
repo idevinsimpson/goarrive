@@ -23,6 +23,7 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from './firebase';
+import { setSentryUser, clearSentryUser } from './sentry';
 import { registerForPushNotifications, refreshPushTokenIfNeeded } from './notifications';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -97,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         setUser(firebaseUser);
+        setSentryUser(firebaseUser.uid, firebaseUser.email ?? undefined);
         try {
           // Force refresh ID token to get latest custom claims
           const tokenResult = await firebaseUser.getIdTokenResult(true);
@@ -172,6 +174,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         console.log('[AuthContext] User signed out');
         setUser(null);
+        clearSentryUser();
         setClaims(null);
       }
       setLoading(false);

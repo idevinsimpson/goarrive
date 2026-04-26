@@ -11,14 +11,19 @@
  * GestureHandlerRootView is required at the root for react-native-draggable-flatlist
  * and other gesture-based interactions.
  */
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider } from '../lib/AuthContext';
+import { initSentry } from '../lib/sentry';
 
 export default function RootLayout() {
+  useEffect(() => {
+    initSentry();
+  }, []);
+
   return (
     <SafeAreaProvider>
       <GestureHandlerRootView style={{ flex: 1 }}>
