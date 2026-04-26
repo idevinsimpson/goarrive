@@ -68,6 +68,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.slackEvents = void 0;
+exports.slackify = slackify;
 const crypto = __importStar(require("crypto"));
 const https_1 = require("firebase-functions/v2/https");
 const params_1 = require("firebase-functions/params");
@@ -75,10 +76,13 @@ const admin = __importStar(require("firebase-admin"));
 const slackSigningSecret = (0, params_1.defineSecret)('SLACK_SIGNING_SECRET');
 const slackBotToken = (0, params_1.defineSecret)('SLACK_BOT_TOKEN');
 const openaiApiKey = (0, params_1.defineSecret)('OPENAI_API_KEY');
+const anthropicApiKey = (0, params_1.defineSecret)('ANTHROPIC_API_KEY');
 const linearApiKey = (0, params_1.defineSecret)('LINEAR_API_KEY');
 const sentryDsn = (0, params_1.defineSecret)('SENTRY_DSN');
 const SLACK_API = 'https://slack.com/api';
 const OPENAI_API = 'https://api.openai.com/v1';
+const ANTHROPIC_API = 'https://api.anthropic.com/v1';
+const ANTHROPIC_MODEL = 'claude-opus-4-7';
 const LINEAR_API = 'https://api.linear.app/graphql';
 // Marco's bot user ID (new app A0B0947S7ND)
 const MARCO_BOT_USER_ID = 'U0AV3U11E8K';
@@ -111,8 +115,39 @@ async function slackPost(botToken, method, body) {
     });
     return res.json();
 }
+// Convert AI-emitted Markdown to Slack mrkdwn. Preserves fenced code blocks.
+function slackify(text) {
+    if (!text)
+        return text;
+    const parts = [];
+    const fence = /```[\s\S]*?```/g;
+    let last = 0;
+    let m;
+    while ((m = fence.exec(text))) {
+        if (m.index > last)
+            parts.push({ code: false, text: text.slice(last, m.index) });
+        parts.push({ code: true, text: m[0] });
+        last = m.index + m[0].length;
+    }
+    if (last < text.length)
+        parts.push({ code: false, text: text.slice(last) });
+    return parts.map((p) => {
+        if (p.code)
+            return p.text;
+        let t = p.text;
+        // Bold: **x** / __x__ → *x*  (Slack uses single-asterisk bold)
+        t = t.replace(/\*\*([^*\n]+?)\*\*/g, '*$1*');
+        t = t.replace(/__([^_\n]+?)__/g, '*$1*');
+        // Headings on their own line → bold line
+        t = t.replace(/^#{1,6}\s+(.+)$/gm, '*$1*');
+        // Decode the safe HTML entity (& only — leave &lt;/&gt; alone so Slack
+        // doesn't treat literal text as user/channel/link tokens).
+        t = t.replace(/&amp;/g, '&');
+        return t;
+    }).join('');
+}
 async function postSlackMessage(botToken, channel, text, threadTs) {
-    const body = { channel, text };
+    const body = { channel, text: slackify(text), mrkdwn: true };
     if (threadTs)
         body.thread_ts = threadTs;
     const json = await slackPost(botToken, 'chat.postMessage', body);
@@ -153,7 +188,7 @@ async function stopStream(handle, finalText) {
             chunks: [
                 {
                     type: 'markdown_text',
-                    text: finalText,
+                    text: slackify(finalText),
                 },
             ],
         });
@@ -214,6 +249,35 @@ async function downloadSlackImage(url, botToken) {
     }
     catch (_a) {
         return null;
+    }
+}
+// ─── Slack event idempotency ────────────────────────────────────────────────
+// Slack fires both `app_mention` and `message` for the same user @mention, and
+// also retries on timeout. We claim each user message exactly once by event.ts
+// (the message timestamp — identical across both event types for one message).
+const EVENT_DEDUPE_TTL_MS = 10 * 60 * 1000;
+async function claimSlackEvent(eventTs, eventType, channel) {
+    var _a;
+    if (!eventTs)
+        return true;
+    const ref = admin.firestore().collection('slack_event_dedupe').doc(eventTs);
+    const expireAt = admin.firestore.Timestamp.fromMillis(Date.now() + EVENT_DEDUPE_TTL_MS);
+    try {
+        await ref.create({
+            eventTs,
+            firstEventType: eventType,
+            channel,
+            claimedAt: admin.firestore.FieldValue.serverTimestamp(),
+            expireAt,
+        });
+        return true;
+    }
+    catch (err) {
+        if ((err === null || err === void 0 ? void 0 : err.code) === 6 || /ALREADY_EXISTS/i.test(String((_a = err === null || err === void 0 ? void 0 : err.message) !== null && _a !== void 0 ? _a : ''))) {
+            return false;
+        }
+        console.warn('[slackEvents] claimSlackEvent error (allowing through):', err);
+        return true;
     }
 }
 // ─── Load shared brain rules from Firestore ─────────────────────────────────
@@ -645,9 +709,41 @@ function formatSentryIssues(issues, filter) {
     });
     return `*Sentry Issues (${filter}):*\n\n${lines.join('\n\n')}`;
 }
-// ─── Maia Brain (Gemini via OpenAI-compatible API) ──────────────────────────
-async function getMaiaBrainReply(openaiKey, sharedContext, marcoAnalysis, marcoQuestion, userMessage) {
-    var _a, _b, _c, _d, _e;
+// ─── Maia Brain (Anthropic Claude) ──────────────────────────────────────────
+/**
+ * Low-level Anthropic call for Maia. Accepts a full messages array so it can
+ * be used for both single-shot and multi-turn strategize conversations.
+ */
+async function callMaiaBrain(anthropicKey, systemPrompt, messages) {
+    var _a;
+    const res = await fetch(`${ANTHROPIC_API}/messages`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': anthropicKey,
+            'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+            model: ANTHROPIC_MODEL,
+            max_tokens: 600,
+            system: systemPrompt,
+            messages,
+        }),
+    });
+    const json = (await res.json());
+    if (json.error) {
+        console.error('[slackEvents] Maia brain error:', json.error.message);
+        return '(Maia was unable to respond)';
+    }
+    const text = ((_a = json.content) !== null && _a !== void 0 ? _a : [])
+        .filter((b) => b.type === 'text' && typeof b.text === 'string')
+        .map((b) => b.text)
+        .join('')
+        .trim();
+    return text || '(No response from Maia)';
+}
+/** Single-shot Maia reply (used by the legacy huddle mode). */
+async function getMaiaBrainReply(anthropicKey, sharedContext, marcoAnalysis, marcoQuestion, userMessage) {
     const maiaSystemPrompt = `You are Maia, an AI code agent for GoArrive (G➢A), a fitness coaching platform.
 You work alongside Marco (the Slack coordination agent). You share the same knowledge base, memory, and goals.
 
@@ -659,38 +755,107 @@ Do NOT include any command prefixes (LINEAR_*, SENTRY_*, MAIA_TASK:) — Marco h
 Keep your response focused and under 200 words.
 
 ${sharedContext}`;
-    const messages = [
-        { role: 'system', content: maiaSystemPrompt },
-        { role: 'user', content: `User asked: "${userMessage}"\n\nMarco's analysis: ${marcoAnalysis}\n\nMarco's question for you: ${marcoQuestion}` },
+    const userContent = `User asked: "${userMessage}"\n\nMarco's analysis: ${marcoAnalysis}\n\nMarco's question for you: ${marcoQuestion}`;
+    return callMaiaBrain(anthropicKey, maiaSystemPrompt, [{ role: 'user', content: userContent }]);
+}
+// ─── Multi-Turn Strategize Huddle ─────────────────────────────────────────────
+//
+// 3 rounds of genuine back-and-forth between Marco (OpenAI) and Maia (Anthropic)
+// where each agent is explicitly prompted to challenge the other's points,
+// name trade-offs, and disagree at least once per round.
+// Final synthesis is produced by Marco after seeing all rounds.
+const STRATEGIZE_ROUNDS = 3;
+const MARCO_STRATEGIZE_SYSTEM = (sharedContext) => `You are Marco (My Autonomous Resource & Coordination Operator), a strategic advisor embedded in the GoArrive Slack workspace.
+You are in a STRATEGIZE session with Maia. Your job is to think critically and help Devin reach the best possible decision.
+
+Rules for this session:
+1. Be specific — use names (Jefferson, Sandy, Devin), project names (JT, GoArrive, Georgia Movement), and concrete numbers when you have them.
+2. Take a side — do not hedge. If asked to cut/double-down/replace, pick one and defend it.
+3. Challenge Maia — if she agrees with you too easily, push harder. If she makes a good point you missed, acknowledge it AND add a counter-consideration.
+4. Name the trade-off — every recommendation has a cost. State it explicitly.
+5. Keep each turn under 150 words. Be punchy, not exhaustive.
+
+Do NOT include HUDDLE_DECISION, LINEAR_*, SENTRY_*, or MAIA_TASK: lines in this session.
+
+${sharedContext ? `Shared context:\n${sharedContext.slice(0, 3000)}` : ''}`;
+const MAIA_STRATEGIZE_SYSTEM = (sharedContext) => `You are Maia, an AI code agent and strategic partner for GoArrive (G➢A).
+You are in a STRATEGIZE session with Marco. Your job is to think critically and help Devin reach the best possible decision.
+
+Rules for this session:
+1. Be specific — use names (Jefferson, Sandy, Devin), project names (JT, GoArrive, Georgia Movement), and concrete details.
+2. Take a side — do not hedge. If asked to cut/double-down/replace, pick one and defend it.
+3. You MUST disagree with at least one of Marco's points each round — not just refine it. Name the specific flaw.
+4. Name the trade-off — every recommendation has a cost. State it explicitly.
+5. Keep each turn under 150 words. Be punchy, not exhaustive.
+6. Do NOT include any command prefixes (LINEAR_*, SENTRY_*, MAIA_TASK:) — this is a strategy session only.
+
+${sharedContext ? `Shared context:\n${sharedContext.slice(0, 3000)}` : ''}`;
+async function runStrategizeHuddle(openaiKey, anthropicKey, userQuestion, sharedContext) {
+    const TAG = '[strategize]';
+    const marcoSysPrompt = MARCO_STRATEGIZE_SYSTEM(sharedContext);
+    const maiaSysPrompt = MAIA_STRATEGIZE_SYSTEM(sharedContext);
+    // Marco's conversation history (OpenAI format)
+    const marcoHistory = [
+        { role: 'system', content: marcoSysPrompt },
+        { role: 'user', content: `Devin's question: ${userQuestion}\n\nGive your opening position. Be direct and take a side.` },
     ];
-    // Use gemini-2.5-flash via the OpenAI-compatible endpoint
-    const res = await fetch(`${OPENAI_API}/chat/completions`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${openaiKey}`,
-        },
-        body: JSON.stringify({
-            model: 'gemini-2.5-flash',
-            messages,
-            max_completion_tokens: 500,
-        }),
-    });
-    const json = (await res.json());
-    if (json.error) {
-        console.error('[slackEvents] Maia brain error:', json.error.message);
-        return '(Maia was unable to respond)';
+    // Maia's conversation history (Anthropic format)
+    const maiaHistory = [];
+    const rounds = [];
+    for (let round = 0; round < STRATEGIZE_ROUNDS; round++) {
+        console.log(TAG, `Round ${round + 1}/${STRATEGIZE_ROUNDS}`);
+        // Marco speaks
+        const marcoReply = await getOpenAIReply(openaiKey, marcoHistory, false);
+        const cleanMarco = marcoReply.replace(/HUDDLE_DECISION:.+/g, '').trim();
+        console.log(TAG, `Marco R${round + 1}:`, cleanMarco.slice(0, 80));
+        // Update Marco's history with his own reply
+        marcoHistory.push({ role: 'assistant', content: cleanMarco });
+        // Build Maia's prompt for this round
+        const maiaTurn = round === 0
+            ? `Devin's question: ${userQuestion}\n\nMarco's opening position:\n${cleanMarco}\n\nRespond with your position. You MUST challenge at least one of Marco's points.`
+            : `Marco's latest point:\n${cleanMarco}\n\nRespond. You MUST challenge at least one of his points and name the trade-off he's ignoring.`;
+        maiaHistory.push({ role: 'user', content: maiaTurn });
+        // Maia speaks (real Anthropic)
+        const maiaReply = await callMaiaBrain(anthropicKey, maiaSysPrompt, maiaHistory);
+        console.log(TAG, `Maia R${round + 1}:`, maiaReply.slice(0, 80));
+        maiaHistory.push({ role: 'assistant', content: maiaReply });
+        rounds.push({ marco: cleanMarco, maia: maiaReply });
+        // Feed Maia's reply back to Marco for the next round (unless it's the last)
+        if (round < STRATEGIZE_ROUNDS - 1) {
+            marcoHistory.push({
+                role: 'user',
+                content: `Maia's response:\n${maiaReply}\n\nYour turn. Acknowledge her strongest point, then push back on the one you disagree with most. Stay under 150 words.`,
+            });
+        }
     }
-    return (_e = (_d = (_c = (_b = (_a = json.choices) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.message) === null || _c === void 0 ? void 0 : _c.content) === null || _d === void 0 ? void 0 : _d.trim()) !== null && _e !== void 0 ? _e : '(No response from Maia)';
+    // Final synthesis — Marco produces the unified answer for Devin
+    const transcriptSummary = rounds
+        .map((r, i) => `Round ${i + 1}:\nMarco: ${r.marco}\nMaia: ${r.maia}`)
+        .join('\n\n');
+    marcoHistory.push({
+        role: 'user',
+        content: `Here is the full debate transcript:\n\n${transcriptSummary}\n\nNow synthesize this into a final, actionable answer for Devin. Format:\n1. *Recommendation* — one clear sentence on what to do\n2. *Why* — 2-3 sentences of the strongest reasoning from both sides\n3. *Trade-off* — what you're giving up with this choice\n4. *Next action* — one concrete next step Devin can take today\n\nDo NOT say "Marco says" or "Maia says". Write as a unified voice.`,
+    });
+    const synthesisReply = await getOpenAIReply(openaiKey, marcoHistory, false);
+    const cleanSynthesis = synthesisReply.replace(/HUDDLE_DECISION:.+/g, '').trim();
+    // Build the full Slack-formatted output
+    const transcriptBlock = rounds
+        .map((r, i) => `:speech_balloon: *Round ${i + 1}*\n*Marco:* ${r.marco}\n*Maia:* ${r.maia}`)
+        .join('\n\n');
+    const finalReply = `*Strategize: ${userQuestion.slice(0, 80)}${userQuestion.length > 80 ? '...' : ''}*\n\n${transcriptBlock}\n\n---\n\n*Synthesis*\n${cleanSynthesis}`;
+    console.log(TAG, 'Strategize complete —', rounds.length, 'rounds');
+    return { finalReply, transcript: rounds };
 }
 function detectRoutingMode(text) {
     const lower = text.toLowerCase();
     if (lower.startsWith('huddle:') || lower.startsWith('huddle ')) {
-        return { mode: 'huddle', cleanText: text.replace(/^huddle[: ]/i, '').trim() };
+        // 'huddle:' prefix now maps to strategize mode for full multi-turn back-and-forth
+        return { mode: 'strategize', cleanText: text.replace(/^huddle[: ]/i, '').trim() };
     }
     return { mode: 'solo', cleanText: text };
 }
-async function runHuddle(openaiKey, messages, hasImages, userMessage, sharedContext, mode) {
+async function runHuddle(openaiKey, anthropicKey, messages, hasImages, userMessage, sharedContext, mode) {
+    var _a, _b;
     const TAG = '[huddle]';
     // SOLO mode: Marco answers alone, fast. Maia sees it via agent_memory.
     if (mode === 'solo') {
@@ -705,15 +870,29 @@ async function runHuddle(openaiKey, messages, hasImages, userMessage, sharedCont
             maiaInput: '',
         };
     }
-    // HUDDLE mode: Marco analyzes, asks Maia, synthesizes
-    console.log(TAG, 'Mode: huddle — consulting Maia');
+    // STRATEGIZE mode: Full multi-turn debate (3 rounds) with real Anthropic Maia.
+    // Triggered by 'huddle:' prefix OR /huddle slash command — both entry points
+    // use this path so behavior is identical regardless of how you invoke it.
+    if (mode === 'strategize') {
+        console.log(TAG, 'Mode: strategize — 3-round debate with real Anthropic Maia');
+        const { finalReply, transcript } = await runStrategizeHuddle(openaiKey, anthropicKey, userMessage, sharedContext);
+        return {
+            finalReply,
+            huddled: true,
+            marcoInitial: (_b = (_a = transcript[0]) === null || _a === void 0 ? void 0 : _a.marco) !== null && _b !== void 0 ? _b : '',
+            maiaInput: transcript.map((r) => r.maia).join(' | '),
+        };
+    }
+    // HUDDLE mode (legacy single-pass): Marco analyzes, asks Maia once, synthesizes.
+    // Kept for backwards compatibility but no longer triggered by any UI path.
+    console.log(TAG, 'Mode: huddle (legacy) — consulting Maia once');
     // Step 1: Marco's initial analysis
     const marcoReply = await getOpenAIReply(openaiKey, messages, hasImages);
     const cleanMarcoReply = marcoReply.replace(/HUDDLE_DECISION:.+/g, '').trim();
     console.log(TAG, 'Marco initial reply length:', cleanMarcoReply.length);
     // Step 2: Ask Maia for her technical perspective
     const maiaQuestion = `Based on the user's request and Marco's analysis, what is your technical perspective? What should we tell the user?`;
-    const maiaReply = await getMaiaBrainReply(openaiKey, sharedContext, cleanMarcoReply, maiaQuestion, userMessage);
+    const maiaReply = await getMaiaBrainReply(anthropicKey, sharedContext, cleanMarcoReply, maiaQuestion, userMessage);
     console.log(TAG, 'Maia reply length:', maiaReply.length);
     // Step 3: Marco synthesizes final unified response
     const synthesisMessages = [
@@ -845,7 +1024,7 @@ async function executeSentryCommands(dsn, aiReply) {
     return cleanReply || aiReply;
 }
 // ─── Handle a mention (shared logic for app_mention and thread replies) ───────
-async function handleMention(botToken, openaiKey, linearKey, sentryDsnValue, channel, threadTs, userId, currentMsg) {
+async function handleMention(botToken, openaiKey, anthropicKey, linearKey, sentryDsnValue, channel, threadTs, userId, currentMsg) {
     var _a, _b, _c;
     const TAG = '[slackEvents]';
     // 1. Start the streaming thinking indicator
@@ -894,7 +1073,7 @@ async function handleMention(botToken, openaiKey, linearKey, sentryDsnValue, cha
     // 6. Run the multi-agent huddle (or solo, depending on mode)
     let huddleResult;
     try {
-        huddleResult = await runHuddle(openaiKey, messages, hasImages, currentText, sharedContext, routingMode);
+        huddleResult = await runHuddle(openaiKey, anthropicKey, messages, hasImages, currentText, sharedContext, routingMode);
     }
     catch (err) {
         console.error(TAG, 'Huddle failed:', err);
@@ -1011,7 +1190,7 @@ async function handleMention(botToken, openaiKey, linearKey, sentryDsnValue, cha
 // ─── Cloud Function ───────────────────────────────────────────────────────────
 exports.slackEvents = (0, https_1.onRequest)({
     region: 'us-central1',
-    secrets: [slackSigningSecret, slackBotToken, openaiApiKey, linearApiKey, sentryDsn],
+    secrets: [slackSigningSecret, slackBotToken, openaiApiKey, anthropicApiKey, linearApiKey, sentryDsn],
     timeoutSeconds: 60,
     invoker: 'public',
 }, async (req, res) => {
@@ -1045,23 +1224,27 @@ exports.slackEvents = (0, https_1.onRequest)({
     }
     const payload = req.body;
     // ── /huddle slash command ──────────────────────────────────────────────────────────────────────────────
+    // Uses strategize mode (3-round multi-turn debate with real Anthropic Maia).
+    // Identical behavior to '@Marco huddle: <question>' — both paths go through runStrategizeHuddle.
     if (payload.command === '/huddle') {
         const botToken = slackBotToken.value();
         const openaiKey = openaiApiKey.value();
+        const anthropicKey = anthropicApiKey.value();
         const linearKey = linearApiKey.value();
         const sentryDsnValue = sentryDsn.value();
         const channel = payload.channel_id;
         const userId = payload.user_id;
         const text = ((_a = payload.text) !== null && _a !== void 0 ? _a : '').trim();
         const ts = String(Date.now() / 1000);
-        console.log(TAG, `/huddle from ${userId}: "${text}"`);
+        console.log(TAG, `/huddle (strategize) from ${userId}: "${text}"`);
         // Acknowledge immediately with a placeholder
         res.status(200).json({
             response_type: 'in_channel',
-            text: '🤝 *Marco & Maia are huddling...*',
+            text: ':brain: *Marco & Maia are strategizing... (3 rounds of debate)*',
         });
-        // Run the full huddle asynchronously
-        handleMention(botToken, openaiKey, linearKey, sentryDsnValue, channel, ts, userId, {
+        // Run the full strategize huddle asynchronously via handleMention.
+        // The 'huddle:' prefix in the text triggers detectRoutingMode → 'strategize'.
+        handleMention(botToken, openaiKey, anthropicKey, linearKey, sentryDsnValue, channel, ts, userId, {
             ts,
             text: `huddle: ${text}`,
             user: userId,
@@ -1076,6 +1259,7 @@ exports.slackEvents = (0, https_1.onRequest)({
     }
     const botToken = slackBotToken.value();
     const openaiKey = openaiApiKey.value();
+    const anthropicKey = anthropicApiKey.value();
     const linearKey = linearApiKey.value();
     const sentryDsnValue = sentryDsn.value();
     const eventType = event.type;
@@ -1093,8 +1277,14 @@ exports.slackEvents = (0, https_1.onRequest)({
         console.log(TAG, `app_mention from ${userId} in ${channel}`);
         // Acknowledge immediately — Slack requires a 200 within 3 seconds
         res.status(200).send('');
+        // Dedupe — Slack fires both `app_mention` and `message` for the same
+        // user message, so claim it atomically by event.ts.
+        if (!(await claimSlackEvent(event.ts, 'app_mention', channel))) {
+            console.log(TAG, `Duplicate event.ts=${event.ts} (app_mention) — skipping`);
+            return;
+        }
         // Process asynchronously after acknowledging
-        handleMention(botToken, openaiKey, linearKey, sentryDsnValue, channel, threadTs, userId, {
+        handleMention(botToken, openaiKey, anthropicKey, linearKey, sentryDsnValue, channel, threadTs, userId, {
             ts: event.ts,
             text: event.text,
             user: userId,
@@ -1153,7 +1343,13 @@ exports.slackEvents = (0, https_1.onRequest)({
         console.log(TAG, `Thread reply from ${userId} in ${channel} (thread: ${threadTs})`);
         // Acknowledge immediately
         res.status(200).send('');
-        handleMention(botToken, openaiKey, linearKey, sentryDsnValue, channel, threadTs, userId, {
+        // Dedupe — same event.ts may also arrive as `app_mention`. Whichever
+        // claim wins runs the handler; the other short-circuits.
+        if (!(await claimSlackEvent(event.ts, 'message', channel))) {
+            console.log(TAG, `Duplicate event.ts=${event.ts} (message) — skipping`);
+            return;
+        }
+        handleMention(botToken, openaiKey, anthropicKey, linearKey, sentryDsnValue, channel, threadTs, userId, {
             ts: event.ts,
             text: event.text,
             user: userId,
