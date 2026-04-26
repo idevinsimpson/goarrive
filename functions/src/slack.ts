@@ -262,6 +262,44 @@ async function loadSharedBrain(): Promise<string> {
   return cachedSharedBrain!;
 }
 
+// ─── Load recent agent_memory (both agents' activity) ──────────────────────────
+async function loadRecentMemory(): Promise<string> {
+  try {
+    const snapshot = await admin.firestore().collection('agent_memory')
+      .orderBy('createdAt', 'desc')
+      .limit(20)
+      .get();
+    if (snapshot.empty) return '';
+    const entries = snapshot.docs.map(doc => {
+      const d = doc.data();
+      return `[${d.agent}] ${d.eventType}: ${d.summary || ''}`;
+    }).reverse(); // chronological order
+    return entries.join('\n');
+  } catch (err) {
+    console.warn('[slackEvents] Failed to load agent_memory:', err);
+    return '';
+  }
+}
+
+// ─── Load recent Maia task queue status ─────────────────────────────────────────
+async function loadMaiaTaskStatus(): Promise<string> {
+  try {
+    const snapshot = await admin.firestore().collection('maia_task_queue')
+      .orderBy('createdAt', 'desc')
+      .limit(10)
+      .get();
+    if (snapshot.empty) return '';
+    const entries = snapshot.docs.map(doc => {
+      const d = doc.data();
+      return `[${d.status}] ${d.taskDescription || ''}`;
+    }).reverse();
+    return entries.join('\n');
+  } catch (err) {
+    console.warn('[slackEvents] Failed to load maia_task_queue:', err);
+    return '';
+  }
+}
+
 // ─── Build OpenAI messages from thread history ────────────────────────────────
 type OpenAIContentPart =
   | { type: 'text'; text: string }
@@ -283,7 +321,19 @@ async function buildMessagesFromThread(
     ? `\n\n## GoArrive Shared Knowledge Base\nThe following documents contain all product rules, architecture decisions, routing protocols, and interaction guidelines. Both you (Marco) and Maia operate from this same knowledge base.\n\n${sharedBrain}`
     : '';
 
-  const systemPrompt = `You are Marco (My Autonomous Resource & Coordination Operator), an AI agent embedded in the GoArrive Slack workspace.${sharedBrainSection}\n\n---\n\nCore Identity:
+  // Load recent activity from both agents
+  const recentMemory = await loadRecentMemory();
+  const recentMemorySection = recentMemory
+    ? `\n\n## Recent Agent Activity (Both Marco & Maia)\nThis is the shared timeline of what both you and Maia have been doing. Use this to stay in sync and pick up where the other left off.\n\n${recentMemory}`
+    : '';
+
+  // Load Maia's current task queue
+  const maiaTaskStatus = await loadMaiaTaskStatus();
+  const maiaTaskSection = maiaTaskStatus
+    ? `\n\n## Maia's Task Queue (Live Status)\nThese are the tasks Maia is currently working on or has completed:\n\n${maiaTaskStatus}`
+    : '';
+
+  const systemPrompt = `You are Marco (My Autonomous Resource & Coordination Operator), an AI agent embedded in the GoArrive Slack workspace.${sharedBrainSection}${recentMemorySection}${maiaTaskSection}\n\n---\n\nCore Identity:
 GoArrive (G➢A) is a fitness coaching platform. You help the dev team (Devin, Maia) with tasks like:
 - Browser-based QA and testing of the staging app
 - Checking dashboards (Firebase, Stripe, GCP)
