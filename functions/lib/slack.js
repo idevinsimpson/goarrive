@@ -25,6 +25,11 @@
  * v5 upgrades:
  *  6. Sentry integration — query recent errors and crash reports from Slack via @Marco
  *
+ * v9 upgrades:
+ *  7. Multi-agent huddle — Marco consults Maia (Gemini) on technical questions before responding
+ *  8. Shared brain — both agents read from agent_shared_brain, agent_memory, maia_task_queue
+ *  9. Agent inbox — Marco checks agent_messages for Maia's updates and surfaces them
+ *
  * Deployed URL:
  *   https://us-central1-goarrive.cloudfunctions.net/slackEvents
  */
@@ -123,7 +128,7 @@ async function startStream(botToken, channel, threadTs) {
                 {
                     type: 'task_update',
                     id: 'thinking',
-                    title: 'Marco is thinking...',
+                    title: 'Marco & Maia are thinking...',
                     status: 'in_progress',
                 },
             ],
@@ -349,7 +354,31 @@ When someone asks you to do a CODE task (write/fix/deploy code, modify files, cr
 
 After the MAIA_TASK line, tell the user: "I've queued this for Maia — she'll pick it up and handle the code changes."
 
-Do NOT use MAIA_TASK for questions, explanations, or dashboard lookups — only for actual code/deploy work.`;
+Do NOT use MAIA_TASK for questions, explanations, or dashboard lookups — only for actual code/deploy work.
+
+## Huddle Decision (REQUIRED on every response)
+You MUST include exactly one HUDDLE_DECISION line in every response. This determines whether Maia needs to weigh in before the user sees the answer.
+
+- HUDDLE_DECISION:solo — You can handle this alone (simple questions, greetings, dashboard lookups, Linear/Sentry queries)
+- HUDDLE_DECISION:maia|<your question for Maia> — You need Maia's technical input before responding
+
+Use 'maia' when the request involves ANY of these:
+- Code questions (architecture, file structure, implementation details, debugging)
+- Deploy status or build questions
+- Technical decisions about the product
+- Anything about React Native, Expo, Firebase functions, TypeScript
+- Feature planning or roadmap prioritization
+- Bug analysis or error diagnosis that requires code knowledge
+- Any task where Maia's perspective would make the answer better
+
+Use 'solo' for:
+- Simple greetings or small talk
+- Pure dashboard lookups (Stripe, Firebase console)
+- Linear issue management (create/list/update)
+- Sentry error queries
+- Questions you can fully answer from the shared knowledge base alone
+
+The HUDDLE_DECISION line will be stripped before the user sees your response. Place it on its own line at the end.`;
     const messages = [{ role: 'system', content: systemPrompt }];
     for (const msg of threadMessages) {
         // Skip the current event (it'll be added as the last user message)
@@ -606,6 +635,95 @@ function formatSentryIssues(issues, filter) {
     });
     return `*Sentry Issues (${filter}):*\n\n${lines.join('\n\n')}`;
 }
+// ─── Maia Brain (Gemini via OpenAI-compatible API) ──────────────────────────
+async function getMaiaBrainReply(openaiKey, sharedContext, marcoAnalysis, marcoQuestion, userMessage) {
+    var _a, _b, _c, _d, _e;
+    const maiaSystemPrompt = `You are Maia, an AI code agent for GoArrive (G➢A), a fitness coaching platform.
+You work alongside Marco (the Slack coordination agent). You share the same knowledge base, memory, and goals.
+
+Your strengths: code, architecture, deploys, file structure, technical implementation, debugging, testing, React Native/Expo, Firebase, TypeScript.
+Marco's strengths: coordination, dashboards, browser QA, Slack communication, Linear/Sentry queries.
+
+Marco is consulting you on a user request. Provide your technical perspective concisely.
+Do NOT include any command prefixes (LINEAR_*, SENTRY_*, MAIA_TASK:) — Marco handles those.
+Keep your response focused and under 200 words.
+
+${sharedContext}`;
+    const messages = [
+        { role: 'system', content: maiaSystemPrompt },
+        { role: 'user', content: `User asked: "${userMessage}"\n\nMarco's analysis: ${marcoAnalysis}\n\nMarco's question for you: ${marcoQuestion}` },
+    ];
+    // Use gemini-2.5-flash via the OpenAI-compatible endpoint
+    const res = await fetch(`${OPENAI_API}/chat/completions`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${openaiKey}`,
+        },
+        body: JSON.stringify({
+            model: 'gemini-2.5-flash',
+            messages,
+            max_completion_tokens: 500,
+        }),
+    });
+    const json = (await res.json());
+    if (json.error) {
+        console.error('[slackEvents] Maia brain error:', json.error.message);
+        return '(Maia was unable to respond)';
+    }
+    return (_e = (_d = (_c = (_b = (_a = json.choices) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.message) === null || _c === void 0 ? void 0 : _c.content) === null || _d === void 0 ? void 0 : _d.trim()) !== null && _e !== void 0 ? _e : '(No response from Maia)';
+}
+function detectRoutingMode(text) {
+    const lower = text.toLowerCase();
+    if (lower.startsWith('huddle:') || lower.startsWith('huddle ')) {
+        return { mode: 'huddle', cleanText: text.replace(/^huddle[: ]/i, '').trim() };
+    }
+    return { mode: 'solo', cleanText: text };
+}
+async function runHuddle(openaiKey, messages, hasImages, userMessage, sharedContext, mode) {
+    const TAG = '[huddle]';
+    // SOLO mode: Marco answers alone, fast. Maia sees it via agent_memory.
+    if (mode === 'solo') {
+        console.log(TAG, 'Mode: solo — Marco answering alone');
+        const marcoReply = await getOpenAIReply(openaiKey, messages, hasImages);
+        // Strip any HUDDLE_DECISION lines that may appear in solo mode
+        const cleanReply = marcoReply.replace(/HUDDLE_DECISION:.+/g, '').trim();
+        return {
+            finalReply: cleanReply,
+            huddled: false,
+            marcoInitial: cleanReply,
+            maiaInput: '',
+        };
+    }
+    // HUDDLE mode: Marco analyzes, asks Maia, synthesizes
+    console.log(TAG, 'Mode: huddle — consulting Maia');
+    // Step 1: Marco's initial analysis
+    const marcoReply = await getOpenAIReply(openaiKey, messages, hasImages);
+    const cleanMarcoReply = marcoReply.replace(/HUDDLE_DECISION:.+/g, '').trim();
+    console.log(TAG, 'Marco initial reply length:', cleanMarcoReply.length);
+    // Step 2: Ask Maia for her technical perspective
+    const maiaQuestion = `Based on the user's request and Marco's analysis, what is your technical perspective? What should we tell the user?`;
+    const maiaReply = await getMaiaBrainReply(openaiKey, sharedContext, cleanMarcoReply, maiaQuestion, userMessage);
+    console.log(TAG, 'Maia reply length:', maiaReply.length);
+    // Step 3: Marco synthesizes final unified response
+    const synthesisMessages = [
+        ...messages,
+        { role: 'assistant', content: cleanMarcoReply },
+        {
+            role: 'user',
+            content: `[INTERNAL — Maia's input]\n\nMaia says: ${maiaReply}\n\nNow synthesize your analysis with Maia's input into one clean, unified response for the user. Do NOT mention the huddle process or say "Maia says". Give the best combined answer as if you both thought of it together.`,
+        },
+    ];
+    const finalReply = await getOpenAIReply(openaiKey, synthesisMessages, false);
+    const cleanFinal = finalReply.replace(/HUDDLE_DECISION:.+/g, '').trim();
+    console.log(TAG, 'Huddle complete — unified reply ready');
+    return {
+        finalReply: cleanFinal,
+        huddled: true,
+        marcoInitial: cleanMarcoReply,
+        maiaInput: maiaReply,
+    };
+}
 // ─── Parse and execute Linear commands from AI reply ─────────────────────────
 async function executeLinearCommands(linearKey, aiReply) {
     var _a, _b;
@@ -726,8 +844,10 @@ async function handleMention(botToken, openaiKey, linearKey, sentryDsnValue, cha
     const threadMessages = await fetchThreadHistory(botToken, channel, threadTs);
     // 3. Build OpenAI messages from thread history
     const messages = await buildMessagesFromThread(botToken, threadMessages, currentMsg.ts);
-    // 4. Add the current message as the final user turn
-    const currentText = stripMention((_a = currentMsg.text) !== null && _a !== void 0 ? _a : '');
+    // 4. Detect routing mode from message prefix (huddle: / maia: / default solo)
+    const rawText = stripMention((_a = currentMsg.text) !== null && _a !== void 0 ? _a : '');
+    const { mode: routingMode, cleanText: currentText } = detectRoutingMode(rawText);
+    console.log(TAG, `Routing mode: ${routingMode}`);
     const currentImages = ((_b = currentMsg.files) !== null && _b !== void 0 ? _b : []).filter((f) => { var _a; return (_a = f.mimetype) === null || _a === void 0 ? void 0 : _a.startsWith('image/'); });
     const hasImages = currentImages.length > 0;
     if (hasImages) {
@@ -752,13 +872,22 @@ async function handleMention(botToken, openaiKey, linearKey, sentryDsnValue, cha
     else {
         messages.push({ role: 'user', content: currentText || 'Hello!' });
     }
-    // 5. Call OpenAI with full context
-    let aiReply = '';
+    // 5. Build shared context string for the huddle
+    const sharedBrain = await loadSharedBrain();
+    const recentMemory = await loadRecentMemory();
+    const maiaTaskStatus = await loadMaiaTaskStatus();
+    const sharedContext = [
+        sharedBrain ? `Knowledge Base:\n${sharedBrain.slice(0, 3000)}` : '',
+        recentMemory ? `Recent Activity:\n${recentMemory}` : '',
+        maiaTaskStatus ? `Maia Tasks:\n${maiaTaskStatus}` : '',
+    ].filter(Boolean).join('\n\n');
+    // 6. Run the multi-agent huddle (or solo, depending on mode)
+    let huddleResult;
     try {
-        aiReply = await getOpenAIReply(openaiKey, messages, hasImages);
+        huddleResult = await runHuddle(openaiKey, messages, hasImages, currentText, sharedContext, routingMode);
     }
     catch (err) {
-        console.error(TAG, 'OpenAI call failed:', err);
+        console.error(TAG, 'Huddle failed:', err);
         const errMsg = "Sorry, I had trouble processing that. Please try again.";
         if (stream) {
             await stopStreamWithError(stream, errMsg);
@@ -768,7 +897,9 @@ async function handleMention(botToken, openaiKey, linearKey, sentryDsnValue, cha
         }
         return;
     }
-    // 6. Execute any Linear commands embedded in the AI reply
+    const aiReply = huddleResult.finalReply;
+    console.log(TAG, `Huddle complete: huddled=${huddleResult.huddled}`);
+    // 7. Execute any Linear commands embedded in the AI reply
     let finalReply = aiReply;
     try {
         finalReply = await executeLinearCommands(linearKey, aiReply);
@@ -823,12 +954,14 @@ async function handleMention(botToken, openaiKey, linearKey, sentryDsnValue, cha
     try {
         const isMaiaTask = finalReply.includes('queued this for Maia') || aiReply.includes('MAIA_TASK:');
         await admin.firestore().collection('agent_memory').add({
-            agent: 'marco',
-            eventType: isMaiaTask ? 'task_delegated' : 'message_handled',
-            summary: `Marco responded to: "${currentText.slice(0, 80)}${currentText.length > 80 ? '...' : ''}"`,
+            agent: huddleResult.huddled ? 'marco+maia' : 'marco',
+            eventType: isMaiaTask ? 'task_delegated' : (huddleResult.huddled ? 'huddle_response' : 'message_handled'),
+            summary: `${huddleResult.huddled ? 'Marco & Maia' : 'Marco'} responded to: "${currentText.slice(0, 80)}${currentText.length > 80 ? '...' : ''}"`,
             details: {
                 userMessage: currentText,
                 aiReply: finalReply.slice(0, 500),
+                huddled: huddleResult.huddled,
+                maiaInput: huddleResult.maiaInput ? huddleResult.maiaInput.slice(0, 300) : '',
                 hasImages,
                 channel,
                 threadTs,
@@ -872,7 +1005,7 @@ exports.slackEvents = (0, https_1.onRequest)({
     timeoutSeconds: 60,
     invoker: 'public',
 }, async (req, res) => {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     const TAG = '[slackEvents]';
     if (req.method !== 'POST') {
         res.status(405).send('Method Not Allowed');
@@ -901,6 +1034,31 @@ exports.slackEvents = (0, https_1.onRequest)({
         return;
     }
     const payload = req.body;
+    // ── /huddle slash command ──────────────────────────────────────────────────────────────────────────────
+    if (payload.command === '/huddle') {
+        const botToken = slackBotToken.value();
+        const openaiKey = openaiApiKey.value();
+        const linearKey = linearApiKey.value();
+        const sentryDsnValue = sentryDsn.value();
+        const channel = payload.channel_id;
+        const userId = payload.user_id;
+        const text = ((_a = payload.text) !== null && _a !== void 0 ? _a : '').trim();
+        const ts = String(Date.now() / 1000);
+        console.log(TAG, `/huddle from ${userId}: "${text}"`);
+        // Acknowledge immediately with a placeholder
+        res.status(200).json({
+            response_type: 'in_channel',
+            text: '🤝 *Marco & Maia are huddling...*',
+        });
+        // Run the full huddle asynchronously
+        handleMention(botToken, openaiKey, linearKey, sentryDsnValue, channel, ts, userId, {
+            ts,
+            text: `huddle: ${text}`,
+            user: userId,
+            files: [],
+        }).catch((err) => console.error(TAG, '/huddle handleMention failed:', err));
+        return;
+    }
     const event = payload.event;
     if (!event) {
         res.status(200).send('');
@@ -920,7 +1078,7 @@ exports.slackEvents = (0, https_1.onRequest)({
             return;
         }
         const channel = event.channel;
-        const threadTs = ((_a = event.thread_ts) !== null && _a !== void 0 ? _a : event.ts);
+        const threadTs = ((_b = event.thread_ts) !== null && _b !== void 0 ? _b : event.ts);
         const userId = event.user;
         console.log(TAG, `app_mention from ${userId} in ${channel}`);
         // Acknowledge immediately — Slack requires a 200 within 3 seconds
@@ -936,8 +1094,8 @@ exports.slackEvents = (0, https_1.onRequest)({
     }
     // ── assistant_thread_started ──────────────────────────────────────────────
     if (eventType === 'assistant_thread_started') {
-        const channelId = (_b = event.assistant_thread) === null || _b === void 0 ? void 0 : _b.channel_id;
-        const threadTs = (_c = event.assistant_thread) === null || _c === void 0 ? void 0 : _c.thread_ts;
+        const channelId = (_c = event.assistant_thread) === null || _c === void 0 ? void 0 : _c.channel_id;
+        const threadTs = (_d = event.assistant_thread) === null || _d === void 0 ? void 0 : _d.thread_ts;
         console.log(TAG, `assistant_thread_started in ${channelId}`);
         res.status(200).send('');
         // Set suggested prompts asynchronously
