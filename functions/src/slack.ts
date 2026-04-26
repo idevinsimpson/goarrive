@@ -41,11 +41,14 @@ import * as admin from 'firebase-admin';
 const slackSigningSecret = defineSecret('SLACK_SIGNING_SECRET');
 const slackBotToken = defineSecret('SLACK_BOT_TOKEN');
 const openaiApiKey = defineSecret('OPENAI_API_KEY');
+const anthropicApiKey = defineSecret('ANTHROPIC_API_KEY');
 const linearApiKey = defineSecret('LINEAR_API_KEY');
 const sentryDsn = defineSecret('SENTRY_DSN');
 
 const SLACK_API = 'https://slack.com/api';
 const OPENAI_API = 'https://api.openai.com/v1';
+const ANTHROPIC_API = 'https://api.anthropic.com/v1';
+const ANTHROPIC_MODEL = 'claude-opus-4-7';
 const LINEAR_API = 'https://api.linear.app/graphql';
 
 // Marco's bot user ID (new app A0B0947S7ND)
@@ -92,13 +95,42 @@ async function slackPost(botToken: string, method: string, body: Record<string, 
   return res.json();
 }
 
+// Convert AI-emitted Markdown to Slack mrkdwn. Preserves fenced code blocks.
+export function slackify(text: string): string {
+  if (!text) return text;
+  const parts: Array<{ code: boolean; text: string }> = [];
+  const fence = /```[\s\S]*?```/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = fence.exec(text))) {
+    if (m.index > last) parts.push({ code: false, text: text.slice(last, m.index) });
+    parts.push({ code: true, text: m[0] });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push({ code: false, text: text.slice(last) });
+
+  return parts.map((p) => {
+    if (p.code) return p.text;
+    let t = p.text;
+    // Bold: **x** / __x__ → *x*  (Slack uses single-asterisk bold)
+    t = t.replace(/\*\*([^*\n]+?)\*\*/g, '*$1*');
+    t = t.replace(/__([^_\n]+?)__/g, '*$1*');
+    // Headings on their own line → bold line
+    t = t.replace(/^#{1,6}\s+(.+)$/gm, '*$1*');
+    // Decode the safe HTML entity (& only — leave &lt;/&gt; alone so Slack
+    // doesn't treat literal text as user/channel/link tokens).
+    t = t.replace(/&amp;/g, '&');
+    return t;
+  }).join('');
+}
+
 async function postSlackMessage(
   botToken: string,
   channel: string,
   text: string,
   threadTs?: string
 ): Promise<void> {
-  const body: Record<string, unknown> = { channel, text };
+  const body: Record<string, unknown> = { channel, text: slackify(text), mrkdwn: true };
   if (threadTs) body.thread_ts = threadTs;
   const json = await slackPost(botToken, 'chat.postMessage', body) as { ok: boolean; error?: string };
   if (!json.ok) console.error('[slackEvents] chat.postMessage error:', json.error);
@@ -148,7 +180,7 @@ async function stopStream(handle: StreamHandle, finalText: string): Promise<void
       chunks: [
         {
           type: 'markdown_text',
-          text: finalText,
+          text: slackify(finalText),
         },
       ],
     });
@@ -224,6 +256,35 @@ async function downloadSlackImage(url: string, botToken: string): Promise<string
     return Buffer.from(buffer).toString('base64');
   } catch {
     return null;
+  }
+}
+
+// ─── Slack event idempotency ────────────────────────────────────────────────
+// Slack fires both `app_mention` and `message` for the same user @mention, and
+// also retries on timeout. We claim each user message exactly once by event.ts
+// (the message timestamp — identical across both event types for one message).
+
+const EVENT_DEDUPE_TTL_MS = 10 * 60 * 1000;
+
+async function claimSlackEvent(eventTs: string, eventType: string, channel: string): Promise<boolean> {
+  if (!eventTs) return true;
+  const ref = admin.firestore().collection('slack_event_dedupe').doc(eventTs);
+  const expireAt = admin.firestore.Timestamp.fromMillis(Date.now() + EVENT_DEDUPE_TTL_MS);
+  try {
+    await ref.create({
+      eventTs,
+      firstEventType: eventType,
+      channel,
+      claimedAt: admin.firestore.FieldValue.serverTimestamp(),
+      expireAt,
+    });
+    return true;
+  } catch (err: any) {
+    if (err?.code === 6 || /ALREADY_EXISTS/i.test(String(err?.message ?? ''))) {
+      return false;
+    }
+    console.warn('[slackEvents] claimSlackEvent error (allowing through):', err);
+    return true;
   }
 }
 
@@ -725,10 +786,10 @@ function formatSentryIssues(issues: Array<{ title: string; culprit: string; stat
   return `*Sentry Issues (${filter}):*\n\n${lines.join('\n\n')}`;
 }
 
-// ─── Maia Brain (Gemini via OpenAI-compatible API) ──────────────────────────
+// ─── Maia Brain (Anthropic Claude) ──────────────────────────────────────────
 
 async function getMaiaBrainReply(
-  openaiKey: string,
+  anthropicKey: string,
   sharedContext: string,
   marcoAnalysis: string,
   marcoQuestion: string,
@@ -746,27 +807,25 @@ Keep your response focused and under 200 words.
 
 ${sharedContext}`;
 
-  const messages = [
-    { role: 'system' as const, content: maiaSystemPrompt },
-    { role: 'user' as const, content: `User asked: "${userMessage}"\n\nMarco's analysis: ${marcoAnalysis}\n\nMarco's question for you: ${marcoQuestion}` },
-  ];
+  const userContent = `User asked: "${userMessage}"\n\nMarco's analysis: ${marcoAnalysis}\n\nMarco's question for you: ${marcoQuestion}`;
 
-  // Use gemini-2.5-flash via the OpenAI-compatible endpoint
-  const res = await fetch(`${OPENAI_API}/chat/completions`, {
+  const res = await fetch(`${ANTHROPIC_API}/messages`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${openaiKey}`,
+      'x-api-key': anthropicKey,
+      'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'gemini-2.5-flash',
-      messages,
-      max_completion_tokens: 500,
+      model: ANTHROPIC_MODEL,
+      max_tokens: 500,
+      system: maiaSystemPrompt,
+      messages: [{ role: 'user', content: userContent }],
     }),
   });
 
   const json = (await res.json()) as {
-    choices?: Array<{ message: { content: string } }>;
+    content?: Array<{ type: string; text?: string }>;
     error?: { message: string };
   };
 
@@ -775,7 +834,13 @@ ${sharedContext}`;
     return '(Maia was unable to respond)';
   }
 
-  return json.choices?.[0]?.message?.content?.trim() ?? '(No response from Maia)';
+  const text = (json.content ?? [])
+    .filter((b) => b.type === 'text' && typeof b.text === 'string')
+    .map((b) => b.text!)
+    .join('')
+    .trim();
+
+  return text || '(No response from Maia)';
 }
 
 // ─── Multi-Agent Huddle: Marco consults Maia, then produces unified response ─
@@ -802,6 +867,7 @@ function detectRoutingMode(text: string): { mode: RoutingMode; cleanText: string
 
 async function runHuddle(
   openaiKey: string,
+  anthropicKey: string,
   messages: OpenAIMessage[],
   hasImages: boolean,
   userMessage: string,
@@ -835,7 +901,7 @@ async function runHuddle(
   // Step 2: Ask Maia for her technical perspective
   const maiaQuestion = `Based on the user's request and Marco's analysis, what is your technical perspective? What should we tell the user?`;
   const maiaReply = await getMaiaBrainReply(
-    openaiKey,
+    anthropicKey,
     sharedContext,
     cleanMarcoReply,
     maiaQuestion,
@@ -993,6 +1059,7 @@ async function executeSentryCommands(
 async function handleMention(
   botToken: string,
   openaiKey: string,
+  anthropicKey: string,
   linearKey: string,
   sentryDsnValue: string,
   channel: string,
@@ -1054,7 +1121,7 @@ async function handleMention(
   // 6. Run the multi-agent huddle (or solo, depending on mode)
   let huddleResult: HuddleResult;
   try {
-    huddleResult = await runHuddle(openaiKey, messages, hasImages, currentText, sharedContext, routingMode);
+    huddleResult = await runHuddle(openaiKey, anthropicKey, messages, hasImages, currentText, sharedContext, routingMode);
   } catch (err) {
     console.error(TAG, 'Huddle failed:', err);
     const errMsg = "Sorry, I had trouble processing that. Please try again.";
@@ -1169,7 +1236,7 @@ async function handleMention(
 export const slackEvents = onRequest(
   {
     region: 'us-central1',
-    secrets: [slackSigningSecret, slackBotToken, openaiApiKey, linearApiKey, sentryDsn],
+    secrets: [slackSigningSecret, slackBotToken, openaiApiKey, anthropicApiKey, linearApiKey, sentryDsn],
     timeoutSeconds: 60,
     invoker: 'public',
   },
@@ -1214,6 +1281,7 @@ export const slackEvents = onRequest(
     if (payload.command === '/huddle') {
       const botToken = slackBotToken.value();
       const openaiKey = openaiApiKey.value();
+      const anthropicKey = anthropicApiKey.value();
       const linearKey = linearApiKey.value();
       const sentryDsnValue = sentryDsn.value();
       const channel = payload.channel_id as string;
@@ -1227,7 +1295,7 @@ export const slackEvents = onRequest(
         text: '🤝 *Marco & Maia are huddling...*',
       });
       // Run the full huddle asynchronously
-      handleMention(botToken, openaiKey, linearKey, sentryDsnValue, channel, ts, userId, {
+      handleMention(botToken, openaiKey, anthropicKey, linearKey, sentryDsnValue, channel, ts, userId, {
         ts,
         text: `huddle: ${text}`,
         user: userId,
@@ -1244,6 +1312,7 @@ export const slackEvents = onRequest(
 
     const botToken = slackBotToken.value();
     const openaiKey = openaiApiKey.value();
+    const anthropicKey = anthropicApiKey.value();
     const linearKey = linearApiKey.value();
     const sentryDsnValue = sentryDsn.value();
     const eventType = event.type as string;
@@ -1267,8 +1336,15 @@ export const slackEvents = onRequest(
       // Acknowledge immediately — Slack requires a 200 within 3 seconds
       res.status(200).send('');
 
+      // Dedupe — Slack fires both `app_mention` and `message` for the same
+      // user message, so claim it atomically by event.ts.
+      if (!(await claimSlackEvent(event.ts as string, 'app_mention', channel))) {
+        console.log(TAG, `Duplicate event.ts=${event.ts} (app_mention) — skipping`);
+        return;
+      }
+
       // Process asynchronously after acknowledging
-      handleMention(botToken, openaiKey, linearKey, sentryDsnValue, channel, threadTs, userId, {
+      handleMention(botToken, openaiKey, anthropicKey, linearKey, sentryDsnValue, channel, threadTs, userId, {
         ts: event.ts as string,
         text: event.text as string,
         user: userId,
@@ -1339,7 +1415,14 @@ export const slackEvents = onRequest(
       // Acknowledge immediately
       res.status(200).send('');
 
-      handleMention(botToken, openaiKey, linearKey, sentryDsnValue, channel, threadTs!, userId, {
+      // Dedupe — same event.ts may also arrive as `app_mention`. Whichever
+      // claim wins runs the handler; the other short-circuits.
+      if (!(await claimSlackEvent(event.ts as string, 'message', channel))) {
+        console.log(TAG, `Duplicate event.ts=${event.ts} (message) — skipping`);
+        return;
+      }
+
+      handleMention(botToken, openaiKey, anthropicKey, linearKey, sentryDsnValue, channel, threadTs!, userId, {
         ts: event.ts as string,
         text: event.text as string,
         user: userId,
