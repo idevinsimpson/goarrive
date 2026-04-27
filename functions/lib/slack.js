@@ -152,11 +152,34 @@ async function postSlackMessage(botToken, channel, text, threadTs) {
     if (!json.ok)
         console.error('[slackEvents] chat.postMessage error:', json.error);
 }
-async function startStream(botToken, channel, threadTs) {
+// ─── Slack Native Status Indicator (under-input "is thinking..." text) ───────
+// Calls assistant.threads.setStatus — this is what Slack renders as the
+// ephemeral "<App Name> is thinking..." text under the message input box for
+// AI apps. Distinct from chat.startStream below (which posts in-thread cards).
+// Auto-clear only fires for Assistant-container threads — for regular channel
+// threads we must explicitly call setStatus(..., '') when the reply posts.
+async function setAssistantStatus(botToken, channel, threadTs, status) {
+    try {
+        const json = await slackPost(botToken, 'assistant.threads.setStatus', {
+            channel_id: channel,
+            thread_ts: threadTs,
+            status,
+        });
+        if (!json.ok && json.error !== 'thread_not_found') {
+            console.warn('[slackEvents] assistant.threads.setStatus error:', json.error);
+        }
+    }
+    catch (err) {
+        console.warn('[slackEvents] setAssistantStatus failed (non-fatal):', err);
+    }
+}
+async function startStream(botToken, channel, threadTs, teamId, userId) {
     try {
         const json = await slackPost(botToken, 'chat.startStream', {
             channel,
             thread_ts: threadTs,
+            recipient_team_id: teamId,
+            recipient_user_id: userId,
             chunks: [
                 {
                     type: 'task_update',
@@ -1019,11 +1042,18 @@ async function executeSentryCommands(dsn, aiReply) {
     return cleanReply || aiReply;
 }
 // ─── Handle a mention (shared logic for app_mention and thread replies) ───────
-async function handleMention(botToken, openaiKey, anthropicKey, linearKey, sentryDsnValue, channel, threadTs, userId, currentMsg) {
+async function handleMention(botToken, openaiKey, anthropicKey, linearKey, sentryDsnValue, channel, threadTs, userId, currentMsg, teamId) {
     var _a, _b, _c;
     const TAG = '[slackEvents]';
-    // 1. Start the streaming thinking indicator
-    const stream = await startStream(botToken, channel, threadTs);
+    // 1a. Set the native under-input "is thinking..." status (Slack auto-prefixes app name)
+    let currentStatus = 'is thinking...';
+    await setAssistantStatus(botToken, channel, threadTs, currentStatus);
+    // Slack times out the status after ~2min — refresh every 90s while we work
+    const statusInterval = setInterval(() => {
+        setAssistantStatus(botToken, channel, threadTs, currentStatus);
+    }, 90000);
+    // 1b. Start the in-thread streaming card (separate from the under-input indicator)
+    const stream = await startStream(botToken, channel, threadTs, teamId, userId);
     // 2. Fetch full thread history for context
     const threadMessages = await fetchThreadHistory(botToken, channel, threadTs);
     // 3. Build OpenAI messages from thread history
@@ -1073,6 +1103,8 @@ async function handleMention(botToken, openaiKey, anthropicKey, linearKey, sentr
     catch (err) {
         console.error(TAG, 'Huddle failed:', err);
         const errMsg = "Sorry, I had trouble processing that. Please try again.";
+        clearInterval(statusInterval);
+        await setAssistantStatus(botToken, channel, threadTs, '');
         if (stream) {
             await stopStreamWithError(stream, errMsg);
         }
@@ -1109,7 +1141,10 @@ async function handleMention(botToken, openaiKey, anthropicKey, linearKey, sentr
         console.error(TAG, 'Maia task queue failed:', err);
         // Don't fail the whole response
     }
-    // 7. Stop the stream with the final reply (or post directly if stream failed)
+    // 7. Stop the stream with the final reply (or post directly if stream failed),
+    //    and clear the under-input "is thinking..." status
+    clearInterval(statusInterval);
+    await setAssistantStatus(botToken, channel, threadTs, '');
     if (stream) {
         await stopStream(stream, finalReply);
     }
@@ -1229,6 +1264,7 @@ exports.slackEvents = (0, https_1.onRequest)({
         const sentryDsnValue = sentryDsn.value();
         const channel = payload.channel_id;
         const userId = payload.user_id;
+        const teamId = payload.team_id;
         const text = ((_a = payload.text) !== null && _a !== void 0 ? _a : '').trim();
         const ts = String(Date.now() / 1000);
         console.log(TAG, `/huddle (strategize) from ${userId}: "${text}"`);
@@ -1244,7 +1280,7 @@ exports.slackEvents = (0, https_1.onRequest)({
             text: `huddle: ${text}`,
             user: userId,
             files: [],
-        }).catch((err) => console.error(TAG, '/huddle handleMention failed:', err));
+        }, teamId).catch((err) => console.error(TAG, '/huddle handleMention failed:', err));
         return;
     }
     const event = payload.event;
@@ -1284,7 +1320,7 @@ exports.slackEvents = (0, https_1.onRequest)({
             text: event.text,
             user: userId,
             files: event.files,
-        }).catch((err) => console.error(TAG, 'handleMention failed:', err));
+        }, payload.team_id).catch((err) => console.error(TAG, 'handleMention failed:', err));
         return;
     }
     // ── assistant_thread_started ──────────────────────────────────────────────
@@ -1349,7 +1385,7 @@ exports.slackEvents = (0, https_1.onRequest)({
             text: event.text,
             user: userId,
             files: event.files,
-        }).catch((err) => console.error(TAG, 'handleMention (thread reply) failed:', err));
+        }, payload.team_id).catch((err) => console.error(TAG, 'handleMention (thread reply) failed:', err));
         return;
     }
     console.log(TAG, `Unhandled event type: ${eventType} — ignoring`);
