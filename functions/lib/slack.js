@@ -174,6 +174,7 @@ async function setAssistantStatus(botToken, channel, threadTs, status) {
     }
 }
 async function startStream(botToken, channel, threadTs, teamId, userId) {
+    var _a;
     try {
         const json = await slackPost(botToken, 'chat.startStream', {
             channel,
@@ -189,41 +190,53 @@ async function startStream(botToken, channel, threadTs, teamId, userId) {
                 },
             ],
         });
-        if (!json.ok) {
-            console.warn('[slackEvents] chat.startStream error:', json.error);
+        if (!json.ok || !json.ts) {
+            console.warn('[slackEvents] chat.startStream error:', (_a = json.error) !== null && _a !== void 0 ? _a : 'no ts in response');
             return null;
         }
-        return { channel, threadTs, streamTs: json.stream_ts, botToken };
+        return { channel, threadTs, streamTs: json.ts, botToken };
     }
     catch (err) {
         console.warn('[slackEvents] startStream failed (non-fatal):', err);
         return null;
     }
 }
+// Returns true if the stream was finalized successfully. Caller should fall
+// back to chat.postMessage when this returns false so the user always sees a reply.
 async function stopStream(handle, finalText) {
     try {
-        await slackPost(handle.botToken, 'chat.stopStream', {
+        const json = await slackPost(handle.botToken, 'chat.stopStream', {
             channel: handle.channel,
-            thread_ts: handle.threadTs,
-            stream_ts: handle.streamTs,
+            ts: handle.streamTs,
             chunks: [
+                {
+                    type: 'task_update',
+                    id: 'thinking',
+                    title: 'Done',
+                    status: 'completed',
+                },
                 {
                     type: 'markdown_text',
                     text: slackify(finalText),
                 },
             ],
         });
+        if (!json.ok) {
+            console.error('[slackEvents] chat.stopStream error:', json.error);
+            return false;
+        }
+        return true;
     }
     catch (err) {
-        console.warn('[slackEvents] stopStream failed (non-fatal):', err);
+        console.error('[slackEvents] stopStream failed:', err);
+        return false;
     }
 }
 async function stopStreamWithError(handle, errorText) {
     try {
-        await slackPost(handle.botToken, 'chat.stopStream', {
+        const json = await slackPost(handle.botToken, 'chat.stopStream', {
             channel: handle.channel,
-            thread_ts: handle.threadTs,
-            stream_ts: handle.streamTs,
+            ts: handle.streamTs,
             chunks: [
                 {
                     type: 'task_update',
@@ -234,9 +247,15 @@ async function stopStreamWithError(handle, errorText) {
                 },
             ],
         });
+        if (!json.ok) {
+            console.error('[slackEvents] chat.stopStream (error path) failed:', json.error);
+            return false;
+        }
+        return true;
     }
     catch (err) {
-        console.warn('[slackEvents] stopStreamWithError failed (non-fatal):', err);
+        console.error('[slackEvents] stopStreamWithError failed:', err);
+        return false;
     }
 }
 async function fetchThreadHistory(botToken, channel, threadTs) {
@@ -1105,10 +1124,8 @@ async function handleMention(botToken, openaiKey, anthropicKey, linearKey, sentr
         const errMsg = "Sorry, I had trouble processing that. Please try again.";
         clearInterval(statusInterval);
         await setAssistantStatus(botToken, channel, threadTs, '');
-        if (stream) {
-            await stopStreamWithError(stream, errMsg);
-        }
-        else {
+        const finalized = stream ? await stopStreamWithError(stream, errMsg) : false;
+        if (!finalized) {
             await postSlackMessage(botToken, channel, errMsg, threadTs);
         }
         return;
@@ -1141,14 +1158,12 @@ async function handleMention(botToken, openaiKey, anthropicKey, linearKey, sentr
         console.error(TAG, 'Maia task queue failed:', err);
         // Don't fail the whole response
     }
-    // 7. Stop the stream with the final reply (or post directly if stream failed),
-    //    and clear the under-input "is thinking..." status
+    // 7. Stop the stream with the final reply (or post directly if stream failed
+    //    or stopStream returned !ok), and clear the under-input "is thinking..." status
     clearInterval(statusInterval);
     await setAssistantStatus(botToken, channel, threadTs, '');
-    if (stream) {
-        await stopStream(stream, finalReply);
-    }
-    else {
+    const finalized = stream ? await stopStream(stream, finalReply) : false;
+    if (!finalized) {
         await postSlackMessage(botToken, channel, finalReply, threadTs);
     }
     // 8. Log to slack_mentions Firestore (existing)
