@@ -47,8 +47,6 @@ const sentryDsn = defineSecret('SENTRY_DSN');
 
 const SLACK_API = 'https://slack.com/api';
 const OPENAI_API = 'https://api.openai.com/v1';
-// Maia uses OpenAI (same key as Marco) — no separate Anthropic account needed
-const MAIA_OPENAI_MODEL = 'gpt-4.1';
 const LINEAR_API = 'https://api.linear.app/graphql';
 
 // Marco's bot user ID (new app A0B0947S7ND)
@@ -786,40 +784,37 @@ function formatSentryIssues(issues: Array<{ title: string; culprit: string; stat
   return `*Sentry Issues (${filter}):*\n\n${lines.join('\n\n')}`;
 }
 
-// ─── Maia Brain (OpenAI — same key as Marco) ──────────────────────────────────
+// ─── Maia Brain (Anthropic Claude) ───────────────────────────────────────────
+
+const ANTHROPIC_API = 'https://api.anthropic.com/v1';
+const MAIA_CLAUDE_MODEL = 'claude-opus-4-7';
 
 /**
- * callMaiaBrain — Maia's multi-turn brain, now powered by OpenAI.
- * Uses the same OPENAI_API_KEY as Marco; no separate Anthropic account needed.
- * The `_anthropicKey` param is kept for signature compatibility but ignored.
+ * callMaiaBrain — Maia's multi-turn brain, powered by real Anthropic Claude.
+ * Uses ANTHROPIC_API_KEY from Secret Manager.
  */
 async function callMaiaBrain(
-  _anthropicKey: string,
+  anthropicKey: string,
   systemPrompt: string,
   messages: Array<{ role: 'user' | 'assistant'; content: string }>
 ): Promise<string> {
-  // anthropicKey is intentionally unused — Maia now uses OpenAI
-  // We read the OpenAI key from the module-level secret at call time.
-  // Because this function is called from within the Firebase function handler,
-  // openaiApiKey.value() is available in scope via closure.
-  const res = await fetch(`${OPENAI_API}/chat/completions`, {
+  const res = await fetch(`${ANTHROPIC_API}/messages`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${openaiApiKey.value()}`,
+      'x-api-key': anthropicKey,
+      'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: MAIA_OPENAI_MODEL,
+      model: MAIA_CLAUDE_MODEL,
       max_tokens: 600,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...messages,
-      ],
+      system: systemPrompt,
+      messages,
     }),
   });
 
   const json = (await res.json()) as {
-    choices?: Array<{ message: { content: string } }>;
+    content?: Array<{ type: string; text: string }>;
     error?: { message: string };
   };
 
@@ -828,7 +823,7 @@ async function callMaiaBrain(
     return '(Maia was unable to respond)';
   }
 
-  return json.choices?.[0]?.message?.content?.trim() || '(No response from Maia)';
+  return json.content?.[0]?.text?.trim() || '(No response from Maia)';
 }
 
 /** Single-shot Maia reply (used by the legacy huddle mode). */

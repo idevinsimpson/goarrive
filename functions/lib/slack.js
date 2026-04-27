@@ -81,8 +81,6 @@ const linearApiKey = (0, params_1.defineSecret)('LINEAR_API_KEY');
 const sentryDsn = (0, params_1.defineSecret)('SENTRY_DSN');
 const SLACK_API = 'https://slack.com/api';
 const OPENAI_API = 'https://api.openai.com/v1';
-const ANTHROPIC_API = 'https://api.anthropic.com/v1';
-const ANTHROPIC_MODEL = 'claude-opus-4-7';
 const LINEAR_API = 'https://api.linear.app/graphql';
 // Marco's bot user ID (new app A0B0947S7ND)
 const MARCO_BOT_USER_ID = 'U0AV3U11E8K';
@@ -709,13 +707,15 @@ function formatSentryIssues(issues, filter) {
     });
     return `*Sentry Issues (${filter}):*\n\n${lines.join('\n\n')}`;
 }
-// ─── Maia Brain (Anthropic Claude) ──────────────────────────────────────────
+// ─── Maia Brain (Anthropic Claude) ───────────────────────────────────────────
+const ANTHROPIC_API = 'https://api.anthropic.com/v1';
+const MAIA_CLAUDE_MODEL = 'claude-opus-4-7';
 /**
- * Low-level Anthropic call for Maia. Accepts a full messages array so it can
- * be used for both single-shot and multi-turn strategize conversations.
+ * callMaiaBrain — Maia's multi-turn brain, powered by real Anthropic Claude.
+ * Uses ANTHROPIC_API_KEY from Secret Manager.
  */
 async function callMaiaBrain(anthropicKey, systemPrompt, messages) {
-    var _a;
+    var _a, _b, _c;
     const res = await fetch(`${ANTHROPIC_API}/messages`, {
         method: 'POST',
         headers: {
@@ -724,7 +724,7 @@ async function callMaiaBrain(anthropicKey, systemPrompt, messages) {
             'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-            model: ANTHROPIC_MODEL,
+            model: MAIA_CLAUDE_MODEL,
             max_tokens: 600,
             system: systemPrompt,
             messages,
@@ -735,12 +735,7 @@ async function callMaiaBrain(anthropicKey, systemPrompt, messages) {
         console.error('[slackEvents] Maia brain error:', json.error.message);
         return '(Maia was unable to respond)';
     }
-    const text = ((_a = json.content) !== null && _a !== void 0 ? _a : [])
-        .filter((b) => b.type === 'text' && typeof b.text === 'string')
-        .map((b) => b.text)
-        .join('')
-        .trim();
-    return text || '(No response from Maia)';
+    return ((_c = (_b = (_a = json.content) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.text) === null || _c === void 0 ? void 0 : _c.trim()) || '(No response from Maia)';
 }
 /** Single-shot Maia reply (used by the legacy huddle mode). */
 async function getMaiaBrainReply(anthropicKey, sharedContext, marcoAnalysis, marcoQuestion, userMessage) {
