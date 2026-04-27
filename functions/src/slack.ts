@@ -291,7 +291,9 @@ async function claimSlackEvent(eventTs: string, eventType: string, channel: stri
 // ─── Load shared brain rules from Firestore ─────────────────────────────────
 let cachedSharedBrain: string | null = null;
 let cachedSharedBrainAt = 0;
-const BRAIN_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+// Lowered from 5 min to 30s on 2026-04-27 so Maia's edits propagate within an active session.
+// Static enough that 30s is fine; heavy reads cached briefly inside a request burst.
+const BRAIN_CACHE_TTL_MS = 30 * 1000;
 
 async function loadSharedBrain(): Promise<string> {
   const now = Date.now();
@@ -347,6 +349,166 @@ async function loadRecentMemory(): Promise<string> {
   }
 }
 
+// ─── Life Graph: TOC + targeted retrieval ───────────────────────────────────
+// Marco's access path to Maia's ~/life/ knowledge graph (people, companies, ministry, family,
+// communication logs, voice/style guides). Mirrors agent_shared_brain (engineering docs)
+// but for relational/life context. Schema: docs in `agent_life_graph` have
+// { filename, relativePath, category, content, bytes, updatedBy, updatedAt }.
+
+interface LifeGraphTocEntry {
+  doc_id: string;
+  filename: string;
+  relativePath: string;
+  category: string;
+  bytes: number;
+}
+
+let cachedLifeGraphToc: LifeGraphTocEntry[] | null = null;
+let cachedLifeGraphTocAt = 0;
+const LIFE_GRAPH_TOC_TTL_MS = 60 * 1000; // 60s — TOC is small, refreshes often
+
+async function loadLifeGraphToc(): Promise<LifeGraphTocEntry[]> {
+  const now = Date.now();
+  if (cachedLifeGraphToc && now - cachedLifeGraphTocAt < LIFE_GRAPH_TOC_TTL_MS) {
+    return cachedLifeGraphToc;
+  }
+  try {
+    // Pull only the small fields. Firestore doesn't have a projection that excludes `content`,
+    // but admin SDK reads everything per doc — so we pull and slice in memory. 74 docs ~ ~500KB worst case.
+    // For perf later, a separate `agent_life_graph_index` collection (one tiny doc per entry) would be cleaner.
+    const snap = await admin.firestore().collection('agent_life_graph').get();
+    const entries: LifeGraphTocEntry[] = [];
+    snap.forEach(doc => {
+      const d = doc.data();
+      entries.push({
+        doc_id: doc.id,
+        filename: d.filename || d.name || doc.id,
+        relativePath: d.relativePath || d.path || '',
+        category: d.category || 'unknown',
+        bytes: typeof d.bytes === 'number' ? d.bytes : (typeof d.content === 'string' ? d.content.length : 0),
+      });
+    });
+    cachedLifeGraphToc = entries;
+    cachedLifeGraphTocAt = now;
+    console.log('[slackEvents] Loaded life-graph TOC:', entries.length, 'docs');
+  } catch (err) {
+    console.warn('[slackEvents] Failed to load life-graph TOC:', err);
+    cachedLifeGraphToc = [];
+  }
+  return cachedLifeGraphToc!;
+}
+
+function formatLifeGraphTocForPrompt(toc: LifeGraphTocEntry[]): string {
+  if (!toc || toc.length === 0) return '';
+  // Group by category, list `doc_id — relativePath` per line. Compact.
+  const byCategory: Record<string, LifeGraphTocEntry[]> = {};
+  for (const e of toc) {
+    (byCategory[e.category] = byCategory[e.category] || []).push(e);
+  }
+  const sections: string[] = [];
+  const order = ['areas_people', 'areas_companies', 'areas_groups', 'areas_personal', 'areas_operations', 'product', 'interaction', 'operational', 'resources_contacts'];
+  const seen = new Set<string>();
+  for (const cat of order) {
+    if (!byCategory[cat]) continue;
+    seen.add(cat);
+    const lines = byCategory[cat]
+      .sort((a, b) => a.relativePath.localeCompare(b.relativePath))
+      .map(e => `  - ${e.doc_id} (${e.relativePath || e.filename})`);
+    sections.push(`### ${cat} (${byCategory[cat].length})\n${lines.join('\n')}`);
+  }
+  for (const cat of Object.keys(byCategory)) {
+    if (seen.has(cat)) continue;
+    const lines = byCategory[cat].map(e => `  - ${e.doc_id} (${e.relativePath || e.filename})`);
+    sections.push(`### ${cat} (${byCategory[cat].length})\n${lines.join('\n')}`);
+  }
+  return sections.join('\n');
+}
+
+// Retrieval triggers: keywords/names in user message that suggest a life-graph doc is relevant.
+// People/companies/ministry trigger word -> matched against TOC entry doc_id/relativePath.
+// Conservative — only fires on explicit signals so we don't bloat prompts.
+const LIFE_GRAPH_REQUEST_TRIGGERS = [
+  'in my voice', 'how i talk to', 'help me respond', 'draft a text', 'draft a message',
+  'look at this thread', 'based on previous', 'continue this', 'what do we know about',
+  'train an agent on', 'write like me', 'relationship', 'tone', 'ministry', 'crm',
+  'intake', 'lead', 'donor', 'client', 'family', 'sensitive', 'pricing', 'follow-up',
+  'communication log', 'voice guide', 'texting guide',
+];
+
+function findRelevantLifeGraphDocs(userMessage: string, toc: LifeGraphTocEntry[], maxDocs = 4): string[] {
+  if (!userMessage || !toc || toc.length === 0) return [];
+  const lower = ` ${userMessage.toLowerCase()} `;
+
+  // 1. Explicit doc_id mention always wins
+  const explicit = toc.filter(e => lower.includes(` ${e.doc_id.toLowerCase()} `)).map(e => e.doc_id);
+  if (explicit.length) return explicit.slice(0, maxDocs);
+
+  // 2. Name match: extract slug-like tokens from each doc's relativePath, match in user message.
+  //    For people/companies, individual tokens often match (e.g. user types "Mark" not "Mark McGoldrick").
+  const matched = new Map<string, number>(); // doc_id -> score
+  for (const e of toc) {
+    const path = (e.relativePath || e.filename || '').toLowerCase();
+    // Pull slugs out of the path: `areas/people/mark-mcgoldrick/summary.md` -> segments
+    const segments = path.split(/[\/.]/);
+    for (const seg of segments) {
+      if (seg.length < 4) continue;
+      const tokens = seg.split('-').filter(t => t.length >= 4);
+      const phrases: string[] = [seg];
+      // Multi-word join (mark-mcgoldrick -> 'mark mcgoldrick')
+      if (tokens.length > 1) phrases.push(tokens.join(' '));
+      // Each individual token (mark, mcgoldrick) — 4+ char names. Catches "draft a text to Mark".
+      for (const tok of tokens) phrases.push(tok);
+      for (const ph of phrases) {
+        if (ph.length < 4) continue;
+        if (lower.includes(` ${ph} `) || lower.includes(`${ph} `) || lower.includes(` ${ph}`)) {
+          // Score by phrase length so multi-word matches outrank single-token ones.
+          matched.set(e.doc_id, (matched.get(e.doc_id) || 0) + ph.length);
+        }
+      }
+    }
+  }
+
+  // 3. Request-type triggers: if any fires, also include core voice guide(s)
+  const hasRequestTrigger = LIFE_GRAPH_REQUEST_TRIGGERS.some(t => lower.includes(t));
+  if (hasRequestTrigger) {
+    for (const e of toc) {
+      const p = (e.relativePath || '').toLowerCase();
+      if (p.includes('texting-voice-guide') || p.includes('master-agent-brief')) {
+        matched.set(e.doc_id, (matched.get(e.doc_id) || 0) + 5);
+      }
+    }
+  }
+
+  return [...matched.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, maxDocs)
+    .map(([id]) => id);
+}
+
+async function loadLifeGraphDocs(docIds: string[], maxBytesPerDoc = 4000): Promise<string> {
+  if (!docIds || docIds.length === 0) return '';
+  try {
+    const refs = docIds.map(id => admin.firestore().collection('agent_life_graph').doc(id));
+    const docs = await admin.firestore().getAll(...refs);
+    const sections: string[] = [];
+    for (const d of docs) {
+      if (!d.exists) {
+        sections.push(`### ${d.id}\n(not found)`);
+        continue;
+      }
+      const data = d.data() as { filename?: string; relativePath?: string; content?: string };
+      const path = data.relativePath || data.filename || d.id;
+      let content = data.content || '';
+      if (content.length > maxBytesPerDoc) content = content.slice(0, maxBytesPerDoc) + `\n\n…[truncated; full doc is ${data.content!.length} bytes — use LIFE_LOOKUP:${d.id} for more if needed]`;
+      sections.push(`### ${d.id} (${path})\n${content}`);
+    }
+    return sections.join('\n\n---\n\n');
+  } catch (err) {
+    console.warn('[slackEvents] Failed to load life-graph docs:', err);
+    return '';
+  }
+}
+
 // ─── Load recent Maia task queue status ─────────────────────────────────────────
 async function loadMaiaTaskStatus(): Promise<string> {
   try {
@@ -379,7 +541,8 @@ interface OpenAIMessage {
 async function buildMessagesFromThread(
   botToken: string,
   threadMessages: SlackMessage[],
-  currentEventTs: string
+  currentEventTs: string,
+  currentUserText: string = ''
 ): Promise<OpenAIMessage[]> {
   // Load shared brain rules from Firestore (cached)
   const sharedBrain = await loadSharedBrain();
@@ -399,7 +562,19 @@ async function buildMessagesFromThread(
     ? `\n\n## Maia's Task Queue (Live Status)\nThese are the tasks Maia is currently working on or has completed:\n\n${maiaTaskStatus}`
     : '';
 
-  const systemPrompt = `You are Marco (My Autonomous Resource & Coordination Operator), an AI agent embedded in the GoArrive Slack workspace.${sharedBrainSection}${recentMemorySection}${maiaTaskSection}\n\n---\n\nCore Identity:
+  // Load Maia's life-graph TOC + pre-fetch any docs likely relevant to the current message
+  const lifeToc = await loadLifeGraphToc();
+  const lifeTocSection = lifeToc.length
+    ? `\n\n## Life Graph (Maia's ~/life/ knowledge — relational/personal/ministry context)\nDoc IDs you can request via LIFE_LOOKUP:<doc_id>. This is the shared deeper context (people, communication logs, voice guides, ministry/business playbooks). Categories: areas_people=people, areas_companies=businesses (Joyful Transitions/Trifecta/Georgia Movement/etc), areas_personal=Devin's voice/preferences, areas_groups=group communications.\n\n${formatLifeGraphTocForPrompt(lifeToc)}`
+    : '';
+
+  const preloadedIds = findRelevantLifeGraphDocs(currentUserText, lifeToc, 4);
+  const preloadedDocs = preloadedIds.length ? await loadLifeGraphDocs(preloadedIds) : '';
+  const preloadedSection = preloadedDocs
+    ? `\n\n## Pre-loaded Life Graph Context (auto-retrieved based on this request)\n${preloadedDocs}`
+    : '';
+
+  const systemPrompt = `You are Marco (My Autonomous Resource & Coordination Operator), an AI agent embedded in the GoArrive Slack workspace.${sharedBrainSection}${recentMemorySection}${maiaTaskSection}${lifeTocSection}${preloadedSection}\n\n---\n\nCore Identity:
 GoArrive (G➢A) is a fitness coaching platform. You help the dev team (Devin, Maia) with tasks like:
 - Browser-based QA and testing of the staging app
 - Checking dashboards (Firebase, Stripe, GCP)
@@ -440,6 +615,28 @@ When someone asks you to do a CODE task (write/fix/deploy code, modify files, cr
 After the MAIA_TASK line, tell the user: "I've queued this for Maia — she'll pick it up and handle the code changes."
 
 Do NOT use MAIA_TASK for questions, explanations, or dashboard lookups — only for actual code/deploy work.
+
+## Life Graph Lookup (LIFE_LOOKUP)
+The Life Graph TOC above lists every document Maia maintains in ~/life/ — relational context, communication logs, voice/style guides, ministry/business playbooks, family context. The system has already pre-loaded any docs that look relevant to this request (see "Pre-loaded Life Graph Context" if present).
+
+If you need additional life-graph context that was NOT pre-loaded, request it explicitly:
+- Respond with one or more lines starting with "LIFE_LOOKUP:" followed by an exact doc_id from the TOC
+  Example: "LIFE_LOOKUP:areas__people__mark_mcgoldrick__texting_guide"
+  Example: "LIFE_LOOKUP:areas__companies__trifecta__communication_guide"
+
+The system will fetch those docs and re-prompt you with their content. Then give your final answer.
+
+When to use LIFE_LOOKUP — fire on ANY of these triggers in the request:
+- *People:* Mark, Jefferson, Sandy, Morgan, Chris, Justin, David, Nick, Jeff, John, or any named contact/client/lead/family member/ministry contact, or any person Devin says "how do I respond to"
+- *Businesses/projects:* Joyful Transitions, JT, Trifecta, Georgia Movement, GM, GoArrive coach contexts, CBMC, church/ministry groups, senior move/intake/CRM work
+- *Request types:* "in my voice", "how I talk to", "help me respond", "draft a text", "look at this thread", "based on previous", "continue this", "what do we know about", "train an agent on", "write like me", "relationship", "tone", "ministry", "CRM", "intake", "lead", "donor", "client", "family", "Morgan", "sensitive", "pricing", "follow-up"
+
+If the relevant doc does NOT exist in the TOC, do not invent context. Say: "I don't have life-graph context loaded for this — recommend Maia for this part."
+
+## Honesty rules — no pretend access, no fake huddle
+- Do NOT say "Maia said", "Maia thinks", "Maia confirmed", "Maia and I huddled", or "I checked with Maia" UNLESS the response was actually produced via the huddle pathway (see HUDDLE_DECISION below). The system runtime — not your prose — decides whether Maia was consulted.
+- Do NOT say "I searched", "I looked up", "I created", "I updated", "I logged" unless the underlying tool actually ran. If you only intend an action, say "would search", "recommend creating", "would update if approved".
+- If life-graph context is unavailable for a topic, say so plainly. Do not bluff prior history or relationship details you cannot see.
 
 ## Huddle Decision (REQUIRED on every response)
 You MUST include exactly one HUDDLE_DECISION line in every response. This determines whether Maia needs to weigh in before the user sees the answer.
@@ -787,60 +984,131 @@ function formatSentryIssues(issues: Array<{ title: string; culprit: string; stat
 }
 
 // ─── Maia Brain (Anthropic Claude) ──────────────────────────────────────────
+// Real Maia in huddle: loads (1) Maia's identity prompt from agent_shared_brain
+// (or embedded fallback), (2) relevant agent_life_graph slice based on the user
+// message, (3) recent agent_memory (last 30 by createdAt). No more stub.
+//
+// Returns { text, contextLoaded, lifeDocsUsed } — `contextLoaded=false` means
+// life-graph was unavailable and the synthesis prompt must NOT claim "Maia said".
+
+interface MaiaReplyResult {
+  text: string;
+  contextLoaded: boolean;
+  lifeDocsUsed: string[];
+  recentMemoryUsed: number;
+}
+
+async function loadMaiaIdentityPrompt(): Promise<string> {
+  // Prefer a synced doc; fall back to an embedded identity if not yet created.
+  try {
+    const doc = await admin.firestore().collection('agent_shared_brain').doc('maia_system_prompt').get();
+    if (doc.exists) {
+      const c = (doc.data() as { content?: string }).content || '';
+      if (c.trim().length > 100) return c;
+    }
+  } catch (err) {
+    console.warn('[slackEvents] loadMaiaIdentityPrompt: read failed', err);
+  }
+  return [
+    'You are Maia, Devin Simpson\'s AI executive assistant.',
+    'You are the code/deploy/research half of the unified Maia↔Marco brain. Marco is the Slack coordination half.',
+    'You and Marco share one brain via Firestore: agent_shared_brain (engineering), agent_life_graph (relational/personal/ministry), agent_memory (timeline).',
+    'Your voice: short, direct, no fluff, lead with the answer. You handle code, deploys, file structure, React Native/Expo, Firebase, TypeScript, browser automation, scheduling, and the full ~/life/ knowledge graph (people, companies, communication logs, voice guides).',
+    'You are being consulted by Marco mid-Slack-thread. Be the real Maia — use the life-graph context provided, do not invent facts, and stay under 200 words unless the question demands more.',
+    'Do NOT include any of Marco\'s command prefixes (LINEAR_*, SENTRY_*, MAIA_TASK:, LIFE_LOOKUP:, HUDDLE_DECISION:) — those are Marco-side wire-format.',
+  ].join('\n');
+}
+
+async function loadRecentMemoryForMaia(limit = 30): Promise<string> {
+  try {
+    const snap = await admin.firestore().collection('agent_memory')
+      .orderBy('createdAt', 'desc')
+      .limit(limit)
+      .get();
+    if (snap.empty) return '';
+    const lines: string[] = [];
+    snap.forEach(d => {
+      const x = d.data();
+      lines.push(`[${x.agent || '?'}/${x.eventType || '?'}] ${x.summary || ''}`);
+    });
+    return lines.reverse().join('\n');
+  } catch (err) {
+    console.warn('[slackEvents] loadRecentMemoryForMaia failed:', err);
+    return '';
+  }
+}
 
 async function getMaiaBrainReply(
   anthropicKey: string,
-  sharedContext: string,
   marcoAnalysis: string,
   marcoQuestion: string,
   userMessage: string
-): Promise<string> {
-  const maiaSystemPrompt = `You are Maia, an AI code agent for GoArrive (G➢A), a fitness coaching platform.
-You work alongside Marco (the Slack coordination agent). You share the same knowledge base, memory, and goals.
+): Promise<MaiaReplyResult> {
+  const [identity, toc, recentMemory] = await Promise.all([
+    loadMaiaIdentityPrompt(),
+    loadLifeGraphToc(),
+    loadRecentMemoryForMaia(30),
+  ]);
 
-Your strengths: code, architecture, deploys, file structure, technical implementation, debugging, testing, React Native/Expo, Firebase, TypeScript.
-Marco's strengths: coordination, dashboards, browser QA, Slack communication, Linear/Sentry queries.
+  const relevantIds = findRelevantLifeGraphDocs(userMessage, toc, 4);
+  const lifeContext = relevantIds.length ? await loadLifeGraphDocs(relevantIds) : '';
 
-Marco is consulting you on a user request. Provide your technical perspective concisely.
-Do NOT include any command prefixes (LINEAR_*, SENTRY_*, MAIA_TASK:) — Marco handles those.
-Keep your response focused and under 200 words.
+  // Honesty signal: did we actually load any of Maia's "real" context (life graph or recent memory)?
+  // If neither loaded, the synthesis prompt must not claim "Maia consulted".
+  const contextLoaded = !!(lifeContext || recentMemory);
 
-${sharedContext}`;
-
-  const userContent = `User asked: "${userMessage}"\n\nMarco's analysis: ${marcoAnalysis}\n\nMarco's question for you: ${marcoQuestion}`;
-
-  const res = await fetch(`${ANTHROPIC_API}/messages`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': anthropicKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: 500,
-      system: maiaSystemPrompt,
-      messages: [{ role: 'user', content: userContent }],
-    }),
-  });
-
-  const json = (await res.json()) as {
-    content?: Array<{ type: string; text?: string }>;
-    error?: { message: string };
-  };
-
-  if (json.error) {
-    console.error('[slackEvents] Maia brain error:', json.error.message);
-    return '(Maia was unable to respond)';
+  const sections: string[] = [identity];
+  if (toc.length) {
+    sections.push(`## Life Graph TOC (you have access to all of these — request more via the user's message if needed)\n${formatLifeGraphTocForPrompt(toc)}`);
   }
+  if (lifeContext) {
+    sections.push(`## Relevant Life Graph Docs (auto-retrieved for this request)\n${lifeContext}`);
+  }
+  if (recentMemory) {
+    sections.push(`## Recent agent_memory (both agents, last 30)\n${recentMemory}`);
+  }
+  const maiaSystemPrompt = sections.join('\n\n---\n\n');
 
-  const text = (json.content ?? [])
-    .filter((b) => b.type === 'text' && typeof b.text === 'string')
-    .map((b) => b.text!)
-    .join('')
-    .trim();
+  const userContent = `Marco is asking your perspective on a user request in Slack.\n\n## User asked\n"${userMessage}"\n\n## Marco's initial analysis\n${marcoAnalysis}\n\n## Marco's question for you\n${marcoQuestion}\n\nGive Marco the real-Maia perspective. Use the life-graph context above. Do not invent facts. If the loaded context is insufficient, say so plainly so Marco doesn't bluff.`;
 
-  return text || '(No response from Maia)';
+  try {
+    const res = await fetch(`${ANTHROPIC_API}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': anthropicKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: ANTHROPIC_MODEL,
+        max_tokens: 500,
+        system: maiaSystemPrompt,
+        messages: [{ role: 'user', content: userContent }],
+      }),
+    });
+    const json = (await res.json()) as {
+      content?: Array<{ type: string; text?: string }>;
+      error?: { message: string };
+    };
+    if (json.error) {
+      console.error('[slackEvents] Maia brain error:', json.error.message);
+      return { text: '(Maia context was loaded but the model call failed — flag to Devin.)', contextLoaded: false, lifeDocsUsed: relevantIds, recentMemoryUsed: 0 };
+    }
+    const text = (json.content ?? [])
+      .filter((b) => b.type === 'text' && typeof b.text === 'string')
+      .map((b) => b.text!)
+      .join('')
+      .trim();
+    return {
+      text: text || '(No response from Maia)',
+      contextLoaded,
+      lifeDocsUsed: relevantIds,
+      recentMemoryUsed: recentMemory ? recentMemory.split('\n').length : 0,
+    };
+  } catch (err) {
+    console.error('[slackEvents] Maia brain network error:', err);
+    return { text: '(Maia call failed — network error.)', contextLoaded: false, lifeDocsUsed: relevantIds, recentMemoryUsed: 0 };
+  }
 }
 
 // ─── Multi-Agent Huddle: Marco consults Maia, then produces unified response ─
@@ -871,7 +1139,7 @@ async function runHuddle(
   messages: OpenAIMessage[],
   hasImages: boolean,
   userMessage: string,
-  sharedContext: string,
+  _sharedContext: string,
   mode: RoutingMode
 ): Promise<HuddleResult> {
   const TAG = '[huddle]';
@@ -890,45 +1158,79 @@ async function runHuddle(
     };
   }
 
-  // HUDDLE mode: Marco analyzes, asks Maia, synthesizes
-  console.log(TAG, 'Mode: huddle — consulting Maia');
+  // HUDDLE mode: Marco analyzes, asks REAL Maia, synthesizes
+  console.log(TAG, 'Mode: huddle — consulting Maia (real-context path)');
 
   // Step 1: Marco's initial analysis
   const marcoReply = await getOpenAIReply(openaiKey, messages, hasImages);
   const cleanMarcoReply = marcoReply.replace(/HUDDLE_DECISION:.+/g, '').trim();
   console.log(TAG, 'Marco initial reply length:', cleanMarcoReply.length);
 
-  // Step 2: Ask Maia for her technical perspective
-  const maiaQuestion = `Based on the user's request and Marco's analysis, what is your technical perspective? What should we tell the user?`;
-  const maiaReply = await getMaiaBrainReply(
+  // Step 2: Ask Maia for her perspective — with real Maia identity + life graph + recent memory
+  const maiaQuestion = `Based on the user's request and Marco's analysis, what's your take? Use your life-graph context if relevant. What should we tell the user?`;
+  const maiaResult = await getMaiaBrainReply(
     anthropicKey,
-    sharedContext,
     cleanMarcoReply,
     maiaQuestion,
     userMessage
   );
-  console.log(TAG, 'Maia reply length:', maiaReply.length);
+  console.log(TAG, `Maia reply length: ${maiaResult.text.length}, contextLoaded=${maiaResult.contextLoaded}, lifeDocs=${maiaResult.lifeDocsUsed.length}`);
 
-  // Step 3: Marco synthesizes final unified response
+  // Step 3: Marco synthesizes final unified response.
+  //   Honesty rule: if Maia context did NOT load, do not let Marco claim a real huddle.
+  const synthInstruction = maiaResult.contextLoaded
+    ? `Synthesize your analysis with Maia's input into one clean, unified response for the user. Do NOT mention the huddle process or say "Maia says". Give the best combined answer as if you both thought of it together.`
+    : `Maia's real context did NOT load for this huddle — treat her input as a generic Claude-style review, not real Maia. Synthesize a final answer but do NOT claim "Maia said", "Maia confirmed", "we huddled", or imply Maia consulted. If the answer would have benefited from real Maia context, briefly note "(Maia context unavailable for this one — flag if you want her real take)".`;
+
   const synthesisMessages: OpenAIMessage[] = [
     ...messages,
     { role: 'assistant' as const, content: cleanMarcoReply },
     {
       role: 'user' as const,
-      content: `[INTERNAL — Maia's input]\n\nMaia says: ${maiaReply}\n\nNow synthesize your analysis with Maia's input into one clean, unified response for the user. Do NOT mention the huddle process or say "Maia says". Give the best combined answer as if you both thought of it together.`,
+      content: `[INTERNAL — Maia's input]\n\nMaia says: ${maiaResult.text}\n\n${synthInstruction}`,
     },
   ];
 
   const finalReply = await getOpenAIReply(openaiKey, synthesisMessages, false);
   const cleanFinal = finalReply.replace(/HUDDLE_DECISION:.+/g, '').trim();
 
-  console.log(TAG, 'Huddle complete — unified reply ready');
+  // HARD honesty guard (belt-and-braces over the synth instruction):
+  // When Maia's real context did NOT load, scrub fake-Maia phrases from the
+  // synth output and prepend an unambiguous banner. Trust-critical — the synth
+  // model is told not to say "Maia said", but we enforce it post-hoc too.
+  const honestFinal = enforceMaiaHonesty(cleanFinal, maiaResult.contextLoaded);
+
+  console.log(TAG, `Huddle complete — unified reply ready (real-context=${maiaResult.contextLoaded})`);
   return {
-    finalReply: cleanFinal,
-    huddled: true,
+    finalReply: honestFinal,
+    huddled: maiaResult.contextLoaded, // only flag as a real huddle if Maia's context actually loaded
     marcoInitial: cleanMarcoReply,
-    maiaInput: maiaReply,
+    maiaInput: maiaResult.text,
   };
+}
+
+// HARD honesty guard. When Maia's real context did NOT load:
+//   - strip phrases that imply real-Maia consultation
+//   - prepend an explicit "unavailable" banner so the user is never misled
+// This runs AFTER the synth model. The synth model is also instructed not to
+// fabricate, but model instructions are soft guarantees; this is the hard one.
+export function enforceMaiaHonesty(reply: string, contextLoaded: boolean): string {
+  if (contextLoaded) return reply;
+  const forbidden: RegExp[] = [
+    /\bmaia (said|says|thinks|confirmed|noted|suggested|agreed|told me|told you|recommends?|advises?|points out)\b/gi,
+    /\b(we|i) huddled( with maia)?\b/gi,
+    /\bi (checked|consulted|asked|talked|spoke) with maia\b/gi,
+    /\bmaia (and|&) i\b/gi,
+    /\baccording to maia\b/gi,
+    /\bper maia\b/gi,
+    /\bmaia('s)? (take|input|perspective|view|opinion)\b/gi,
+  ];
+  let scrubbed = reply;
+  for (const pat of forbidden) {
+    scrubbed = scrubbed.replace(pat, '[Marco only — real Maia unavailable]');
+  }
+  const banner = '_(Real Maia huddle unavailable — Marco answering alone)_\n\n';
+  return banner + scrubbed;
 }
 
 // ─── Parse and execute Linear commands from AI reply ─────────────────────────
@@ -1023,6 +1325,52 @@ async function executeMaiaTaskCommands(
   return cleanReply || aiReply;
 }
 
+// ─── Parse and execute LIFE_LOOKUP commands (two-pass) ─────────────────────
+// Marco may emit `LIFE_LOOKUP:<doc_id>` lines in his initial reply when he needs
+// life-graph context that wasn't pre-loaded. We fetch the requested docs, re-prompt
+// Marco with the fetched content as a system addendum, and return his refined reply.
+//
+// Returns { reply, looked_up } — `looked_up` is true if any LIFE_LOOKUP was processed.
+
+async function executeLifeLookupCommands(
+  openaiKey: string,
+  baseMessages: OpenAIMessage[],
+  hasImages: boolean,
+  initialReply: string,
+): Promise<{ reply: string; looked_up: boolean; doc_ids: string[] }> {
+  const lookupRe = /^LIFE_LOOKUP:\s*([A-Za-z0-9_]+)\s*$/gm;
+  const matches = [...initialReply.matchAll(lookupRe)];
+  if (matches.length === 0) {
+    return { reply: initialReply, looked_up: false, doc_ids: [] };
+  }
+  const docIds = [...new Set(matches.map(m => m[1]))].slice(0, 6); // cap at 6 to bound cost
+  const docs = await loadLifeGraphDocs(docIds);
+  if (!docs) {
+    // Strip the LIFE_LOOKUP lines and return — no context available.
+    const cleaned = initialReply.replace(lookupRe, '').trim();
+    return { reply: cleaned + '\n\n(Note: requested life-graph docs were not available.)', looked_up: false, doc_ids: docIds };
+  }
+
+  // Re-prompt Marco with the fetched docs.
+  const cleanedInitial = initialReply.replace(lookupRe, '').trim();
+  const synthMessages: OpenAIMessage[] = [
+    ...baseMessages,
+    { role: 'assistant', content: cleanedInitial || '(no preliminary text)' },
+    {
+      role: 'user',
+      content: `[INTERNAL — Life Graph Context fetched for your LIFE_LOOKUP requests]\n\n${docs}\n\nNow give the user your final answer using this context. Do NOT repeat the LIFE_LOOKUP lines.`,
+    },
+  ];
+  try {
+    const refined = await getOpenAIReply(openaiKey, synthMessages, false);
+    const cleanedRefined = refined.replace(/HUDDLE_DECISION:.+/g, '').replace(lookupRe, '').trim();
+    return { reply: cleanedRefined || cleanedInitial, looked_up: true, doc_ids: docIds };
+  } catch (err) {
+    console.warn('[slackEvents] LIFE_LOOKUP refine call failed:', err);
+    return { reply: cleanedInitial, looked_up: false, doc_ids: docIds };
+  }
+}
+
 // ─── Parse and execute Sentry commands from AI reply ────────────────────────
 
 async function executeSentryCommands(
@@ -1075,12 +1423,12 @@ async function handleMention(
   // 2. Fetch full thread history for context
   const threadMessages = await fetchThreadHistory(botToken, channel, threadTs);
 
-  // 3. Build OpenAI messages from thread history
-  const messages = await buildMessagesFromThread(botToken, threadMessages, currentMsg.ts);
-
-  // 4. Detect routing mode from message prefix (huddle: / maia: / default solo)
+  // 3. Build OpenAI messages from thread history. Pass the current user text so we can pre-load
+  //    relevant life-graph docs (people/companies/voice triggers) into the system prompt.
   const rawText = stripMention(currentMsg.text ?? '');
   const { mode: routingMode, cleanText: currentText } = detectRoutingMode(rawText);
+  const messages = await buildMessagesFromThread(botToken, threadMessages, currentMsg.ts, currentText);
+
   console.log(TAG, `Routing mode: ${routingMode}`);
 
   const currentImages = (currentMsg.files ?? []).filter((f) => f.mimetype?.startsWith('image/'));
@@ -1133,8 +1481,20 @@ async function handleMention(
     return;
   }
 
-  const aiReply = huddleResult.finalReply;
+  let aiReply = huddleResult.finalReply;
   console.log(TAG, `Huddle complete: huddled=${huddleResult.huddled}`);
+
+  // 6d. Execute any LIFE_LOOKUP commands (two-pass: fetch docs, re-prompt Marco).
+  //     Solo mode benefits most — it's the cheap "Marco asks for the doc he needs" path.
+  let lifeLookupIds: string[] = [];
+  try {
+    const lookupResult = await executeLifeLookupCommands(openaiKey, messages, hasImages, aiReply);
+    aiReply = lookupResult.reply;
+    lifeLookupIds = lookupResult.doc_ids;
+    if (lookupResult.looked_up) console.log(TAG, 'LIFE_LOOKUP fetched docs:', lifeLookupIds);
+  } catch (err) {
+    console.error(TAG, 'LIFE_LOOKUP execution failed:', err);
+  }
 
   // 7. Execute any Linear commands embedded in the AI reply
   let finalReply = aiReply;
@@ -1196,6 +1556,7 @@ async function handleMention(
         aiReply: finalReply.slice(0, 500),
         huddled: huddleResult.huddled,
         maiaInput: huddleResult.maiaInput ? huddleResult.maiaInput.slice(0, 300) : '',
+        lifeLookupIds,
         hasImages,
         channel,
         threadTs,
