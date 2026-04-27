@@ -208,43 +208,55 @@ async function startStream(
           status: 'in_progress',
         },
       ],
-    }) as { ok: boolean; stream_ts?: string; error?: string };
+    }) as { ok: boolean; ts?: string; error?: string };
 
-    if (!json.ok) {
-      console.warn('[slackEvents] chat.startStream error:', json.error);
+    if (!json.ok || !json.ts) {
+      console.warn('[slackEvents] chat.startStream error:', json.error ?? 'no ts in response');
       return null;
     }
-    return { channel, threadTs, streamTs: json.stream_ts!, botToken };
+    return { channel, threadTs, streamTs: json.ts, botToken };
   } catch (err) {
     console.warn('[slackEvents] startStream failed (non-fatal):', err);
     return null;
   }
 }
 
-async function stopStream(handle: StreamHandle, finalText: string): Promise<void> {
+// Returns true if the stream was finalized successfully. Caller should fall
+// back to chat.postMessage when this returns false so the user always sees a reply.
+async function stopStream(handle: StreamHandle, finalText: string): Promise<boolean> {
   try {
-    await slackPost(handle.botToken, 'chat.stopStream', {
+    const json = await slackPost(handle.botToken, 'chat.stopStream', {
       channel: handle.channel,
-      thread_ts: handle.threadTs,
-      stream_ts: handle.streamTs,
+      ts: handle.streamTs,
       chunks: [
+        {
+          type: 'task_update',
+          id: 'thinking',
+          title: 'Done',
+          status: 'completed',
+        },
         {
           type: 'markdown_text',
           text: slackify(finalText),
         },
       ],
-    });
+    }) as { ok: boolean; error?: string };
+    if (!json.ok) {
+      console.error('[slackEvents] chat.stopStream error:', json.error);
+      return false;
+    }
+    return true;
   } catch (err) {
-    console.warn('[slackEvents] stopStream failed (non-fatal):', err);
+    console.error('[slackEvents] stopStream failed:', err);
+    return false;
   }
 }
 
-async function stopStreamWithError(handle: StreamHandle, errorText: string): Promise<void> {
+async function stopStreamWithError(handle: StreamHandle, errorText: string): Promise<boolean> {
   try {
-    await slackPost(handle.botToken, 'chat.stopStream', {
+    const json = await slackPost(handle.botToken, 'chat.stopStream', {
       channel: handle.channel,
-      thread_ts: handle.threadTs,
-      stream_ts: handle.streamTs,
+      ts: handle.streamTs,
       chunks: [
         {
           type: 'task_update',
@@ -254,9 +266,15 @@ async function stopStreamWithError(handle: StreamHandle, errorText: string): Pro
           details: errorText,
         },
       ],
-    });
+    }) as { ok: boolean; error?: string };
+    if (!json.ok) {
+      console.error('[slackEvents] chat.stopStream (error path) failed:', json.error);
+      return false;
+    }
+    return true;
   } catch (err) {
-    console.warn('[slackEvents] stopStreamWithError failed (non-fatal):', err);
+    console.error('[slackEvents] stopStreamWithError failed:', err);
+    return false;
   }
 }
 
@@ -1340,9 +1358,8 @@ async function handleMention(
     const errMsg = "Sorry, I had trouble processing that. Please try again.";
     clearInterval(statusInterval);
     await setAssistantStatus(botToken, channel, threadTs, '');
-    if (stream) {
-      await stopStreamWithError(stream, errMsg);
-    } else {
+    const finalized = stream ? await stopStreamWithError(stream, errMsg) : false;
+    if (!finalized) {
       await postSlackMessage(botToken, channel, errMsg, threadTs);
     }
     return;
@@ -1375,14 +1392,13 @@ async function handleMention(
     console.error(TAG, 'Maia task queue failed:', err);
     // Don't fail the whole response
   }
-  // 7. Stop the stream with the final reply (or post directly if stream failed),
-  //    and clear the under-input "is thinking..." status
+  // 7. Stop the stream with the final reply (or post directly if stream failed
+  //    or stopStream returned !ok), and clear the under-input "is thinking..." status
   clearInterval(statusInterval);
   await setAssistantStatus(botToken, channel, threadTs, '');
   console.log(TAG, 'Reply branch:', stream ? 'stopStream' : 'postSlackMessage', 'finalReplyLen=', (finalReply || '').length);
-  if (stream) {
-    await stopStream(stream, finalReply);
-  } else {
+  const finalized = stream ? await stopStream(stream, finalReply) : false;
+  if (!finalized) {
     await postSlackMessage(botToken, channel, finalReply, threadTs);
   }
 
