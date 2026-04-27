@@ -145,12 +145,31 @@ function slackify(text) {
     }).join('');
 }
 async function postSlackMessage(botToken, channel, text, threadTs) {
-    const body = { channel, text: slackify(text), mrkdwn: true };
+    const slackText = slackify(text);
+    const body = { channel, text: slackText, mrkdwn: true };
     if (threadTs)
         body.thread_ts = threadTs;
-    const json = await slackPost(botToken, 'chat.postMessage', body);
-    if (!json.ok)
-        console.error('[slackEvents] chat.postMessage error:', json.error);
+    console.log('[slackEvents] postSlackMessage →', {
+        channel,
+        threadTs,
+        rawTextLen: (text || '').length,
+        slackTextLen: (slackText || '').length,
+        head: (slackText || '').slice(0, 80),
+    });
+    let json;
+    try {
+        json = await slackPost(botToken, 'chat.postMessage', body);
+    }
+    catch (err) {
+        console.error('[slackEvents] postSlackMessage threw:', err);
+        return;
+    }
+    if (!json.ok) {
+        console.error('[slackEvents] chat.postMessage error:', json.error, 'body:', JSON.stringify(body).slice(0, 300));
+    }
+    else {
+        console.log('[slackEvents] postSlackMessage ok ts=', json.ts);
+    }
 }
 async function startStream(botToken, channel, threadTs) {
     try {
@@ -1110,6 +1129,7 @@ async function handleMention(botToken, openaiKey, anthropicKey, linearKey, sentr
         // Don't fail the whole response
     }
     // 7. Stop the stream with the final reply (or post directly if stream failed)
+    console.log(TAG, 'Reply branch:', stream ? 'stopStream' : 'postSlackMessage', 'finalReplyLen=', (finalReply || '').length);
     if (stream) {
         await stopStream(stream, finalReply);
     }
@@ -1186,7 +1206,12 @@ async function handleMention(botToken, openaiKey, anthropicKey, linearKey, sentr
 exports.slackEvents = (0, https_1.onRequest)({
     region: 'us-central1',
     secrets: [slackSigningSecret, slackBotToken, openaiApiKey, anthropicApiKey, linearApiKey, sentryDsn],
-    timeoutSeconds: 60,
+    // Strategize huddle (3-round Marco↔Maia debate) plus shared-brain reads
+    // and GPT calls regularly run 90-180s. Slack is acked within ~1s, but the
+    // handler stays alive (await handleMention below) so Cloud Run doesn't
+    // terminate the instance before stopStream replaces the thinking placeholder.
+    timeoutSeconds: 540,
+    memory: '512MiB',
     invoker: 'public',
 }, async (req, res) => {
     var _a, _b, _c, _d;
@@ -1232,19 +1257,32 @@ exports.slackEvents = (0, https_1.onRequest)({
         const text = ((_a = payload.text) !== null && _a !== void 0 ? _a : '').trim();
         const ts = String(Date.now() / 1000);
         console.log(TAG, `/huddle (strategize) from ${userId}: "${text}"`);
-        // Acknowledge immediately with a placeholder
-        res.status(200).json({
-            response_type: 'in_channel',
-            text: ':brain: *Marco & Maia are strategizing... (3 rounds of debate)*',
-        });
-        // Run the full strategize huddle asynchronously via handleMention.
-        // The 'huddle:' prefix in the text triggers detectRoutingMode → 'strategize'.
-        handleMention(botToken, openaiKey, anthropicKey, linearKey, sentryDsnValue, channel, ts, userId, {
-            ts,
-            text: `huddle: ${text}`,
-            user: userId,
-            files: [],
-        }).catch((err) => console.error(TAG, '/huddle handleMention failed:', err));
+        // Post a visible placeholder via chat.postMessage *before* the heavy work,
+        // since the slash command's response_url is only delivered alongside the
+        // final ack. The placeholder reassures the user while handleMention runs.
+        try {
+            await postSlackMessage(botToken, channel, ':brain: *Marco & Maia are strategizing... (3 rounds of debate)*');
+        }
+        catch (err) {
+            console.warn(TAG, '/huddle placeholder failed:', err);
+        }
+        // Run the heavy work BEFORE acking so Cloud Run keeps full CPU. Cloud
+        // Run throttles CPU after res.send(), making post-ack awaits 30x slower
+        // and silently terminating background work in many cases. Slack retries
+        // on slow ack, but our dedupe (slack_event_dedupe) short-circuits them.
+        try {
+            await handleMention(botToken, openaiKey, anthropicKey, linearKey, sentryDsnValue, channel, ts, userId, {
+                ts,
+                text: `huddle: ${text}`,
+                user: userId,
+                files: [],
+            });
+        }
+        catch (err) {
+            console.error(TAG, '/huddle handleMention failed:', err);
+        }
+        // Final ack — content already posted in-thread by handleMention.
+        res.status(200).send('');
         return;
     }
     const event = payload.event;
@@ -1270,21 +1308,30 @@ exports.slackEvents = (0, https_1.onRequest)({
         const threadTs = ((_b = event.thread_ts) !== null && _b !== void 0 ? _b : event.ts);
         const userId = event.user;
         console.log(TAG, `app_mention from ${userId} in ${channel}`);
-        // Acknowledge immediately — Slack requires a 200 within 3 seconds
-        res.status(200).send('');
-        // Dedupe — Slack fires both `app_mention` and `message` for the same
-        // user message, so claim it atomically by event.ts.
+        // Dedupe FIRST — if this is a Slack retry (we already started handling
+        // the original), ack immediately so Slack stops retrying.
         if (!(await claimSlackEvent(event.ts, 'app_mention', channel))) {
             console.log(TAG, `Duplicate event.ts=${event.ts} (app_mention) — skipping`);
+            res.status(200).send('');
             return;
         }
-        // Process asynchronously after acknowledging
-        handleMention(botToken, openaiKey, anthropicKey, linearKey, sentryDsnValue, channel, threadTs, userId, {
-            ts: event.ts,
-            text: event.text,
-            user: userId,
-            files: event.files,
-        }).catch((err) => console.error(TAG, 'handleMention failed:', err));
+        // Run the heavy work BEFORE acking so Cloud Run keeps full CPU. Cloud
+        // Run throttles CPU aggressively after res.send() — post-ack awaits
+        // run 30x slower and the instance can be terminated mid-flight,
+        // killing chat.postMessage calls. Slack will retry our slow response,
+        // but the dedupe above short-circuits the retries to a fast 200.
+        try {
+            await handleMention(botToken, openaiKey, anthropicKey, linearKey, sentryDsnValue, channel, threadTs, userId, {
+                ts: event.ts,
+                text: event.text,
+                user: userId,
+                files: event.files,
+            });
+        }
+        catch (err) {
+            console.error(TAG, 'handleMention failed:', err);
+        }
+        res.status(200).send('');
         return;
     }
     // ── assistant_thread_started ──────────────────────────────────────────────
@@ -1336,20 +1383,29 @@ exports.slackEvents = (0, https_1.onRequest)({
             return;
         }
         console.log(TAG, `Thread reply from ${userId} in ${channel} (thread: ${threadTs})`);
-        // Acknowledge immediately
-        res.status(200).send('');
-        // Dedupe — same event.ts may also arrive as `app_mention`. Whichever
-        // claim wins runs the handler; the other short-circuits.
+        // Dedupe FIRST — same event.ts may also arrive as `app_mention`.
+        // Whichever claim wins runs the handler; the other short-circuits
+        // and acks immediately so Slack stops retrying.
         if (!(await claimSlackEvent(event.ts, 'message', channel))) {
             console.log(TAG, `Duplicate event.ts=${event.ts} (message) — skipping`);
+            res.status(200).send('');
             return;
         }
-        handleMention(botToken, openaiKey, anthropicKey, linearKey, sentryDsnValue, channel, threadTs, userId, {
-            ts: event.ts,
-            text: event.text,
-            user: userId,
-            files: event.files,
-        }).catch((err) => console.error(TAG, 'handleMention (thread reply) failed:', err));
+        // Run the heavy work BEFORE acking — Cloud Run throttles CPU after
+        // res.send(), which makes awaits 30x slower and can kill the instance
+        // mid-flight. Slack retries are absorbed by the dedupe above.
+        try {
+            await handleMention(botToken, openaiKey, anthropicKey, linearKey, sentryDsnValue, channel, threadTs, userId, {
+                ts: event.ts,
+                text: event.text,
+                user: userId,
+                files: event.files,
+            });
+        }
+        catch (err) {
+            console.error(TAG, 'handleMention (thread reply) failed:', err);
+        }
+        res.status(200).send('');
         return;
     }
     console.log(TAG, `Unhandled event type: ${eventType} — ignoring`);
