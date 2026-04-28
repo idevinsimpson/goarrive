@@ -1038,12 +1038,33 @@ async function loadRecentMemoryForMaia(limit = 30): Promise<string> {
   }
 }
 
-async function getMaiaBrainReply(
+// Thrown when the Maia bridge fails in a way that should abort an explicit
+// /huddle invocation (rather than silently degrading). Solo-mode never calls
+// the bridge, so this only surfaces in huddle mode.
+export class MaiaBridgeError extends Error {
+  readonly stage: 'missing_key' | 'api_error' | 'network';
+  readonly status?: number;
+  constructor(message: string, stage: MaiaBridgeError['stage'], status?: number) {
+    super(message);
+    this.name = 'MaiaBridgeError';
+    this.stage = stage;
+    this.status = status;
+  }
+}
+
+export async function getMaiaBrainReply(
   anthropicKey: string,
   marcoAnalysis: string,
   marcoQuestion: string,
   userMessage: string
 ): Promise<MaiaReplyResult> {
+  if (!anthropicKey || anthropicKey.trim() === '') {
+    throw new MaiaBridgeError(
+      'ANTHROPIC_API_KEY secret is missing or empty',
+      'missing_key'
+    );
+  }
+
   const [identity, toc, recentMemory] = await Promise.all([
     loadMaiaIdentityPrompt(),
     loadLifeGraphToc(),
@@ -1071,8 +1092,9 @@ async function getMaiaBrainReply(
 
   const userContent = `Marco is asking your perspective on a user request in Slack.\n\n## User asked\n"${userMessage}"\n\n## Marco's initial analysis\n${marcoAnalysis}\n\n## Marco's question for you\n${marcoQuestion}\n\nGive Marco the real-Maia perspective. Use the life-graph context above. Do not invent facts. If the loaded context is insufficient, say so plainly so Marco doesn't bluff.`;
 
+  let res: Response;
   try {
-    const res = await fetch(`${ANTHROPIC_API}/messages`, {
+    res = await fetch(`${ANTHROPIC_API}/messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1086,29 +1108,40 @@ async function getMaiaBrainReply(
         messages: [{ role: 'user', content: userContent }],
       }),
     });
-    const json = (await res.json()) as {
-      content?: Array<{ type: string; text?: string }>;
-      error?: { message: string };
-    };
-    if (json.error) {
-      console.error('[slackEvents] Maia brain error:', json.error.message);
-      return { text: '(Maia context was loaded but the model call failed — flag to Devin.)', contextLoaded: false, lifeDocsUsed: relevantIds, recentMemoryUsed: 0 };
-    }
-    const text = (json.content ?? [])
-      .filter((b) => b.type === 'text' && typeof b.text === 'string')
-      .map((b) => b.text!)
-      .join('')
-      .trim();
-    return {
-      text: text || '(No response from Maia)',
-      contextLoaded,
-      lifeDocsUsed: relevantIds,
-      recentMemoryUsed: recentMemory ? recentMemory.split('\n').length : 0,
-    };
   } catch (err) {
     console.error('[slackEvents] Maia brain network error:', err);
-    return { text: '(Maia call failed — network error.)', contextLoaded: false, lifeDocsUsed: relevantIds, recentMemoryUsed: 0 };
+    throw new MaiaBridgeError(
+      `network error calling Anthropic: ${(err as Error).message ?? String(err)}`,
+      'network'
+    );
   }
+
+  const json = (await res.json().catch(() => ({}))) as {
+    content?: Array<{ type: string; text?: string }>;
+    error?: { message?: string; type?: string };
+  };
+
+  if (!res.ok || json.error) {
+    const msg = json.error?.message ?? `HTTP ${res.status}`;
+    console.error('[slackEvents] Maia brain error:', msg, 'model=', ANTHROPIC_MODEL);
+    throw new MaiaBridgeError(
+      `Anthropic API error (model=${ANTHROPIC_MODEL}): ${msg}`,
+      'api_error',
+      res.status
+    );
+  }
+
+  const text = (json.content ?? [])
+    .filter((b) => b.type === 'text' && typeof b.text === 'string')
+    .map((b) => b.text!)
+    .join('')
+    .trim();
+  return {
+    text: text || '(No response from Maia)',
+    contextLoaded,
+    lifeDocsUsed: relevantIds,
+    recentMemoryUsed: recentMemory ? recentMemory.split('\n').length : 0,
+  };
 }
 
 // ─── Multi-Agent Huddle: Marco consults Maia, then produces unified response ─
@@ -1118,6 +1151,10 @@ interface HuddleResult {
   huddled: boolean;
   marcoInitial: string;
   maiaInput: string;
+  // Set when an explicit /huddle invocation aborted because the Maia bridge
+  // failed (missing key, API error, or network). Surfaced verbatim to the user
+  // instead of silently degrading to a Marco-only reply.
+  bridgeError?: { stage: string; message: string; status?: number };
 }
 
 // Routing modes:
@@ -1166,14 +1203,41 @@ async function runHuddle(
   const cleanMarcoReply = marcoReply.replace(/HUDDLE_DECISION:.+/g, '').trim();
   console.log(TAG, 'Marco initial reply length:', cleanMarcoReply.length);
 
-  // Step 2: Ask Maia for her perspective — with real Maia identity + life graph + recent memory
+  // Step 2: Ask Maia for her perspective — with real Maia identity + life graph + recent memory.
+  //
+  // /huddle is an explicit user intent for a two-agent answer. If the Maia
+  // bridge fails (missing key, invalid model, network), abort loudly instead
+  // of silently degrading to a solo synthesis with the "real Maia unavailable"
+  // banner. The user explicitly asked for a huddle — they should know it
+  // failed.
   const maiaQuestion = `Based on the user's request and Marco's analysis, what's your take? Use your life-graph context if relevant. What should we tell the user?`;
-  const maiaResult = await getMaiaBrainReply(
-    anthropicKey,
-    cleanMarcoReply,
-    maiaQuestion,
-    userMessage
-  );
+  let maiaResult: MaiaReplyResult;
+  try {
+    maiaResult = await getMaiaBrainReply(
+      anthropicKey,
+      cleanMarcoReply,
+      maiaQuestion,
+      userMessage
+    );
+  } catch (err) {
+    if (err instanceof MaiaBridgeError) {
+      console.error(TAG, `Maia bridge aborted huddle: stage=${err.stage} status=${err.status ?? 'n/a'} msg=${err.message}`);
+      const userMsg =
+        `*Huddle aborted — Maia bridge failed.*\n` +
+        `• stage: \`${err.stage}\`` +
+        (err.status ? `\n• status: \`${err.status}\`` : '') +
+        `\n• detail: ${err.message}\n` +
+        `Re-run as @marco for a solo answer, or fix the bridge and retry /huddle.`;
+      return {
+        finalReply: userMsg,
+        huddled: false,
+        marcoInitial: cleanMarcoReply,
+        maiaInput: '',
+        bridgeError: { stage: err.stage, message: err.message, status: err.status },
+      };
+    }
+    throw err;
+  }
   console.log(TAG, `Maia reply length: ${maiaResult.text.length}, contextLoaded=${maiaResult.contextLoaded}, lifeDocs=${maiaResult.lifeDocsUsed.length}`);
 
   // Step 3: Marco synthesizes final unified response.
@@ -1207,6 +1271,20 @@ async function runHuddle(
     marcoInitial: cleanMarcoReply,
     maiaInput: maiaResult.text,
   };
+}
+
+// Build a transcript footer to append to the final huddle reply so the user can
+// see both agents' actual contributions. Only meaningful when `huddled` is true
+// (real Maia context loaded). Caller decides whether to attach.
+export function formatHuddleTranscript(result: HuddleResult): string {
+  if (!result.huddled) return '';
+  const marco = (result.marcoInitial || '').trim();
+  const maia = (result.maiaInput || '').trim();
+  if (!marco && !maia) return '';
+  const sections: string[] = ['', '---', '*Huddle transcript*'];
+  if (marco) sections.push('', '*Marco (initial):*', marco);
+  if (maia) sections.push('', '*Maia (real-context):*', maia);
+  return sections.join('\n');
 }
 
 // HARD honesty guard. When Maia's real context did NOT load:
@@ -1520,6 +1598,15 @@ async function handleMention(
     console.error(TAG, 'Maia task queue failed:', err);
     // Don't fail the whole response
   }
+
+  // 6e. For explicit /huddle invocations, append the Marco+Maia transcript so
+  //     the user can see the actual two-agent exchange behind the synthesis.
+  //     Skips automatically when the bridge degraded (huddled=false).
+  if (routingMode === 'huddle') {
+    const transcript = formatHuddleTranscript(huddleResult);
+    if (transcript) finalReply = `${finalReply}${transcript}`;
+  }
+
   // 7. Stop the stream with the final reply (or post directly if stream failed)
   if (stream) {
     await stopStream(stream, finalReply);
@@ -1650,12 +1737,17 @@ export const slackEvents = onRequest(
       const text = (payload.text as string ?? '').trim();
       const ts = String(Date.now() / 1000);
       console.log(TAG, `/huddle from ${userId}: "${text}"`);
-      // Acknowledge immediately with a placeholder
+      // Acknowledge immediately with an EPHEMERAL placeholder so it doesn't
+      // linger in-channel after the real huddle reply posts. The real reply
+      // arrives via handleMention → postSlackMessage / stopStream and is
+      // visible to everyone.
       res.status(200).json({
-        response_type: 'in_channel',
-        text: '🤝 *Marco & Maia are huddling...*',
+        response_type: 'ephemeral',
+        text: '🤝 Huddle starting — Marco + Maia. The full reply will post in-channel shortly.',
       });
-      // Run the full huddle asynchronously
+      // Run the full huddle asynchronously. Force the `huddle:` prefix so
+      // detectRoutingMode → 'huddle' regardless of what the user typed; the
+      // slash command itself is the unambiguous intent signal.
       handleMention(botToken, openaiKey, anthropicKey, linearKey, sentryDsnValue, channel, ts, userId, {
         ts,
         text: `huddle: ${text}`,

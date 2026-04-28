@@ -4,7 +4,8 @@
     "build": "tsc",
     "serve": "npm run build && firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions",
-    "test:rules": "jest --rootDir=.. --testPathPattern='firestore\\.rules\\.test'"
+    "test:rules": "jest --rootDir=.. --testPathPattern='firestore\\.rules\\.test'",
+    "test:src": "node --max-old-space-size=4096 ./node_modules/jest/bin/jest.js --config jest.config.src.js"
   },
   "jest": {
     "preset": "ts-jest",
