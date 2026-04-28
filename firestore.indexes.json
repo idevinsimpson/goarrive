@@ -346,6 +346,24 @@
       "fields": [
         { "fieldPath": "funnelSubdomain", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "agent_messages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "huddle_id", "order": "ASCENDING" },
+        { "fieldPath": "type", "order": "ASCENDING" },
+        { "fieldPath": "turn_index", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "agent_messages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "to", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [
