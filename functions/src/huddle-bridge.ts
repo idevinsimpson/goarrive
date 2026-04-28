@@ -57,6 +57,7 @@ export interface HuddleTurnDoc {
   topic: string;
   assigned_position: 'advocate_pro' | 'advocate_con' | null;
   mode: 'advocate' | 'honest' | 'red-team';
+  role?: 'chair' | 'steward'; // Maia alternates chair/steward per round
   from: 'maia' | 'marco';
   to: 'marco' | 'maia';
   message: string;
