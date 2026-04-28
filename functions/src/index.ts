@@ -83,6 +83,11 @@ import { CloudTasksClient } from '@google-cloud/tasks';
 // ── Slack Bot (ME-011, ME-012) ────────────────────────────────────────────────
 export { slackEvents } from './slack';
 
+// ── Huddle Bridge (ME-013) — Marco-side Firestore trigger for real cross-bot huddles ──
+// Listens for agent_messages where type == "huddle_turn" && to == "marco",
+// generates Marco's real OpenAI response, and writes the reply back to agent_messages.
+export { marcoHuddleTurn } from './huddle-bridge';
+
 admin.initializeApp();
 
 const db = admin.firestore(); // IAM: datastore.user granted 2026-03-22

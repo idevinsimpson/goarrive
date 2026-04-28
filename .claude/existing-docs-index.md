@@ -3,6 +3,11 @@
 ## Overview
 The repository contains several documentation files from different phases of development. This index maps each document to its purpose and current relevance.
 
+## `.claude/` Directory
+| File | Purpose | Current Relevance |
+|---|---|---|
+| `agent_messages_schema.md` | Schema definition for the `agent_messages` Firestore collection, used for cross-bot huddles. | **High** — Active schema for the Huddle v2 system. |
+
 ## Root-Level Documents
 
 | File | Purpose | Current Relevance |
