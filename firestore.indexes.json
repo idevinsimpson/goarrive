@@ -341,13 +341,6 @@
       ]
     },
     {
-      "collectionGroup": "coaches",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "funnelSubdomain", "order": "ASCENDING" }
-      ]
-    },
-    {
       "collectionGroup": "agent_messages",
       "queryScope": "COLLECTION",
       "fields": [
