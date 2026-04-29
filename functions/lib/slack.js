@@ -204,7 +204,7 @@ async function startStream(botToken, channel, threadTs, teamId, userId) {
                 {
                     type: 'task_update',
                     id: 'thinking',
-                    title: 'Marco & Maia are thinking...',
+                    title: 'Thinking...',
                     status: 'in_progress',
                 },
             ],
@@ -232,7 +232,7 @@ async function stopStream(handle, finalText) {
                     type: 'task_update',
                     id: 'thinking',
                     title: 'Done',
-                    status: 'completed',
+                    status: 'complete',
                 },
                 {
                     type: 'markdown_text',

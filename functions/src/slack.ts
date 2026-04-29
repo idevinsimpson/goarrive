@@ -204,7 +204,7 @@ async function startStream(
         {
           type: 'task_update',
           id: 'thinking',
-          title: 'Marco & Maia are thinking...',
+          title: 'Thinking...',
           status: 'in_progress',
         },
       ],
@@ -233,7 +233,7 @@ async function stopStream(handle: StreamHandle, finalText: string): Promise<bool
           type: 'task_update',
           id: 'thinking',
           title: 'Done',
-          status: 'completed',
+          status: 'complete',
         },
         {
           type: 'markdown_text',
