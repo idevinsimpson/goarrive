@@ -10,7 +10,7 @@
  *   - Earnings cap: $40,000/year (prorated if mid-year join)
  *   - Profit share: 5% 1st gen, 3% 2nd gen (up to recruited coach's cap)
  *   - Inter-coach referral: 7% of net revenue, first year
- *   - Client referral: 3 referrals → full annual fee refund (G➲A covers 33%)
+ *   - Client referral: 3 referrals → full contract fee refund (G➲A covers 33%)
  *
  * Reads from:
  *   - coachStripeAccounts/{coachId}
@@ -641,7 +641,7 @@ export default function BillingDashboard() {
           <View style={s.card}>
             <Text style={s.cardTitle}>Member Referrals</Text>
             <Text style={{ color: MUTED, fontSize: 11, marginBottom: 10 }}>
-              Members referring new members (3 referrals = full annual fee refund; G➲A covers 33%)
+              Members referring new members (3 referrals = full contract fee refund; G➲A covers 33%)
             </Text>
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <View style={[s.statBox, { flex: 1 }]}>
@@ -957,7 +957,7 @@ function KnowTab({ tier, activePayingCount, nextTier, membersToNextTier, gen1Cou
     {
       icon: '↩️',
       title: 'Client referral rewards',
-      content: `Members who refer 3 new members within one year receive a full refund of their annual fees (G➲A Program Terms §7).\n\nContribution structure:\n• GoArrive covers 33% of the refund\n• Coach contributions are proportional to referrals received\n  (e.g., if you receive 2 of 3 referrals, you cover 2/3 of the coach portion)\n\nConditions:\n• Referred clients must sign up at the minimum support level of the referee\n• All must commit to a 1-year contract\n• Refund is paid after the last payment of the 3rd referral`,
+      content: `Members who refer 3 new members within their contract length receive a full refund of their contract fees (G➲A Program Terms §7).\n\nContribution structure:\n• GoArrive covers 33% of the refund\n• Coach contributions are proportional to referrals received\n  (e.g., if you receive 2 of 3 referrals, you cover 2/3 of the coach portion)\n\nConditions:\n• Referred clients must sign up at the minimum support level of the referee\n• All must commit to a matching contract length\n• Refund is paid after the last payment of the 3rd referral`,
     },
     {
       icon: '↩️',

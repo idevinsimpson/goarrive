@@ -261,7 +261,7 @@ export default function ContinuationCard({
                   {'🎁'} Referral Clock Resets
                 </Text>
                 <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
-                  {`Refer 3 friends into a yearly plan within ${plan.contractMonths || 12} months and your base membership is refunded — same rules as your original contract.`}
+                  {`Refer 3 friends into a ${plan.contractMonths || 12}-month plan within ${plan.contractMonths || 12} months and your base membership is refunded — same rules as your original contract.`}
                 </Text>
               </View>
 

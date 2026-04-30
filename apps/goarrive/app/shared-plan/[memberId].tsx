@@ -671,7 +671,7 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
         <View style={[inv.statsRow, { marginTop: 12, paddingVertical: 14, paddingHorizontal: 16 }]}>
           <Text style={{ color: MUTED, fontSize: 13, lineHeight: 19, textAlign: 'center' }}>
             <Text style={{ color: GOLD, fontWeight: '700' }}>Referral Rewards: </Text>
-            Invite 3 friends into a yearly plan and your base membership is refunded.
+            Invite 3 friends into a {plan.contractMonths || 12}-month plan and your base membership is refunded.
           </Text>
         </View>
       )}
@@ -907,7 +907,7 @@ function PostContractCard({ plan, sessionsPerMonth }: {
               <View style={{ padding: 10, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, borderWidth: 1, borderColor: BORDER }}>
                 <Text style={{ color: GOLD, fontSize: 13, fontWeight: '700', marginBottom: 2 }}>🎁 Referral Clock Resets</Text>
                 <Text style={{ color: MUTED, fontSize: 12, lineHeight: 18 }}>
-                  Refer 3 friends into a yearly plan within {plan.contractMonths || 12} months and your base membership is refunded — same as your original contract.
+                  Refer 3 friends into a {plan.contractMonths || 12}-month plan within {plan.contractMonths || 12} months and your base membership is refunded — same as your original contract.
                 </Text>
               </View>
             </View>
