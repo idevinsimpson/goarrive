@@ -23,6 +23,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import CoachRotation from './CoachRotation';
 
 /* ─── Brand Tokens ─── */
 const C = {
@@ -155,6 +156,7 @@ export default function LandingPage() {
         </Text>
         <CtaButton label="Find Your Coach" onPress={goStart} />
         <Text style={hero.trust}>Takes 2 minutes. No commitment required.</Text>
+        <CoachRotation isMobile={isMobile} />
       </View>
     </View>
   );
