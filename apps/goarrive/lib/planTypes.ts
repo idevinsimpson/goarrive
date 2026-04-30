@@ -75,7 +75,7 @@ export interface SessionTypeGuidance {
 
 // ─── Pricing types ────────────────────────────────────────────────────────────
 
-export type ContractLength = 6 | 9 | 12;
+export type ContractLength = 3 | 6 | 9 | 12;
 export type OverrideFrequency = 'week' | 'month' | 'year';
 
 export interface PricingInputs {
@@ -247,7 +247,7 @@ export interface AcceptedPlanSnapshot {
   snapshotAt: FirestoreTimestamp;  // Firestore Timestamp
 
   // ── Initial contract pricing ──
-  contractLengthMonths: 6 | 9 | 12;
+  contractLengthMonths: 3 | 6 | 9 | 12;
   hourlyRate: number;
   sessionLengthMinutes: number;
   checkInCallMinutes: number;
@@ -510,6 +510,7 @@ export function formatCurrency(amount: number): string {
 }
 
 export function monthsToWeeks(months: number): number {
+  if (months === 3) return 13;
   if (months === 6) return 26;
   if (months === 9) return 39;
   if (months === 12) return 52;
