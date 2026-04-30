@@ -80,19 +80,6 @@ export default function CoachRotation({ isMobile }: { isMobile: boolean }) {
   const [paused, setPaused] = useState(false);
   const reduceMotion = usePrefersReducedMotion();
 
-  // Preload every coach photo on mount so transitions don't flash a blank
-  // ring while the next image fetches. Image.prefetch warms the RN image
-  // cache on native; the hidden <Image> nodes guarantee the browser
-  // requests them on web before the carousel needs them.
-  useEffect(() => {
-    COACHES.forEach((c) => {
-      const src = Image.resolveAssetSource(c.photo);
-      if (src?.uri) {
-        Image.prefetch(src.uri).catch(() => {});
-      }
-    });
-  }, []);
-
   const opacity = useRef(new Animated.Value(1)).current;
   const translateX = useRef(new Animated.Value(0)).current;
 
@@ -159,13 +146,6 @@ export default function CoachRotation({ isMobile }: { isMobile: boolean }) {
 
   return (
     <View style={styles.wrap} {...hoverProps}>
-      {/* Hidden preload bay — forces the browser/RN image cache to fetch
-          every coach photo at mount, eliminating first-paint flicker. */}
-      <View style={styles.preload} pointerEvents="none" aria-hidden>
-        {COACHES.map((c) => (
-          <Image key={`pre-${c.name}`} source={c.photo} style={styles.preloadImg} />
-        ))}
-      </View>
       <View style={[styles.stage, { minHeight: isMobile ? 320 : 360 }]}>
         <Animated.View style={[styles.slide, animatedStyle]}>
           <View
@@ -282,16 +262,5 @@ const styles = StyleSheet.create({
   dotActive: {
     backgroundColor: C.gold,
     transform: [{ scale: 1.25 }],
-  },
-  preload: {
-    position: 'absolute',
-    width: 1,
-    height: 1,
-    opacity: 0,
-    overflow: 'hidden',
-  },
-  preloadImg: {
-    width: 1,
-    height: 1,
   },
 });
