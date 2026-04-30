@@ -2292,7 +2292,12 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
               <ButtonGroup options={[3, 6, 9, 12] as number[]} value={plan.contractMonths} onChange={(v) => {
                 const months = v as ContractLength;
                 const newPhases = createDefaultPhases(months);
-                onChange({ contractMonths: months, phases: newPhases });
+                const updatedIncluded = (plan.whatsIncluded || []).map(item =>
+                  /^\d+-month commitment$/i.test(item)
+                    ? `${months}-month commitment`
+                    : item
+                );
+                onChange({ contractMonths: months, phases: newPhases, whatsIncluded: updatedIncluded });
               }} />
             </View>
 

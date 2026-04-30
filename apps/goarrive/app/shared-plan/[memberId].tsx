@@ -381,12 +381,17 @@ export default function SharedPlanScreen() {
           <View style={{ marginBottom: 20 }}>
             <Text style={st.sectionLabel}>What's Included</Text>
             <View style={st.darkCard}>
-              {plan.whatsIncluded.map((item, i) => (
-                <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
-                  <Text style={{ fontSize: 16 }}>{'\u2705'}</Text>
-                  <Text style={{ color: '#C5CDD8', fontSize: 14, lineHeight: 20, flex: 1 }}>{item}</Text>
-                </View>
-              ))}
+              {plan.whatsIncluded.map((item, i) => {
+                const display = /^\d+-month commitment$/i.test(item)
+                  ? `${plan.contractMonths || plan.contractLengthMonths || 12}-month commitment`
+                  : item;
+                return (
+                  <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
+                    <Text style={{ fontSize: 16 }}>{'\u2705'}</Text>
+                    <Text style={{ color: '#C5CDD8', fontSize: 14, lineHeight: 20, flex: 1 }}>{display}</Text>
+                  </View>
+                );
+              })}
             </View>
           </View>
         ) : null}
