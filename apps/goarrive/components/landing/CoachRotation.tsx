@@ -80,6 +80,23 @@ export default function CoachRotation({ isMobile }: { isMobile: boolean }) {
   const [paused, setPaused] = useState(false);
   const reduceMotion = usePrefersReducedMotion();
 
+  // Warm the browser cache for every coach photo on mount so the first
+  // slide doesn't flash a blank ring while the JPG fetches. Pure browser
+  // API — react-native-web 0.21 does not expose Image.resolveAssetSource,
+  // so we read the bundled asset's .uri directly instead.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    COACHES.forEach((c) => {
+      const uri = (c.photo as { uri?: string } | number)?.['uri' as never] as
+        | string
+        | undefined;
+      if (typeof uri === 'string') {
+        const img = new window.Image();
+        img.src = uri;
+      }
+    });
+  }, []);
+
   const opacity = useRef(new Animated.Value(1)).current;
   const translateX = useRef(new Animated.Value(0)).current;
 
