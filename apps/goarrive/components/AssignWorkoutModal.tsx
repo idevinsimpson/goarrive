@@ -123,6 +123,21 @@ function getInitials(name: string): string {
     .slice(0, 2);
 }
 
+// Workouts are stored as { blocks: [{ movements: [...] }, ...] }.
+// Older or partial docs may carry a legacy flat `exercises` array.
+// Sum across blocks, then fall back to the legacy field.
+function workoutMovementCount(data: any): number {
+  if (Array.isArray(data?.blocks)) {
+    let n = 0;
+    for (const b of data.blocks) {
+      if (Array.isArray(b?.movements)) n += b.movements.length;
+    }
+    if (n > 0) return n;
+  }
+  if (Array.isArray(data?.exercises)) return data.exercises.length;
+  return 0;
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 type Step = 'pickWorkout' | 'pickMember' | 'schedule' | 'success';
@@ -191,7 +206,7 @@ export default function AssignWorkoutModal({
             return {
               id: d.id,
               name: data.name ?? 'Untitled',
-              exerciseCount: Array.isArray(data.exercises) ? data.exercises.length : 0,
+              exerciseCount: workoutMovementCount(data),
               category: data.category ?? '',
             };
           }),
