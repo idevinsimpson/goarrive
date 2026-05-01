@@ -262,9 +262,6 @@ export default function SchedulingScreen() {
               {needsAttention.length > 0 ? ` · ${needsAttention.length} need attention` : ''}
             </Text>
           </View>
-          <View style={s.betaBadge}>
-            <Text style={s.betaText}>BETA</Text>
-          </View>
         </View>
 
         {/* Tab Bar */}
@@ -841,8 +838,6 @@ const s = StyleSheet.create({
   headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 10 },
   pageTitle: { color: WHITE, fontSize: 20, fontWeight: '700', fontFamily: FONT },
   subtitle: { color: MUTED, fontSize: 13, marginTop: 2, fontFamily: FONT },
-  betaBadge: { backgroundColor: GOLD + '20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
-  betaText: { color: GOLD, fontSize: 10, fontWeight: '700', letterSpacing: 1 },
 
   tabBar: { flexDirection: 'row', marginBottom: 16, gap: 4 },
   tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8, backgroundColor: CARD_BG },

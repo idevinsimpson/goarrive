@@ -1332,7 +1332,7 @@ export default function WorkoutForm({
       <Pressable style={s.pickerOverlay} onPress={() => setShowGlobalTiming(false)}>
         <Pressable style={s.pickerSheet} onPress={(e) => e.stopPropagation()}>
           <Text style={s.pickerTitle}>Global Timing</Text>
-          <Text style={[s.pickerSubtitle, { marginTop: 0 }]}>Apply to all exercise blocks</Text>
+          <Text style={[s.pickerSubtitle, { marginTop: 0 }]}>Apply to all movement blocks</Text>
 
           <View style={s.globalTimingGrid}>
             <View style={s.globalTimingItem}>

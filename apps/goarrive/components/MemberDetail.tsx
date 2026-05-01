@@ -301,27 +301,22 @@ export default function MemberDetail({
           >
             <Text style={s.sectionLabel}>MEMBER HUB</Text>
             <View style={s.grid}>
-              {tiles.map((tile) => (
+              {tiles.filter((t) => t.live).map((tile) => (
                 <TouchableOpacity
                   key={tile.label}
-                  style={[s.tile, { backgroundColor: tile.bgColor, borderColor: tile.live ? tile.color + '40' : BORDER }]}
-                  onPress={tile.live && tile.onPress ? tile.onPress : undefined}
-                  activeOpacity={tile.live ? 0.7 : 1}
+                  style={[s.tile, { backgroundColor: tile.bgColor, borderColor: tile.color + '40' }]}
+                  onPress={tile.onPress}
+                  activeOpacity={0.7}
                 >
                   <View style={[s.tileIcon, { backgroundColor: tile.bgColor }]}>
-                    <Icon name={tile.icon as any} size={20} color={tile.live ? tile.color : MUTED} />
+                    <Icon name={tile.icon as any} size={20} color={tile.color} />
                   </View>
-                  <Text style={[s.tileLabel, { color: tile.live ? '#F0F4F8' : MUTED }]} numberOfLines={1}>
+                  <Text style={[s.tileLabel, { color: '#F0F4F8' }]} numberOfLines={1}>
                     {tile.label}
                   </Text>
                   {tile.sublabel ? (
                     <Text style={s.tileSublabel} numberOfLines={1}>{tile.sublabel}</Text>
                   ) : null}
-                  {!tile.live && (
-                    <View style={s.comingSoonBadge}>
-                      <Text style={s.comingSoonText}>Soon</Text>
-                    </View>
-                  )}
                 </TouchableOpacity>
               ))}
             </View>
