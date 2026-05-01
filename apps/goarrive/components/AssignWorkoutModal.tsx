@@ -594,7 +594,7 @@ export default function AssignWorkoutModal({
                       <View style={s.cardInfo}>
                         <Text style={s.cardName} numberOfLines={1}>{w.name}</Text>
                         <Text style={s.cardMeta}>
-                          {w.exerciseCount} exercise{w.exerciseCount !== 1 ? 's' : ''}
+                          {w.exerciseCount} movement{w.exerciseCount !== 1 ? 's' : ''}
                           {w.category ? ` · ${w.category}` : ''}
                         </Text>
                       </View>

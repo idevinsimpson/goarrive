@@ -31,7 +31,7 @@ interface Step {
 }
 
 const STEP_DEFS = [
-  { label: 'Add a movement', sublabel: 'Build your exercise library' },
+  { label: 'Add a movement', sublabel: 'Build your movement library' },
   { label: 'Create a workout', sublabel: 'Design your first program' },
   { label: 'Add a member', sublabel: 'Grow your coaching roster' },
   { label: 'Assign a workout', sublabel: 'Put your member to work' },

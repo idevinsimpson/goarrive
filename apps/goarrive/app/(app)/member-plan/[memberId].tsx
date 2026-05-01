@@ -1667,7 +1667,7 @@ function CoachingInvestmentSection({ plan, pricing, isCoach, onChange }: {
 
       {hidden && isCoach && (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10, padding: 8, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
-          <Text style={{ color: MUTED, fontSize: 12, fontStyle: 'italic' }}>Investment hidden from member</Text>
+          <Text style={{ color: MUTED, fontSize: 12, fontStyle: 'italic' }}>Pricing not shown to member</Text>
         </View>
       )}
 
@@ -3354,9 +3354,6 @@ export default function MemberPlanScreen() {
               style={[mt.btn, isCoachMode && mt.btnActive]}>
               <Icon name="settings" size={14} color={isCoachMode ? '#FFF' : MUTED} />
               <Text style={[mt.btnText, isCoachMode && mt.btnTextActive]}>Coach</Text>
-              <View style={{ backgroundColor: 'rgba(245,166,35,0.2)', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
-                <Text style={{ fontSize: 8, fontWeight: '700', color: '#F5A623', letterSpacing: 0.8 }}>BETA</Text>
-              </View>
             </Pressable>
             <Pressable onPress={() => setIsCoachMode(false)}
               style={[mt.btn, !isCoachMode && mt.btnActive]}>
