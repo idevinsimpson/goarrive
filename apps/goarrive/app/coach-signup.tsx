@@ -43,8 +43,14 @@ export default function CoachSignupScreen() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
-  // If no token, show an error immediately
-  const hasToken = !!token;
+  // Defer reading URL params until after hydration so the SSR HTML
+  // (which has no query string) matches the client's first render.
+  // Without this, /coach-signup?token=xyz mismatches: SSR renders
+  // "Invalid Invite" while client renders the form → React #418.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+  const hasToken = mounted && !!token;
 
   async function handleSignup() {
     if (!name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim()) {

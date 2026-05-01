@@ -6,6 +6,8 @@
       "**/.*",
       "**/node_modules/**"
     ],
+    "cleanUrls": true,
+    "trailingSlash": false,
     "rewrites": [
       {
         "source": "/service-worker.js",
@@ -16,12 +18,20 @@
         "destination": "/manifest.json"
       },
       {
-        "source": "!/_expo/**",
-        "destination": "/index.html"
+        "source": "/shared-plan/**",
+        "destination": "/shared-plan/[memberId].html"
       },
       {
-        "source": "!/assets/**",
-        "destination": "/index.html"
+        "source": "/member-plan/**",
+        "destination": "/member-plan/[memberId].html"
+      },
+      {
+        "source": "/join/**",
+        "destination": "/join/[sessionInstanceId].html"
+      },
+      {
+        "source": "/intake/*",
+        "destination": "/intake/[coachId].html"
       },
       {
         "source": "**",
