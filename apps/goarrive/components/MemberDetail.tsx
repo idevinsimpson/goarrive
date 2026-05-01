@@ -348,6 +348,7 @@ export default function MemberDetail({
       <AssignWorkoutModal
         visible={showAssignWorkout}
         memberName={currentMember.firstName ? `${currentMember.firstName} ${currentMember.lastName ?? ''}`.trim() : currentMember.email ?? ''}
+        memberId={currentMember.id}
         coachId={coachId}
         preselectedWorkoutId=""
         preselectedWorkoutName=""
