@@ -101,8 +101,10 @@ export default function WorkoutLogReview({
     try {
       await updateDoc(doc(db, 'workout_logs', logId), {
         reviewedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
         coachReaction: reaction || null,
-        coachComment: comment || null,
+        coachNote: comment || null,
+        reviewStatus: 'reviewed',
       });
       setLogs((prev) => prev.filter((l) => l.id !== logId));
       setReviewingId(null);

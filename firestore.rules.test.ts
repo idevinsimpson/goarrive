@@ -48,6 +48,8 @@ const MEMBER_A_UID = 'memberA'; // belongs to Coach A
 const MEMBER_B_UID = 'memberB'; // belongs to Coach B
 const PLAN_A_ID = 'planA';      // owned by Coach A, for Member A
 const PLAN_B_ID = 'planB';      // owned by Coach B, for Member B
+const ADMIN_UID = 'platformAdmin1';
+const LOG_PENDING_A_ID = 'logPendingA'; // pending workout log: Member A, Coach A
 
 // ─── Test environment setup ───────────────────────────────────────────────────
 
@@ -115,6 +117,15 @@ beforeEach(async () => {
       coachId: COACH_A_UID,
       goals: ['Fat loss'],
     });
+
+    // Seed pending workout_log (no review fields yet)
+    await setDoc(doc(db, 'workout_logs', LOG_PENDING_A_ID), {
+      memberId: MEMBER_A_UID,
+      coachId: COACH_A_UID,
+      assignmentId: 'asgA',
+      completedAt: new Date('2026-04-30T12:00:00Z'),
+      journal: '',
+    });
   });
 });
 
@@ -139,6 +150,11 @@ function asMemberB() {
 
 function asUnauthenticated() {
   return testEnv.unauthenticatedContext().firestore();
+}
+
+function asPlatformAdmin() {
+  // Custom-claim platformAdmin: token.admin == true triggers isPlatformAdmin()
+  return testEnv.authenticatedContext(ADMIN_UID, { admin: true }).firestore();
 }
 
 // ─── member_plans ─────────────────────────────────────────────────────────────
@@ -283,6 +299,91 @@ describe('intakeSubmissions', () => {
         uid: null,
         coachId: COACH_A_UID,
         goals: ['Fat loss'],
+      })
+    );
+  });
+});
+
+// ─── workout_logs (coach review field alignment) ──────────────────────────────
+
+describe('workout_logs — coach review field alignment', () => {
+  test('non-admin coach (bootstrap) can update pending log to reviewed using canonical fields', async () => {
+    await assertSucceeds(
+      updateDoc(doc(asCoachA(), 'workout_logs', LOG_PENDING_A_ID), {
+        coachNote: 'Great form on the squats.',
+        coachReaction: '💪',
+        reviewedAt: new Date('2026-05-02T14:00:00Z'),
+        reviewStatus: 'reviewed',
+        updatedAt: new Date('2026-05-02T14:00:00Z'),
+      })
+    );
+  });
+
+  test('non-admin coach cannot write a stray field alongside canonical review fields', async () => {
+    await assertFails(
+      updateDoc(doc(asCoachA(), 'workout_logs', LOG_PENDING_A_ID), {
+        coachNote: 'note',
+        coachReaction: '🔥',
+        reviewedAt: new Date('2026-05-02T14:00:00Z'),
+        reviewStatus: 'reviewed',
+        updatedAt: new Date('2026-05-02T14:00:00Z'),
+        memberId: 'hacked', // stray / disallowed
+      })
+    );
+  });
+
+  test('member cannot write coach review fields on their own log', async () => {
+    await assertFails(
+      updateDoc(doc(asMemberA(), 'workout_logs', LOG_PENDING_A_ID), {
+        coachNote: 'self-praise',
+        reviewStatus: 'reviewed',
+      })
+    );
+  });
+
+  test('member journal update on own log still works', async () => {
+    await assertSucceeds(
+      updateDoc(doc(asMemberA(), 'workout_logs', LOG_PENDING_A_ID), {
+        journal: 'Felt strong today.',
+        glow: 'Hit a new PR',
+        grow: 'Need more sleep',
+        rating: 4,
+        updatedAt: new Date('2026-05-02T14:00:00Z'),
+      })
+    );
+  });
+
+  test('platformAdmin bypass still works (can write canonical + stray together)', async () => {
+    await assertSucceeds(
+      updateDoc(doc(asPlatformAdmin(), 'workout_logs', LOG_PENDING_A_ID), {
+        coachNote: 'admin override',
+        coachReaction: '⭐',
+        reviewedAt: new Date('2026-05-02T14:00:00Z'),
+        reviewStatus: 'reviewed',
+        updatedAt: new Date('2026-05-02T14:00:00Z'),
+        adminAudit: { actor: ADMIN_UID }, // stray field allowed under admin bypass
+      })
+    );
+  });
+
+  test('legacy coachComment write by coach is rejected', async () => {
+    await assertFails(
+      updateDoc(doc(asCoachA(), 'workout_logs', LOG_PENDING_A_ID), {
+        coachComment: 'legacy field name',
+        coachReaction: '👏',
+        reviewedAt: new Date('2026-05-02T14:00:00Z'),
+        updatedAt: new Date('2026-05-02T14:00:00Z'),
+      })
+    );
+  });
+
+  test('legacy coachNotes (plural) write by coach is rejected', async () => {
+    await assertFails(
+      updateDoc(doc(asCoachA(), 'workout_logs', LOG_PENDING_A_ID), {
+        coachNotes: 'legacy plural field',
+        coachReaction: '❤️',
+        reviewedAt: new Date('2026-05-02T14:00:00Z'),
+        updatedAt: new Date('2026-05-02T14:00:00Z'),
       })
     );
   });
