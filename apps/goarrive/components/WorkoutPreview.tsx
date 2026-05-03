@@ -38,6 +38,8 @@ interface WorkoutPreviewProps {
   onClose: () => void;
   /** When true, shows a lightweight "Coach Preview" label */
   isPreview?: boolean;
+  /** Optional note from the coach attached to this assignment (≤200 chars). */
+  assignmentNote?: string;
 }
 
 /** Equipment checklist item with toggle */
@@ -63,6 +65,7 @@ export default function WorkoutPreview({
   onStart,
   onClose,
   isPreview = false,
+  assignmentNote,
 }: WorkoutPreviewProps) {
   const { getCachedUri, cacheVideos, progress, isCaching } = useOfflineVideoCache();
 
@@ -217,6 +220,14 @@ export default function WorkoutPreview({
           <Text style={st.workoutName}>{workout.name || 'Workout'}</Text>
           {workout.description ? (
             <Text style={st.workoutDesc}>{workout.description}</Text>
+          ) : null}
+
+          {/* Coach assignment note */}
+          {assignmentNote ? (
+            <View style={st.noteCard}>
+              <Text style={st.noteLabel}>Note from your coach</Text>
+              <Text style={st.noteBody}>{assignmentNote}</Text>
+            </View>
           ) : null}
 
           {/* Stats row */}
@@ -374,6 +385,30 @@ const st = StyleSheet.create({
     fontFamily: FB,
     lineHeight: 20,
     marginBottom: 20,
+  },
+  noteCard: {
+    backgroundColor: 'rgba(245,166,35,0.08)',
+    borderLeftWidth: 3,
+    borderLeftColor: '#F5A623',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 20,
+    gap: 6,
+  },
+  noteLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#F5A623',
+    fontFamily: FH,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  noteBody: {
+    fontSize: 14,
+    color: '#F0F4F8',
+    fontFamily: FB,
+    lineHeight: 20,
   },
   statsRow: {
     flexDirection: 'row',

@@ -23,6 +23,7 @@ import { collection, getDocs, query, where, limit } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import { FB, FH } from '../lib/theme';
+import { router } from 'expo-router';
 
 interface Step {
   label: string;
@@ -133,6 +134,20 @@ export default function OnboardingChecklist() {
           </View>
         ))}
       </View>
+
+      {/* Contextual hint: workout built, no member yet */}
+      {steps[1].done && !steps[2].done ? (
+        <View style={s.hintRow}>
+          <Text style={s.hintText}>You've got a workout — invite your first member.</Text>
+          <Pressable
+            style={s.hintBtn}
+            onPress={() => router.push('/members?openShare=1' as any)}
+            hitSlop={6}
+          >
+            <Text style={s.hintBtnText}>Share intake link</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -262,5 +277,39 @@ const s = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 5,
     overflow: 'hidden',
+  },
+  hintRow: {
+    marginTop: 4,
+    marginHorizontal: 16,
+    marginBottom: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.25)',
+    backgroundColor: 'rgba(245,166,35,0.06)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  hintText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#D0D8E4',
+    fontFamily: FB,
+    lineHeight: 16,
+  },
+  hintBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#F5A623',
+  },
+  hintBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0F1623',
+    fontFamily: FH,
   },
 });

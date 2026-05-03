@@ -408,8 +408,9 @@ export default function DashboardScreen() {
         visible={showQuickAssign}
         onClose={() => setShowQuickAssign(false)}
         coachId={coachId}
-        onAssign={async (workoutId: string, _workoutName: string, scheduledFor: Date, memberId: string) => {
+        onAssign={async (workoutId: string, _workoutName: string, scheduledFor: Date, memberId: string, assignmentNote?: string) => {
           const { addDoc, collection: col, Timestamp } = await import('firebase/firestore');
+          const trimmedNote = (assignmentNote ?? '').trim().slice(0, 200);
           await addDoc(col(db, 'workout_assignments'), {
             workoutId,
             memberId,
@@ -417,6 +418,7 @@ export default function DashboardScreen() {
             scheduledFor: Timestamp.fromDate(scheduledFor),
             status: 'assigned',
             createdAt: Timestamp.now(),
+            ...(trimmedNote ? { assignmentNote: trimmedNote } : {}),
           });
           setShowQuickAssign(false);
           fetchData();
