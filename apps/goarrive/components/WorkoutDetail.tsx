@@ -107,6 +107,7 @@ export default function WorkoutDetail({
     workoutName: string,
     scheduledFor: Date,
     memberId: string,
+    assignmentNote?: string,
   ) {
     try {
       // Snapshot workout data at assignment time for versioning
@@ -119,6 +120,7 @@ export default function WorkoutDetail({
         blocks: currentWorkout.blocks ?? [],
         tags: currentWorkout.tags ?? [],
       };
+      const trimmedNote = (assignmentNote ?? '').trim().slice(0, 200);
       await addDoc(collection(db, 'workout_assignments'), {
         memberId,
         coachId,
@@ -129,6 +131,7 @@ export default function WorkoutDetail({
         status: 'scheduled',
         createdAt: Timestamp.now(),
         workoutSnapshot,
+        ...(trimmedNote ? { assignmentNote: trimmedNote } : {}),
       });
     } catch (err) {
       console.error('Failed to assign workout:', err);

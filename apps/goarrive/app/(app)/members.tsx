@@ -56,6 +56,7 @@ import ConfirmDialog from '../../components/ConfirmDialog';
 import UndoToast from '../../components/UndoToast';
 import ListSkeleton from '../../components/ListSkeleton';
 import AssignWorkoutModal from '../../components/AssignWorkoutModal';
+import { useLocalSearchParams, router } from 'expo-router';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -85,6 +86,7 @@ export default function MembersScreen() {
   // Use effectiveUid to respect admin override (View as Coach)
   const coachId = effectiveUid || claims?.coachId || user?.uid || '';
   const tenantId = claims?.tenantId ?? '';
+  const params = useLocalSearchParams<{ openShare?: string }>();
 
   // ── State ────────────────────────────────────────────────────────────
   const [members, setMembers] = useState<MemberListItem[]>([]);
@@ -124,6 +126,14 @@ export default function MembersScreen() {
   // Share intake form state
   const [showShareModal, setShowShareModal] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+
+  // Auto-open share modal when navigated with ?openShare=1 (onboarding hint)
+  useEffect(() => {
+    if (params.openShare === '1') {
+      setShowShareModal(true);
+      router.setParams({ openShare: undefined });
+    }
+  }, [params.openShare]);
 
   // NEXT-A / NEXT-D: assignment counts + today flag per member
   const [assignMeta, setAssignMeta] = useState<Record<string, MemberAssignmentMeta>>({});
@@ -342,9 +352,11 @@ export default function MembersScreen() {
     workoutName: string,
     scheduledFor: Date,
     memberId?: string,
+    assignmentNote?: string,
   ) {
     const mid = memberId || assignTarget?.id;
     if (!mid) return;
+    const trimmedNote = (assignmentNote ?? '').trim().slice(0, 200);
     try {
       await addDoc(collection(db, 'workout_assignments'), {
         memberId: mid,
@@ -355,6 +367,7 @@ export default function MembersScreen() {
         scheduledFor: Timestamp.fromDate(scheduledFor),
         status: 'scheduled',
         createdAt: Timestamp.now(),
+        ...(trimmedNote ? { assignmentNote: trimmedNote } : {}),
       });
       // Trigger refresh of AssignedWorkoutsList in MemberDetail
       setAssignmentRefresh((prev) => prev + 1);

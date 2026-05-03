@@ -61,7 +61,7 @@ interface Props {
   memberId?: string;
   coachId: string;
   onClose: () => void;
-  onAssign: (workoutId: string, workoutName: string, scheduledFor: Date, memberId: string) => void;
+  onAssign: (workoutId: string, workoutName: string, scheduledFor: Date, memberId: string, assignmentNote?: string) => void;
   /** When provided, skip the workout-picker step (Build screen flow) */
   preselectedWorkoutId?: string;
   preselectedWorkoutName?: string;
@@ -164,6 +164,7 @@ export default function AssignWorkoutModal({
   const [selectedMember, setSelectedMember] = useState<MemberPickerItem | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [dateInput, setDateInput] = useState(toDateString(new Date()));
+  const [assignmentNote, setAssignmentNote] = useState('');
   const [assigning, setAssigning] = useState(false);
 
   // Workout preview
@@ -261,6 +262,7 @@ export default function AssignWorkoutModal({
       setLastAssignedName('');
       setWorkoutSearch('');
       setMemberSearch('');
+      setAssignmentNote('');
       setPreviewBlocks([]);
       recurring.reset();
 
@@ -406,8 +408,9 @@ export default function AssignWorkoutModal({
     setAssigning(true);
     try {
       const dates = recurring.generateDates(selectedDate);
+      const trimmedNote = assignmentNote.trim().slice(0, 200);
       for (const d of dates) {
-        await onAssign(selectedWorkout.id, selectedWorkout.name, d, effectiveMemberId);
+        await onAssign(selectedWorkout.id, selectedWorkout.name, d, effectiveMemberId, trimmedNote || undefined);
       }
       setLastAssignedName(selectedWorkout.name);
       setStep('success');
@@ -421,6 +424,7 @@ export default function AssignWorkoutModal({
     setSelectedMember(hasMemberPreselected ? selectedMember : null);
     setWorkoutSearch('');
     setMemberSearch('');
+    setAssignmentNote('');
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     setSelectedDate(today);
@@ -749,6 +753,24 @@ export default function AssignWorkoutModal({
                 {formatDateDisplay(selectedDate)}
               </Text>
 
+              {/* Assignment note (optional, max 200 chars) */}
+              <Text style={s.sectionLabel}>
+                {effectiveMemberName
+                  ? `Note for ${effectiveMemberName} (optional)`
+                  : 'Note (optional)'}
+              </Text>
+              <TextInput
+                style={s.noteInput}
+                value={assignmentNote}
+                onChangeText={(t) => setAssignmentNote(t.slice(0, 200))}
+                placeholder="Quick reminder, encouragement, or focus point…"
+                placeholderTextColor="#4A5568"
+                multiline
+                maxLength={200}
+                textAlignVertical="top"
+              />
+              <Text style={s.noteCounter}>{assignmentNote.length} / 200</Text>
+
               {/* Recurring toggle */}
               <View style={s.recurringSection}>
                 <Pressable
@@ -1057,6 +1079,27 @@ const s = StyleSheet.create({
     fontFamily: FB,
     marginBottom: 32,
     paddingLeft: 4,
+  },
+  noteInput: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: '#F0F4F8',
+    fontFamily: FB,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    minHeight: 64,
+    maxHeight: 120,
+    marginBottom: 6,
+  },
+  noteCounter: {
+    fontSize: 11,
+    color: '#4A5568',
+    fontFamily: FB,
+    textAlign: 'right',
+    marginBottom: 18,
   },
   confirmBtn: {
     flexDirection: 'row',

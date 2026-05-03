@@ -66,6 +66,8 @@ interface AssignedWorkout {
   completedAt?: any;
   /** Snapshot of workout data at assignment time (versioning) */
   workoutSnapshot?: any;
+  /** Optional note from coach attached at assignment time (≤200 chars) */
+  assignmentNote?: string;
 }
 
 /** Lightweight reaction data from workout_logs for completed assignments */
@@ -121,6 +123,7 @@ export default function MemberWorkoutsScreen() {
   // Preview state (Suggestion 1: WorkoutPreview before player launch)
   const [previewVisible, setPreviewVisible] = useState(false);
   const [previewWorkout, setPreviewWorkout] = useState<any>(null);
+  const [previewNote, setPreviewNote] = useState<string>('');
 
   // Swap log state (S5: track movement swaps for workout_log)
   const [sessionSwapLog, setSessionSwapLog] = useState<any[]>([]);
@@ -167,6 +170,7 @@ export default function MemberWorkoutsScreen() {
             assignedAt: data.assignedAt,
             completedAt: data.completedAt,
             workoutSnapshot: data.workoutSnapshot ?? null,
+            assignmentNote: data.assignmentNote ?? '',
           };
         });
         setAssignments(list);
@@ -212,6 +216,7 @@ export default function MemberWorkoutsScreen() {
 
         // Show preview first instead of jumping straight to player
         setPreviewWorkout(workoutData);
+        setPreviewNote(assignment.assignmentNote ?? '');
         setActiveAssignmentId(assignment.id);
         setPreviewVisible(true);
       } catch (err) {
@@ -403,6 +408,15 @@ export default function MemberWorkoutsScreen() {
           </View>
         </View>
 
+        {item.assignmentNote ? (
+          <View style={s.todayNoteRow}>
+            <Text style={s.todayNoteLabel}>Note from your coach</Text>
+            <Text style={s.todayNoteText} numberOfLines={2}>
+              {item.assignmentNote}
+            </Text>
+          </View>
+        ) : null}
+
         <Pressable
           style={[s.startButton, isLoading && s.startButtonDisabled]}
           onPress={() => handleStartWorkout(item)}
@@ -463,6 +477,11 @@ export default function MemberWorkoutsScreen() {
         {section === 'completed' && reactions[item.id]?.coachNote ? (
           <Text style={s.coachNotePreview} numberOfLines={1}>
             Coach: "{reactions[item.id].coachNote}"
+          </Text>
+        ) : null}
+        {(section === 'upcoming' || section === 'missed') && item.assignmentNote ? (
+          <Text style={s.assignmentNotePreview} numberOfLines={1}>
+            Note: "{item.assignmentNote}"
           </Text>
         ) : null}
       </View>
@@ -654,6 +673,7 @@ export default function MemberWorkoutsScreen() {
       <WorkoutPreview
         visible={previewVisible}
         workout={previewWorkout}
+        assignmentNote={previewNote || undefined}
         onStart={() => {
           setPreviewVisible(false);
           setPlayerWorkout(previewWorkout);
@@ -672,6 +692,7 @@ export default function MemberWorkoutsScreen() {
         onClose={() => {
           setPreviewVisible(false);
           setPreviewWorkout(null);
+          setPreviewNote('');
           setActiveAssignmentId(null);
         }}
       />
@@ -940,6 +961,39 @@ const s = StyleSheet.create({
     fontFamily: FB,
     fontStyle: 'italic',
     marginTop: 3,
+  },
+  assignmentNotePreview: {
+    fontSize: 11,
+    color: '#F5A623',
+    fontFamily: FB,
+    fontStyle: 'italic',
+    marginTop: 3,
+  },
+
+  // Coach note on today card
+  todayNoteRow: {
+    backgroundColor: 'rgba(245,166,35,0.08)',
+    borderLeftWidth: 3,
+    borderLeftColor: '#F5A623',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 14,
+    gap: 4,
+  },
+  todayNoteLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#F5A623',
+    fontFamily: FH,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  todayNoteText: {
+    fontSize: 13,
+    color: '#F0F4F8',
+    fontFamily: FB,
+    lineHeight: 18,
   },
 
   // Empty state

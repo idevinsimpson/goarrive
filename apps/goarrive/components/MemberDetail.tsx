@@ -348,7 +348,7 @@ export default function MemberDetail({
         preselectedWorkoutId=""
         preselectedWorkoutName=""
         onClose={() => setShowAssignWorkout(false)}
-        onAssign={async (workoutId, workoutName, scheduledFor, memberId) => {
+        onAssign={async (workoutId, workoutName, scheduledFor, memberId, assignmentNote) => {
           try {
             const { Timestamp, getDoc } = await import('firebase/firestore');
             // Suggestion 7: Snapshot workout data at assignment time for versioning
@@ -371,6 +371,7 @@ export default function MemberDetail({
             } catch (snapErr) {
               console.warn('Could not snapshot workout for versioning:', snapErr);
             }
+            const trimmedNote = (assignmentNote ?? '').trim().slice(0, 200);
             await addDoc(collection(db, 'workout_assignments'), {
               memberId: memberId || currentMember.id,
               coachId,
@@ -381,6 +382,7 @@ export default function MemberDetail({
               status: 'scheduled',
               createdAt: Timestamp.now(),
               ...(workoutSnapshot ? { workoutSnapshot } : {}),
+              ...(trimmedNote ? { assignmentNote: trimmedNote } : {}),
             });
           } catch (err) {
             console.error('Failed to assign workout:', err);
@@ -392,6 +394,10 @@ export default function MemberDetail({
         visible={showReviewQueue}
         coachId={claims?.coachId || authUser?.uid || ''}
         onClose={() => setShowReviewQueue(false)}
+        onAssignClick={() => {
+          setShowReviewQueue(false);
+          setShowAssignWorkout(true);
+        }}
       />
       <WorkoutAnalytics
         visible={showAnalytics}

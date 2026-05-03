@@ -63,6 +63,8 @@ interface CoachReviewQueueProps {
   onClose: () => void;
   /** Optional map of memberId → memberName for display */
   memberNames?: Record<string, string>;
+  /** Optional handler to assign a workout from the empty pending state */
+  onAssignClick?: () => void;
 }
 
 const ENERGY_LABELS = ['Drained', 'Low', 'Steady', 'Strong', 'On Fire'];
@@ -75,6 +77,7 @@ export default function CoachReviewQueue({
   coachId,
   onClose,
   memberNames = {},
+  onAssignClick,
 }: CoachReviewQueueProps) {
   const [logs, setLogs] = useState<WorkoutLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -438,6 +441,16 @@ export default function CoachReviewQueue({
                 ? 'Reviewed workout logs will appear here.'
                 : 'No pending workout reviews. Great job staying on top of it!'}
             </Text>
+            {!showReviewed && onAssignClick ? (
+              <TouchableOpacity
+                style={st.emptyAssignBtn}
+                onPress={onAssignClick}
+                activeOpacity={0.85}
+              >
+                <Icon name="plus" size={16} color="#F5A623" />
+                <Text style={st.emptyAssignBtnText}>Assign a workout</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         ) : (
           <FlatList
@@ -795,6 +808,24 @@ const st = StyleSheet.create({
     fontFamily: FB,
     textAlign: 'center',
     lineHeight: 22,
+  },
+  emptyAssignBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.4)',
+    backgroundColor: 'rgba(245,166,35,0.08)',
+  },
+  emptyAssignBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#F5A623',
+    fontFamily: FH,
   },
 
   // Detail modal
