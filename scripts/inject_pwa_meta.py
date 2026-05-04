@@ -8,8 +8,13 @@ Injects into dist/index.html:
   4. CSS overrides for fixed header/tab-bar positioning on web
   5. Safari-specific fixes and error handling
   6. Modal scroll fixes for iOS Safari PWA
+  7. Open Graph + Twitter card tags for link previews (iMessage, Slack, Twitter, Facebook)
 
 Run after `expo export --platform web` and before `firebase deploy`.
+
+Environment variables:
+  SITE_URL — canonical site origin (default: https://goarrive.fit). Override on staging:
+             SITE_URL=https://goarrive--staging-gurfzjak.web.app python3 scripts/inject_pwa_meta.py
 """
 import os
 import sys
@@ -18,6 +23,16 @@ DIST_DIR = os.path.join(
     os.path.dirname(__file__), '..', 'apps', 'goarrive', 'dist'
 )
 INDEX = os.path.join(DIST_DIR, 'index.html')
+
+# ── Social preview config ────────────────────────────────────────────────────
+SITE_URL = os.environ.get('SITE_URL', 'https://goarrive.fit').rstrip('/')
+OG_TITLE = 'GoArrive — Your Coaching Business, All in One Place'
+OG_DESCRIPTION = (
+    'Build workouts, manage members, handle payments, and deliver a premium '
+    'experience — all from one platform for independent fitness coaches.'
+)
+OG_IMAGE = f'{SITE_URL}/og-image.png'
+OG_IMAGE_ALT = 'GoArrive — Your Coaching Business, All in One Place'
 
 # ── Manifest ─────────────────────────────────────────────────────────────────
 MANIFEST = """{
@@ -33,8 +48,35 @@ MANIFEST = """{
   ]
 }"""
 
+# ── Social meta (rendered with f-string; concatenated with static head below) ─
+SOCIAL_META = f"""
+    <!-- SEO -->
+    <meta name="description" content="{OG_DESCRIPTION}" />
+
+    <!-- Open Graph (iMessage, Slack, Facebook, LinkedIn link previews) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="GoArrive" />
+    <meta property="og:url" content="{SITE_URL}/" />
+    <meta property="og:title" content="{OG_TITLE}" />
+    <meta property="og:description" content="{OG_DESCRIPTION}" />
+    <meta property="og:image" content="{OG_IMAGE}" />
+    <meta property="og:image:secure_url" content="{OG_IMAGE}" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="{OG_IMAGE_ALT}" />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter / X card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="{OG_TITLE}" />
+    <meta name="twitter:description" content="{OG_DESCRIPTION}" />
+    <meta name="twitter:image" content="{OG_IMAGE}" />
+    <meta name="twitter:image:alt" content="{OG_IMAGE_ALT}" />
+"""
+
 # ── Head injection ───────────────────────────────────────────────────────────
-HEAD_INJECT = """
+HEAD_INJECT = SOCIAL_META + """
     <!-- PWA Meta Tags -->
     <meta name="theme-color" content="#0E1117" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -273,6 +315,14 @@ def main():
 
     with open(INDEX, 'r') as f:
         html = f.read()
+
+    # Populate the empty <title> Expo emits so social scrapers see a title even
+    # before React hydrates and react-helmet sets the route-specific title.
+    html = html.replace(
+        '<title data-rh="true"></title>',
+        f'<title data-rh="true">{OG_TITLE}</title>',
+        1,
+    )
 
     # Inject into <head>
     html = html.replace('</head>', HEAD_INJECT + '\n  </head>', 1)
