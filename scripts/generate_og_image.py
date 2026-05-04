@@ -61,18 +61,18 @@ def main():
     ly = 150
     img.paste(logo, (lx, ly), logo)
 
-    # Tagline (site language)
-    tagline_font = ImageFont.truetype(FONT_GROTESK, 46)
-    tagline = 'Your Coaching Business, All in One Place'
+    # Tagline (site hero language — member-facing)
+    tagline_font = ImageFont.truetype(FONT_GROTESK, 54)
+    tagline = 'A Coach in Your Pocket'
     tw = draw.textlength(tagline, font=tagline_font)
     tagline_y = ly + target_h + 60
     draw.text(((W - tw) // 2, tagline_y), tagline, font=tagline_font, fill=TEXT)
 
-    # Sub-line
+    # Sub-line (site hero sub)
     sub_font = ImageFont.truetype(FONT_DMSANS, 22)
-    sub = 'Workouts · Members · Scheduling · Payments'
+    sub = 'Real coaching. Personalized for you. Delivered through your phone.'
     sw = draw.textlength(sub, font=sub_font)
-    draw.text(((W - sw) // 2, tagline_y + 70), sub, font=sub_font, fill=MUTED)
+    draw.text(((W - sw) // 2, tagline_y + 78), sub, font=sub_font, fill=MUTED)
 
     # Footer URL
     url_font = ImageFont.truetype(FONT_DMSANS, 20)

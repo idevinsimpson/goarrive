@@ -26,13 +26,13 @@ INDEX = os.path.join(DIST_DIR, 'index.html')
 
 # ── Social preview config ────────────────────────────────────────────────────
 SITE_URL = os.environ.get('SITE_URL', 'https://goarrive.fit').rstrip('/')
-OG_TITLE = 'GoArrive — Your Coaching Business, All in One Place'
+OG_TITLE = 'GoArrive — A Coach in Your Pocket'
 OG_DESCRIPTION = (
-    'Build workouts, manage members, handle payments, and deliver a premium '
-    'experience — all from one platform for independent fitness coaches.'
+    'Personal training designed by a real coach, delivered through your phone, '
+    'built around your life.'
 )
 OG_IMAGE = f'{SITE_URL}/og-image.png'
-OG_IMAGE_ALT = 'GoArrive — Your Coaching Business, All in One Place'
+OG_IMAGE_ALT = 'GoArrive — A Coach in Your Pocket'
 
 # ── Manifest ─────────────────────────────────────────────────────────────────
 MANIFEST = """{
