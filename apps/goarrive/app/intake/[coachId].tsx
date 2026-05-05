@@ -1098,7 +1098,10 @@ const s: any = StyleSheet.create({
     // field (e.g. Weight) behind the fixed navbar.
     height: Platform.OS === 'web' ? (0 as any) : undefined,
     minHeight: 0,
-    overflow: Platform.OS === 'web' ? ('auto' as any) : undefined,
+    // Do NOT set overflow:auto here — the inner ScrollView is the only
+    // scrollable element. A second overflow:auto creates nested scroll
+    // containers, which on iOS Safari produce the "double pull" feel
+    // (user has to release/regrab to cross between the two scroll areas).
   },
   scroll: {
     flex: 1,
