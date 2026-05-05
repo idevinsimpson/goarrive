@@ -990,16 +990,21 @@ export function PlanView({ plan, isCoach, onChange, onAccept }: {
         </View>
       ) : null}
 
+      {/* ─── NUTRITION COACHING (rendered before Coaching Investment so the
+           overall session price isn't revealed on the nutrition element) ─── */}
+      {pricing && ((plan.nutrition?.enabled ?? false) || (isCoach && plan.nutrition)) && (
+        <NutritionAddOnSection plan={plan} pricing={pricing} isCoach={isCoach} onChange={onChange} />
+      )}
+
       {/* ─── COACHING INVESTMENT (unified section) ──────────────────────── */}
       {/* Show the section if:
            - pricing is visible (showInvestment !== false), OR
            - the viewer is a coach (always show), OR
-           - there are enabled add-on cards (CTS / Nutrition) to show even when
-             the main pricing numbers are hidden from the member */}
+           - Commit to Save / Post-Contract add-ons are enabled (Nutrition
+             now renders in its own section above) */}
       {pricing && (
         (plan.showInvestment !== false || isCoach ||
           (plan.commitToSave?.enabled ?? false) ||
-          (plan.nutrition?.enabled ?? false) ||
           (plan.postContract?.enabled ?? false)
         ) && (
           <CoachingInvestmentSection plan={plan} pricing={pricing} isCoach={isCoach} onChange={onChange} />
@@ -1613,21 +1618,17 @@ function CoachingInvestmentSection({ plan, pricing, isCoach, onChange }: {
 }) {
   const hidden = plan.showInvestment === false;
   const cts = plan.commitToSave;
-  const nut = plan.nutrition;
   const ctsEnabled = cts?.enabled ?? false; // coach enabled it as an option
   const ctsActive = cts?.active ?? false;    // member (or coach) toggled it on
-  const nutEnabled = nut?.enabled ?? false;  // coach enabled it as an option
-  const nutActive = nut?.active ?? false;     // member (or coach) toggled it on
+  // Nutrition add-on now renders in its own section above (NutritionAddOnSection).
   // When investment is hidden, only the pricing numbers are suppressed.
-  // Commit to Save and Nutrition add-on cards have their own separate `enabled`
-  // flags and must still render for members when the coach has enabled them.
-  const hasVisibleAddOns = ctsEnabled || nutEnabled;
+  // Commit to Save still renders here when enabled.
+  const hasVisibleAddOns = ctsEnabled;
   if (hidden && !isCoach && !hasVisibleAddOns) return null;
 
   // Compute prices with and without add-ons for display
   const baseMonthly = pricing.baseMonthlyPrice; // before commit-to-save
   const ctsSavings = cts?.monthlySavings ?? 100;
-  const nutCost = nut?.monthlyCost ?? 100;
 
   // The displayMonthlyPrice already includes commit-to-save if active
   const monthlyPrice = pricing.displayMonthlyPrice;
@@ -1646,17 +1647,6 @@ function CoachingInvestmentSection({ plan, pricing, isCoach, onChange }: {
       commitToSave: {
         ...(cts || { monthlySavings: 100, nextMonthPercentOff: 5, missedSessionFee: 50, makeUpWindowHours: 48, emergencyWaiverEnabled: true, reentryRule: '', summary: '', enabled: true }),
         active: !ctsActive,
-      },
-    });
-  };
-
-  // Toggle nutrition active state (member adds/removes)
-  const toggleNutrition = () => {
-    if (!nut) return;
-    onChange({
-      nutrition: {
-        ...nut,
-        active: !nutActive,
       },
     });
   };
@@ -1718,18 +1708,7 @@ function CoachingInvestmentSection({ plan, pricing, isCoach, onChange }: {
         />
       )}
 
-      {/* ── Nutrition Add-On card ── */}
-      {(nutEnabled || (isCoach && nut)) && (
-        <NutritionAddOnCard
-          plan={plan}
-          isCoach={isCoach}
-          isActive={nutActive}
-          onToggle={toggleNutrition}
-          monthlyPrice={monthlyPrice}
-          nutCost={nutCost}
-          payInFullMonthly={payInFullMonthly}
-        />
-      )}
+      {/* Nutrition add-on now renders in NutritionAddOnSection above this section. */}
 
       {/* ── How we got these numbers (coach only) ── */}
       {(!hidden || isCoach) && <HowWeGotTheseNumbers plan={plan} pricing={pricing} isCoach={isCoach} />}
@@ -1837,6 +1816,36 @@ function CommitToSaveCard({ plan, isCoach, isActive, onToggle, monthlyPrice, cts
           </View>
         </View>
       )}
+    </View>
+  );
+}
+
+// ── Nutrition Add-On standalone section (rendered before Coaching Investment) ──
+function NutritionAddOnSection({ plan, pricing, isCoach, onChange }: {
+  plan: MemberPlanData; pricing: PricingResult; isCoach: boolean;
+  onChange: (updates: Partial<MemberPlanData>) => void;
+}) {
+  const nut = plan.nutrition;
+  const nutCost = nut?.monthlyCost ?? 100;
+  const nutActive = nut?.active ?? false;
+  const monthlyPrice = pricing.displayMonthlyPrice;
+  const payInFullMonthly = Math.round(pricing.payInFullPrice / (plan.contractMonths || 12));
+  const toggleNutrition = () => {
+    if (!nut) return;
+    onChange({ nutrition: { ...nut, active: !nutActive } });
+  };
+  return (
+    <View style={pv.section}>
+      <Text style={pv.sectionLabel}>NUTRITION COACHING</Text>
+      <NutritionAddOnCard
+        plan={plan}
+        isCoach={isCoach}
+        isActive={nutActive}
+        onToggle={toggleNutrition}
+        monthlyPrice={monthlyPrice}
+        nutCost={nutCost}
+        payInFullMonthly={payInFullMonthly}
+      />
     </View>
   );
 }
