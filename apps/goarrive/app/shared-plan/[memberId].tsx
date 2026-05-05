@@ -822,8 +822,6 @@ function NutritionAddOnCard({ plan, isActive, onToggle, monthlyPrice, nutCost, p
   const nut = plan.nutrition || getNutrition(plan);
   const providerName = nut?.providerName || 'Partner';
   const description = nut?.description || 'Add personalized nutrition coaching to your plan. Includes a custom nutrition strategy, macro targets, and monthly check-ins with a dedicated nutrition coach.';
-  const newMonthly = isActive ? monthlyPrice : monthlyPrice + nutCost;
-  const newPayInFull = Math.round(newMonthly * (plan.contractMonths || 12) * (1 - (plan.payInFullDiscountPercent || 10) / 100) / (plan.contractMonths || 12));
 
   return (
     <View style={[inv.addonCard, isActive && { borderColor: GREEN_BORDER, backgroundColor: 'rgba(110,187,122,0.08)' }]}>
@@ -850,18 +848,6 @@ function NutritionAddOnCard({ plan, isActive, onToggle, monthlyPrice, nutCost, p
           </Text>
         </View>
       </View>
-      {isActive && (
-        <View style={{ flexDirection: 'row', marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(110,187,122,0.2)' }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: ACCENT, fontSize: 11, fontWeight: '700', letterSpacing: 1 }}>NEW MONTHLY</Text>
-            <Text style={{ color: '#FFF', fontSize: 22, fontWeight: '700', fontFamily: FH }}>{formatCurrency(newMonthly)}<Text style={{ fontSize: 13, color: MUTED }}>/mo</Text></Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: ACCENT, fontSize: 11, fontWeight: '700', letterSpacing: 1 }}>PAY IN FULL</Text>
-            <Text style={{ color: '#FFF', fontSize: 22, fontWeight: '700', fontFamily: FH }}>{formatCurrency(newPayInFull)}<Text style={{ fontSize: 13, color: MUTED }}>/mo</Text></Text>
-          </View>
-        </View>
-      )}
     </View>
   );
 }
