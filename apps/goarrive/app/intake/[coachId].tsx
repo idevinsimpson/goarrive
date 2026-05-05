@@ -1091,7 +1091,17 @@ const s: any = StyleSheet.create({
   },
   scrollContainer: {
     flex: 1,
+    // height:0 forces the flex item to start at 0 and grow via flex:1.
+    // Immune to the global `.css-175oi2r { min-height: auto !important }`
+    // injected by scripts/inject_pwa_meta.py, which otherwise lets this
+    // container expand to content height on Safari and clips the bottom
+    // field (e.g. Weight) behind the fixed navbar.
+    height: Platform.OS === 'web' ? (0 as any) : undefined,
     minHeight: 0,
+    // Do NOT set overflow:auto here — the inner ScrollView is the only
+    // scrollable element. A second overflow:auto creates nested scroll
+    // containers, which on iOS Safari produce the "double pull" feel
+    // (user has to release/regrab to cross between the two scroll areas).
   },
   scroll: {
     flex: 1,
