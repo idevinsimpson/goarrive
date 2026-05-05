@@ -57,14 +57,20 @@ def main():
     draw = ImageDraw.Draw(img)
     draw.rectangle((0, 0, W, 4), fill=GOLD)
 
-    # Small wordmark anchored top — the headline carries the card
+    # Category kicker — establishes "fitness" so the card can't read as life/exec coaching
+    kicker_font = ImageFont.truetype(FONT_GROTESK, 26)
+    kicker = 'O N L I N E   F I T N E S S   C O A C H I N G'
+    kw = draw.textlength(kicker, font=kicker_font)
+    draw.text(((W - kw) // 2, 70), kicker, font=kicker_font, fill=GOLD)
+
+    # Small wordmark below the kicker — supporting brand mark
     logo = Image.open(LOGO_PATH).convert('RGBA')
-    target_w = 360
+    target_w = 320
     ratio = target_w / logo.width
     target_h = int(logo.height * ratio)
     logo = logo.resize((target_w, target_h), Image.LANCZOS)
     lx = (W - target_w) // 2
-    ly = 70
+    ly = 130
     img.paste(logo, (lx, ly), logo)
 
     # Hero headline — auto-fit to leave 80px margins, capped at 96px
@@ -76,14 +82,14 @@ def main():
         headline_size -= 2
         headline_font = ImageFont.truetype(FONT_GROTESK, headline_size)
     hw = draw.textlength(headline, font=headline_font)
-    headline_y = 300
+    headline_y = 320
     draw.text(((W - hw) // 2, headline_y), headline, font=headline_font, fill=TEXT)
 
-    # Subhead — readable at thumbnail scale, supports the headline
+    # Subhead — fitness-specific language ("personal training") clinches the category
     sub_font = ImageFont.truetype(FONT_DMSANS, 38)
-    sub = 'Real coaching. Personalized for you.'
+    sub = 'Personal training. Built around your life.'
     sw = draw.textlength(sub, font=sub_font)
-    draw.text(((W - sw) // 2, headline_y + headline_size + 40), sub, font=sub_font, fill=MUTED)
+    draw.text(((W - sw) // 2, headline_y + headline_size + 30), sub, font=sub_font, fill=MUTED)
 
     img.save(OUT_PATH, 'PNG', optimize=True)
     print(f'[generate_og_image] Wrote {OUT_PATH} ({os.path.getsize(OUT_PATH)} bytes)')
