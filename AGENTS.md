@@ -64,6 +64,7 @@ cd apps/goarrive && npm run deploy
 ### Deployment
 - Always use the `/ship` command to deploy to staging (`goarrive--staging.web.app`).
 - Never deploy to production (`goarrive.fit`) without explicit approval.
+- **After every staging deploy, you MUST trigger Relay for a smoke test before creating a PR.** See `.claude/relay-handoff.md` for the exact protocol. This is not optional.
 
 ### Do Not Build
 - MySQL, TiDB, Drizzle, S3, Fastify, JotForm, Calendly, Zoom Embedded SDK
@@ -104,3 +105,4 @@ For deep dives, see the `.claude/` directory:
 - `multi-agent-workflow-guide.md` — Staging-first protocol and agent coordination
 - `interaction-rules.md` — **Mandatory.** Behavioral rules: scope adherence, continuous improvement loop, communication style, and initiative protocol
 - `agent-task-routing.md` — **Mandatory.** Official workflow split between @maia (Slack/code/stateless-browser) and Manus (stateful-dashboard)
+- `relay-handoff.md` — **Mandatory.** Post-staging smoke test protocol. Trigger Relay (`<@U0B1YQS8L12>`) in `#dev-goarrive` after every staging deploy, before every PR.

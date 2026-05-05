@@ -45,6 +45,23 @@ cd apps/goarrive && npm run deploy:staging
 
 Staging URL: `https://goarrive--staging.web.app`
 
+## Step 4b: Trigger Relay Smoke Test (MANDATORY — do not skip)
+
+After staging deploys successfully, post this message in the `#dev-goarrive` Slack channel before creating the PR:
+
+```
+<@U0B1YQS8L12> smoke test — [one sentence: what you changed and what to test]
+```
+
+**Wait for Relay's response in the thread.**
+
+- If Relay reports `✅ Smoke Test Passed` → proceed to Step 5.
+- If Relay reports `❌ Smoke Test Failed` → fix the reported issues, redeploy to staging (`npm run deploy:staging`), and trigger Relay again. Do not create a PR until the smoke test passes.
+
+Relay's Slack ID: `U0B1YQS8L12`. Always use the ID, not the display name.
+
+---
+
 ## Step 5: Commit and PR
 
 - Stage only the files you changed — never `git add -A`
