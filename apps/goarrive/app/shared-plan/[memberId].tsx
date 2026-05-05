@@ -396,11 +396,20 @@ export default function SharedPlanScreen() {
           </View>
         ) : null}
 
+        {/* Nutrition Coaching — rendered before Coaching Investment so the
+            overall session price isn't revealed on the nutrition element. */}
+        {pricing && (activePlan.nutrition?.enabled ?? false) && (
+          <NutritionAddOnSection
+            plan={activePlan}
+            pricing={pricing}
+            onChange={handleLocalChange}
+          />
+        )}
+
         {/* Coaching Investment */}
         {pricing && (
           (activePlan.showInvestment !== false ||
             (activePlan.commitToSave?.enabled ?? false) ||
-            (activePlan.nutrition?.enabled ?? false) ||
             (activePlan.postContract?.enabled ?? false)
           ) && (
             <CoachingInvestmentSection
@@ -451,19 +460,17 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
 
   const pcEnabled = plan.postContract?.enabled ?? false;
   const ctsEnabledCheck = plan.commitToSave?.enabled ?? false;
-  const nutEnabledCheck = plan.nutrition?.enabled ?? false;
-  const hasVisibleAddOns = ctsEnabledCheck || nutEnabledCheck || pcEnabled;
+  // Nutrition add-on now renders in NutritionAddOnSection above this section.
+  const hasVisibleAddOns = ctsEnabledCheck || pcEnabled;
   if (plan.showInvestment === false && !hasVisibleAddOns) return null;
 
   const cts = plan.commitToSave || getCts(plan);
   const nut = plan.nutrition || getNutrition(plan);
   const ctsEnabled = cts?.enabled ?? false;
   const ctsActive = cts?.active ?? false;
-  const nutEnabled = nut?.enabled ?? false;
   const nutActive = (nut as any)?.active ?? false;
 
   const ctsSavings = cts?.monthlySavings ?? 100;
-  const nutCost = nut?.monthlyCost ?? 100;
 
   const monthlyPrice = pricing.displayMonthlyPrice;
   const weeklyPrice = Math.round(monthlyPrice / (52 / 12));
@@ -486,16 +493,6 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
       commitToSave: {
         ...(cts || { monthlySavings: 100, nextMonthPercentOff: 5, missedSessionFee: 50, makeUpWindowHours: 48, emergencyWaiverEnabled: true, reentryRule: '', summary: '', enabled: true }),
         active: !ctsActive,
-      },
-    });
-  };
-
-  const toggleNutrition = () => {
-    if (!nut) return;
-    onChange({
-      nutrition: {
-        ...nut,
-        active: !nutActive,
       },
     });
   };
@@ -660,16 +657,7 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
         />
       )}
 
-      {nutEnabled && (
-        <NutritionAddOnCard
-          plan={plan}
-          isActive={nutActive}
-          onToggle={toggleNutrition}
-          monthlyPrice={monthlyPrice}
-          nutCost={nutCost}
-          payInFullMonthly={payInFullMonthly}
-        />
-      )}
+      {/* Nutrition add-on now renders in NutritionAddOnSection above this section. */}
 
 
       {plan.showInvestment !== false && (
@@ -798,6 +786,35 @@ function CommitToSaveCard({ plan, isActive, onToggle, monthlyPrice, ctsSavings, 
   );
 }
 
+// ── Nutrition Add-On standalone section (rendered before Coaching Investment) ──
+function NutritionAddOnSection({ plan, pricing, onChange }: {
+  plan: MemberPlanData; pricing: PricingResult;
+  onChange: (updates: Partial<MemberPlanData>) => void;
+}) {
+  const nut = plan.nutrition || getNutrition(plan);
+  if (!nut) return null;
+  const nutCost = nut.monthlyCost ?? 100;
+  const nutActive = (nut as any)?.active ?? false;
+  const monthlyPrice = pricing.displayMonthlyPrice;
+  const payInFullMonthly = Math.round(pricing.payInFullPrice / (plan.contractMonths || 12));
+  const toggleNutrition = () => {
+    onChange({ nutrition: { ...nut, active: !nutActive } });
+  };
+  return (
+    <View style={{ marginBottom: 20 }}>
+      <Text style={st.sectionLabel}>Nutrition Coaching</Text>
+      <NutritionAddOnCard
+        plan={plan}
+        isActive={nutActive}
+        onToggle={toggleNutrition}
+        monthlyPrice={monthlyPrice}
+        nutCost={nutCost}
+        payInFullMonthly={payInFullMonthly}
+      />
+    </View>
+  );
+}
+
 function NutritionAddOnCard({ plan, isActive, onToggle, monthlyPrice, nutCost, payInFullMonthly }: {
   plan: MemberPlanData; isActive: boolean;
   onToggle: () => void; monthlyPrice: number; nutCost: number; payInFullMonthly: number;
@@ -805,8 +822,6 @@ function NutritionAddOnCard({ plan, isActive, onToggle, monthlyPrice, nutCost, p
   const nut = plan.nutrition || getNutrition(plan);
   const providerName = nut?.providerName || 'Partner';
   const description = nut?.description || 'Add personalized nutrition coaching to your plan. Includes a custom nutrition strategy, macro targets, and monthly check-ins with a dedicated nutrition coach.';
-  const newMonthly = isActive ? monthlyPrice : monthlyPrice + nutCost;
-  const newPayInFull = Math.round(newMonthly * (plan.contractMonths || 12) * (1 - (plan.payInFullDiscountPercent || 10) / 100) / (plan.contractMonths || 12));
 
   return (
     <View style={[inv.addonCard, isActive && { borderColor: GREEN_BORDER, backgroundColor: 'rgba(110,187,122,0.08)' }]}>
@@ -833,18 +848,6 @@ function NutritionAddOnCard({ plan, isActive, onToggle, monthlyPrice, nutCost, p
           </Text>
         </View>
       </View>
-      {isActive && (
-        <View style={{ flexDirection: 'row', marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(110,187,122,0.2)' }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: ACCENT, fontSize: 11, fontWeight: '700', letterSpacing: 1 }}>NEW MONTHLY</Text>
-            <Text style={{ color: '#FFF', fontSize: 22, fontWeight: '700', fontFamily: FH }}>{formatCurrency(newMonthly)}<Text style={{ fontSize: 13, color: MUTED }}>/mo</Text></Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: ACCENT, fontSize: 11, fontWeight: '700', letterSpacing: 1 }}>PAY IN FULL</Text>
-            <Text style={{ color: '#FFF', fontSize: 22, fontWeight: '700', fontFamily: FH }}>{formatCurrency(newPayInFull)}<Text style={{ fontSize: 13, color: MUTED }}>/mo</Text></Text>
-          </View>
-        </View>
-      )}
     </View>
   );
 }
