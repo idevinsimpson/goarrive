@@ -5,10 +5,16 @@ Output: apps/goarrive/public/og-image.png
 
 Design (interim — Morgan replaces with final brand asset):
   - Dark brand background (#0F1117) with a soft gold radial glow
-  - GoArrive wordmark centered (uses public/goarrive-logo.png)
-  - Tagline below in Space Grotesk Bold
-  - Gold accent underline sweep (brand signature)
-  - Small site-language footer line
+  - Small GoArrive wordmark anchored top
+  - Headline "A Coach in Your Pocket" set BIG so it reads at iMessage thumbnail scale
+  - Top gold accent bar (brand signature)
+
+Notes:
+  - iMessage and SMS previews compress 1200x630 down to ~600px wide.
+    The headline must read at a glance at that scale, so the tagline is
+    sized as the dominant element (logo is the supporting mark).
+  - The og:description and the URL are shown by iMessage *below* the
+    image, so we don't repeat them on the card.
 """
 import os
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -51,34 +57,33 @@ def main():
     draw = ImageDraw.Draw(img)
     draw.rectangle((0, 0, W, 4), fill=GOLD)
 
-    # Logo (wordmark — already includes its own gold underline sweep)
+    # Small wordmark anchored top — the headline carries the card
     logo = Image.open(LOGO_PATH).convert('RGBA')
-    target_w = 720
+    target_w = 360
     ratio = target_w / logo.width
     target_h = int(logo.height * ratio)
     logo = logo.resize((target_w, target_h), Image.LANCZOS)
     lx = (W - target_w) // 2
-    ly = 150
+    ly = 70
     img.paste(logo, (lx, ly), logo)
 
-    # Tagline (site hero language — member-facing)
-    tagline_font = ImageFont.truetype(FONT_GROTESK, 54)
-    tagline = 'A Coach in Your Pocket'
-    tw = draw.textlength(tagline, font=tagline_font)
-    tagline_y = ly + target_h + 60
-    draw.text(((W - tw) // 2, tagline_y), tagline, font=tagline_font, fill=TEXT)
+    # Hero headline — auto-fit to leave 80px margins, capped at 96px
+    headline = 'A Coach in Your Pocket'
+    max_text_w = W - 160
+    headline_size = 96
+    headline_font = ImageFont.truetype(FONT_GROTESK, headline_size)
+    while draw.textlength(headline, font=headline_font) > max_text_w and headline_size > 60:
+        headline_size -= 2
+        headline_font = ImageFont.truetype(FONT_GROTESK, headline_size)
+    hw = draw.textlength(headline, font=headline_font)
+    headline_y = 300
+    draw.text(((W - hw) // 2, headline_y), headline, font=headline_font, fill=TEXT)
 
-    # Sub-line (site hero sub)
-    sub_font = ImageFont.truetype(FONT_DMSANS, 22)
-    sub = 'Real coaching. Personalized for you. Delivered through your phone.'
+    # Subhead — readable at thumbnail scale, supports the headline
+    sub_font = ImageFont.truetype(FONT_DMSANS, 38)
+    sub = 'Real coaching. Personalized for you.'
     sw = draw.textlength(sub, font=sub_font)
-    draw.text(((W - sw) // 2, tagline_y + 78), sub, font=sub_font, fill=MUTED)
-
-    # Footer URL
-    url_font = ImageFont.truetype(FONT_DMSANS, 20)
-    url = 'goarrive.fit'
-    uw = draw.textlength(url, font=url_font)
-    draw.text(((W - uw) // 2, H - 60), url, font=url_font, fill=GOLD)
+    draw.text(((W - sw) // 2, headline_y + headline_size + 40), sub, font=sub_font, fill=MUTED)
 
     img.save(OUT_PATH, 'PNG', optimize=True)
     print(f'[generate_og_image] Wrote {OUT_PATH} ({os.path.getsize(OUT_PATH)} bytes)')
