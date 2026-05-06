@@ -9213,3 +9213,193 @@ export const getEmbeddedSessionJoinConfig = onCall(
     };
   }
 );
+
+// ─── Workout Share Links ─────────────────────────────────────────────────────
+
+import * as crypto from 'crypto';
+
+export const createShareToken = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Must be signed in.');
+  }
+  const callerToken = request.auth.token as Record<string, any>;
+  const callerRole = callerToken.role as string | undefined;
+  if (callerRole !== 'coach' && callerRole !== 'platformAdmin' && !callerToken.admin) {
+    throw new HttpsError('permission-denied', 'Only coaches can share workouts.');
+  }
+
+  const { workoutId } = request.data as { workoutId: string };
+  if (!workoutId) {
+    throw new HttpsError('invalid-argument', 'workoutId is required.');
+  }
+
+  const coachId = callerToken.coachId || request.auth.uid;
+
+  const workoutSnap = await db.collection('workouts').doc(workoutId).get();
+  if (!workoutSnap.exists) {
+    throw new HttpsError('not-found', 'Workout not found.');
+  }
+  const workoutData = workoutSnap.data()!;
+  if (workoutData.coachId !== coachId && callerRole !== 'platformAdmin' && !callerToken.admin) {
+    throw new HttpsError('permission-denied', 'You can only share your own workouts.');
+  }
+
+  const existingTokens = await db.collection('shareTokens')
+    .where('workoutId', '==', workoutId)
+    .where('createdBy', '==', coachId)
+    .where('revokedAt', '==', null)
+    .limit(1)
+    .get();
+
+  if (!existingTokens.empty) {
+    const existing = existingTokens.docs[0];
+    return { shareId: existing.id, alreadyExists: true };
+  }
+
+  const shareId = crypto.randomBytes(16).toString('hex');
+  await db.collection('shareTokens').doc(shareId).set({
+    workoutId,
+    tenantId: workoutData.tenantId || coachId,
+    createdBy: coachId,
+    coachName: workoutData.coachName || null,
+    revokedAt: null,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
+  return { shareId, alreadyExists: false };
+});
+
+export const revokeShareToken = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Must be signed in.');
+  }
+  const callerToken = request.auth.token as Record<string, any>;
+  const callerRole = callerToken.role as string | undefined;
+  const coachId = callerToken.coachId || request.auth.uid;
+
+  const { workoutId } = request.data as { workoutId: string };
+  if (!workoutId) {
+    throw new HttpsError('invalid-argument', 'workoutId is required.');
+  }
+
+  const tokens = await db.collection('shareTokens')
+    .where('workoutId', '==', workoutId)
+    .where('createdBy', '==', coachId)
+    .where('revokedAt', '==', null)
+    .get();
+
+  if (tokens.empty) {
+    if (callerRole === 'platformAdmin' || callerToken.admin) {
+      const allTokens = await db.collection('shareTokens')
+        .where('workoutId', '==', workoutId)
+        .where('revokedAt', '==', null)
+        .get();
+      const batch = db.batch();
+      allTokens.docs.forEach((d) => batch.update(d.ref, { revokedAt: FieldValue.serverTimestamp() }));
+      await batch.commit();
+      return { revoked: allTokens.size };
+    }
+    throw new HttpsError('not-found', 'No active share link found for this workout.');
+  }
+
+  const batch = db.batch();
+  tokens.docs.forEach((d) => batch.update(d.ref, { revokedAt: FieldValue.serverTimestamp() }));
+  await batch.commit();
+  return { revoked: tokens.size };
+});
+
+export const resolveShareToken = onRequest(
+  { cors: true, region: 'us-central1' },
+  async (req, res) => {
+    const shareId = (req.query.shareId as string) || (req.body?.shareId as string);
+    if (!shareId || typeof shareId !== 'string' || shareId.length !== 32) {
+      res.status(400).json({ error: 'Invalid share link.' });
+      return;
+    }
+
+    const tokenSnap = await db.collection('shareTokens').doc(shareId).get();
+    if (!tokenSnap.exists) {
+      res.status(404).json({ error: 'This share link is no longer available.' });
+      return;
+    }
+
+    const tokenData = tokenSnap.data()!;
+    if (tokenData.revokedAt) {
+      res.status(410).json({ error: 'This share link has been revoked.' });
+      return;
+    }
+
+    const workoutSnap = await db.collection('workouts').doc(tokenData.workoutId).get();
+    if (!workoutSnap.exists) {
+      res.status(404).json({ error: 'This workout no longer exists.' });
+      return;
+    }
+
+    const workout = workoutSnap.data()!;
+
+    const coachSnap = await db.collection('coaches').doc(tokenData.createdBy).get();
+    const coachData = coachSnap.exists ? coachSnap.data()! : {};
+
+    const authHeader = req.headers.authorization;
+    let isAuthenticated = false;
+
+    if (authHeader?.startsWith('Bearer ')) {
+      try {
+        await admin.auth().verifyIdToken(authHeader.slice(7));
+        isAuthenticated = true;
+      } catch {
+        // Invalid token — treat as unauthenticated
+      }
+    }
+
+    const teaser = {
+      workoutId: tokenData.workoutId,
+      name: workout.name || 'Workout',
+      description: workout.description || '',
+      category: workout.category || null,
+      difficulty: workout.difficulty || null,
+      estimatedDurationMin: workout.estimatedDurationMin || null,
+      blockCount: (workout.blocks || []).length,
+      coachName: coachData.displayName || coachData.name || 'Coach',
+      coachPhotoUrl: coachData.photoURL || null,
+      tags: workout.tags || [],
+    };
+
+    if (!isAuthenticated) {
+      res.status(200).json({ authenticated: false, teaser });
+      return;
+    }
+
+    const sanitizedBlocks = (workout.blocks || []).map((block: any) => ({
+      type: block.type || 'Block',
+      movements: (block.movements || []).map((m: any) => ({
+        name: m.name || '',
+        category: m.category || '',
+        muscleGroup: m.muscleGroup || '',
+        videoUrl: m.videoUrl || null,
+        thumbnailUrl: m.thumbnailUrl || null,
+        sets: m.sets || 0,
+        reps: m.reps || 0,
+        duration: m.duration || 0,
+        restSeconds: m.restSeconds || 0,
+      })),
+      restBetweenSets: block.restBetweenSets || 0,
+      rounds: block.rounds || 1,
+    }));
+
+    res.status(200).json({
+      authenticated: true,
+      teaser,
+      workout: {
+        id: tokenData.workoutId,
+        name: workout.name || 'Workout',
+        description: workout.description || '',
+        category: workout.category || null,
+        difficulty: workout.difficulty || null,
+        estimatedDurationMin: workout.estimatedDurationMin || null,
+        tags: workout.tags || [],
+        blocks: sanitizedBlocks,
+      },
+    });
+  },
+);
