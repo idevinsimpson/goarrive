@@ -19,14 +19,10 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
-  Platform,
-  ActivityIndicator,
-  Share,
 } from 'react-native';
 import ModalSheet from './ModalSheet';
-import { db, functions } from '../lib/firebase';
-import { doc, onSnapshot, updateDoc, addDoc, collection, Timestamp, query, where, getDocs } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
+import { db } from '../lib/firebase';
+import { doc, onSnapshot, updateDoc, addDoc, collection, Timestamp } from 'firebase/firestore';
 import { Icon } from './Icon';
 import AssignWorkoutModal from './AssignWorkoutModal';
 import BatchAssignModal from './BatchAssignModal';
@@ -78,8 +74,6 @@ export default function WorkoutDetail({
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [showPreStartPreview, setShowPreStartPreview] = useState(false);
   const [showPlayer, setShowPlayer] = useState(false);
-  const [shareLoading, setShareLoading] = useState(false);
-  const [activeShareId, setActiveShareId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!workout?.id) return;
@@ -108,73 +102,8 @@ export default function WorkoutDetail({
     return () => unsubscribe();
   }, [workout?.id]);
 
-  useEffect(() => {
-    if (!workout?.id || !coachId) return;
-    const q = query(
-      collection(db, 'shareTokens'),
-      where('workoutId', '==', workout.id),
-      where('createdBy', '==', coachId),
-      where('revokedAt', '==', null),
-    );
-    getDocs(q).then((snap) => {
-      if (!snap.empty) setActiveShareId(snap.docs[0].id);
-    }).catch(() => {});
-  }, [workout?.id, coachId]);
 
-  async function handleShareLink() {
-    setShareLoading(true);
-    try {
-      const createFn = httpsCallable<{ workoutId: string }, { shareId: string; alreadyExists: boolean }>(functions, 'createShareToken');
-      const result = await createFn({ workoutId: currentWorkout.id });
-      const { shareId } = result.data;
-      setActiveShareId(shareId);
 
-      const shareUrl = `https://goarrive.fit/share/${shareId}`;
-      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
-        await navigator.clipboard.writeText(shareUrl);
-        Alert.alert('Link Copied', 'Workout share link copied to clipboard.');
-      } else {
-        try {
-          await Share.share({ message: shareUrl });
-        } catch {
-          Alert.alert('Share Link', shareUrl);
-        }
-      }
-    } catch (err: any) {
-      console.error('[WorkoutDetail] Share link error:', err);
-      Alert.alert('Error', err?.message || 'Failed to create share link.');
-    } finally {
-      setShareLoading(false);
-    }
-  }
-
-  async function handleRevokeLink() {
-    Alert.alert(
-      'Revoke Share Link',
-      'Anyone with the current link will no longer be able to access this workout. You can create a new link later.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Revoke',
-          style: 'destructive',
-          onPress: async () => {
-            setShareLoading(true);
-            try {
-              const revokeFn = httpsCallable<{ workoutId: string }, { revoked: number }>(functions, 'revokeShareToken');
-              await revokeFn({ workoutId: currentWorkout.id });
-              setActiveShareId(null);
-              Alert.alert('Link Revoked', 'The share link has been revoked.');
-            } catch (err: any) {
-              console.error('[WorkoutDetail] Revoke error:', err);
-              Alert.alert('Error', err?.message || 'Failed to revoke share link.');
-            } finally {
-              setShareLoading(false);
-            }
-          },
-        },
-      ],
-    );
-  }
 
   async function handleAssign(
     _workoutId: string,
@@ -420,46 +349,6 @@ export default function WorkoutDetail({
                 </TouchableOpacity>
               )}
             </View>
-
-            {/* Share Workout Link / Revoke */}
-            <View style={styles.actionRow}>
-              <TouchableOpacity
-                style={styles.actionBtn}
-                onPress={activeShareId ? handleRevokeLink : handleShareLink}
-                disabled={shareLoading}
-              >
-                {shareLoading ? (
-                  <ActivityIndicator size={16} color={activeShareId ? '#EF4444' : '#6EBB7A'} />
-                ) : (
-                  <Icon
-                    name={activeShareId ? 'x-circle' : 'link'}
-                    size={16}
-                    color={activeShareId ? '#EF4444' : '#6EBB7A'}
-                  />
-                )}
-                <Text
-                  style={[
-                    styles.actionBtnText,
-                    { color: activeShareId ? '#EF4444' : '#6EBB7A' },
-                  ]}
-                >
-                  {activeShareId ? 'Revoke Share Link' : 'Share Workout Link'}
-                </Text>
-              </TouchableOpacity>
-              {activeShareId && (
-                <TouchableOpacity
-                  style={styles.actionBtn}
-                  onPress={handleShareLink}
-                  disabled={shareLoading}
-                >
-                  <Icon name="share" size={16} color="#7DD3FC" />
-                  <Text style={[styles.actionBtnText, { color: '#7DD3FC' }]}>
-                    Copy Link
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
             {/* Admin: Share to Marketplace toggle */}
             {isAdmin && (
               <TouchableOpacity
