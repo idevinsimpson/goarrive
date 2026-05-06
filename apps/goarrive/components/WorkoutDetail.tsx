@@ -148,30 +148,47 @@ export default function WorkoutDetail({
     }
   }
 
-  async function handleRevokeLink() {
+  async function performRevoke() {
+    setShareLoading(true);
+    try {
+      const revokeFn = httpsCallable<{ workoutId: string }, { revoked: number }>(functions, 'revokeShareToken');
+      await revokeFn({ workoutId: currentWorkout.id });
+      setActiveShareId(null);
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert('The share link has been revoked.');
+      } else {
+        Alert.alert('Link Revoked', 'The share link has been revoked.');
+      }
+    } catch (err: any) {
+      console.error('[WorkoutDetail] Revoke error:', err);
+      const msg = err?.message || 'Failed to revoke share link.';
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(`Error: ${msg}`);
+      } else {
+        Alert.alert('Error', msg);
+      }
+    } finally {
+      setShareLoading(false);
+    }
+  }
+
+  function handleRevokeLink() {
+    // react-native-web's Alert.alert only renders the message — its buttons
+    // array is silently dropped. Use window.confirm on web so the destructive
+    // action actually requires confirmation.
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const confirmed = window.confirm(
+        'Revoke Share Link\n\nAnyone with the current link will no longer be able to access this workout. You can create a new link later.',
+      );
+      if (confirmed) performRevoke();
+      return;
+    }
     Alert.alert(
       'Revoke Share Link',
       'Anyone with the current link will no longer be able to access this workout. You can create a new link later.',
       [
         { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Revoke',
-          style: 'destructive',
-          onPress: async () => {
-            setShareLoading(true);
-            try {
-              const revokeFn = httpsCallable<{ workoutId: string }, { revoked: number }>(functions, 'revokeShareToken');
-              await revokeFn({ workoutId: currentWorkout.id });
-              setActiveShareId(null);
-              Alert.alert('Link Revoked', 'The share link has been revoked.');
-            } catch (err: any) {
-              console.error('[WorkoutDetail] Revoke error:', err);
-              Alert.alert('Error', err?.message || 'Failed to revoke share link.');
-            } finally {
-              setShareLoading(false);
-            }
-          },
-        },
+        { text: 'Revoke', style: 'destructive', onPress: performRevoke },
       ],
     );
   }
