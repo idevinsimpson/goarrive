@@ -45,6 +45,30 @@ cd apps/goarrive && npm run deploy:staging
 
 Staging URL: `https://goarrive--staging.web.app`
 
+## Step 4a: Update the Briefing Doc (MANDATORY — do not skip)
+
+Before triggering Relay, update the Manus Smoke Test Briefing Doc so Manus has structured context. Run from the repo root:
+
+```bash
+node scripts/update-briefing-doc.js \
+  --staging-url "https://goarrive--staging-$(firebase hosting:channel:list 2>/dev/null | grep staging | awk '{print $1}').web.app" \
+  --commit "$(git rev-parse --short HEAD)" \
+  --branch "$(git branch --show-current)" \
+  --deploy-class "Hosting only" \
+  --production-affecting "no" \
+  --what-changed "[2-5 sentences describing what was shipped]" \
+  --what-to-focus-on "[exact test steps: route, action, expected outcome]" \
+  --what-not-to-retest "[stable routes to skip this cycle]" \
+  --known-gaps "[anything that can't be tested yet and why]" \
+  --activity-entry "[one-line summary for the activity log]"
+```
+
+**Requires:** `.secrets/firebase-service-account.json` — if missing, ask Devin or Manus to regenerate it from Firebase Console → Project Settings → Service Accounts.
+
+After posting in Step 4b, re-run with `--slack-thread "[permalink]"` to add the thread link.
+
+---
+
 ## Step 4b: Trigger Relay Smoke Test (MANDATORY — do not skip)
 
 After staging deploys successfully, post this message in the `#dev-goarrive` Slack channel before creating the PR:

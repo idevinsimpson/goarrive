@@ -53,13 +53,28 @@ If the result is FAIL: fix the issue, redeploy, and trigger Relay again. Do not 
 
 ## Updated /ship Workflow
 
-The `/ship` command workflow now has an additional step between Step 4 (staging deploy) and Step 5 (PR creation):
+The `/ship` command workflow now has two additional steps between Step 4 (staging deploy) and Step 5 (PR creation):
 
 ```
 Step 1: tsc --noEmit
 Step 2: npm run test:vitest -- --run
 Step 3: npx expo export --platform web
 Step 4: npm run deploy:staging
+Step 4a: UPDATE the Briefing Doc (MANDATORY — Manus reads this before every test)
+         Run from the repo root:
+         node scripts/update-briefing-doc.js \
+           --staging-url "https://goarrive--staging-[suffix].web.app" \
+           --commit "$(git rev-parse --short HEAD)" \
+           --branch "$(git branch --show-current)" \
+           --deploy-class "Hosting only" \
+           --production-affecting "no" \
+           --what-changed "[2-5 sentences: what was shipped, files touched, behavior changed]" \
+           --what-to-focus-on "[exact test steps: route, action, expected outcome]" \
+           --what-not-to-retest "[stable routes to skip]" \
+           --known-gaps "[anything that can't be tested yet and why]" \
+           --activity-entry "[one-line summary for the activity log]"
+         Requires: .secrets/firebase-service-account.json (ask Devin/Manus if missing)
+         Then re-run with --slack-thread after posting in Step 4b to add the permalink.
 Step 4b: POST in #dev-goarrive → <@U0B1YQS8L12> smoke test — [summary]. Staging: https://goarrive--staging-[suffix].web.app
          WAIT for Relay's result before proceeding
          If FAIL → fix, redeploy, re-trigger Relay
@@ -67,6 +82,10 @@ Step 4b: POST in #dev-goarrive → <@U0B1YQS8L12> smoke test — [summary]. Stag
 Step 5: git commit + push + gh pr create
 Step 6: Report back to Devin
 ```
+
+### Why Step 4a matters
+
+Manus reads the Briefing Doc **before** every smoke test. If Sections 1–4 are empty or stale, Manus falls back to Maia's Slack message as the test spec — which works, but loses the structured context (known gaps, what NOT to re-test, Slack thread permalink). Filling the doc takes ~10 seconds and makes every smoke test more accurate and faster.
 
 ## Slack IDs Reference
 
