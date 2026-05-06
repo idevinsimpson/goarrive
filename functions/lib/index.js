@@ -8147,22 +8147,52 @@ exports.resolveShareToken = (0, https_1.onRequest)({ cors: true, region: 'us-cen
         res.status(200).json({ authenticated: false, teaser });
         return;
     }
-    const sanitizedBlocks = (workout.blocks || []).map((block) => ({
-        type: block.type || 'Block',
-        movements: (block.movements || []).map((m) => ({
-            name: m.name || '',
-            category: m.category || '',
-            muscleGroup: m.muscleGroup || '',
-            videoUrl: m.videoUrl || null,
-            thumbnailUrl: m.thumbnailUrl || null,
-            sets: m.sets || 0,
-            reps: m.reps || 0,
-            duration: m.duration || 0,
-            restSeconds: m.restSeconds || 0,
-        })),
-        restBetweenSets: block.restBetweenSets || 0,
-        rounds: block.rounds || 1,
-    }));
+    const sanitizedBlocks = (workout.blocks || []).map((block) => {
+        var _a;
+        return ({
+            type: block.type || 'Block',
+            name: block.name || '',
+            label: block.label || '',
+            movements: (block.movements || []).map((m) => {
+                var _a, _b, _c, _d, _e;
+                return ({
+                    movementId: m.movementId || '',
+                    movementName: m.movementName || m.name || '',
+                    name: m.name || m.movementName || '',
+                    category: m.category || '',
+                    muscleGroup: m.muscleGroup || '',
+                    videoUrl: m.videoUrl || null,
+                    mediaUrl: m.mediaUrl || null,
+                    thumbnailUrl: m.thumbnailUrl || null,
+                    voiceUrl: m.voiceUrl || null,
+                    nextUpVoiceUrl: m.nextUpVoiceUrl || null,
+                    sets: m.sets || 0,
+                    reps: m.reps || '',
+                    duration: m.duration || 0,
+                    durationSec: m.durationSec || 0,
+                    workSec: m.workSec || 0,
+                    restSec: m.restSec || 0,
+                    restSeconds: m.restSeconds || 0,
+                    swapSides: (_a = m.swapSides) !== null && _a !== void 0 ? _a : false,
+                    showOnPreview: (_b = m.showOnPreview) !== null && _b !== void 0 ? _b : true,
+                    description: m.description || '',
+                    coachingCues: m.coachingCues || '',
+                    notes: m.notes || '',
+                    cropScale: (_c = m.cropScale) !== null && _c !== void 0 ? _c : 1,
+                    cropTranslateX: (_d = m.cropTranslateX) !== null && _d !== void 0 ? _d : 0,
+                    cropTranslateY: (_e = m.cropTranslateY) !== null && _e !== void 0 ? _e : 0,
+                });
+            }),
+            restBetweenSets: block.restBetweenSets || 0,
+            restBetweenSec: block.restBetweenSec || 0,
+            restBetweenRoundsSec: block.restBetweenRoundsSec || 0,
+            restBetweenMovementsSec: block.restBetweenMovementsSec || 0,
+            circuitStartRestSec: block.circuitStartRestSec || 0,
+            rounds: block.rounds || 1,
+            showDemo: (_a = block.showDemo) !== null && _a !== void 0 ? _a : false,
+            demoDurationSec: block.demoDurationSec || 0,
+        });
+    });
     res.status(200).json({
         authenticated: true,
         teaser,
