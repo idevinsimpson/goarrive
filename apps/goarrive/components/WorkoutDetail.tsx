@@ -129,7 +129,11 @@ export default function WorkoutDetail({
       const { shareId } = result.data;
       setActiveShareId(shareId);
 
-      const shareUrl = `https://goarrive.fit/share/${shareId}`;
+      const origin =
+        Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.origin
+          ? window.location.origin
+          : 'https://goarrive.fit';
+      const shareUrl = `${origin}/share/${shareId}`;
       if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
         await navigator.clipboard.writeText(shareUrl);
         Alert.alert('Link Copied', 'Workout share link copied to clipboard.');
