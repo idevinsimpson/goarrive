@@ -779,6 +779,19 @@ service cloud.firestore {
     // pricing, tier split, and contract terms. MUST NOT be modified after
     // creation — all revenue calculations reference this snapshot.
     // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────
+    // SHARE TOKENS (Workout share links)
+    // Created/revoked by Cloud Functions (onCall).
+    // Coaches can read their own tokens. Resolver uses Admin SDK.
+    // ─────────────────────────────────────────────
+    match /shareTokens/{tokenId} {
+      allow read: if isAuthenticated() && (
+        isCoachOrBootstrap(resource.data.createdBy)
+        || isPlatformAdmin()
+      );
+      allow create, update, delete: if false;
+    }
+
     match /acceptedPlanSnapshots/{snapshotId} {
       // Coaches and admins can read their own snapshots for auditing
       allow read: if isAuthenticated() && (

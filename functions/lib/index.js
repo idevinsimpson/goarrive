@@ -89,7 +89,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = void 0;
-exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = void 0;
+exports.resolveShareToken = exports.revokeShareToken = exports.createShareToken = exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -8015,5 +8015,167 @@ exports.getEmbeddedSessionJoinConfig = (0, https_1.onCall)({
         role: 0,
         zak: null,
     };
+});
+// ─── Workout Share Links ─────────────────────────────────────────────────────
+const crypto = __importStar(require("crypto"));
+exports.createShareToken = (0, https_1.onCall)(async (request) => {
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in.');
+    }
+    const callerToken = request.auth.token;
+    const callerRole = callerToken.role;
+    if (callerRole !== 'coach' && callerRole !== 'platformAdmin' && !callerToken.admin) {
+        throw new https_1.HttpsError('permission-denied', 'Only coaches can share workouts.');
+    }
+    const { workoutId } = request.data;
+    if (!workoutId) {
+        throw new https_1.HttpsError('invalid-argument', 'workoutId is required.');
+    }
+    const coachId = callerToken.coachId || request.auth.uid;
+    const workoutSnap = await db.collection('workouts').doc(workoutId).get();
+    if (!workoutSnap.exists) {
+        throw new https_1.HttpsError('not-found', 'Workout not found.');
+    }
+    const workoutData = workoutSnap.data();
+    if (workoutData.coachId !== coachId && callerRole !== 'platformAdmin' && !callerToken.admin) {
+        throw new https_1.HttpsError('permission-denied', 'You can only share your own workouts.');
+    }
+    const existingTokens = await db.collection('shareTokens')
+        .where('workoutId', '==', workoutId)
+        .where('createdBy', '==', coachId)
+        .where('revokedAt', '==', null)
+        .limit(1)
+        .get();
+    if (!existingTokens.empty) {
+        const existing = existingTokens.docs[0];
+        return { shareId: existing.id, alreadyExists: true };
+    }
+    const shareId = crypto.randomBytes(16).toString('hex');
+    await db.collection('shareTokens').doc(shareId).set({
+        workoutId,
+        tenantId: workoutData.tenantId || coachId,
+        createdBy: coachId,
+        coachName: workoutData.coachName || null,
+        revokedAt: null,
+        createdAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    return { shareId, alreadyExists: false };
+});
+exports.revokeShareToken = (0, https_1.onCall)(async (request) => {
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in.');
+    }
+    const callerToken = request.auth.token;
+    const callerRole = callerToken.role;
+    const coachId = callerToken.coachId || request.auth.uid;
+    const { workoutId } = request.data;
+    if (!workoutId) {
+        throw new https_1.HttpsError('invalid-argument', 'workoutId is required.');
+    }
+    const tokens = await db.collection('shareTokens')
+        .where('workoutId', '==', workoutId)
+        .where('createdBy', '==', coachId)
+        .where('revokedAt', '==', null)
+        .get();
+    if (tokens.empty) {
+        if (callerRole === 'platformAdmin' || callerToken.admin) {
+            const allTokens = await db.collection('shareTokens')
+                .where('workoutId', '==', workoutId)
+                .where('revokedAt', '==', null)
+                .get();
+            const batch = db.batch();
+            allTokens.docs.forEach((d) => batch.update(d.ref, { revokedAt: firestore_2.FieldValue.serverTimestamp() }));
+            await batch.commit();
+            return { revoked: allTokens.size };
+        }
+        throw new https_1.HttpsError('not-found', 'No active share link found for this workout.');
+    }
+    const batch = db.batch();
+    tokens.docs.forEach((d) => batch.update(d.ref, { revokedAt: firestore_2.FieldValue.serverTimestamp() }));
+    await batch.commit();
+    return { revoked: tokens.size };
+});
+exports.resolveShareToken = (0, https_1.onRequest)({ cors: true, region: 'us-central1' }, async (req, res) => {
+    var _a;
+    const shareId = req.query.shareId || ((_a = req.body) === null || _a === void 0 ? void 0 : _a.shareId);
+    if (!shareId || typeof shareId !== 'string' || shareId.length !== 32) {
+        res.status(400).json({ error: 'Invalid share link.' });
+        return;
+    }
+    const tokenSnap = await db.collection('shareTokens').doc(shareId).get();
+    if (!tokenSnap.exists) {
+        res.status(404).json({ error: 'This share link is no longer available.' });
+        return;
+    }
+    const tokenData = tokenSnap.data();
+    if (tokenData.revokedAt) {
+        res.status(410).json({ error: 'This share link has been revoked.' });
+        return;
+    }
+    const workoutSnap = await db.collection('workouts').doc(tokenData.workoutId).get();
+    if (!workoutSnap.exists) {
+        res.status(404).json({ error: 'This workout no longer exists.' });
+        return;
+    }
+    const workout = workoutSnap.data();
+    const coachSnap = await db.collection('coaches').doc(tokenData.createdBy).get();
+    const coachData = coachSnap.exists ? coachSnap.data() : {};
+    const authHeader = req.headers.authorization;
+    let isAuthenticated = false;
+    if (authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith('Bearer ')) {
+        try {
+            await admin.auth().verifyIdToken(authHeader.slice(7));
+            isAuthenticated = true;
+        }
+        catch (_b) {
+            // Invalid token — treat as unauthenticated
+        }
+    }
+    const teaser = {
+        workoutId: tokenData.workoutId,
+        name: workout.name || 'Workout',
+        description: workout.description || '',
+        category: workout.category || null,
+        difficulty: workout.difficulty || null,
+        estimatedDurationMin: workout.estimatedDurationMin || null,
+        blockCount: (workout.blocks || []).length,
+        coachName: coachData.displayName || coachData.name || 'Coach',
+        coachPhotoUrl: coachData.photoURL || null,
+        tags: workout.tags || [],
+    };
+    if (!isAuthenticated) {
+        res.status(200).json({ authenticated: false, teaser });
+        return;
+    }
+    const sanitizedBlocks = (workout.blocks || []).map((block) => ({
+        type: block.type || 'Block',
+        movements: (block.movements || []).map((m) => ({
+            name: m.name || '',
+            category: m.category || '',
+            muscleGroup: m.muscleGroup || '',
+            videoUrl: m.videoUrl || null,
+            thumbnailUrl: m.thumbnailUrl || null,
+            sets: m.sets || 0,
+            reps: m.reps || 0,
+            duration: m.duration || 0,
+            restSeconds: m.restSeconds || 0,
+        })),
+        restBetweenSets: block.restBetweenSets || 0,
+        rounds: block.rounds || 1,
+    }));
+    res.status(200).json({
+        authenticated: true,
+        teaser,
+        workout: {
+            id: tokenData.workoutId,
+            name: workout.name || 'Workout',
+            description: workout.description || '',
+            category: workout.category || null,
+            difficulty: workout.difficulty || null,
+            estimatedDurationMin: workout.estimatedDurationMin || null,
+            tags: workout.tags || [],
+            blocks: sanitizedBlocks,
+        },
+    });
 });
 //# sourceMappingURL=index.js.map

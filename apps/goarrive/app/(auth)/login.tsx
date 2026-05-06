@@ -85,6 +85,15 @@ export default function LoginScreen() {
         }
       }
 
+      if (typeof window !== 'undefined') {
+        const pendingShare = sessionStorage.getItem('pendingShareId');
+        if (pendingShare) {
+          sessionStorage.removeItem('pendingShareId');
+          router.replace(`/share/${pendingShare}` as any);
+          return;
+        }
+      }
+
       if (role === 'member') {
         router.replace('/(member)/home');
       } else {

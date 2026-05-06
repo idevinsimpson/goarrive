@@ -30,6 +30,10 @@
         "destination": "/join/[sessionInstanceId].html"
       },
       {
+        "source": "/share/**",
+        "destination": "/share/[shareId].html"
+      },
+      {
         "source": "/intake/*",
         "destination": "/intake/[coachId].html"
       },

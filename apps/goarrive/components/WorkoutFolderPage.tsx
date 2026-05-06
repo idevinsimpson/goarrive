@@ -26,6 +26,7 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Alert,
+  Share,
 } from 'react-native';
 import ModalSheet from './ModalSheet';
 import {
@@ -40,7 +41,8 @@ import {
   serverTimestamp,
   onSnapshot,
 } from 'firebase/firestore';
-import { db, storage } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, storage, functions } from '../lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from './Icon';
@@ -340,6 +342,8 @@ export default function WorkoutFolderPage({
   const [showMoveTo, setShowMoveTo] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [activeShareId, setActiveShareId] = useState<string | null>(null);
   const [moveToSearch, setMoveToSearch] = useState('');
   const [editingNameKey, setEditingNameKey] = useState<string | null>(null);
   const [editingNameValue, setEditingNameValue] = useState('');
@@ -376,6 +380,75 @@ export default function WorkoutFolderPage({
     setEditingNameKey(null);
     setReorderSource(null);
   }, []);
+
+  // ── Active share token lookup ────────────────────────────────────────────
+  useEffect(() => {
+    if (!workoutId || !coachId) return;
+    const q = query(
+      collection(db, 'shareTokens'),
+      where('workoutId', '==', workoutId),
+      where('createdBy', '==', coachId),
+      where('revokedAt', '==', null),
+    );
+    getDocs(q).then((snap) => {
+      if (!snap.empty) setActiveShareId(snap.docs[0].id);
+    }).catch(() => {});
+  }, [workoutId, coachId]);
+
+  async function handleShareLink() {
+    setShareLoading(true);
+    try {
+      const createFn = httpsCallable<{ workoutId: string }, { shareId: string; alreadyExists: boolean }>(functions, 'createShareToken');
+      const result = await createFn({ workoutId });
+      const { shareId } = result.data;
+      setActiveShareId(shareId);
+
+      const shareUrl = `https://goarrive.fit/share/${shareId}`;
+      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(shareUrl);
+        Alert.alert('Link Copied', 'Workout share link copied to clipboard.');
+      } else {
+        try {
+          await Share.share({ message: shareUrl });
+        } catch {
+          Alert.alert('Share Link', shareUrl);
+        }
+      }
+    } catch (err: any) {
+      console.error('[WorkoutFolder] Share link error:', err);
+      Alert.alert('Error', err?.message || 'Failed to create share link.');
+    } finally {
+      setShareLoading(false);
+    }
+  }
+
+  function handleRevokeLink() {
+    Alert.alert(
+      'Revoke Share Link',
+      'Anyone with the current link will no longer be able to access this workout. You can create a new link later.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Revoke',
+          style: 'destructive',
+          onPress: async () => {
+            setShareLoading(true);
+            try {
+              const revokeFn = httpsCallable<{ workoutId: string }, { revoked: number }>(functions, 'revokeShareToken');
+              await revokeFn({ workoutId });
+              setActiveShareId(null);
+              Alert.alert('Link Revoked', 'The share link has been revoked.');
+            } catch (err: any) {
+              console.error('[WorkoutFolder] Revoke error:', err);
+              Alert.alert('Error', err?.message || 'Failed to revoke share link.');
+            } finally {
+              setShareLoading(false);
+            }
+          },
+        },
+      ],
+    );
+  }
 
   // ── Load workout data ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -1265,6 +1338,39 @@ export default function WorkoutFolderPage({
           onPress={(e) => { e.stopPropagation(); setShowTitleMenu(false); }}
         >
           <View style={st.menuDropdown} onStartShouldSetResponder={() => true}>
+            <Pressable
+              style={st.menuItem}
+              onPress={() => {
+                setShowTitleMenu(false);
+                if (activeShareId) handleRevokeLink();
+                else handleShareLink();
+              }}
+              disabled={shareLoading}
+            >
+              {shareLoading ? (
+                <ActivityIndicator size={16} color={activeShareId ? '#EF4444' : '#6EBB7A'} />
+              ) : (
+                <Icon
+                  name={activeShareId ? 'x-circle' : 'link'}
+                  size={16}
+                  color={activeShareId ? '#EF4444' : '#6EBB7A'}
+                />
+              )}
+              <Text style={[st.menuItemText, { color: activeShareId ? '#EF4444' : '#6EBB7A' }]}>
+                {activeShareId ? 'Revoke Share Link' : 'Share Workout Link'}
+              </Text>
+            </Pressable>
+            {activeShareId && (
+              <Pressable
+                style={st.menuItem}
+                onPress={() => { setShowTitleMenu(false); handleShareLink(); }}
+                disabled={shareLoading}
+              >
+                <Icon name="share" size={16} color="#7DD3FC" />
+                <Text style={[st.menuItemText, { color: '#7DD3FC' }]}>Copy Share Link</Text>
+              </Pressable>
+            )}
+            <View style={st.menuDivider} />
             <Pressable
               style={st.menuItem}
               onPress={() => { setShowTitleMenu(false); setShowDescriptionEdit(true); }}
