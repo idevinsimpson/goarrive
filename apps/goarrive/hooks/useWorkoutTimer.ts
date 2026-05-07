@@ -16,7 +16,8 @@ import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess } from '../lib/ha
 import type { StepType } from './useWorkoutFlatten';
 
 export type Phase = 'ready' | 'work' | 'rest' | 'swap' | 'complete'
-  | 'intro' | 'outro' | 'demo' | 'transition' | 'waterBreak' | 'grabEquipment';
+  | 'intro' | 'outro' | 'demo' | 'transition' | 'waterBreak' | 'grabEquipment'
+  | 'followAlongVideo';
 
 // Lands inside REVEAL_LEAD_SECONDS (3.5 in WorkoutPlayer.tsx) so the next
 // timeline item reveals immediately when Skip is pressed — important for the
@@ -48,6 +49,7 @@ export function stepTypeToPhase(stepType: StepType | undefined): Phase {
     case 'transition': return 'transition';
     case 'waterBreak': return 'waterBreak';
     case 'grabEquipment': return 'grabEquipment';
+    case 'followAlongVideo': return 'followAlongVideo';
     default: return 'work';
   }
 }
@@ -73,7 +75,8 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
 
   const isRepBased = !!(current?.reps && (!current.duration || current.duration <= 0));
   const isSpecialPhase = phase === 'intro' || phase === 'outro' || phase === 'demo'
-    || phase === 'transition' || phase === 'waterBreak' || phase === 'grabEquipment';
+    || phase === 'transition' || phase === 'waterBreak' || phase === 'grabEquipment'
+    || phase === 'followAlongVideo';
 
   const progressPct = total > 0 ? (currentIndex / total) * 100 : 0;
 
@@ -175,7 +178,8 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
 
     // Special block phases: auto-advance when timer reaches 0
     if (phase === 'intro' || phase === 'outro' || phase === 'demo'
-        || phase === 'transition' || phase === 'waterBreak' || phase === 'grabEquipment') {
+        || phase === 'transition' || phase === 'waterBreak' || phase === 'grabEquipment'
+        || phase === 'followAlongVideo') {
       advanceToNext();
       return;
     }
@@ -272,7 +276,8 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     const leadIn = SKIP_PRE_ENTRY_SECONDS;
 
     if (phase === 'intro' || phase === 'outro' || phase === 'demo'
-        || phase === 'transition' || phase === 'waterBreak' || phase === 'grabEquipment') {
+        || phase === 'transition' || phase === 'waterBreak' || phase === 'grabEquipment'
+        || phase === 'followAlongVideo') {
       advanceToNext(true);
       if (!isPaused) setTimeLeft(leadIn);
     } else if (phase === 'work') {

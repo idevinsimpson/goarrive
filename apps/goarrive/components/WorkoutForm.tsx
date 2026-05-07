@@ -62,6 +62,7 @@ import {
 import { Icon } from './Icon';
 import { useWorkoutTemplates, WorkoutTemplate } from '../hooks/useWorkoutTemplates';
 import { calculateAdjustedRest } from '../hooks/useRestAutoAdjust';
+import FollowAlongVideoUploadSheet, { FollowAlongVideoPayload } from './FollowAlongVideoUploadSheet';
 import { FB, FH } from '../lib/theme';
 
 // ── Web-compatible alert helper ──────────────────────────────────────────
@@ -93,12 +94,12 @@ const EXERCISE_BLOCK_TYPES = [
   'Timed', 'AMRAP', 'EMOM', 'Cool-Down', 'Rest',
 ];
 const SPECIAL_BLOCK_TYPES = [
-  'Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment',
+  'Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment', 'Follow-Along Video',
 ];
 const ALL_BLOCK_TYPES = [...EXERCISE_BLOCK_TYPES, ...SPECIAL_BLOCK_TYPES];
 
 // Special blocks that don't contain movements (Demo added — was missing)
-const NO_MOVEMENT_BLOCKS = ['Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment'];
+const NO_MOVEMENT_BLOCKS = ['Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment', 'Follow-Along Video'];
 
 // Quick-insert types for between-block "+" buttons
 const QUICK_INSERT_TYPES = ['Water Break', 'Transition', 'Rest'];
@@ -129,6 +130,7 @@ const BLOCK_COLORS: Record<string, string> = {
   'Transition': '#94A3B8',
   'Water Break': '#38BDF8',
   'Grab Equipment': '#FB923C',
+  'Follow-Along Video': '#22D3EE',
 };
 
 // ── Helper: auto-calculate duration from blocks ──────────────────────────
@@ -159,6 +161,7 @@ function generateBlockLabel(type: string, existingBlocks: WorkoutBlock[]): strin
   if (type === 'Water Break') return '💧 Water Break';
   if (type === 'Transition') return '→ Transition';
   if (type === 'Grab Equipment') return 'Grab Equipment';
+  if (type === 'Follow-Along Video') return 'Follow-Along Video';
   // Count how many blocks of this type already exist
   const count = existingBlocks.filter(b => b.type === type).length + 1;
   return `${type} ${count}`;
@@ -189,6 +192,16 @@ interface WorkoutBlock {
   circuitStartRestSec?: number; // rest before first movement, first round only (circuit-type blocks)
   showDemo?: boolean; // show demo/preview screen before this block in the player
   movements: BlockMovement[];
+  // Follow-Along Video fields (only set when type === 'Follow-Along Video')
+  videoUrl?: string;
+  videoStoragePath?: string;
+  videoDurationSec?: number;
+  soundEnabled?: boolean;
+  cropScale?: number;
+  cropTranslateX?: number;
+  cropTranslateY?: number;
+  cropFrameWidth?: number;
+  cropFrameHeight?: number;
 }
 
 interface MovementOption {
@@ -242,6 +255,12 @@ export default function WorkoutForm({
   const [expandedMovement, setExpandedMovement] = useState<string | null>(null); // "blockIdx-movIdx"
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showGlobalTiming, setShowGlobalTiming] = useState(false);
+
+  // ── Follow-Along Video upload sheet state ─────────────────────────────
+  // Mode: 'add' inserts a new block (atIndex). 'replace' swaps the video on an existing block.
+  const [followAlongTarget, setFollowAlongTarget] = useState<
+    { mode: 'add'; atIndex: number | null } | { mode: 'replace'; blockIndex: number } | null
+  >(null);
 
   // ── Global timing overrides ──────────────────────────────────────────
   const [globalWorkSec, setGlobalWorkSec] = useState(String(DEFAULT_DURATION_SEC));
@@ -370,6 +389,16 @@ export default function WorkoutForm({
             notes: m.notes ?? '',
             showOnPreview: m.showOnPreview,
           })),
+          // Follow-Along Video fields (only present on type === 'Follow-Along Video')
+          videoUrl: b.videoUrl,
+          videoStoragePath: b.videoStoragePath,
+          videoDurationSec: b.videoDurationSec,
+          soundEnabled: b.soundEnabled,
+          cropScale: b.cropScale,
+          cropTranslateX: b.cropTranslateX,
+          cropTranslateY: b.cropTranslateY,
+          cropFrameWidth: b.cropFrameWidth,
+          cropFrameHeight: b.cropFrameHeight,
         })),
       );
     } else {
@@ -435,6 +464,12 @@ export default function WorkoutForm({
         showAlert('Demo Placement', 'Demo blocks should be placed before an exercise block (Circuit, Superset, etc.) to preview its movements.');
       }
     }
+    // Follow-Along Video: detour through the upload sheet first, then insert on success.
+    if (type === 'Follow-Along Video') {
+      setShowBlockTypePicker(false);
+      setFollowAlongTarget({ mode: 'add', atIndex: atIndex ?? null });
+      return;
+    }
     const isSpecial = NO_MOVEMENT_BLOCKS.includes(type);
     const newBlock: WorkoutBlock = {
       type,
@@ -453,6 +488,64 @@ export default function WorkoutForm({
     }
     setShowBlockTypePicker(false);
     setInsertAtIndex(null);
+  };
+
+  // ── Follow-Along Video: upload-sheet result handler ─────────────────────
+  const onFollowAlongUploaded = (payload: FollowAlongVideoPayload) => {
+    if (!followAlongTarget) return;
+
+    if (followAlongTarget.mode === 'add') {
+      const newBlock: WorkoutBlock = {
+        type: 'Follow-Along Video',
+        label: generateBlockLabel('Follow-Along Video', blocks),
+        rounds: 1,
+        restBetweenRoundsSec: 0,
+        restBetweenMovementsSec: 0,
+        durationSec: payload.videoDurationSec,
+        firstMovementPrepSec: 0,
+        movements: [],
+        videoUrl: payload.videoUrl,
+        videoStoragePath: payload.videoStoragePath,
+        videoDurationSec: payload.videoDurationSec,
+        soundEnabled: payload.soundEnabled,
+        cropScale: payload.cropScale,
+        cropTranslateX: payload.cropTranslateX,
+        cropTranslateY: payload.cropTranslateY,
+        cropFrameWidth: payload.cropFrameWidth,
+        cropFrameHeight: payload.cropFrameHeight,
+      };
+      const at = followAlongTarget.atIndex;
+      if (at != null && at >= 0 && at <= blocks.length) {
+        setBlocks((prev) => [...prev.slice(0, at), newBlock, ...prev.slice(at)]);
+      } else {
+        setBlocks((prev) => [...prev, newBlock]);
+      }
+      setInsertAtIndex(null);
+      showToast('Follow-along video added');
+    } else {
+      const idx = followAlongTarget.blockIndex;
+      setBlocks((prev) =>
+        prev.map((b, i) =>
+          i === idx
+            ? {
+                ...b,
+                durationSec: payload.videoDurationSec,
+                videoUrl: payload.videoUrl,
+                videoStoragePath: payload.videoStoragePath,
+                videoDurationSec: payload.videoDurationSec,
+                soundEnabled: payload.soundEnabled,
+                cropScale: payload.cropScale,
+                cropTranslateX: payload.cropTranslateX,
+                cropTranslateY: payload.cropTranslateY,
+                cropFrameWidth: payload.cropFrameWidth,
+                cropFrameHeight: payload.cropFrameHeight,
+              }
+            : b,
+        ),
+      );
+      showToast('Video replaced');
+    }
+    setFollowAlongTarget(null);
   };
 
   const removeBlock = (index: number) => {
@@ -628,6 +721,17 @@ export default function WorkoutForm({
         if (b.firstMovementPrepSec) clean.firstMovementPrepSec = b.firstMovementPrepSec;
         if (b.circuitStartRestSec) clean.circuitStartRestSec = b.circuitStartRestSec;
         if (b.showDemo != null) clean.showDemo = b.showDemo;
+        if (b.type === 'Follow-Along Video') {
+          if (b.videoUrl) clean.videoUrl = b.videoUrl;
+          if (b.videoStoragePath) clean.videoStoragePath = b.videoStoragePath;
+          if (b.videoDurationSec != null) clean.videoDurationSec = b.videoDurationSec;
+          if (b.soundEnabled != null) clean.soundEnabled = b.soundEnabled;
+          if (b.cropScale != null) clean.cropScale = b.cropScale;
+          if (b.cropTranslateX != null) clean.cropTranslateX = b.cropTranslateX;
+          if (b.cropTranslateY != null) clean.cropTranslateY = b.cropTranslateY;
+          if (b.cropFrameWidth != null) clean.cropFrameWidth = b.cropFrameWidth;
+          if (b.cropFrameHeight != null) clean.cropFrameHeight = b.cropFrameHeight;
+        }
         clean.movements = (b.movements ?? []).map((m) => {
           const cm: any = { movementId: m.movementId, movementName: m.movementName };
           if (m.sets) cm.sets = m.sets;
@@ -1017,7 +1121,7 @@ export default function WorkoutForm({
                         )}
 
                         {/* Special block: duration + instruction */}
-                        {isSpecial && (
+                        {isSpecial && block.type !== 'Follow-Along Video' && (
                           <View style={s.specialBlockContent}>
                             <View style={s.blockSettingItem}>
                               <Text style={s.blockSettingLabel}>Duration (sec)</Text>
@@ -1039,6 +1143,50 @@ export default function WorkoutForm({
                                 multiline
                               />
                             )}
+                          </View>
+                        )}
+
+                        {/* Follow-Along Video special tile: preview + sound + replace */}
+                        {block.type === 'Follow-Along Video' && (
+                          <View style={s.specialBlockContent}>
+                            <View style={s.followAlongRow}>
+                              <View style={s.followAlongThumb}>
+                                <Icon
+                                  name={block.videoUrl ? 'play' : 'video'}
+                                  size={24}
+                                  color="#22D3EE"
+                                />
+                              </View>
+                              <View style={s.followAlongMeta}>
+                                <Text style={s.followAlongMetaLabel}>
+                                  {block.videoDurationSec
+                                    ? `${Math.floor(block.videoDurationSec / 60)}:${String(Math.round(block.videoDurationSec % 60)).padStart(2, '0')} video`
+                                    : 'No video'}
+                                </Text>
+                                <Pressable
+                                  onPress={() => updateBlockField(bi, 'soundEnabled', !block.soundEnabled)}
+                                  style={s.followAlongSoundRow}
+                                  hitSlop={4}
+                                >
+                                  <Icon
+                                    name={block.soundEnabled !== false ? 'volume-high' : 'volume-mute'}
+                                    size={14}
+                                    color={block.soundEnabled !== false ? '#34D399' : '#8A95A3'}
+                                  />
+                                  <Text style={s.followAlongSoundLabel}>
+                                    Sound {block.soundEnabled !== false ? 'on' : 'off'}
+                                  </Text>
+                                </Pressable>
+                              </View>
+                              <TouchableOpacity
+                                style={s.followAlongReplaceBtn}
+                                onPress={() => setFollowAlongTarget({ mode: 'replace', blockIndex: bi })}
+                              >
+                                <Text style={s.followAlongReplaceText}>
+                                  {block.videoUrl ? 'Replace' : 'Upload'}
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
                           </View>
                         )}
 
@@ -1383,6 +1531,14 @@ export default function WorkoutForm({
         </Pressable>
       </Pressable>
     </Modal>
+
+    {/* ── Follow-Along Video Upload Sheet ──────────────────────────── */}
+    <FollowAlongVideoUploadSheet
+      visible={followAlongTarget != null}
+      coachId={coachId}
+      onClose={() => setFollowAlongTarget(null)}
+      onUploaded={onFollowAlongUploaded}
+    />
 
     {/* ── Details Sheet Modal ─────────────────────────────────────── */}
     <ModalSheet visible={showDetails} onClose={() => setShowDetails(false)} maxHeightPct={0.85} sheetBg="#111827" backdropColor="rgba(0,0,0,0.65)" borderRadius={24}>
@@ -1767,6 +1923,59 @@ const s = StyleSheet.create({
     borderColor: '#2A3347',
     minHeight: 48,
     textAlignVertical: 'top',
+  },
+
+  // ── Follow-Along Video tile (canvas) ────────────────────────────────
+  followAlongRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#161B22',
+    borderRadius: 8,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#22D3EE44',
+  },
+  followAlongThumb: {
+    width: 56,
+    height: 70,
+    backgroundColor: '#0E1117',
+    borderRadius: 6,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  followAlongMeta: {
+    flex: 1,
+    gap: 4,
+  },
+  followAlongMetaLabel: {
+    color: '#F0F4F8',
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: FH,
+  },
+  followAlongSoundRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  followAlongSoundLabel: {
+    color: '#8A95A3',
+    fontSize: 11,
+    fontFamily: FB,
+  },
+  followAlongReplaceBtn: {
+    backgroundColor: '#22D3EE',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+  },
+  followAlongReplaceText: {
+    color: '#0E1117',
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: FH,
   },
 
   // ── Movement rows ───────────────────────────────────────────────────
