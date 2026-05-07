@@ -970,7 +970,7 @@ function BuildScreenInner() {
         onUploaded={async (payload: FollowAlongVideoPayload) => {
           setIsFollowAlongOpen(false);
           try {
-            const newWorkoutRef = await addDoc(collection(db, 'workouts'), {
+            await addDoc(collection(db, 'workouts'), {
               name: 'Untitled Follow-Along',
               description: '',
               coachId,
@@ -996,7 +996,7 @@ function BuildScreenInner() {
                   cropFrameHeight: payload.cropFrameHeight,
                 },
               ],
-              coverThumbs: [],
+              coverThumbs: payload.thumbnailUrl ? [payload.thumbnailUrl] : [],
               introVideoUrl: null,
               introGifUrl: null,
               outroVideoUrl: null,
@@ -1007,7 +1007,8 @@ function BuildScreenInner() {
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             });
-            setOpenWorkoutId(newWorkoutRef.id);
+            // Stay on Build library — the listener-driven grid will surface
+            // the new workout tile so the coach can confirm it landed.
           } catch (e) {
             console.error('Create follow-along workout error:', e);
           }

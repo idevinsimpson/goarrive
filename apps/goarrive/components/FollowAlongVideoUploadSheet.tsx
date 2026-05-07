@@ -20,7 +20,7 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { storage } from '../lib/firebase';
 import VideoCropModal, { CropValues } from './VideoCropModal';
 import { Icon } from './Icon';
@@ -36,11 +36,98 @@ export interface FollowAlongVideoPayload {
   videoStoragePath: string;
   videoDurationSec: number;
   soundEnabled: boolean;
+  thumbnailUrl?: string;
   cropScale: number;
   cropTranslateX: number;
   cropTranslateY: number;
   cropFrameWidth: number;
   cropFrameHeight: number;
+}
+
+// Web-only probe: HTMLVideoElement gives reliable duration + lets us paint a
+// frame to a canvas for the library thumbnail. expo-av's onPlaybackStatusUpdate
+// reported durationMillis=1 on web, which is why the previous build was
+// writing videoDurationSec=1 to Firestore.
+async function probeWebVideo(
+  uri: string,
+): Promise<{ durationSec: number; thumbnailBlob: Blob | null }> {
+  if (Platform.OS !== 'web' || typeof document === 'undefined') {
+    return { durationSec: 0, thumbnailBlob: null };
+  }
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+
+    let resolved = false;
+    const finish = (out: { durationSec: number; thumbnailBlob: Blob | null }) => {
+      if (resolved) return;
+      resolved = true;
+      try {
+        video.src = '';
+        video.load();
+      } catch {
+        /* noop */
+      }
+      resolve(out);
+    };
+
+    const captureFrameAndFinish = () => {
+      const dur = isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) {
+        finish({ durationSec: dur, thumbnailBlob: null });
+        return;
+      }
+      const MAX_W = 720;
+      const scale = Math.min(1, MAX_W / vw);
+      const w = Math.max(1, Math.round(vw * scale));
+      const h = Math.max(1, Math.round(vh * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        finish({ durationSec: dur, thumbnailBlob: null });
+        return;
+      }
+      try {
+        ctx.drawImage(video, 0, 0, w, h);
+        canvas.toBlob(
+          (blob) => finish({ durationSec: dur, thumbnailBlob: blob }),
+          'image/jpeg',
+          0.85,
+        );
+      } catch {
+        finish({ durationSec: dur, thumbnailBlob: null });
+      }
+    };
+
+    video.onerror = () => finish({ durationSec: 0, thumbnailBlob: null });
+
+    video.onloadedmetadata = () => {
+      // Some webm/mp4 streams report duration=Infinity until forced past EOF
+      if (!isFinite(video.duration)) {
+        video.currentTime = 1e6;
+        video.ontimeupdate = () => {
+          video.ontimeupdate = null;
+          video.onseeked = captureFrameAndFinish;
+          const seek = isFinite(video.duration) && video.duration > 0
+            ? Math.min(1, Math.max(0, video.duration - 0.05))
+            : 0;
+          video.currentTime = seek;
+        };
+        return;
+      }
+      video.onseeked = captureFrameAndFinish;
+      video.currentTime = Math.min(1, Math.max(0, video.duration - 0.05));
+    };
+
+    video.src = uri;
+    video.load();
+  });
 }
 
 interface Props {
@@ -176,23 +263,31 @@ export default function FollowAlongVideoUploadSheet({
   const onCropDone = useCallback(async (crop: CropValues) => {
     if (!pickedUri) return;
 
-    // Final duration guard (probe may have just resolved)
-    const finalDuration = duration ?? 0;
-    if (finalDuration > MAX_DURATION_SEC) {
-      showAlert('Video Too Long', 'Follow-along videos must be 45 minutes or shorter.');
-      setStage('pick');
-      return;
-    }
-    if (finalDuration <= 0) {
-      showAlert('Could Not Read Duration', 'Please try a different video file.');
-      setStage('pick');
-      return;
-    }
-
     setStage('uploading');
     setProgress(0);
 
     try {
+      // Authoritative duration + thumbnail capture.
+      // On web, HTMLVideoElement gives a reliable duration where expo-av did not.
+      let finalDuration = duration ?? 0;
+      let thumbnailBlob: Blob | null = null;
+      if (Platform.OS === 'web') {
+        const probe = await probeWebVideo(pickedUri);
+        if (probe.durationSec > 0) finalDuration = probe.durationSec;
+        thumbnailBlob = probe.thumbnailBlob;
+      }
+
+      if (finalDuration > MAX_DURATION_SEC) {
+        showAlert('Video Too Long', 'Follow-along videos must be 45 minutes or shorter.');
+        setStage('pick');
+        return;
+      }
+      if (finalDuration <= 0) {
+        showAlert('Could Not Read Duration', 'Please try a different video file.');
+        setStage('pick');
+        return;
+      }
+
       const response = await fetch(pickedUri);
       const blob = await response.blob();
       if (blob.size > MAX_BYTES) {
@@ -202,7 +297,8 @@ export default function FollowAlongVideoUploadSheet({
       }
 
       const ext = (extOf(pickedUri) || 'mp4') as 'mp4' | 'mov';
-      const path = `workouts/${coachId}/follow-along-videos/${Date.now()}.${ext}`;
+      const tsBase = Date.now();
+      const path = `workouts/${coachId}/follow-along-videos/${tsBase}.${ext}`;
       const storageRef = ref(storage, path);
       const task = uploadBytesResumable(storageRef, blob, {
         contentType: ext === 'mov' ? 'video/quicktime' : 'video/mp4',
@@ -222,11 +318,25 @@ export default function FollowAlongVideoUploadSheet({
 
       const downloadUrl = await getDownloadURL(task.snapshot.ref);
 
+      // Best-effort poster upload — failure is non-fatal (video still works).
+      let thumbnailUrl: string | undefined;
+      if (thumbnailBlob) {
+        try {
+          const posterPath = `workouts/${coachId}/follow-along-videos/${tsBase}-poster.jpg`;
+          const posterRef = ref(storage, posterPath);
+          await uploadBytes(posterRef, thumbnailBlob, { contentType: 'image/jpeg' });
+          thumbnailUrl = await getDownloadURL(posterRef);
+        } catch (posterErr) {
+          console.warn('[FollowAlongVideoUploadSheet] poster upload failed:', posterErr);
+        }
+      }
+
       onUploaded({
         videoUrl: downloadUrl,
         videoStoragePath: path,
         videoDurationSec: Math.round(finalDuration),
         soundEnabled,
+        thumbnailUrl,
         cropScale: crop.cropScale,
         cropTranslateX: crop.cropTranslateX,
         cropTranslateY: crop.cropTranslateY,
