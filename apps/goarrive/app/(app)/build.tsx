@@ -52,6 +52,7 @@ import WorkoutDetail from '../../components/WorkoutDetail';
 import WorkoutForm from '../../components/WorkoutForm';
 import WorkoutFolderPage from '../../components/WorkoutFolderPage';
 import BulkMovementUpload from '../../components/BulkMovementUpload';
+import FollowAlongVideoUploadSheet, { FollowAlongVideoPayload } from '../../components/FollowAlongVideoUploadSheet';
 import { usePreviewEngine } from '../../hooks/usePreviewEngine';
 import { AnimatedPreviewTile, MosaicPreviewTile } from '../../components/AnimatedPreviewTile';
 
@@ -245,6 +246,7 @@ function BuildScreenInner() {
   const [editMovement, setEditMovement] = useState<any | null>(null);
   const [isMovementFormOpen, setIsMovementFormOpen] = useState(false);
   const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
+  const [isFollowAlongOpen, setIsFollowAlongOpen] = useState(false);
   const [selectedWorkout, setSelectedWorkout] = useState<any | null>(null);
   const [editWorkout, setEditWorkout] = useState<any | null>(null);
   const [isWorkoutFormOpen, setIsWorkoutFormOpen] = useState(false);
@@ -961,6 +963,57 @@ function BuildScreenInner() {
         tenantId={tenantId}
       />
 
+      <FollowAlongVideoUploadSheet
+        visible={isFollowAlongOpen}
+        coachId={coachId}
+        onClose={() => setIsFollowAlongOpen(false)}
+        onUploaded={async (payload: FollowAlongVideoPayload) => {
+          setIsFollowAlongOpen(false);
+          try {
+            const newWorkoutRef = await addDoc(collection(db, 'workouts'), {
+              name: 'Untitled Follow-Along',
+              description: '',
+              coachId,
+              tenantId,
+              blocks: [
+                {
+                  type: 'Follow-Along Video',
+                  label: 'Follow-Along Video',
+                  rounds: 1,
+                  restBetweenRoundsSec: 0,
+                  restBetweenMovementsSec: 0,
+                  durationSec: payload.videoDurationSec,
+                  firstMovementPrepSec: 0,
+                  movements: [],
+                  videoUrl: payload.videoUrl,
+                  videoStoragePath: payload.videoStoragePath,
+                  videoDurationSec: payload.videoDurationSec,
+                  soundEnabled: payload.soundEnabled,
+                  cropScale: payload.cropScale,
+                  cropTranslateX: payload.cropTranslateX,
+                  cropTranslateY: payload.cropTranslateY,
+                  cropFrameWidth: payload.cropFrameWidth,
+                  cropFrameHeight: payload.cropFrameHeight,
+                },
+              ],
+              coverThumbs: [],
+              introVideoUrl: null,
+              introGifUrl: null,
+              outroVideoUrl: null,
+              outroGifUrl: null,
+              parentId: currentFolderId || null,
+              isArchived: false,
+              isTemplate: false,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
+            setOpenWorkoutId(newWorkoutRef.id);
+          } catch (e) {
+            console.error('Create follow-along workout error:', e);
+          }
+        }}
+      />
+
       {/* WorkoutDetail and WorkoutForm modals removed — replaced by WorkoutFolderPage */}
 
       <Modal transparent visible={isPlusOpen} animationType="fade" onRequestClose={() => setIsPlusOpen(false)}>
@@ -1034,6 +1087,16 @@ function BuildScreenInner() {
             >
               <Icon name="workouts" size={20} color="#F0F4F8" />
               <Text style={s.plusMenuItemText}>Workout</Text>
+            </Pressable>
+            <Pressable
+              style={s.plusMenuItem}
+              onPress={() => {
+                setIsPlusOpen(false);
+                setIsFollowAlongOpen(true);
+              }}
+            >
+              <Icon name="video" size={20} color="#22D3EE" />
+              <Text style={s.plusMenuItemText}>Follow-Along Video</Text>
             </Pressable>
             <Pressable style={s.plusMenuItem} onPress={() => { setIsPlusOpen(false); setShowPlaybookCreate(true); }}>
               <Icon name="playbook" size={20} color="#A78BFA" />
