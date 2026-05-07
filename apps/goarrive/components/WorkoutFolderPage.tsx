@@ -61,13 +61,13 @@ const MAX_CARD_WIDTH = Math.round(LIBRARY_MAX_CARD / 2); // 120px — half the l
 const CARD_ASPECT = 4 / 5;
 
 // ── Block types & colors ───────────────────────────────────────────────────
-const NO_MOVEMENT_BLOCKS = ['Transition', 'Water Break'];
+const NO_MOVEMENT_BLOCKS = ['Transition', 'Water Break', 'Follow-Along Video'];
 const BLOCK_COLORS: Record<string, string> = {
   'Warm-Up': '#F59E0B', 'Circuit': '#34D399', 'Superset': '#F59E0B',
   'Interval': '#818CF8', 'Strength': '#7DD3FC', 'Timed': '#A78BFA',
   'AMRAP': '#34D399', 'EMOM': '#34D399', 'Cool-Down': '#60A5FA',
   'Rest': '#4A5568',
-  'Transition': '#94A3B8', 'Water Break': '#38BDF8',
+  'Transition': '#94A3B8', 'Water Break': '#38BDF8', 'Follow-Along Video': '#22D3EE',
 };
 const DEFAULT_ROUNDS = 3;
 const DEFAULT_DURATION_SEC = 40;
@@ -129,6 +129,15 @@ interface WorkoutBlock {
   blockPreSequence?: ('demo' | 'grabEquipment')[];
   circuitStartRestSec?: number; // legacy compat
   movements: BlockMovement[];
+  videoUrl?: string;
+  videoStoragePath?: string;
+  videoDurationSec?: number;
+  soundEnabled?: boolean;
+  cropScale?: number;
+  cropTranslateX?: number;
+  cropTranslateY?: number;
+  cropFrameWidth?: number;
+  cropFrameHeight?: number;
 }
 
 interface MovementOption {
@@ -485,37 +494,51 @@ export default function WorkoutFolderPage({
             (b: any) => b.type !== 'Intro' && b.type !== 'Outro' && b.type !== 'Demo'
           );
           setBlocks(
-            rawBlocks.map((b: any) => ({
-              type: b.type ?? 'Circuit',
-              label: b.label ?? '',
-              rounds: b.rounds ?? DEFAULT_ROUNDS,
-              restBetweenRoundsSec: b.restBetweenRoundsSec ?? 0,
-              restBetweenMovementsSec: b.restBetweenMovementsSec ?? 0,
-              durationSec: b.durationSec ?? undefined,
-              instructionText: b.instructionText ?? undefined,
-              firstMovementPrepSec: b.firstMovementPrepSec ?? DEFAULT_REST_SEC,
-              showDemo: b.showDemo ?? false,
-              demoDurationSec: b.demoDurationSec ?? DEFAULT_DEMO_DURATION_SEC,
-              showGrabEquipment: b.showGrabEquipment ?? false,
-              grabEquipmentDurationSec: b.grabEquipmentDurationSec ?? undefined,
-              grabEquipmentText: b.grabEquipmentText ?? '',
-              beginningRestSec: b.beginningRestSec ?? b.circuitStartRestSec ?? undefined,
-              blockPreSequence: b.blockPreSequence ?? undefined,
-              circuitStartRestSec: b.circuitStartRestSec ?? undefined,
-              movements: (b.movements ?? []).map((m: any) => ({
-                movementId: m.movementId ?? '',
-                movementName: m.movementName ?? '',
-                displayName: m.displayName ?? undefined,
-                hidden: m.hidden ?? undefined,
-                sets: m.sets ?? undefined,
-                reps: m.reps ?? undefined,
-                weight: m.weight ?? undefined,
-                durationSec: m.durationSec ?? undefined,
-                restSec: m.restSec ?? undefined,
-                notes: m.notes ?? '',
-                thumbnailUrl: m.thumbnailUrl ?? undefined,
-              })),
-            })),
+            rawBlocks.map((b: any) => {
+              const out: WorkoutBlock = {
+                type: b.type ?? 'Circuit',
+                label: b.label ?? '',
+                rounds: b.rounds ?? DEFAULT_ROUNDS,
+                restBetweenRoundsSec: b.restBetweenRoundsSec ?? 0,
+                restBetweenMovementsSec: b.restBetweenMovementsSec ?? 0,
+                durationSec: b.durationSec ?? undefined,
+                instructionText: b.instructionText ?? undefined,
+                firstMovementPrepSec: b.firstMovementPrepSec ?? DEFAULT_REST_SEC,
+                showDemo: b.showDemo ?? false,
+                demoDurationSec: b.demoDurationSec ?? DEFAULT_DEMO_DURATION_SEC,
+                showGrabEquipment: b.showGrabEquipment ?? false,
+                grabEquipmentDurationSec: b.grabEquipmentDurationSec ?? undefined,
+                grabEquipmentText: b.grabEquipmentText ?? '',
+                beginningRestSec: b.beginningRestSec ?? b.circuitStartRestSec ?? undefined,
+                blockPreSequence: b.blockPreSequence ?? undefined,
+                circuitStartRestSec: b.circuitStartRestSec ?? undefined,
+                movements: (b.movements ?? []).map((m: any) => ({
+                  movementId: m.movementId ?? '',
+                  movementName: m.movementName ?? '',
+                  displayName: m.displayName ?? undefined,
+                  hidden: m.hidden ?? undefined,
+                  sets: m.sets ?? undefined,
+                  reps: m.reps ?? undefined,
+                  weight: m.weight ?? undefined,
+                  durationSec: m.durationSec ?? undefined,
+                  restSec: m.restSec ?? undefined,
+                  notes: m.notes ?? '',
+                  thumbnailUrl: m.thumbnailUrl ?? undefined,
+                })),
+              };
+              if (b.type === 'Follow-Along Video') {
+                out.videoUrl = b.videoUrl;
+                out.videoStoragePath = b.videoStoragePath;
+                out.videoDurationSec = b.videoDurationSec;
+                out.soundEnabled = b.soundEnabled ?? true;
+                out.cropScale = b.cropScale ?? 1;
+                out.cropTranslateX = b.cropTranslateX ?? 0;
+                out.cropTranslateY = b.cropTranslateY ?? 0;
+                out.cropFrameWidth = b.cropFrameWidth;
+                out.cropFrameHeight = b.cropFrameHeight;
+              }
+              return out;
+            }),
           );
         }
         setIntroVideoUrl(data.introVideoUrl ?? null);
@@ -655,6 +678,17 @@ export default function WorkoutFolderPage({
             clean.beginningRestSec = b.beginningRestSec;
             clean.circuitStartRestSec = b.beginningRestSec; // backwards compat
           }
+          if (b.type === 'Follow-Along Video') {
+            clean.videoUrl = b.videoUrl ?? undefined;
+            clean.videoStoragePath = b.videoStoragePath ?? undefined;
+            clean.videoDurationSec = b.videoDurationSec ?? undefined;
+            clean.soundEnabled = b.soundEnabled ?? true;
+            clean.cropScale = b.cropScale ?? 1;
+            clean.cropTranslateX = b.cropTranslateX ?? 0;
+            clean.cropTranslateY = b.cropTranslateY ?? 0;
+            clean.cropFrameWidth = b.cropFrameWidth ?? undefined;
+            clean.cropFrameHeight = b.cropFrameHeight ?? undefined;
+          }
           return clean;
         });
 
@@ -737,6 +771,17 @@ export default function WorkoutFolderPage({
           clean.beginningRestSec = b.beginningRestSec;
           clean.circuitStartRestSec = b.beginningRestSec;
         }
+        if (b.type === 'Follow-Along Video') {
+          clean.videoUrl = b.videoUrl ?? undefined;
+          clean.videoStoragePath = b.videoStoragePath ?? undefined;
+          clean.videoDurationSec = b.videoDurationSec ?? undefined;
+          clean.soundEnabled = b.soundEnabled ?? true;
+          clean.cropScale = b.cropScale ?? 1;
+          clean.cropTranslateX = b.cropTranslateX ?? 0;
+          clean.cropTranslateY = b.cropTranslateY ?? 0;
+          clean.cropFrameWidth = b.cropFrameWidth ?? undefined;
+          clean.cropFrameHeight = b.cropFrameHeight ?? undefined;
+        }
         return clean;
       });
       const coverThumbs: string[] = [];
@@ -772,30 +817,47 @@ export default function WorkoutFolderPage({
       const totalMovs = currentBlocks.reduce(
         (sum, b) => sum + ((b.movements ?? []).length), 0,
       );
-      if (totalMovs === 0) {
+      const hasFollowAlongVideo = currentBlocks.some(
+        (b) => b.type === 'Follow-Along Video' && !!b.videoUrl,
+      );
+      if (totalMovs === 0 && !hasFollowAlongVideo) {
         deleteDoc(doc(db, 'workouts', workoutId)).catch((e) => console.error('[WorkoutFolder] Unmount auto-delete error:', e));
         return;
       }
 
       // Non-empty workout with pending edits — fire-and-forget save
       if (dirtyRef.current) {
-        const cleanBlocks = currentBlocks.map((b) => ({
-          type: b.type, label: b.label,
-          rounds: b.rounds ?? DEFAULT_ROUNDS,
-          restBetweenRoundsSec: b.restBetweenRoundsSec ?? 0,
-          restBetweenMovementsSec: b.restBetweenMovementsSec ?? 0,
-          durationSec: b.durationSec ?? undefined,
-          instructionText: b.instructionText ?? undefined,
-          firstMovementPrepSec: b.firstMovementPrepSec ?? DEFAULT_REST_SEC,
-          showDemo: b.showDemo ?? false,
-          demoDurationSec: b.demoDurationSec ?? DEFAULT_DEMO_DURATION_SEC,
-          movements: (b.movements ?? []).map((m) => ({
-            movementId: m.movementId, movementName: m.movementName,
-            sets: m.sets ?? undefined, reps: m.reps ?? undefined,
-            durationSec: m.durationSec ?? undefined, restSec: m.restSec ?? undefined,
-            notes: m.notes ?? '', thumbnailUrl: m.thumbnailUrl ?? undefined,
-          })),
-        }));
+        const cleanBlocks = currentBlocks.map((b) => {
+          const c: any = {
+            type: b.type, label: b.label,
+            rounds: b.rounds ?? DEFAULT_ROUNDS,
+            restBetweenRoundsSec: b.restBetweenRoundsSec ?? 0,
+            restBetweenMovementsSec: b.restBetweenMovementsSec ?? 0,
+            durationSec: b.durationSec ?? undefined,
+            instructionText: b.instructionText ?? undefined,
+            firstMovementPrepSec: b.firstMovementPrepSec ?? DEFAULT_REST_SEC,
+            showDemo: b.showDemo ?? false,
+            demoDurationSec: b.demoDurationSec ?? DEFAULT_DEMO_DURATION_SEC,
+            movements: (b.movements ?? []).map((m) => ({
+              movementId: m.movementId, movementName: m.movementName,
+              sets: m.sets ?? undefined, reps: m.reps ?? undefined,
+              durationSec: m.durationSec ?? undefined, restSec: m.restSec ?? undefined,
+              notes: m.notes ?? '', thumbnailUrl: m.thumbnailUrl ?? undefined,
+            })),
+          };
+          if (b.type === 'Follow-Along Video') {
+            c.videoUrl = b.videoUrl ?? undefined;
+            c.videoStoragePath = b.videoStoragePath ?? undefined;
+            c.videoDurationSec = b.videoDurationSec ?? undefined;
+            c.soundEnabled = b.soundEnabled ?? true;
+            c.cropScale = b.cropScale ?? 1;
+            c.cropTranslateX = b.cropTranslateX ?? 0;
+            c.cropTranslateY = b.cropTranslateY ?? 0;
+            c.cropFrameWidth = b.cropFrameWidth ?? undefined;
+            c.cropFrameHeight = b.cropFrameHeight ?? undefined;
+          }
+          return c;
+        });
         const coverThumbs: string[] = [];
         for (const b of cleanBlocks) {
           for (const m of b.movements ?? []) {
@@ -822,6 +884,10 @@ export default function WorkoutFolderPage({
     );
     if (totalMovs > 0) return false;
     if (introVideoUrl || outroVideoUrl) return false;
+    const hasFollowAlongVideo = blocksRef.current.some(
+      (b) => b.type === 'Follow-Along Video' && !!b.videoUrl,
+    );
+    if (hasFollowAlongVideo) return false;
     return true;
   }, [introVideoUrl, outroVideoUrl]);
 
@@ -1482,7 +1548,7 @@ export default function WorkoutFolderPage({
                     },
                   ]}
                 >
-                  {/* Special block (Water Break, Transition) */}
+                  {/* Special block (Water Break, Transition, Follow-Along Video) */}
                   {isSpecial ? (
                     <Pressable
                       style={st.specialBlock}
@@ -1493,14 +1559,30 @@ export default function WorkoutFolderPage({
                       }}
                     >
                       <View style={[st.specialIcon, { backgroundColor: blockColor + '20' }]}>
-                        <Text style={{ fontSize: 20 }}>
-                          {block.type === 'Water Break' ? '💧' :
-                           block.type === 'Transition' ? '→' : '•'}
-                        </Text>
+                        {block.type === 'Follow-Along Video' ? (
+                          <Icon name="video" size={20} color={blockColor} />
+                        ) : (
+                          <Text style={{ fontSize: 20 }}>
+                            {block.type === 'Water Break' ? '💧' :
+                             block.type === 'Transition' ? '→' : '•'}
+                          </Text>
+                        )}
                       </View>
                       <Text style={[st.specialLabel, { color: blockColor }]}>{block.label}</Text>
-                      {block.durationSec !== undefined && (
-                        <Text style={st.specialDuration}>{block.durationSec}s</Text>
+                      {block.type === 'Follow-Along Video' ? (
+                        <Text style={st.specialDuration}>
+                          {(() => {
+                            const d = block.videoDurationSec ?? block.durationSec ?? 0;
+                            const mm = Math.floor(d / 60);
+                            const ss = Math.round(d % 60);
+                            return `${mm}:${String(ss).padStart(2, '0')}`;
+                          })()}
+                          {block.soundEnabled === false ? '  🔇' : '  🔊'}
+                        </Text>
+                      ) : (
+                        block.durationSec !== undefined && (
+                          <Text style={st.specialDuration}>{block.durationSec}s</Text>
+                        )
                       )}
                       {isBlockExpanded && (
                         <Pressable
