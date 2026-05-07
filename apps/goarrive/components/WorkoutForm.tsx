@@ -491,60 +491,12 @@ export default function WorkoutForm({
   };
 
   // ── Follow-Along Video: upload-sheet result handler ─────────────────────
-  const onFollowAlongUploaded = (payload: FollowAlongVideoPayload) => {
-    if (!followAlongTarget) return;
-
-    if (followAlongTarget.mode === 'add') {
-      const newBlock: WorkoutBlock = {
-        type: 'Follow-Along Video',
-        label: generateBlockLabel('Follow-Along Video', blocks),
-        rounds: 1,
-        restBetweenRoundsSec: 0,
-        restBetweenMovementsSec: 0,
-        durationSec: payload.videoDurationSec,
-        firstMovementPrepSec: 0,
-        movements: [],
-        videoUrl: payload.videoUrl,
-        videoStoragePath: payload.videoStoragePath,
-        videoDurationSec: payload.videoDurationSec,
-        soundEnabled: payload.soundEnabled,
-        cropScale: payload.cropScale,
-        cropTranslateX: payload.cropTranslateX,
-        cropTranslateY: payload.cropTranslateY,
-        cropFrameWidth: payload.cropFrameWidth,
-        cropFrameHeight: payload.cropFrameHeight,
-      };
-      const at = followAlongTarget.atIndex;
-      if (at != null && at >= 0 && at <= blocks.length) {
-        setBlocks((prev) => [...prev.slice(0, at), newBlock, ...prev.slice(at)]);
-      } else {
-        setBlocks((prev) => [...prev, newBlock]);
-      }
-      setInsertAtIndex(null);
-      showToast('Follow-along video added');
-    } else {
-      const idx = followAlongTarget.blockIndex;
-      setBlocks((prev) =>
-        prev.map((b, i) =>
-          i === idx
-            ? {
-                ...b,
-                durationSec: payload.videoDurationSec,
-                videoUrl: payload.videoUrl,
-                videoStoragePath: payload.videoStoragePath,
-                videoDurationSec: payload.videoDurationSec,
-                soundEnabled: payload.soundEnabled,
-                cropScale: payload.cropScale,
-                cropTranslateX: payload.cropTranslateX,
-                cropTranslateY: payload.cropTranslateY,
-                cropFrameWidth: payload.cropFrameWidth,
-                cropFrameHeight: payload.cropFrameHeight,
-              }
-            : b,
-        ),
-      );
-      showToast('Video replaced');
-    }
+  // NOTE: WorkoutForm is no longer the active workout editor (replaced by
+  // WorkoutFolderPage). The upload sheet now writes a `followAlongVideos`
+  // *asset* doc instead of returning per-block fields, so this handler
+  // would need an asset-id lookup to populate the block. Since the
+  // component isn't rendered, we keep a no-op stub to satisfy the type.
+  const onFollowAlongUploaded = (_payload: FollowAlongVideoPayload) => {
     setFollowAlongTarget(null);
   };
 

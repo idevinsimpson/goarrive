@@ -90,9 +90,13 @@ function stripUndefined(obj: any): any {
   return obj;
 }
 
-// Block types available when adding a new block — only 2 options now
+// Block types available when adding a new block.
+//   'movement'             → opens Movement picker, creates Circuit block w/ that movement
+//   'follow-along'         → opens Follow-Along asset picker, creates Follow-Along Video block
+//   'Water Break'          → adds a Water Break block directly
 const ADD_BLOCK_OPTIONS = [
   { type: 'movement', label: 'Movement', icon: 'movements', color: '#F0F4F8' },
+  { type: 'follow-along', label: 'Follow-Along Video', icon: 'video', color: '#22D3EE' },
   { type: 'Water Break', label: 'Water Break', icon: 'droplet', color: '#38BDF8' },
 ];
 
@@ -146,6 +150,22 @@ interface MovementOption {
   category: string;
   thumbnailUrl?: string | null;
   mediaUrl?: string | null;
+}
+
+interface FollowAlongOption {
+  id: string;
+  name: string;
+  videoUrl?: string | null;
+  videoStoragePath?: string | null;
+  videoDurationSec?: number;
+  thumbnailUrl?: string | null;
+  thumbnailImageUrl?: string | null;
+  soundEnabled?: boolean;
+  cropScale?: number;
+  cropTranslateX?: number;
+  cropTranslateY?: number;
+  cropFrameWidth?: number;
+  cropFrameHeight?: number;
 }
 
 // ── Duration calculator ─────────────────────────────────────────────────────
@@ -344,6 +364,12 @@ export default function WorkoutFolderPage({
   const [showMovementPicker, setShowMovementPicker] = useState(false);
   const [movementPickerBlockIdx, setMovementPickerBlockIdx] = useState<number | null>(null);
   const [movementSearch, setMovementSearch] = useState('');
+  const [showFollowAlongPicker, setShowFollowAlongPicker] = useState(false);
+  /** Insert position remembered when opening the picker — null = append. */
+  const [followAlongPickerInsertAt, setFollowAlongPickerInsertAt] = useState<number | null>(null);
+  const [followAlongSearch, setFollowAlongSearch] = useState('');
+  const [availableFollowAlongs, setAvailableFollowAlongs] = useState<FollowAlongOption[]>([]);
+  const [followAlongsLoaded, setFollowAlongsLoaded] = useState(false);
   const [showTitleMenu, setShowTitleMenu] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [showDescriptionEdit, setShowDescriptionEdit] = useState(false);
@@ -610,6 +636,40 @@ export default function WorkoutFolderPage({
   useEffect(() => {
     if (!movementsLoaded && coachId) loadMovements();
   }, [coachId, movementsLoaded, loadMovements]);
+
+  // ── Load follow-along library ─────────────────────────────────────────────
+  const loadFollowAlongs = useCallback(async () => {
+    if (followAlongsLoaded || !coachId) return;
+    try {
+      const q = query(collection(db, 'followAlongVideos'), where('coachId', '==', coachId));
+      const snap = await getDocs(q);
+      const list: FollowAlongOption[] = [];
+      snap.docs.forEach((d) => {
+        const data = d.data();
+        if (data.isArchived) return;
+        list.push({
+          id: d.id,
+          name: data.name ?? 'Untitled Follow-Along',
+          videoUrl: data.videoUrl ?? null,
+          videoStoragePath: data.videoStoragePath ?? null,
+          videoDurationSec: data.videoDurationSec ?? 0,
+          thumbnailUrl: data.thumbnailUrl ?? null,
+          thumbnailImageUrl: data.thumbnailImageUrl ?? null,
+          soundEnabled: data.soundEnabled ?? true,
+          cropScale: data.cropScale ?? 1,
+          cropTranslateX: data.cropTranslateX ?? 0,
+          cropTranslateY: data.cropTranslateY ?? 0,
+          cropFrameWidth: data.cropFrameWidth ?? 0,
+          cropFrameHeight: data.cropFrameHeight ?? 0,
+        });
+      });
+      list.sort((a, b) => a.name.localeCompare(b.name));
+      setAvailableFollowAlongs(list);
+      setFollowAlongsLoaded(true);
+    } catch (err: any) {
+      console.error('[WorkoutFolder] Load follow-alongs error:', err?.message ?? err);
+    }
+  }, [coachId, followAlongsLoaded]);
 
   // ── Enrich block movements with thumbnailUrl ─────────────────────────────
   useEffect(() => {
@@ -956,6 +1016,29 @@ export default function WorkoutFolderPage({
     return newBlocks.length - 1;
   }, [blocks, updateBlocks]);
 
+  /** Insert a Follow-Along Video block populated from a `followAlongVideos` asset. */
+  const addFollowAlongBlock = useCallback((asset: FollowAlongOption, atIndex?: number) => {
+    const newBlock: WorkoutBlock = {
+      type: 'Follow-Along Video',
+      label: asset.name || 'Follow-Along Video',
+      durationSec: asset.videoDurationSec ?? 0,
+      videoUrl: asset.videoUrl ?? undefined,
+      videoStoragePath: asset.videoStoragePath ?? undefined,
+      videoDurationSec: asset.videoDurationSec ?? 0,
+      soundEnabled: asset.soundEnabled ?? true,
+      cropScale: asset.cropScale ?? 1,
+      cropTranslateX: asset.cropTranslateX ?? 0,
+      cropTranslateY: asset.cropTranslateY ?? 0,
+      cropFrameWidth: asset.cropFrameWidth ?? 0,
+      cropFrameHeight: asset.cropFrameHeight ?? 0,
+      movements: [],
+    };
+    const newBlocks = [...blocks];
+    if (atIndex !== undefined && atIndex >= 0) newBlocks.splice(atIndex, 0, newBlock);
+    else newBlocks.push(newBlock);
+    updateBlocks(newBlocks);
+  }, [blocks, updateBlocks]);
+
   const removeBlock = useCallback((blockIdx: number) => {
     const newBlocks = blocks.filter((_, i) => i !== blockIdx);
     updateBlocks(newBlocks);
@@ -1110,6 +1193,13 @@ export default function WorkoutFolderPage({
     const q = movementSearch.toLowerCase();
     return availableMovements.filter(m => m.name.toLowerCase().includes(q));
   }, [availableMovements, movementSearch]);
+
+  // ── Filtered follow-alongs for picker ─────────────────────────────────────
+  const filteredFollowAlongs = useMemo(() => {
+    if (!followAlongSearch.trim()) return availableFollowAlongs;
+    const q = followAlongSearch.toLowerCase();
+    return availableFollowAlongs.filter(f => f.name.toLowerCase().includes(q));
+  }, [availableFollowAlongs, followAlongSearch]);
 
   // ── Auto-inferred metadata ────────────────────────────────────────────────
   const autoDuration = useMemo(() => calcDurationMin(blocks), [blocks]);
@@ -2052,10 +2142,19 @@ export default function WorkoutFolderPage({
                     setShowMovementPicker(true);
                     setMovementSearch('');
                     if (!movementsLoaded) loadMovements();
+                    setAddBlockAtIndex(null);
+                  } else if (opt.type === 'follow-along') {
+                    // Open Follow-Along asset picker; we'll create the block on selection,
+                    // so that picking creates a real block populated from the asset.
+                    setFollowAlongPickerInsertAt(addBlockAtIndex);
+                    setShowFollowAlongPicker(true);
+                    setFollowAlongSearch('');
+                    if (!followAlongsLoaded) loadFollowAlongs();
+                    // intentionally do NOT clear addBlockAtIndex here — picker owns it.
                   } else {
                     addBlock(opt.type, addBlockAtIndex ?? undefined);
+                    setAddBlockAtIndex(null);
                   }
-                  setAddBlockAtIndex(null);
                 }}
               >
                 <View style={[st.addBlockIcon, { backgroundColor: opt.color + '20' }]}>
@@ -2127,6 +2226,82 @@ export default function WorkoutFolderPage({
                 <Text style={st.pickerEmpty}>No movements found</Text>
               )}
             </ScrollView>
+      </ModalSheet>
+
+      {/* ── Follow-Along Asset Picker Modal ────────────────────────────── */}
+      <ModalSheet
+        visible={showFollowAlongPicker}
+        onClose={() => {
+          setShowFollowAlongPicker(false);
+          setFollowAlongPickerInsertAt(null);
+          setAddBlockAtIndex(null);
+        }}
+        maxHeightPct={0.8}
+        sheetBg="#1E2A3A"
+        backdropColor="rgba(0,0,0,0.7)"
+        borderRadius={24}
+      >
+        <View style={st.pickerHeader}>
+          <Text style={st.pickerTitle}>Add Follow-Along Video</Text>
+          <Pressable onPress={() => {
+            setShowFollowAlongPicker(false);
+            setFollowAlongPickerInsertAt(null);
+            setAddBlockAtIndex(null);
+          }}>
+            <Icon name="close" size={20} color="#8A95A3" />
+          </Pressable>
+        </View>
+        <View style={st.pickerSearch}>
+          <Icon name="search" size={16} color="#4A5568" />
+          <TextInput
+            style={st.pickerSearchInput}
+            value={followAlongSearch}
+            onChangeText={setFollowAlongSearch}
+            placeholder="Search follow-along videos..."
+            placeholderTextColor="#4A5568"
+            autoFocus
+          />
+        </View>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={st.pickerList} keyboardShouldPersistTaps="handled">
+          {filteredFollowAlongs.map((fa) => (
+            <Pressable
+              key={fa.id}
+              style={st.pickerItem}
+              onPress={() => {
+                addFollowAlongBlock(fa, followAlongPickerInsertAt ?? undefined);
+                setShowFollowAlongPicker(false);
+                setFollowAlongPickerInsertAt(null);
+                setAddBlockAtIndex(null);
+              }}
+            >
+              <View style={st.pickerThumb}>
+                {fa.thumbnailUrl || fa.thumbnailImageUrl ? (
+                  <Image source={{ uri: fa.thumbnailUrl || fa.thumbnailImageUrl || '' }} style={st.pickerThumbImg} resizeMode="cover" />
+                ) : (
+                  <View style={st.pickerThumbPlaceholder}>
+                    <Icon name="video" size={16} color="#22D3EE" />
+                  </View>
+                )}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={st.pickerItemName}>{fa.name}</Text>
+                {typeof fa.videoDurationSec === 'number' && fa.videoDurationSec > 0 ? (
+                  <Text style={st.pickerItemCat}>
+                    {Math.floor(fa.videoDurationSec / 60)}:{String(Math.round(fa.videoDurationSec % 60)).padStart(2, '0')}
+                  </Text>
+                ) : null}
+              </View>
+              <Icon name="plus" size={18} color="#22D3EE" />
+            </Pressable>
+          ))}
+          {filteredFollowAlongs.length === 0 && (
+            <Text style={st.pickerEmpty}>
+              {followAlongsLoaded
+                ? 'No follow-along videos yet. Upload one from the Build tab.'
+                : 'Loading…'}
+            </Text>
+          )}
+        </ScrollView>
       </ModalSheet>
 
       {/* ── Description Edit Modal ───────────────────────────────────────── */}

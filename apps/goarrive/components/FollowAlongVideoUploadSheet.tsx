@@ -1,8 +1,10 @@
 /**
- * FollowAlongVideoUploadSheet — pick + crop + upload a long-form follow-along video.
+ * FollowAlongVideoUploadSheet — pick + crop + upload a long-form follow-along video,
+ * then write a `followAlongVideos` *asset* doc (mirrors the Movement asset pattern).
  *
- * Flow: pick (mp4/mov, ≤45 min, ≤1 GB) → 4:5 crop → upload to Firebase Storage →
- *       return payload to parent (WorkoutForm).
+ * Flow: pick (mp4/mov, ≤45 min, ≤1 GB) → 4:5 crop → upload video to Storage →
+ *       generate 5s GIF + first-frame JPEG (web-only) → upload thumbs →
+ *       create followAlongVideos/{id} asset doc → return assetId to parent.
  *
  * Sound is ON by default for follow-along videos (coach-led voice in video).
  * The non-destructive crop transform mirrors MovementForm/VideoCropModal pattern.
@@ -21,27 +23,26 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { ref, uploadBytes, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { storage } from '../lib/firebase';
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { db, storage } from '../lib/firebase';
 import VideoCropModal, { CropValues } from './VideoCropModal';
 import { Icon } from './Icon';
 import { FB, FH } from '../lib/theme';
+import { generateMovementDerivatives } from '../utils/generateMovementDerivatives';
 
 // ── Limits (v1) ─────────────────────────────────────────────────────────────
 const MAX_DURATION_SEC = 45 * 60; // 45 minutes
 const MAX_BYTES = 1024 * 1024 * 1024; // 1 GB
 const ACCEPTED_EXTS = ['mp4', 'mov'];
+const PREVIEW_GIF_DURATION_SEC = 5; // 5-second loop preview from start of video
 
 export interface FollowAlongVideoPayload {
-  videoUrl: string;
-  videoStoragePath: string;
+  /** id of the new `followAlongVideos/{id}` asset doc */
+  assetId: string;
+  /** name on the new doc — caller may want to display "Created '<name>'" toast */
+  name: string;
+  /** duration of the source video in seconds (for callers that want to show it) */
   videoDurationSec: number;
-  soundEnabled: boolean;
-  thumbnailUrl?: string;
-  cropScale: number;
-  cropTranslateX: number;
-  cropTranslateY: number;
-  cropFrameWidth: number;
-  cropFrameHeight: number;
 }
 
 // Web-only probe: HTMLVideoElement gives reliable duration + lets us paint a
@@ -133,11 +134,12 @@ async function probeWebVideo(
 interface Props {
   visible: boolean;
   coachId: string;
+  tenantId?: string;
   onClose: () => void;
   onUploaded: (payload: FollowAlongVideoPayload) => void;
 }
 
-type Stage = 'pick' | 'crop' | 'uploading';
+type Stage = 'pick' | 'crop' | 'uploading' | 'processing';
 
 function showAlert(title: string, message?: string) {
   if (Platform.OS === 'web') {
@@ -161,6 +163,7 @@ function fmtMmSs(totalSec: number): string {
 export default function FollowAlongVideoUploadSheet({
   visible,
   coachId,
+  tenantId,
   onClose,
   onUploaded,
 }: Props) {
@@ -259,7 +262,7 @@ export default function FollowAlongVideoUploadSheet({
     }
   }, []);
 
-  // ── Crop done → upload ─────────────────────────────────────────────────
+  // ── Crop done → upload + write asset ──────────────────────────────────
   const onCropDone = useCallback(async (crop: CropValues) => {
     if (!pickedUri) return;
 
@@ -267,16 +270,13 @@ export default function FollowAlongVideoUploadSheet({
     setProgress(0);
 
     try {
-      // Authoritative duration + thumbnail capture.
-      // On web, HTMLVideoElement gives a reliable duration where expo-av did not.
+      // 1) Authoritative duration. expo-av's onPlaybackStatusUpdate is unreliable
+      //    on web; HTMLVideoElement.duration via 'loadedmetadata' is solid.
       let finalDuration = duration ?? 0;
-      let thumbnailBlob: Blob | null = null;
       if (Platform.OS === 'web') {
         const probe = await probeWebVideo(pickedUri);
         if (probe.durationSec > 0) finalDuration = probe.durationSec;
-        thumbnailBlob = probe.thumbnailBlob;
       }
-
       if (finalDuration > MAX_DURATION_SEC) {
         showAlert('Video Too Long', 'Follow-along videos must be 45 minutes or shorter.');
         setStage('pick');
@@ -288,6 +288,7 @@ export default function FollowAlongVideoUploadSheet({
         return;
       }
 
+      // 2) Read the source as a blob (used both for video upload + GIF gen).
       const response = await fetch(pickedUri);
       const blob = await response.blob();
       if (blob.size > MAX_BYTES) {
@@ -298,14 +299,14 @@ export default function FollowAlongVideoUploadSheet({
 
       const ext = (extOf(pickedUri) || 'mp4') as 'mp4' | 'mov';
       const tsBase = Date.now();
-      const path = `workouts/${coachId}/follow-along-videos/${tsBase}.${ext}`;
-      const storageRef = ref(storage, path);
-      const task = uploadBytesResumable(storageRef, blob, {
+      const videoPath = `workouts/${coachId}/follow-along-videos/${tsBase}.${ext}`;
+      const videoStorageRef = ref(storage, videoPath);
+      const uploadTask = uploadBytesResumable(videoStorageRef, blob, {
         contentType: ext === 'mov' ? 'video/quicktime' : 'video/mp4',
       });
 
       await new Promise<void>((resolve, reject) => {
-        task.on(
+        uploadTask.on(
           'state_changed',
           (snap) => {
             const p = snap.totalBytes > 0 ? snap.bytesTransferred / snap.totalBytes : 0;
@@ -316,32 +317,81 @@ export default function FollowAlongVideoUploadSheet({
         );
       });
 
-      const downloadUrl = await getDownloadURL(task.snapshot.ref);
+      const videoDownloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
 
-      // Best-effort poster upload — failure is non-fatal (video still works).
-      let thumbnailUrl: string | undefined;
-      if (thumbnailBlob) {
+      // 3) Generate a 5-second loop GIF + first-frame JPEG, applying the crop.
+      //    Reuses the Movement derivative pipeline (web-only).
+      setStage('processing');
+      let thumbnailUrl: string | null = null;
+      let thumbnailLowUrl: string | null = null;
+      let thumbnailImageUrl: string | null = null;
+
+      if (Platform.OS === 'web') {
         try {
-          const posterPath = `workouts/${coachId}/follow-along-videos/${tsBase}-poster.jpg`;
-          const posterRef = ref(storage, posterPath);
-          await uploadBytes(posterRef, thumbnailBlob, { contentType: 'image/jpeg' });
-          thumbnailUrl = await getDownloadURL(posterRef);
-        } catch (posterErr) {
-          console.warn('[FollowAlongVideoUploadSheet] poster upload failed:', posterErr);
+          const cropTransform = {
+            cropScale: crop.cropScale,
+            cropTranslateX: crop.cropTranslateX,
+            cropTranslateY: crop.cropTranslateY,
+            cropFrameWidth: crop.cropFrameWidth,
+            cropFrameHeight: crop.cropFrameHeight,
+          };
+          const derivatives = await generateMovementDerivatives(
+            pickedUri,
+            cropTransform,
+            undefined,
+            { maxDurationSec: PREVIEW_GIF_DURATION_SEC },
+          );
+
+          if (derivatives?.gifHigh) {
+            const p = `workouts/${coachId}/follow-along-videos/${tsBase}-thumb.gif`;
+            const r = ref(storage, p);
+            await uploadBytes(r, derivatives.gifHigh, { contentType: 'image/gif' });
+            thumbnailUrl = await getDownloadURL(r);
+          }
+          if (derivatives?.gifLow) {
+            const p = `workouts/${coachId}/follow-along-videos/${tsBase}-thumb-lo.gif`;
+            const r = ref(storage, p);
+            await uploadBytes(r, derivatives.gifLow, { contentType: 'image/gif' });
+            thumbnailLowUrl = await getDownloadURL(r);
+          }
+          if (derivatives?.firstFrame) {
+            const p = `workouts/${coachId}/follow-along-videos/${tsBase}-poster.jpg`;
+            const r = ref(storage, p);
+            await uploadBytes(r, derivatives.firstFrame, { contentType: 'image/jpeg' });
+            thumbnailImageUrl = await getDownloadURL(r);
+          }
+        } catch (derivErr) {
+          console.warn('[FollowAlongVideoUploadSheet] derivative generation failed:', derivErr);
         }
       }
 
-      onUploaded({
-        videoUrl: downloadUrl,
-        videoStoragePath: path,
+      // 4) Write the asset doc — mirrors the Movement asset shape.
+      const name = 'Untitled Follow-Along';
+      const docRef = await addDoc(collection(db, 'followAlongVideos'), {
+        name,
+        coachId,
+        tenantId: tenantId ?? null,
+        videoUrl: videoDownloadUrl,
+        videoStoragePath: videoPath,
         videoDurationSec: Math.round(finalDuration),
-        soundEnabled,
         thumbnailUrl,
+        thumbnailLowUrl,
+        thumbnailImageUrl,
+        soundEnabled,
         cropScale: crop.cropScale,
         cropTranslateX: crop.cropTranslateX,
         cropTranslateY: crop.cropTranslateY,
         cropFrameWidth: crop.cropFrameWidth,
         cropFrameHeight: crop.cropFrameHeight,
+        isArchived: false,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      onUploaded({
+        assetId: docRef.id,
+        name,
+        videoDurationSec: Math.round(finalDuration),
       });
       onClose();
     } catch (err) {
@@ -349,7 +399,7 @@ export default function FollowAlongVideoUploadSheet({
       showAlert('Upload Failed', 'Please check your connection and try again.');
       setStage('crop');
     }
-  }, [pickedUri, duration, coachId, soundEnabled, onUploaded, onClose]);
+  }, [pickedUri, duration, coachId, tenantId, soundEnabled, onUploaded, onClose]);
 
   const onCropCancel = useCallback(() => {
     setStage('pick');
@@ -430,6 +480,16 @@ export default function FollowAlongVideoUploadSheet({
                   <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
                 </View>
                 <Text style={styles.hint}>Keep this screen open until the upload finishes.</Text>
+              </View>
+            )}
+
+            {stage === 'processing' && (
+              <View style={styles.body}>
+                <ActivityIndicator size="large" color="#F5A623" />
+                <Text style={styles.uploadingTitle}>Generating preview…</Text>
+                <Text style={styles.hint}>
+                  Creating a 5-second loop GIF for the library tile. This takes a few seconds.
+                </Text>
               </View>
             )}
           </Pressable>
