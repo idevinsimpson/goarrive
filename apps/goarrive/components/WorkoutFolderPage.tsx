@@ -207,6 +207,20 @@ function inferCategory(movementCategories: string[]): string {
   return sorted[0][0] + ' Body';
 }
 
+// ── Share settings types ────────────────────────────────────────────────────
+type ShareVisibility = 'restricted' | 'anyone_with_link' | 'anyone_with_link_signin_required';
+const VALID_VISIBILITIES: ShareVisibility[] = ['restricted', 'anyone_with_link', 'anyone_with_link_signin_required'];
+function normalizeVisibility(v: unknown): ShareVisibility {
+  return VALID_VISIBILITIES.includes(v as ShareVisibility) ? (v as ShareVisibility) : 'anyone_with_link';
+}
+
+interface ShareSettingsState {
+  visibility: ShareVisibility;
+  expiresAt: number | null;
+  resolvedCount: number;
+  lastResolvedAt: number | null;
+}
+
 // ── Props ───────────────────────────────────────────────────────────────────
 interface WorkoutFolderPageProps {
   workoutId: string;
@@ -379,6 +393,14 @@ export default function WorkoutFolderPage({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [shareLoading, setShareLoading] = useState(false);
   const [activeShareId, setActiveShareId] = useState<string | null>(null);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareSettings, setShareSettings] = useState<ShareSettingsState>({
+    visibility: 'anyone_with_link',
+    expiresAt: null,
+    resolvedCount: 0,
+    lastResolvedAt: null,
+  });
+  const [shareSettingsSaving, setShareSettingsSaving] = useState(false);
   const [moveToSearch, setMoveToSearch] = useState('');
   const [editingNameKey, setEditingNameKey] = useState<string | null>(null);
   const [editingNameValue, setEditingNameValue] = useState('');
@@ -426,38 +448,97 @@ export default function WorkoutFolderPage({
       where('revokedAt', '==', null),
     );
     getDocs(q).then((snap) => {
-      if (!snap.empty) setActiveShareId(snap.docs[0].id);
+      if (snap.empty) {
+        setActiveShareId(null);
+        return;
+      }
+      const docSnap = snap.docs[0];
+      const data = docSnap.data() as Record<string, any>;
+      setActiveShareId(docSnap.id);
+      setShareSettings({
+        visibility: normalizeVisibility(data.visibility),
+        expiresAt: data.expiresAt?.toMillis?.() ?? null,
+        resolvedCount: data.resolvedCount ?? 0,
+        lastResolvedAt: data.lastResolvedAt?.toMillis?.() ?? null,
+      });
     }).catch(() => {});
   }, [workoutId, coachId]);
 
-  async function handleShareLink() {
+  function buildShareUrl(shareId: string): string {
+    const origin =
+      Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'https://goarrive.fit';
+    return `${origin}/share/${shareId}`;
+  }
+
+  async function copyShareLinkToClipboard(shareUrl: string) {
+    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+      await navigator.clipboard.writeText(shareUrl);
+      if (typeof window !== 'undefined') {
+        window.alert('Link copied to clipboard.');
+      }
+    } else {
+      try {
+        await Share.share({ message: shareUrl });
+      } catch {
+        Alert.alert('Share Link', shareUrl);
+      }
+    }
+  }
+
+  // Open the Share Settings modal. If no token exists yet, create one with
+  // the default visibility ("anyone with the link") so coaches get a working
+  // link in one click.
+  async function handleOpenShareSettings() {
     setShareLoading(true);
     try {
-      const createFn = httpsCallable<{ workoutId: string }, { shareId: string; alreadyExists: boolean }>(functions, 'createShareToken');
+      type CreateResult = {
+        shareId: string;
+        alreadyExists: boolean;
+        visibility?: ShareVisibility;
+        expiresAt?: number | null;
+        resolvedCount?: number;
+        lastResolvedAt?: number | null;
+      };
+      const createFn = httpsCallable<{ workoutId: string }, CreateResult>(functions, 'createShareToken');
       const result = await createFn({ workoutId });
-      const { shareId } = result.data;
-      setActiveShareId(shareId);
-
-      const origin =
-        Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.origin
-          ? window.location.origin
-          : 'https://goarrive.fit';
-      const shareUrl = `${origin}/share/${shareId}`;
-      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
-        await navigator.clipboard.writeText(shareUrl);
-        Alert.alert('Link Copied', 'Workout share link copied to clipboard.');
-      } else {
-        try {
-          await Share.share({ message: shareUrl });
-        } catch {
-          Alert.alert('Share Link', shareUrl);
-        }
-      }
+      const data = result.data;
+      setActiveShareId(data.shareId);
+      setShareSettings({
+        visibility: normalizeVisibility(data.visibility),
+        expiresAt: data.expiresAt ?? null,
+        resolvedCount: data.resolvedCount ?? 0,
+        lastResolvedAt: data.lastResolvedAt ?? null,
+      });
+      setShareModalOpen(true);
     } catch (err: any) {
       console.error('[WorkoutFolder] Share link error:', err);
       Alert.alert('Error', err?.message || 'Failed to create share link.');
     } finally {
       setShareLoading(false);
+    }
+  }
+
+  async function saveShareSettings(patch: Partial<Pick<ShareSettingsState, 'visibility' | 'expiresAt'>>) {
+    const next = { ...shareSettings, ...patch };
+    setShareSettings(next);
+    setShareSettingsSaving(true);
+    try {
+      const updateFn = httpsCallable<
+        { workoutId: string; visibility?: ShareVisibility; expiresAt?: number | null },
+        { updated: number; shareId?: string }
+      >(functions, 'updateShareToken');
+      await updateFn({
+        workoutId,
+        visibility: next.visibility,
+        expiresAt: next.expiresAt,
+      });
+    } catch (err: any) {
+      console.error('[WorkoutFolder] Update share settings error:', err);
+      Alert.alert('Error', err?.message || 'Failed to update share settings.');
+    } finally {
+      setShareSettingsSaving(false);
     }
   }
 
@@ -467,6 +548,13 @@ export default function WorkoutFolderPage({
       const revokeFn = httpsCallable<{ workoutId: string }, { revoked: number }>(functions, 'revokeShareToken');
       await revokeFn({ workoutId });
       setActiveShareId(null);
+      setShareModalOpen(false);
+      setShareSettings({
+        visibility: 'anyone_with_link',
+        expiresAt: null,
+        resolvedCount: 0,
+        lastResolvedAt: null,
+      });
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
         window.alert('The share link has been revoked.');
       } else {
@@ -1519,34 +1607,19 @@ export default function WorkoutFolderPage({
               style={st.menuItem}
               onPress={() => {
                 setShowTitleMenu(false);
-                if (activeShareId) handleRevokeLink();
-                else handleShareLink();
+                handleOpenShareSettings();
               }}
               disabled={shareLoading}
             >
               {shareLoading ? (
-                <ActivityIndicator size={16} color={activeShareId ? '#EF4444' : '#6EBB7A'} />
+                <ActivityIndicator size={16} color="#6EBB7A" />
               ) : (
-                <Icon
-                  name={activeShareId ? 'x-circle' : 'link'}
-                  size={16}
-                  color={activeShareId ? '#EF4444' : '#6EBB7A'}
-                />
+                <Icon name="share" size={16} color="#6EBB7A" />
               )}
-              <Text style={[st.menuItemText, { color: activeShareId ? '#EF4444' : '#6EBB7A' }]}>
-                {activeShareId ? 'Revoke Share Link' : 'Share Workout Link'}
+              <Text style={[st.menuItemText, { color: '#6EBB7A' }]}>
+                {activeShareId ? 'Share Settings' : 'Share Workout Link'}
               </Text>
             </Pressable>
-            {activeShareId && (
-              <Pressable
-                style={st.menuItem}
-                onPress={() => { setShowTitleMenu(false); handleShareLink(); }}
-                disabled={shareLoading}
-              >
-                <Icon name="share" size={16} color="#7DD3FC" />
-                <Text style={[st.menuItemText, { color: '#7DD3FC' }]}>Copy Share Link</Text>
-              </Pressable>
-            )}
             <View style={st.menuDivider} />
             <Pressable
               style={st.menuItem}
@@ -2602,8 +2675,153 @@ export default function WorkoutFolderPage({
           </View>
         </Pressable>
       </Modal>
+
+      {/* ── Share Settings Modal ────────────────────────────────────────── */}
+      <Modal
+        visible={shareModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShareModalOpen(false)}
+      >
+        <View style={st.shareModalOverlay}>
+          <View style={st.shareModalCard}>
+            <View style={st.shareModalHeader}>
+              <Text style={st.shareModalTitle}>Share Settings</Text>
+              <TouchableOpacity onPress={() => setShareModalOpen(false)}>
+                <Icon name="x" size={20} color="#8A95A3" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={st.shareModalSectionLabel}>Who can view this workout</Text>
+            <View style={st.shareModalOptions}>
+              {VISIBILITY_OPTIONS.map((opt) => {
+                const active = shareSettings.visibility === opt.value;
+                return (
+                  <TouchableOpacity
+                    key={opt.value}
+                    style={[st.shareModalOption, active && st.shareModalOptionActive]}
+                    onPress={() => saveShareSettings({ visibility: opt.value })}
+                    disabled={shareSettingsSaving}
+                  >
+                    <View style={[st.shareModalRadio, active && st.shareModalRadioActive]}>
+                      {active ? <View style={st.shareModalRadioDot} /> : null}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={st.shareModalOptionTitle}>{opt.label}</Text>
+                      <Text style={st.shareModalOptionDesc}>{opt.description}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={st.shareModalSectionLabel}>Link expires</Text>
+            <View style={st.shareModalChipRow}>
+              {EXPIRY_PRESETS.map((preset) => {
+                const active = sameExpiry(shareSettings.expiresAt, preset.ms);
+                return (
+                  <TouchableOpacity
+                    key={preset.label}
+                    style={[st.shareModalChip, active && st.shareModalChipActive]}
+                    onPress={() =>
+                      saveShareSettings({
+                        expiresAt: preset.ms === null ? null : Date.now() + preset.ms,
+                      })
+                    }
+                    disabled={shareSettingsSaving}
+                  >
+                    <Text style={[st.shareModalChipText, active && st.shareModalChipTextActive]}>
+                      {preset.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            {shareSettings.expiresAt ? (
+              <Text style={st.shareModalHint}>
+                Expires {new Date(shareSettings.expiresAt).toLocaleString()}
+              </Text>
+            ) : null}
+
+            <View style={st.shareModalStatsRow}>
+              <Icon name="eye" size={14} color="#8A95A3" />
+              <Text style={st.shareModalStatsText}>
+                {shareSettings.resolvedCount === 0
+                  ? 'Not opened yet'
+                  : `Opened ${shareSettings.resolvedCount} time${shareSettings.resolvedCount === 1 ? '' : 's'}${
+                      shareSettings.lastResolvedAt ? ` · Last ${formatRelativeTime(shareSettings.lastResolvedAt)}` : ''
+                    }`}
+              </Text>
+            </View>
+
+            <View style={st.shareModalButtonRow}>
+              <TouchableOpacity
+                style={st.shareModalPrimaryBtn}
+                onPress={() => activeShareId && copyShareLinkToClipboard(buildShareUrl(activeShareId))}
+                disabled={!activeShareId || shareSettingsSaving}
+              >
+                <Icon name="link" size={16} color="#0E1117" />
+                <Text style={st.shareModalPrimaryBtnText}>Copy Link</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={st.shareModalDangerBtn}
+                onPress={handleRevokeLink}
+                disabled={!activeShareId || shareLoading}
+              >
+                <Icon name="x-circle" size={16} color="#EF4444" />
+                <Text style={st.shareModalDangerBtnText}>Revoke Link</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
+}
+
+// ── Share Settings constants & helpers ──────────────────────────────────────
+const VISIBILITY_OPTIONS: Array<{ value: ShareVisibility; label: string; description: string }> = [
+  {
+    value: 'anyone_with_link',
+    label: 'Anyone with the link',
+    description: 'No sign-in needed. Best for previewing or sharing with prospects.',
+  },
+  {
+    value: 'anyone_with_link_signin_required',
+    label: 'Anyone with the link, sign-in required',
+    description: 'Viewer must create an account or sign in to play.',
+  },
+  {
+    value: 'restricted',
+    label: 'Restricted',
+    description: 'The share link is disabled. Only your assigned members can play.',
+  },
+];
+
+const EXPIRY_PRESETS: Array<{ label: string; ms: number | null }> = [
+  { label: 'Never', ms: null },
+  { label: '1 day', ms: 24 * 60 * 60 * 1000 },
+  { label: '7 days', ms: 7 * 24 * 60 * 60 * 1000 },
+  { label: '30 days', ms: 30 * 24 * 60 * 60 * 1000 },
+];
+
+function sameExpiry(currentExpiresAt: number | null, presetMs: number | null): boolean {
+  if (presetMs === null) return currentExpiresAt === null;
+  if (currentExpiresAt === null) return false;
+  // Within 24h of preset → treat as the same preset (covers existing tokens that were set with this preset).
+  return Math.abs(currentExpiresAt - (Date.now() + presetMs)) < 24 * 60 * 60 * 1000;
+}
+
+function formatRelativeTime(ms: number): string {
+  const diffSec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (diffSec < 60) return 'just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 30) return `${diffDay}d ago`;
+  return new Date(ms).toLocaleDateString();
 }
 
 // ── Styles ───────────────────────────────────────────────────────────────────
@@ -3660,6 +3878,177 @@ const st = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#EF4444',
+    fontFamily: FB,
+  },
+
+  // ── Share Settings modal ──────────────────────────────────────────────
+  shareModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  shareModalCard: {
+    width: '100%',
+    maxWidth: 460,
+    backgroundColor: '#0E1117',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#2A3347',
+    padding: 20,
+    gap: 14,
+  },
+  shareModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  shareModalTitle: {
+    color: '#E6EDF3',
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: FH,
+  },
+  shareModalSectionLabel: {
+    color: '#8A95A3',
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: FB,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginTop: 4,
+  },
+  shareModalOptions: {
+    gap: 8,
+  },
+  shareModalOption: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2A3347',
+    backgroundColor: '#161B22',
+  },
+  shareModalOptionActive: {
+    borderColor: '#F5A623',
+    backgroundColor: 'rgba(245,166,35,0.06)',
+  },
+  shareModalRadio: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: '#2A3347',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  shareModalRadioActive: {
+    borderColor: '#F5A623',
+  },
+  shareModalRadioDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#F5A623',
+  },
+  shareModalOptionTitle: {
+    color: '#E6EDF3',
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: FB,
+  },
+  shareModalOptionDesc: {
+    color: '#8A95A3',
+    fontSize: 12,
+    fontFamily: FB,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  shareModalChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  shareModalChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#2A3347',
+    backgroundColor: '#161B22',
+  },
+  shareModalChipActive: {
+    borderColor: '#F5A623',
+    backgroundColor: 'rgba(245,166,35,0.1)',
+  },
+  shareModalChipText: {
+    color: '#8A95A3',
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: FB,
+  },
+  shareModalChipTextActive: {
+    color: '#F5A623',
+  },
+  shareModalHint: {
+    color: '#8A95A3',
+    fontSize: 12,
+    fontFamily: FB,
+  },
+  shareModalStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#2A3347',
+  },
+  shareModalStatsText: {
+    color: '#8A95A3',
+    fontSize: 12,
+    fontFamily: FB,
+  },
+  shareModalButtonRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 6,
+  },
+  shareModalPrimaryBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#F5A623',
+    borderRadius: 10,
+    paddingVertical: 12,
+  },
+  shareModalPrimaryBtnText: {
+    color: '#0E1117',
+    fontSize: 14,
+    fontWeight: '700',
+    fontFamily: FH,
+  },
+  shareModalDangerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#EF4444',
+    backgroundColor: 'transparent',
+  },
+  shareModalDangerBtnText: {
+    color: '#EF4444',
+    fontSize: 14,
+    fontWeight: '600',
     fontFamily: FB,
   },
 });
