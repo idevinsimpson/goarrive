@@ -113,6 +113,9 @@ interface BlockMovement {
   restSec?: number;
   notes?: string;
   thumbnailUrl?: string;
+  swapSides?: boolean;
+  swapMode?: 'split' | 'duplicate';
+  swapWindowSec?: number;
 }
 
 interface WorkoutBlock {
@@ -150,6 +153,9 @@ interface MovementOption {
   category: string;
   thumbnailUrl?: string | null;
   mediaUrl?: string | null;
+  swapSides?: boolean;
+  swapMode?: 'split' | 'duplicate';
+  swapWindowSec?: number;
 }
 
 interface FollowAlongOption {
@@ -638,6 +644,9 @@ export default function WorkoutFolderPage({
                   restSec: m.restSec ?? undefined,
                   notes: m.notes ?? '',
                   thumbnailUrl: m.thumbnailUrl ?? undefined,
+                  swapSides: m.swapSides ?? undefined,
+                  swapMode: m.swapMode ?? undefined,
+                  swapWindowSec: m.swapWindowSec ?? undefined,
                 })),
               };
               if (b.type === 'Follow-Along Video') {
@@ -697,6 +706,9 @@ export default function WorkoutFolderPage({
             category: cd.category ?? '',
             thumbnailUrl: cd.thumbnailUrl ?? null,
             mediaUrl: cd.mediaUrl ?? null,
+            swapSides: cd.swapSides ?? false,
+            swapMode: cd.swapMode ?? undefined,
+            swapWindowSec: cd.swapWindowSec ?? undefined,
           });
         }
       });
@@ -710,6 +722,9 @@ export default function WorkoutFolderPage({
             category: gd.category ?? '',
             thumbnailUrl: gd.thumbnailUrl ?? null,
             mediaUrl: gd.mediaUrl ?? null,
+            swapSides: gd.swapSides ?? false,
+            swapMode: gd.swapMode ?? undefined,
+            swapWindowSec: gd.swapWindowSec ?? undefined,
           });
         }
       });
@@ -812,6 +827,9 @@ export default function WorkoutFolderPage({
               restSec: m.restSec ?? undefined,
               notes: m.notes ?? '',
               thumbnailUrl: m.thumbnailUrl ?? undefined,
+              swapSides: m.swapSides ?? undefined,
+              swapMode: m.swapMode ?? undefined,
+              swapWindowSec: m.swapWindowSec ?? undefined,
             })),
           };
           if (b.showDemo != null) clean.showDemo = b.showDemo;
@@ -907,6 +925,9 @@ export default function WorkoutFolderPage({
             sets: m.sets ?? undefined, reps: m.reps ?? undefined,
             durationSec: m.durationSec ?? undefined, restSec: m.restSec ?? undefined,
             notes: m.notes ?? '', thumbnailUrl: m.thumbnailUrl ?? undefined,
+            swapSides: m.swapSides ?? undefined,
+            swapMode: m.swapMode ?? undefined,
+            swapWindowSec: m.swapWindowSec ?? undefined,
           })),
         };
         if (b.showGrabEquipment) {
@@ -991,6 +1012,9 @@ export default function WorkoutFolderPage({
               sets: m.sets ?? undefined, reps: m.reps ?? undefined,
               durationSec: m.durationSec ?? undefined, restSec: m.restSec ?? undefined,
               notes: m.notes ?? '', thumbnailUrl: m.thumbnailUrl ?? undefined,
+              swapSides: m.swapSides ?? undefined,
+              swapMode: m.swapMode ?? undefined,
+              swapWindowSec: m.swapWindowSec ?? undefined,
             })),
           };
           if (b.type === 'Follow-Along Video') {
@@ -1163,14 +1187,20 @@ export default function WorkoutFolderPage({
   // ── Movement operations ───────────────────────────────────────────────────
   const addMovementToBlock = useCallback((blockIdx: number, movement: MovementOption) => {
     const newBlocks = [...blocks];
-    newBlocks[blockIdx].movements.push({
+    const next: BlockMovement = {
       movementId: movement.id,
       movementName: movement.name,
       durationSec: DEFAULT_DURATION_SEC,
       restSec: DEFAULT_REST_SEC,
       sets: 1,
       thumbnailUrl: movement.thumbnailUrl ?? movement.mediaUrl ?? undefined,
-    });
+    };
+    if (movement.swapSides) {
+      next.swapSides = true;
+      next.swapMode = movement.swapMode ?? 'split';
+      next.swapWindowSec = movement.swapWindowSec ?? 5;
+    }
+    newBlocks[blockIdx].movements.push(next);
     updateBlocks(newBlocks);
   }, [blocks, updateBlocks]);
 
@@ -1217,6 +1247,22 @@ export default function WorkoutFolderPage({
     const newBlocks = [...blocks];
     const mov = newBlocks[blockIdx].movements[movIdx];
     mov.hidden = !mov.hidden;
+    updateBlocks(newBlocks);
+  }, [blocks, updateBlocks]);
+
+  const updateMovementSwapMode = useCallback((blockIdx: number, movIdx: number, mode: 'split' | 'duplicate') => {
+    const newBlocks = [...blocks];
+    const mov = newBlocks[blockIdx].movements[movIdx];
+    if (!mov.swapSides) return;
+    mov.swapMode = mode;
+    updateBlocks(newBlocks);
+  }, [blocks, updateBlocks]);
+
+  const updateMovementSwapWindow = useCallback((blockIdx: number, movIdx: number, delta: number) => {
+    const newBlocks = [...blocks];
+    const mov = newBlocks[blockIdx].movements[movIdx];
+    if (!mov.swapSides) return;
+    mov.swapWindowSec = Math.max(2, Math.min(15, (mov.swapWindowSec ?? 5) + delta));
     updateBlocks(newBlocks);
   }, [blocks, updateBlocks]);
 
@@ -1942,6 +1988,45 @@ export default function WorkoutFolderPage({
                                     />
                                   </View>
 
+                                  {/* Swap Sides — appears only if movement has swapSides toggled in library */}
+                                  {mov.swapSides && (
+                                    <View style={st.swapPanel}>
+                                      <View style={st.swapHeaderRow}>
+                                        <Icon name="swap" size={10} color="#A78BFA" />
+                                        <Text style={st.swapHeaderText}>SWAP SIDES</Text>
+                                      </View>
+                                      <View style={st.swapSegmented}>
+                                        <Pressable
+                                          style={[st.swapSegBtn, (mov.swapMode ?? 'split') === 'split' && st.swapSegBtnActive]}
+                                          onPress={(e) => { e.stopPropagation(); updateMovementSwapMode(blockIdx, movIdx, 'split'); }}
+                                        >
+                                          <Text style={[st.swapSegBtnText, (mov.swapMode ?? 'split') === 'split' && st.swapSegBtnTextActive]}>Split</Text>
+                                        </Pressable>
+                                        <Pressable
+                                          style={[st.swapSegBtn, mov.swapMode === 'duplicate' && st.swapSegBtnActive]}
+                                          onPress={(e) => { e.stopPropagation(); updateMovementSwapMode(blockIdx, movIdx, 'duplicate'); }}
+                                        >
+                                          <Text style={[st.swapSegBtnText, mov.swapMode === 'duplicate' && st.swapSegBtnTextActive]}>Full</Text>
+                                        </Pressable>
+                                      </View>
+                                      <Text style={st.swapModeDesc}>
+                                        {(mov.swapMode ?? 'split') === 'split'
+                                          ? `Half each side (${Math.round(((mov.durationSec ?? DEFAULT_DURATION_SEC) / 2))}s · ${Math.round(((mov.durationSec ?? DEFAULT_DURATION_SEC) / 2))}s)`
+                                          : `Full duration on both sides (${mov.durationSec ?? DEFAULT_DURATION_SEC}s · ${mov.durationSec ?? DEFAULT_DURATION_SEC}s)`}
+                                      </Text>
+                                      <View style={st.ovRow}>
+                                        <Text style={st.ovSmLabel}>swap window</Text>
+                                        <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementSwapWindow(blockIdx, movIdx, -1); }}>
+                                          <Text style={st.ovBtnText}>−</Text>
+                                        </Pressable>
+                                        <Text style={st.ovVal}>{mov.swapWindowSec ?? 5}s</Text>
+                                        <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementSwapWindow(blockIdx, movIdx, 1); }}>
+                                          <Text style={st.ovBtnText}>+</Text>
+                                        </Pressable>
+                                      </View>
+                                    </View>
+                                  )}
+
                                   {/* Bottom row: three-dots (details) + eye toggle (visibility) */}
                                   <View style={st.ovBottomRow}>
                                     <Pressable
@@ -2111,6 +2196,33 @@ export default function WorkoutFolderPage({
                                     <Icon name="trash-2" size={12} color="#EF4444" />
                                   </Pressable>
                                 </View>
+                                {mov.swapSides && (
+                                  <View style={st.swapPanelInline}>
+                                    <Icon name="swap" size={10} color="#A78BFA" />
+                                    <Text style={st.swapHeaderText}>SWAP</Text>
+                                    <Pressable
+                                      style={[st.swapSegBtn, (mov.swapMode ?? 'split') === 'split' && st.swapSegBtnActive]}
+                                      onPress={(e) => { e.stopPropagation(); updateMovementSwapMode(blockIdx, movIdx, 'split'); }}
+                                    >
+                                      <Text style={[st.swapSegBtnText, (mov.swapMode ?? 'split') === 'split' && st.swapSegBtnTextActive]}>Split</Text>
+                                    </Pressable>
+                                    <Pressable
+                                      style={[st.swapSegBtn, mov.swapMode === 'duplicate' && st.swapSegBtnActive]}
+                                      onPress={(e) => { e.stopPropagation(); updateMovementSwapMode(blockIdx, movIdx, 'duplicate'); }}
+                                    >
+                                      <Text style={[st.swapSegBtnText, mov.swapMode === 'duplicate' && st.swapSegBtnTextActive]}>Full</Text>
+                                    </Pressable>
+                                    <View style={{ width: 6 }} />
+                                    <Text style={st.ovSmLabel}>window</Text>
+                                    <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementSwapWindow(blockIdx, movIdx, -1); }}>
+                                      <Text style={st.ovBtnText}>−</Text>
+                                    </Pressable>
+                                    <Text style={st.ovVal}>{mov.swapWindowSec ?? 5}s</Text>
+                                    <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementSwapWindow(blockIdx, movIdx, 1); }}>
+                                      <Text style={st.ovBtnText}>+</Text>
+                                    </Pressable>
+                                  </View>
+                                )}
                               </View>
                             )}
                           </View>
@@ -3211,6 +3323,72 @@ const st = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.10)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  swapPanel: {
+    marginTop: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+    backgroundColor: 'rgba(167,139,250,0.10)',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(167,139,250,0.25)',
+    gap: 3,
+  },
+  swapHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  swapHeaderText: {
+    fontSize: 9,
+    color: '#A78BFA',
+    fontFamily: FH,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  swapSegmented: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  swapSegBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(167,139,250,0.25)',
+  },
+  swapSegBtnActive: {
+    backgroundColor: 'rgba(167,139,250,0.35)',
+    borderColor: '#A78BFA',
+  },
+  swapSegBtnText: {
+    fontSize: 10,
+    color: '#8A95A3',
+    fontFamily: FB,
+    fontWeight: '700',
+  },
+  swapSegBtnTextActive: {
+    color: '#F0F4F8',
+  },
+  swapModeDesc: {
+    fontSize: 8,
+    color: '#8A95A3',
+    fontFamily: FB,
+    textAlign: 'center',
+  },
+  swapPanelInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 4,
+    paddingTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(167,139,250,0.20)',
   },
   removeXBtn: {
     position: 'absolute',
