@@ -173,7 +173,8 @@ const QUEUE_GAP_MS = 90;
 
 // ── Types ────────────────────────────────────────────────────────────
 type Phase = 'ready' | 'work' | 'rest' | 'swap' | 'complete'
-  | 'intro' | 'outro' | 'demo' | 'transition' | 'waterBreak' | 'grabEquipment';
+  | 'intro' | 'outro' | 'demo' | 'transition' | 'waterBreak' | 'grabEquipment'
+  | 'followAlongVideo';
 
 type QueueItem =
   | { kind: 'cue'; key: CueKey; context: string; runId: number }

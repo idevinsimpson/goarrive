@@ -266,6 +266,18 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
+    // FOLLOW-ALONG VIDEOS — coach-owned long-form video assets
+    // Used as Build tab tiles + as workout block source. Mirrors movements.
+    // ─────────────────────────────────────────────
+
+    match /followAlongVideos/{videoId} {
+      allow read: if isAuthenticated() && isCoachOrBootstrap(resource.data.coachId);
+      allow create: if isCoachOrBootstrap(request.resource.data.coachId);
+      allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+      allow delete: if false; // archive only
+    }
+
+    // ─────────────────────────────────────────────
     // WORKOUTS (Week 3 — coachId-scoped CRUD)
     // App uses 'workouts' collection (not 'workout_templates')
     // ─────────────────────────────────────────────

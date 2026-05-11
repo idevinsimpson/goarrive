@@ -37,7 +37,7 @@ const LO_HEIGHT = 150;
 
 const HI_FPS = 8;
 const LO_FPS = 6;
-const MAX_DURATION_SEC = 10;
+const DEFAULT_MAX_DURATION_SEC = 10;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -170,7 +170,9 @@ export async function generateMovementDerivatives(
   videoUrl: string,
   crop: CropTransform,
   onProgress?: (progress: number) => void,
+  options?: { maxDurationSec?: number },
 ): Promise<DerivativeBlobs | null> {
+  const maxDurationSec = options?.maxDurationSec ?? DEFAULT_MAX_DURATION_SEC;
   if (Platform.OS !== 'web') return null;
 
   const canEncodeGif = !!GIFConstructor;
@@ -263,7 +265,7 @@ export async function generateMovementDerivatives(
     }
 
     // ── Capture frames ─────────────────────────────────────────────────
-    const videoDuration = Math.min(video.duration, MAX_DURATION_SEC);
+    const videoDuration = Math.min(video.duration, maxDurationSec);
 
     // High-res frames at HI_FPS
     const hiTotalFrames = Math.ceil(videoDuration * HI_FPS);

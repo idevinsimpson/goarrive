@@ -106,6 +106,7 @@ export default function WorkoutPlayer({
     phase, currentIndex, timeLeft, swapSide, isPaused,
     current, next, total, isRepBased, progressPct, isSpecialPhase,
     handleStart, handlePauseResume, handleSkip, handleRepDone,
+    advanceToNext,
   } = timer;
 
   useWakeLock(phase !== 'ready' && phase !== 'complete');
@@ -1011,6 +1012,64 @@ export default function WorkoutPlayer({
         )}
 
         {/* ── WATER BREAK — Hydration pause ───────────────────── */}
+        {phase === 'followAlongVideo' && current && (() => {
+          const followVideoUrl = current.videoUrl || activeVideoUrl;
+          const followMuted = isMuted || current.soundEnabled === false;
+          const hasCrop =
+            (current.cropScale ?? 1) !== 1
+            || (current.cropTranslateX ?? 0) !== 0
+            || (current.cropTranslateY ?? 0) !== 0;
+          const cropTransform = hasCrop
+            ? {
+                transform: [
+                  { scale: current.cropScale ?? 1 },
+                  { translateX: current.cropTranslateX ?? 0 },
+                  { translateY: current.cropTranslateY ?? 0 },
+                ],
+              }
+            : undefined;
+          return (
+            <View style={[st.workContainer, webSafeBottomStyle]}>
+              {renderLogoSlot()}
+              {renderTitleTimerSlot(
+                renderAutoFitTitle(current.name || 'Follow Along', { hasTimer: true, maxLines: 2 }),
+                renderGoldTimer(formatTime(timeLeft)),
+              )}
+              <View style={st.mediaSlot}>
+                <View style={[st.mediaInner, mediaInnerSize]}>
+                  {followVideoUrl ? (
+                    <Video
+                      ref={registerVideo}
+                      key={followVideoUrl}
+                      source={{ uri: followVideoUrl }}
+                      resizeMode={ResizeMode.COVER}
+                      isLooping={false}
+                      shouldPlay={!isPaused}
+                      isMuted={followMuted}
+                      style={[st.videoPlayer, cropTransform as any]}
+                      videoStyle={
+                        Platform.OS === 'web'
+                          ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
+                          : undefined
+                      }
+                      onPlaybackStatusUpdate={(status: any) => {
+                        if (status?.isLoaded && status.didJustFinish) {
+                          advanceToNext();
+                        }
+                      }}
+                    />
+                  ) : (
+                    <View style={[st.videoPlayer, st.waterBreakPlaceholder]}>
+                      <Icon name="video" size={64} color="#22D3EE" />
+                    </View>
+                  )}
+                </View>
+              </View>
+              {renderNextUpSlot(null)}
+            </View>
+          );
+        })()}
+
         {phase === 'waterBreak' && current && (
           <View style={[st.workContainer, webSafeBottomStyle]}>
             {renderLogoSlot()}

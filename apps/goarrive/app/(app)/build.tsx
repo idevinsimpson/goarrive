@@ -52,6 +52,8 @@ import WorkoutDetail from '../../components/WorkoutDetail';
 import WorkoutForm from '../../components/WorkoutForm';
 import WorkoutFolderPage from '../../components/WorkoutFolderPage';
 import BulkMovementUpload from '../../components/BulkMovementUpload';
+import FollowAlongVideoUploadSheet, { FollowAlongVideoPayload } from '../../components/FollowAlongVideoUploadSheet';
+import FollowAlongVideoDetail from '../../components/FollowAlongVideoDetail';
 import { usePreviewEngine } from '../../hooks/usePreviewEngine';
 import { AnimatedPreviewTile, MosaicPreviewTile } from '../../components/AnimatedPreviewTile';
 
@@ -59,8 +61,8 @@ import { AnimatedPreviewTile, MosaicPreviewTile } from '../../components/Animate
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
-type BuildType = 'Plans' | 'Movements' | 'Workouts' | 'Playbooks';
-const TYPES: BuildType[] = ['Plans', 'Movements', 'Workouts', 'Playbooks'];
+type BuildType = 'Plans' | 'Movements' | 'Workouts' | 'Follow-Alongs' | 'Playbooks';
+const TYPES: BuildType[] = ['Plans', 'Movements', 'Workouts', 'Follow-Alongs', 'Playbooks'];
 
 // ── Grid layout constants ──────────────────────────────────────────────────
 const GRID_PADDING = 16;       // padding on left/right of the grid
@@ -245,6 +247,8 @@ function BuildScreenInner() {
   const [editMovement, setEditMovement] = useState<any | null>(null);
   const [isMovementFormOpen, setIsMovementFormOpen] = useState(false);
   const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
+  const [isFollowAlongOpen, setIsFollowAlongOpen] = useState(false);
+  const [selectedFollowAlong, setSelectedFollowAlong] = useState<any | null>(null);
   const [selectedWorkout, setSelectedWorkout] = useState<any | null>(null);
   const [editWorkout, setEditWorkout] = useState<any | null>(null);
   const [isWorkoutFormOpen, setIsWorkoutFormOpen] = useState(false);
@@ -426,12 +430,37 @@ function BuildScreenInner() {
       (err) => console.error('[Build] Playbooks listener error:', err),
     );
 
+    // Follow-Along Videos listener (asset collection — like movements)
+    const followAlongsQuery = query(
+      collection(db, 'followAlongVideos'),
+      where('coachId', '==', coachId),
+    );
+    const unsubFollowAlongs = onSnapshot(
+      followAlongsQuery,
+      (snap) => {
+        const followAlongItems: BuildItem[] = snap.docs.map(d => ({
+          id: d.id,
+          ...d.data(),
+          type: 'Follow-Alongs' as BuildType,
+          name: d.data().name || 'Untitled Follow-Along',
+        } as BuildItem));
+        setItems(prev => {
+          const otherItems = prev.filter(i => i.type !== 'Follow-Alongs');
+          return [...otherItems, ...followAlongItems].sort((a, b) =>
+            (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0)
+          );
+        });
+      },
+      (err) => console.error('[Build] Follow-Alongs listener error:', err),
+    );
+
     return () => {
       unsubMovements();
       unsubWorkouts();
       unsubFolders();
       unsubPlans();
       unsubPlaybooks();
+      unsubFollowAlongs();
     };
   }, [coachId]);
 
@@ -638,8 +667,9 @@ function BuildScreenInner() {
       const isPlan = item.type === 'Plans';
       const isPlaybook = item.type === 'Playbooks';
       const isWorkout = item.type === 'Workouts';
-      const iconName = isPlan ? 'plan' : isPlaybook ? 'playbook' : isMovement ? 'movements' : 'workouts';
-      const iconColor = isPlan ? '#60A5FA' : isPlaybook ? '#A78BFA' : '#4A5568';
+      const isFollowAlong = item.type === 'Follow-Alongs';
+      const iconName = isPlan ? 'plan' : isPlaybook ? 'playbook' : isMovement ? 'movements' : isFollowAlong ? 'video' : 'workouts';
+      const iconColor = isPlan ? '#60A5FA' : isPlaybook ? '#A78BFA' : isFollowAlong ? '#22D3EE' : '#4A5568';
 
       // Prefer thumbnailUrl (GIF), then first-frame image, then low-quality GIF, then mediaUrl
       const singleThumbUri = item.thumbnailUrl || item.thumbnailImageUrl || item.gifLowUrl || item.mediaUrl || null;
@@ -667,6 +697,7 @@ function BuildScreenInner() {
             if (isMovement) setSelectedMovement(item);
             else if (isPlan) setSelectedPlan(item);
             else if (isPlaybook) setSelectedPlaybook(item);
+            else if (isFollowAlong) setSelectedFollowAlong(item);
             else setOpenWorkoutId(item.id);
           }}
         >
@@ -716,12 +747,13 @@ function BuildScreenInner() {
 
     // List view
     return (
-      <Pressable 
+      <Pressable
         style={s.listItem}
         onPress={() => {
           if (item.type === 'Movements') setSelectedMovement(item);
           else if (item.type === 'Plans') setSelectedPlan(item);
           else if (item.type === 'Playbooks') setSelectedPlaybook(item);
+          else if (item.type === 'Follow-Alongs') setSelectedFollowAlong(item);
           else setOpenWorkoutId(item.id);
         }}
       >
@@ -733,7 +765,7 @@ function BuildScreenInner() {
             />
           ) : (
             <View style={s.listPlaceholder}>
-              <Icon name={item.type === 'Plans' ? 'plan' : item.type === 'Playbooks' ? 'playbook' : item.type === 'Movements' ? 'movements' : 'workouts'} size={20} color={item.type === 'Plans' ? '#60A5FA' : item.type === 'Playbooks' ? '#A78BFA' : '#4A5568'} />
+              <Icon name={item.type === 'Plans' ? 'plan' : item.type === 'Playbooks' ? 'playbook' : item.type === 'Movements' ? 'movements' : item.type === 'Follow-Alongs' ? 'video' : 'workouts'} size={20} color={item.type === 'Plans' ? '#60A5FA' : item.type === 'Playbooks' ? '#A78BFA' : item.type === 'Follow-Alongs' ? '#22D3EE' : '#4A5568'} />
             </View>
           )}
         </View>
@@ -961,6 +993,30 @@ function BuildScreenInner() {
         tenantId={tenantId}
       />
 
+      <FollowAlongVideoUploadSheet
+        visible={isFollowAlongOpen}
+        coachId={coachId}
+        tenantId={tenantId}
+        onClose={() => setIsFollowAlongOpen(false)}
+        onUploaded={(_payload: FollowAlongVideoPayload) => {
+          // Sheet writes the followAlongVideos asset doc itself.
+          // Stay on Build library — the asset appears via the listener.
+          setIsFollowAlongOpen(false);
+        }}
+      />
+
+      <FollowAlongVideoDetail
+        visible={!!selectedFollowAlong}
+        followAlong={selectedFollowAlong}
+        onClose={() => setSelectedFollowAlong(null)}
+        onArchive={async (m) => {
+          try {
+            await updateDoc(doc(db, 'followAlongVideos', m.id), { isArchived: !m.isArchived });
+            setSelectedFollowAlong(null);
+          } catch (e) { console.error('Archive follow-along error:', e); }
+        }}
+      />
+
       {/* WorkoutDetail and WorkoutForm modals removed — replaced by WorkoutFolderPage */}
 
       <Modal transparent visible={isPlusOpen} animationType="fade" onRequestClose={() => setIsPlusOpen(false)}>
@@ -1034,6 +1090,16 @@ function BuildScreenInner() {
             >
               <Icon name="workouts" size={20} color="#F0F4F8" />
               <Text style={s.plusMenuItemText}>Workout</Text>
+            </Pressable>
+            <Pressable
+              style={s.plusMenuItem}
+              onPress={() => {
+                setIsPlusOpen(false);
+                setIsFollowAlongOpen(true);
+              }}
+            >
+              <Icon name="video" size={20} color="#22D3EE" />
+              <Text style={s.plusMenuItemText}>Follow-Along Video</Text>
             </Pressable>
             <Pressable style={s.plusMenuItem} onPress={() => { setIsPlusOpen(false); setShowPlaybookCreate(true); }}>
               <Icon name="playbook" size={20} color="#A78BFA" />

@@ -19,7 +19,7 @@ import { calculateAdjustedRest } from './useRestAutoAdjust';
 
 // ── Special block types that don't contain movements ──────────────────
 const SPECIAL_BLOCK_TYPES = new Set([
-  'Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment',
+  'Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment', 'Follow-Along Video',
 ]);
 
 // ── Types ─────────────────────────────────────────────────────────────
@@ -30,7 +30,8 @@ export type StepType =
   | 'demo'
   | 'transition'
   | 'waterBreak'
-  | 'grabEquipment';
+  | 'grabEquipment'
+  | 'followAlongVideo';
 
 export interface FlatMovement {
   name: string;
@@ -82,6 +83,12 @@ export interface FlatMovement {
   isFullScreen?: boolean;
   /** Original block type string (e.g., 'Warm-Up', 'Circuit') */
   originalBlockType?: string;
+  /** Follow-Along Video: whether the video's audio plays through (default true) */
+  soundEnabled?: boolean;
+  /** Follow-Along Video: original frame width used during cropping (for accurate translate scaling) */
+  cropFrameWidth?: number;
+  /** Follow-Along Video: original frame height used during cropping */
+  cropFrameHeight?: number;
 }
 
 export function resolveBlockType(blockType: string | undefined): 'linear' | 'superset' | 'circuit' {
@@ -105,6 +112,7 @@ export function toStepType(blockType: string): StepType {
     case 'Transition': return 'transition';
     case 'Water Break': return 'waterBreak';
     case 'Grab Equipment': return 'grabEquipment';
+    case 'Follow-Along Video': return 'followAlongVideo';
     default: return 'exercise';
   }
 }
@@ -137,7 +145,10 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
       // ── Special blocks ──────────────────────────────────────────────
       if (SPECIAL_BLOCK_TYPES.has(blockType)) {
         const stepType = toStepType(blockType);
-        const duration = block.durationSec ?? (blockType === 'Intro' || blockType === 'Outro' ? 10 : 30);
+        const duration =
+          blockType === 'Follow-Along Video'
+            ? (block.videoDurationSec ?? block.durationSec ?? 0)
+            : (block.durationSec ?? (blockType === 'Intro' || blockType === 'Outro' ? 10 : 30));
 
         // For Demo blocks, look ahead to find the next exercise block's movements
         let demoMovements: FlatMovement['demoMovements'] = undefined;
@@ -169,8 +180,19 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
           stepType,
           demoMovements,
           instructionText: block.instructionText || '',
-          isFullScreen: blockType === 'Intro' || blockType === 'Outro',
+          isFullScreen: blockType === 'Intro' || blockType === 'Outro' || blockType === 'Follow-Along Video',
           originalBlockType: blockType,
+          // Follow-Along Video: propagate sound + crop transform for the player
+          ...(blockType === 'Follow-Along Video'
+            ? {
+                soundEnabled: block.soundEnabled !== false, // default ON
+                cropScale: block.cropScale,
+                cropTranslateX: block.cropTranslateX,
+                cropTranslateY: block.cropTranslateY,
+                cropFrameWidth: block.cropFrameWidth,
+                cropFrameHeight: block.cropFrameHeight,
+              }
+            : {}),
         });
         return;
       }
