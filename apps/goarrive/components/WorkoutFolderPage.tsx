@@ -1253,18 +1253,25 @@ export default function WorkoutFolderPage({
   const updateMovementSwapMode = useCallback((blockIdx: number, movIdx: number, mode: 'split' | 'duplicate') => {
     const newBlocks = [...blocks];
     const mov = newBlocks[blockIdx].movements[movIdx];
-    if (!mov.swapSides) return;
+    const lib = availableMovements.find((m) => m.id === mov.movementId);
+    if (!(mov.swapSides || lib?.swapSides)) return;
+    mov.swapSides = true; // persist override on block
     mov.swapMode = mode;
+    if (mov.swapWindowSec == null) mov.swapWindowSec = lib?.swapWindowSec ?? 5;
     updateBlocks(newBlocks);
-  }, [blocks, updateBlocks]);
+  }, [blocks, updateBlocks, availableMovements]);
 
   const updateMovementSwapWindow = useCallback((blockIdx: number, movIdx: number, delta: number) => {
     const newBlocks = [...blocks];
     const mov = newBlocks[blockIdx].movements[movIdx];
-    if (!mov.swapSides) return;
-    mov.swapWindowSec = Math.max(2, Math.min(15, (mov.swapWindowSec ?? 5) + delta));
+    const lib = availableMovements.find((m) => m.id === mov.movementId);
+    if (!(mov.swapSides || lib?.swapSides)) return;
+    mov.swapSides = true;
+    if (mov.swapMode == null) mov.swapMode = lib?.swapMode ?? 'split';
+    const current = mov.swapWindowSec ?? lib?.swapWindowSec ?? 5;
+    mov.swapWindowSec = Math.max(2, Math.min(15, current + delta));
     updateBlocks(newBlocks);
-  }, [blocks, updateBlocks]);
+  }, [blocks, updateBlocks, availableMovements]);
 
   // ── Reorder: move a movement within the same block ──────────────────────
   const reorderMovement = useCallback((blockIdx: number, fromIdx: number, toIdx: number) => {
@@ -1988,44 +1995,52 @@ export default function WorkoutFolderPage({
                                     />
                                   </View>
 
-                                  {/* Swap Sides — appears only if movement has swapSides toggled in library */}
-                                  {mov.swapSides && (
-                                    <View style={st.swapPanel}>
-                                      <View style={st.swapHeaderRow}>
-                                        <Icon name="swap" size={10} color="#A78BFA" />
-                                        <Text style={st.swapHeaderText}>SWAP SIDES</Text>
+                                  {/* Swap Sides — shown if block OR library has swapSides; library values used as fallback */}
+                                  {(() => {
+                                    const libMov = availableMovements.find((m) => m.id === mov.movementId);
+                                    const effSwap = mov.swapSides ?? libMov?.swapSides ?? false;
+                                    if (!effSwap) return null;
+                                    const effMode = mov.swapMode ?? libMov?.swapMode ?? 'split';
+                                    const effWindow = mov.swapWindowSec ?? libMov?.swapWindowSec ?? 5;
+                                    const dur = mov.durationSec ?? DEFAULT_DURATION_SEC;
+                                    return (
+                                      <View style={st.swapPanel}>
+                                        <View style={st.swapHeaderRow}>
+                                          <Icon name="swap" size={10} color="#A78BFA" />
+                                          <Text style={st.swapHeaderText}>SWAP SIDES</Text>
+                                        </View>
+                                        <View style={st.swapSegmented}>
+                                          <Pressable
+                                            style={[st.swapSegBtn, effMode === 'split' && st.swapSegBtnActive]}
+                                            onPress={(e) => { e.stopPropagation(); updateMovementSwapMode(blockIdx, movIdx, 'split'); }}
+                                          >
+                                            <Text style={[st.swapSegBtnText, effMode === 'split' && st.swapSegBtnTextActive]}>Split</Text>
+                                          </Pressable>
+                                          <Pressable
+                                            style={[st.swapSegBtn, effMode === 'duplicate' && st.swapSegBtnActive]}
+                                            onPress={(e) => { e.stopPropagation(); updateMovementSwapMode(blockIdx, movIdx, 'duplicate'); }}
+                                          >
+                                            <Text style={[st.swapSegBtnText, effMode === 'duplicate' && st.swapSegBtnTextActive]}>Full</Text>
+                                          </Pressable>
+                                        </View>
+                                        <Text style={st.swapModeDesc}>
+                                          {effMode === 'split'
+                                            ? `Half each side (${Math.round(dur / 2)}s · ${Math.round(dur / 2)}s)`
+                                            : `Full duration on both sides (${dur}s · ${dur}s)`}
+                                        </Text>
+                                        <View style={st.ovRow}>
+                                          <Text style={st.ovSmLabel}>swap window</Text>
+                                          <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementSwapWindow(blockIdx, movIdx, -1); }}>
+                                            <Text style={st.ovBtnText}>−</Text>
+                                          </Pressable>
+                                          <Text style={st.ovVal}>{effWindow}s</Text>
+                                          <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementSwapWindow(blockIdx, movIdx, 1); }}>
+                                            <Text style={st.ovBtnText}>+</Text>
+                                          </Pressable>
+                                        </View>
                                       </View>
-                                      <View style={st.swapSegmented}>
-                                        <Pressable
-                                          style={[st.swapSegBtn, (mov.swapMode ?? 'split') === 'split' && st.swapSegBtnActive]}
-                                          onPress={(e) => { e.stopPropagation(); updateMovementSwapMode(blockIdx, movIdx, 'split'); }}
-                                        >
-                                          <Text style={[st.swapSegBtnText, (mov.swapMode ?? 'split') === 'split' && st.swapSegBtnTextActive]}>Split</Text>
-                                        </Pressable>
-                                        <Pressable
-                                          style={[st.swapSegBtn, mov.swapMode === 'duplicate' && st.swapSegBtnActive]}
-                                          onPress={(e) => { e.stopPropagation(); updateMovementSwapMode(blockIdx, movIdx, 'duplicate'); }}
-                                        >
-                                          <Text style={[st.swapSegBtnText, mov.swapMode === 'duplicate' && st.swapSegBtnTextActive]}>Full</Text>
-                                        </Pressable>
-                                      </View>
-                                      <Text style={st.swapModeDesc}>
-                                        {(mov.swapMode ?? 'split') === 'split'
-                                          ? `Half each side (${Math.round(((mov.durationSec ?? DEFAULT_DURATION_SEC) / 2))}s · ${Math.round(((mov.durationSec ?? DEFAULT_DURATION_SEC) / 2))}s)`
-                                          : `Full duration on both sides (${mov.durationSec ?? DEFAULT_DURATION_SEC}s · ${mov.durationSec ?? DEFAULT_DURATION_SEC}s)`}
-                                      </Text>
-                                      <View style={st.ovRow}>
-                                        <Text style={st.ovSmLabel}>swap window</Text>
-                                        <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementSwapWindow(blockIdx, movIdx, -1); }}>
-                                          <Text style={st.ovBtnText}>−</Text>
-                                        </Pressable>
-                                        <Text style={st.ovVal}>{mov.swapWindowSec ?? 5}s</Text>
-                                        <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementSwapWindow(blockIdx, movIdx, 1); }}>
-                                          <Text style={st.ovBtnText}>+</Text>
-                                        </Pressable>
-                                      </View>
-                                    </View>
-                                  )}
+                                    );
+                                  })()}
 
                                   {/* Bottom row: three-dots (details) + eye toggle (visibility) */}
                                   <View style={st.ovBottomRow}>
@@ -2196,33 +2211,40 @@ export default function WorkoutFolderPage({
                                     <Icon name="trash-2" size={12} color="#EF4444" />
                                   </Pressable>
                                 </View>
-                                {mov.swapSides && (
-                                  <View style={st.swapPanelInline}>
-                                    <Icon name="swap" size={10} color="#A78BFA" />
-                                    <Text style={st.swapHeaderText}>SWAP</Text>
-                                    <Pressable
-                                      style={[st.swapSegBtn, (mov.swapMode ?? 'split') === 'split' && st.swapSegBtnActive]}
-                                      onPress={(e) => { e.stopPropagation(); updateMovementSwapMode(blockIdx, movIdx, 'split'); }}
-                                    >
-                                      <Text style={[st.swapSegBtnText, (mov.swapMode ?? 'split') === 'split' && st.swapSegBtnTextActive]}>Split</Text>
-                                    </Pressable>
-                                    <Pressable
-                                      style={[st.swapSegBtn, mov.swapMode === 'duplicate' && st.swapSegBtnActive]}
-                                      onPress={(e) => { e.stopPropagation(); updateMovementSwapMode(blockIdx, movIdx, 'duplicate'); }}
-                                    >
-                                      <Text style={[st.swapSegBtnText, mov.swapMode === 'duplicate' && st.swapSegBtnTextActive]}>Full</Text>
-                                    </Pressable>
-                                    <View style={{ width: 6 }} />
-                                    <Text style={st.ovSmLabel}>window</Text>
-                                    <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementSwapWindow(blockIdx, movIdx, -1); }}>
-                                      <Text style={st.ovBtnText}>−</Text>
-                                    </Pressable>
-                                    <Text style={st.ovVal}>{mov.swapWindowSec ?? 5}s</Text>
-                                    <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementSwapWindow(blockIdx, movIdx, 1); }}>
-                                      <Text style={st.ovBtnText}>+</Text>
-                                    </Pressable>
-                                  </View>
-                                )}
+                                {(() => {
+                                  const libMov = availableMovements.find((m) => m.id === mov.movementId);
+                                  const effSwap = mov.swapSides ?? libMov?.swapSides ?? false;
+                                  if (!effSwap) return null;
+                                  const effMode = mov.swapMode ?? libMov?.swapMode ?? 'split';
+                                  const effWindow = mov.swapWindowSec ?? libMov?.swapWindowSec ?? 5;
+                                  return (
+                                    <View style={st.swapPanelInline}>
+                                      <Icon name="swap" size={10} color="#A78BFA" />
+                                      <Text style={st.swapHeaderText}>SWAP</Text>
+                                      <Pressable
+                                        style={[st.swapSegBtn, effMode === 'split' && st.swapSegBtnActive]}
+                                        onPress={(e) => { e.stopPropagation(); updateMovementSwapMode(blockIdx, movIdx, 'split'); }}
+                                      >
+                                        <Text style={[st.swapSegBtnText, effMode === 'split' && st.swapSegBtnTextActive]}>Split</Text>
+                                      </Pressable>
+                                      <Pressable
+                                        style={[st.swapSegBtn, effMode === 'duplicate' && st.swapSegBtnActive]}
+                                        onPress={(e) => { e.stopPropagation(); updateMovementSwapMode(blockIdx, movIdx, 'duplicate'); }}
+                                      >
+                                        <Text style={[st.swapSegBtnText, effMode === 'duplicate' && st.swapSegBtnTextActive]}>Full</Text>
+                                      </Pressable>
+                                      <View style={{ width: 6 }} />
+                                      <Text style={st.ovSmLabel}>window</Text>
+                                      <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementSwapWindow(blockIdx, movIdx, -1); }}>
+                                        <Text style={st.ovBtnText}>−</Text>
+                                      </Pressable>
+                                      <Text style={st.ovVal}>{effWindow}s</Text>
+                                      <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementSwapWindow(blockIdx, movIdx, 1); }}>
+                                        <Text style={st.ovBtnText}>+</Text>
+                                      </Pressable>
+                                    </View>
+                                  );
+                                })()}
                               </View>
                             )}
                           </View>
