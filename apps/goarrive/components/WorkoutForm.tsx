@@ -178,6 +178,9 @@ interface BlockMovement {
   notes?: string;
   thumbnailUrl?: string;
   showOnPreview?: boolean;
+  swapSides?: boolean;
+  swapMode?: 'split' | 'duplicate';
+  swapWindowSec?: number;
 }
 
 interface WorkoutBlock {
@@ -211,6 +214,9 @@ interface MovementOption {
   thumbnailUrl?: string | null;
   mediaUrl?: string | null;
   videoUrl?: string | null;
+  swapSides?: boolean;
+  swapMode?: 'split' | 'duplicate';
+  swapWindowSec?: number;
 }
 
 // ── Props ────────────────────────────────────────────────────────────────────
@@ -327,14 +333,32 @@ export default function WorkoutForm({
         const cd = d.data();
         if (!seen.has(d.id) && !cd.isArchived) {
           seen.add(d.id);
-          list.push({ id: d.id, name: cd.name ?? '', category: cd.category ?? '', mediaUrl: cd.mediaUrl ?? null, videoUrl: cd.videoUrl ?? null });
+          list.push({
+            id: d.id,
+            name: cd.name ?? '',
+            category: cd.category ?? '',
+            mediaUrl: cd.mediaUrl ?? null,
+            videoUrl: cd.videoUrl ?? null,
+            swapSides: cd.swapSides ?? false,
+            swapMode: cd.swapMode ?? 'split',
+            swapWindowSec: cd.swapWindowSec ?? 5,
+          });
         }
       });
       globalSnap.docs.forEach((d) => {
         const gd = d.data();
         if (!seen.has(d.id) && !gd.isArchived) {
           seen.add(d.id);
-          list.push({ id: d.id, name: gd.name ?? '', category: gd.category ?? '', mediaUrl: gd.mediaUrl ?? null, videoUrl: gd.videoUrl ?? null });
+          list.push({
+            id: d.id,
+            name: gd.name ?? '',
+            category: gd.category ?? '',
+            mediaUrl: gd.mediaUrl ?? null,
+            videoUrl: gd.videoUrl ?? null,
+            swapSides: gd.swapSides ?? false,
+            swapMode: gd.swapMode ?? 'split',
+            swapWindowSec: gd.swapWindowSec ?? 5,
+          });
         }
       });
       list.sort((a, b) => a.name.localeCompare(b.name));
@@ -388,6 +412,9 @@ export default function WorkoutForm({
             restSec: m.restSec ?? undefined,
             notes: m.notes ?? '',
             showOnPreview: m.showOnPreview,
+            swapSides: m.swapSides ?? undefined,
+            swapMode: m.swapMode ?? undefined,
+            swapWindowSec: m.swapWindowSec ?? undefined,
           })),
           // Follow-Along Video fields (only present on type === 'Follow-Along Video')
           videoUrl: b.videoUrl,
@@ -622,6 +649,13 @@ export default function WorkoutForm({
                   restSec: DEFAULT_REST_SEC,
                   notes: '',
                   thumbnailUrl: movement.mediaUrl || movement.videoUrl || undefined,
+                  ...(movement.swapSides
+                    ? {
+                        swapSides: true,
+                        swapMode: movement.swapMode ?? 'split',
+                        swapWindowSec: movement.swapWindowSec ?? 5,
+                      }
+                    : {}),
                 },
               ],
             }
@@ -692,6 +726,11 @@ export default function WorkoutForm({
           if (m.restSec) cm.restSec = m.restSec;
           if (m.notes) cm.notes = m.notes;
           if (m.showOnPreview === false) cm.showOnPreview = false;
+          if (m.swapSides) {
+            cm.swapSides = true;
+            cm.swapMode = m.swapMode ?? 'split';
+            cm.swapWindowSec = m.swapWindowSec ?? 5;
+          }
           return cm;
         });
         return clean;
@@ -1235,6 +1274,47 @@ export default function WorkoutForm({
                                         placeholderTextColor="#4A5568"
                                         multiline
                                       />
+                                      {mov.swapSides && (
+                                        <View style={s.swapSidesPanel}>
+                                          <View style={s.swapSidesHeader}>
+                                            <Icon name="swap" size={12} color="#A78BFA" />
+                                            <Text style={s.swapSidesTitle}>Swap Sides</Text>
+                                          </View>
+                                          <View style={s.swapSidesRow}>
+                                            <Text style={s.swapSidesLabel}>Mode</Text>
+                                            <View style={s.swapSidesSegmented}>
+                                              <Pressable
+                                                style={[s.swapSidesSegment, (mov.swapMode ?? 'split') === 'split' && s.swapSidesSegmentActive]}
+                                                onPress={() => updateMovementField(bi, mi, 'swapMode', 'split')}
+                                              >
+                                                <Text style={[s.swapSidesSegmentText, (mov.swapMode ?? 'split') === 'split' && s.swapSidesSegmentTextActive]}>Split</Text>
+                                              </Pressable>
+                                              <Pressable
+                                                style={[s.swapSidesSegment, mov.swapMode === 'duplicate' && s.swapSidesSegmentActive]}
+                                                onPress={() => updateMovementField(bi, mi, 'swapMode', 'duplicate')}
+                                              >
+                                                <Text style={[s.swapSidesSegmentText, mov.swapMode === 'duplicate' && s.swapSidesSegmentTextActive]}>Full</Text>
+                                              </Pressable>
+                                            </View>
+                                          </View>
+                                          <View style={s.swapSidesRow}>
+                                            <Text style={s.swapSidesLabel}>Swap window</Text>
+                                            <TextInput
+                                              style={s.swapSidesInput}
+                                              value={String(mov.swapWindowSec ?? 5)}
+                                              onChangeText={(t) => updateMovementField(bi, mi, 'swapWindowSec', parseInt(t.replace(/[^0-9]/g, ''), 10) || 5)}
+                                              keyboardType="number-pad"
+                                              maxLength={2}
+                                            />
+                                            <Text style={s.swapSidesUnit}>sec</Text>
+                                          </View>
+                                          <Text style={s.swapSidesHint}>
+                                            {(mov.swapMode ?? 'split') === 'split'
+                                              ? `Each side gets half of ${mov.durationSec ?? DEFAULT_DURATION_SEC}s`
+                                              : `Each side gets the full ${mov.durationSec ?? DEFAULT_DURATION_SEC}s`}
+                                          </Text>
+                                        </View>
+                                      )}
                                       <View style={s.movementMoveRow}>
                                         {mi > 0 && (
                                           <Pressable style={s.moveMoveBtn} onPress={() => moveMovementInBlock(bi, mi, 'up')}>
@@ -2032,6 +2112,86 @@ const s = StyleSheet.create({
     color: '#8A95A3',
     fontFamily: FB,
     maxWidth: 80,
+  },
+  swapSidesPanel: {
+    gap: 6,
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(167,139,250,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(167,139,250,0.25)',
+  },
+  swapSidesHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  swapSidesTitle: {
+    fontSize: 11,
+    color: '#A78BFA',
+    fontFamily: FB,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  swapSidesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  swapSidesLabel: {
+    fontSize: 11,
+    color: '#8A95A3',
+    fontFamily: FB,
+    width: 90,
+  },
+  swapSidesSegmented: {
+    flexDirection: 'row',
+    backgroundColor: '#0E1117',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#2A3347',
+    overflow: 'hidden',
+  },
+  swapSidesSegment: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  swapSidesSegmentActive: {
+    backgroundColor: 'rgba(167,139,250,0.25)',
+  },
+  swapSidesSegmentText: {
+    fontSize: 11,
+    color: '#8A95A3',
+    fontFamily: FB,
+  },
+  swapSidesSegmentTextActive: {
+    color: '#F0F4F8',
+    fontWeight: '600',
+  },
+  swapSidesInput: {
+    backgroundColor: '#0E1117',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    fontSize: 11,
+    color: '#F0F4F8',
+    fontFamily: FB,
+    borderWidth: 1,
+    borderColor: '#2A3347',
+    minWidth: 44,
+    textAlign: 'center',
+  },
+  swapSidesUnit: {
+    fontSize: 11,
+    color: '#8A95A3',
+    fontFamily: FB,
+  },
+  swapSidesHint: {
+    fontSize: 10,
+    color: '#6B7280',
+    fontFamily: FB,
+    fontStyle: 'italic',
   },
   addMovementBtn: {
     flexDirection: 'row',
