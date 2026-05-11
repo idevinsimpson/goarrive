@@ -1995,49 +1995,35 @@ export default function WorkoutFolderPage({
                                     />
                                   </View>
 
-                                  {/* Swap Sides — shown if block OR library has swapSides; library values used as fallback */}
+                                  {/* Swap Sides — compact one-row form for card view */}
                                   {(() => {
                                     const libMov = availableMovements.find((m) => m.id === mov.movementId);
                                     const effSwap = mov.swapSides ?? libMov?.swapSides ?? false;
                                     if (!effSwap) return null;
                                     const effMode = mov.swapMode ?? libMov?.swapMode ?? 'split';
                                     const effWindow = mov.swapWindowSec ?? libMov?.swapWindowSec ?? 5;
-                                    const dur = mov.durationSec ?? DEFAULT_DURATION_SEC;
                                     return (
-                                      <View style={st.swapPanel}>
-                                        <View style={st.swapHeaderRow}>
-                                          <Icon name="swap" size={10} color="#A78BFA" />
-                                          <Text style={st.swapHeaderText}>SWAP SIDES</Text>
-                                        </View>
-                                        <View style={st.swapSegmented}>
-                                          <Pressable
-                                            style={[st.swapSegBtn, effMode === 'split' && st.swapSegBtnActive]}
-                                            onPress={(e) => { e.stopPropagation(); updateMovementSwapMode(blockIdx, movIdx, 'split'); }}
-                                          >
-                                            <Text style={[st.swapSegBtnText, effMode === 'split' && st.swapSegBtnTextActive]}>Split</Text>
-                                          </Pressable>
-                                          <Pressable
-                                            style={[st.swapSegBtn, effMode === 'duplicate' && st.swapSegBtnActive]}
-                                            onPress={(e) => { e.stopPropagation(); updateMovementSwapMode(blockIdx, movIdx, 'duplicate'); }}
-                                          >
-                                            <Text style={[st.swapSegBtnText, effMode === 'duplicate' && st.swapSegBtnTextActive]}>Full</Text>
-                                          </Pressable>
-                                        </View>
-                                        <Text style={st.swapModeDesc}>
-                                          {effMode === 'split'
-                                            ? `Half each side (${Math.round(dur / 2)}s · ${Math.round(dur / 2)}s)`
-                                            : `Full duration on both sides (${dur}s · ${dur}s)`}
-                                        </Text>
-                                        <View style={st.ovRow}>
-                                          <Text style={st.ovSmLabel}>swap window</Text>
-                                          <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementSwapWindow(blockIdx, movIdx, -1); }}>
-                                            <Text style={st.ovBtnText}>−</Text>
-                                          </Pressable>
-                                          <Text style={st.ovVal}>{effWindow}s</Text>
-                                          <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementSwapWindow(blockIdx, movIdx, 1); }}>
-                                            <Text style={st.ovBtnText}>+</Text>
-                                          </Pressable>
-                                        </View>
+                                      <View style={st.swapRowCompact}>
+                                        <Icon name="swap" size={9} color="#A78BFA" />
+                                        <Pressable
+                                          style={[st.swapPillTiny, effMode === 'split' && st.swapPillTinyActive]}
+                                          onPress={(e) => { e.stopPropagation(); updateMovementSwapMode(blockIdx, movIdx, 'split'); }}
+                                        >
+                                          <Text style={[st.swapPillTinyText, effMode === 'split' && st.swapPillTinyTextActive]}>½</Text>
+                                        </Pressable>
+                                        <Pressable
+                                          style={[st.swapPillTiny, effMode === 'duplicate' && st.swapPillTinyActive]}
+                                          onPress={(e) => { e.stopPropagation(); updateMovementSwapMode(blockIdx, movIdx, 'duplicate'); }}
+                                        >
+                                          <Text style={[st.swapPillTinyText, effMode === 'duplicate' && st.swapPillTinyTextActive]}>1×</Text>
+                                        </Pressable>
+                                        <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementSwapWindow(blockIdx, movIdx, -1); }}>
+                                          <Text style={st.ovBtnText}>−</Text>
+                                        </Pressable>
+                                        <Text style={st.ovVal}>{effWindow}s</Text>
+                                        <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementSwapWindow(blockIdx, movIdx, 1); }}>
+                                          <Text style={st.ovBtnText}>+</Text>
+                                        </Pressable>
                                       </View>
                                     );
                                   })()}
@@ -3411,6 +3397,38 @@ const st = StyleSheet.create({
     paddingTop: 4,
     borderTopWidth: 1,
     borderTopColor: 'rgba(167,139,250,0.20)',
+  },
+  swapRowCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+    marginTop: 1,
+  },
+  swapPillTiny: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+    backgroundColor: 'rgba(167,139,250,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(167,139,250,0.30)',
+    minWidth: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swapPillTinyActive: {
+    backgroundColor: 'rgba(167,139,250,0.40)',
+    borderColor: '#A78BFA',
+  },
+  swapPillTinyText: {
+    fontSize: 10,
+    color: '#8A95A3',
+    fontFamily: FB,
+    fontWeight: '700',
+    lineHeight: 12,
+  },
+  swapPillTinyTextActive: {
+    color: '#F0F4F8',
   },
   removeXBtn: {
     position: 'absolute',
