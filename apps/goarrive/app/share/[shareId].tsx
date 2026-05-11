@@ -17,6 +17,8 @@ import { BG, CARD, BORDER, FG, GOLD, MUTED, FH, FB } from '../../lib/theme';
 
 const RESOLVE_URL = 'https://us-central1-goarrive.cloudfunctions.net/resolveShareToken';
 
+type ShareVisibility = 'restricted' | 'anyone_with_link' | 'anyone_with_link_signin_required';
+
 interface Teaser {
   workoutId: string;
   name: string;
@@ -28,6 +30,8 @@ interface Teaser {
   coachName: string;
   coachPhotoUrl: string | null;
   tags: string[];
+  visibility?: ShareVisibility;
+  requireAuth?: boolean;
 }
 
 interface SharedWorkout {
@@ -76,7 +80,7 @@ export default function SharePage() {
       }
 
       setTeaser(json.teaser);
-      if (json.authenticated && json.workout) {
+      if (json.workout) {
         setWorkout(json.workout);
       }
     } catch (err) {
@@ -124,7 +128,7 @@ export default function SharePage() {
 
   if (!teaser) return null;
 
-  if (workout && user) {
+  if (workout) {
     return (
       <View style={{ flex: 1, backgroundColor: BG }}>
         {!showPlayer ? (
@@ -164,10 +168,27 @@ export default function SharePage() {
                 </View>
               </View>
 
+              {!user ? (
+                <View style={styles.guestBanner}>
+                  <Icon name="info" size={14} color={MUTED} />
+                  <Text style={styles.guestBannerText}>
+                    Playing as guest — your progress won't be saved.
+                  </Text>
+                </View>
+              ) : null}
+
               <Pressable style={styles.playBtn} onPress={() => setShowPlayer(true)}>
                 <Icon name="play" size={20} color={BG} />
                 <Text style={styles.playBtnText}>Start Workout</Text>
               </Pressable>
+
+              {!user ? (
+                <Pressable style={styles.signUpBtnSubtle} onPress={handleSignUp}>
+                  <Text style={styles.signUpBtnSubtleText}>
+                    Create a free account to save your progress
+                  </Text>
+                </Pressable>
+              ) : null}
             </View>
           </ScrollView>
         ) : (
@@ -222,17 +243,25 @@ export default function SharePage() {
 
           <View style={styles.authGate}>
             <Icon name="lock" size={24} color={GOLD} />
-            <Text style={styles.authGateTitle}>Sign in to start this workout</Text>
+            <Text style={styles.authGateTitle}>
+              {teaser.requireAuth ? 'Sign in to start this workout' : 'This link is no longer available'}
+            </Text>
             <Text style={styles.authGateDesc}>
-              Create a free account or sign in to play this workout from {teaser.coachName}.
+              {teaser.requireAuth
+                ? `Create a free account or sign in to play this workout from ${teaser.coachName}.`
+                : 'Ask your coach for a new link.'}
             </Text>
 
-            <Pressable style={styles.signInBtn} onPress={handleSignIn}>
-              <Text style={styles.signInBtnText}>Sign In</Text>
-            </Pressable>
-            <Pressable style={styles.signUpBtn} onPress={handleSignUp}>
-              <Text style={styles.signUpBtnText}>Create Account</Text>
-            </Pressable>
+            {teaser.requireAuth ? (
+              <>
+                <Pressable style={styles.signInBtn} onPress={handleSignIn}>
+                  <Text style={styles.signInBtnText}>Sign In</Text>
+                </Pressable>
+                <Pressable style={styles.signUpBtn} onPress={handleSignUp}>
+                  <Text style={styles.signUpBtnText}>Create Account</Text>
+                </Pressable>
+              </>
+            ) : null}
           </View>
         </View>
       </ScrollView>
@@ -408,5 +437,33 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     fontFamily: FH,
+  },
+  guestBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(125,211,252,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(125,211,252,0.2)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  guestBannerText: {
+    color: MUTED,
+    fontSize: 12,
+    fontFamily: FB,
+    flexShrink: 1,
+  },
+  signUpBtnSubtle: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  signUpBtnSubtleText: {
+    color: GOLD,
+    fontSize: 13,
+    fontFamily: FB,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
 });

@@ -9218,6 +9218,20 @@ export const getEmbeddedSessionJoinConfig = onCall(
 
 import * as crypto from 'crypto';
 
+type ShareVisibility = 'restricted' | 'anyone_with_link' | 'anyone_with_link_signin_required';
+const VALID_VISIBILITIES: ShareVisibility[] = ['restricted', 'anyone_with_link', 'anyone_with_link_signin_required'];
+
+function normalizeVisibility(v: unknown): ShareVisibility {
+  return VALID_VISIBILITIES.includes(v as ShareVisibility) ? (v as ShareVisibility) : 'anyone_with_link';
+}
+
+function normalizeExpiresAt(input: unknown): admin.firestore.Timestamp | null {
+  if (input === null || input === undefined) return null;
+  const ms = typeof input === 'number' ? input : typeof input === 'string' ? Date.parse(input) : NaN;
+  if (!Number.isFinite(ms)) return null;
+  return admin.firestore.Timestamp.fromMillis(ms);
+}
+
 export const createShareToken = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Must be signed in.');
@@ -9228,7 +9242,11 @@ export const createShareToken = onCall(async (request) => {
     throw new HttpsError('permission-denied', 'Only coaches can share workouts.');
   }
 
-  const { workoutId } = request.data as { workoutId: string };
+  const { workoutId, visibility, expiresAt } = request.data as {
+    workoutId: string;
+    visibility?: string;
+    expiresAt?: number | string | null;
+  };
   if (!workoutId) {
     throw new HttpsError('invalid-argument', 'workoutId is required.');
   }
@@ -9253,10 +9271,20 @@ export const createShareToken = onCall(async (request) => {
 
   if (!existingTokens.empty) {
     const existing = existingTokens.docs[0];
-    return { shareId: existing.id, alreadyExists: true };
+    const data = existing.data();
+    return {
+      shareId: existing.id,
+      alreadyExists: true,
+      visibility: normalizeVisibility(data.visibility),
+      expiresAt: data.expiresAt?.toMillis?.() ?? null,
+      resolvedCount: data.resolvedCount ?? 0,
+      lastResolvedAt: data.lastResolvedAt?.toMillis?.() ?? null,
+    };
   }
 
   const shareId = crypto.randomBytes(16).toString('hex');
+  const resolvedVisibility = normalizeVisibility(visibility);
+  const resolvedExpiresAt = normalizeExpiresAt(expiresAt);
   await db.collection('shareTokens').doc(shareId).set({
     workoutId,
     tenantId: workoutData.tenantId || coachId,
@@ -9264,9 +9292,72 @@ export const createShareToken = onCall(async (request) => {
     coachName: workoutData.coachName || null,
     revokedAt: null,
     createdAt: FieldValue.serverTimestamp(),
+    visibility: resolvedVisibility,
+    expiresAt: resolvedExpiresAt,
+    resolvedCount: 0,
+    firstResolvedAt: null,
+    lastResolvedAt: null,
   });
 
-  return { shareId, alreadyExists: false };
+  return {
+    shareId,
+    alreadyExists: false,
+    visibility: resolvedVisibility,
+    expiresAt: resolvedExpiresAt?.toMillis?.() ?? null,
+    resolvedCount: 0,
+    lastResolvedAt: null,
+  };
+});
+
+export const updateShareToken = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Must be signed in.');
+  }
+  const callerToken = request.auth.token as Record<string, any>;
+  const callerRole = callerToken.role as string | undefined;
+  const coachId = callerToken.coachId || request.auth.uid;
+  const isAdmin = callerRole === 'platformAdmin' || !!callerToken.admin;
+
+  const { workoutId, visibility, expiresAt } = request.data as {
+    workoutId: string;
+    visibility?: string;
+    expiresAt?: number | string | null;
+  };
+  if (!workoutId) {
+    throw new HttpsError('invalid-argument', 'workoutId is required.');
+  }
+
+  const baseQuery = db.collection('shareTokens')
+    .where('workoutId', '==', workoutId)
+    .where('revokedAt', '==', null);
+  const tokens = isAdmin
+    ? await baseQuery.get()
+    : await baseQuery.where('createdBy', '==', coachId).get();
+
+  if (tokens.empty) {
+    throw new HttpsError('not-found', 'No active share link found for this workout.');
+  }
+
+  const updates: Record<string, any> = {};
+  if (visibility !== undefined) updates.visibility = normalizeVisibility(visibility);
+  if (expiresAt !== undefined) updates.expiresAt = normalizeExpiresAt(expiresAt);
+
+  if (Object.keys(updates).length === 0) {
+    return { updated: 0 };
+  }
+
+  const batch = db.batch();
+  tokens.docs.forEach((d) => batch.update(d.ref, updates));
+  await batch.commit();
+
+  const first = tokens.docs[0];
+  const data = { ...first.data(), ...updates };
+  return {
+    updated: tokens.size,
+    shareId: first.id,
+    visibility: normalizeVisibility(data.visibility),
+    expiresAt: data.expiresAt?.toMillis?.() ?? null,
+  };
 });
 
 export const revokeShareToken = onCall(async (request) => {
@@ -9329,6 +9420,21 @@ export const resolveShareToken = onRequest(
       return;
     }
 
+    const expiresAt = tokenData.expiresAt as admin.firestore.Timestamp | null | undefined;
+    if (expiresAt && expiresAt.toMillis() < Date.now()) {
+      res.status(410).json({ error: 'This share link has expired.' });
+      return;
+    }
+
+    // Tokens created before visibility was added default to anyone-with-link
+    // (preserves existing share-link behavior — they were already meant to be shared).
+    const visibility: ShareVisibility = normalizeVisibility(tokenData.visibility);
+
+    if (visibility === 'restricted') {
+      res.status(403).json({ error: 'This workout is no longer shared via link.' });
+      return;
+    }
+
     const workoutSnap = await db.collection('workouts').doc(tokenData.workoutId).get();
     if (!workoutSnap.exists) {
       res.status(404).json({ error: 'This workout no longer exists.' });
@@ -9352,6 +9458,8 @@ export const resolveShareToken = onRequest(
       }
     }
 
+    const requireAuth = visibility === 'anyone_with_link_signin_required';
+
     const teaser = {
       workoutId: tokenData.workoutId,
       name: workout.name || 'Workout',
@@ -9363,12 +9471,24 @@ export const resolveShareToken = onRequest(
       coachName: coachData.displayName || coachData.name || 'Coach',
       coachPhotoUrl: coachData.photoURL || null,
       tags: workout.tags || [],
+      visibility,
+      requireAuth,
     };
 
-    if (!isAuthenticated) {
+    if (requireAuth && !isAuthenticated) {
       res.status(200).json({ authenticated: false, teaser });
       return;
     }
+
+    // Best-effort view tracking — fire-and-forget, never block the response.
+    const viewUpdate: Record<string, any> = {
+      resolvedCount: FieldValue.increment(1),
+      lastResolvedAt: FieldValue.serverTimestamp(),
+    };
+    if (!tokenData.firstResolvedAt) viewUpdate.firstResolvedAt = FieldValue.serverTimestamp();
+    tokenSnap.ref.update(viewUpdate).catch((err) => {
+      console.warn('[resolveShareToken] view counter update failed:', err);
+    });
 
     const sanitizedBlocks = (workout.blocks || []).map((block: any) => ({
       type: block.type || 'Block',
@@ -9412,7 +9532,7 @@ export const resolveShareToken = onRequest(
     }));
 
     res.status(200).json({
-      authenticated: true,
+      authenticated: isAuthenticated,
       teaser,
       workout: {
         id: tokenData.workoutId,
