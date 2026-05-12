@@ -1995,7 +1995,7 @@ export default function WorkoutFolderPage({
                                     />
                                   </View>
 
-                                  {/* Swap Sides — compact one-row form for card view */}
+                                  {/* Swap Sides — single toggle pill cycles split↔full, leaves room for ± window */}
                                   {(() => {
                                     const libMov = availableMovements.find((m) => m.id === mov.movementId);
                                     const effSwap = mov.swapSides ?? libMov?.swapSides ?? false;
@@ -2004,18 +2004,15 @@ export default function WorkoutFolderPage({
                                     const effWindow = mov.swapWindowSec ?? libMov?.swapWindowSec ?? 5;
                                     return (
                                       <View style={st.swapRowCompact}>
-                                        <Icon name="swap" size={9} color="#A78BFA" />
+                                        <Icon name="swap" size={10} color="#A78BFA" />
                                         <Pressable
-                                          style={[st.swapPillTiny, effMode === 'split' && st.swapPillTinyActive]}
-                                          onPress={(e) => { e.stopPropagation(); updateMovementSwapMode(blockIdx, movIdx, 'split'); }}
+                                          style={st.swapTogglePill}
+                                          onPress={(e) => {
+                                            e.stopPropagation();
+                                            updateMovementSwapMode(blockIdx, movIdx, effMode === 'split' ? 'duplicate' : 'split');
+                                          }}
                                         >
-                                          <Text style={[st.swapPillTinyText, effMode === 'split' && st.swapPillTinyTextActive]}>½</Text>
-                                        </Pressable>
-                                        <Pressable
-                                          style={[st.swapPillTiny, effMode === 'duplicate' && st.swapPillTinyActive]}
-                                          onPress={(e) => { e.stopPropagation(); updateMovementSwapMode(blockIdx, movIdx, 'duplicate'); }}
-                                        >
-                                          <Text style={[st.swapPillTinyText, effMode === 'duplicate' && st.swapPillTinyTextActive]}>1×</Text>
+                                          <Text style={st.swapTogglePillText}>{effMode === 'split' ? 'Split' : 'Full'}</Text>
                                         </Pressable>
                                         <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementSwapWindow(blockIdx, movIdx, -1); }}>
                                           <Text style={st.ovBtnText}>−</Text>
@@ -3429,6 +3426,24 @@ const st = StyleSheet.create({
   },
   swapPillTinyTextActive: {
     color: '#F0F4F8',
+  },
+  swapTogglePill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: 'rgba(167,139,250,0.30)',
+    borderWidth: 1,
+    borderColor: '#A78BFA',
+    minWidth: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swapTogglePillText: {
+    fontSize: 10,
+    color: '#F0F4F8',
+    fontFamily: FB,
+    fontWeight: '700',
+    lineHeight: 12,
   },
   removeXBtn: {
     position: 'absolute',
