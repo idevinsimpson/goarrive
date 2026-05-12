@@ -30,9 +30,29 @@ interface FlatMovement {
   duration: number;
   restAfter: number;
   swapSides: boolean;
+  swapMode?: 'split' | 'duplicate';
+  swapWindowSec?: number;
   reps?: string;
   stepType?: StepType;
   [key: string]: any;
+}
+
+const DEFAULT_SWAP_WINDOW_SEC = 5;
+
+// Per-side work duration. `split` mode halves the configured duration so L + R
+// together equal the coach's intended work time. `duplicate` (default for any
+// legacy block without a mode) plays the full duration on each side.
+function sideDuration(mov: FlatMovement | null): number {
+  const base = mov?.duration ?? 30;
+  if (!mov?.swapSides) return base;
+  if (mov.swapMode === 'split') return Math.max(1, Math.round(base / 2));
+  return base;
+}
+
+function swapWindowOf(mov: FlatMovement | null): number {
+  const raw = mov?.swapWindowSec;
+  if (typeof raw === 'number' && raw >= 2 && raw <= 15) return raw;
+  return DEFAULT_SWAP_WINDOW_SEC;
 }
 
 interface UseWorkoutTimerOptions {
@@ -122,7 +142,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
         // previously fired concurrently with the spoken "Go" MP3 and was
         // heard as a beep BETWEEN "3, 2, 1" and "Go".
         setPhase('work');
-        setTimeLeft(nextStep.duration ?? 30);
+        setTimeLeft(sideDuration(nextStep));
         if (!silent) hapticHeavy();
       }
     }
@@ -149,14 +169,15 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
           if (displayed <= 3 && displayed > 0 && n > 0) hapticLight();
           if (n <= 0) hapticMedium();
         } else if (phase === 'swap') {
-          if (displayed <= 3 && displayed > 0 && n > 0) {
-            playCue('countdownTick');
-            hapticLight();
-          }
-          if (n <= 0) {
-            playCue('countdownFinal');
-            hapticMedium();
-          }
+          // Audio for swap's last-3 countdown + "Go" is owned by useWorkoutTTS
+          // (spoken `countdown_3` + `go`). The synth beeps used to fire here
+          // were a 880Hz square wave that masked the spoken cue (member heard
+          // "peeps" instead of "3, 2, 1, Go") and on iOS competed for the
+          // audio context with the TTS queue, dropping later movement-name
+          // announcements. Keep only haptics so the wrist still confirms each
+          // tick. Mirrors how `rest` already works.
+          if (displayed <= 3 && displayed > 0 && n > 0) hapticLight();
+          if (n <= 0) hapticMedium();
         } else if (phase === 'work') {
           if (displayed <= 3 && displayed > 0 && n > 0) hapticLight();
           if (n <= 0) hapticMedium();
@@ -190,7 +211,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
       if (current?.swapSides && swapSide === 'L') {
         setSwapSide('R');
         setPhase('swap');
-        setTimeLeft(5);
+        setTimeLeft(swapWindowOf(current));
       } else if (current?.restAfter > 0) {
         setPhase('rest');
         setTimeLeft(current.restAfter);
@@ -199,7 +220,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
       }
     } else if (phase === 'swap') {
       setPhase('work');
-      setTimeLeft(current?.duration ?? 30);
+      setTimeLeft(sideDuration(current));
     } else if (phase === 'rest') {
       advanceToNext();
     }
@@ -224,7 +245,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
       setTimeLeft(firstStep.restAfter);
     } else {
       setPhase('work');
-      setTimeLeft(firstStep.duration ?? 30);
+      setTimeLeft(sideDuration(firstStep));
     }
     hapticHeavy();
   }, [total, flatMovements]);
@@ -284,7 +305,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
       if (current?.swapSides && swapSide === 'L') {
         setSwapSide('R');
         setPhase('swap');
-        setTimeLeft(isPaused ? 5 : leadIn);
+        setTimeLeft(isPaused ? swapWindowOf(current) : leadIn);
       } else if (current?.restAfter && current.restAfter > 0) {
         setPhase('rest');
         setTimeLeft(isPaused ? current.restAfter : leadIn);
@@ -294,7 +315,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
       }
     } else if (phase === 'swap') {
       setPhase('work');
-      setTimeLeft(isPaused ? (current?.duration ?? 30) : leadIn);
+      setTimeLeft(isPaused ? sideDuration(current) : leadIn);
     } else if (phase === 'rest') {
       advanceToNext(true);
       if (!isPaused) setTimeLeft(leadIn);
@@ -308,7 +329,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     if (current.swapSides && swapSide === 'L') {
       setSwapSide('R');
       setPhase('swap');
-      setTimeLeft(5);
+      setTimeLeft(swapWindowOf(current));
     } else if (current.restAfter > 0) {
       setPhase('rest');
       setTimeLeft(current.restAfter);

@@ -153,6 +153,8 @@ export default function MovementForm({
   const [restSec, setRestSec] = useState('15');
   const [countdownSec, setCountdownSec] = useState('3');
   const [swapSides, setSwapSides] = useState(false);
+  const [swapMode, setSwapMode] = useState<'split' | 'duplicate'>('split');
+  const [swapWindowSec, setSwapWindowSec] = useState(5);
   const [videoUrl, setVideoUrl] = useState('');
   const [thumbnailUrl, setThumbnailUrl] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -200,6 +202,8 @@ export default function MovementForm({
       setRestSec(String(editMovement.restSec ?? 15));
       setCountdownSec(String(editMovement.countdownSec ?? 3));
       setSwapSides(editMovement.swapSides ?? false);
+      setSwapMode(((editMovement as any).swapMode === 'duplicate' ? 'duplicate' : 'split'));
+      setSwapWindowSec(Math.max(2, Math.min(15, (editMovement as any).swapWindowSec ?? 5)));
       setVideoUrl((editMovement as any).videoUrl || editMovement.mediaUrl || '');
       setThumbnailUrl((editMovement as any).thumbnailUrl || '');
       setRegression((editMovement as any).regression || '');
@@ -574,7 +578,7 @@ export default function MovementForm({
         restSec: aiData.restSec || 15,
         countdownSec: 3,
         swapSides: false,
-        swapMode: 'split' as const,
+        swapMode: 'split' as const, // initial — coach edits after creation
         swapWindowSec: 5,
         videoUrl: videoUrl.trim(),
         thumbnailUrl: gifHighUrl || thumbnailImageUrl || '',
@@ -676,8 +680,8 @@ export default function MovementForm({
     restSec: parseInt(restSec, 10) || 15,
     countdownSec: parseInt(countdownSec, 10) || 3,
     swapSides,
-    swapMode: 'split' as const,
-    swapWindowSec: 5,
+    swapMode,
+    swapWindowSec,
     videoUrl: videoUrl.trim(),
     thumbnailUrl: thumbnailUrl.trim(),
     regression: regression.trim(),
@@ -689,7 +693,7 @@ export default function MovementForm({
     cropFrameWidth,
     cropFrameHeight,
     updatedAt: serverTimestamp(),
-  }), [name, category, equipment, difficulty, description, muscleGroups, workSec, restSec, countdownSec, swapSides, videoUrl, thumbnailUrl, regression, progression, contraindications, cropScale, cropTranslateX, cropTranslateY, cropFrameWidth, cropFrameHeight]);
+  }), [name, category, equipment, difficulty, description, muscleGroups, workSec, restSec, countdownSec, swapSides, swapMode, swapWindowSec, videoUrl, thumbnailUrl, regression, progression, contraindications, cropScale, cropTranslateX, cropTranslateY, cropFrameWidth, cropFrameHeight]);
 
   // Regenerate the OpenAI movement voice clip whenever the spoken name
   // changes. Clears voiceUrl synchronously so the player can't speak the old
@@ -777,7 +781,7 @@ export default function MovementForm({
   useEffect(() => {
     if (!isEdit || !initializedRef.current) return;
     autoSave();
-  }, [name, category, equipment, difficulty, description, muscleGroups, workSec, restSec, countdownSec, swapSides, videoUrl, thumbnailUrl, regression, progression, contraindications, cropScale, cropTranslateX, cropTranslateY, cropFrameWidth, cropFrameHeight]);
+  }, [name, category, equipment, difficulty, description, muscleGroups, workSec, restSec, countdownSec, swapSides, swapMode, swapWindowSec, videoUrl, thumbnailUrl, regression, progression, contraindications, cropScale, cropTranslateX, cropTranslateY, cropFrameWidth, cropFrameHeight]);
 
   // Clean up timers on unmount
   useEffect(() => {
@@ -836,8 +840,8 @@ export default function MovementForm({
         restSec: parseInt(restSec, 10) || 15,
         countdownSec: parseInt(countdownSec, 10) || 3,
         swapSides,
-        swapMode: 'split' as const,
-        swapWindowSec: 5,
+        swapMode,
+        swapWindowSec,
         videoUrl: videoUrl.trim(),
         thumbnailUrl: finalThumbnailUrl,
         regression: regression.trim(),
@@ -1042,6 +1046,49 @@ export default function MovementForm({
                     <View style={[st.toggleThumb, swapSides && st.toggleThumbActive]} />
                   </View>
                 </Pressable>
+
+                {/* Swap Sides — mode + window (visible when toggle on) */}
+                {swapSides && (
+                  <View style={st.swapSettingsBlock}>
+                    <View style={st.swapSettingsRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={st.swapSettingsLabel}>Mode</Text>
+                        <Text style={st.swapSettingsHint}>
+                          {swapMode === 'split'
+                            ? 'Half on each side (½ of work time per side)'
+                            : 'Full duration on both sides (2× total)'}
+                        </Text>
+                      </View>
+                      <Pressable
+                        style={st.swapModePill}
+                        onPress={() => setSwapMode(swapMode === 'split' ? 'duplicate' : 'split')}
+                      >
+                        <Text style={st.swapModePillText}>{swapMode === 'split' ? '½' : '2×'}</Text>
+                      </Pressable>
+                    </View>
+                    <View style={st.swapSettingsRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={st.swapSettingsLabel}>Swap Window</Text>
+                        <Text style={st.swapSettingsHint}>Countdown before "swap sides" cue (2–15s)</Text>
+                      </View>
+                      <View style={st.swapWindowStepper}>
+                        <Pressable
+                          style={st.swapStepBtn}
+                          onPress={() => setSwapWindowSec((s) => Math.max(2, s - 1))}
+                        >
+                          <Text style={st.swapStepBtnText}>−</Text>
+                        </Pressable>
+                        <Text style={st.swapWindowValue}>{swapWindowSec}s</Text>
+                        <Pressable
+                          style={st.swapStepBtn}
+                          onPress={() => setSwapWindowSec((s) => Math.min(15, s + 1))}
+                        >
+                          <Text style={st.swapStepBtnText}>+</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  </View>
+                )}
 
                 {/* Media */}
                 <Text style={st.sectionTitle}>Media</Text>
@@ -1639,6 +1686,80 @@ const st = StyleSheet.create({
   toggleThumbActive: {
     backgroundColor: '#F5A623',
     alignSelf: 'flex-end',
+  },
+  swapSettingsBlock: {
+    marginTop: -4,
+    marginBottom: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(167,139,250,0.08)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(167,139,250,0.25)',
+    gap: 10,
+  },
+  swapSettingsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  swapSettingsLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#F0F4F8',
+    fontFamily: FB,
+  },
+  swapSettingsHint: {
+    fontSize: 11,
+    color: '#8A95A3',
+    fontFamily: FB,
+    marginTop: 2,
+  },
+  swapModePill: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(167,139,250,0.30)',
+    borderWidth: 1,
+    borderColor: '#A78BFA',
+    minWidth: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swapModePillText: {
+    fontSize: 14,
+    color: '#F0F4F8',
+    fontFamily: FB,
+    fontWeight: '700',
+  },
+  swapWindowStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  swapStepBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swapStepBtnText: {
+    fontSize: 16,
+    color: '#F0F4F8',
+    fontFamily: FB,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  swapWindowValue: {
+    fontSize: 14,
+    color: '#F5A623',
+    fontFamily: FB,
+    fontWeight: '700',
+    minWidth: 32,
+    textAlign: 'center',
   },
   footer: {
     flexDirection: 'row',

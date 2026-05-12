@@ -76,6 +76,16 @@ function mergeFromCache(fm: FlatMovement, cached: any): FlatMovement {
   const canonicalVoiceUrl = typeof cached.voiceUrl === 'string' && voiceCurrent
     ? cached.voiceUrl
     : (voiceCurrent ? (fm.voiceUrl || '') : '');
+  // Swap-sides fields: block snapshot wins, library is fallback. Pre-Step 2
+  // blocks have no swap* fields, so the library's coach-configured values
+  // (set via MovementForm) need to flow through to the player.
+  const cachedSwapSides = typeof cached.swapSides === 'boolean' ? cached.swapSides : undefined;
+  const cachedSwapMode = cached.swapMode === 'duplicate' || cached.swapMode === 'split'
+    ? cached.swapMode as 'split' | 'duplicate'
+    : undefined;
+  const cachedSwapWindow = typeof cached.swapWindowSec === 'number'
+    ? cached.swapWindowSec
+    : undefined;
   return {
     ...fm,
     name: canonicalName,
@@ -87,6 +97,9 @@ function mergeFromCache(fm: FlatMovement, cached: any): FlatMovement {
     cropScale: fm.cropScale ?? cached.cropScale ?? 1,
     cropTranslateX: fm.cropTranslateX ?? cached.cropTranslateX ?? 0,
     cropTranslateY: fm.cropTranslateY ?? cached.cropTranslateY ?? 0,
+    swapSides: fm.swapSides || cachedSwapSides || false,
+    swapMode: fm.swapMode ?? cachedSwapMode,
+    swapWindowSec: fm.swapWindowSec ?? cachedSwapWindow,
   };
 }
 
