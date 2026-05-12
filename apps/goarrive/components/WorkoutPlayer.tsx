@@ -1116,54 +1116,79 @@ export default function WorkoutPlayer({
           </View>
         )}
 
-        {/* ── WORK + REST — share one Video element so the asset persists ── */}
-        {/* across the phase boundary. The rest UI overlays a REST label on   */}
-        {/* the same video, which already shows the next item per activeVideoUrl. */}
-        {(phase === 'work' || phase === 'rest') && current && (
+        {/* ── WORK + REST + SWAP — share one Video element so the asset    */}
+        {/* persists across phase boundaries. Rest overlays a REST label on  */}
+        {/* the same video; swap keeps the video mounted (mirrored if going  */}
+        {/* to R) so the member sees the next side instead of an empty card. */}
+        {(phase === 'work' || phase === 'rest' || phase === 'swap') && current && (() => {
+          // Mirror the media when about to enter / already on the R side of
+          // a swap-sides movement. `transform: [{ scaleX: -1 }]` works for
+          // both <Video> and <Image>; on web RN translates it to CSS
+          // `transform: scaleX(-1)` which the HTMLVideoElement honors. This
+          // way GIFs, MP4s, and image thumbnails all mirror with the same
+          // primitive — no per-source branching required.
+          const isMirrored = !!current.swapSides
+            && ((phase === 'work' && swapSide === 'R') || phase === 'swap');
+          const mirrorStyle = isMirrored ? { transform: [{ scaleX: -1 }] } as any : null;
+          return (
           <View style={[st.workContainer, webSafeBottomStyle]}>
             {renderLogoSlot()}
-            {phase === 'work'
-              ? renderTitleTimerSlot(
-                  <>
-                    {current.supersetLabel && (
-                      <Text style={[st.supersetLabel, { fontSize: scaledLabels.superset }]}>{current.supersetLabel}</Text>
-                    )}
-                    {renderAutoFitTitle(current.name, {
-                      hasTimer: !isRepBased,
-                      maxLines: current.supersetLabel ? 2 : NAME_MAX_LINES,
-                    })}
-                  </>,
-                  !isRepBased ? renderGoldTimer(formatTime(timeLeft)) : null,
-                )
-              : renderTitleTimerSlot(
-                  <>
-                    <Text style={[st.restPhaseLabel, { fontSize: scaledLabels.restPhase }]}>REST</Text>
-                    {next && renderAutoFitTitle(`Next: ${next.name}`, {
-                      hasTimer: true,
-                      maxLines: 2,
-                      color: '#F0F4F8',
-                      marginTop: 2,
-                    })}
-                  </>,
-                  renderRestTimer(formatTime(timeLeft)),
+            {phase === 'work' && renderTitleTimerSlot(
+              <>
+                {current.supersetLabel && (
+                  <Text style={[st.supersetLabel, { fontSize: scaledLabels.superset }]}>{current.supersetLabel}</Text>
                 )}
+                {renderAutoFitTitle(current.name, {
+                  hasTimer: !isRepBased,
+                  maxLines: current.supersetLabel ? 2 : NAME_MAX_LINES,
+                })}
+                {/* Swap-mode badge stacks naturally below the title — the */}
+                {/* title column is center-aligned, so it appears centered  */}
+                {/* directly under the movement name without overlapping    */}
+                {/* the media frame.                                        */}
+                {current.swapSides && (() => {
+                  const mode = (current as any).swapMode === 'duplicate' ? 'duplicate' : 'split';
+                  const win = typeof (current as any).swapWindowSec === 'number'
+                    ? (current as any).swapWindowSec : 5;
+                  return (
+                    <View style={st.swapBadgePill} pointerEvents="none">
+                      <Text style={st.splitText}>{mode === 'split' ? 'SPLIT' : 'FULL'}</Text>
+                      <Text style={st.splitSep}> | </Text>
+                      <Text style={st.splitDuration}>{win} sec</Text>
+                      <Text style={st.splitArrows}> ⇄</Text>
+                    </View>
+                  );
+                })()}
+              </>,
+              !isRepBased ? renderGoldTimer(formatTime(timeLeft)) : null,
+            )}
+            {phase === 'rest' && renderTitleTimerSlot(
+              <>
+                <Text style={[st.restPhaseLabel, { fontSize: scaledLabels.restPhase }]}>REST</Text>
+                {next && renderAutoFitTitle(`Next: ${next.name}`, {
+                  hasTimer: true,
+                  maxLines: 2,
+                  color: '#F0F4F8',
+                  marginTop: 2,
+                })}
+              </>,
+              renderRestTimer(formatTime(timeLeft)),
+            )}
+            {phase === 'swap' && renderTitleTimerSlot(
+              <>
+                <Text style={[st.phaseLabel, { fontSize: scaledLabels.phaseLabel }]}>SWITCH SIDES</Text>
+                {renderAutoFitTitle(current.name, {
+                  hasTimer: true,
+                  maxLines: 2,
+                  color: '#F0F4F8',
+                  marginTop: 2,
+                })}
+              </>,
+              renderGoldTimer(String(Math.max(0, Math.ceil(timeLeft)))),
+            )}
 
-            {/* Shared media slot — Video stays mounted across work↔rest. */}
+            {/* Shared media slot — Video stays mounted across work↔rest↔swap. */}
             <View style={st.mediaSlot}>
-              {/* SPLIT label overlays the media so it never alters slot height */}
-              {phase === 'work' && current.swapSides && (() => {
-                const mode = (current as any).swapMode === 'duplicate' ? 'duplicate' : 'split';
-                const window = typeof (current as any).swapWindowSec === 'number'
-                  ? (current as any).swapWindowSec : 5;
-                return (
-                  <View style={st.splitLabelOverlay} pointerEvents="none">
-                    <Text style={st.splitText}>{mode === 'split' ? 'SPLIT' : 'FULL'}</Text>
-                    <Text style={st.splitSep}> | </Text>
-                    <Text style={st.splitDuration}>{window} sec</Text>
-                    <Text style={st.splitArrows}> ⇄</Text>
-                  </View>
-                );
-              })()}
               <View style={[st.mediaInner, mediaInnerSize]}>
                 {videoLayers.length > 0 ? (
                   <>
@@ -1186,7 +1211,7 @@ export default function WorkoutPlayer({
                           isLooping
                           shouldPlay={!isPaused}
                           isMuted
-                          style={[st.videoPlayer, st.videoLayer, { opacity } as any]}
+                          style={[st.videoPlayer, st.videoLayer, { opacity } as any, mirrorStyle]}
                           videoStyle={
                             Platform.OS === 'web'
                               ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
@@ -1199,7 +1224,7 @@ export default function WorkoutPlayer({
                     {!displayedUrl && activeThumbUrl && (
                       <Image
                         source={{ uri: activeThumbUrl }}
-                        style={st.posterFallback}
+                        style={[st.posterFallback, mirrorStyle]}
                         resizeMode="cover"
                       />
                     )}
@@ -1207,7 +1232,7 @@ export default function WorkoutPlayer({
                 ) : activeThumbUrl ? (
                   <Image
                     source={{ uri: activeThumbUrl }}
-                    style={st.videoPlayer}
+                    style={[st.videoPlayer, mirrorStyle]}
                     resizeMode="cover"
                   />
                 ) : (
@@ -1218,38 +1243,12 @@ export default function WorkoutPlayer({
               </View>
             </View>
 
-            {/* Next-up slot — work shows next item, rest leaves it empty */}
-            {/* (the rest layout already names the next item in the title slot). */}
+            {/* Next-up slot — work shows next item, rest/swap stay empty   */}
+            {/* (the rest/swap title slot already names the next thing).    */}
             {renderNextUpSlot(phase === 'work' ? renderNextUp() : null)}
           </View>
-        )}
-
-        {/* ── SWAP state ──────────────────────────────────────── */}
-        {phase === 'swap' && current && (
-          <View style={[st.workContainer, webSafeBottomStyle]}>
-            {renderLogoSlot()}
-            {renderTitleTimerSlot(
-              <>
-                <Text style={[st.phaseLabel, { fontSize: scaledLabels.phaseLabel }]}>SWITCH SIDES</Text>
-                {renderAutoFitTitle(current.name, {
-                  hasTimer: true,
-                  maxLines: 2,
-                  color: '#F0F4F8',
-                  marginTop: 2,
-                })}
-              </>,
-              renderGoldTimer(String(Math.max(0, Math.ceil(timeLeft)))),
-            )}
-            <View style={st.mediaSlot}>
-              <View style={[st.mediaInner, st.swapPanel, mediaInnerSize]}>
-                <View style={st.sideBadge}>
-                  <Text style={st.sideBadgeText}>RIGHT SIDE</Text>
-                </View>
-              </View>
-            </View>
-            {renderNextUpSlot(null)}
-          </View>
-        )}
+          );
+        })()}
 
         {/* ── COMPLETE state ──────────────────────────────────── */}
         {phase === 'complete' && (
@@ -1734,18 +1733,19 @@ const st = StyleSheet.create({
     marginTop: 12, // SLOT_GAP_MEDIA — gap from media (must always be visible)
     alignSelf: 'center',
   },
-  splitLabelOverlay: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
+  // Swap-mode badge — small pill that stacks naturally inside the centered
+  // title column, directly below the movement name. Replaces the older
+  // `splitLabelOverlay` that was painted over the top-left of the video and
+  // obscured the movement.
+  swapBadgePill: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.55)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    zIndex: 5,
-  } as any,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+    marginTop: 6,
+  },
   equipmentPanel: {
     backgroundColor: 'rgba(251,146,60,0.08)',
     alignItems: 'center',

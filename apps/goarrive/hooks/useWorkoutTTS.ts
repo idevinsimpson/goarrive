@@ -741,10 +741,17 @@ export function useWorkoutTTS({
   }, [phase, current?.name, current?.stepType, current?.voiceUrl, currentIndex, next?.name, nextNextUpVoiceUrl, enqueueCue, enqueueVoice, isPaused]);
 
   // ── Halfway announcement (exercise only) ───────────────────────────
+  // Split-mode swap-sides movements: each side IS already a "half", so a
+  // mid-side halfway cue would land at the 3/4 point of the side's clock and
+  // sounds confusing. Skip it entirely for split. Duplicate-mode swap-sides
+  // still gets halfway because each side runs the full duration.
   useEffect(() => {
     if (isPaused) return;
     if (phase !== 'work' || !current || current.stepType !== 'exercise') return;
     if (currentDuration <= 6) return;
+    const isSplitSwap = !!current.swapSides
+      && (current.swapMode === 'split' || !current.swapMode);
+    if (isSplitSwap) return;
     const halfway = Math.floor(currentDuration / 2);
     if (timeLeft === halfway && !halfwaySpokenRef.current) {
       halfwaySpokenRef.current = true;
