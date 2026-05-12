@@ -169,14 +169,15 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
           if (displayed <= 3 && displayed > 0 && n > 0) hapticLight();
           if (n <= 0) hapticMedium();
         } else if (phase === 'swap') {
-          if (displayed <= 3 && displayed > 0 && n > 0) {
-            playCue('countdownTick');
-            hapticLight();
-          }
-          if (n <= 0) {
-            playCue('countdownFinal');
-            hapticMedium();
-          }
+          // Audio for swap's last-3 countdown + "Go" is owned by useWorkoutTTS
+          // (spoken `countdown_3` + `go`). The synth beeps used to fire here
+          // were a 880Hz square wave that masked the spoken cue (member heard
+          // "peeps" instead of "3, 2, 1, Go") and on iOS competed for the
+          // audio context with the TTS queue, dropping later movement-name
+          // announcements. Keep only haptics so the wrist still confirms each
+          // tick. Mirrors how `rest` already works.
+          if (displayed <= 3 && displayed > 0 && n > 0) hapticLight();
+          if (n <= 0) hapticMedium();
         } else if (phase === 'work') {
           if (displayed <= 3 && displayed > 0 && n > 0) hapticLight();
           if (n <= 0) hapticMedium();

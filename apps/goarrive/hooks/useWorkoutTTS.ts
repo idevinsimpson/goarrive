@@ -661,7 +661,12 @@ export function useWorkoutTTS({
         // index 0) so no clipping.
         const announcedByPriorRest = previousKey === `rest_${currentIndex - 1}`
           || previousKey === `rest_${currentIndex}`;
-        if (!announcedByPriorRest) {
+        // Returning from a swap window (work-L → swap → work-R): the rest
+        // before work-L already announced this movement, so re-announcing on
+        // work-R is needless repetition and adds an extra item to the audio
+        // queue right after `switch_sides` + countdown + `go`. Skip.
+        const returningFromSwap = previousKey === `swap_${currentIndex}`;
+        if (!announcedByPriorRest && !returningFromSwap) {
           const voiceUrl = current.voiceUrl;
           enqueueVoice(voiceUrl || '', `work_${currentIndex}_${current.name}`);
         }
