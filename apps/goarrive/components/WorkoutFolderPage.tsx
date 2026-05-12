@@ -2012,7 +2012,7 @@ export default function WorkoutFolderPage({
                                             updateMovementSwapMode(blockIdx, movIdx, effMode === 'split' ? 'duplicate' : 'split');
                                           }}
                                         >
-                                          <Text style={st.swapTogglePillText}>{effMode === 'split' ? 'Split' : 'Full'}</Text>
+                                          <Text style={st.swapTogglePillText}>{effMode === 'split' ? '½' : '2×'}</Text>
                                         </Pressable>
                                         <Pressable style={st.ovBtn} onPress={(e) => { e.stopPropagation(); updateMovementSwapWindow(blockIdx, movIdx, -1); }}>
                                           <Text style={st.ovBtnText}>−</Text>
@@ -3428,13 +3428,13 @@ const st = StyleSheet.create({
     color: '#F0F4F8',
   },
   swapTogglePill: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
     borderRadius: 4,
     backgroundColor: 'rgba(167,139,250,0.30)',
     borderWidth: 1,
     borderColor: '#A78BFA',
-    minWidth: 38,
+    minWidth: 22,
     alignItems: 'center',
     justifyContent: 'center',
   },
