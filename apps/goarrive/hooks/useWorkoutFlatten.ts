@@ -41,6 +41,8 @@ export interface FlatMovement {
   blockIndex: number;
   movementIndex: number;
   swapSides: boolean;
+  swapMode?: 'split' | 'duplicate';
+  swapWindowSec?: number;
   showOnPreview?: boolean;
   description?: string;
   sets?: number;
@@ -328,6 +330,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               blockIndex: bi,
               movementIndex: mi,
               swapSides: mv.swapSides ?? false,
+              swapMode: mv.swapMode,
+              swapWindowSec: mv.swapWindowSec,
               showOnPreview: mv.showOnPreview,
               description: mv.description || mv.coachingCues || mv.notes || '',
               sets: mv.sets,
@@ -412,6 +416,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               blockIndex: bi,
               movementIndex: mi,
               swapSides: mv.swapSides ?? false,
+              swapMode: mv.swapMode,
+              swapWindowSec: mv.swapWindowSec,
               showOnPreview: mv.showOnPreview,
               description: mv.description || mv.coachingCues || mv.notes || '',
               sets: mv.sets,

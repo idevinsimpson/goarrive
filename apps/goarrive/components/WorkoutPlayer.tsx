@@ -142,6 +142,7 @@ export default function WorkoutPlayer({
     timeLeft,
     currentDuration: current?.duration ?? 0,
     restGoVoiceUrl,
+    swapSide,
   });
 
   // ── Movement swap ─────────────────────────────
@@ -1150,14 +1151,19 @@ export default function WorkoutPlayer({
             {/* Shared media slot — Video stays mounted across work↔rest. */}
             <View style={st.mediaSlot}>
               {/* SPLIT label overlays the media so it never alters slot height */}
-              {phase === 'work' && current.swapSides && (
-                <View style={st.splitLabelOverlay} pointerEvents="none">
-                  <Text style={st.splitText}>SPLIT</Text>
-                  <Text style={st.splitSep}> | </Text>
-                  <Text style={st.splitDuration}>5 sec</Text>
-                  <Text style={st.splitArrows}> ⇄</Text>
-                </View>
-              )}
+              {phase === 'work' && current.swapSides && (() => {
+                const mode = (current as any).swapMode === 'duplicate' ? 'duplicate' : 'split';
+                const window = typeof (current as any).swapWindowSec === 'number'
+                  ? (current as any).swapWindowSec : 5;
+                return (
+                  <View style={st.splitLabelOverlay} pointerEvents="none">
+                    <Text style={st.splitText}>{mode === 'split' ? 'SPLIT' : 'FULL'}</Text>
+                    <Text style={st.splitSep}> | </Text>
+                    <Text style={st.splitDuration}>{window} sec</Text>
+                    <Text style={st.splitArrows}> ⇄</Text>
+                  </View>
+                );
+              })()}
               <View style={[st.mediaInner, mediaInnerSize]}>
                 {videoLayers.length > 0 ? (
                   <>
