@@ -16,10 +16,14 @@
  *
  * Shared static clips (no movement name):
  *   - restGo:               "3, 2, 1. Go." (rest → next exercise)
- *   - swapSidesCountdownGo: "Switch sides. 3, 2, 1. Go." (swap window 4–6s)
- *   - countdownSwapSidesGo: "3, 2, 1. Swap sides. Go." (swap window 1–3s, fast pacing)
  *   - workSwapOtherSide:    "3, 2, 1. Go on the other side." (swap window 0s,
  *      fired during work-L last 4s; the swap visual phase is skipped)
+ *
+ * Note: The per-window combined swap clips (swapSidesCountdownGo for 4–6s and
+ * countdownSwapSidesGo for 1–3s) were dropped — short swap windows now play
+ * the original static switch_sides + countdown_3 + go sequence. The combined
+ * clips were a single point of failure: if any one URL failed to load or
+ * decode in time, the entire 1–6s swap window played silent.
  *
  * Pre-warm timing: kicks off at workout-open so clips are (usually) cached
  * by the time playback reaches the first transition. On a fresh first
@@ -37,8 +41,6 @@ import { generateTransitionPhrase } from '../utils/generateTransitionPhrase';
 export interface UseTransitionPhrasesResult {
   flatMovements: FlatMovement[];
   restGoVoiceUrl: string | null;
-  swapSidesCountdownGoVoiceUrl: string | null;
-  countdownSwapSidesGoVoiceUrl: string | null;
   workSwapOtherSideVoiceUrl: string | null;
 }
 
@@ -48,10 +50,6 @@ export function useTransitionPhrases(
   const [workRestNextUrls, setWorkRestNextUrls] = useState<Record<string, string>>({});
   const [workNextUrls, setWorkNextUrls] = useState<Record<string, string>>({});
   const [restGoVoiceUrl, setRestGoVoiceUrl] = useState<string | null>(null);
-  const [swapSidesCountdownGoVoiceUrl, setSwapSidesCountdownGoVoiceUrl] =
-    useState<string | null>(null);
-  const [countdownSwapSidesGoVoiceUrl, setCountdownSwapSidesGoVoiceUrl] =
-    useState<string | null>(null);
   const [workSwapOtherSideVoiceUrl, setWorkSwapOtherSideVoiceUrl] =
     useState<string | null>(null);
   const startedWorkRestNamesRef = useRef<Set<string>>(new Set());
@@ -68,22 +66,6 @@ export function useTransitionPhrases(
         })
         .catch((err) => {
           console.warn('[VOICE-AUDIT] useTransitionPhrases restGo REJECTED', { err });
-        });
-      generateTransitionPhrase('swapSidesCountdownGo')
-        .then(({ url }) => {
-          if (!url) return;
-          setSwapSidesCountdownGoVoiceUrl((prev) => (prev === url ? prev : url));
-        })
-        .catch((err) => {
-          console.warn('[VOICE-AUDIT] useTransitionPhrases swapSidesCountdownGo REJECTED', { err });
-        });
-      generateTransitionPhrase('countdownSwapSidesGo')
-        .then(({ url }) => {
-          if (!url) return;
-          setCountdownSwapSidesGoVoiceUrl((prev) => (prev === url ? prev : url));
-        })
-        .catch((err) => {
-          console.warn('[VOICE-AUDIT] useTransitionPhrases countdownSwapSidesGo REJECTED', { err });
         });
       generateTransitionPhrase('workSwapOtherSide')
         .then(({ url }) => {
@@ -162,8 +144,6 @@ export function useTransitionPhrases(
   return {
     flatMovements: enrichedFlatMovements,
     restGoVoiceUrl,
-    swapSidesCountdownGoVoiceUrl,
-    countdownSwapSidesGoVoiceUrl,
     workSwapOtherSideVoiceUrl,
   };
 }

@@ -223,18 +223,6 @@ interface UseWorkoutTTSOptions {
    */
   restGoVoiceUrl?: string | null;
   /**
-   * Pre-warmed combined "Switch sides. 3, 2, 1. Go." clip URL — fired at
-   * swap-phase entry when the swap window is 4–6s. One coherent breath so the
-   * spoken cue stays in lockstep with the visible countdown.
-   */
-  swapSidesCountdownGoVoiceUrl?: string | null;
-  /**
-   * Pre-warmed combined "3, 2, 1. Swap sides. Go." clip URL — fired at
-   * swap-phase entry when the swap window is 1–3s. Faster countdown pacing
-   * packs the digits into the tight window.
-   */
-  countdownSwapSidesGoVoiceUrl?: string | null;
-  /**
    * Pre-warmed combined "3, 2, 1. Go on the other side." clip URL — fired
    * during work-L's last 4s when swapWindowSec === 0. The swap visual phase
    * is skipped; sides flip the instant work-L hits zero.
@@ -254,8 +242,6 @@ export function useWorkoutTTS({
   timeLeft,
   currentDuration,
   restGoVoiceUrl = null,
-  swapSidesCountdownGoVoiceUrl = null,
-  countdownSwapSidesGoVoiceUrl = null,
   workSwapOtherSideVoiceUrl = null,
   swapSide = 'L',
 }: UseWorkoutTTSOptions) {
@@ -295,12 +281,6 @@ export function useWorkoutTTS({
   // timeLeft<=0 (there is no rest in this path) and the otherwise-silent
   // swap-entry effect (no swap phase is entered).
   const combinedWorkSwapOtherSideFiredIndexRef = useRef<number>(-1);
-  // Combined "Switch sides. 3, 2, 1. Go." (4–6s) or "3, 2, 1. Swap sides.
-  // Go." (1–3s) fired at swap entry. Suppresses the standalone switch_sides
-  // cue, the countdown_3 in the swap-countdown effect, and the "Go" cue at
-  // swap timeLeft<=0.
-  const combinedSwapPhraseFiredIndexRef = useRef<number>(-1);
-
   // Mirror isPaused for synchronous use inside the queue pump callbacks.
   const isPausedRef = useRef(isPaused);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
@@ -586,7 +566,6 @@ export function useWorkoutTTS({
       combinedRestGoFiredIndexRef.current = -1;
       combinedWorkNextFiredIndexRef.current = -1;
       combinedWorkSwapOtherSideFiredIndexRef.current = -1;
-      combinedSwapPhraseFiredIndexRef.current = -1;
     }
   }, []);
 
@@ -794,33 +773,13 @@ export function useWorkoutTTS({
       const key = `swap_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
-        const window = swapWindowSeconds(current);
-        // 1–3s windows are handled during work-L's last 4s (so the clip
-        // doesn't overrun into work-R for tight windows). If that already
-        // fired, the swap-entry adds nothing.
-        const combinedAlreadyFired =
-          combinedSwapPhraseFiredIndexRef.current === currentIndex;
-        if (combinedAlreadyFired) {
-          console.info(
-            '[VOICE-AUDIT] swap-entry — combined phrase already fired at work-L, staying silent',
-            { currentIndex, window },
-          );
-        } else if (window >= 4 && window <= 6 && swapSidesCountdownGoVoiceUrl) {
-          // 4–6s window: combined "Switch sides. 3, 2, 1. Go." Replaces the
-          // back-to-back switch_sides + countdown_3 + go sequence that left
-          // an audible gap before the countdown for short windows.
-          combinedSwapPhraseFiredIndexRef.current = currentIndex;
-          console.info(
-            '[VOICE-AUDIT] swap-entry combined clip (4–6s window) — enqueueing',
-            { currentIndex, window, urlPreview: swapSidesCountdownGoVoiceUrl.slice(0, 80) },
-          );
-          enqueueVoice(swapSidesCountdownGoVoiceUrl, `${key}_combined`);
-        } else {
-          // 7+s window (or 1–3s combined URL not ready yet): fall back to
-          // the legacy switch_sides cue. The swap-countdown effect will
-          // still fire countdown_3 at displayed===3 and `go` at zero.
-          enqueueCue('switch_sides', key);
-        }
+        // Always the static `switch_sides` cue on swap-entry. The combined
+        // "Switch sides. 3, 2, 1. Go." / "3, 2, 1. Swap sides. Go." clips
+        // were an unreliable single point of failure for short windows: if
+        // the clip URL failed to load/decode in time, the entire 1–6s window
+        // played silent. Static cues + standalone countdown_3 + go cover the
+        // same visual sequence with four short, reliably-cached MP3s.
+        enqueueCue('switch_sides', key);
       }
     } else if (phase === 'ready') {
       lastSpokenRef.current = '';
@@ -828,7 +787,7 @@ export function useWorkoutTTS({
       halfwaySpokenRef.current = false;
       countdownSpokenRef.current = -1;
     }
-  }, [phase, current, current?.name, current?.stepType, current?.voiceUrl, currentIndex, swapSide, next?.name, nextNextUpVoiceUrl, swapSidesCountdownGoVoiceUrl, countdownSwapSidesGoVoiceUrl, enqueueCue, enqueueVoice, isPaused]);
+  }, [phase, current, current?.name, current?.stepType, current?.voiceUrl, currentIndex, swapSide, next?.name, nextNextUpVoiceUrl, enqueueCue, enqueueVoice, isPaused]);
 
   // ── Halfway announcement (exercise only) ───────────────────────────
   // Split-mode swap-sides movements: each side IS already a "half", so a
@@ -909,25 +868,12 @@ export function useWorkoutTTS({
           { currentIndex, urlPreview: workSwapOtherSideVoiceUrl.slice(0, 80), timeLeft },
         );
         enqueueVoice(workSwapOtherSideVoiceUrl, `work_swap_other_side_${currentIndex}`);
-      } else if (isSwapLToR && swapWindow >= 1 && swapWindow <= 3 && countdownSwapSidesGoVoiceUrl) {
-        // 1–3s swap window: combined "3, 2, 1. Swap sides. Go." fires during
-        // work-L's last 4s — the "3, 2, 1" lines up with work-L's visual
-        // countdown, then "Swap sides. Go." lands as we cross into the swap
-        // phase. Firing here instead of at swap entry keeps the clip from
-        // overrunning into work-R for tight windows. Sets the swap-entry
-        // suppression ref so the swap-entry effect doesn't double-fire.
-        countdownSpokenRef.current = 4;
-        combinedSwapPhraseFiredIndexRef.current = currentIndex;
-        console.info(
-          '[VOICE-AUDIT] work-L swap=1–3s combined clip — enqueueing "3,2,1 Swap sides. Go." at work-L last 4s',
-          { currentIndex, swapWindow, urlPreview: countdownSwapSidesGoVoiceUrl.slice(0, 80), timeLeft },
-        );
-        enqueueVoice(countdownSwapSidesGoVoiceUrl, `work_swap_1_3_combined_${currentIndex}`);
-      } else if (isSwapLToR && swapWindow >= 4 && swapWindow <= 6) {
-        // 4–6s swap window: stay silent here. work-L's standalone
-        // countdown_3 plays at displayed===3 to cover the visible 3,2,1, and
-        // the swap-entry effect plays "Switch sides. 3,2,1. Go." to cover
-        // the swap phase. Two distinct countdowns, audio on both.
+      } else if (isSwapLToR) {
+        // Swap-L with window >= 1: stay silent at displayed===4 and let the
+        // displayed===3 branch fire the standalone countdown_3. The swap
+        // phase handles its own "Switch sides" + countdown + "Go" cues.
+        // Combined clips for short windows were unreliable (single point of
+        // failure leading to total silence for 1–6s windows).
       } else if (!isLastMovement && nextIsExercise && !isSwapLToR
           && (current?.restAfter ?? 0) === 0 && nextWorkNextVoiceUrl) {
         // rest === 0: chain directly into the next movement. The combined
@@ -1027,22 +973,13 @@ export function useWorkoutTTS({
       if (swapCountdownSpokenRef.current !== -1) swapCountdownSpokenRef.current = -1;
       return;
     }
-    // If the swap-entry effect fired a combined phrase ("Switch sides, 3,
-    // 2, 1, Go" or "3, 2, 1, Swap sides, Go"), the countdown and "go" are
-    // already in that single clip — suppress the standalone cues here.
-    const combinedSwapFired =
-      combinedSwapPhraseFiredIndexRef.current === currentIndex;
     const displayed = Math.max(0, Math.ceil(timeLeft));
     if (displayed === 3 && timeLeft > 0 && swapCountdownSpokenRef.current !== 3) {
       swapCountdownSpokenRef.current = 3;
-      if (!combinedSwapFired) {
-        enqueueCue('countdown_3', `swap_countdown_${currentIndex}`);
-      }
+      enqueueCue('countdown_3', `swap_countdown_${currentIndex}`);
     } else if (timeLeft <= 0 && swapCountdownSpokenRef.current !== 0) {
       swapCountdownSpokenRef.current = 0;
-      if (!combinedSwapFired) {
-        enqueueCue('go', `swap_end_${currentIndex}`);
-      }
+      enqueueCue('go', `swap_end_${currentIndex}`);
     }
   }, [phase, timeLeft, currentIndex, enqueueCue, isPaused]);
 

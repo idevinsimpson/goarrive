@@ -98,8 +98,6 @@ export default function WorkoutPlayer({
   const {
     flatMovements: transitionPhrasedMovements,
     restGoVoiceUrl,
-    swapSidesCountdownGoVoiceUrl,
-    countdownSwapSidesGoVoiceUrl,
     workSwapOtherSideVoiceUrl,
   } = useTransitionPhrases(phrasedMovements);
   const [flatOverride, setFlatOverride] = useState<any[] | null>(null);
@@ -147,8 +145,6 @@ export default function WorkoutPlayer({
     timeLeft,
     currentDuration: current?.duration ?? 0,
     restGoVoiceUrl,
-    swapSidesCountdownGoVoiceUrl,
-    countdownSwapSidesGoVoiceUrl,
     workSwapOtherSideVoiceUrl,
     swapSide,
   });
