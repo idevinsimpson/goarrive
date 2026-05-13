@@ -1269,7 +1269,7 @@ export default function WorkoutFolderPage({
     mov.swapSides = true;
     if (mov.swapMode == null) mov.swapMode = lib?.swapMode ?? 'split';
     const current = mov.swapWindowSec ?? lib?.swapWindowSec ?? 5;
-    mov.swapWindowSec = Math.max(2, Math.min(15, current + delta));
+    mov.swapWindowSec = Math.max(0, Math.min(15, current + delta));
     updateBlocks(newBlocks);
   }, [blocks, updateBlocks, availableMovements]);
 

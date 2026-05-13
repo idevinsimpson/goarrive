@@ -7,12 +7,27 @@
  *   [countdown_3] → [rest] → [next-up phrase]
  * which sounded like three separate clips stitched together.
  *
- * Two phrase kinds:
- *   1. workRestNext(name)
+ * Phrase kinds:
+ *   1. workRestNext(name)  — work end, rest > 0
  *      "<break 200ms/>3<break 700ms/>2<break 700ms/>1<break 400ms/>Rest.
  *       <break 400ms/>Next up: <break 100ms/>{name}."
- *   2. restGo()
+ *   2. restGo()  — rest end
  *      "<break 200ms/>3<break 700ms/>2<break 700ms/>1<break 400ms/>Go."
+ *   3. workNext(name)  — work end, rest === 0 (no "rest", no "go")
+ *      "<break 200ms/>3<break 700ms/>2<break 700ms/>1<break 400ms/>Next up:
+ *       <break 100ms/>{name}."
+ *   4. swapSidesCountdownGo()  — swap window 4–6s, fired at swap entry
+ *      "<break 100ms/>Switch sides.<break 400ms/>3<break 700ms/>2
+ *       <break 700ms/>1<break 400ms/>Go."
+ *   5. countdownSwapSidesGo()  — swap window 1–3s, fired at swap entry
+ *      "<break 100ms/>3<break 300ms/>2<break 300ms/>1<break 300ms/>
+ *       Swap sides.<break 200ms/>Go."
+ *      Faster pacing fits the tight window.
+ *   6. workSwapOtherSide()  — swap window === 0, fired during work-L last 4s
+ *      "<break 200ms/>3<break 700ms/>2<break 700ms/>1<break 400ms/>
+ *       Go on the other side."
+ *      The swap visual phase is skipped entirely; sides flip the instant
+ *      work-L hits zero.
  *
  * Break tags are SSML that Voicemaker honors — they control pacing so the
  * clip plays as one coached breath.
@@ -55,7 +70,21 @@ export const TRANSITION_PHRASE_TEMPLATE_V = 'v1';
 const COUNTDOWN_PREFIX =
   '<break time="200ms"/>3<break time="700ms"/>2<break time="700ms"/>1<break time="400ms"/>';
 
-export type TransitionPhraseKind = 'workRestNext' | 'restGo';
+export type TransitionPhraseKind =
+  | 'workRestNext'
+  | 'restGo'
+  | 'workNext'
+  | 'swapSidesCountdownGo'
+  | 'countdownSwapSidesGo'
+  | 'workSwapOtherSide';
+
+/**
+ * Faster prefix for the tight 1–3s swap window, where the standard 200ms +
+ * 700ms-per-digit pacing wouldn't fit. Compressed gaps still read as a
+ * countdown but pack the digits into ~1.2s instead of ~2.5s.
+ */
+const COUNTDOWN_PREFIX_FAST =
+  '<break time="100ms"/>3<break time="300ms"/>2<break time="300ms"/>1<break time="300ms"/>';
 
 export interface TransitionPhraseResult {
   url: string | null;
@@ -71,8 +100,21 @@ export function buildTransitionPhrase(
   if (kind === 'restGo') {
     return `${COUNTDOWN_PREFIX}Go.`;
   }
+  if (kind === 'swapSidesCountdownGo') {
+    return `<break time="100ms"/>Switch sides.<break time="400ms"/>3<break time="700ms"/>2<break time="700ms"/>1<break time="400ms"/>Go.`;
+  }
+  if (kind === 'countdownSwapSidesGo') {
+    return `${COUNTDOWN_PREFIX_FAST}Swap sides.<break time="200ms"/>Go.`;
+  }
+  if (kind === 'workSwapOtherSide') {
+    return `${COUNTDOWN_PREFIX}Go on the other side.`;
+  }
   const normalized = normalizeTtsText(movementName || '');
   if (!normalized) return '';
+  if (kind === 'workNext') {
+    return `${COUNTDOWN_PREFIX}Next up: <break time="100ms"/>${normalized}.`;
+  }
+  // workRestNext
   return `${COUNTDOWN_PREFIX}Rest. <break time="400ms"/>Next up: <break time="100ms"/>${normalized}.`;
 }
 

@@ -95,8 +95,13 @@ export default function WorkoutPlayer({
   // per upcoming movement, plus the shared "3, 2, 1. Go." When ready, the
   // player enqueues a single Voicemaker clip per transition instead of
   // stitching countdown_3 + rest/go + next-up at playback time.
-  const { flatMovements: transitionPhrasedMovements, restGoVoiceUrl } =
-    useTransitionPhrases(phrasedMovements);
+  const {
+    flatMovements: transitionPhrasedMovements,
+    restGoVoiceUrl,
+    swapSidesCountdownGoVoiceUrl,
+    countdownSwapSidesGoVoiceUrl,
+    workSwapOtherSideVoiceUrl,
+  } = useTransitionPhrases(phrasedMovements);
   const [flatOverride, setFlatOverride] = useState<any[] | null>(null);
   const flatMovements = flatOverride || transitionPhrasedMovements;
 
@@ -142,6 +147,9 @@ export default function WorkoutPlayer({
     timeLeft,
     currentDuration: current?.duration ?? 0,
     restGoVoiceUrl,
+    swapSidesCountdownGoVoiceUrl,
+    countdownSwapSidesGoVoiceUrl,
+    workSwapOtherSideVoiceUrl,
     swapSide,
   });
 

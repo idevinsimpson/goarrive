@@ -73,6 +73,15 @@ export interface FlatMovement {
    * instead of countdown_3 + rest + next-up phrase.
    */
   workRestNextUpVoiceUrl?: string;
+  /**
+   * Combined "3, 2, 1. Next up, {name}." phrase clip URL — the rest=0
+   * variant of workRestNextUpVoiceUrl. Injected by useTransitionPhrases,
+   * keyed on this movement's own name. The player looks up
+   * `next.workNextVoiceUrl` at the end of the previous work phase when the
+   * previous movement's `restAfter === 0` and enqueues it at the work
+   * countdown's early trigger, in place of any "rest" or "go" cue.
+   */
+  workNextVoiceUrl?: string;
 
   // ── Phase 3: Special block fields ───────────────────────────────
   /** What kind of step this is — determines which player screen renders */
