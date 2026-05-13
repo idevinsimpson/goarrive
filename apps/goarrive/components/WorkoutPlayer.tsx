@@ -42,7 +42,6 @@ import { useWorkoutTimer } from '../hooks/useWorkoutTimer';
 import { useMediaPrefetch } from '../hooks/useMediaPrefetch';
 import { useMovementSwap } from '../hooks/useMovementSwap';
 import { useMovementHydrate } from '../hooks/useMovementHydrate';
-import { useNextUpPhrases } from '../hooks/useNextUpPhrases';
 import { useTransitionPhrases } from '../hooks/useTransitionPhrases';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
@@ -88,20 +87,19 @@ export default function WorkoutPlayer({
   // ── Hooks ────────────────────────────────────────────────────────────
   const flatFromBlocks = useWorkoutFlatten(workout);
   const hydratedMovements = useMovementHydrate(flatFromBlocks);
-  // Pre-warm combined "Next up, {name}." phrase clips so the rest screen can
-  // play one cohesive cue instead of next_up MP3 + standalone movement voice.
-  const phrasedMovements = useNextUpPhrases(hydratedMovements);
-  // Pre-warm combined transition clips: one "3, 2, 1. Rest. Next up, {name}."
-  // per upcoming movement, plus the shared "3, 2, 1. Go." When ready, the
-  // player enqueues a single Voicemaker clip per transition instead of
-  // stitching countdown_3 + rest/go + next-up at playback time.
+  // Pre-warm the two SHARED transition clips: "3, 2, 1. Go." (rest→work) and
+  // "3, 2, 1. Go on the other side." (swapWindow=0). Per-movement combined
+  // clips were dropped: they were a per-name failure surface (Voicemaker rate
+  // limit, decode error, pool exhaustion) that silently suppressed fallback
+  // cues when they failed to play. Static cues + per-movement OpenAI voiceUrl
+  // cover the same beats reliably; the two clips that remain are shared and
+  // pre-warm once per workout.
   const {
-    flatMovements: transitionPhrasedMovements,
     restGoVoiceUrl,
     workSwapOtherSideVoiceUrl,
-  } = useTransitionPhrases(phrasedMovements);
+  } = useTransitionPhrases(hydratedMovements);
   const [flatOverride, setFlatOverride] = useState<any[] | null>(null);
-  const flatMovements = flatOverride || transitionPhrasedMovements;
+  const flatMovements = flatOverride || hydratedMovements;
 
   const timer = useWorkoutTimer({ flatMovements });
 

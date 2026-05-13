@@ -58,30 +58,6 @@ export interface FlatMovement {
   cropTranslateY?: number;
   /** GoArrive Coach voice clip URL for this movement name (OpenAI TTS generated) */
   voiceUrl?: string;
-  /**
-   * Combined "Next up, {movement name}." phrase clip URL (gpt-4o-mini-tts with
-   * style instructions). Injected by useNextUpPhrases. The workout player
-   * enqueues this single clip on rest-entry instead of the static next_up cue
-   * + the standalone voiceUrl, eliminating the gap and unifying the delivery.
-   */
-  nextUpVoiceUrl?: string;
-  /**
-   * Combined "3, 2, 1. Rest. Next up, {name}." phrase clip URL (Voicemaker
-   * ai3-Aria with break tags). Injected by useTransitionPhrases, keyed on
-   * this movement's own name. The player looks up `next.workRestNextUpVoiceUrl`
-   * at the end of the previous work phase and enqueues it at timeLeft===3
-   * instead of countdown_3 + rest + next-up phrase.
-   */
-  workRestNextUpVoiceUrl?: string;
-  /**
-   * Combined "3, 2, 1. Next up, {name}." phrase clip URL — the rest=0
-   * variant of workRestNextUpVoiceUrl. Injected by useTransitionPhrases,
-   * keyed on this movement's own name. The player looks up
-   * `next.workNextVoiceUrl` at the end of the previous work phase when the
-   * previous movement's `restAfter === 0` and enqueues it at the work
-   * countdown's early trigger, in place of any "rest" or "go" cue.
-   */
-  workNextVoiceUrl?: string;
 
   // ── Phase 3: Special block fields ───────────────────────────────
   /** What kind of step this is — determines which player screen renders */

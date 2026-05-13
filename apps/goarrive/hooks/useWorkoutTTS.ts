@@ -21,18 +21,23 @@
  *   fired on a fixed timer instead of waiting for the previous audio to end.
  *
  *   Expected sequence when work → rest:
- *     Preferred (combined clip ready):
- *       [combined "3, 2, 1. Rest. Next up, {name}." Voicemaker clip]
- *       — one breath, enqueued at work timeLeft===3 via enqueueVoice.
- *     Fallback (combined clip not ready, swap sides pending, or last movement):
- *       [countdown_3] → [rest] → [combined "Next up, {name}." phrase clip]
- *       (each item waits for the previous `ended` event + QUEUE_GAP_MS)
- *     See useTransitionPhrases / generateTransitionPhrase.
+ *     [countdown_3 (at work last 3s)] → [rest (at work end)] →
+ *     [next_up cue (at rest start)] → [next movement's OpenAI voiceUrl] →
+ *     [rest→go combined Voicemaker clip OR countdown_3 + go fallback]
  *   Expected sequence when rest → work:
- *     Preferred (combined clip ready):
- *       [combined "3, 2, 1. Go." Voicemaker clip]
+ *     Preferred (shared "3, 2, 1. Go." clip ready):
+ *       [combined Voicemaker clip] — one breath, fired at rest displayed===4
  *     Fallback:
  *       [countdown_3 (rest)] → [go]
+ *
+ *   Per-movement combined clips (workRestNext / workNext / nextUp) were
+ *   removed. They were a polish layer that introduced a per-name failure
+ *   surface — when a single per-movement clip failed to load/decode/play,
+ *   suppression flags set at enqueue time blocked the fallback cues, leaving
+ *   transitions silent for the rest of the workout. Static cues plus
+ *   per-movement voiceUrl clips cover the same beats with no shared point
+ *   of failure: each clip succeeds or fails on its own without affecting
+ *   what comes next.
  *
  *   Invalidation rules:
  *     • Skip:  stopAllAudio() bumps runIdRef, flushes queue, stops current audio.
@@ -252,34 +257,18 @@ export function useWorkoutTTS({
   const restCountdownSpokenRef = useRef<number>(-1);
   const welcomeSpokenRef = useRef<boolean>(false);
 
-  // Records the rest phase we're waiting on a combined "Next up, {name}."
-  // phrase clip for. Pre-warm normally has it ready by rest-entry, but on
-  // first-ever encounter the phrase generation may still be in flight — in
-  // that case we rest silent and a separate effect enqueues the clip when
-  // its URL arrives via state, provided we still have enough rest time left.
-  const pendingNextUpPhraseRef = useRef<
-    { restKey: string; movementId: string; name: string; context: string } | null
-  >(null);
-
-  // When the combined "3, 2, 1. Rest. Next up, {name}." clip fires at work
-  // timeLeft===3, stores the currentIndex. Checked at work timeLeft<=0 to
-  // suppress the standalone `rest` cue, and at rest-entry to suppress the
-  // standalone next-up phrase. Cleared by skip (via stopAllAudio) so a fresh
-  // skip target runs the combined-or-fallback decision again.
-  const combinedWorkRestFiredIndexRef = useRef<number>(-1);
-  // When the combined "3, 2, 1. Go." clip fires at rest timeLeft===3, stores
-  // the currentIndex. Checked at rest timeLeft<=0 to suppress the standalone
-  // `go` cue.
+  // SHARED-clip suppression refs. Only fire-once flags for the two surviving
+  // combined Voicemaker clips (both shared across the whole workout):
+  //   - combinedRestGoFiredIndexRef: tracks the "3, 2, 1. Go." rest→work clip.
+  //     Checked at rest timeLeft<=0 to suppress the standalone `go` cue when
+  //     the combined clip already said "Go".
+  //   - combinedWorkSwapOtherSideFiredIndexRef: tracks the "3, 2, 1. Go on
+  //     the other side." swap-window=0 clip. Checked at work-L timeLeft<=0
+  //     to suppress the otherwise-fallback `other_side` cue.
+  // Per-movement combined clips (workRestNext / workNext / nextUp) and their
+  // suppression refs were removed — when a per-name clip failed to play, the
+  // suppression silently blocked fallback cues for the rest of the workout.
   const combinedRestGoFiredIndexRef = useRef<number>(-1);
-  // Combined "3, 2, 1. Next up, {name}." rest=0 variant fired at work
-  // timeLeft===4 for currentIndex. Used at the next movement's work-start
-  // announcement to suppress the redundant voiceUrl call (the name is already
-  // in the just-played combined clip).
-  const combinedWorkNextFiredIndexRef = useRef<number>(-1);
-  // Combined "3, 2, 1. Go on the other side." swap-window=0 variant fired at
-  // work-L timeLeft===4. Suppresses the standalone "rest" cue at work-L
-  // timeLeft<=0 (there is no rest in this path) and the otherwise-silent
-  // swap-entry effect (no swap phase is entered).
   const combinedWorkSwapOtherSideFiredIndexRef = useRef<number>(-1);
   // Mirror isPaused for synchronous use inside the queue pump callbacks.
   const isPausedRef = useRef(isPaused);
@@ -562,9 +551,7 @@ export function useWorkoutTTS({
     if (resetSpoken) {
       countdownSpokenRef.current = -1;
       halfwaySpokenRef.current = false;
-      combinedWorkRestFiredIndexRef.current = -1;
       combinedRestGoFiredIndexRef.current = -1;
-      combinedWorkNextFiredIndexRef.current = -1;
       combinedWorkSwapOtherSideFiredIndexRef.current = -1;
     }
   }, []);
@@ -665,9 +652,6 @@ export function useWorkoutTTS({
   }, [phase, currentIndex, current?.stepType, enqueueCue, isPaused]);
 
   // ── Exercise movement announcements ────────────────────────────────
-  // Extracted ahead of the effect so the dep array references a flat
-  // identifier (eslint react-hooks rule rejects complex expressions there).
-  const nextNextUpVoiceUrl = (next as any)?.nextUpVoiceUrl as string | undefined;
   useEffect(() => {
     if (isPaused) return;
     if (!current || current.stepType !== 'exercise') return;
@@ -699,12 +683,7 @@ export function useWorkoutTTS({
         // needless repetition. Skip.
         const returningFromSwap = previousKey === `swap_${currentIndex}`
           || (previousKey?.startsWith(`work_${currentIndex}_${current.name}_`) ?? false);
-        // rest === 0 chain: the previous movement's combined "Next up,
-        // {this-name}" clip already announced this movement. Don't echo it
-        // with a standalone voiceUrl on work-start.
-        const announcedByPriorWorkNext =
-          combinedWorkNextFiredIndexRef.current === currentIndex - 1;
-        if (!announcedByPriorRest && !returningFromSwap && !announcedByPriorWorkNext) {
+        if (!announcedByPriorRest && !returningFromSwap) {
           const voiceUrl = current.voiceUrl;
           enqueueVoice(voiceUrl || '', `work_${currentIndex}_${current.name}`);
         }
@@ -716,54 +695,23 @@ export function useWorkoutTTS({
         lastSpokenRef.current = key;
         countdownSpokenRef.current = -1;
         restCountdownSpokenRef.current = -1;
-        pendingNextUpPhraseRef.current = null;
         // Synthetic "Get Ready" prep-rest step (movementIndex === -1) plays BEFORE
         // the first movement of a block.
         const isPrepRest = current?.movementIndex === -1;
-        // If the work→rest combined clip already played, it included
-        // "Rest. Next up, {name}." — do not also enqueue the standalone
-        // next-up phrase.
-        const combinedWorkRestFired = combinedWorkRestFiredIndexRef.current === currentIndex;
-        if (combinedWorkRestFired) {
-          console.info(
-            '[VOICE-AUDIT] rest entry — suppressing standalone next-up phrase (combined work→rest→next-up clip already fired)',
-            { currentIndex, nextName },
-          );
-        } else if (nextName) {
-          // Queue order: [rest (enqueued at end of previous work phase)] →
-          // [combined "Next up, {name}." phrase clip]. One OpenAI clip with
-          // style instructions replaces the old next_up MP3 + standalone
-          // movement-name voiceUrl pair so the cue sounds like one coherent
-          // sentence with no audible seam. Pre-warm runs at workout-open;
-          // the URL arrives on the FlatMovement as nextUpVoiceUrl.
-          const nextMovementId = (next as any)?.movementId || '';
-          const logContext = `rest_next_up_${nextName}`;
-          const phraseUrl = nextNextUpVoiceUrl || '';
-          console.info('[VOICE-AUDIT] rest entry — combined next-up phrase state', {
-            currentIndex,
-            nextName,
-            nextMovementId: nextMovementId || '(MISSING)',
-            phraseUrlPresent: !!phraseUrl,
-            phraseUrlPreview: phraseUrl ? phraseUrl.slice(0, 80) : '',
-          });
-          if (phraseUrl) {
-            enqueueVoice(phraseUrl, logContext);
+        if (nextName) {
+          // Two reliably-cached pieces sequenced via the queue: the static
+          // `next_up` MP3, then the next movement's OpenAI voiceUrl. Both
+          // succeed or fail independently — a missing voiceUrl only mutes
+          // the name, not the rest-screen cue.
+          enqueueCue('next_up', `rest_next_up_cue_${currentIndex}`);
+          const nextVoiceUrl = (next as any)?.voiceUrl as string | undefined;
+          if (nextVoiceUrl) {
+            enqueueVoice(nextVoiceUrl, `rest_next_voice_${nextName}_${currentIndex}`);
           } else {
-            // Phrase not ready yet (first encounter, generation still in
-            // flight). Stay silent for this rest per product decision —
-            // device speech is off-brand and the old two-clip fallback is
-            // gone. Late-arrival effect picks it up if it shows up before
-            // the rest countdown window.
-            pendingNextUpPhraseRef.current = {
-              restKey: key,
-              movementId: nextMovementId,
-              name: nextName,
-              context: logContext,
-            };
-            console.warn(
-              '[VOICE-AUDIT] next-up phrase not ready — late-arrival watcher armed',
-              { movementId: nextMovementId || '(MISSING)', name: nextName, context: logContext },
-            );
+            console.warn('[VOICE-AUDIT] rest entry — next.voiceUrl missing', {
+              currentIndex,
+              nextName,
+            });
           }
         } else if (!isPrepRest) {
           enqueueCue('rest_now', `rest_${currentIndex}_rest_now`);
@@ -787,7 +735,7 @@ export function useWorkoutTTS({
       halfwaySpokenRef.current = false;
       countdownSpokenRef.current = -1;
     }
-  }, [phase, current, current?.name, current?.stepType, current?.voiceUrl, currentIndex, swapSide, next?.name, nextNextUpVoiceUrl, enqueueCue, enqueueVoice, isPaused]);
+  }, [phase, current, current?.name, current?.stepType, current?.voiceUrl, currentIndex, swapSide, next, next?.name, enqueueCue, enqueueVoice, isPaused]);
 
   // ── Halfway announcement (exercise only) ───────────────────────────
   // Split-mode swap-sides movements: each side IS already a "half", so a
@@ -809,58 +757,34 @@ export function useWorkoutTTS({
   }, [phase, timeLeft, currentDuration, current, enqueueCue, isPaused, currentIndex]);
 
   // ── Countdown voice (exercise only) ────────────────────────────────
-  // Trigger timing rationale (Devin reported the combined clip felt ~1s late):
-  //   The combined clip's SSML opens with a 200ms <break/> lead and ~700ms
-  //   between digits (matched to the visual 1s tick). On iOS Safari the first
-  //   `play()` for a fresh URL adds another ~300–800ms of decode + start
-  //   latency. Triggering at `displayed===3` (timeLeft hits 3) made the audio
-  //   "3" word land ~600–1200ms after the visual "3" appeared — exactly the
-  //   "about a second late" Devin heard. Firing one tick earlier (timeLeft
-  //   hits 4) absorbs that startup latency so the audio digits land in sync.
-  //
-  // At timeLeft === 4 (combined clip path):
-  //   Prefer the combined "3, 2, 1. Rest. Next up, {name}." Voicemaker clip.
-  //   Fires once per movement index (gated by combinedWorkRestFiredIndexRef).
-  //   Falls through to displayed===3 when the combined URL isn't ready, the
-  //   current movement has swapSides (next is swap not rest), the next step
-  //   isn't a plain exercise, or it's the last movement.
-  // At timeLeft === 3 (standalone fallback):
-  //   Enqueue countdown_3 ONLY when the combined clip didn't fire at
-  //   displayed===4 (we'd double up otherwise).
-  // At timeLeft === 0:
-  //   If the combined clip fired, the `rest` word is already in that clip —
-  //   skip the standalone `rest` cue. Otherwise enqueue `rest`. Last movement
-  //   always fires `workout_complete` (no transition clip applies).
-  const nextWorkRestNextUpVoiceUrl = (next as any)?.workRestNextUpVoiceUrl as string | undefined;
-  const nextWorkNextVoiceUrl = (next as any)?.workNextVoiceUrl as string | undefined;
+  // Sequence at end of a work phase:
+  //   displayed === 4 (only branch that can fire): the SHARED "3, 2, 1, Go on
+  //     the other side." clip when current is swap-L with swapWindow === 0.
+  //     This is the only combined-clip path on the work-end side that
+  //     survived the reliability refactor — it's a single URL shared across
+  //     the whole workout, pre-warmed once, with a static `other_side`
+  //     fallback at timeLeft<=0 if the URL still isn't ready.
+  //   displayed === 3: standalone countdown_3 — fires for every work→rest
+  //     and every swap-L (with window ≥ 1) transition. The swap-entry effect
+  //     handles its own "Switch sides" cue separately, so suppressing work-L
+  //     audio here would leave its visible 3,2,1 silent.
+  //   timeLeft <= 0: the trailing cue — workout_complete (last), other_side
+  //     (swap window=0 fallback), `rest` (normal work→rest), or silence
+  //     (rest=0 chain, special-block next).
   useEffect(() => {
     if (isPaused) return;
     if (phase !== 'work' || !current || current.stepType !== 'exercise') return;
     if (currentDuration <= 0) return;
 
     const displayed = Math.max(0, Math.ceil(timeLeft));
-    // displayed===4 is the EARLIEST tick where we can fire the combined clip
-    // and still have ~1s of head start. Guard with countdownSpokenRef so it
-    // only fires once per countdown window. Skip when the work duration is
-    // <=4s (the visual countdown won't have a clean "4,3,2,1" sequence and we
-    // shouldn't pre-empt the cue at workout-start).
+    // displayed===4 fires the ONE remaining shared combined clip — the
+    // swapWindow===0 "Go on the other side" phrase. All other work-end
+    // transitions use the standalone countdown_3 at displayed===3 + the
+    // trailing static cue at timeLeft<=0.
     if (displayed === 4 && timeLeft > 0 && currentDuration > 4 && countdownSpokenRef.current < 0) {
-      const isLastMovement = currentIndex >= total - 1;
-      const nextIsExercise = !!next
-        && (!(next as any).stepType || (next as any).stepType === 'exercise');
-      const nextIsSpecial = next && (next as any).stepType && (next as any).stepType !== 'exercise';
-
-      // Swap-sides L→R direction. When work-L's countdown is running we may
-      // be heading into the swap phase OR (for swapWindowSec===0) flipping
-      // straight to work-R. The combined "rest+next-up" clip never applies
-      // in this direction — instead pick the swap-aware phrase.
       const isSwapLToR = !!current?.swapSides && swapSide === 'L';
       const swapWindow = isSwapLToR ? swapWindowSeconds(current) : -1;
-
       if (isSwapLToR && swapWindow <= 0 && workSwapOtherSideVoiceUrl) {
-        // Zero-window swap: no visual swap phase to enter, so the combined
-        // "3, 2, 1, Go on the other side." clip plays during work-L's last
-        // 4s. After this fires, the timer flips work-L → work-R instantly.
         countdownSpokenRef.current = 4;
         combinedWorkSwapOtherSideFiredIndexRef.current = currentIndex;
         console.info(
@@ -868,103 +792,48 @@ export function useWorkoutTTS({
           { currentIndex, urlPreview: workSwapOtherSideVoiceUrl.slice(0, 80), timeLeft },
         );
         enqueueVoice(workSwapOtherSideVoiceUrl, `work_swap_other_side_${currentIndex}`);
-      } else if (isSwapLToR) {
-        // Swap-L with window >= 1: stay silent at displayed===4 and let the
-        // displayed===3 branch fire the standalone countdown_3. The swap
-        // phase handles its own "Switch sides" + countdown + "Go" cues.
-        // Combined clips for short windows were unreliable (single point of
-        // failure leading to total silence for 1–6s windows).
-      } else if (!isLastMovement && nextIsExercise && !isSwapLToR
-          && (current?.restAfter ?? 0) === 0 && nextWorkNextVoiceUrl) {
-        // rest === 0: chain directly into the next movement. The combined
-        // "3, 2, 1. Next up, {next-name}." clip replaces the "Rest. Next up"
-        // path. No standalone "rest" or "go" cue should follow.
-        countdownSpokenRef.current = 4;
-        combinedWorkNextFiredIndexRef.current = currentIndex;
-        console.info(
-          '[VOICE-AUDIT] work→next combined clip (rest=0) — enqueueing one-breath transition',
-          { currentIndex, nextName: (next as any)?.name, urlPreview: nextWorkNextVoiceUrl.slice(0, 80), timeLeft },
-        );
-        enqueueVoice(nextWorkNextVoiceUrl, `work_next_combined_${currentIndex}`);
-      } else if (!isLastMovement && nextIsExercise && !isSwapLToR
-          && (current?.restAfter ?? 0) > 0 && nextWorkRestNextUpVoiceUrl) {
-        countdownSpokenRef.current = 4;
-        console.info(
-          '[VOICE-AUDIT] work→rest combined clip — enqueueing one-breath transition (early trigger)',
-          { currentIndex, nextName: (next as any)?.name, urlPreview: nextWorkRestNextUpVoiceUrl.slice(0, 80), timeLeft },
-        );
-        enqueueVoice(nextWorkRestNextUpVoiceUrl, `work_rest_next_combined_${currentIndex}`);
-        combinedWorkRestFiredIndexRef.current = currentIndex;
       }
-      // No-op fall-through: leave countdownSpokenRef untouched so the
-      // displayed===3 branch below still fires the standalone countdown
-      // when no combined clip was eligible (e.g. last movement, special-
-      // block next, or URL not yet ready).
     }
     if (displayed === 3 && timeLeft > 0 && countdownSpokenRef.current !== 3 && countdownSpokenRef.current !== 4) {
       countdownSpokenRef.current = 3;
-      // No combined clip fired at displayed===4 — play the standalone
-      // countdown. For swap-L with a 1–6s window, the swap-entry combined
-      // phrase plays during the swap phase visual countdown (a separate
-      // countdown from work-L's). Suppressing work-L's audio here would
-      // leave its visible 3,2,1 silent, which sounds like a gap.
       enqueueCue('countdown_3', `work_countdown_${currentIndex}`);
     } else if (displayed === 3 && timeLeft > 0 && countdownSpokenRef.current === 4) {
-      // Combined clip already fired one second ago — mark the 3-spoken slot
-      // so the timeLeft<=0 branch below correctly identifies that the "3"
-      // window has passed without re-entering this branch.
       countdownSpokenRef.current = 3;
     } else if (timeLeft <= 0 && countdownSpokenRef.current !== 0) {
       countdownSpokenRef.current = 0;
       const isLastMovement = currentIndex >= total - 1;
-      // End-of-workout audio rule: see header comment for the full table.
       const nextIsSpecial = next && (next as any).stepType && (next as any).stepType !== 'exercise';
-      const combinedWorkRestFired = combinedWorkRestFiredIndexRef.current === currentIndex;
-      const combinedWorkNextFired = combinedWorkNextFiredIndexRef.current === currentIndex;
       const combinedWorkSwapOtherSideFired = combinedWorkSwapOtherSideFiredIndexRef.current === currentIndex;
-      // Swap-sides L→swap: stay silent here so the swap-entry combined
-      // phrase (or the legacy switch_sides cue) lands cleanly without a
-      // preceding "Rest." word.
       const swapTransitionPending = !!current?.swapSides && swapSide === 'L';
-      // rest === 0: there is no rest phase to announce, and the combined
-      // "Next up, {name}" clip already covers the handoff.
       const restIsZero = (current?.restAfter ?? 0) === 0;
       if (isLastMovement) {
         enqueueCue('workout_complete', `work_end_${currentIndex}`);
       } else if (swapTransitionPending) {
-        // swap=0 with no combined clip ready (first encounter, URL still
-        // generating): fall back to the static "other_side" cue so the flip
-        // isn't silent. With combined ready, the workSwapOtherSide clip is
-        // already in flight from displayed===4. For swap>0, the swap phase
-        // entry effect handles its own audio.
         const window = swapWindowSeconds(current);
         if (window <= 0 && !combinedWorkSwapOtherSideFired) {
+          // swap=0 fallback when the shared workSwapOtherSide clip wasn't
+          // ready in time (first encounter, generation in flight).
           enqueueCue('other_side', `work_end_swap_0_fallback_${currentIndex}`);
         }
+        // swap window > 0: the swap-entry effect plays switch_sides.
       } else if (restIsZero) {
-        // intentionally silent — either combinedWorkNext already fired, or
-        // we fell back silently. Either way, no "rest" word belongs here.
-      } else if (!nextIsSpecial && !combinedWorkRestFired) {
+        // No rest phase — next movement's work-start voiceUrl announces it.
+      } else if (!nextIsSpecial) {
         enqueueCue('rest', `work_end_${currentIndex}`);
       }
-      // Tag-unused locals so eslint doesn't complain; they're documentation
-      // for the suppression rules above.
-      void combinedWorkNextFired;
     }
-  }, [phase, timeLeft, current, currentDuration, currentIndex, total, next, nextWorkRestNextUpVoiceUrl, nextWorkNextVoiceUrl, workSwapOtherSideVoiceUrl, enqueueCue, enqueueVoice, isPaused, swapSide]);
+  }, [phase, timeLeft, current, currentDuration, currentIndex, total, next, workSwapOtherSideVoiceUrl, enqueueCue, enqueueVoice, isPaused, swapSide]);
 
   // ── Swap countdown voice (work-L → swap → work-R) ─────────────────
-  // Mirrors the rest-end "3, 2, 1. Go." but for the swap window. Uses the
-  // existing static `countdown_3` + `go` cues (no combined clip needed —
-  // swap windows are short and the same for every swap-sides movement).
-  //   At timeLeft === 3: countdown_3 ("3, 2, 1")
-  //   At timeLeft <= 0:  go ("Go") — flips us to work-R
-  // `switch_sides` is enqueued at swap-entry from the phase-transition effect
-  // above, so the full spoken sequence is:
-  //   work-L last 3s → countdown_3 ("3, 2, 1")
-  //   work-L→swap     → switch_sides ("Switch sides")
-  //   swap last 3s    → countdown_3 ("3, 2, 1")
-  //   swap→work-R     → go ("Go")
+  // Sequence:
+  //   work-L last 3s    → countdown_3 ("3, 2, 1") via the work-countdown effect
+  //   work-L→swap        → switch_sides ("Switch sides") via phase-transition effect
+  //   swap displayed===4 → countdown_3 ("3, 2, 1") — fires one tick EARLY for
+  //     windows ≥ 4 so the audio "3" word lines up with the visible "3" tick.
+  //     On iOS Safari, firing at displayed===3 made the spoken "3" land
+  //     300–800ms after the visible "3" appeared (decode + SSML lead latency).
+  //   swap displayed===3 → countdown_3 fallback for window=3 (no displayed===4).
+  //   swap→work-R        → go ("Go") at timeLeft<=0
   const swapCountdownSpokenRef = useRef<number>(-1);
   useEffect(() => {
     if (isPaused) return;
@@ -974,9 +843,14 @@ export function useWorkoutTTS({
       return;
     }
     const displayed = Math.max(0, Math.ceil(timeLeft));
-    if (displayed === 3 && timeLeft > 0 && swapCountdownSpokenRef.current !== 3) {
+    if (displayed === 4 && timeLeft > 0 && swapCountdownSpokenRef.current < 0) {
+      swapCountdownSpokenRef.current = 4;
+      enqueueCue('countdown_3', `swap_countdown_early_${currentIndex}`);
+    } else if (displayed === 3 && timeLeft > 0 && swapCountdownSpokenRef.current !== 3 && swapCountdownSpokenRef.current !== 4) {
       swapCountdownSpokenRef.current = 3;
       enqueueCue('countdown_3', `swap_countdown_${currentIndex}`);
+    } else if (displayed === 3 && timeLeft > 0 && swapCountdownSpokenRef.current === 4) {
+      swapCountdownSpokenRef.current = 3;
     } else if (timeLeft <= 0 && swapCountdownSpokenRef.current !== 0) {
       swapCountdownSpokenRef.current = 0;
       enqueueCue('go', `swap_end_${currentIndex}`);
@@ -1042,45 +916,6 @@ export function useWorkoutTTS({
       }
     }
   }, [phase, timeLeft, currentDuration, next, currentIndex, restGoVoiceUrl, enqueueCue, enqueueVoice, isPaused]);
-
-  // ── Late-arriving combined "Next up, {name}." phrase clip ────────
-  // Pre-warm normally has the phrase URL injected before rest-entry, but
-  // first-ever encounter of a phrase has to wait on OpenAI (~1-3s). When
-  // useNextUpPhrases pushes the URL into state mid-rest, this watcher
-  // enqueues it — provided we still have enough time before the rest
-  // countdown that the clip can finish without clipping "3, 2, 1, Go".
-  useEffect(() => {
-    if (isPaused) return;
-    if (phase !== 'rest') return;
-    const pending = pendingNextUpPhraseRef.current;
-    if (!pending) return;
-    // Only the movement we were waiting on — never play a stale name.
-    const nextMovementId = (next as any)?.movementId || '';
-    if (pending.movementId && nextMovementId && pending.movementId !== nextMovementId) {
-      console.warn('[VOICE-AUDIT] late-arrival: movementId mismatch — clearing pending', {
-        pendingId: pending.movementId, nextMovementId,
-      });
-      pendingNextUpPhraseRef.current = null;
-      return;
-    }
-    const phraseUrl = (next as any)?.nextUpVoiceUrl || '';
-    if (!phraseUrl) return;
-    // Don't enqueue a phrase clip into the rest→work countdown window.
-    if (timeLeft <= 3.5) {
-      console.warn(
-        '[VOICE-AUDIT] late next-up phrase arrived inside rest countdown — skipping',
-        { name: pending.name, timeLeft },
-      );
-      pendingNextUpPhraseRef.current = null;
-      return;
-    }
-    pendingNextUpPhraseRef.current = null;
-    console.info(
-      '[VOICE-AUDIT] late next-up phrase arrived — enqueuing',
-      { name: pending.name, timeLeft, urlPreview: phraseUrl.slice(0, 80) },
-    );
-    enqueueVoice(phraseUrl, `${pending.context}_late`);
-  }, [phase, timeLeft, next, enqueueVoice, isPaused]);
 
   // ── Pause → silence any audio in flight ─────────────────────────────
   useEffect(() => {
