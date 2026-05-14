@@ -42,7 +42,6 @@ import { useWorkoutTimer } from '../hooks/useWorkoutTimer';
 import { useMediaPrefetch } from '../hooks/useMediaPrefetch';
 import { useMovementSwap } from '../hooks/useMovementSwap';
 import { useMovementHydrate } from '../hooks/useMovementHydrate';
-import { useTransitionPhrases } from '../hooks/useTransitionPhrases';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useWorkoutTTS } from '../hooks/useWorkoutTTS';
@@ -87,12 +86,6 @@ export default function WorkoutPlayer({
   // ── Hooks ────────────────────────────────────────────────────────────
   const flatFromBlocks = useWorkoutFlatten(workout);
   const hydratedMovements = useMovementHydrate(flatFromBlocks);
-  // Pre-warm the one SHARED transition clip still in use: "3, 2, 1. Go."
-  // (rest→work). Static MP3 cues + per-movement OpenAI voiceUrl clips carry
-  // every other transition. Combined-clip layers were dropped wherever
-  // suppression of static fallbacks would dead-air the workout if the
-  // combined clip failed to play.
-  const { restGoVoiceUrl } = useTransitionPhrases(hydratedMovements);
   const [flatOverride, setFlatOverride] = useState<any[] | null>(null);
   const flatMovements = flatOverride || hydratedMovements;
 
@@ -137,7 +130,6 @@ export default function WorkoutPlayer({
     total,
     timeLeft,
     currentDuration: current?.duration ?? 0,
-    restGoVoiceUrl,
     swapSide,
   });
 
