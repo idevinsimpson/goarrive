@@ -253,6 +253,7 @@ export function useWorkoutTTS({
   const halfwaySpokenRef = useRef<boolean>(false);
   const countdownSpokenRef = useRef<number>(-1);
   const restCountdownSpokenRef = useRef<number>(-1);
+  const demoCountdownSpokenRef = useRef<number>(-1);
   const welcomeSpokenRef = useRef<boolean>(false);
 
   // Tracks the currentIndex+1 (upcoming movement index) for which the rest
@@ -857,6 +858,29 @@ export function useWorkoutTTS({
       }
     }
   }, [phase, timeLeft, next, currentIndex, enqueueCue, isPaused]);
+
+  // ── Demo end countdown (3-2-1 leading out of the demo phase) ───────
+  // Only fires `countdown_3` in the last 3s of the demo phase. We DO NOT
+  // fire `go` or `next_up` at timeLeft <= 0 — the following rest phase's
+  // entry effect already announces "Next up, {name}" + the movement's
+  // voiceUrl. The work-countdown effect is gated to stepType === 'exercise'
+  // so it can't cover the demo's tail; without this effect the demo ends
+  // silently (no 3-2-1 before the rest's next-up announcement).
+  useEffect(() => {
+    if (isPaused) return;
+    const isDemoPhase = phase === 'demo'
+      || (phase === 'work' && current?.stepType === 'demo');
+    if (!isDemoPhase) {
+      if (demoCountdownSpokenRef.current !== -1) demoCountdownSpokenRef.current = -1;
+      return;
+    }
+
+    const displayed = Math.max(0, Math.ceil(timeLeft));
+    if (displayed === 3 && timeLeft > 0 && demoCountdownSpokenRef.current !== 3) {
+      demoCountdownSpokenRef.current = 3;
+      enqueueCue('countdown_3', `demo_end_countdown_${currentIndex}`);
+    }
+  }, [phase, timeLeft, current?.stepType, currentIndex, enqueueCue, isPaused]);
 
   // ── Pause → silence any audio in flight ─────────────────────────────
   useEffect(() => {
