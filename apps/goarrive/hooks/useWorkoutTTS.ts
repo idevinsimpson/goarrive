@@ -105,6 +105,7 @@ const CUES = {
   start_now: CUE_URL('start_now'),
   next_up: CUE_URL('next_up'),
   get_ready: CUE_URL('get_ready'),
+  demo_intro: CUE_URL('demo_intro'),
   switch_sides: CUE_URL('switch_sides'),
   other_side: CUE_URL('other_side'),
   water_break: CUE_URL('water_break'),
@@ -252,6 +253,7 @@ export function useWorkoutTTS({
   const halfwaySpokenRef = useRef<boolean>(false);
   const countdownSpokenRef = useRef<number>(-1);
   const restCountdownSpokenRef = useRef<number>(-1);
+  const demoCountdownSpokenRef = useRef<number>(-1);
   const welcomeSpokenRef = useRef<boolean>(false);
 
   // Tracks the currentIndex+1 (upcoming movement index) for which the rest
@@ -581,20 +583,18 @@ export function useWorkoutTTS({
       return;
     }
 
-    // Demo block. Until there's an OpenAI/MP3 cue for "Here's what's coming
-    // up" + the demo movement names, we stay silent (visual list is shown on
-    // screen). Device speech would read the list aloud in the robotic voice,
-    // which clashes with the OpenAI-voiced rest of the player.
+    // Demo block. At demo entry: countdown_3 ("3, 2, 1") → demo_intro
+    // ("Here's what's coming up.") bracket the start. The visual list of
+    // upcoming movements stays on screen for the names — per-movement name
+    // audio isn't queued (keeps the announcement short, avoids drift if
+    // names change). The trailing countdown into the first movement is
+    // handled by the dedicated demo-end countdown effect below.
     if (phase === 'demo' || (phase === 'work' && stepType === 'demo')) {
       const key = `demo_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
-        const movements = current.demoMovements || [];
-        const names = movements.map((m: any) => m.name).join(', then ');
-        logSpeechSuppressed(
-          `demo_block_${currentIndex}`,
-          names ? `Here's what's coming up: ${names}` : "Here's what's coming up",
-        );
+        enqueueCue('countdown_3', `demo_start_countdown_${currentIndex}`);
+        enqueueCue('demo_intro', `demo_intro_${currentIndex}`);
       }
       return;
     }
@@ -858,6 +858,52 @@ export function useWorkoutTTS({
       }
     }
   }, [phase, timeLeft, next, currentIndex, enqueueCue, isPaused]);
+
+  // ── Demo end countdown voice (demo → first movement) ──────────────
+  // Spoken arc at demo phase's tail: "3, 2, 1. Next up, {movement name}."
+  //   displayed === 3 → countdown_3
+  //   timeLeft <= 0   → next_up cue + next movement's voiceUrl
+  // The work-countdown effect is gated to stepType === 'exercise', so it
+  // skips demo phases. We mirror the rest→work entry pattern (next_up +
+  // voiceUrl) rather than the rest→work exit pattern (countdown_3 + go),
+  // because "Go" misses the affordance of naming what's coming.
+  // restAnnouncedVoiceUrlForIndexRef is set so the work-start fallback
+  // doesn't double-announce the same name when the next phase begins.
+  useEffect(() => {
+    if (isPaused) return;
+    const isDemoPhase = phase === 'demo'
+      || (phase === 'work' && current?.stepType === 'demo');
+    if (!isDemoPhase) {
+      if (demoCountdownSpokenRef.current !== -1) demoCountdownSpokenRef.current = -1;
+      return;
+    }
+
+    const displayed = Math.max(0, Math.ceil(timeLeft));
+    if (displayed === 3 && timeLeft > 0 && demoCountdownSpokenRef.current !== 3) {
+      demoCountdownSpokenRef.current = 3;
+      enqueueCue('countdown_3', `demo_end_countdown_${currentIndex}`);
+    } else if (timeLeft <= 0 && demoCountdownSpokenRef.current !== 0) {
+      demoCountdownSpokenRef.current = 0;
+      const nextIsExercise = next
+        && (!(next as any).stepType || (next as any).stepType === 'exercise');
+      if (nextIsExercise) {
+        enqueueCue('next_up', `demo_end_next_up_${currentIndex}`);
+        const nextVoiceUrl = (next as any)?.voiceUrl as string | undefined;
+        const nextName = (next as any)?.name as string | undefined;
+        const upcomingIndex = currentIndex + 1;
+        if (nextVoiceUrl) {
+          enqueueVoice(nextVoiceUrl, `demo_end_next_voice_${nextName ?? 'unknown'}_${currentIndex}`);
+          restAnnouncedVoiceUrlForIndexRef.current = upcomingIndex;
+        } else {
+          console.warn('[VOICE-AUDIT] demo end — next.voiceUrl missing (work-start will fallback)', {
+            currentIndex,
+            upcomingIndex,
+            nextName,
+          });
+        }
+      }
+    }
+  }, [phase, timeLeft, current?.stepType, next, currentIndex, enqueueCue, enqueueVoice, isPaused]);
 
   // ── Pause → silence any audio in flight ─────────────────────────────
   useEffect(() => {
