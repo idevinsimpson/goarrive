@@ -60,8 +60,13 @@ export function calculateAdjustedRest(
   block: { type?: string; restBetweenRoundsSec?: number; [key: string]: any },
   difficulty: string = 'Intermediate',
 ): number {
-  // If coach explicitly set rest on the movement, respect it
-  if (movement.restSec !== undefined && movement.restSec !== null && movement.restSec > 0) {
+  // If coach explicitly set rest on the movement, respect it — including 0.
+  // A coach setting rest=0 means "no rest between this and the next movement";
+  // the player handles that as a direct chain (no rest phase, no "rest" word
+  // spoken). Treating 0 as "unset" used to fall through to auto-adjust, which
+  // then clamped to a 5s minimum and effectively turned rest=0 into rest=10 for
+  // circuits — the bug Devin reported.
+  if (movement.restSec !== undefined && movement.restSec !== null) {
     return movement.restSec;
   }
 

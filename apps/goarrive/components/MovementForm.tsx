@@ -203,7 +203,7 @@ export default function MovementForm({
       setCountdownSec(String(editMovement.countdownSec ?? 3));
       setSwapSides(editMovement.swapSides ?? false);
       setSwapMode(((editMovement as any).swapMode === 'duplicate' ? 'duplicate' : 'split'));
-      setSwapWindowSec(Math.max(2, Math.min(15, (editMovement as any).swapWindowSec ?? 5)));
+      setSwapWindowSec(Math.max(0, Math.min(15, (editMovement as any).swapWindowSec ?? 5)));
       setVideoUrl((editMovement as any).videoUrl || editMovement.mediaUrl || '');
       setThumbnailUrl((editMovement as any).thumbnailUrl || '');
       setRegression((editMovement as any).regression || '');
@@ -1069,12 +1069,12 @@ export default function MovementForm({
                     <View style={st.swapSettingsRow}>
                       <View style={{ flex: 1 }}>
                         <Text style={st.swapSettingsLabel}>Swap Window</Text>
-                        <Text style={st.swapSettingsHint}>Countdown before "swap sides" cue (2–15s)</Text>
+                        <Text style={st.swapSettingsHint}>Countdown before "swap sides" cue (0–15s). 0 = skip the visual countdown and flip sides instantly with a combined "3, 2, 1, go on the other side" cue.</Text>
                       </View>
                       <View style={st.swapWindowStepper}>
                         <Pressable
                           style={st.swapStepBtn}
-                          onPress={() => setSwapWindowSec((s) => Math.max(2, s - 1))}
+                          onPress={() => setSwapWindowSec((s) => Math.max(0, s - 1))}
                         >
                           <Text style={st.swapStepBtnText}>−</Text>
                         </Pressable>

@@ -49,9 +49,12 @@ function sideDuration(mov: FlatMovement | null): number {
   return base;
 }
 
+// 0 is a meaningful value (skip the swap visual phase entirely — sides flip
+// instantly when work-L hits zero). 1–15 are the configurable window lengths.
+// Anything outside the valid range falls back to the 5s default.
 function swapWindowOf(mov: FlatMovement | null): number {
   const raw = mov?.swapWindowSec;
-  if (typeof raw === 'number' && raw >= 2 && raw <= 15) return raw;
+  if (typeof raw === 'number' && raw >= 0 && raw <= 15) return raw;
   return DEFAULT_SWAP_WINDOW_SEC;
 }
 
@@ -209,9 +212,19 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
       if (isRepBased && !isSkippingRep) return;
       if (isSkippingRep) setIsSkippingRep(false);
       if (current?.swapSides && swapSide === 'L') {
-        setSwapSide('R');
-        setPhase('swap');
-        setTimeLeft(swapWindowOf(current));
+        const window = swapWindowOf(current);
+        if (window <= 0) {
+          // Zero-window swap: skip the visual swap phase entirely. The TTS
+          // layer already played "3, 2, 1, go on the other side" during
+          // work-L's last 4s, so sides flip instantly into work-R.
+          setSwapSide('R');
+          setPhase('work');
+          setTimeLeft(sideDuration(current));
+        } else {
+          setSwapSide('R');
+          setPhase('swap');
+          setTimeLeft(window);
+        }
       } else if (current?.restAfter > 0) {
         setPhase('rest');
         setTimeLeft(current.restAfter);
@@ -303,9 +316,18 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
       if (!isPaused) setTimeLeft(leadIn);
     } else if (phase === 'work') {
       if (current?.swapSides && swapSide === 'L') {
-        setSwapSide('R');
-        setPhase('swap');
-        setTimeLeft(isPaused ? swapWindowOf(current) : leadIn);
+        const window = swapWindowOf(current);
+        if (window <= 0) {
+          // Zero-window swap: skip directly to work-R, mirroring the natural
+          // hit-zero path. No swap phase to scrub into.
+          setSwapSide('R');
+          setPhase('work');
+          setTimeLeft(isPaused ? sideDuration(current) : leadIn);
+        } else {
+          setSwapSide('R');
+          setPhase('swap');
+          setTimeLeft(isPaused ? window : leadIn);
+        }
       } else if (current?.restAfter && current.restAfter > 0) {
         setPhase('rest');
         setTimeLeft(isPaused ? current.restAfter : leadIn);
@@ -327,9 +349,16 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     playCue('repDone');
     hapticMedium();
     if (current.swapSides && swapSide === 'L') {
-      setSwapSide('R');
-      setPhase('swap');
-      setTimeLeft(swapWindowOf(current));
+      const window = swapWindowOf(current);
+      if (window <= 0) {
+        setSwapSide('R');
+        setPhase('work');
+        setTimeLeft(sideDuration(current));
+      } else {
+        setSwapSide('R');
+        setPhase('swap');
+        setTimeLeft(window);
+      }
     } else if (current.restAfter > 0) {
       setPhase('rest');
       setTimeLeft(current.restAfter);
