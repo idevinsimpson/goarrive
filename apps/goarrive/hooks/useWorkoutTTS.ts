@@ -172,7 +172,7 @@ function preloadCue(key: CueKey): void {
 // audioPool) play cleanly.
 const PRIORITY_CUES: CueKey[] = [
   'countdown_3', 'countdown_3_rest', 'rest', 'go', 'halfway',
-  'workout_complete', 'next_up', 'you_got_this', 'keep_pushing',
+  'workout_complete', 'next_up', 'demo_intro', 'you_got_this', 'keep_pushing',
   'almost_there', 'workout_starting', 'lets_get_started',
 ];
 if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -261,6 +261,11 @@ export function useWorkoutTTS({
   // decide whether to fire a voiceUrl fallback — if rest's voiceUrl was empty
   // (legacy/regenerating movement), the work branch announces the name then.
   const restAnnouncedVoiceUrlForIndexRef = useRef<number>(-1);
+  // Mirror for the `next_up` cue specifically — set when rest entry enqueues
+  // next_up. Lets work-start know whether the cue already played, so the
+  // fallback path can fire next_up before voiceUrl when a demo block
+  // transitioned directly into work (no rest phase between to fire it).
+  const restAnnouncedNextUpForIndexRef = useRef<number>(-1);
   // Mirror isPaused for synchronous use inside the queue pump callbacks.
   const isPausedRef = useRef(isPaused);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
@@ -543,6 +548,8 @@ export function useWorkoutTTS({
       countdownSpokenRef.current = -1;
       halfwaySpokenRef.current = false;
       restAnnouncedVoiceUrlForIndexRef.current = -1;
+      restAnnouncedNextUpForIndexRef.current = -1;
+      demoCountdownSpokenRef.current = -1;
     }
   }, []);
 
@@ -668,11 +675,20 @@ export function useWorkoutTTS({
         // so the check is exact (no false negatives from the previous
         // movement's restAnnounced state).
         const restAnnouncedName = restAnnouncedVoiceUrlForIndexRef.current === currentIndex;
+        const restAnnouncedNextUp = restAnnouncedNextUpForIndexRef.current === currentIndex;
         if (!restAnnouncedName && !returningFromSwap) {
           const voiceUrl = current.voiceUrl;
           if (voiceUrl) {
+            // If no preceding rest fired `next_up` (e.g., demo → work directly
+            // when the block's first movement has no prep-rest), fire it here
+            // so the fallback voiceUrl reads as "Next up. {name}." Skip on the
+            // very first movement — the `workout_starting` welcome covers it.
+            if (!restAnnouncedNextUp && currentIndex > 0) {
+              enqueueCue('next_up', `work_start_next_up_fallback_${currentIndex}`);
+            }
             console.info('[VOICE-AUDIT] work-start fallback voiceUrl enqueue', {
               currentIndex, name: current.name, swapSide,
+              firedNextUp: !restAnnouncedNextUp && currentIndex > 0,
             });
             enqueueVoice(voiceUrl, `work_${currentIndex}_${current.name}_fallback`);
           } else {
@@ -700,6 +716,7 @@ export function useWorkoutTTS({
           enqueueCue('next_up', `rest_next_up_cue_${currentIndex}`);
           const nextVoiceUrl = (next as any)?.voiceUrl as string | undefined;
           const upcomingIndex = currentIndex + 1;
+          restAnnouncedNextUpForIndexRef.current = upcomingIndex;
           if (nextVoiceUrl) {
             enqueueVoice(nextVoiceUrl, `rest_next_voice_${nextName}_${currentIndex}`);
             restAnnouncedVoiceUrlForIndexRef.current = upcomingIndex;
