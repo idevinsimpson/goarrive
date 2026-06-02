@@ -153,6 +153,7 @@ interface MovementOption {
   category: string;
   thumbnailUrl?: string | null;
   mediaUrl?: string | null;
+  videoUrl?: string | null;
   swapSides?: boolean;
   swapMode?: 'split' | 'duplicate';
   swapWindowSec?: number;
@@ -706,6 +707,7 @@ export default function WorkoutFolderPage({
             category: cd.category ?? '',
             thumbnailUrl: cd.thumbnailUrl ?? null,
             mediaUrl: cd.mediaUrl ?? null,
+            videoUrl: cd.videoUrl ?? null,
             swapSides: cd.swapSides ?? false,
             swapMode: cd.swapMode ?? undefined,
             swapWindowSec: cd.swapWindowSec ?? undefined,
@@ -722,6 +724,7 @@ export default function WorkoutFolderPage({
             category: gd.category ?? '',
             thumbnailUrl: gd.thumbnailUrl ?? null,
             mediaUrl: gd.mediaUrl ?? null,
+            videoUrl: gd.videoUrl ?? null,
             swapSides: gd.swapSides ?? false,
             swapMode: gd.swapMode ?? undefined,
             swapWindowSec: gd.swapWindowSec ?? undefined,
@@ -2407,7 +2410,14 @@ export default function WorkoutFolderPage({
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={st.pickerItemName}>{mov.name}</Text>
-                    {mov.category ? <Text style={st.pickerItemCat}>{mov.category}</Text> : null}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      {mov.category ? <Text style={st.pickerItemCat}>{mov.category}</Text> : null}
+                      {!mov.videoUrl && (
+                        <View style={st.videoNeededPill}>
+                          <Text style={st.videoNeededText}>Video needed</Text>
+                        </View>
+                      )}
+                    </View>
                   </View>
                   <Icon name="plus" size={18} color="#F5A623" />
                 </Pressable>
@@ -3788,6 +3798,18 @@ const st = StyleSheet.create({
     fontFamily: FB,
     textAlign: 'center',
     paddingVertical: 40,
+  },
+  videoNeededPill: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: '#2A3340',
+  },
+  videoNeededText: {
+    fontSize: 9,
+    color: '#8A95A3',
+    fontFamily: FB,
+    fontWeight: '600',
   },
 
   // Description modal

@@ -741,6 +741,11 @@ function BuildScreenInner() {
           <View style={[styles.nameOverlay, isWorkoutCard && { backgroundColor: 'rgba(26, 35, 50, 0.92)' }]}>
             <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
           </View>
+          {isMovement && !item.videoUrl && (
+            <View style={styles.videoNeededPill}>
+              <Text style={styles.videoNeededText}>Video needed</Text>
+            </View>
+          )}
         </Pressable>
       );
     }
@@ -771,7 +776,14 @@ function BuildScreenInner() {
         </View>
         <View style={s.listContent}>
           <Text style={s.listName}>{item.name}</Text>
-          <Text style={s.listSub}>{item.type.slice(0, -1)}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={s.listSub}>{item.type.slice(0, -1)}</Text>
+            {item.type === 'Movements' && !item.videoUrl && (
+              <View style={{ paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4, backgroundColor: '#2A3340' }}>
+                <Text style={styles.videoNeededText}>Video needed</Text>
+              </View>
+            )}
+          </View>
         </View>
         <Icon name="chevron-right" size={20} color="#4A5568" />
       </Pressable>
@@ -1313,6 +1325,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold',
+  },
+  videoNeededPill: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: '#2A3340',
+  },
+  videoNeededText: {
+    fontSize: 8,
+    color: '#8A95A3',
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-SemiBold',
   },
 });
 

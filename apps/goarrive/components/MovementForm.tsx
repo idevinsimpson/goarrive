@@ -114,7 +114,7 @@ interface MovementFormProps {
   editMovement?: MovementDetailData | null;
 }
 
-type CreateStep = 'upload' | 'crop' | 'processing';
+type CreateStep = 'upload' | 'crop' | 'processing' | 'no-video-meta';
 
 // ── Component ──────────────────────────────────────────────────────────────
 export default function MovementForm({
@@ -250,6 +250,80 @@ export default function MovementForm({
     setGifProgress(0);
     gifPromiseRef.current = null;
     savedDocIdRef.current = null;
+  };
+
+  // ── No-video creation ──────────────────────────────────────────────
+  const startNoVideoCreate = () => {
+    setVideoUrl('');
+    setCropScale(1);
+    setCropTranslateX(0);
+    setCropTranslateY(0);
+    setCropFrameWidth(0);
+    setCropFrameHeight(0);
+    setCreateStep('no-video-meta');
+  };
+
+  const saveNoVideoMovement = async () => {
+    if (!name.trim()) {
+      Alert.alert('Error', 'Please enter a movement name.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const data: Record<string, any> = {
+        name: name.trim(),
+        category,
+        equipment,
+        difficulty,
+        description: description.trim(),
+        muscleGroups,
+        workSec: parseInt(workSec, 10) || 30,
+        restSec: parseInt(restSec, 10) || 15,
+        countdownSec: parseInt(countdownSec, 10) || 3,
+        swapSides,
+        swapMode,
+        swapWindowSec,
+        videoUrl: '',
+        thumbnailUrl: '',
+        thumbnailImageUrl: '',
+        gifLowUrl: '',
+        gifLoopUrl: '',
+        cropScale: 1,
+        cropTranslateX: 0,
+        cropTranslateY: 0,
+        cropFrameWidth: 0,
+        cropFrameHeight: 0,
+        regression: regression.trim(),
+        progression: progression.trim(),
+        contraindications: contraindications.trim(),
+        coachId,
+        tenantId,
+        isGlobal: false,
+        isArchived: false,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      const docRef = await addDoc(collection(db, 'movements'), data);
+      const docId = docRef.id;
+
+      generateMovementVoice(docId, name.trim())
+        .then(({ url, text, voiceName }) => {
+          const update: Record<string, any> = url
+            ? { voiceUrl: url, voiceText: text, voiceName }
+            : { voiceUrl: '', voiceText: '', voiceName: '' };
+          updateDoc(doc(db, 'movements', docId), update).catch(() => {});
+        })
+        .catch(() => {});
+
+      resetForm();
+      onClose();
+    } catch (err) {
+      console.error('[MovementForm] No-video save error:', err);
+      Alert.alert('Error', 'Something went wrong. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // ── GIF thumbnail generation ─────────────────────────────────────────
@@ -1266,6 +1340,14 @@ export default function MovementForm({
                 <Text style={st.uploadHint}>
                   Upload or record a movement demo (up to 25 sec)
                 </Text>
+
+                <Pressable style={st.noVideoBtn} onPress={startNoVideoCreate}>
+                  <Icon name="document" size={18} color="#8A95A3" />
+                  <Text style={st.noVideoBtnLabel}>Create without video</Text>
+                </Pressable>
+                <Text style={st.noVideoBtnHint}>
+                  You can add the video later — the movement will work in workouts now.
+                </Text>
               </View>
             )}
 
@@ -1320,6 +1402,237 @@ export default function MovementForm({
                   />
                 </View>
               </View>
+            )}
+
+            {/* ── STEP: No-video metadata form ───────────────────── */}
+            {createStep === 'no-video-meta' && (
+              <>
+                <View style={st.header}>
+                  <Text style={st.headerTitle}>Create movement (no video yet)</Text>
+                  <View style={{ width: 36 }} />
+                </View>
+
+                <ScrollView
+                  style={st.scroll}
+                  contentContainerStyle={st.scrollContent}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  <Text style={st.label}>Movement Name *</Text>
+                  <TextInput
+                    style={st.input}
+                    value={name}
+                    onChangeText={(t) => setName(toTitleCase(t))}
+                    onBlur={() => setName((n) => toTitleCase(n))}
+                    placeholder="e.g. Back Squat"
+                    placeholderTextColor="#4A5568"
+                    autoCapitalize="words"
+                    autoFocus
+                  />
+
+                  <Text style={st.label}>Category</Text>
+                  <View style={st.chipRow}>
+                    {CATEGORY_OPTIONS.map((opt) => {
+                      const active = category === opt;
+                      return (
+                        <Pressable
+                          key={opt}
+                          style={[st.chip, active && st.chipActive]}
+                          onPress={() => setCategory(active ? '' : opt)}
+                        >
+                          <Text style={[st.chipText, active && st.chipTextActive]}>{opt}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  <Text style={st.label}>Equipment</Text>
+                  <View style={st.chipRow}>
+                    {EQUIPMENT_OPTIONS.map((opt) => {
+                      const active = equipment === opt;
+                      return (
+                        <Pressable
+                          key={opt}
+                          style={[st.chip, active && st.chipActive]}
+                          onPress={() => setEquipment(active ? '' : opt)}
+                        >
+                          <Text style={[st.chipText, active && st.chipTextActive]}>{opt}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  <Text style={st.label}>Difficulty</Text>
+                  <View style={st.chipRow}>
+                    {DIFFICULTY_OPTIONS.map((opt) => {
+                      const active = difficulty === opt;
+                      return (
+                        <Pressable
+                          key={opt}
+                          style={[st.chip, active && st.chipActive]}
+                          onPress={() => setDifficulty(active ? '' : opt)}
+                        >
+                          <Text style={[st.chipText, active && st.chipTextActive]}>{opt}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  <Text style={st.label}>Muscle Groups</Text>
+                  <View style={st.chipRow}>
+                    {MUSCLE_GROUP_OPTIONS.map((mg) => {
+                      const active = muscleGroups.includes(mg);
+                      return (
+                        <Pressable
+                          key={mg}
+                          style={[st.chip, active && st.chipActive]}
+                          onPress={() => toggleMuscleGroup(mg)}
+                        >
+                          <Text style={[st.chipText, active && st.chipTextActive]}>{mg}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  <Text style={st.label}>Description / Coaching Cues</Text>
+                  <TextInput
+                    style={[st.input, st.textArea]}
+                    value={description}
+                    onChangeText={setDescription}
+                    placeholder="Coaching cues, notes, or instructions..."
+                    placeholderTextColor="#4A5568"
+                    multiline
+                    numberOfLines={3}
+                    textAlignVertical="top"
+                  />
+
+                  <Text style={st.sectionTitle}>Timer Defaults</Text>
+                  <View style={st.timerRow}>
+                    <View style={st.timerField}>
+                      <Text style={st.timerLabel}>Work (sec)</Text>
+                      <TextInput
+                        style={st.timerInput}
+                        value={workSec}
+                        onChangeText={setWorkSec}
+                        keyboardType="numeric"
+                        placeholder="30"
+                        placeholderTextColor="#4A5568"
+                      />
+                    </View>
+                    <View style={st.timerField}>
+                      <Text style={st.timerLabel}>Rest (sec)</Text>
+                      <TextInput
+                        style={st.timerInput}
+                        value={restSec}
+                        onChangeText={setRestSec}
+                        keyboardType="numeric"
+                        placeholder="15"
+                        placeholderTextColor="#4A5568"
+                      />
+                    </View>
+                  </View>
+
+                  <Pressable style={st.toggleRow} onPress={() => setSwapSides(!swapSides)}>
+                    <View>
+                      <Text style={st.toggleLabel}>Swap Sides</Text>
+                      <Text style={st.toggleHint}>Automatically split work time for left/right sides</Text>
+                    </View>
+                    <View style={[st.toggleTrack, swapSides && st.toggleTrackActive]}>
+                      <View style={[st.toggleThumb, swapSides && st.toggleThumbActive]} />
+                    </View>
+                  </Pressable>
+
+                  {swapSides && (
+                    <View style={st.swapSettingsBlock}>
+                      <View style={st.swapSettingsRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={st.swapSettingsLabel}>Mode</Text>
+                          <Text style={st.swapSettingsHint}>
+                            {swapMode === 'split'
+                              ? 'Half on each side (½ of work time per side)'
+                              : 'Full duration on both sides (2× total)'}
+                          </Text>
+                        </View>
+                        <Pressable
+                          style={st.swapModePill}
+                          onPress={() => setSwapMode(swapMode === 'split' ? 'duplicate' : 'split')}
+                        >
+                          <Text style={st.swapModePillText}>{swapMode === 'split' ? '½' : '2×'}</Text>
+                        </Pressable>
+                      </View>
+                      <View style={st.swapSettingsRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={st.swapSettingsLabel}>Swap Window</Text>
+                          <Text style={st.swapSettingsHint}>Countdown before "swap sides" cue (0–15s)</Text>
+                        </View>
+                        <View style={st.swapWindowStepper}>
+                          <Pressable
+                            style={st.swapStepBtn}
+                            onPress={() => setSwapWindowSec((s) => Math.max(0, s - 1))}
+                          >
+                            <Text style={st.swapStepBtnText}>−</Text>
+                          </Pressable>
+                          <Text style={st.swapWindowValue}>{swapWindowSec}s</Text>
+                          <Pressable
+                            style={st.swapStepBtn}
+                            onPress={() => setSwapWindowSec((s) => Math.min(15, s + 1))}
+                          >
+                            <Text style={st.swapStepBtnText}>+</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    </View>
+                  )}
+
+                  <Text style={st.label}>Regression (Easier Alternative)</Text>
+                  <TextInput
+                    style={st.input}
+                    value={regression}
+                    onChangeText={setRegression}
+                    placeholder="e.g. Knee push-ups, Assisted pull-ups..."
+                    placeholderTextColor="#4A5568"
+                    autoCapitalize="sentences"
+                  />
+
+                  <Text style={st.label}>Progression (Harder Alternative)</Text>
+                  <TextInput
+                    style={st.input}
+                    value={progression}
+                    onChangeText={setProgression}
+                    placeholder="e.g. Weighted push-ups, Archer pull-ups..."
+                    placeholderTextColor="#4A5568"
+                    autoCapitalize="sentences"
+                  />
+
+                  <Text style={st.label}>Contraindications</Text>
+                  <TextInput
+                    style={[st.input, { minHeight: 60 }]}
+                    value={contraindications}
+                    onChangeText={setContraindications}
+                    placeholder="e.g. Avoid with lower back injury..."
+                    placeholderTextColor="#4A5568"
+                    autoCapitalize="sentences"
+                    multiline
+                    numberOfLines={2}
+                  />
+                </ScrollView>
+
+                <View style={st.footer}>
+                  <Pressable style={st.cancelBtn} onPress={() => setCreateStep('upload')}>
+                    <Text style={st.cancelBtnText}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[st.saveBtn, (!name.trim() || submitting) && st.saveBtnDisabled]}
+                    onPress={saveNoVideoMovement}
+                    disabled={!name.trim() || submitting}
+                  >
+                    {submitting ? (
+                      <ActivityIndicator size="small" color="#0E1117" />
+                    ) : (
+                      <Text style={st.saveBtnText}>Create</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </>
             )}
       </ModalSheet>
 
@@ -1851,5 +2164,33 @@ const st = StyleSheet.create({
     fontWeight: '600',
     color: '#F5A623',
     fontFamily: FH,
+  },
+
+  // ── No-video create button (upload screen) ───────────────────────────
+  noVideoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: '#2A3347',
+  },
+  noVideoBtnLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#8A95A3',
+    fontFamily: FB,
+  },
+  noVideoBtnHint: {
+    fontSize: 12,
+    color: '#4A5568',
+    fontFamily: FB,
+    textAlign: 'center',
+    marginTop: 8,
+    paddingHorizontal: 24,
   },
 });
