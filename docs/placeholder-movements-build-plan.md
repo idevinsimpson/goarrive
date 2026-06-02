@@ -1,8 +1,28 @@
 # Placeholder Movements — Build Plan
 
-**Status:** draft — direction approved by Devin 2026-06-02. Awaiting build sign-off.
+**Status:** draft — direction + refinements approved by Devin 2026-06-02. Phase 1 already shipped to staging (PR #111). Phase 2+ awaiting go-ahead.
 **Author:** Maia (engine: Claude Code, Opus 4.7)
 **Scope:** 4 phases, surgical. No core player rewrite, no media-system rewrite.
+
+---
+
+## 0. Core principles (Devin's refinements, 2026-06-02)
+
+These principles override anything later in this doc if they conflict.
+
+**P1 — Placeholder movements are standard movements without uploaded media yet.** They are not a separate movement type. There is no "draft" / "placeholder" / "real" trichotomy in the data model or in any UI code path. A movement is a movement; it may or may not have a video. The player, picker, workout builder, and members all treat them as full movements with a graceful media fallback.
+
+**P2 — Use implicit `!videoUrl` as the truth source, not an explicit `isPlaceholder` flag (for now).** Adding an `isPlaceholder` boolean creates two possible drift states (`isPlaceholder=true` but video exists; `isPlaceholder=false` but video missing) and gives us two truth sources to keep in sync. Until a real query or UX need emerges that `!videoUrl` cannot serve, we don't add the flag. If/when we discover that need (e.g. coaches want to filter "video pending" movements at scale, or analytics need an explicit lifecycle state), we add `isPlaceholder` then with a one-shot backfill of `!videoUrl → isPlaceholder: true`. Defaulting to the simplest truth source.
+
+**P3 — Phase 3 (add-video-later) is the actual product unlock; architect with it in mind from day one.** Phase 1 is visual polish. Phase 2 unlocks the create-without-video flow. Phase 3 is what lets coaches brain-dump movement ideas without interrupting workout-building momentum — it's the strategic win. Every Phase 2 decision (where the metadata form lives, how the save path writes, what fields default to what) should leave a clean handoff for Phase 3 to slot the video pipeline back in.
+
+**P4 — Never silently rename a coach-created movement.** Coaches use shorthand naming AI will misinterpret. The coach's chosen title is intentional unless the coach explicitly accepts an AI suggestion via confirm modal.
+
+**P5 — Do not fork the upload/processing pipeline.** Phase 3's add-video-later flow converges into the existing `upload → crop → derivatives → AI analysis → save` pipeline. The only difference is timing (after the movement already exists). No parallel pipeline, no duplicated code.
+
+**P6 — Keep the member experience premium.** The placeholder media frame should feel intentional ("video coming soon"), not broken ("missing media"). The dark frame + GoArrive logo treatment achieves this; never expose words like "missing", "pending", "broken" to members.
+
+**P7 — Movement libraries are coaches' IP.** Placeholders will become part of creative drafting workflow: capturing movement ideas, organizing future filming sessions, building workouts before media production. Treat them as valid first-class movements awaiting media, never as incomplete junk.
 
 ---
 
@@ -16,49 +36,60 @@ When the coach is ready, they can add the video later via an "Add Video" button 
 
 ## 2. Data shape (Firestore `movements`)
 
-No schema migration required. `videoUrl`, `thumbnailUrl`, `gifLoopUrl`, `gifLowUrl`, `thumbnailImageUrl` are already optional in `MovementDetailData` (`apps/goarrive/components/MovementDetail.tsx:37-70`). Adding one new optional field:
+**No schema migration. No new fields. No new TypeScript interface field.** Per Principle P2, we use the implicit `!videoUrl` signal — no `isPlaceholder` flag is added in any phase of this build.
 
-```ts
-// in MovementDetailData and the picker MovementOption
-isPlaceholder?: boolean; // true if created without a video; flipped to false on successful video add
-```
+What the data looks like for a placeholder movement, created via Phase 2:
+- `name`: coach-entered (required)
+- All other metadata fields: coach-entered or defaulted (workSec=30, restSec=15, swapSides=false, etc. — same defaults the AI-create path uses today)
+- `videoUrl`: `''` (empty string)
+- `thumbnailUrl`: `''`
+- `gifLoopUrl`: `''`
+- `gifLowUrl`: `''`
+- `thumbnailImageUrl`: `''`
+- `cropScale`: 1, `cropTranslateX`: 0, `cropTranslateY`: 0, `cropFrameWidth`: 0, `cropFrameHeight`: 0 (defaults; rewritten by Phase 3 when a video is later cropped)
+- `coachId`, `tenantId`, `isGlobal: false`, `isArchived: false`, `createdAt`, `updatedAt` — same as today
+- `voiceUrl`, `voiceText`, `voiceName` — populated post-save by `generateMovementVoice(docId, name)` (same async pattern as today)
 
-Behavior:
-- New placeholder movements: `isPlaceholder: true`, `videoUrl: ''`, `thumbnailUrl: ''`, `gifLoopUrl: ''`, `gifLowUrl: ''`, `thumbnailImageUrl: ''`.
-- Defensive UI: any movement with `isPlaceholder === true` **OR** `!videoUrl` is treated as a placeholder. (Belt-and-suspenders for older docs that pre-date the flag.)
-- When add-video-later succeeds: set `isPlaceholder: false` in the same Firestore write that sets the new media URLs.
+Truth source for "no media yet" everywhere in the app: `!movement.videoUrl` (or equivalently `movement.videoUrl === ''`). Use this single check for:
+- Player render fallback (Phase 1 already ships this implicitly — the player just checks `videoLayers.length > 0 || activeThumbUrl`)
+- Coach-only "Video needed" badge in picker + library (Phase 2)
+- Edit-mode "Add Video" CTA (Phase 3)
+
+`MovementDetailData` interface (`apps/goarrive/components/MovementDetail.tsx:37-70`) already has `videoUrl?: string | null` and `thumbnailUrl?: string | null` — no interface change needed in any phase.
 
 No Firestore Rules changes. `firestore.rules:258-266` only enforces `coachId` / `isGlobal` — nothing about video fields.
+
+If a future need arises to filter or query placeholder movements as a distinct cohort (e.g. coach analytics, batch "remind me to film these" workflows), revisit adding `isPlaceholder` then, with a one-shot backfill where `!videoUrl → isPlaceholder: true`. Not today.
 
 ---
 
 ## 3. Files to touch
 
-**Phase 1 (player fallback):**
-- `apps/goarrive/components/WorkoutPlayer.tsx` — replace generic icon placeholder at lines 1226-1230; add `placeholderLogo` and `placeholderLogoFrame` styles near line 1846.
+**Phase 1 (player fallback) — SHIPPED to staging 2026-06-02 (PR #111):**
+- `apps/goarrive/components/WorkoutPlayer.tsx` — generic icon placeholder at lines 1226-1230 replaced with GoArrive logo render; `placeholderLogo` and `placeholderLogoFrame` styles added near line 1846. *No `isPlaceholder` reference in the player; fallback is purely implicit on `videoLayers.length === 0 && !activeThumbUrl`.*
 
-**Phase 2 (create-placeholder flow):**
+**Phase 2 (create-without-video flow):**
 - `apps/goarrive/components/MovementForm.tsx` —
-  - `CreateStep` union add `'placeholder-meta'` (line ~141).
+  - `CreateStep` union add a new step (e.g. `'no-video-meta'`) at line ~141.
   - Upload-choice screen at lines 1221-1272 gets a third button: *"Create without video"* alongside *Camera* and *Library*.
-  - New handler `startPlaceholderCreate()` that initializes state and jumps to a metadata form.
-  - New render branch for `createStep === 'placeholder-meta'` showing the metadata form (reuses existing field components from edit mode at lines 192-220).
-  - New save path that writes the doc with `isPlaceholder: true`, empty media URLs, then fires `generateMovementVoice(docId, name)` (same as existing line 615).
-- `apps/goarrive/components/MovementDetail.tsx` — extend `MovementDetailData` interface with `isPlaceholder?: boolean` (line 37-70).
+  - New handler `startNoVideoCreate()` that initializes state and jumps to the metadata form.
+  - New render branch for the new step showing the metadata form (reuses existing field components from edit mode at lines 192-220).
+  - New save path that writes the doc with empty media URLs (no flag) and immediately fires `generateMovementVoice(docId, name)` (same call site pattern as line 615).
+- *No edit to `MovementDetail.tsx` interface.* `videoUrl?: string | null` already exists.
 
-**Phase 3 (add-video-later):**
-- `apps/goarrive/components/MovementForm.tsx` (edit mode) — when `movement.isPlaceholder === true || !movement.videoUrl`, show *"Add Video"* button in the edit view. Reuses existing `pickFromLibrary` / `recordFromCamera` / `processAfterCrop` / `generateAndUploadDerivatives` / `analyzeMovementMedia` pipeline.
-  - On successful pipeline completion: write `isPlaceholder: false` + new media fields in the existing update path.
-  - Pass the current movement name into `analyzeMovementMedia` as `existingName`.
-  - If AI returns a different name with high confidence, show a confirm modal before overwriting; never silently rename.
+**Phase 3 (add-video-later — the strategic unlock):**
+- `apps/goarrive/components/MovementForm.tsx` (edit mode) — when `!movement.videoUrl`, show *"Add Video"* button in the edit view. Reuses the existing `pickFromLibrary` / `recordFromCamera` / `processAfterCrop` / `generateAndUploadDerivatives` / `analyzeMovementMedia` pipeline. Per Principle P5, no parallel pipeline — the same code path runs; it just operates on a movement that already exists.
+  - On successful pipeline completion: write the new media fields into the existing Firestore doc via the existing update path. *No `isPlaceholder` flag to flip — populating `videoUrl` IS the state transition.*
+  - Pass the current movement name into `analyzeMovementMedia` as `existingName` (Phase 4 enables the backend support; until then it's harmlessly ignored).
+  - If AI returns a different name with high confidence, show a confirm modal before overwriting (Principle P4). Never silently rename.
 
 **Phase 4 (AI hint):**
 - `apps/goarrive/utils/analyzeMovementMedia.ts` — accept new optional `existingName?: string` argument; thread it through to the callable.
-- `functions/src/index.ts` — `analyzeMovement` callable (line 7816-7930). Extend request shape to accept `existingName?: string`. When present, append to the system prompt: *"The user has already titled this movement '<X>'. Treat that as a strong hint. Confirm the existing name in your 'name' field unless you have high confidence the video shows a clearly different movement; in that case return your best name plus a high confidence score."* Coach-side confirmation handles any actual rename.
+- `functions/src/index.ts` — `analyzeMovement` callable (line 7816-7930). Extend request shape to accept `existingName?: string`. When present, append to the system prompt: *"The user has already titled this movement '<X>'. Treat that as a strong hint. Confirm the existing name in your 'name' field unless you have high confidence the video shows a clearly different movement; in that case return your best name plus a high confidence score."* Coach-side confirm modal handles any actual rename.
 
 **Phase 2 badge (coach-facing list/picker only):**
-- `apps/goarrive/components/WorkoutFolderPage.tsx` — picker card render needs a small *"Video needed"* pill when `m.isPlaceholder || !m.videoUrl`. Picker query already returns these (`apps/goarrive/components/WorkoutFolderPage.tsx:689-737` loads all non-archived movements; no `videoUrl` filter).
-- Add the same pill on any coach-facing movements library list (verify location during build — likely a Movements tab page in `apps/goarrive/app/` or under Build tab; not the standalone WorkoutForm.tsx which is dead code per memory). Member-facing surfaces: never show this badge.
+- `apps/goarrive/components/WorkoutFolderPage.tsx` — picker card render needs a small *"Video needed"* pill when `!m.videoUrl`. Picker query already returns these (`apps/goarrive/components/WorkoutFolderPage.tsx:689-737` loads all non-archived movements; no `videoUrl` filter). `MovementOption` interface at line 150 must be extended with `videoUrl?: string | null` so the picker can read it (currently only carries `mediaUrl` + `thumbnailUrl`).
+- Add the same pill on any coach-facing movements library list (verify location during build — likely a Movements tab page in `apps/goarrive/app/` or under Build tab; not the standalone `WorkoutForm.tsx` which is dead code per memory). Member-facing surfaces: never show this badge.
 
 **Files explicitly NOT touched:**
 - Player core timing, audio queue logic, `WorkoutPlayer` phase machinery
@@ -109,9 +140,10 @@ Slack-mrkdwn note: UI copy above is for the in-app React Native UI — no Slack 
               │
               └─→ [Coach taps Save]
                     │
-                    ├─→ Write Firestore doc with isPlaceholder: true,
+                    ├─→ Write Firestore doc with empty media URLs:
                     │   videoUrl: '', thumbnailUrl: '', gifLoopUrl: '',
                     │   gifLowUrl: '', thumbnailImageUrl: '', cropScale: 1, etc.
+                    │   (NO isPlaceholder flag — implicit !videoUrl is the state)
                     ├─→ Fire generateMovementVoice(docId, name) (non-blocking, same as today)
                     └─→ Close MovementForm, return to Movements list
 ```
@@ -146,11 +178,11 @@ The new flow shares **zero** infra with the video pipeline — no upload, no cro
                          {
                            videoUrl, thumbnailUrl, thumbnailImageUrl, gifLowUrl, gifLoopUrl,
                            cropScale, cropTranslateX, cropTranslateY, cropFrameWidth, cropFrameHeight,
-                           isPlaceholder: false,
                            name: (confirmed-by-coach),
                            ...AI-merged metadata (only fields the coach hasn't manually edited),
                            updatedAt
                          }
+                         (Populating videoUrl IS the state transition — no flag flip needed.)
                          Then trigger generateMovementVoice if the name changed.
                          Then trigger analyzeMovementReps for one-rep loop GIF (existing behavior).
 ```
@@ -220,7 +252,7 @@ placeholderLogo: {
 
 The 4:5 frame is already enforced by `mediaInnerSize` (line 191-207) — no aspect-ratio work needed. Logo asset `apps/goarrive/assets/goarrive-icon.png` already has a near-matching dark navy background baked in, so the visual effect is a clean dark frame with the GoArrive G➲A symbol centered at ~60% width, subtle opacity.
 
-This branch fires for any movement where the player ends up with no video AND no thumbnail. Today that's already the "broken movement" case (rare); with placeholders shipped it becomes the expected case for any movement created without media. **Same render path, no special-case branching for `isPlaceholder` in the player.**
+This branch fires for any movement where the player ends up with no video AND no thumbnail. Today that's already the "broken movement" case (rare); with placeholders shipped it becomes the expected case for any movement created without media. **Same render path — the fallback is purely implicit on absence of media; no flag and no special-case branching anywhere in the player.** This aligns with Principle P1 (placeholders are standard movements) and P2 (implicit `!videoUrl` truth source).
 
 ---
 
@@ -241,7 +273,7 @@ There is currently **no pure G➲A abs symbol** (without "Arrive" wordmark) in t
 - **R1 — Picker thumbnail rendering with no media.** Picker enrichment at `WorkoutFolderPage.tsx:778-794` only sets `thumbnailUrl` if found; placeholder movements will have empty `thumbnailUrl`. Confirm during build that the picker cell renders cleanly with no thumbnail (likely a fallback already; verify with a placeholder movement on staging).
 - **R2 — Workout demo phase audio.** Recent commits (7dcd1cb, fd9b6a5, 62206f0, 18e3fe4) hardened demo-phase audio. Placeholder movements still get `voiceUrl` from `generateMovementVoice`, so this should be unchanged — but worth a quick demo-phase regression check on staging.
 - **R3 — AI rename UX trap.** If we show the confirm modal too often, coaches will rage-tap "keep existing" reflexively. The confidence ≥ 0.7 floor for *showing* the modal is the guardrail; if it's still noisy in practice, bump the floor to 0.85.
-- **R4 — Older movements without `isPlaceholder` field.** Defensive `!videoUrl` check handles legacy/edge docs. No backfill migration needed; the field is optional.
+- **R4 — Existing "broken" movements with no media.** Any pre-existing movements with empty `videoUrl` (rare edge cases — failed uploads, manually-created docs) will now render the new logo fallback instead of the gray icon. This is a strict improvement, but worth a one-time scan during Phase 2 staging to make sure no surprises emerge.
 - **R5 — Coach-facing badge on member-facing surfaces.** Easy to leak into a shared component. Guard rule during build: badge component lives next to the picker; never imported by workout player or member screens.
 - **R6 — Web Speech fallback voice audio quality.** If `generateMovementVoice` fails for a placeholder, the player will fall back to Web Speech reading the name — same as today's behavior, but more likely to surface since placeholders rely on the name being the entire audio context. Mitigation: the post-save voice fire is already best-effort; coach can manually re-trigger by editing the name.
 
@@ -273,7 +305,7 @@ Test environment: staging Hosting preview channel — `goarrive--staging-gurfzja
 2. *Expected:* "This movement has no video yet…" banner + *Add Video* button visible.
 3. Tap *Add Video* → pick any sample video → crop → confirm
 4. *Expected:* Standard processing UI runs (thumbnails / AI analysis / saving). If AI returns a different name with high confidence, the rename confirm modal appears.
-5. After save: `isPlaceholder` is now `false`, `videoUrl` populated, `thumbnailUrl` populated, "Video needed" badge gone from picker, banner gone from edit.
+5. After save: `videoUrl` populated, `thumbnailUrl` populated, "Video needed" badge gone from picker, banner gone from edit. (No flag to inspect — the populated `videoUrl` IS the state.)
 6. Play the workout again — the 4:5 frame now shows the looped video.
 
 **Test 4 — AI rename guardrails**
@@ -300,9 +332,9 @@ Manus reports: pass/fail per test, screenshots of any unexpected layout, console
 
 ## 13. V3.2 Blueprint update
 
-**Light update needed.** The blueprint's Movement / Build section currently implies a video-first creation flow. Add a one-line note under the relevant section:
+**Light update needed.** The blueprint's Movement / Build section currently implies a video-first creation flow. Add a short note under the relevant section:
 
-> *Movements can be created without a video (placeholder mode) using `isPlaceholder: true`. The looped-video slot renders the GoArrive logo on a dark frame; voice cue is still generated from the name. Coach can add the video later via the edit view, which reuses the standard upload → crop → derivative → AI pipeline.*
+> *Movements are standard regardless of whether a video has been uploaded yet. A movement with empty `videoUrl` plays normally in workouts — the player renders the GoArrive logo on a dark frame in place of the looped video, and the voice cue is generated from the name. Coaches can add the video later via the edit view, which reuses the standard upload → crop → derivative → AI pipeline. There is no separate "placeholder" data type; `!videoUrl` is the implicit signal.*
 
 Doc ID `1hn_B6u-LnC5yrpdj127wFtPLEbOOLkTefeIdt3Pgdmg`. I'll do this after Phase 2 ships (when the feature is real on staging), not before.
 
@@ -312,9 +344,9 @@ Doc ID `1hn_B6u-LnC5yrpdj127wFtPLEbOOLkTefeIdt3Pgdmg`. I'll do this after Phase 
 
 After each phase deploys to staging, append a row to the Operating Changelog (Doc id `1CCsZO3uYEfqpUDk...` — full id in `memory/goarrive_operating_changelog.md`):
 
-- *Phase 1:* "Player fallback: GoArrive logo on dark frame for movements with no video/thumb. (`WorkoutPlayer.tsx`)"
-- *Phase 2:* "Placeholder movements — coaches can create movements without a video. (`MovementForm.tsx`, `MovementDetail.tsx`, `WorkoutFolderPage.tsx`)"
-- *Phase 3:* "Add-video-later flow on placeholder movements via edit mode. Reuses existing media pipeline. (`MovementForm.tsx`)"
+- *Phase 1:* "Player fallback: GoArrive logo on dark frame for movements with no video/thumb. (`WorkoutPlayer.tsx`) — PR #111, staging-verified"
+- *Phase 2:* "Create-without-video flow — coaches can create movements with metadata only; `!videoUrl` is the implicit state. (`MovementForm.tsx`, `WorkoutFolderPage.tsx`)"
+- *Phase 3:* "Add-video-later flow via edit mode — reuses existing upload/crop/derivative/AI pipeline; populating `videoUrl` is the state transition. (`MovementForm.tsx`)"
 - *Phase 4:* "`analyzeMovement` accepts `existingName` hint; coach confirms any AI-suggested rename. (`functions/src/index.ts`, `analyzeMovementMedia.ts`, `MovementForm.tsx`)"
 
 Each row notes shipped PR(s), staging verification, follow-ups. Production deploy entries land separately after Devin's explicit go-ahead.
@@ -334,12 +366,12 @@ Each row notes shipped PR(s), staging verification, follow-ups. Production deplo
 
 Ship strictly in order. Each phase: PR → staging deploy → Manus test pass → Devin go-ahead → production deploy. Standard 9-step ship checklist applies per phase.
 
-1. **Phase 1** — Player fallback (1 file, ~20 LOC). Lowest risk; ship first so the logo render is in place before any placeholder movements exist.
-2. **Phase 2** — Create-placeholder entry + badge (3 files). Coaches can now create placeholders; player handles them via Phase 1 fallback.
-3. **Phase 3** — Add-video-later (1 file, reuses existing functions). Closes the loop.
-4. **Phase 4** — AI `existingName` hint + rename confirm modal (3 files including the callable). Polish, not blocking.
+1. **Phase 1** — *SHIPPED 2026-06-02 (PR #111).* Player fallback, 1 file, ~14 LOC code change. Logo render is in place before any movements-without-video exist.
+2. **Phase 2** — Create-without-video entry + coach badge (2 files: `MovementForm.tsx`, `WorkoutFolderPage.tsx`). Coaches can now create movements with metadata only; the player handles them via Phase 1's fallback. Architect the new step + save path with Phase 3 in mind so the edit view drops cleanly in next.
+3. **Phase 3** — Add-video-later (1 file: `MovementForm.tsx`, reuses all existing pipeline functions). The strategic unlock — closes the loop and enables the creative drafting workflow (Principle P3, P7).
+4. **Phase 4** — AI `existingName` hint + rename confirm modal (3 files including the `analyzeMovement` callable + backend deploy). Polish on top of Phase 3, not blocking.
 
-Estimated effort: Phase 1 = ~1 hour, Phase 2 = ~3-4 hours, Phase 3 = ~2 hours, Phase 4 = ~2 hours including backend deploy. Total ~8-10 hours of focused coding plus testing/deploy cycles.
+Estimated effort: Phase 1 = done. Phase 2 = ~3-4 hours, Phase 3 = ~2 hours, Phase 4 = ~2 hours including backend deploy. Remaining ~7-8 hours of focused coding plus testing/deploy cycles.
 
 ---
 
