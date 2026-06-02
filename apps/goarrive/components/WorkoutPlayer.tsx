@@ -1224,8 +1224,12 @@ export default function WorkoutPlayer({
                     resizeMode="cover"
                   />
                 ) : (
-                  <View style={[st.videoPlayer, st.videoPlaceholder]}>
-                    <Icon name="play-circle" size={48} color="#3A4050" />
+                  <View style={[st.videoPlayer, st.placeholderLogoFrame]}>
+                    <Image
+                      source={require('../assets/goarrive-icon.png')}
+                      style={st.placeholderLogo}
+                      resizeMode="contain"
+                    />
                   </View>
                 )}
               </View>
@@ -1845,6 +1849,12 @@ const st = StyleSheet.create({
   videoLayer: { ...StyleSheet.absoluteFillObject } as any,
   videoPlaceholder: {
     justifyContent: 'center', alignItems: 'center', backgroundColor: '#1A1E26',
+  },
+  placeholderLogoFrame: {
+    justifyContent: 'center', alignItems: 'center', backgroundColor: '#0E1117',
+  },
+  placeholderLogo: {
+    width: '60%', height: '60%', opacity: 0.65,
   },
   posterFallback: {
     ...StyleSheet.absoluteFillObject, backgroundColor: '#000000',
