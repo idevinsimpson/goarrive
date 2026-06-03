@@ -575,6 +575,18 @@ function BuildScreenInner() {
   }, [coachId, tenantId, currentFolderId, newPlaybookName, newPlaybookDesc]);  // ── Enrich workout coverThumbs from loaded movements ──────────────────
   // Movements in workout blocks may only store movementId without thumbnailUrl.
   // After both collections load, cross-reference to build coverThumbs.
+  // Phase 4: lightweight list passed to MovementForm so its duplicate-name
+  // check can match against already-loaded movements without a Firestore
+  // round-trip. Excludes archived so the warning aligns with the visible
+  // library.
+  const existingMovementNames = useMemo(
+    () =>
+      items
+        .filter((i: any) => i.type === 'Movements' && !i.isArchived)
+        .map((i: any) => ({ id: i.id, name: i.name || '' })),
+    [items],
+  );
+
   const enrichedItems = useMemo(() => {
     const movementMap = new Map<string, string>();
     const movementNameMap = new Map<string, string>();
@@ -1060,6 +1072,7 @@ function BuildScreenInner() {
         coachId={coachId}
         tenantId={tenantId}
         editMovement={editMovement}
+        existingMovements={existingMovementNames}
       />
 
       <BulkMovementUpload
