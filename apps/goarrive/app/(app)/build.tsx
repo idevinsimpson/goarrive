@@ -78,7 +78,7 @@ interface BuildItem {
   difficulty?: string;
   thumbnailUrl?: string;
   mediaUrl?: string;
-  coverThumbs?: (string | null)[];
+  coverThumbs?: (string | { name: string })[];
   isArchived: boolean;
   createdAt: any;
   updatedAt: any;
@@ -142,19 +142,34 @@ function useGridLayout() {
  *  Tight borders, distinct background, top-to-bottom left-to-right layout. */
 const WORKOUT_CARD_BG = '#1A2332'; // Slightly lighter than page bg so cards stand out
 
-function MosaicPlaceholderCell({ width, height, borderRadius }: { width: number; height: number; borderRadius: number }) {
+function MosaicPlaceholderCell({ width, height, borderRadius, name }: { width: number; height: number; borderRadius: number; name?: string }) {
+  // Friction-killer for coaches: when a movement has no video yet, show its
+  // NAME big and bold in the mosaic cell instead of a generic logo, so the
+  // workout's contents are readable straight from the Build page.
+  const fontSize = Math.max(9, Math.min(22, Math.round(Math.min(width, height) * 0.18)));
+  const lineHeight = Math.round(fontSize * 1.15);
   return (
-    <View style={{ width, height, borderRadius, overflow: 'hidden', backgroundColor: '#0E1117' }}>
-      <Image
-        source={require('../../assets/goarrive-icon.png')}
-        style={{ width: '100%', height: '100%' }}
-        resizeMode="cover"
-      />
+    <View style={{ width, height, borderRadius, overflow: 'hidden', backgroundColor: '#0E1117', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4, paddingVertical: 3 }}>
+      <Text
+        numberOfLines={4}
+        adjustsFontSizeToFit
+        minimumFontScale={0.6}
+        style={{
+          color: '#F0F4F8',
+          fontSize,
+          lineHeight,
+          fontWeight: '700',
+          textAlign: 'center',
+          fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Bold',
+        }}
+      >
+        {name || 'Movement'}
+      </Text>
     </View>
   );
 }
 
-function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle = false }: { thumbs: (string | null)[]; width: number; height: number; isAnimating?: boolean; scrollIdle?: boolean }) {
+function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle = false }: { thumbs: (string | { name: string })[]; width: number; height: number; isAnimating?: boolean; scrollIdle?: boolean }) {
   const gap = 2; // tight gap between mini GIFs
   const inset = 6; // small padding inside the card
   const innerW = width - inset * 2;
@@ -177,7 +192,7 @@ function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle 
     const clampedW = clampedH * (4 / 5);
     return (
       <View style={{ width, height, backgroundColor: WORKOUT_CARD_BG, justifyContent: 'center', alignItems: 'center' }}>
-        {thumbs[0] ? (
+        {typeof thumbs[0] === 'string' ? (
           <MosaicPreviewTile
             uri={thumbs[0]}
             width={clampedW}
@@ -188,7 +203,7 @@ function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle 
             borderRadius={6}
           />
         ) : (
-          <MosaicPlaceholderCell width={clampedW} height={clampedH} borderRadius={6} />
+          <MosaicPlaceholderCell width={clampedW} height={clampedH} borderRadius={6} name={thumbs[0]?.name} />
         )}
       </View>
     );
@@ -217,11 +232,11 @@ function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle 
         width,
         overflow: 'hidden',
       }}>
-        {thumbs.slice(0, maxShow).map((url, i) => (
-          url ? (
+        {thumbs.slice(0, maxShow).map((slot, i) => (
+          typeof slot === 'string' ? (
             <MosaicPreviewTile
               key={i}
-              uri={url}
+              uri={slot}
               width={finalCellW}
               height={finalCellH}
               parentIsAnimating={isAnimating}
@@ -230,7 +245,7 @@ function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle 
               borderRadius={3}
             />
           ) : (
-            <MosaicPlaceholderCell key={i} width={finalCellW} height={finalCellH} borderRadius={3} />
+            <MosaicPlaceholderCell key={i} width={finalCellW} height={finalCellH} borderRadius={3} name={slot?.name} />
           )
         ))}
       </View>
@@ -562,19 +577,23 @@ function BuildScreenInner() {
   // After both collections load, cross-reference to build coverThumbs.
   const enrichedItems = useMemo(() => {
     const movementMap = new Map<string, string>();
+    const movementNameMap = new Map<string, string>();
     for (const item of items) {
-      if (item.type === 'Movements' && (item.thumbnailUrl || item.mediaUrl)) {
-        movementMap.set(item.id, (item.thumbnailUrl || item.mediaUrl) as string);
+      if (item.type === 'Movements') {
+        if (item.thumbnailUrl || item.mediaUrl) {
+          movementMap.set(item.id, (item.thumbnailUrl || item.mediaUrl) as string);
+        }
+        if (item.name) movementNameMap.set(item.id, item.name as string);
       }
     }
 
     return items.map(item => {
       if (item.type !== 'Workouts') return item;
       if (!item.blocks || !Array.isArray(item.blocks)) return item;
-      // Build a per-movement slot list: real URL for videoed, null for placeholder.
+      // Build a per-movement slot list: real URL for videoed, { name } for placeholder.
       // Dedupe URLs (don't repeat the same thumb), but keep every placeholder slot
-      // so coaches see exactly how many movements still need video.
-      const slots: (string | null)[] = [];
+      // so coaches can read the movement names of anything still needing video.
+      const slots: (string | { name: string })[] = [];
       const seenUrls = new Set<string>();
       for (const block of item.blocks) {
         if (block.movements && Array.isArray(block.movements)) {
@@ -587,7 +606,8 @@ function BuildScreenInner() {
                 slots.push(url);
               }
             } else {
-              slots.push(null);
+              const name = mov.movementName || (movId ? movementNameMap.get(movId) : null) || mov.name || 'Movement';
+              slots.push({ name });
             }
           }
         }
