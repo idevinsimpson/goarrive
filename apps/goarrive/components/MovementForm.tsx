@@ -43,6 +43,9 @@ import {
   doc,
   updateDoc,
   serverTimestamp,
+  query,
+  where,
+  getDocs,
 } from 'firebase/firestore';
 import { Icon } from './Icon';
 import MovementVideoControls from './MovementVideoControls';
@@ -105,6 +108,14 @@ const MUSCLE_GROUP_OPTIONS = [
   'Full Body',
 ];
 
+// Phase 4: normalize a movement name for duplicate matching.
+// Case-insensitive, trim outer whitespace, collapse internal whitespace
+// runs to a single space. "  Air   squat " ≈ "air squat".
+function normalizeMovementName(raw: string | null | undefined): string {
+  if (!raw) return '';
+  return String(raw).trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 interface MovementFormProps {
   visible: boolean;
@@ -112,6 +123,10 @@ interface MovementFormProps {
   coachId: string;
   tenantId: string;
   editMovement?: MovementDetailData | null;
+  // Phase 4: optional in-memory list used to avoid a Firestore round-trip
+  // when checking for duplicate names. If omitted or empty, the dup check
+  // falls back to a one-shot getDocs query scoped to coachId.
+  existingMovements?: Array<{ id: string; name: string }>;
 }
 
 type CreateStep = 'upload' | 'crop' | 'processing' | 'no-video-meta';
@@ -123,6 +138,7 @@ export default function MovementForm({
   coachId,
   tenantId,
   editMovement,
+  existingMovements,
 }: MovementFormProps) {
   const isEdit = !!editMovement;
 
@@ -226,6 +242,64 @@ export default function MovementForm({
   } | null>(null);
   const [aiMergeChecked, setAiMergeChecked] = useState<Record<string, boolean>>({});
 
+  // ── Phase 4: duplicate-name soft warning ───────────────────────────────
+  // Soft warning only — never blocks save. Two surfaces:
+  //   1. The no-video create flow (taps Save on the no-video metadata form)
+  //   2. The AI confirm-merge modal (proposed AI name matches another movement)
+  const [noVideoDupWarning, setNoVideoDupWarning] = useState<
+    { id: string; name: string } | null
+  >(null);
+  const [aiMergeDupWarning, setAiMergeDupWarning] = useState<
+    { id: string; name: string } | null
+  >(null);
+  const [aiMergeDupDismissed, setAiMergeDupDismissed] = useState(false);
+  // Refs for focusing the name input when the coach taps "Rename".
+  const noVideoNameInputRef = useRef<TextInput | null>(null);
+  const editNameInputRef = useRef<TextInput | null>(null);
+
+  // Phase 4: find a duplicate movement by name. Prefers the in-memory list
+  // (existingMovements prop) when available; falls back to a one-shot
+  // getDocs query scoped to this coach. Excludes the movement currently
+  // being edited so the coach doesn't get warned about themselves.
+  const findDuplicateMovement = useCallback(
+    async (
+      proposedName: string,
+    ): Promise<{ id: string; name: string } | null> => {
+      const target = normalizeMovementName(proposedName);
+      if (!target) return null;
+      const selfId = editMovement?.id ?? null;
+
+      if (existingMovements && existingMovements.length > 0) {
+        for (const m of existingMovements) {
+          if (selfId && m.id === selfId) continue;
+          if (normalizeMovementName(m.name) === target) {
+            return { id: m.id, name: m.name };
+          }
+        }
+        return null;
+      }
+
+      if (!coachId) return null;
+      try {
+        const snap = await getDocs(
+          query(collection(db, 'movements'), where('coachId', '==', coachId)),
+        );
+        for (const d of snap.docs) {
+          if (selfId && d.id === selfId) continue;
+          const docName = (d.data() as any).name || '';
+          if (normalizeMovementName(docName) === target) {
+            return { id: d.id, name: docName };
+          }
+        }
+      } catch (err) {
+        // Soft warning is purely advisory — never block on the check.
+        console.warn('[MovementForm] Duplicate-name check failed:', err);
+      }
+      return null;
+    },
+    [existingMovements, editMovement, coachId],
+  );
+
   // ── Pre-populate on edit ───────────────────────────────────────────────
   useEffect(() => {
     if (editMovement) {
@@ -298,8 +372,40 @@ export default function MovementForm({
     setCropTranslateY(0);
     setCropFrameWidth(0);
     setCropFrameHeight(0);
+    setNoVideoDupWarning(null);
     setCreateStep('no-video-meta');
   };
+
+  // Phase 4: Save tap in the no-video-create flow. First tap runs the
+  // duplicate-name check; if a match is found, show a soft warning banner
+  // and stop. Second tap (or the banner's Save anyway) proceeds without
+  // re-checking, so the coach never sees the warning twice for the same
+  // pending save.
+  const handleNoVideoSavePressed = async () => {
+    if (!name.trim()) {
+      Alert.alert('Error', 'Please enter a movement name.');
+      return;
+    }
+    if (noVideoDupWarning) {
+      setNoVideoDupWarning(null);
+      await saveNoVideoMovement();
+      return;
+    }
+    const match = await findDuplicateMovement(name);
+    if (match) {
+      setNoVideoDupWarning(match);
+      return;
+    }
+    await saveNoVideoMovement();
+  };
+
+  // Clear the dup warning whenever the coach edits the name. The next Save
+  // tap will re-check against the updated name. (Keeps the banner from
+  // pointing at a stale match while the coach is mid-rename.)
+  useEffect(() => {
+    if (noVideoDupWarning) setNoVideoDupWarning(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name]);
 
   const saveNoVideoMovement = async () => {
     if (!name.trim()) {
@@ -743,6 +849,18 @@ export default function MovementForm({
         setAiMergeChecked(initialChecked);
         setProcessingProgress(0);
         setProcessingStatus('');
+
+        // Phase 4: soft duplicate-name warning. If the AI-proposed name
+        // matches another movement (not the one being edited), surface a
+        // banner in the modal. Reset dismissed state each time the modal
+        // re-opens so an old dismissal doesn't bleed across sessions.
+        setAiMergeDupDismissed(false);
+        setAiMergeDupWarning(null);
+        if (aiAnalysis?.name) {
+          findDuplicateMovement(aiAnalysis.name).then((m) => {
+            if (m) setAiMergeDupWarning(m);
+          });
+        }
         return;
       }
 
@@ -953,6 +1071,8 @@ export default function MovementForm({
     }
     setAiMergeData(null);
     setAiMergeChecked({});
+    setAiMergeDupWarning(null);
+    setAiMergeDupDismissed(false);
   };
 
   // ── Muscle group toggle (for edit mode) ───────────────────────────────
@@ -1202,6 +1322,7 @@ export default function MovementForm({
                 {/* Movement Name */}
                 <Text style={st.label}>Movement Name</Text>
                 <TextInput
+                  ref={editNameInputRef}
                   style={st.input}
                   value={name}
                   onChangeText={(t) => setName(toTitleCase(t))}
@@ -1568,6 +1689,16 @@ export default function MovementForm({
           onToggle={(key) => setAiMergeChecked((prev) => ({ ...prev, [key]: !prev[key] }))}
           onSkip={() => handleAiMergeConfirm(false)}
           onApply={() => handleAiMergeConfirm(true)}
+          dupWarning={aiMergeDupWarning}
+          dupWarningDismissed={aiMergeDupDismissed}
+          onDismissDupWarning={() => setAiMergeDupDismissed(true)}
+          onRenameDup={() => {
+            // Close the modal so the coach can edit the name in the
+            // underlying edit form. Treat as "skip AI" so we don't
+            // overwrite their existing name. Then focus the name input.
+            handleAiMergeConfirm(false);
+            setTimeout(() => editNameInputRef.current?.focus(), 100);
+          }}
         />
       </>
     );
@@ -1717,6 +1848,7 @@ export default function MovementForm({
                 >
                   <Text style={st.label}>Movement Name *</Text>
                   <TextInput
+                    ref={noVideoNameInputRef}
                     style={st.input}
                     value={name}
                     onChangeText={(t) => setName(toTitleCase(t))}
@@ -1914,13 +2046,31 @@ export default function MovementForm({
                   />
                 </ScrollView>
 
+                {noVideoDupWarning && (
+                  <DuplicateNameWarningBanner
+                    existingName={noVideoDupWarning.name}
+                    onSaveAnyway={async () => {
+                      setNoVideoDupWarning(null);
+                      await saveNoVideoMovement();
+                    }}
+                    onRename={() => {
+                      setNoVideoDupWarning(null);
+                      // setTimeout lets the banner unmount first so focus lands
+                      // cleanly on the name TextInput.
+                      setTimeout(() => {
+                        noVideoNameInputRef.current?.focus();
+                      }, 50);
+                    }}
+                  />
+                )}
+
                 <View style={st.footer}>
                   <Pressable style={st.cancelBtn} onPress={() => setCreateStep('upload')}>
                     <Text style={st.cancelBtnText}>Cancel</Text>
                   </Pressable>
                   <Pressable
                     style={[st.saveBtn, (!name.trim() || submitting) && st.saveBtnDisabled]}
-                    onPress={saveNoVideoMovement}
+                    onPress={handleNoVideoSavePressed}
                     disabled={!name.trim() || submitting}
                   >
                     {submitting ? (
@@ -1949,6 +2099,43 @@ export default function MovementForm({
         }}
       />
     </>
+  );
+}
+
+// ── Phase 4: duplicate-name soft warning banner ─────────────────────────
+// Shared between the AI confirm-merge modal and the no-video-create flow.
+// Yellow/amber bar. Two buttons — Save anyway is dismissive, Rename hands
+// focus back to the name input upstream.
+interface DuplicateNameWarningBannerProps {
+  existingName: string;
+  onSaveAnyway: () => void;
+  onRename: () => void;
+}
+
+function DuplicateNameWarningBanner({
+  existingName,
+  onSaveAnyway,
+  onRename,
+}: DuplicateNameWarningBannerProps) {
+  return (
+    <View style={st.dupWarnBanner}>
+      <View style={st.dupWarnTextWrap}>
+        <Icon name="warning" size={16} color="#F5A623" />
+        <Text style={st.dupWarnText}>
+          You already have a movement called{' '}
+          <Text style={st.dupWarnTextBold}>{existingName}</Text>. Save as
+          duplicate, or rename?
+        </Text>
+      </View>
+      <View style={st.dupWarnBtnRow}>
+        <Pressable style={st.dupWarnSaveBtn} onPress={onSaveAnyway} hitSlop={6}>
+          <Text style={st.dupWarnSaveBtnText}>Save anyway</Text>
+        </Pressable>
+        <Pressable style={st.dupWarnRenameBtn} onPress={onRename} hitSlop={6}>
+          <Text style={st.dupWarnRenameBtnText}>Rename</Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }
 
@@ -2004,6 +2191,13 @@ interface AIConfirmMergeModalProps {
   onToggle: (key: AIMergeFieldKey) => void;
   onSkip: () => void;
   onApply: () => void;
+  // Phase 4: soft duplicate-name warning. Banner renders when a match is
+  // present, the coach hasn't dismissed it, and the AI name overwrite is
+  // checked (toggling name off makes the warning irrelevant).
+  dupWarning: { id: string; name: string } | null;
+  dupWarningDismissed: boolean;
+  onDismissDupWarning: () => void;
+  onRenameDup: () => void;
 }
 
 function formatMergeValue(key: AIMergeFieldKey, raw: any): string {
@@ -2016,9 +2210,22 @@ function formatMergeValue(key: AIMergeFieldKey, raw: any): string {
   return s.length ? s : '—';
 }
 
-function AIConfirmMergeModal({ data, checked, onToggle, onSkip, onApply }: AIConfirmMergeModalProps) {
+function AIConfirmMergeModal({
+  data,
+  checked,
+  onToggle,
+  onSkip,
+  onApply,
+  dupWarning,
+  dupWarningDismissed,
+  onDismissDupWarning,
+  onRenameDup,
+}: AIConfirmMergeModalProps) {
   if (!data) return null;
   const { proposed, existing } = data;
+  // Banner shows only when the coach actually intends to overwrite the
+  // name. If they uncheck name, the duplicate becomes a non-issue.
+  const showDupBanner = !!dupWarning && !dupWarningDismissed && !!checked.name;
   return (
     <Modal visible={!!data} transparent animationType="slide" onRequestClose={onSkip}>
       <View style={st.aiMergeBackdrop}>
@@ -2029,6 +2236,13 @@ function AIConfirmMergeModal({ data, checked, onToggle, onSkip, onApply }: AICon
               Check each field you want to overwrite. The video and crop are saved either way.
             </Text>
           </View>
+          {showDupBanner && dupWarning && (
+            <DuplicateNameWarningBanner
+              existingName={dupWarning.name}
+              onSaveAnyway={onDismissDupWarning}
+              onRename={onRenameDup}
+            />
+          )}
           <ScrollView
             style={st.aiMergeScroll}
             contentContainerStyle={st.aiMergeScrollContent}
@@ -2828,5 +3042,63 @@ const st = StyleSheet.create({
     fontWeight: '700',
     color: '#0E1117',
     fontFamily: FH,
+  },
+  // Phase 4: duplicate-name soft warning banner
+  dupWarnBanner: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(245, 166, 35, 0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 166, 35, 0.55)',
+    gap: 8,
+  },
+  dupWarnTextWrap: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  dupWarnText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#F0F4F8',
+    fontFamily: FB,
+    lineHeight: 18,
+  },
+  dupWarnTextBold: {
+    fontWeight: '700',
+    color: '#F5A623',
+  },
+  dupWarnBtnRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  dupWarnSaveBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#2A3347',
+  },
+  dupWarnSaveBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#F0F4F8',
+    fontFamily: FB,
+  },
+  dupWarnRenameBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#F5A623',
+  },
+  dupWarnRenameBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0E1117',
+    fontFamily: FB,
   },
 });
