@@ -779,8 +779,12 @@ export default function WorkoutPlayer({
                                 resizeMode="cover"
                               />
                             ) : (
-                              <View style={[st.readyThumbImage, { backgroundColor: '#1A2035', justifyContent: 'center', alignItems: 'center' }]}>
-                                <Icon name="play-circle" size={20} color="#3A4050" />
+                              <View style={[st.readyThumbImage, st.placeholderLogoFrame]}>
+                                <Image
+                                  source={require('../assets/goarrive-icon.png')}
+                                  style={st.placeholderLogo}
+                                  resizeMode="cover"
+                                />
                               </View>
                             )}
                             <Text style={st.readyThumbName} numberOfLines={1}>{mv.movementName || mv.name || 'Movement'}</Text>
@@ -903,8 +907,12 @@ export default function WorkoutPlayer({
                       {mv.thumbnailUrl ? (
                         <Image source={{ uri: mv.thumbnailUrl }} style={st.demoGridImage} resizeMode="cover" />
                       ) : (
-                        <View style={[st.demoGridImage, { backgroundColor: '#1A2035', justifyContent: 'center', alignItems: 'center' }]}>
-                          <Icon name="play-circle" size={24} color="#3A4050" />
+                        <View style={[st.demoGridImage, st.placeholderLogoFrame]}>
+                          <Image
+                            source={require('../assets/goarrive-icon.png')}
+                            style={st.placeholderLogo}
+                            resizeMode="cover"
+                          />
                         </View>
                       )}
                     </View>
@@ -958,8 +966,12 @@ export default function WorkoutPlayer({
                 ) : activeThumbUrl ? (
                   <Image source={{ uri: activeThumbUrl }} style={st.videoPlayer} resizeMode="cover" />
                 ) : (
-                  <View style={[st.videoPlayer, st.videoPlaceholder]}>
-                    <Icon name="arrow-right" size={48} color="#3A4050" />
+                  <View style={[st.videoPlayer, st.placeholderLogoFrame]}>
+                    <Image
+                      source={require('../assets/goarrive-icon.png')}
+                      style={st.placeholderLogo}
+                      resizeMode="cover"
+                    />
                   </View>
                 )}
               </View>
@@ -1224,8 +1236,12 @@ export default function WorkoutPlayer({
                     resizeMode="cover"
                   />
                 ) : (
-                  <View style={[st.videoPlayer, st.videoPlaceholder]}>
-                    <Icon name="play-circle" size={48} color="#3A4050" />
+                  <View style={[st.videoPlayer, st.placeholderLogoFrame]}>
+                    <Image
+                      source={require('../assets/goarrive-icon.png')}
+                      style={st.placeholderLogo}
+                      resizeMode="cover"
+                    />
                   </View>
                 )}
               </View>
@@ -1845,6 +1861,12 @@ const st = StyleSheet.create({
   videoLayer: { ...StyleSheet.absoluteFillObject } as any,
   videoPlaceholder: {
     justifyContent: 'center', alignItems: 'center', backgroundColor: '#1A1E26',
+  },
+  placeholderLogoFrame: {
+    justifyContent: 'center', alignItems: 'center', backgroundColor: '#0E1117', overflow: 'hidden',
+  },
+  placeholderLogo: {
+    width: '100%', height: '100%',
   },
   posterFallback: {
     ...StyleSheet.absoluteFillObject, backgroundColor: '#000000',

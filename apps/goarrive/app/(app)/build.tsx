@@ -78,7 +78,7 @@ interface BuildItem {
   difficulty?: string;
   thumbnailUrl?: string;
   mediaUrl?: string;
-  coverThumbs?: string[];
+  coverThumbs?: (string | { name: string })[];
   isArchived: boolean;
   createdAt: any;
   updatedAt: any;
@@ -142,7 +142,34 @@ function useGridLayout() {
  *  Tight borders, distinct background, top-to-bottom left-to-right layout. */
 const WORKOUT_CARD_BG = '#1A2332'; // Slightly lighter than page bg so cards stand out
 
-function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle = false }: { thumbs: string[]; width: number; height: number; isAnimating?: boolean; scrollIdle?: boolean }) {
+function MosaicPlaceholderCell({ width, height, borderRadius, name }: { width: number; height: number; borderRadius: number; name?: string }) {
+  // Friction-killer for coaches: when a movement has no video yet, show its
+  // NAME big and bold in the mosaic cell instead of a generic logo, so the
+  // workout's contents are readable straight from the Build page.
+  const fontSize = Math.max(9, Math.min(22, Math.round(Math.min(width, height) * 0.18)));
+  const lineHeight = Math.round(fontSize * 1.15);
+  return (
+    <View style={{ width, height, borderRadius, overflow: 'hidden', backgroundColor: '#0E1117', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4, paddingVertical: 3 }}>
+      <Text
+        numberOfLines={4}
+        adjustsFontSizeToFit
+        minimumFontScale={0.6}
+        style={{
+          color: '#F0F4F8',
+          fontSize,
+          lineHeight,
+          fontWeight: '700',
+          textAlign: 'center',
+          fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Bold',
+        }}
+      >
+        {name || 'Movement'}
+      </Text>
+    </View>
+  );
+}
+
+function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle = false }: { thumbs: (string | { name: string })[]; width: number; height: number; isAnimating?: boolean; scrollIdle?: boolean }) {
   const gap = 2; // tight gap between mini GIFs
   const inset = 6; // small padding inside the card
   const innerW = width - inset * 2;
@@ -165,15 +192,19 @@ function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle 
     const clampedW = clampedH * (4 / 5);
     return (
       <View style={{ width, height, backgroundColor: WORKOUT_CARD_BG, justifyContent: 'center', alignItems: 'center' }}>
-        <MosaicPreviewTile
-          uri={thumbs[0]}
-          width={clampedW}
-          height={clampedH}
-          parentIsAnimating={isAnimating}
-          scrollIdle={scrollIdle}
-          index={0}
-          borderRadius={6}
-        />
+        {typeof thumbs[0] === 'string' ? (
+          <MosaicPreviewTile
+            uri={thumbs[0]}
+            width={clampedW}
+            height={clampedH}
+            parentIsAnimating={isAnimating}
+            scrollIdle={scrollIdle}
+            index={0}
+            borderRadius={6}
+          />
+        ) : (
+          <MosaicPlaceholderCell width={clampedW} height={clampedH} borderRadius={6} name={thumbs[0]?.name} />
+        )}
       </View>
     );
   }
@@ -201,17 +232,21 @@ function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle 
         width,
         overflow: 'hidden',
       }}>
-        {thumbs.slice(0, maxShow).map((url, i) => (
-          <MosaicPreviewTile
-            key={i}
-            uri={url}
-            width={finalCellW}
-            height={finalCellH}
-            parentIsAnimating={isAnimating}
-            scrollIdle={scrollIdle}
-            index={i}
-            borderRadius={3}
-          />
+        {thumbs.slice(0, maxShow).map((slot, i) => (
+          typeof slot === 'string' ? (
+            <MosaicPreviewTile
+              key={i}
+              uri={slot}
+              width={finalCellW}
+              height={finalCellH}
+              parentIsAnimating={isAnimating}
+              scrollIdle={scrollIdle}
+              index={i}
+              borderRadius={3}
+            />
+          ) : (
+            <MosaicPlaceholderCell key={i} width={finalCellW} height={finalCellH} borderRadius={3} name={slot?.name} />
+          )
         ))}
       </View>
     </View>
@@ -542,29 +577,42 @@ function BuildScreenInner() {
   // After both collections load, cross-reference to build coverThumbs.
   const enrichedItems = useMemo(() => {
     const movementMap = new Map<string, string>();
+    const movementNameMap = new Map<string, string>();
     for (const item of items) {
-      if (item.type === 'Movements' && (item.thumbnailUrl || item.mediaUrl)) {
-        movementMap.set(item.id, (item.thumbnailUrl || item.mediaUrl) as string);
+      if (item.type === 'Movements') {
+        if (item.thumbnailUrl || item.mediaUrl) {
+          movementMap.set(item.id, (item.thumbnailUrl || item.mediaUrl) as string);
+        }
+        if (item.name) movementNameMap.set(item.id, item.name as string);
       }
     }
-    if (movementMap.size === 0) return items;
 
     return items.map(item => {
       if (item.type !== 'Workouts') return item;
-      // Always re-enrich from movement data (don't trust saved coverThumbs — they may be stale)
-      // Try to build coverThumbs from blocks + movement lookup
       if (!item.blocks || !Array.isArray(item.blocks)) return item;
-      const thumbs: string[] = [];
+      // Build a per-movement slot list: real URL for videoed, { name } for placeholder.
+      // Dedupe URLs (don't repeat the same thumb), but keep every placeholder slot
+      // so coaches can read the movement names of anything still needing video.
+      const slots: (string | { name: string })[] = [];
+      const seenUrls = new Set<string>();
       for (const block of item.blocks) {
         if (block.movements && Array.isArray(block.movements)) {
           for (const mov of block.movements) {
             const movId = mov.movementId || mov.id || null;
             const url = mov.thumbnailUrl || mov.gifUrl || (movId ? movementMap.get(movId) : null);
-            if (url && !thumbs.includes(url)) thumbs.push(url);
+            if (url) {
+              if (!seenUrls.has(url)) {
+                seenUrls.add(url);
+                slots.push(url);
+              }
+            } else {
+              const name = mov.movementName || (movId ? movementNameMap.get(movId) : null) || mov.name || 'Movement';
+              slots.push({ name });
+            }
           }
         }
       }
-      if (thumbs.length > 0) return { ...item, coverThumbs: thumbs };
+      if (slots.length > 0) return { ...item, coverThumbs: slots };
       return item;
     });
   }, [items]);
@@ -733,7 +781,15 @@ function BuildScreenInner() {
               priority={tilePriority}
               registerTile={previewEngine.registerTile}
               borderRadius={10}
-              fallbackIcon={<Icon name={iconName} size={32} color={iconColor} />}
+              fallbackIcon={isMovement ? (
+                <Image
+                  source={require('../../assets/goarrive-icon.png')}
+                  style={styles.placeholderLogo}
+                  resizeMode="cover"
+                />
+              ) : (
+                <Icon name={iconName} size={32} color={iconColor} />
+              )}
             />
           )}
 
@@ -741,6 +797,11 @@ function BuildScreenInner() {
           <View style={[styles.nameOverlay, isWorkoutCard && { backgroundColor: 'rgba(26, 35, 50, 0.92)' }]}>
             <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
           </View>
+          {isMovement && !item.videoUrl && (
+            <View style={styles.videoNeededPill}>
+              <Text style={styles.videoNeededText}>Video needed</Text>
+            </View>
+          )}
         </Pressable>
       );
     }
@@ -763,15 +824,30 @@ function BuildScreenInner() {
               source={{ uri: previewEngine.scrollState !== 'scrolling' ? (item.thumbnailUrl || item.thumbnailImageUrl || item.gifLowUrl || item.mediaUrl) : 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' }}
               style={[s.listImage, { backgroundColor: '#151B28' }]}
             />
+          ) : item.type === 'Movements' ? (
+            <View style={[s.listPlaceholder, { backgroundColor: '#0E1117' }]}>
+              <Image
+                source={require('../../assets/goarrive-icon.png')}
+                style={styles.placeholderLogo}
+                resizeMode="cover"
+              />
+            </View>
           ) : (
             <View style={s.listPlaceholder}>
-              <Icon name={item.type === 'Plans' ? 'plan' : item.type === 'Playbooks' ? 'playbook' : item.type === 'Movements' ? 'movements' : item.type === 'Follow-Alongs' ? 'video' : 'workouts'} size={20} color={item.type === 'Plans' ? '#60A5FA' : item.type === 'Playbooks' ? '#A78BFA' : item.type === 'Follow-Alongs' ? '#22D3EE' : '#4A5568'} />
+              <Icon name={item.type === 'Plans' ? 'plan' : item.type === 'Playbooks' ? 'playbook' : item.type === 'Follow-Alongs' ? 'video' : 'workouts'} size={20} color={item.type === 'Plans' ? '#60A5FA' : item.type === 'Playbooks' ? '#A78BFA' : item.type === 'Follow-Alongs' ? '#22D3EE' : '#4A5568'} />
             </View>
           )}
         </View>
         <View style={s.listContent}>
           <Text style={s.listName}>{item.name}</Text>
-          <Text style={s.listSub}>{item.type.slice(0, -1)}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={s.listSub}>{item.type.slice(0, -1)}</Text>
+            {item.type === 'Movements' && !item.videoUrl && (
+              <View style={{ paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4, backgroundColor: '#2A3340' }}>
+                <Text style={styles.videoNeededText}>Video needed</Text>
+              </View>
+            )}
+          </View>
         </View>
         <Icon name="chevron-right" size={20} color="#4A5568" />
       </Pressable>
@@ -1313,6 +1389,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold',
+  },
+  videoNeededPill: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: '#2A3340',
+  },
+  videoNeededText: {
+    fontSize: 8,
+    color: '#8A95A3',
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-SemiBold',
+  },
+  placeholderLogo: {
+    width: '100%',
+    height: '100%',
   },
 });
 
