@@ -1908,7 +1908,7 @@ export default function WorkoutFolderPage({
                                   <Image
                                     source={require('../assets/goarrive-icon.png')}
                                     style={st.placeholderLogo}
-                                    resizeMode="contain"
+                                    resizeMode="cover"
                                   />
                                 </View>
                               )}
@@ -2158,7 +2158,7 @@ export default function WorkoutFolderPage({
                                     <Image
                                       source={require('../assets/goarrive-icon.png')}
                                       style={st.placeholderLogo}
-                                      resizeMode="contain"
+                                      resizeMode="cover"
                                     />
                                   </View>
                                 )}
@@ -2415,7 +2415,7 @@ export default function WorkoutFolderPage({
                         <Image
                           source={require('../assets/goarrive-icon.png')}
                           style={st.placeholderLogo}
-                          resizeMode="contain"
+                          resizeMode="cover"
                         />
                       </View>
                     )}
@@ -3254,11 +3254,11 @@ const st = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#0E1117',
+    overflow: 'hidden',
   },
   placeholderLogo: {
-    width: '85%',
-    height: '85%',
-    opacity: 0.9,
+    width: '100%',
+    height: '100%',
   },
   nameOverlay: {
     position: 'absolute',
