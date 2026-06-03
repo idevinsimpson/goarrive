@@ -55,7 +55,7 @@ import {
   CropTransform,
 } from '../utils/generateMovementDerivatives';
 import { generateMovementVoice } from '../utils/generateMovementVoice';
-import { analyzeMovementMedia } from '../utils/analyzeMovementMedia';
+import { analyzeMovementMedia, MovementAnalysis } from '../utils/analyzeMovementMedia';
 import { analyzeMovementReps } from '../utils/analyzeMovementReps';
 import { FB, FH } from '../lib/theme';
 
@@ -187,6 +187,44 @@ export default function MovementForm({
   const [cropFrameWidth, setCropFrameWidth] = useState(345);
   const [cropFrameHeight, setCropFrameHeight] = useState(431);
   const [cropTranslateY, setCropTranslateY] = useState(0);
+
+  // ── Phase 3: add-video-later flow (edit mode) ──────────────────────────
+  // Set true when the coach taps Add Video on a placeholder movement.
+  // Drives processAfterCrop to run the full derivatives + AI pipeline
+  // (and updateDoc, not addDoc) instead of the legacy GIF-only reframe path.
+  const addVideoSessionRef = useRef<boolean>(false);
+  const [editProcessing, setEditProcessing] = useState(false);
+  const [editProcessingStatus, setEditProcessingStatus] = useState('Analyzing video…');
+  const [aiMergeData, setAiMergeData] = useState<{
+    proposed: MovementAnalysis;
+    existing: {
+      name: string;
+      category: string;
+      equipment: string;
+      difficulty: string;
+      description: string;
+      muscleGroups: string[];
+      workSec: number;
+      restSec: number;
+      regression: string;
+      progression: string;
+      contraindications: string;
+    };
+    derivatives: {
+      videoUrl: string;
+      thumbnailUrl: string;
+      thumbnailImageUrl: string;
+      gifLowUrl: string;
+      gifHighUrl: string | null;
+      cropScale: number;
+      cropTranslateX: number;
+      cropTranslateY: number;
+      cropFrameWidth: number;
+      cropFrameHeight: number;
+      _loFrames: ImageData[];
+    };
+  } | null>(null);
+  const [aiMergeChecked, setAiMergeChecked] = useState<Record<string, boolean>>({});
 
   // ── Pre-populate on edit ───────────────────────────────────────────────
   useEffect(() => {
@@ -585,7 +623,13 @@ export default function MovementForm({
     setCropFrameWidth(crop.cropFrameWidth);
     setCropFrameHeight(crop.cropFrameHeight);
     setShowCropModal(false);
-    setCreateStep('processing');
+    const isAddVideoSession = isEdit && !!editMovement && addVideoSessionRef.current;
+    if (isAddVideoSession) {
+      setEditProcessing(true);
+      setEditProcessingStatus('Creating thumbnails…');
+    } else {
+      setCreateStep('processing');
+    }
 
     const fullCrop: CropTransform = {
       cropScale: crop.cropScale,
@@ -604,32 +648,102 @@ export default function MovementForm({
       const { gifHighUrl, gifLowUrl, thumbnailImageUrl, _loFrames } = derivatives;
 
       setProcessingProgress(0.4);
+      if (isAddVideoSession) setEditProcessingStatus('Analyzing video…');
 
       // Step 2: AI Analysis (runs on the high-quality GIF)
       let aiData: Record<string, any> = {};
+      let aiAnalysis: MovementAnalysis | null = null;
       if (gifHighUrl) {
         setProcessingStatus('Analyzing movement...');
         setProcessingProgress(0.5);
         try {
-          const analysis = await analyzeMovementMedia(videoUrl, fullCrop);
-          if (analysis) {
+          aiAnalysis = await analyzeMovementMedia(videoUrl, fullCrop);
+          if (aiAnalysis) {
             aiData = {
-              name: analysis.name || '',
-              category: analysis.category || '',
-              equipment: analysis.equipment || '',
-              difficulty: analysis.difficulty || '',
-              muscleGroups: analysis.muscleGroups || [],
-              description: analysis.description || '',
-              regression: analysis.regression || '',
-              progression: analysis.progression || '',
-              contraindications: analysis.contraindications || '',
-              workSec: analysis.workSec || 30,
-              restSec: analysis.restSec || 15,
+              name: aiAnalysis.name || '',
+              category: aiAnalysis.category || '',
+              equipment: aiAnalysis.equipment || '',
+              difficulty: aiAnalysis.difficulty || '',
+              muscleGroups: aiAnalysis.muscleGroups || [],
+              description: aiAnalysis.description || '',
+              regression: aiAnalysis.regression || '',
+              progression: aiAnalysis.progression || '',
+              contraindications: aiAnalysis.contraindications || '',
+              workSec: aiAnalysis.workSec || 30,
+              restSec: aiAnalysis.restSec || 15,
             };
           }
         } catch (aiErr) {
           console.warn('[MovementForm] AI analysis failed, saving without:', aiErr);
         }
+      }
+
+      // Edit-mode add-video flow: do NOT auto-overwrite metadata.
+      // Open the AI confirm-merge modal with side-by-side proposals.
+      if (isAddVideoSession && editMovement) {
+        addVideoSessionRef.current = false;
+        setEditProcessing(false);
+        const proposed: MovementAnalysis = aiAnalysis ?? {
+          name: '',
+          category: '',
+          equipment: '',
+          difficulty: '',
+          muscleGroups: [],
+          description: '',
+          regression: '',
+          progression: '',
+          contraindications: '',
+          workSec: 30,
+          restSec: 15,
+          confidence: 0,
+        };
+        setAiMergeData({
+          proposed,
+          existing: {
+            name,
+            category,
+            equipment,
+            difficulty,
+            description,
+            muscleGroups,
+            workSec: parseInt(workSec, 10) || 30,
+            restSec: parseInt(restSec, 10) || 15,
+            regression,
+            progression,
+            contraindications,
+          },
+          derivatives: {
+            videoUrl: videoUrl.trim(),
+            thumbnailUrl: gifHighUrl || thumbnailImageUrl || '',
+            thumbnailImageUrl: thumbnailImageUrl || '',
+            gifLowUrl: gifLowUrl || '',
+            gifHighUrl,
+            cropScale: crop.cropScale,
+            cropTranslateX: crop.cropTranslateX,
+            cropTranslateY: crop.cropTranslateY,
+            cropFrameWidth: crop.cropFrameWidth,
+            cropFrameHeight: crop.cropFrameHeight,
+            _loFrames,
+          },
+        });
+        // Default-check every AI field that returned a non-empty value
+        // so the common case (accept all) is one tap.
+        const initialChecked: Record<string, boolean> = {};
+        if (aiAnalysis?.name) initialChecked.name = true;
+        if (aiAnalysis?.category) initialChecked.category = true;
+        if (aiAnalysis?.equipment) initialChecked.equipment = true;
+        if (aiAnalysis?.difficulty) initialChecked.difficulty = true;
+        if (aiAnalysis?.description) initialChecked.description = true;
+        if (aiAnalysis?.muscleGroups?.length) initialChecked.muscleGroups = true;
+        if (aiAnalysis?.workSec) initialChecked.workSec = true;
+        if (aiAnalysis?.restSec) initialChecked.restSec = true;
+        if (aiAnalysis?.regression) initialChecked.regression = true;
+        if (aiAnalysis?.progression) initialChecked.progression = true;
+        if (aiAnalysis?.contraindications) initialChecked.contraindications = true;
+        setAiMergeChecked(initialChecked);
+        setProcessingProgress(0);
+        setProcessingStatus('');
+        return;
       }
 
       if (!aiData.name) {
@@ -729,10 +843,116 @@ export default function MovementForm({
     } catch (err) {
       console.error('[MovementForm] Processing pipeline error:', err);
       Alert.alert('Error', 'Something went wrong while creating the movement. Please try again.');
-      setCreateStep('upload');
+      if (isAddVideoSession) {
+        addVideoSessionRef.current = false;
+        setEditProcessing(false);
+      } else {
+        setCreateStep('upload');
+      }
       setProcessingStatus('');
       setProcessingProgress(0);
     }
+  };
+
+  // ── Phase 3: Add-Video CTA entrypoint ──────────────────────────────────
+  const startAddVideo = (source: 'library' | 'camera') => {
+    addVideoSessionRef.current = true;
+    if (source === 'library') {
+      pickFromLibrary();
+    } else {
+      recordFromCamera();
+    }
+  };
+
+  // ── Phase 3: AI confirm-merge handler ──────────────────────────────────
+  // Called from AIConfirmMergeModal. `apply` = false when coach taps "Skip".
+  // Always writes derivatives + crop fields (always-update); only writes
+  // AI-derived metadata fields the coach checked.
+  const handleAiMergeConfirm = async (apply: boolean) => {
+    if (!aiMergeData || !editMovement) {
+      setAiMergeData(null);
+      return;
+    }
+    const checked = apply ? aiMergeChecked : {};
+    const p = aiMergeData.proposed;
+    const d = aiMergeData.derivatives;
+    const updates: Record<string, any> = {
+      videoUrl: d.videoUrl,
+      thumbnailUrl: d.thumbnailUrl,
+      thumbnailImageUrl: d.thumbnailImageUrl,
+      gifLowUrl: d.gifLowUrl,
+      cropScale: d.cropScale,
+      cropTranslateX: d.cropTranslateX,
+      cropTranslateY: d.cropTranslateY,
+      cropFrameWidth: d.cropFrameWidth,
+      cropFrameHeight: d.cropFrameHeight,
+      updatedAt: serverTimestamp(),
+    };
+    if (checked.name && p.name) { updates.name = p.name; setName(p.name); }
+    if (checked.category && p.category) { updates.category = p.category; setCategory(p.category); }
+    if (checked.equipment && p.equipment) { updates.equipment = p.equipment; setEquipment(p.equipment); }
+    if (checked.difficulty && p.difficulty) { updates.difficulty = p.difficulty; setDifficulty(p.difficulty); }
+    if (checked.description && p.description) { updates.description = p.description; setDescription(p.description); }
+    if (checked.muscleGroups && p.muscleGroups?.length) { updates.muscleGroups = p.muscleGroups; setMuscleGroups(p.muscleGroups); }
+    if (checked.workSec && p.workSec) { updates.workSec = p.workSec; setWorkSec(String(p.workSec)); }
+    if (checked.restSec && p.restSec) { updates.restSec = p.restSec; setRestSec(String(p.restSec)); }
+    if (checked.regression && p.regression) { updates.regression = p.regression; setRegression(p.regression); }
+    if (checked.progression && p.progression) { updates.progression = p.progression; setProgression(p.progression); }
+    if (checked.contraindications && p.contraindications) { updates.contraindications = p.contraindications; setContraindications(p.contraindications); }
+
+    // Reflect derivative URLs in form state so the live preview updates
+    setVideoUrl(d.videoUrl);
+    setThumbnailUrl(d.thumbnailUrl);
+    setCropScale(d.cropScale);
+    setCropTranslateX(d.cropTranslateX);
+    setCropTranslateY(d.cropTranslateY);
+    setCropFrameWidth(d.cropFrameWidth);
+    setCropFrameHeight(d.cropFrameHeight);
+
+    const movementId = editMovement.id;
+    try {
+      await updateDoc(doc(db, 'movements', movementId), updates);
+      savedDocIdRef.current = movementId;
+
+      // Voice regen if name was applied (and changed)
+      const newName: string | undefined = updates.name;
+      if (newName && newName.trim() && newName.trim() !== lastVoiceNameRef.current) {
+        lastVoiceNameRef.current = newName.trim();
+        updateDoc(doc(db, 'movements', movementId), { voiceUrl: '', voiceText: '', voiceName: '' }).catch(() => {});
+        generateMovementVoice(movementId, newName.trim())
+          .then(({ url, text, voiceName }) => {
+            if (url) {
+              updateDoc(doc(db, 'movements', movementId), { voiceUrl: url, voiceText: text, voiceName }).catch(() => {});
+            }
+          })
+          .catch(() => {});
+      }
+
+      // One-rep loop detection (background)
+      if (d.gifHighUrl && d._loFrames.length > 0) {
+        const gifHighUrl = d.gifHighUrl;
+        const loFrames = d._loFrames;
+        (async () => {
+          try {
+            const repAnalysis = await analyzeMovementReps(gifHighUrl);
+            if (repAnalysis && repAnalysis.repCount >= 2) {
+              const loopBlob = await encodeOneRepLoopGif(loFrames, repAnalysis.loopStartPct, repAnalysis.loopEndPct);
+              if (loopBlob) {
+                const gifLoopUrl = await uploadBlob(loopBlob, 'thumbnails-loop', 'gif');
+                await updateDoc(doc(db, 'movements', movementId), { gifLoopUrl });
+              }
+            }
+          } catch (err) {
+            console.warn('[MovementForm] One-rep loop generation failed:', err);
+          }
+        })();
+      }
+    } catch (err) {
+      console.error('[MovementForm] AI merge confirm error:', err);
+      Alert.alert('Error', 'Could not save the video. Please try again.');
+    }
+    setAiMergeData(null);
+    setAiMergeChecked({});
   };
 
   // ── Muscle group toggle (for edit mode) ───────────────────────────────
@@ -1191,7 +1411,53 @@ export default function MovementForm({
                       </Pressable>
                     </View>
                   </View>
-                ) : null}
+                ) : (
+                  // Phase 3 placeholder "Add Video" CTA — appears in edit mode when
+                  // the movement was created without a video. Picks/records a clip,
+                  // runs the full derivatives + AI pipeline, then opens the AI
+                  // confirm-merge modal so the coach picks which fields to overwrite.
+                  <View style={st.addVideoCta}>
+                    {uploading ? (
+                      <View style={st.uploadingContainer}>
+                        <ActivityIndicator size="small" color="#F5A623" />
+                        <Text style={st.uploadingText}>
+                          Uploading... {Math.round(uploadProgress * 100)}%
+                        </Text>
+                        <View style={st.progressBarSmall}>
+                          <View
+                            style={[
+                              st.progressFillSmall,
+                              { width: `${Math.round(uploadProgress * 100)}%` },
+                            ]}
+                          />
+                        </View>
+                      </View>
+                    ) : (
+                      <>
+                        <Text style={st.addVideoCtaTitle}>Add a video</Text>
+                        <Text style={st.addVideoCtaHint}>
+                          This movement was created without a video. Add one now and AI will suggest fields.
+                        </Text>
+                        <View style={st.addVideoCtaRow}>
+                          <Pressable
+                            style={st.addVideoCtaBtn}
+                            onPress={() => startAddVideo('library')}
+                          >
+                            <Icon name="image" size={18} color="#F5A623" />
+                            <Text style={st.addVideoCtaBtnText}>Pick from Library</Text>
+                          </Pressable>
+                          <Pressable
+                            style={st.addVideoCtaBtn}
+                            onPress={() => startAddVideo('camera')}
+                          >
+                            <Icon name="camera" size={18} color="#F5A623" />
+                            <Text style={st.addVideoCtaBtnText}>Record</Text>
+                          </Pressable>
+                        </View>
+                      </>
+                    )}
+                  </View>
+                )}
 
                 {/* Regression / Progression */}
                 <Text style={st.label}>Regression (Easier Alternative)</Text>
@@ -1261,6 +1527,13 @@ export default function MovementForm({
           videoUri={videoUrl}
           initialCrop={{ cropScale, cropTranslateX, cropTranslateY, cropFrameWidth, cropFrameHeight }}
           onDone={(crop: CropValues) => {
+            // Phase 3: when the coach is adding a video to a placeholder,
+            // run the full derivatives + AI pipeline (processAfterCrop)
+            // instead of the legacy GIF-only reframe path.
+            if (addVideoSessionRef.current) {
+              processAfterCrop(crop);
+              return;
+            }
             setCropScale(crop.cropScale);
             setCropTranslateX(crop.cropTranslateX);
             setCropTranslateY(crop.cropTranslateY);
@@ -1269,7 +1542,32 @@ export default function MovementForm({
             setShowCropModal(false);
             generateAndUploadGif(videoUrl, crop);
           }}
-          onCancel={() => setShowCropModal(false)}
+          onCancel={() => {
+            setShowCropModal(false);
+            // If the coach cancels crop during an add-video session, drop
+            // the just-uploaded clip so the placeholder CTA reappears.
+            if (addVideoSessionRef.current) {
+              addVideoSessionRef.current = false;
+              setVideoUrl('');
+            }
+          }}
+        />
+
+        {/* Phase 3: full-screen processing overlay while derivatives + AI run */}
+        <Modal visible={editProcessing} transparent animationType="fade">
+          <View style={st.editProcessingOverlay}>
+            <ActivityIndicator size="large" color="#F5A623" />
+            <Text style={st.editProcessingText}>{editProcessingStatus}</Text>
+          </View>
+        </Modal>
+
+        {/* Phase 3: AI confirm-merge modal (policy C — opt-in per field) */}
+        <AIConfirmMergeModal
+          data={aiMergeData}
+          checked={aiMergeChecked}
+          onToggle={(key) => setAiMergeChecked((prev) => ({ ...prev, [key]: !prev[key] }))}
+          onSkip={() => handleAiMergeConfirm(false)}
+          onApply={() => handleAiMergeConfirm(true)}
         />
       </>
     );
@@ -1651,6 +1949,136 @@ export default function MovementForm({
         }}
       />
     </>
+  );
+}
+
+// ── Phase 3: AI confirm-merge modal ─────────────────────────────────────
+// Renders side-by-side existing vs. AI-proposed values with an opt-in
+// checkbox per field. Coach taps Apply Selected to write checked fields;
+// Skip writes only derivative/crop fields (no AI metadata overwrite).
+type AIMergeFieldKey =
+  | 'name'
+  | 'category'
+  | 'equipment'
+  | 'difficulty'
+  | 'description'
+  | 'muscleGroups'
+  | 'workSec'
+  | 'restSec'
+  | 'regression'
+  | 'progression'
+  | 'contraindications';
+
+const AI_MERGE_FIELDS: { key: AIMergeFieldKey; label: string }[] = [
+  { key: 'name', label: 'Name' },
+  { key: 'category', label: 'Category' },
+  { key: 'equipment', label: 'Equipment' },
+  { key: 'difficulty', label: 'Difficulty' },
+  { key: 'muscleGroups', label: 'Muscle Groups' },
+  { key: 'description', label: 'Description' },
+  { key: 'workSec', label: 'Work (sec)' },
+  { key: 'restSec', label: 'Rest (sec)' },
+  { key: 'regression', label: 'Regression' },
+  { key: 'progression', label: 'Progression' },
+  { key: 'contraindications', label: 'Contraindications' },
+];
+
+interface AIConfirmMergeModalProps {
+  data: {
+    proposed: MovementAnalysis;
+    existing: {
+      name: string;
+      category: string;
+      equipment: string;
+      difficulty: string;
+      description: string;
+      muscleGroups: string[];
+      workSec: number;
+      restSec: number;
+      regression: string;
+      progression: string;
+      contraindications: string;
+    };
+  } | null;
+  checked: Record<string, boolean>;
+  onToggle: (key: AIMergeFieldKey) => void;
+  onSkip: () => void;
+  onApply: () => void;
+}
+
+function formatMergeValue(key: AIMergeFieldKey, raw: any): string {
+  if (raw === null || raw === undefined) return '—';
+  if (key === 'muscleGroups') {
+    const arr = Array.isArray(raw) ? raw : [];
+    return arr.length ? arr.join(', ') : '—';
+  }
+  const s = String(raw).trim();
+  return s.length ? s : '—';
+}
+
+function AIConfirmMergeModal({ data, checked, onToggle, onSkip, onApply }: AIConfirmMergeModalProps) {
+  if (!data) return null;
+  const { proposed, existing } = data;
+  return (
+    <Modal visible={!!data} transparent animationType="slide" onRequestClose={onSkip}>
+      <View style={st.aiMergeBackdrop}>
+        <View style={st.aiMergeSheet}>
+          <View style={st.aiMergeHeader}>
+            <Text style={st.aiMergeTitle}>Apply AI suggestions?</Text>
+            <Text style={st.aiMergeSubtitle}>
+              Check each field you want to overwrite. The video and crop are saved either way.
+            </Text>
+          </View>
+          <ScrollView
+            style={st.aiMergeScroll}
+            contentContainerStyle={st.aiMergeScrollContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            {AI_MERGE_FIELDS.map(({ key, label }) => {
+              const proposedVal = formatMergeValue(key, (proposed as any)[key]);
+              const existingVal = formatMergeValue(key, (existing as any)[key]);
+              const isChecked = !!checked[key];
+              // Hide rows where AI returned nothing useful — coach can't overwrite
+              // existing values with empty AI output.
+              if (proposedVal === '—') return null;
+              const changed = proposedVal !== existingVal;
+              return (
+                <Pressable
+                  key={key}
+                  style={[st.aiMergeRow, !changed && st.aiMergeRowUnchanged]}
+                  onPress={() => onToggle(key)}
+                >
+                  <View style={[st.aiMergeCheckbox, isChecked && st.aiMergeCheckboxChecked]}>
+                    {isChecked ? <Icon name="checkmark" size={14} color="#0E1117" /> : null}
+                  </View>
+                  <View style={st.aiMergeRowBody}>
+                    <Text style={st.aiMergeRowLabel}>{label}</Text>
+                    <View style={st.aiMergeValues}>
+                      <View style={st.aiMergeValueCol}>
+                        <Text style={st.aiMergeValueTag}>Current</Text>
+                        <Text style={st.aiMergeValueExisting} numberOfLines={3}>{existingVal}</Text>
+                      </View>
+                      <View style={st.aiMergeValueCol}>
+                        <Text style={[st.aiMergeValueTag, st.aiMergeValueTagAi]}>AI</Text>
+                        <Text style={st.aiMergeValueProposed} numberOfLines={3}>{proposedVal}</Text>
+                      </View>
+                    </View>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          <View style={st.aiMergeFooter}>
+            <Pressable style={st.aiMergeSkipBtn} onPress={onSkip}>
+              <Text style={st.aiMergeSkipBtnText}>Skip suggestions</Text>
+            </Pressable>
+            <Pressable style={st.aiMergeApplyBtn} onPress={onApply}>
+              <Text style={st.aiMergeApplyBtnText}>Apply selected</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -2192,5 +2620,213 @@ const st = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
     paddingHorizontal: 24,
+  },
+
+  // ── Phase 3: Add-Video CTA (edit mode placeholder) ───────────────────
+  addVideoCta: {
+    backgroundColor: 'rgba(245,166,35,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.25)',
+    borderRadius: 12,
+    padding: 16,
+    gap: 10,
+    marginBottom: 8,
+  },
+  addVideoCtaTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FH,
+  },
+  addVideoCtaHint: {
+    fontSize: 12,
+    color: '#8A95A3',
+    fontFamily: FB,
+    lineHeight: 16,
+  },
+  addVideoCtaRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  addVideoCtaBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(245,166,35,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.35)',
+  },
+  addVideoCtaBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#F5A623',
+    fontFamily: FB,
+  },
+
+  // ── Phase 3: edit-mode processing overlay ─────────────────────────────
+  editProcessingOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(14,17,23,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 16,
+  },
+  editProcessingText: {
+    fontSize: 14,
+    color: '#F0F4F8',
+    fontFamily: FB,
+    fontWeight: '600',
+  },
+
+  // ── Phase 3: AI confirm-merge modal ───────────────────────────────────
+  aiMergeBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  aiMergeSheet: {
+    backgroundColor: '#0E1117',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '90%',
+    borderTopWidth: 1,
+    borderTopColor: '#2A3347',
+  },
+  aiMergeHeader: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3347',
+    gap: 4,
+  },
+  aiMergeTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FH,
+  },
+  aiMergeSubtitle: {
+    fontSize: 13,
+    color: '#8A95A3',
+    fontFamily: FB,
+    lineHeight: 18,
+  },
+  aiMergeScroll: {
+    flexGrow: 0,
+  },
+  aiMergeScrollContent: {
+    padding: 16,
+    gap: 10,
+  },
+  aiMergeRow: {
+    flexDirection: 'row',
+    gap: 12,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: '#161B22',
+    borderWidth: 1,
+    borderColor: '#2A3347',
+  },
+  aiMergeRowUnchanged: {
+    opacity: 0.6,
+  },
+  aiMergeCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#4A5568',
+    backgroundColor: '#0E1117',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  aiMergeCheckboxChecked: {
+    backgroundColor: '#F5A623',
+    borderColor: '#F5A623',
+  },
+  aiMergeRowBody: {
+    flex: 1,
+    gap: 6,
+  },
+  aiMergeRowLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#8A95A3',
+    fontFamily: FH,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  aiMergeValues: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  aiMergeValueCol: {
+    flex: 1,
+    gap: 2,
+  },
+  aiMergeValueTag: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#4A5568',
+    fontFamily: FH,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  aiMergeValueTagAi: {
+    color: '#F5A623',
+  },
+  aiMergeValueExisting: {
+    fontSize: 13,
+    color: '#8A95A3',
+    fontFamily: FB,
+  },
+  aiMergeValueProposed: {
+    fontSize: 13,
+    color: '#F0F4F8',
+    fontFamily: FB,
+    fontWeight: '600',
+  },
+  aiMergeFooter: {
+    flexDirection: 'row',
+    gap: 12,
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#2A3347',
+  },
+  aiMergeSkipBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2A3347',
+  },
+  aiMergeSkipBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#8A95A3',
+    fontFamily: FB,
+  },
+  aiMergeApplyBtn: {
+    flex: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 10,
+    backgroundColor: '#F5A623',
+  },
+  aiMergeApplyBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0E1117',
+    fontFamily: FH,
   },
 });
