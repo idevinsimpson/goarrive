@@ -1904,8 +1904,12 @@ export default function WorkoutFolderPage({
                                   resizeMode="cover"
                                 />
                               ) : (
-                                <View style={st.movPlaceholder}>
-                                  <Icon name="movements" size={20} color="#4A5568" />
+                                <View style={st.placeholderLogoFrame}>
+                                  <Image
+                                    source={require('../assets/goarrive-icon.png')}
+                                    style={st.placeholderLogo}
+                                    resizeMode="contain"
+                                  />
                                 </View>
                               )}
 
@@ -2150,8 +2154,12 @@ export default function WorkoutFolderPage({
                                 {thumbUri ? (
                                   <Image source={{ uri: thumbUri }} style={st.listThumbImg} resizeMode="cover" />
                                 ) : (
-                                  <View style={st.listThumbPlaceholder}>
-                                    <Icon name="movements" size={16} color="#4A5568" />
+                                  <View style={st.placeholderLogoFrame}>
+                                    <Image
+                                      source={require('../assets/goarrive-icon.png')}
+                                      style={st.placeholderLogo}
+                                      resizeMode="contain"
+                                    />
                                   </View>
                                 )}
                               </View>
@@ -2403,8 +2411,12 @@ export default function WorkoutFolderPage({
                     {mov.thumbnailUrl || mov.mediaUrl ? (
                       <Image source={{ uri: mov.thumbnailUrl || mov.mediaUrl || '' }} style={st.pickerThumbImg} resizeMode="cover" />
                     ) : (
-                      <View style={st.pickerThumbPlaceholder}>
-                        <Icon name="movements" size={16} color="#4A5568" />
+                      <View style={st.placeholderLogoFrame}>
+                        <Image
+                          source={require('../assets/goarrive-icon.png')}
+                          style={st.placeholderLogo}
+                          resizeMode="contain"
+                        />
                       </View>
                     )}
                   </View>
@@ -3236,6 +3248,17 @@ const st = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#1A2332',
+  },
+  placeholderLogoFrame: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#0E1117',
+  },
+  placeholderLogo: {
+    width: '85%',
+    height: '85%',
+    opacity: 0.9,
   },
   nameOverlay: {
     position: 'absolute',

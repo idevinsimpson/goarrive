@@ -1866,7 +1866,7 @@ const st = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center', backgroundColor: '#0E1117',
   },
   placeholderLogo: {
-    width: '60%', height: '60%', opacity: 0.65,
+    width: '85%', height: '85%', opacity: 0.9,
   },
   posterFallback: {
     ...StyleSheet.absoluteFillObject, backgroundColor: '#000000',

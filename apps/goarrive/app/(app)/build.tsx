@@ -733,7 +733,15 @@ function BuildScreenInner() {
               priority={tilePriority}
               registerTile={previewEngine.registerTile}
               borderRadius={10}
-              fallbackIcon={<Icon name={iconName} size={32} color={iconColor} />}
+              fallbackIcon={isMovement ? (
+                <Image
+                  source={require('../../assets/goarrive-icon.png')}
+                  style={styles.placeholderLogo}
+                  resizeMode="contain"
+                />
+              ) : (
+                <Icon name={iconName} size={32} color={iconColor} />
+              )}
             />
           )}
 
@@ -768,9 +776,17 @@ function BuildScreenInner() {
               source={{ uri: previewEngine.scrollState !== 'scrolling' ? (item.thumbnailUrl || item.thumbnailImageUrl || item.gifLowUrl || item.mediaUrl) : 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' }}
               style={[s.listImage, { backgroundColor: '#151B28' }]}
             />
+          ) : item.type === 'Movements' ? (
+            <View style={[s.listPlaceholder, { backgroundColor: '#0E1117' }]}>
+              <Image
+                source={require('../../assets/goarrive-icon.png')}
+                style={styles.placeholderLogo}
+                resizeMode="contain"
+              />
+            </View>
           ) : (
             <View style={s.listPlaceholder}>
-              <Icon name={item.type === 'Plans' ? 'plan' : item.type === 'Playbooks' ? 'playbook' : item.type === 'Movements' ? 'movements' : item.type === 'Follow-Alongs' ? 'video' : 'workouts'} size={20} color={item.type === 'Plans' ? '#60A5FA' : item.type === 'Playbooks' ? '#A78BFA' : item.type === 'Follow-Alongs' ? '#22D3EE' : '#4A5568'} />
+              <Icon name={item.type === 'Plans' ? 'plan' : item.type === 'Playbooks' ? 'playbook' : item.type === 'Follow-Alongs' ? 'video' : 'workouts'} size={20} color={item.type === 'Plans' ? '#60A5FA' : item.type === 'Playbooks' ? '#A78BFA' : item.type === 'Follow-Alongs' ? '#22D3EE' : '#4A5568'} />
             </View>
           )}
         </View>
@@ -1340,6 +1356,11 @@ const styles = StyleSheet.create({
     color: '#8A95A3',
     fontWeight: '600',
     fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-SemiBold',
+  },
+  placeholderLogo: {
+    width: '85%',
+    height: '85%',
+    opacity: 0.9,
   },
 });
 
