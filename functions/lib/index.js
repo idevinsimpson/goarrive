@@ -89,7 +89,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = void 0;
-exports.resolveShareToken = exports.revokeShareToken = exports.createShareToken = exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = void 0;
+exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -8018,7 +8018,20 @@ exports.getEmbeddedSessionJoinConfig = (0, https_1.onCall)({
 });
 // ─── Workout Share Links ─────────────────────────────────────────────────────
 const crypto = __importStar(require("crypto"));
+const VALID_VISIBILITIES = ['restricted', 'anyone_with_link', 'anyone_with_link_signin_required'];
+function normalizeVisibility(v) {
+    return VALID_VISIBILITIES.includes(v) ? v : 'anyone_with_link';
+}
+function normalizeExpiresAt(input) {
+    if (input === null || input === undefined)
+        return null;
+    const ms = typeof input === 'number' ? input : typeof input === 'string' ? Date.parse(input) : NaN;
+    if (!Number.isFinite(ms))
+        return null;
+    return admin.firestore.Timestamp.fromMillis(ms);
+}
 exports.createShareToken = (0, https_1.onCall)(async (request) => {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
     if (!request.auth) {
         throw new https_1.HttpsError('unauthenticated', 'Must be signed in.');
     }
@@ -8027,7 +8040,7 @@ exports.createShareToken = (0, https_1.onCall)(async (request) => {
     if (callerRole !== 'coach' && callerRole !== 'platformAdmin' && !callerToken.admin) {
         throw new https_1.HttpsError('permission-denied', 'Only coaches can share workouts.');
     }
-    const { workoutId } = request.data;
+    const { workoutId, visibility, expiresAt } = request.data;
     if (!workoutId) {
         throw new https_1.HttpsError('invalid-argument', 'workoutId is required.');
     }
@@ -8048,9 +8061,19 @@ exports.createShareToken = (0, https_1.onCall)(async (request) => {
         .get();
     if (!existingTokens.empty) {
         const existing = existingTokens.docs[0];
-        return { shareId: existing.id, alreadyExists: true };
+        const data = existing.data();
+        return {
+            shareId: existing.id,
+            alreadyExists: true,
+            visibility: normalizeVisibility(data.visibility),
+            expiresAt: (_c = (_b = (_a = data.expiresAt) === null || _a === void 0 ? void 0 : _a.toMillis) === null || _b === void 0 ? void 0 : _b.call(_a)) !== null && _c !== void 0 ? _c : null,
+            resolvedCount: (_d = data.resolvedCount) !== null && _d !== void 0 ? _d : 0,
+            lastResolvedAt: (_g = (_f = (_e = data.lastResolvedAt) === null || _e === void 0 ? void 0 : _e.toMillis) === null || _f === void 0 ? void 0 : _f.call(_e)) !== null && _g !== void 0 ? _g : null,
+        };
     }
     const shareId = crypto.randomBytes(16).toString('hex');
+    const resolvedVisibility = normalizeVisibility(visibility);
+    const resolvedExpiresAt = normalizeExpiresAt(expiresAt);
     await db.collection('shareTokens').doc(shareId).set({
         workoutId,
         tenantId: workoutData.tenantId || coachId,
@@ -8058,8 +8081,62 @@ exports.createShareToken = (0, https_1.onCall)(async (request) => {
         coachName: workoutData.coachName || null,
         revokedAt: null,
         createdAt: firestore_2.FieldValue.serverTimestamp(),
+        visibility: resolvedVisibility,
+        expiresAt: resolvedExpiresAt,
+        resolvedCount: 0,
+        firstResolvedAt: null,
+        lastResolvedAt: null,
     });
-    return { shareId, alreadyExists: false };
+    return {
+        shareId,
+        alreadyExists: false,
+        visibility: resolvedVisibility,
+        expiresAt: (_j = (_h = resolvedExpiresAt === null || resolvedExpiresAt === void 0 ? void 0 : resolvedExpiresAt.toMillis) === null || _h === void 0 ? void 0 : _h.call(resolvedExpiresAt)) !== null && _j !== void 0 ? _j : null,
+        resolvedCount: 0,
+        lastResolvedAt: null,
+    };
+});
+exports.updateShareToken = (0, https_1.onCall)(async (request) => {
+    var _a, _b, _c;
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in.');
+    }
+    const callerToken = request.auth.token;
+    const callerRole = callerToken.role;
+    const coachId = callerToken.coachId || request.auth.uid;
+    const isAdmin = callerRole === 'platformAdmin' || !!callerToken.admin;
+    const { workoutId, visibility, expiresAt } = request.data;
+    if (!workoutId) {
+        throw new https_1.HttpsError('invalid-argument', 'workoutId is required.');
+    }
+    const baseQuery = db.collection('shareTokens')
+        .where('workoutId', '==', workoutId)
+        .where('revokedAt', '==', null);
+    const tokens = isAdmin
+        ? await baseQuery.get()
+        : await baseQuery.where('createdBy', '==', coachId).get();
+    if (tokens.empty) {
+        throw new https_1.HttpsError('not-found', 'No active share link found for this workout.');
+    }
+    const updates = {};
+    if (visibility !== undefined)
+        updates.visibility = normalizeVisibility(visibility);
+    if (expiresAt !== undefined)
+        updates.expiresAt = normalizeExpiresAt(expiresAt);
+    if (Object.keys(updates).length === 0) {
+        return { updated: 0 };
+    }
+    const batch = db.batch();
+    tokens.docs.forEach((d) => batch.update(d.ref, updates));
+    await batch.commit();
+    const first = tokens.docs[0];
+    const data = Object.assign(Object.assign({}, first.data()), updates);
+    return {
+        updated: tokens.size,
+        shareId: first.id,
+        visibility: normalizeVisibility(data.visibility),
+        expiresAt: (_c = (_b = (_a = data.expiresAt) === null || _a === void 0 ? void 0 : _a.toMillis) === null || _b === void 0 ? void 0 : _b.call(_a)) !== null && _c !== void 0 ? _c : null,
+    };
 });
 exports.revokeShareToken = (0, https_1.onCall)(async (request) => {
     if (!request.auth) {
@@ -8112,6 +8189,18 @@ exports.resolveShareToken = (0, https_1.onRequest)({ cors: true, region: 'us-cen
         res.status(410).json({ error: 'This share link has been revoked.' });
         return;
     }
+    const expiresAt = tokenData.expiresAt;
+    if (expiresAt && expiresAt.toMillis() < Date.now()) {
+        res.status(410).json({ error: 'This share link has expired.' });
+        return;
+    }
+    // Tokens created before visibility was added default to anyone-with-link
+    // (preserves existing share-link behavior — they were already meant to be shared).
+    const visibility = normalizeVisibility(tokenData.visibility);
+    if (visibility === 'restricted') {
+        res.status(403).json({ error: 'This workout is no longer shared via link.' });
+        return;
+    }
     const workoutSnap = await db.collection('workouts').doc(tokenData.workoutId).get();
     if (!workoutSnap.exists) {
         res.status(404).json({ error: 'This workout no longer exists.' });
@@ -8131,6 +8220,7 @@ exports.resolveShareToken = (0, https_1.onRequest)({ cors: true, region: 'us-cen
             // Invalid token — treat as unauthenticated
         }
     }
+    const requireAuth = visibility === 'anyone_with_link_signin_required';
     const teaser = {
         workoutId: tokenData.workoutId,
         name: workout.name || 'Workout',
@@ -8142,10 +8232,56 @@ exports.resolveShareToken = (0, https_1.onRequest)({ cors: true, region: 'us-cen
         coachName: coachData.displayName || coachData.name || 'Coach',
         coachPhotoUrl: coachData.photoURL || null,
         tags: workout.tags || [],
+        visibility,
+        requireAuth,
     };
-    if (!isAuthenticated) {
+    if (requireAuth && !isAuthenticated) {
         res.status(200).json({ authenticated: false, teaser });
         return;
+    }
+    // Best-effort view tracking — fire-and-forget, never block the response.
+    const viewUpdate = {
+        resolvedCount: firestore_2.FieldValue.increment(1),
+        lastResolvedAt: firestore_2.FieldValue.serverTimestamp(),
+    };
+    if (!tokenData.firstResolvedAt)
+        viewUpdate.firstResolvedAt = firestore_2.FieldValue.serverTimestamp();
+    tokenSnap.ref.update(viewUpdate).catch((err) => {
+        console.warn('[resolveShareToken] view counter update failed:', err);
+    });
+    // Enrich every referenced movement with its canonical voiceUrl + name so the
+    // player can speak movement names. Block snapshots stored in workout docs
+    // don't include voiceUrl (WorkoutFolderPage save logic omits it), and the
+    // client-side useMovementHydrate onSnapshot is blocked by firestore.rules
+    // for share-link viewers (unauthenticated or non-coach). Without this
+    // server-side merge the player hears only static cues ("next up",
+    // "halfway") and the movement names are silent.
+    const movementIds = new Set();
+    for (const block of (workout.blocks || [])) {
+        for (const m of (block.movements || [])) {
+            if (typeof m.movementId === 'string' && m.movementId) {
+                movementIds.add(m.movementId);
+            }
+        }
+    }
+    const movementCanonical = {};
+    if (movementIds.size > 0) {
+        try {
+            const refs = Array.from(movementIds).map((id) => db.collection('movements').doc(id));
+            const snaps = await db.getAll(...refs);
+            for (const snap of snaps) {
+                if (!snap.exists)
+                    continue;
+                const data = snap.data() || {};
+                movementCanonical[snap.id] = {
+                    voiceUrl: typeof data.voiceUrl === 'string' ? data.voiceUrl : '',
+                    name: typeof data.name === 'string' ? data.name : '',
+                };
+            }
+        }
+        catch (err) {
+            console.warn('[resolveShareToken] movement enrichment failed:', err);
+        }
     }
     const sanitizedBlocks = (workout.blocks || []).map((block) => {
         var _a;
@@ -8154,17 +8290,25 @@ exports.resolveShareToken = (0, https_1.onRequest)({ cors: true, region: 'us-cen
             name: block.name || '',
             label: block.label || '',
             movements: (block.movements || []).map((m) => {
-                var _a, _b, _c, _d, _e;
+                var _a, _b, _c, _d, _e, _f, _g;
+                const canonical = m.movementId ? movementCanonical[m.movementId] : undefined;
+                // Canonical voiceUrl + name win for audio/identity so a rename or
+                // re-recording in the library propagates to share-link viewers.
+                const resolvedName = ((canonical === null || canonical === void 0 ? void 0 : canonical.name) && canonical.name.trim())
+                    || m.movementName
+                    || m.name
+                    || '';
+                const resolvedVoiceUrl = (canonical === null || canonical === void 0 ? void 0 : canonical.voiceUrl) || m.voiceUrl || null;
                 return ({
                     movementId: m.movementId || '',
-                    movementName: m.movementName || m.name || '',
-                    name: m.name || m.movementName || '',
+                    movementName: resolvedName,
+                    name: resolvedName,
                     category: m.category || '',
                     muscleGroup: m.muscleGroup || '',
                     videoUrl: m.videoUrl || null,
                     mediaUrl: m.mediaUrl || null,
                     thumbnailUrl: m.thumbnailUrl || null,
-                    voiceUrl: m.voiceUrl || null,
+                    voiceUrl: resolvedVoiceUrl,
                     nextUpVoiceUrl: m.nextUpVoiceUrl || null,
                     sets: m.sets || 0,
                     reps: m.reps || '',
@@ -8174,13 +8318,15 @@ exports.resolveShareToken = (0, https_1.onRequest)({ cors: true, region: 'us-cen
                     restSec: m.restSec || 0,
                     restSeconds: m.restSeconds || 0,
                     swapSides: (_a = m.swapSides) !== null && _a !== void 0 ? _a : false,
-                    showOnPreview: (_b = m.showOnPreview) !== null && _b !== void 0 ? _b : true,
+                    swapMode: (_b = m.swapMode) !== null && _b !== void 0 ? _b : 'split',
+                    swapWindowSec: (_c = m.swapWindowSec) !== null && _c !== void 0 ? _c : 5,
+                    showOnPreview: (_d = m.showOnPreview) !== null && _d !== void 0 ? _d : true,
                     description: m.description || '',
                     coachingCues: m.coachingCues || '',
                     notes: m.notes || '',
-                    cropScale: (_c = m.cropScale) !== null && _c !== void 0 ? _c : 1,
-                    cropTranslateX: (_d = m.cropTranslateX) !== null && _d !== void 0 ? _d : 0,
-                    cropTranslateY: (_e = m.cropTranslateY) !== null && _e !== void 0 ? _e : 0,
+                    cropScale: (_e = m.cropScale) !== null && _e !== void 0 ? _e : 1,
+                    cropTranslateX: (_f = m.cropTranslateX) !== null && _f !== void 0 ? _f : 0,
+                    cropTranslateY: (_g = m.cropTranslateY) !== null && _g !== void 0 ? _g : 0,
                 });
             }),
             restBetweenSets: block.restBetweenSets || 0,
@@ -8194,7 +8340,7 @@ exports.resolveShareToken = (0, https_1.onRequest)({ cors: true, region: 'us-cen
         });
     });
     res.status(200).json({
-        authenticated: true,
+        authenticated: isAuthenticated,
         teaser,
         workout: {
             id: tokenData.workoutId,

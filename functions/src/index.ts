@@ -9490,20 +9490,62 @@ export const resolveShareToken = onRequest(
       console.warn('[resolveShareToken] view counter update failed:', err);
     });
 
+    // Enrich every referenced movement with its canonical voiceUrl + name so the
+    // player can speak movement names. Block snapshots stored in workout docs
+    // don't include voiceUrl (WorkoutFolderPage save logic omits it), and the
+    // client-side useMovementHydrate onSnapshot is blocked by firestore.rules
+    // for share-link viewers (unauthenticated or non-coach). Without this
+    // server-side merge the player hears only static cues ("next up",
+    // "halfway") and the movement names are silent.
+    const movementIds = new Set<string>();
+    for (const block of (workout.blocks || [])) {
+      for (const m of (block.movements || [])) {
+        if (typeof m.movementId === 'string' && m.movementId) {
+          movementIds.add(m.movementId);
+        }
+      }
+    }
+    const movementCanonical: Record<string, { voiceUrl: string; name: string }> = {};
+    if (movementIds.size > 0) {
+      try {
+        const refs = Array.from(movementIds).map((id) => db.collection('movements').doc(id));
+        const snaps = await db.getAll(...refs);
+        for (const snap of snaps) {
+          if (!snap.exists) continue;
+          const data = snap.data() || {};
+          movementCanonical[snap.id] = {
+            voiceUrl: typeof data.voiceUrl === 'string' ? data.voiceUrl : '',
+            name: typeof data.name === 'string' ? data.name : '',
+          };
+        }
+      } catch (err) {
+        console.warn('[resolveShareToken] movement enrichment failed:', err);
+      }
+    }
+
     const sanitizedBlocks = (workout.blocks || []).map((block: any) => ({
       type: block.type || 'Block',
       name: block.name || '',
       label: block.label || '',
-      movements: (block.movements || []).map((m: any) => ({
+      movements: (block.movements || []).map((m: any) => {
+        const canonical = m.movementId ? movementCanonical[m.movementId] : undefined;
+        // Canonical voiceUrl + name win for audio/identity so a rename or
+        // re-recording in the library propagates to share-link viewers.
+        const resolvedName = (canonical?.name && canonical.name.trim())
+          || m.movementName
+          || m.name
+          || '';
+        const resolvedVoiceUrl = canonical?.voiceUrl || m.voiceUrl || null;
+        return ({
         movementId: m.movementId || '',
-        movementName: m.movementName || m.name || '',
-        name: m.name || m.movementName || '',
+        movementName: resolvedName,
+        name: resolvedName,
         category: m.category || '',
         muscleGroup: m.muscleGroup || '',
         videoUrl: m.videoUrl || null,
         mediaUrl: m.mediaUrl || null,
         thumbnailUrl: m.thumbnailUrl || null,
-        voiceUrl: m.voiceUrl || null,
+        voiceUrl: resolvedVoiceUrl,
         nextUpVoiceUrl: m.nextUpVoiceUrl || null,
         sets: m.sets || 0,
         reps: m.reps || '',
@@ -9522,7 +9564,8 @@ export const resolveShareToken = onRequest(
         cropScale: m.cropScale ?? 1,
         cropTranslateX: m.cropTranslateX ?? 0,
         cropTranslateY: m.cropTranslateY ?? 0,
-      })),
+      });
+      }),
       restBetweenSets: block.restBetweenSets || 0,
       restBetweenSec: block.restBetweenSec || 0,
       restBetweenRoundsSec: block.restBetweenRoundsSec || 0,
