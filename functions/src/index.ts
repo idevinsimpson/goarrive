@@ -9513,6 +9513,8 @@ export const resolveShareToken = onRequest(
         restSec: m.restSec || 0,
         restSeconds: m.restSeconds || 0,
         swapSides: m.swapSides ?? false,
+        swapMode: m.swapMode ?? 'split',
+        swapWindowSec: m.swapWindowSec ?? 5,
         showOnPreview: m.showOnPreview ?? true,
         description: m.description || '',
         coachingCues: m.coachingCues || '',
