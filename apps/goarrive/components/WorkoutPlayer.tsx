@@ -478,6 +478,12 @@ export default function WorkoutPlayer({
           activeThumbUrl: item.thumbnailUrl ?? null,
         };
       }
+      // Placeholder movements are exercises that intentionally have no video yet.
+      // Don't borrow the next movement's media — return null URLs so the
+      // placeholder render path takes over.
+      if (item.stepType === 'exercise') {
+        return { activeVideoUrl: null, activeThumbUrl: null };
+      }
       for (let i = indexOfItem + 1; i < flatMovements.length; i++) {
         const m = flatMovements[i];
         if (m.stepType === 'exercise' && (m.videoUrl || m.thumbnailUrl)) {
