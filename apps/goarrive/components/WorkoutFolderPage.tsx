@@ -2424,7 +2424,7 @@ export default function WorkoutFolderPage({
                     <Text style={st.pickerItemName}>{mov.name}</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                       {mov.category ? <Text style={st.pickerItemCat}>{mov.category}</Text> : null}
-                      {!mov.videoUrl && (
+                      {!mov.videoUrl && !mov.mediaUrl && (
                         <View style={st.videoNeededPill}>
                           <Text style={st.videoNeededText}>Video needed</Text>
                         </View>
