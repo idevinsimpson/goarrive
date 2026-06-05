@@ -809,7 +809,7 @@ function BuildScreenInner() {
           <View style={[styles.nameOverlay, isWorkoutCard && { backgroundColor: 'rgba(26, 35, 50, 0.92)' }]}>
             <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
           </View>
-          {isMovement && !item.videoUrl && !item.mediaUrl && (
+          {isMovement && !item.videoUrl && !item.mediaUrl && !item.gifLoopUrl && !item.gifLowUrl && (
             <View style={styles.videoNeededPill}>
               <Text style={styles.videoNeededText}>Video needed</Text>
             </View>
@@ -854,7 +854,7 @@ function BuildScreenInner() {
           <Text style={s.listName}>{item.name}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Text style={s.listSub}>{item.type.slice(0, -1)}</Text>
-            {item.type === 'Movements' && !item.videoUrl && !item.mediaUrl && (
+            {item.type === 'Movements' && !item.videoUrl && !item.mediaUrl && !item.gifLoopUrl && !item.gifLowUrl && (
               <View style={{ paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4, backgroundColor: '#2A3340' }}>
                 <Text style={styles.videoNeededText}>Video needed</Text>
               </View>

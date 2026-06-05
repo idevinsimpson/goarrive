@@ -154,6 +154,8 @@ interface MovementOption {
   thumbnailUrl?: string | null;
   mediaUrl?: string | null;
   videoUrl?: string | null;
+  gifLoopUrl?: string | null;
+  gifLowUrl?: string | null;
   swapSides?: boolean;
   swapMode?: 'split' | 'duplicate';
   swapWindowSec?: number;
@@ -708,6 +710,8 @@ export default function WorkoutFolderPage({
             thumbnailUrl: cd.thumbnailUrl ?? null,
             mediaUrl: cd.mediaUrl ?? null,
             videoUrl: cd.videoUrl ?? null,
+            gifLoopUrl: cd.gifLoopUrl ?? null,
+            gifLowUrl: cd.gifLowUrl ?? null,
             swapSides: cd.swapSides ?? false,
             swapMode: cd.swapMode ?? undefined,
             swapWindowSec: cd.swapWindowSec ?? undefined,
@@ -725,6 +729,8 @@ export default function WorkoutFolderPage({
             thumbnailUrl: gd.thumbnailUrl ?? null,
             mediaUrl: gd.mediaUrl ?? null,
             videoUrl: gd.videoUrl ?? null,
+            gifLoopUrl: gd.gifLoopUrl ?? null,
+            gifLowUrl: gd.gifLowUrl ?? null,
             swapSides: gd.swapSides ?? false,
             swapMode: gd.swapMode ?? undefined,
             swapWindowSec: gd.swapWindowSec ?? undefined,
@@ -2424,7 +2430,7 @@ export default function WorkoutFolderPage({
                     <Text style={st.pickerItemName}>{mov.name}</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                       {mov.category ? <Text style={st.pickerItemCat}>{mov.category}</Text> : null}
-                      {!mov.videoUrl && !mov.mediaUrl && (
+                      {!mov.videoUrl && !mov.mediaUrl && !mov.gifLoopUrl && !mov.gifLowUrl && (
                         <View style={st.videoNeededPill}>
                           <Text style={st.videoNeededText}>Video needed</Text>
                         </View>
