@@ -19,6 +19,7 @@ import {
   Image,
   Animated,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import {
   signInWithEmailAndPassword,
@@ -35,6 +36,7 @@ const FONT_BODY =
   Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
 export default function LoginScreen() {
+  const insets = useSafeAreaInsets();
   const { claims } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -163,7 +165,7 @@ export default function LoginScreen() {
   if (showForgot && forgotSent) {
     return (
       <View style={s.root}>
-        <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={[s.content, { paddingTop: Math.max(20, insets.top) }]} keyboardShouldPersistTaps="handled">
           <Animated.View style={[s.card, { opacity: fadeAnim }]}>
             <Image
               source={require('../../assets/logo.png')}
@@ -199,7 +201,7 @@ export default function LoginScreen() {
         style={s.root}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={[s.content, { paddingTop: Math.max(20, insets.top) }]} keyboardShouldPersistTaps="handled">
           <Animated.View style={[s.card, { opacity: fadeAnim }]}>
             <Image
               source={require('../../assets/logo.png')}
@@ -278,7 +280,7 @@ export default function LoginScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView
-        contentContainerStyle={s.content}
+        contentContainerStyle={[s.content, { paddingTop: Math.max(20, insets.top) }]}
         keyboardShouldPersistTaps="handled"
       >
         <Animated.View style={[s.card, { opacity: fadeAnim }]}>

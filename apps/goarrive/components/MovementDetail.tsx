@@ -159,7 +159,7 @@ export default function MovementDetail({
       <View style={[s.root, Platform.OS === 'web' && { height: windowHeight }]}>
         {/* Back-to-workout breadcrumb (shown when opened from workout builder) */}
         {backLabel && (
-          <Pressable style={s.backBreadcrumb} onPress={onClose}>
+          <Pressable style={[s.backBreadcrumb, { paddingTop: Math.max(12, insets.top) }]} onPress={onClose}>
             <Icon name="chevron-left" size={16} color="#F5A623" />
             <Text style={s.backBreadcrumbText}>{backLabel}</Text>
           </Pressable>

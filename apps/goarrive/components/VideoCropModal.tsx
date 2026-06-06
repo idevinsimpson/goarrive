@@ -34,6 +34,7 @@ import Animated, {
   withSpring,
   runOnJS,
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from './Icon';
 import { FB, FH } from '../lib/theme';
 
@@ -93,6 +94,7 @@ export default function VideoCropModal({
   onDone,
   onCancel,
 }: Props) {
+  const insets = useSafeAreaInsets();
   const { width: winWidth, height: winHeight } = useWindowDimensions();
   // For tall aspect ratios (like phone screens), constrain by height so it fits on screen
   const maxFrameHeight = winHeight - 200; // leave room for header, instructions, reset button
@@ -278,7 +280,7 @@ export default function VideoCropModal({
       <GestureHandlerRootView style={{ flex: 1 }}>
       <View style={s.root}>
         {/* Header */}
-        <View style={s.header}>
+        <View style={[s.header, { paddingTop: Math.max(12, insets.top) }]}>
           <Pressable onPress={onCancel} hitSlop={8}>
             <Text style={s.cancelText}>Cancel</Text>
           </Pressable>

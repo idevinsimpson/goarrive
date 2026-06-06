@@ -18,6 +18,7 @@ import {
   Dimensions,
   LayoutChangeEvent,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 
 /* ─── Brand Tokens ─── */
@@ -81,6 +82,7 @@ function SecondaryButton({ label, onPress }: { label: string; onPress: () => voi
    MAIN
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 export default function CoachApplyScreen() {
+  const insets = useSafeAreaInsets();
   const { w, onLayout } = useWidth();
   const isMobile = w < 768;
   const scrollRef = useRef<ScrollView>(null);
@@ -102,7 +104,7 @@ export default function CoachApplyScreen() {
 
   /* ━━━ NAV ━━━ */
   const Nav = (
-    <View style={[nav.bar, Platform.OS === 'web' && ({ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 999 } as any)]}>
+    <View style={[nav.bar, Platform.OS === 'web' && ({ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 999, paddingTop: 'max(12px, env(safe-area-inset-top, 12px))' } as any), Platform.OS !== 'web' && { paddingTop: insets.top }]}>
       <View style={[nav.inner, { maxWidth: 1080 }]}>
         <Pressable onPress={goHome}>
           <Image source={require('../assets/logo.png')} style={nav.logo} resizeMode="contain" accessibilityLabel="GoArrive" />

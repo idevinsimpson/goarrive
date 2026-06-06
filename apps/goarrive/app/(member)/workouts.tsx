@@ -22,6 +22,7 @@ import {
   RefreshControl,
   Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   collection,
   query,
@@ -107,6 +108,7 @@ function isPast(dateStr: string): boolean {
 
 // ── Component ──────────────────────────────────────────────────────────────
 export default function MemberWorkoutsScreen() {
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const memberId = user?.uid ?? '';
 
@@ -617,7 +619,7 @@ export default function MemberWorkoutsScreen() {
   return (
     <View style={s.container}>
       {/* Header */}
-      <View style={s.header}>
+      <View style={[s.header, { paddingTop: Math.max(24, insets.top) }]}>
         <Text style={s.headerTitle}>My Workouts</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           {todayWorkouts.length > 0 && (

@@ -26,6 +26,7 @@ import {
   View, Text, ScrollView, Pressable, ActivityIndicator,
   StyleSheet, Platform, Linking,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import {
   collection, query, where, getDocs, getDoc, doc, onSnapshot,
@@ -196,6 +197,7 @@ interface Task {
 }
 
 export default function BillingDashboard() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { claims, effectiveUid } = useAuth();
   // Use effectiveUid to respect admin override (View as Coach)
@@ -446,7 +448,7 @@ export default function BillingDashboard() {
   return (
     <View style={s.container}>
       {/* Header */}
-      <View style={s.header}>
+      <View style={[s.header, { paddingTop: Math.max(Platform.OS === 'web' ? 12 : 56, insets.top) }]}>
         <Pressable onPress={() => router.back()} style={s.backBtn}>
           <Text style={{ color: PRIMARY, fontSize: 16 }}>{'‹'} Back</Text>
         </Pressable>

@@ -19,6 +19,7 @@ import {
   KeyboardAvoidingView,
   Image,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
   createUserWithEmailAndPassword,
@@ -33,6 +34,7 @@ const FONT_BODY =
   Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
 export default function CoachSignupScreen() {
+  const insets = useSafeAreaInsets();
   const { token } = useLocalSearchParams<{ token?: string }>();
 
   const [name, setName] = useState('');
@@ -152,7 +154,7 @@ export default function CoachSignupScreen() {
 
   return (
     <KeyboardAvoidingView style={s.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={[s.scroll, { paddingTop: Math.max(Platform.OS === 'web' ? 60 : 40, insets.top) }]} keyboardShouldPersistTaps="handled">
         {/* Header */}
         <View style={s.header}>
           <Image

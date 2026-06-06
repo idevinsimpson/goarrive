@@ -19,6 +19,7 @@ import {
   Alert,
   Linking,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../../components/Icon';
 import { useAuth } from '../../lib/AuthContext';
 import StripeConnectPanel from '../../components/StripeConnectPanel';
@@ -53,6 +54,7 @@ interface Props {
 }
 
 export default function AccountScreen({ onClose }: Props) {
+  const insets = useSafeAreaInsets();
   const { user, claims, signOut } = useAuth();
 
   const displayName = user?.displayName ?? user?.email ?? 'User';
@@ -81,7 +83,7 @@ export default function AccountScreen({ onClose }: Props) {
   return (
     <View style={s.root}>
       {/* Header */}
-      <View style={s.header}>
+      <View style={[s.header, { paddingTop: Math.max(12, insets.top) }]}>
         <Pressable onPress={handleBack} hitSlop={8}>
           <Icon name="arrow-left" size={24} color="#8A95A3" />
         </Pressable>

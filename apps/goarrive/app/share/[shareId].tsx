@@ -8,6 +8,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { auth } from '../../lib/firebase';
@@ -46,6 +47,7 @@ interface SharedWorkout {
 }
 
 export default function SharePage() {
+  const insets = useSafeAreaInsets();
   const { shareId } = useLocalSearchParams<{ shareId: string }>();
   const { user, claims, loading: authLoading } = useAuth();
 
@@ -132,7 +134,7 @@ export default function SharePage() {
     return (
       <View style={{ flex: 1, backgroundColor: BG }}>
         {!showPlayer ? (
-          <ScrollView contentContainerStyle={styles.container}>
+          <ScrollView contentContainerStyle={[styles.container, { paddingTop: Math.max(20, insets.top) }]}>
             <View style={styles.heroCard}>
               <View style={styles.coachRow}>
                 <View style={styles.coachAvatar}>
