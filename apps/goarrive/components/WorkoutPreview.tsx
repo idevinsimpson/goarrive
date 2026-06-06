@@ -25,6 +25,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Icon } from './Icon';
@@ -67,6 +68,7 @@ export default function WorkoutPreview({
   isPreview = false,
   assignmentNote,
 }: WorkoutPreviewProps) {
+  const insets = useSafeAreaInsets();
   const { getCachedUri, cacheVideos, progress, isCaching } = useOfflineVideoCache();
 
   // ── Fetch equipment from movements collection (blocks only store movementId) ──
@@ -200,7 +202,7 @@ export default function WorkoutPreview({
     <Modal visible={visible} animationType="slide" transparent={false}>
       <View style={st.container}>
         {/* Header */}
-        <View style={st.header}>
+        <View style={[st.header, { paddingTop: Math.max(12, insets.top) }]}>
           <TouchableOpacity onPress={onClose} style={st.backBtn}>
             <Icon name="arrow-left" size={22} color="#F0F4F8" />
           </TouchableOpacity>

@@ -20,6 +20,7 @@ import {
   ActivityIndicator,
   Modal,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   collection,
   addDoc,
@@ -137,6 +138,7 @@ interface QuickAddMemberProps {
 export default function QuickAddMember({
   visible, onClose, onSaved, coachId, tenantId,
 }: QuickAddMemberProps) {
+  const insets = useSafeAreaInsets();
   const [step, setStep] = useState(0);
   const [formData, setFormData] = useState<FormData>({ ...initialFormData });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -547,7 +549,7 @@ export default function QuickAddMember({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         {/* Header with progress */}
-        <View style={s.progressBar}>
+        <View style={[s.progressBar, { paddingTop: Math.max(12, insets.top) }]}>
           <View style={s.headerRow}>
             <Pressable onPress={handleCloseForm} style={s.closeBtn}>
               <Text style={s.closeBtnText}>✕</Text>

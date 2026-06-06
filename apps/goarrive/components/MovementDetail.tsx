@@ -165,7 +165,7 @@ export default function MovementDetail({
           </Pressable>
         )}
         {/* Header */}
-        <View style={s.header}>
+        <View style={[s.header, !backLabel && { paddingTop: Math.max(12, insets.top) }]}>
           <Pressable onPress={onClose} hitSlop={8}>
             <Icon name="close" size={24} color="#8A95A3" />
           </Pressable>

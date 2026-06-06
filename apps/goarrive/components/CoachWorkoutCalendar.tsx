@@ -20,6 +20,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { db } from '../lib/firebase';
 import {
   collection,
@@ -54,6 +55,7 @@ export default function CoachWorkoutCalendar({
   visible,
   onClose,
 }: CoachWorkoutCalendarProps) {
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [weekOffset, setWeekOffset] = useState(0); // 0 = this week, 1 = next, -1 = prev
@@ -153,7 +155,7 @@ export default function CoachWorkoutCalendar({
     <Modal visible={visible} animationType="slide" transparent={false}>
       <View style={st.container}>
         {/* Header */}
-        <View style={st.header}>
+        <View style={[st.header, { paddingTop: Math.max(12, insets.top) }]}>
           <TouchableOpacity onPress={onClose} style={st.backBtn}>
             <Icon name="x" size={22} color="#F0F4F8" />
           </TouchableOpacity>
