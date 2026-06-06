@@ -25,6 +25,7 @@ import {
   ActivityIndicator,
   Image,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { db, storage } from '../lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -85,6 +86,7 @@ export default function BulkMovementUpload({
   coachId,
   tenantId,
 }: BulkMovementUploadProps) {
+  const insets = useSafeAreaInsets();
   const [items, setItems] = useState<UploadItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const processingRef = useRef(false);
@@ -348,7 +350,7 @@ export default function BulkMovementUpload({
     <Modal visible={visible} animationType="slide" transparent={false}>
       <View style={s.root}>
         {/* Header */}
-        <View style={s.header}>
+        <View style={[s.header, { paddingTop: Math.max(12, insets.top) }]}>
           <Pressable onPress={handleClose} style={s.backBtn}>
             <Icon name="chevron-left" size={22} color="#F0F4F8" />
             <Text style={s.backText}>Back</Text>

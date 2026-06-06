@@ -123,13 +123,13 @@ export default function FollowAlongVideoDetail({
     >
       <View style={[s.root, Platform.OS === 'web' && { height: windowHeight }]}>
         {backLabel && (
-          <Pressable style={s.backBreadcrumb} onPress={onClose}>
+          <Pressable style={[s.backBreadcrumb, { paddingTop: Math.max(12, insets.top) }]} onPress={onClose}>
             <Icon name="chevron-left" size={16} color="#F5A623" />
             <Text style={s.backBreadcrumbText}>{backLabel}</Text>
           </Pressable>
         )}
 
-        <View style={s.header}>
+        <View style={[s.header, !backLabel && { paddingTop: Math.max(12, insets.top) }]}>
           <Pressable onPress={onClose} hitSlop={8}>
             <Icon name="close" size={24} color="#8A95A3" />
           </Pressable>

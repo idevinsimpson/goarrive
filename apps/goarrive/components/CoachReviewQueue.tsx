@@ -22,6 +22,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   collection,
   query,
@@ -79,6 +80,7 @@ export default function CoachReviewQueue({
   memberNames = {},
   onAssignClick,
 }: CoachReviewQueueProps) {
+  const insets = useSafeAreaInsets();
   const [logs, setLogs] = useState<WorkoutLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -354,7 +356,7 @@ export default function CoachReviewQueue({
     <Modal visible={visible} animationType="slide" transparent={false}>
       <View style={st.container}>
         {/* Header */}
-        <View style={st.header}>
+        <View style={[st.header, { paddingTop: Math.max(12, insets.top) }]}>
           <TouchableOpacity onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
             <Icon name="close" size={24} color="#8A95A3" />
           </TouchableOpacity>

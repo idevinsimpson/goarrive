@@ -10,6 +10,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { View, Text, Pressable, ActivityIndicator, StyleSheet, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
@@ -22,6 +23,7 @@ const PRIMARY = '#5B9BD5';
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'System';
 
 export default function CheckoutSuccessScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { intent } = useLocalSearchParams<{ intent: string }>();
   const [status, setStatus] = useState<'polling' | 'completed' | 'timeout'>('polling');
@@ -55,7 +57,7 @@ export default function CheckoutSuccessScreen() {
   }, [intent]);
 
   return (
-    <View style={s.root}>
+    <View style={[s.root, { paddingTop: Math.max(24, insets.top) }]}>
       <View style={s.card}>
         {status === 'polling' && (
           <>

@@ -26,6 +26,7 @@ import {
   Linking,
   ScrollView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Redirect } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
@@ -115,6 +116,7 @@ async function loadZoomEmbedded(): Promise<any> {
 // ── Screen ───────────────────────────────────────────────────────────────────
 
 export default function JoinBetaScreen() {
+  const insets = useSafeAreaInsets();
   const { sessionInstanceId } = useLocalSearchParams<{ sessionInstanceId: string }>();
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
@@ -268,7 +270,7 @@ export default function JoinBetaScreen() {
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <View style={s.root}>
-      <ScrollView contentContainerStyle={s.scrollContent}>
+      <ScrollView contentContainerStyle={[s.scrollContent, { paddingTop: Math.max(Platform.OS === 'web' ? 24 : 48, insets.top) }]}>
         <View style={s.header}>
           <Pressable onPress={goBack} style={s.backBtn} hitSlop={12}>
             <Text style={s.backBtnText}>← Back</Text>

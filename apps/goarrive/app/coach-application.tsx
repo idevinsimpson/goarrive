@@ -19,6 +19,7 @@ import {
   Image,
   Dimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
@@ -399,6 +400,7 @@ function Checkbox({ checked, onChange, label, prominent }: { checked: boolean; o
    MAIN COMPONENT
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 export default function CoachApplicationScreen() {
+  const insets = useSafeAreaInsets();
   const [w, setW] = useState(Dimensions.get('window').width);
   const isMobile = w < 768;
   const scrollRef = useRef<ScrollView>(null);
@@ -1103,7 +1105,7 @@ export default function CoachApplicationScreen() {
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: C.bg }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={{ flex: 1 }} onLayout={(e) => setW(e.nativeEvent.layout.width)}>
         {/* Nav Bar */}
-        <View style={[st.nav, Platform.OS === 'web' && ({ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 999 } as any)]}>
+        <View style={[st.nav, Platform.OS === 'web' && ({ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 999, paddingTop: 'max(12px, env(safe-area-inset-top, 12px))' } as any), Platform.OS !== 'web' && { paddingTop: insets.top }]}>
           <View style={st.navInner}>
             <Pressable onPress={() => router.replace('/coach-apply')}>
               <Image source={require('../assets/logo.png')} style={st.navLogo} resizeMode="contain" accessibilityLabel="GoArrive" />

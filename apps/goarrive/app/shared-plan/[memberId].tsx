@@ -11,6 +11,7 @@ import {
   View, Text, StyleSheet, ScrollView, ActivityIndicator,
   Platform, Pressable, Image,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
@@ -74,6 +75,7 @@ function SegmentedBar({ value, max = 10, color }: { value: number; max?: number;
 }
 
 export default function SharedPlanScreen() {
+  const insets = useSafeAreaInsets();
   const { memberId } = useLocalSearchParams<{ memberId: string }>();
   const [plan, setPlan] = useState<MemberPlanData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -157,7 +159,7 @@ export default function SharedPlanScreen() {
   return (
     <View style={st.root}>
       {/* Header bar */}
-      <View style={st.planBar}>
+      <View style={[st.planBar, { paddingTop: Math.max(8, insets.top) }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <Image
             source={require('../../assets/goarrive-icon.png')}

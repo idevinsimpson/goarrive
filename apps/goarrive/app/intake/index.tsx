@@ -17,6 +17,7 @@ import {
   ActivityIndicator,
   TextInput,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
@@ -48,6 +49,7 @@ interface CoachOption {
 }
 
 export default function IntakeIndex() {
+  const insets = useSafeAreaInsets();
   const [hasCoach, setHasCoach] = useState<boolean | null>(null);
   const [coaches, setCoaches] = useState<CoachOption[]>([]);
   const [loading, setLoading] = useState(false);
@@ -92,7 +94,7 @@ export default function IntakeIndex() {
   return (
     <View style={s.container}>
       {/* Nav */}
-      <View style={[s.nav, Platform.OS === 'web' && ({ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 999 } as any)]}>
+      <View style={[s.nav, Platform.OS === 'web' && ({ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 999, paddingTop: 'max(12px, env(safe-area-inset-top, 12px))' } as any), Platform.OS !== 'web' && { paddingTop: insets.top }]}>
         <Pressable onPress={() => router.replace('/')}>
           <Image
             source={require('../../assets/logo.png')}

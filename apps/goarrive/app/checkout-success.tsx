@@ -14,6 +14,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { View, Text, Pressable, ActivityIndicator, StyleSheet, Platform, Linking } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 
 const BG = '#0E1117';
@@ -24,6 +25,7 @@ const PRIMARY = '#5B9BD5';
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'System';
 
 export default function CheckoutSuccessPublicScreen() {
+  const insets = useSafeAreaInsets();
   const { intent, memberId } = useLocalSearchParams<{ intent?: string; memberId?: string }>();
   const [status, setStatus] = useState<'confirming' | 'success'>('confirming');
 
@@ -54,7 +56,7 @@ export default function CheckoutSuccessPublicScreen() {
   };
 
   return (
-    <View style={s.root}>
+    <View style={[s.root, { paddingTop: Math.max(24, insets.top) }]}>
       <View style={s.card}>
         {status === 'confirming' && (
           <>

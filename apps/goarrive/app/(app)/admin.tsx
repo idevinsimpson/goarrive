@@ -16,6 +16,7 @@ import {
   View, Text, TextInput, Pressable, ScrollView, TouchableOpacity,
   StyleSheet, Platform, ActivityIndicator, Share, Linking, Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../../components/Icon';
 import { useAuth } from '../../lib/AuthContext';
 import { router } from 'expo-router';
@@ -95,6 +96,7 @@ const copyToClipboard = async (text: string) => {
 type AdminTab = 'operations' | 'events' | 'recordings' | 'deadletter' | 'cts_billing' | 'analytics' | 'coaches';
 
 export default function AdminScreen() {
+  const insets = useSafeAreaInsets();
   const { user, claims, adminCoachOverride, setAdminCoachOverride } = useAuth();
   const [activeTab, setActiveTab] = useState<AdminTab>('operations');
 
@@ -656,7 +658,7 @@ export default function AdminScreen() {
   ];
 
   return (
-    <ScrollView style={s.root} contentContainerStyle={s.content}>
+    <ScrollView style={s.root} contentContainerStyle={[s.content, { paddingTop: Math.max(Platform.OS === 'web' ? 60 : 16, insets.top) }]}>
       <Text style={s.title}>Operations Center</Text>
       <Text style={s.subtitle}>Platform administration and session operations</Text>
 

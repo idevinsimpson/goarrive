@@ -21,6 +21,7 @@ import {
   View, Text, Pressable, ScrollView, ActivityIndicator,
   StyleSheet, Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
@@ -48,6 +49,7 @@ type PaymentOption = 'monthly' | 'pay_in_full';
 type BillingInterval = 'month' | 'week' | 'year';
 
 export default function PaymentSelectScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { planId } = useLocalSearchParams<{ planId: string }>();
   const { user } = useAuth();
@@ -200,7 +202,7 @@ export default function PaymentSelectScreen() {
   return (
     <View style={s.root}>
       {/* Header */}
-      <View style={s.header}>
+      <View style={[s.header, { paddingTop: Math.max(12, insets.top) }]}>
         <Pressable onPress={() => router.back()} hitSlop={8} style={{ padding: 4 }}>
           <Text style={{ color: PRIMARY, fontSize: 22 }}>{'←'}</Text>
         </Pressable>

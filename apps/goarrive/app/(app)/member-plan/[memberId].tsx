@@ -36,6 +36,7 @@ import {
   View, Text, ScrollView, Pressable, TextInput, StyleSheet,
   Platform, Modal, Animated, Dimensions, Image, ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { doc, getDoc, setDoc, addDoc, collection, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
@@ -2944,6 +2945,7 @@ function QRowEdit({ label, value, onEdit }: { label: string; value?: string | nu
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function MemberPlanScreen() {
+  const insets = useSafeAreaInsets();
   const { memberId } = useLocalSearchParams<{ memberId: string }>();
   const router = useRouter();
   const { user, effectiveUid } = useAuth();
@@ -3313,7 +3315,7 @@ export default function MemberPlanScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: BG, ...(Platform.OS === 'web' ? { height: '100dvh', maxHeight: '100dvh', overflow: 'hidden' } as any : {}) }}>
       {/* ─── TOP BAR ──────────────────────────────────────────────────────── */}
-      <View style={tb.bar}>
+      <View style={[tb.bar, { paddingTop: Math.max(Platform.OS === 'web' ? 12 : 50, insets.top) }]}>
         <Pressable onPress={() => router.back()} style={tb.backBtn}>
           <Icon name="arrow-back" size={20} color={MUTED} />
         </Pressable>
