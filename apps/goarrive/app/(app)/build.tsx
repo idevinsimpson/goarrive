@@ -877,6 +877,7 @@ function BuildScreenInner() {
           tenantId={tenantId}
           onBack={() => setOpenWorkoutId(null)}
           onOpenMovement={(m: any) => setSelectedMovement(m)}
+          onDuplicated={(newId: string) => setOpenWorkoutId(newId)}
         />
         <MovementDetail
           visible={!!selectedMovement}

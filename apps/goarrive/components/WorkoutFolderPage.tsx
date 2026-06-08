@@ -236,6 +236,7 @@ interface WorkoutFolderPageProps {
   tenantId: string;
   onBack: () => void;
   onOpenMovement?: (movement: any) => void;
+  onDuplicated?: (newWorkoutId: string) => void;
 }
 
 export default function WorkoutFolderPage({
@@ -244,6 +245,7 @@ export default function WorkoutFolderPage({
   tenantId,
   onBack,
   onOpenMovement,
+  onDuplicated,
 }: WorkoutFolderPageProps) {
   const { width: screenWidth } = useWindowDimensions();
 
@@ -1171,13 +1173,14 @@ export default function WorkoutFolderPage({
         updatedAt: serverTimestamp(),
       };
 
-      await addDoc(collection(db, 'workouts'), stripUndefined(payload));
+      const newRef = await addDoc(collection(db, 'workouts'), stripUndefined(payload));
 
       setShowDuplicateConfirm(false);
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.alert(`Duplicated as "${candidate}"`);
-      } else {
-        Alert.alert('Duplicated', `Saved as "${candidate}"`);
+      // Navigate the coach directly into the new workout.
+      // The parent (build.tsx) swaps openWorkoutId, which unmounts this
+      // instance and mounts a fresh one with the new id.
+      if (onDuplicated) {
+        onDuplicated(newRef.id);
       }
     } catch (e: any) {
       console.error('[WorkoutFolder] Duplicate workout error:', e?.message ?? e);
@@ -1189,7 +1192,7 @@ export default function WorkoutFolderPage({
     } finally {
       setDuplicating(false);
     }
-  }, [duplicating, flushSave, workoutId, coachId, tenantId]);
+  }, [duplicating, flushSave, workoutId, coachId, tenantId, onDuplicated]);
 
   // ── Block operations ──────────────────────────────────────────────────────
   const updateBlocks = useCallback((newBlocks: WorkoutBlock[]) => {
@@ -2922,7 +2925,7 @@ export default function WorkoutFolderPage({
               <Text style={{ fontWeight: '700', color: '#F0F4F8' }}>{workoutName}</Text>?
               {'\n\n'}The duplicate will be saved as{' '}
               <Text style={{ fontWeight: '700', color: '#F0F4F8' }}>{`"Copy of ${workoutName}"`}</Text>
-              {' '}and appear at the top of your Build grid.
+              {' '}and open it for you to edit.
             </Text>
             <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
               <Pressable style={[st.descBtn, { backgroundColor: '#0E1117' }]} onPress={() => setShowDuplicateConfirm(false)} disabled={duplicating}>
