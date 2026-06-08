@@ -34,6 +34,7 @@ import {
   getDoc,
   updateDoc,
   deleteDoc,
+  addDoc,
   collection,
   query,
   where,
@@ -235,6 +236,7 @@ interface WorkoutFolderPageProps {
   tenantId: string;
   onBack: () => void;
   onOpenMovement?: (movement: any) => void;
+  onDuplicated?: (newWorkoutId: string) => void;
 }
 
 export default function WorkoutFolderPage({
@@ -243,6 +245,7 @@ export default function WorkoutFolderPage({
   tenantId,
   onBack,
   onOpenMovement,
+  onDuplicated,
 }: WorkoutFolderPageProps) {
   const { width: screenWidth } = useWindowDimensions();
 
@@ -398,6 +401,8 @@ export default function WorkoutFolderPage({
   const [showMoveTo, setShowMoveTo] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDuplicateConfirm, setShowDuplicateConfirm] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const [shareLoading, setShareLoading] = useState(false);
   const [activeShareId, setActiveShareId] = useState<string | null>(null);
   const [shareModalOpen, setShareModalOpen] = useState(false);
@@ -1101,6 +1106,94 @@ export default function WorkoutFolderPage({
     }
   }, [workoutId, onBack]);
 
+  // ── Duplicate workout ──────────────────────────────────────────────────
+  // "Copy of <name>" prefix with collision dedupe — "(2)", "(3)", … if needed.
+  // Re-uses movement references by ID; doesn't carry share tokens, assignments,
+  // isShared flag, or cached GIFs (those regenerate on first save/play).
+  const confirmDuplicateWorkout = useCallback(async () => {
+    if (duplicating) return;
+    try {
+      setDuplicating(true);
+      // Flush any in-flight edits so we copy the latest state from Firestore.
+      await flushSave();
+
+      const fullSnap = await getDoc(doc(db, 'workouts', workoutId));
+      if (!fullSnap.exists()) {
+        throw new Error('Workout not found');
+      }
+      const original = fullSnap.data() as any;
+      const originalName = (original.name ?? 'Untitled Workout').trim();
+
+      // Find a unique "Copy of …" name for this coach.
+      const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
+      const existingSnap = await getDocs(
+        query(collection(db, 'workouts'), where('coachId', '==', coachId)),
+      );
+      const existingNames = new Set<string>();
+      existingSnap.docs.forEach((d) => {
+        const n = (d.data() as any)?.name;
+        if (typeof n === 'string') existingNames.add(norm(n));
+      });
+      let candidate = `Copy of ${originalName}`;
+      if (existingNames.has(norm(candidate))) {
+        let n = 2;
+        while (existingNames.has(norm(`Copy of ${originalName} (${n})`))) n++;
+        candidate = `Copy of ${originalName} (${n})`;
+      }
+
+      // Deep-clone blocks so nested arrays/objects aren't shared with the source doc.
+      const clonedBlocks = original.blocks ? JSON.parse(JSON.stringify(original.blocks)) : [];
+
+      const payload: any = {
+        name: candidate,
+        description: original.description ?? '',
+        coachId,
+        tenantId,
+        blocks: clonedBlocks,
+        coverThumbs: Array.isArray(original.coverThumbs) ? [...original.coverThumbs] : [],
+        estimatedDurationMin: original.estimatedDurationMin ?? null,
+        category: original.category ?? undefined,
+        // Intro / Outro: keep source videos so the duplicate looks identical,
+        // but reset GIF caches — the player regenerates them on first play.
+        introVideoUrl: original.introVideoUrl ?? null,
+        introGifUrl: null,
+        outroVideoUrl: original.outroVideoUrl ?? null,
+        outroGifUrl: null,
+        introCropScale: original.introCropScale ?? 1,
+        introCropTranslateX: original.introCropTranslateX ?? 0,
+        introCropTranslateY: original.introCropTranslateY ?? 0,
+        outroCropScale: original.outroCropScale ?? 1,
+        outroCropTranslateX: original.outroCropTranslateX ?? 0,
+        outroCropTranslateY: original.outroCropTranslateY ?? 0,
+        isArchived: false,
+        isTemplate: original.isTemplate ?? false,
+        // Never inherit sharing — duplicate starts private; coach can re-share if they want.
+        isShared: false,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      const newRef = await addDoc(collection(db, 'workouts'), stripUndefined(payload));
+
+      setShowDuplicateConfirm(false);
+      // Navigate the coach directly into the new workout.
+      // The parent (build.tsx) swaps openWorkoutId, which unmounts this
+      // instance and mounts a fresh one with the new id.
+      if (onDuplicated) {
+        onDuplicated(newRef.id);
+      }
+    } catch (e: any) {
+      console.error('[WorkoutFolder] Duplicate workout error:', e?.message ?? e);
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert('Could not duplicate workout. Please try again.');
+      } else {
+        Alert.alert('Error', 'Could not duplicate workout. Please try again.');
+      }
+    } finally {
+      setDuplicating(false);
+    }
+  }, [duplicating, flushSave, workoutId, coachId, tenantId, onDuplicated]);
+
   // ── Block operations ──────────────────────────────────────────────────────
   const updateBlocks = useCallback((newBlocks: WorkoutBlock[]) => {
     setBlocks(newBlocks);
@@ -1690,6 +1783,13 @@ export default function WorkoutFolderPage({
             >
               <Icon name="edit" size={16} color="#8A95A3" />
               <Text style={st.menuItemText}>Rename Workout</Text>
+            </Pressable>
+            <Pressable
+              style={st.menuItem}
+              onPress={() => { setShowTitleMenu(false); setShowDuplicateConfirm(true); }}
+            >
+              <Icon name="copy" size={16} color="#8A95A3" />
+              <Text style={st.menuItemText}>Duplicate Workout</Text>
             </Pressable>
             <View style={st.menuDivider} />
             <Pressable
@@ -2809,6 +2909,34 @@ export default function WorkoutFolderPage({
               </Pressable>
               <Pressable style={[st.descBtn, { backgroundColor: '#EF4444', flex: 1 }]} onPress={confirmDeleteWorkout}>
                 <Text style={{ color: '#FFFFFF', fontWeight: '700', fontFamily: FH }}>Delete</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* ── Duplicate Workout Confirmation ───────────────────────────────── */}
+      <Modal transparent visible={showDuplicateConfirm} animationType="fade" onRequestClose={() => { if (!duplicating) setShowDuplicateConfirm(false); }}>
+        <Pressable style={st.modalBackdrop} onPress={() => { if (!duplicating) setShowDuplicateConfirm(false); }}>
+          <View style={[st.descSheet, { backgroundColor: '#1E2A3A' }]} onStartShouldSetResponder={() => true}>
+            <Text style={[st.descTitle, { color: '#6EBB7A' }]}>Duplicate Workout</Text>
+            <Text style={{ color: '#CBD5E1', fontSize: 14, fontFamily: FB, lineHeight: 20, marginTop: 8 }}>
+              Make a copy of{' '}
+              <Text style={{ fontWeight: '700', color: '#F0F4F8' }}>{workoutName}</Text>?
+              {'\n\n'}The duplicate will be saved as{' '}
+              <Text style={{ fontWeight: '700', color: '#F0F4F8' }}>{`"Copy of ${workoutName}"`}</Text>
+              {' '}and open it for you to edit.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
+              <Pressable style={[st.descBtn, { backgroundColor: '#0E1117' }]} onPress={() => setShowDuplicateConfirm(false)} disabled={duplicating}>
+                <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
+              </Pressable>
+              <Pressable style={[st.descBtn, { backgroundColor: '#6EBB7A', flex: 1, opacity: duplicating ? 0.7 : 1 }]} onPress={confirmDuplicateWorkout} disabled={duplicating}>
+                {duplicating ? (
+                  <ActivityIndicator size={18} color="#FFFFFF" />
+                ) : (
+                  <Text style={{ color: '#FFFFFF', fontWeight: '700', fontFamily: FH }}>Duplicate</Text>
+                )}
               </Pressable>
             </View>
           </View>
