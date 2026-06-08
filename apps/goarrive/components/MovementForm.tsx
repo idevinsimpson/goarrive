@@ -656,6 +656,7 @@ export default function MovementForm({
         allowsEditing: false,
         quality: 0.8,
         videoMaxDuration: 25,
+        videoExportPreset: ImagePicker.VideoExportPreset.H264_1280x720,
       });
 
       if (result.canceled || !result.assets?.[0]) return;
@@ -702,6 +703,7 @@ export default function MovementForm({
         allowsEditing: false,
         quality: 0.8,
         videoMaxDuration: 25,
+        videoExportPreset: ImagePicker.VideoExportPreset.H264_1280x720,
       });
 
       if (result.canceled || !result.assets?.[0]) return;
