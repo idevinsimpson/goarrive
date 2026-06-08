@@ -551,35 +551,6 @@ export default function WorkoutPlayer({
   const [videoLayers, setVideoLayers] = useState<Array<{ url: string; ready: boolean }>>([]);
   const [displayedUrl, setDisplayedUrl] = useState<string | null>(null);
 
-  // Saved crop (scale/translate) per movement videoUrl, so a video layer
-  // can find its crop when only the URL is known (videoLayers stores
-  // just {url, ready}). Same non-destructive transform that
-  // MovementVideoControls applies — without this, the player shows the
-  // raw uncropped source while every other surface shows the cropped one.
-  const cropByUrl = useMemo(() => {
-    const map = new Map<string, { scale: number; tx: number; ty: number }>();
-    for (const m of flatMovements as any[]) {
-      const url = m?.videoUrl;
-      if (!url || map.has(url)) continue;
-      const scale = m.cropScale ?? 1;
-      const tx = m.cropTranslateX ?? 0;
-      const ty = m.cropTranslateY ?? 0;
-      if (scale !== 1 || tx !== 0 || ty !== 0) {
-        map.set(url, { scale, tx, ty });
-      }
-    }
-    return map;
-  }, [flatMovements]);
-
-  const getCropTransform = useCallback((step: any) => {
-    if (!step) return undefined;
-    const scale = step.cropScale ?? 1;
-    const tx = step.cropTranslateX ?? 0;
-    const ty = step.cropTranslateY ?? 0;
-    if (scale === 1 && tx === 0 && ty === 0) return undefined;
-    return { transform: [{ scale }, { translateX: tx }, { translateY: ty }] } as const;
-  }, []);
-
   // Mount the active layer if not already in the stack.
   useEffect(() => {
     if (!activeVideoUrl) return;
@@ -991,7 +962,7 @@ export default function WorkoutPlayer({
                     isLooping
                     shouldPlay={!isPaused}
                     isMuted
-                    style={[st.videoPlayer, getCropTransform(current) as any]}
+                    style={st.videoPlayer}
                     videoStyle={
                       Platform.OS === 'web'
                         ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
@@ -1124,7 +1095,7 @@ export default function WorkoutPlayer({
                     isLooping
                     shouldPlay={!isPaused}
                     isMuted
-                    style={[st.videoPlayer, getCropTransform(current) as any]}
+                    style={st.videoPlayer}
                     videoStyle={
                       Platform.OS === 'web'
                         ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
@@ -1164,22 +1135,7 @@ export default function WorkoutPlayer({
           // primitive — no per-source branching required.
           const isMirrored = !!current.swapSides
             && ((phase === 'work' && swapSide === 'R') || phase === 'swap');
-          // RN does not merge `transform` across style objects — last one
-          // wins. So crop + mirror must be one composed array. Crop first
-          // (scale + pan the source), mirror last (flip the framed result).
-          const buildLayerStyle = (url: string) => {
-            const crop = cropByUrl.get(url);
-            if (!crop && !isMirrored) return null;
-            const transform: any[] = [];
-            if (crop) {
-              transform.push({ scale: crop.scale });
-              transform.push({ translateX: crop.tx });
-              transform.push({ translateY: crop.ty });
-            }
-            if (isMirrored) transform.push({ scaleX: -1 });
-            return { transform } as any;
-          };
-          const fallbackMirrorStyle = isMirrored ? { transform: [{ scaleX: -1 }] } as any : null;
+          const mirrorStyle = isMirrored ? { transform: [{ scaleX: -1 }] } as any : null;
           return (
           <View style={[st.workContainer, webSafeBottomStyle]}>
             {renderLogoSlot()}
@@ -1261,7 +1217,7 @@ export default function WorkoutPlayer({
                           isLooping
                           shouldPlay={!isPaused}
                           isMuted
-                          style={[st.videoPlayer, st.videoLayer, { opacity } as any, buildLayerStyle(layer.url)]}
+                          style={[st.videoPlayer, st.videoLayer, { opacity } as any, mirrorStyle]}
                           videoStyle={
                             Platform.OS === 'web'
                               ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
@@ -1274,7 +1230,7 @@ export default function WorkoutPlayer({
                     {!displayedUrl && activeThumbUrl && (
                       <Image
                         source={{ uri: activeThumbUrl }}
-                        style={[st.posterFallback, activeVideoUrl ? buildLayerStyle(activeVideoUrl) : fallbackMirrorStyle]}
+                        style={[st.posterFallback, mirrorStyle]}
                         resizeMode="cover"
                       />
                     )}
@@ -1282,7 +1238,7 @@ export default function WorkoutPlayer({
                 ) : activeThumbUrl ? (
                   <Image
                     source={{ uri: activeThumbUrl }}
-                    style={[st.videoPlayer, activeVideoUrl ? buildLayerStyle(activeVideoUrl) : fallbackMirrorStyle]}
+                    style={[st.videoPlayer, mirrorStyle]}
                     resizeMode="cover"
                   />
                 ) : (
