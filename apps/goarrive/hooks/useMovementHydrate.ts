@@ -97,6 +97,8 @@ function mergeFromCache(fm: FlatMovement, cached: any): FlatMovement {
     cropScale: fm.cropScale ?? cached.cropScale ?? 1,
     cropTranslateX: fm.cropTranslateX ?? cached.cropTranslateX ?? 0,
     cropTranslateY: fm.cropTranslateY ?? cached.cropTranslateY ?? 0,
+    cropFrameWidth: fm.cropFrameWidth ?? cached.cropFrameWidth ?? 0,
+    cropFrameHeight: fm.cropFrameHeight ?? cached.cropFrameHeight ?? 0,
     swapSides: fm.swapSides || cachedSwapSides || false,
     swapMode: fm.swapMode ?? cachedSwapMode,
     swapWindowSec: fm.swapWindowSec ?? cachedSwapWindow,

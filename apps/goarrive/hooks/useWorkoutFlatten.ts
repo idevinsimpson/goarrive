@@ -288,6 +288,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropScale: 1,
               cropTranslateX: 0,
               cropTranslateY: 0,
+              cropFrameWidth: 0,
+              cropFrameHeight: 0,
               voiceUrl: '',
             });
           }
@@ -336,6 +338,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropScale: mv.cropScale ?? 1,
               cropTranslateX: mv.cropTranslateX ?? 0,
               cropTranslateY: mv.cropTranslateY ?? 0,
+              cropFrameWidth: mv.cropFrameWidth ?? 0,
+              cropFrameHeight: mv.cropFrameHeight ?? 0,
               voiceUrl: mv.voiceUrl || '',
               prescriptionVoiceUrl: mv.prescriptionVoiceUrl || '',
             });
@@ -379,6 +383,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropScale: 1,
               cropTranslateX: 0,
               cropTranslateY: 0,
+              cropFrameWidth: 0,
+              cropFrameHeight: 0,
               voiceUrl: '',
             });
           }
@@ -423,6 +429,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropScale: mv.cropScale ?? 1,
               cropTranslateX: mv.cropTranslateX ?? 0,
               cropTranslateY: mv.cropTranslateY ?? 0,
+              cropFrameWidth: mv.cropFrameWidth ?? 0,
+              cropFrameHeight: mv.cropFrameHeight ?? 0,
               voiceUrl: mv.voiceUrl || '',
               prescriptionVoiceUrl: mv.prescriptionVoiceUrl || '',
             });

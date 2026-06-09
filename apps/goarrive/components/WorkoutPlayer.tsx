@@ -585,9 +585,7 @@ export default function WorkoutPlayer({
       const cropFrameWidth = m.cropFrameWidth ?? 0;
       const cropFrameHeight = m.cropFrameHeight ?? 0;
       const hasCrop = cropScale !== 1 || cropTranslateX !== 0 || cropTranslateY !== 0;
-      // Skip legacy movements missing frame dims — translate scaling
-      // would be undefined and the poster is already baked-cropped.
-      if (!hasCrop || cropFrameWidth <= 0 || cropFrameHeight <= 0) continue;
+      if (!hasCrop) continue;
       map.set(url, { cropScale, cropTranslateX, cropTranslateY, cropFrameWidth, cropFrameHeight });
     }
     return map;
@@ -606,9 +604,9 @@ export default function WorkoutPlayer({
   ) => {
     if (!record && !mirrored) return null;
     const transform: any[] = [];
-    if (record && record.cropFrameWidth > 0 && record.cropFrameHeight > 0) {
-      const ratioX = mediaW / record.cropFrameWidth;
-      const ratioY = mediaH / record.cropFrameHeight;
+    if (record) {
+      const ratioX = record.cropFrameWidth > 0 ? mediaW / record.cropFrameWidth : 1;
+      const ratioY = record.cropFrameHeight > 0 ? mediaH / record.cropFrameHeight : 1;
       transform.push({ scale: record.cropScale });
       transform.push({ translateX: record.cropTranslateX * ratioX });
       transform.push({ translateY: record.cropTranslateY * ratioY });
