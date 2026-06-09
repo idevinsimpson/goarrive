@@ -669,10 +669,14 @@ export function useWorkoutTTS({
         // movement's restAnnounced state).
         const restAnnouncedName = restAnnouncedVoiceUrlForIndexRef.current === currentIndex;
         if (!restAnnouncedName && !returningFromSwap) {
-          const voiceUrl = current.voiceUrl;
+          // Prescription clip ("Cable Curls. 75 pounds, 15 reps.") wins over the
+          // base name-only clip when the coach has set weight or reps on this
+          // block-movement. Falls back cleanly if prescription URL is missing.
+          const voiceUrl = (current as any).prescriptionVoiceUrl || current.voiceUrl;
           if (voiceUrl) {
             console.info('[VOICE-AUDIT] work-start fallback voiceUrl enqueue', {
               currentIndex, name: current.name, swapSide,
+              usingPrescription: !!(current as any).prescriptionVoiceUrl,
             });
             enqueueVoice(voiceUrl, `work_${currentIndex}_${current.name}_fallback`);
           } else {
@@ -698,7 +702,11 @@ export function useWorkoutTTS({
           // succeed or fail independently — a missing voiceUrl only mutes
           // the name, not the rest-screen cue.
           enqueueCue('next_up', `rest_next_up_cue_${currentIndex}`);
-          const nextVoiceUrl = (next as any)?.voiceUrl as string | undefined;
+          // Prefer the per-build prescription clip ("Cable Curls. 75 pounds,
+          // 15 reps.") when set; otherwise fall back to the base name clip.
+          const nextVoiceUrl =
+            ((next as any)?.prescriptionVoiceUrl as string | undefined) ||
+            ((next as any)?.voiceUrl as string | undefined);
           const upcomingIndex = currentIndex + 1;
           if (nextVoiceUrl) {
             enqueueVoice(nextVoiceUrl, `rest_next_voice_${nextName}_${currentIndex}`);

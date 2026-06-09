@@ -44,6 +44,10 @@ import {
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, storage, functions } from '../lib/firebase';
+import {
+  generateMovementPrescriptionVoice,
+  prescriptionCacheKey,
+} from '../utils/generateMovementPrescriptionVoice';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from './Icon';
@@ -117,6 +121,12 @@ interface BlockMovement {
   swapSides?: boolean;
   swapMode?: 'split' | 'duplicate';
   swapWindowSec?: number;
+  // Per-workout voice clip that speaks the coach's prescribed weight/reps
+  // (e.g. "Cable Curls. 75 pounds, 15 reps."). Cleared when weight + reps go
+  // blank. Cache key is the hash of (name, weight, reps) so the watcher
+  // detects "prescription changed → regenerate."
+  prescriptionVoiceUrl?: string;
+  prescriptionVoiceCacheKey?: string;
 }
 
 interface WorkoutBlock {
@@ -801,6 +811,111 @@ export default function WorkoutFolderPage({
     if (changed) setBlocks(enriched);
   }, [movementsLoaded, availableMovements]);
 
+  // ── Prescription voice generation (debounced) ────────────────────────────
+  // Watches block-movement weight/reps. When the prescription cache key drifts
+  // from the stored one, regenerate the per-build TTS clip and write the URL +
+  // key back onto the block-movement so the player can prefer it over the
+  // base name-only voice clip.
+  const prescriptionGenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (blocks.length === 0) return;
+    if (prescriptionGenTimerRef.current) clearTimeout(prescriptionGenTimerRef.current);
+    prescriptionGenTimerRef.current = setTimeout(() => {
+      const targets: Array<{
+        blockIdx: number;
+        movIdx: number;
+        movementId: string;
+        movementName: string;
+        weight: string;
+        reps: string;
+        expectedKey: string;
+      }> = [];
+      const clears: Array<{ blockIdx: number; movIdx: number }> = [];
+      blocks.forEach((b, bi) => {
+        b.movements.forEach((m, mi) => {
+          const w = (m.weight || '').trim();
+          const r = (m.reps || '').trim();
+          if (!w && !r) {
+            if (m.prescriptionVoiceUrl || m.prescriptionVoiceCacheKey) {
+              clears.push({ blockIdx: bi, movIdx: mi });
+            }
+            return;
+          }
+          if (!m.movementId || !m.movementName) return;
+          const expected = prescriptionCacheKey(m.movementName, w, r);
+          if (m.prescriptionVoiceCacheKey !== expected || !m.prescriptionVoiceUrl) {
+            targets.push({
+              blockIdx: bi,
+              movIdx: mi,
+              movementId: m.movementId,
+              movementName: m.movementName,
+              weight: w,
+              reps: r,
+              expectedKey: expected,
+            });
+          }
+        });
+      });
+
+      if (clears.length > 0) {
+        setBlocks((prev) => {
+          const next = prev.map((b) => ({ ...b, movements: [...b.movements] }));
+          clears.forEach(({ blockIdx, movIdx }) => {
+            const blk = next[blockIdx];
+            if (!blk) return;
+            const mv = blk.movements[movIdx];
+            if (!mv) return;
+            blk.movements[movIdx] = {
+              ...mv,
+              prescriptionVoiceUrl: undefined,
+              prescriptionVoiceCacheKey: undefined,
+            };
+          });
+          return next;
+        });
+      }
+
+      targets.forEach(async (t) => {
+        try {
+          const res = await generateMovementPrescriptionVoice(
+            t.movementId,
+            t.movementName,
+            t.weight,
+            t.reps,
+          );
+          if (!res.url) return;
+          setBlocks((prev) => {
+            const blk = prev[t.blockIdx];
+            if (!blk) return prev;
+            const mv = blk.movements[t.movIdx];
+            if (!mv) return prev;
+            // Re-check the current weight/reps still match — user may have edited
+            // again while the TTS call was in flight.
+            const curW = (mv.weight || '').trim();
+            const curR = (mv.reps || '').trim();
+            if (curW !== t.weight || curR !== t.reps) return prev;
+            if (mv.prescriptionVoiceCacheKey === res.cacheKey) return prev;
+            const next = prev.map((b) => ({ ...b, movements: [...b.movements] }));
+            next[t.blockIdx].movements[t.movIdx] = {
+              ...mv,
+              prescriptionVoiceUrl: res.url ?? undefined,
+              prescriptionVoiceCacheKey: res.cacheKey,
+            };
+            return next;
+          });
+        } catch (err: any) {
+          console.warn('[WorkoutFolder] prescription voice gen failed', {
+            movementId: t.movementId, message: err?.message,
+          });
+        }
+      });
+    }, 1500);
+
+    return () => {
+      if (prescriptionGenTimerRef.current) clearTimeout(prescriptionGenTimerRef.current);
+    };
+  }, [blocks]);
+
   // ── Auto-save (debounced) ─────────────────────────────────────────────────
   const autoSave = useCallback(async (newBlocks: WorkoutBlock[], newName?: string) => {
     dirtyRef.current = true;
@@ -838,6 +953,8 @@ export default function WorkoutFolderPage({
               swapSides: m.swapSides ?? undefined,
               swapMode: m.swapMode ?? undefined,
               swapWindowSec: m.swapWindowSec ?? undefined,
+              prescriptionVoiceUrl: m.prescriptionVoiceUrl ?? undefined,
+              prescriptionVoiceCacheKey: m.prescriptionVoiceCacheKey ?? undefined,
             })),
           };
           if (b.showDemo != null) clean.showDemo = b.showDemo;
@@ -931,11 +1048,14 @@ export default function WorkoutFolderPage({
           movements: (b.movements ?? []).map((m) => ({
             movementId: m.movementId, movementName: m.movementName,
             sets: m.sets ?? undefined, reps: m.reps ?? undefined,
+            weight: m.weight ?? undefined,
             durationSec: m.durationSec ?? undefined, restSec: m.restSec ?? undefined,
             notes: m.notes ?? '', thumbnailUrl: m.thumbnailUrl ?? undefined,
             swapSides: m.swapSides ?? undefined,
             swapMode: m.swapMode ?? undefined,
             swapWindowSec: m.swapWindowSec ?? undefined,
+            prescriptionVoiceUrl: m.prescriptionVoiceUrl ?? undefined,
+            prescriptionVoiceCacheKey: m.prescriptionVoiceCacheKey ?? undefined,
           })),
         };
         if (b.showGrabEquipment) {
@@ -1018,11 +1138,14 @@ export default function WorkoutFolderPage({
             movements: (b.movements ?? []).map((m) => ({
               movementId: m.movementId, movementName: m.movementName,
               sets: m.sets ?? undefined, reps: m.reps ?? undefined,
+              weight: m.weight ?? undefined,
               durationSec: m.durationSec ?? undefined, restSec: m.restSec ?? undefined,
               notes: m.notes ?? '', thumbnailUrl: m.thumbnailUrl ?? undefined,
               swapSides: m.swapSides ?? undefined,
               swapMode: m.swapMode ?? undefined,
               swapWindowSec: m.swapWindowSec ?? undefined,
+              prescriptionVoiceUrl: m.prescriptionVoiceUrl ?? undefined,
+              prescriptionVoiceCacheKey: m.prescriptionVoiceCacheKey ?? undefined,
             })),
           };
           if (b.type === 'Follow-Along Video') {
