@@ -64,6 +64,18 @@ if (isStagingHost()) {
 // timeLeft === 3 so the screen and audio reveal together.
 const REVEAL_LEAD_SECONDS = 3.5;
 
+// Compose a movement label that appends coach-prescribed weight and reps after
+// the name (e.g. "Cable Curls, 75 lbs, 15 reps"). Purely-numeric weight/reps
+// get the unit appended; freeform values ("bodyweight", "AMRAP") render as-is.
+export function composePrescriptionLabel(name: string, weight?: string, reps?: string): string {
+  const w = (weight || '').trim();
+  const r = (reps || '').trim();
+  const parts: string[] = [];
+  if (w) parts.push(/^\d+(\.\d+)?$/.test(w) ? `${w} lbs` : w);
+  if (r) parts.push(/^\d+$/.test(r) ? `${r} reps` : r);
+  return parts.length === 0 ? name : `${name}, ${parts.join(', ')}`;
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 interface WorkoutPlayerProps {
   visible: boolean;
@@ -658,7 +670,8 @@ export default function WorkoutPlayer({
   //   [ NEXT UP | name + meta (flex) | thumb ]
   const renderNextUp = () => {
     if (!next) return null;
-    const nextLabel = next.stepType === 'exercise' ? next.name
+    const nextLabel = next.stepType === 'exercise'
+      ? composePrescriptionLabel(next.name, next.weight, next.reps)
       : next.originalBlockType || next.name;
     return (
       <View style={[st.nextUpBar, scaledNextUpBar]}>
@@ -1144,7 +1157,7 @@ export default function WorkoutPlayer({
                 {current.supersetLabel && (
                   <Text style={[st.supersetLabel, { fontSize: scaledLabels.superset }]}>{current.supersetLabel}</Text>
                 )}
-                {renderAutoFitTitle(current.name, {
+                {renderAutoFitTitle(composePrescriptionLabel(current.name, current.weight, current.reps), {
                   hasTimer: !isRepBased,
                   maxLines: current.supersetLabel ? 2 : NAME_MAX_LINES,
                 })}
@@ -1171,7 +1184,7 @@ export default function WorkoutPlayer({
             {phase === 'rest' && renderTitleTimerSlot(
               <>
                 <Text style={[st.restPhaseLabel, { fontSize: scaledLabels.restPhase }]}>REST</Text>
-                {next && renderAutoFitTitle(`Next: ${next.name}`, {
+                {next && renderAutoFitTitle(`Next: ${composePrescriptionLabel(next.name, next.weight, next.reps)}`, {
                   hasTimer: true,
                   maxLines: 2,
                   color: '#F0F4F8',
@@ -1183,7 +1196,7 @@ export default function WorkoutPlayer({
             {phase === 'swap' && renderTitleTimerSlot(
               <>
                 <Text style={[st.phaseLabel, { fontSize: scaledLabels.phaseLabel }]}>SWITCH SIDES</Text>
-                {renderAutoFitTitle(current.name, {
+                {renderAutoFitTitle(composePrescriptionLabel(current.name, current.weight, current.reps), {
                   hasTimer: true,
                   maxLines: 2,
                   color: '#F0F4F8',

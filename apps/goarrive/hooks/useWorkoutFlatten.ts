@@ -47,6 +47,7 @@ export interface FlatMovement {
   description?: string;
   sets?: number;
   reps?: string;
+  weight?: string;
   videoUrl?: string;
   thumbnailUrl?: string;
   coachingCues?: string;
@@ -58,6 +59,8 @@ export interface FlatMovement {
   cropTranslateY?: number;
   /** GoArrive Coach voice clip URL for this movement name (OpenAI TTS generated) */
   voiceUrl?: string;
+  /** Prescription voice clip URL — generated per-workout-build when weight/reps are set. Preferred over voiceUrl when present. */
+  prescriptionVoiceUrl?: string;
 
   // ── Phase 3: Special block fields ───────────────────────────────
   /** What kind of step this is — determines which player screen renders */
@@ -321,6 +324,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               description: mv.description || mv.coachingCues || mv.notes || '',
               sets: mv.sets,
               reps: mv.reps,
+              weight: mv.weight,
               videoUrl: mv.videoUrl || mv.mediaUrl || '',
               thumbnailUrl: mv.thumbnailUrl || '',
               coachingCues: mv.coachingCues || mv.notes || '',
@@ -333,6 +337,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropTranslateX: mv.cropTranslateX ?? 0,
               cropTranslateY: mv.cropTranslateY ?? 0,
               voiceUrl: mv.voiceUrl || '',
+              prescriptionVoiceUrl: mv.prescriptionVoiceUrl || '',
             });
           });
         }
@@ -407,6 +412,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               description: mv.description || mv.coachingCues || mv.notes || '',
               sets: mv.sets,
               reps: mv.reps,
+              weight: mv.weight,
               videoUrl: mv.videoUrl || mv.mediaUrl || '',
               thumbnailUrl: mv.thumbnailUrl || '',
               coachingCues: mv.coachingCues || mv.notes || '',
@@ -418,6 +424,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropTranslateX: mv.cropTranslateX ?? 0,
               cropTranslateY: mv.cropTranslateY ?? 0,
               voiceUrl: mv.voiceUrl || '',
+              prescriptionVoiceUrl: mv.prescriptionVoiceUrl || '',
             });
           });
         }
