@@ -69,6 +69,12 @@ export function buildPrescriptionPhrase(
  * the Storage path AND as a dedup signal on the block-movement so the client
  * can detect "prescription changed → regenerate."
  */
+// Bump PATH_VERSION when the storagePath layout changes so existing stored
+// cacheKeys are invalidated and the watcher regenerates with the new path.
+// v2: moved from subfolder `prescription/` to flat `prescription-*` because
+//     the subfolder didn't match the single-segment storage rule wildcard.
+const PATH_VERSION = 'v2';
+
 export function prescriptionCacheKey(
   movementName: string,
   weight?: string,
@@ -77,7 +83,7 @@ export function prescriptionCacheKey(
   const w = (weight || '').trim();
   const r = (reps || '').trim();
   const normalized = normalizeTtsText(movementName);
-  return hashTtsText(`${TTS_VOICE_SLUG}|${normalized}|w=${w}|r=${r}`);
+  return hashTtsText(`${PATH_VERSION}|${TTS_VOICE_SLUG}|${normalized}|w=${w}|r=${r}`);
 }
 
 export async function generateMovementPrescriptionVoice(
@@ -117,7 +123,11 @@ export async function generateMovementPrescriptionVoice(
       }
     >(functions, 'generateVoice');
 
-    const storagePath = `voice_cache/movements/prescription/${movementId}-${TTS_VOICE_SLUG}-${cacheKey}.mp3`;
+    // Flat path (no `prescription/` subfolder) so Storage Rule
+    // `match /voice_cache/movements/{fileName}` covers it — that wildcard
+    // matches one path segment, so a subfolder would fall through to the
+    // default-deny rule and the browser would get 403 on read.
+    const storagePath = `voice_cache/movements/prescription-${movementId}-${TTS_VOICE_SLUG}-${cacheKey}.mp3`;
 
     console.info('[VOICE-AUDIT] generateMovementPrescriptionVoice calling generateVoice', {
       movementId, movementName, weight, reps, phrase, storagePath,
