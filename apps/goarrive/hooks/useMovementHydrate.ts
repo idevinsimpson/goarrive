@@ -94,11 +94,16 @@ function mergeFromCache(fm: FlatMovement, cached: any): FlatMovement {
     thumbnailUrl: fm.thumbnailUrl || cached.thumbnailUrl || '',
     description: fm.description || cached.description || '',
     coachingCues: fm.coachingCues || cached.coachingCues || '',
-    cropScale: fm.cropScale ?? cached.cropScale ?? 1,
-    cropTranslateX: fm.cropTranslateX ?? cached.cropTranslateX ?? 0,
-    cropTranslateY: fm.cropTranslateY ?? cached.cropTranslateY ?? 0,
-    cropFrameWidth: fm.cropFrameWidth ?? cached.cropFrameWidth ?? 0,
-    cropFrameHeight: fm.cropFrameHeight ?? cached.cropFrameHeight ?? 0,
+    // Canonical Movement doc wins for crop. Workout block snapshots predate the
+    // crop feature and don't carry crop fields, so flatten defaults them to
+    // 1/0/0/0/0 — which are non-nullish, so `fm.X ?? cached.X` would lock those
+    // defaults in and ignore the saved crop. Canonical-first lets a saved crop
+    // on the Movement doc flow through even for older workouts.
+    cropScale: cached.cropScale ?? fm.cropScale ?? 1,
+    cropTranslateX: cached.cropTranslateX ?? fm.cropTranslateX ?? 0,
+    cropTranslateY: cached.cropTranslateY ?? fm.cropTranslateY ?? 0,
+    cropFrameWidth: cached.cropFrameWidth ?? fm.cropFrameWidth ?? 0,
+    cropFrameHeight: cached.cropFrameHeight ?? fm.cropFrameHeight ?? 0,
     swapSides: fm.swapSides || cachedSwapSides || false,
     swapMode: fm.swapMode ?? cachedSwapMode,
     swapWindowSec: fm.swapWindowSec ?? cachedSwapWindow,
