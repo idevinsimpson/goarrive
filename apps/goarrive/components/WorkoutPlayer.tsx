@@ -50,6 +50,7 @@ import { FB, FH } from '../lib/theme';
 import VoiceAuditPanel from './VoiceAuditPanel';
 import { isStagingHost } from '../lib/runtimeEnv';
 import { installVoiceAuditCapture } from '../lib/voiceAuditLog';
+import PosterThumb from './PosterThumb';
 
 // Install [VOICE-AUDIT] console capture at module load on staging only so the
 // in-app debug panel can mirror the forensic trace without DevTools. Has zero
@@ -484,10 +485,10 @@ export default function WorkoutPlayer({
     // grabEquipment, transition often carry no media of their own).
     const pickAsset = (item: any, indexOfItem: number) => {
       if (!item) return { activeVideoUrl: null, activeThumbUrl: null };
-      if (item.videoUrl || item.thumbnailUrl) {
+      if (item.videoUrl || item.thumbnailUrl || item.posterUrl) {
         return {
           activeVideoUrl: item.videoUrl ?? null,
-          activeThumbUrl: item.thumbnailUrl ?? null,
+          activeThumbUrl: item.posterUrl ?? item.thumbnailUrl ?? null,
         };
       }
       // Placeholder movements are exercises that intentionally have no video yet.
@@ -498,8 +499,8 @@ export default function WorkoutPlayer({
       }
       for (let i = indexOfItem + 1; i < flatMovements.length; i++) {
         const m = flatMovements[i];
-        if (m.stepType === 'exercise' && (m.videoUrl || m.thumbnailUrl)) {
-          return { activeVideoUrl: m.videoUrl ?? null, activeThumbUrl: m.thumbnailUrl ?? null };
+        if (m.stepType === 'exercise' && (m.videoUrl || m.thumbnailUrl || m.posterUrl)) {
+          return { activeVideoUrl: m.videoUrl ?? null, activeThumbUrl: m.posterUrl ?? m.thumbnailUrl ?? null };
         }
       }
       return { activeVideoUrl: null, activeThumbUrl: null };
@@ -682,8 +683,13 @@ export default function WorkoutPlayer({
             {next.blockName}{next.duration ? ` · ${next.duration}s` : ''}
           </Text>
         </View>
-        {next.thumbnailUrl ? (
-          <Image source={{ uri: next.thumbnailUrl }} style={[st.nextUpThumb, scaledNextUpThumb]} resizeMode="cover" />
+        {(next.posterUrl || next.thumbnailUrl) ? (
+          <PosterThumb
+            posterUrl={(next as any).posterUrl}
+            gifUrl={next.thumbnailUrl}
+            containerStyle={[st.nextUpThumb, scaledNextUpThumb]}
+            resizeMode="cover"
+          />
         ) : (
           <View style={[st.nextUpThumb, scaledNextUpThumb, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#1A2035' }]}>
             <Icon name={
@@ -791,21 +797,12 @@ export default function WorkoutPlayer({
                       <View style={st.readyThumbGrid}>
                         {mvs.map((mv: any, mi: number) => (
                           <View key={mi} style={st.readyThumbCell}>
-                            {mv.thumbnailUrl ? (
-                              <Image
-                                source={{ uri: mv.thumbnailUrl }}
-                                style={st.readyThumbImage}
-                                resizeMode="cover"
-                              />
-                            ) : (
-                              <View style={[st.readyThumbImage, st.placeholderLogoFrame]}>
-                                <Image
-                                  source={require('../assets/goarrive-icon.png')}
-                                  style={st.placeholderLogo}
-                                  resizeMode="cover"
-                                />
-                              </View>
-                            )}
+                            <PosterThumb
+                              posterUrl={mv.posterUrl}
+                              gifUrl={mv.thumbnailUrl}
+                              containerStyle={st.readyThumbImage}
+                              resizeMode="cover"
+                            />
                             <Text style={st.readyThumbName} numberOfLines={1}>{mv.movementName || mv.name || 'Movement'}</Text>
                           </View>
                         ))}
@@ -835,7 +832,7 @@ export default function WorkoutPlayer({
           // Use the intro block's own video, falling back to first exercise
           const firstExercise = flatMovements.find((f: any) => f.stepType === 'exercise');
           const introVideoUrl = current.videoUrl || firstExercise?.videoUrl;
-          const introThumbUrl = firstExercise?.thumbnailUrl;
+          const introThumbUrl = firstExercise?.posterUrl || firstExercise?.thumbnailUrl;
           return (
             <View style={st.introSplitContainer}>
               {/* Left: video panel */}
@@ -923,17 +920,12 @@ export default function WorkoutPlayer({
                 <View style={[st.demoGrid, mediaInnerSize]}>
                   {demos.map((mv: any, i: number) => (
                     <View key={i} style={[st.demoGridCell, { width: `${Math.floor(100 / cols) - 2}%` as any }]}>
-                      {mv.thumbnailUrl ? (
-                        <Image source={{ uri: mv.thumbnailUrl }} style={st.demoGridImage} resizeMode="cover" />
-                      ) : (
-                        <View style={[st.demoGridImage, st.placeholderLogoFrame]}>
-                          <Image
-                            source={require('../assets/goarrive-icon.png')}
-                            style={st.placeholderLogo}
-                            resizeMode="cover"
-                          />
-                        </View>
-                      )}
+                      <PosterThumb
+                        posterUrl={mv.posterUrl}
+                        gifUrl={mv.thumbnailUrl}
+                        containerStyle={st.demoGridImage}
+                        resizeMode="cover"
+                      />
                     </View>
                   ))}
                 </View>

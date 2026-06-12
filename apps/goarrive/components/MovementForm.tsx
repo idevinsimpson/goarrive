@@ -230,6 +230,7 @@ export default function MovementForm({
       videoUrl: string;
       thumbnailUrl: string;
       thumbnailImageUrl: string;
+      posterUrl: string;
       gifLowUrl: string;
       gifHighUrl: string | null;
       cropScale: number;
@@ -500,10 +501,11 @@ export default function MovementForm({
       gifHighUrl: string | null;
       gifLowUrl: string | null;
       thumbnailImageUrl: string | null;
+      posterUrl: string | null;
       _loFrames: ImageData[];
     }> => {
       if (Platform.OS !== 'web' || !url) {
-        return Promise.resolve({ gifHighUrl: null, gifLowUrl: null, thumbnailImageUrl: null, _loFrames: [] });
+        return Promise.resolve({ gifHighUrl: null, gifLowUrl: null, thumbnailImageUrl: null, posterUrl: null, _loFrames: [] });
       }
 
       setGeneratingGif(true);
@@ -531,35 +533,38 @@ export default function MovementForm({
                   thumbnailUrl: fallbackUrl,
                 }).catch((err) => console.error('[MovementForm] Fallback auto-patch error:', err));
               }
-              return { gifHighUrl: fallbackUrl, gifLowUrl: null, thumbnailImageUrl: null, _loFrames: [] };
+              return { gifHighUrl: fallbackUrl, gifLowUrl: null, thumbnailImageUrl: null, posterUrl: null, _loFrames: [] };
             }
             // Both pipelines failed
             setGeneratingGif(false);
             setGifProgress(0);
-            return { gifHighUrl: null, gifLowUrl: null, thumbnailImageUrl: null, _loFrames: [] };
+            return { gifHighUrl: null, gifLowUrl: null, thumbnailImageUrl: null, posterUrl: null, _loFrames: [] };
           }
 
           // Upload available derivatives in parallel (some may be null if GIF encoding failed)
-          const [gifHighUrl, gifLowUrl, thumbnailImageUrl] = await Promise.all([
+          // firstFrame goes to posters/ (posterUrl) AND thumbnails-img/ (thumbnailImageUrl) for legacy compat
+          const [gifHighUrl, gifLowUrl, posterUrl] = await Promise.all([
             result.gifHigh ? uploadBlob(result.gifHigh, 'thumbnails', 'gif') : Promise.resolve(null),
             result.gifLow ? uploadBlob(result.gifLow, 'thumbnails-low', 'gif') : Promise.resolve(null),
-            result.firstFrame ? uploadBlob(result.firstFrame, 'thumbnails-img', 'jpg') : Promise.resolve(null),
+            result.firstFrame ? uploadBlob(result.firstFrame, 'posters', 'jpg') : Promise.resolve(null),
           ]);
+          const thumbnailImageUrl = posterUrl;
 
-          setThumbnailUrl(gifHighUrl || thumbnailImageUrl || '');
+          setThumbnailUrl(gifHighUrl || posterUrl || '');
           setGeneratingGif(false);
           setGifProgress(0);
 
           // Auto-patch if doc was already saved
           if (savedDocIdRef.current) {
             updateDoc(doc(db, 'movements', savedDocIdRef.current), {
-              thumbnailUrl: gifHighUrl || thumbnailImageUrl || '',
+              thumbnailUrl: gifHighUrl || posterUrl || '',
               gifLowUrl: gifLowUrl || '',
-              thumbnailImageUrl: thumbnailImageUrl || '',
+              thumbnailImageUrl: posterUrl || '',
+              posterUrl: posterUrl || '',
             }).catch((err) => console.error('[MovementForm] Auto-patch derivatives error:', err));
           }
 
-          return { gifHighUrl, gifLowUrl, thumbnailImageUrl, _loFrames: result._loFrames };
+          return { gifHighUrl, gifLowUrl, thumbnailImageUrl, posterUrl, _loFrames: result._loFrames };
         } catch (err) {
           console.error('[MovementForm] Derivative pipeline error:', err);
           // Last-resort fallback to old pipeline
@@ -571,14 +576,14 @@ export default function MovementForm({
               setThumbnailUrl(fallbackUrl);
               setGeneratingGif(false);
               setGifProgress(0);
-              return { gifHighUrl: fallbackUrl, gifLowUrl: null, thumbnailImageUrl: null, _loFrames: [] };
+              return { gifHighUrl: fallbackUrl, gifLowUrl: null, thumbnailImageUrl: null, posterUrl: null, _loFrames: [] };
             }
           } catch (fallbackErr) {
             console.error('[MovementForm] Fallback pipeline also failed:', fallbackErr);
           }
           setGeneratingGif(false);
           setGifProgress(0);
-          return { gifHighUrl: null, gifLowUrl: null, thumbnailImageUrl: null, _loFrames: [] };
+          return { gifHighUrl: null, gifLowUrl: null, thumbnailImageUrl: null, posterUrl: null, _loFrames: [] };
         }
       })();
 
@@ -753,7 +758,7 @@ export default function MovementForm({
       setProcessingProgress(0.1);
 
       const derivatives = await generateAndUploadDerivatives(videoUrl, fullCrop);
-      const { gifHighUrl, gifLowUrl, thumbnailImageUrl, _loFrames } = derivatives;
+      const { gifHighUrl, gifLowUrl, thumbnailImageUrl, posterUrl: derivedPosterUrl, _loFrames } = derivatives;
 
       setProcessingProgress(0.4);
       if (isAddVideoSession) setEditProcessingStatus('Analyzing video…');
@@ -822,8 +827,9 @@ export default function MovementForm({
           },
           derivatives: {
             videoUrl: videoUrl.trim(),
-            thumbnailUrl: gifHighUrl || thumbnailImageUrl || '',
-            thumbnailImageUrl: thumbnailImageUrl || '',
+            thumbnailUrl: gifHighUrl || derivedPosterUrl || '',
+            thumbnailImageUrl: derivedPosterUrl || '',
+            posterUrl: derivedPosterUrl || '',
             gifLowUrl: gifLowUrl || '',
             gifHighUrl,
             cropScale: crop.cropScale,
@@ -889,8 +895,9 @@ export default function MovementForm({
         swapMode: 'split' as const, // initial — coach edits after creation
         swapWindowSec: 5,
         videoUrl: videoUrl.trim(),
-        thumbnailUrl: gifHighUrl || thumbnailImageUrl || '',
-        thumbnailImageUrl: thumbnailImageUrl || '',
+        thumbnailUrl: gifHighUrl || derivedPosterUrl || '',
+        thumbnailImageUrl: derivedPosterUrl || '',
+        posterUrl: derivedPosterUrl || '',
         gifLowUrl: gifLowUrl || '',
         gifLoopUrl: '', // populated by one-rep loop step below
         regression: aiData.regression || '',
@@ -1000,6 +1007,7 @@ export default function MovementForm({
       videoUrl: d.videoUrl,
       thumbnailUrl: d.thumbnailUrl,
       thumbnailImageUrl: d.thumbnailImageUrl,
+      posterUrl: d.posterUrl || d.thumbnailImageUrl || '',
       gifLowUrl: d.gifLowUrl,
       cropScale: d.cropScale,
       cropTranslateX: d.cropTranslateX,

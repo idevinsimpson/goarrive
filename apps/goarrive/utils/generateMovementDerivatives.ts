@@ -241,7 +241,7 @@ export async function generateMovementDerivatives(
         hiCanvas.toBlob(
           (blob) => (blob ? resolve(blob) : reject(new Error('First frame JPEG failed'))),
           'image/jpeg',
-          0.85,
+          0.75,
         );
       });
     } catch (err) {

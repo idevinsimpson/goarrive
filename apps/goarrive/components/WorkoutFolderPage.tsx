@@ -54,6 +54,7 @@ import { Icon } from './Icon';
 import WorkoutPlayer from './WorkoutPlayer';
 import VideoCropModal, { CropValues } from './VideoCropModal';
 import { FB, FH } from '../lib/theme';
+import PosterThumb from './PosterThumb';
 
 
 // ── Fonts ───────────────────────────────────────────────────────────────────
@@ -118,6 +119,7 @@ interface BlockMovement {
   restSec?: number;
   notes?: string;
   thumbnailUrl?: string;
+  posterUrl?: string;
   swapSides?: boolean;
   swapMode?: 'split' | 'duplicate';
   swapWindowSec?: number;
@@ -163,6 +165,7 @@ interface MovementOption {
   name: string;
   category: string;
   thumbnailUrl?: string | null;
+  posterUrl?: string | null;
   mediaUrl?: string | null;
   videoUrl?: string | null;
   swapSides?: boolean;
@@ -660,6 +663,7 @@ export default function WorkoutFolderPage({
                   restSec: m.restSec ?? undefined,
                   notes: m.notes ?? '',
                   thumbnailUrl: m.thumbnailUrl ?? undefined,
+                  posterUrl: m.posterUrl ?? undefined,
                   swapSides: m.swapSides ?? undefined,
                   swapMode: m.swapMode ?? undefined,
                   swapWindowSec: m.swapWindowSec ?? undefined,
@@ -721,6 +725,7 @@ export default function WorkoutFolderPage({
             name: cd.name ?? '',
             category: cd.category ?? '',
             thumbnailUrl: cd.thumbnailUrl ?? null,
+            posterUrl: cd.posterUrl ?? cd.thumbnailImageUrl ?? null,
             mediaUrl: cd.mediaUrl ?? null,
             videoUrl: cd.videoUrl ?? null,
             swapSides: cd.swapSides ?? false,
@@ -738,6 +743,7 @@ export default function WorkoutFolderPage({
             name: gd.name ?? '',
             category: gd.category ?? '',
             thumbnailUrl: gd.thumbnailUrl ?? null,
+            posterUrl: gd.posterUrl ?? gd.thumbnailImageUrl ?? null,
             mediaUrl: gd.mediaUrl ?? null,
             videoUrl: gd.videoUrl ?? null,
             swapSides: gd.swapSides ?? false,
@@ -799,11 +805,15 @@ export default function WorkoutFolderPage({
     const enriched = blocks.map((b) => ({
       ...b,
       movements: b.movements.map((m) => {
-        if (m.thumbnailUrl) return m;
+        if (m.thumbnailUrl && m.posterUrl) return m;
         const found = availableMovements.find((am) => am.id === m.movementId);
-        if (found && (found.thumbnailUrl || found.mediaUrl)) {
+        if (found && (found.thumbnailUrl || found.mediaUrl || found.posterUrl)) {
           changed = true;
-          return { ...m, thumbnailUrl: found.thumbnailUrl ?? found.mediaUrl ?? undefined };
+          return {
+            ...m,
+            thumbnailUrl: m.thumbnailUrl ?? found.thumbnailUrl ?? found.mediaUrl ?? undefined,
+            posterUrl: m.posterUrl ?? found.posterUrl ?? undefined,
+          };
         }
         return m;
       }),
@@ -950,6 +960,7 @@ export default function WorkoutFolderPage({
               restSec: m.restSec ?? undefined,
               notes: m.notes ?? '',
               thumbnailUrl: m.thumbnailUrl ?? undefined,
+              posterUrl: m.posterUrl ?? undefined,
               swapSides: m.swapSides ?? undefined,
               swapMode: m.swapMode ?? undefined,
               swapWindowSec: m.swapWindowSec ?? undefined,
@@ -1051,6 +1062,7 @@ export default function WorkoutFolderPage({
             weight: m.weight ?? undefined,
             durationSec: m.durationSec ?? undefined, restSec: m.restSec ?? undefined,
             notes: m.notes ?? '', thumbnailUrl: m.thumbnailUrl ?? undefined,
+            posterUrl: m.posterUrl ?? undefined,
             swapSides: m.swapSides ?? undefined,
             swapMode: m.swapMode ?? undefined,
             swapWindowSec: m.swapWindowSec ?? undefined,
@@ -1141,6 +1153,7 @@ export default function WorkoutFolderPage({
               weight: m.weight ?? undefined,
               durationSec: m.durationSec ?? undefined, restSec: m.restSec ?? undefined,
               notes: m.notes ?? '', thumbnailUrl: m.thumbnailUrl ?? undefined,
+              posterUrl: m.posterUrl ?? undefined,
               swapSides: m.swapSides ?? undefined,
               swapMode: m.swapMode ?? undefined,
               swapWindowSec: m.swapWindowSec ?? undefined,
@@ -1413,6 +1426,7 @@ export default function WorkoutFolderPage({
       restSec: DEFAULT_REST_SEC,
       sets: 1,
       thumbnailUrl: movement.thumbnailUrl ?? movement.mediaUrl ?? undefined,
+      posterUrl: movement.posterUrl ?? undefined,
     };
     if (movement.swapSides) {
       next.swapSides = true;
@@ -2119,22 +2133,13 @@ export default function WorkoutFolderPage({
                                 setReorderSource({ blockIdx, movIdx });
                               }}
                             >
-                              {/* GIF thumbnail background */}
-                              {thumbUri ? (
-                                <Image
-                                  source={{ uri: thumbUri }}
-                                  style={{ width: '100%', height: '100%' }}
-                                  resizeMode="cover"
-                                />
-                              ) : (
-                                <View style={st.placeholderLogoFrame}>
-                                  <Image
-                                    source={require('../assets/goarrive-icon.png')}
-                                    style={st.placeholderLogo}
-                                    resizeMode="cover"
-                                  />
-                                </View>
-                              )}
+                              {/* Poster (static) → GIF (lazy swap on intersection) */}
+                              <PosterThumb
+                                posterUrl={mov.posterUrl}
+                                gifUrl={thumbUri}
+                                containerStyle={{ width: '100%', height: '100%' }}
+                                resizeMode="cover"
+                              />
 
                               {/* Hidden badge (shown when controls are closed and movement is hidden) — tap to unhide */}
                               {!isMovExpanded && mov.hidden && (
@@ -2374,17 +2379,12 @@ export default function WorkoutFolderPage({
                               }}
                             >
                               <View style={st.listThumb}>
-                                {thumbUri ? (
-                                  <Image source={{ uri: thumbUri }} style={st.listThumbImg} resizeMode="cover" />
-                                ) : (
-                                  <View style={st.placeholderLogoFrame}>
-                                    <Image
-                                      source={require('../assets/goarrive-icon.png')}
-                                      style={st.placeholderLogo}
-                                      resizeMode="cover"
-                                    />
-                                  </View>
-                                )}
+                                <PosterThumb
+                                  posterUrl={mov.posterUrl}
+                                  gifUrl={thumbUri}
+                                  containerStyle={st.listThumbImg}
+                                  resizeMode="cover"
+                                />
                               </View>
                               <Text style={st.listMovName} numberOfLines={1}>{mov.movementName}</Text>
                             </Pressable>
@@ -2631,17 +2631,12 @@ export default function WorkoutFolderPage({
                   }}
                 >
                   <View style={st.pickerThumb}>
-                    {mov.thumbnailUrl || mov.mediaUrl ? (
-                      <Image source={{ uri: mov.thumbnailUrl || mov.mediaUrl || '' }} style={st.pickerThumbImg} resizeMode="cover" />
-                    ) : (
-                      <View style={st.placeholderLogoFrame}>
-                        <Image
-                          source={require('../assets/goarrive-icon.png')}
-                          style={st.placeholderLogo}
-                          resizeMode="cover"
-                        />
-                      </View>
-                    )}
+                    <PosterThumb
+                      posterUrl={mov.posterUrl}
+                      gifUrl={mov.thumbnailUrl || mov.mediaUrl}
+                      containerStyle={st.pickerThumbImg}
+                      resizeMode="cover"
+                    />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={st.pickerItemName}>{mov.name}</Text>

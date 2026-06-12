@@ -92,6 +92,7 @@ function mergeFromCache(fm: FlatMovement, cached: any): FlatMovement {
     voiceUrl: canonicalVoiceUrl,
     videoUrl: fm.videoUrl || cached.videoUrl || '',
     thumbnailUrl: fm.thumbnailUrl || cached.thumbnailUrl || '',
+    posterUrl: fm.posterUrl || cached.posterUrl || cached.thumbnailImageUrl || '',
     description: fm.description || cached.description || '',
     coachingCues: fm.coachingCues || cached.coachingCues || '',
     cropScale: fm.cropScale ?? cached.cropScale ?? 1,
