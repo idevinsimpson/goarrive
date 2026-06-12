@@ -2109,6 +2109,8 @@ export default function WorkoutFolderPage({
                                   borderColor: isReorderSource ? '#38BDF8' : isMovExpanded ? '#F5A623' : isReorderTarget ? 'rgba(56,189,248,0.4)' : 'transparent',
                                   borderWidth: isReorderSource ? 2 : isMovExpanded ? 2 : isReorderTarget ? 1 : 0,
                                   opacity: mov.hidden ? 0.4 : isReorderSource ? 0.6 : 1,
+                                  // Suppress iOS Safari native long-press context menu so hold-to-reorder fires
+                                  ...({ WebkitTouchCallout: 'none', userSelect: 'none' } as any),
                                 },
                               ]}
                               onPress={(e) => {
