@@ -162,6 +162,24 @@ export function cueRepDone(): void {
   playTone(784, 0.1, 0.2, 'sine', 0); // G5
 }
 
+/**
+ * Called once from the user-gesture handler that starts the workout (handleStart).
+ * Resumes the Web Audio context and pre-plays a silent HTMLAudioElement so
+ * subsequent programmatic play() calls are not blocked by Chrome's autoplay
+ * policy on first-visit sessions with low MEI.
+ */
+export function unlockAudio(): void {
+  if (typeof window === 'undefined') return;
+  getAudioContext();
+  try {
+    const el = new (window as any).Audio();
+    const p = el.play();
+    if (p && typeof p.then === 'function') {
+      p.then(() => { el.pause(); }).catch(() => {});
+    }
+  } catch {}
+}
+
 /** Get/set mute state (persisted in memory only) */
 let muted = false;
 

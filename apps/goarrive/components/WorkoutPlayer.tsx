@@ -232,9 +232,15 @@ export default function WorkoutPlayer({
   const registerVideo = useCallback((el: any | null) => {
     if (!el) return;
     videosRef.current.add(el);
-    // Freshly-mounted Videos default to playing; if we're paused right now
-    // (e.g. Skip while paused swapped in a new video), pause it immediately.
-    if (isPausedRef.current) el.pauseAsync?.().catch(() => {});
+    if (isPausedRef.current) {
+      el.pauseAsync?.().catch(() => {});
+    } else {
+      // Explicitly start via programmatic play() rather than relying on the
+      // HTML autoPlay attribute. Chrome blocks unmuted video autoPlay on
+      // first-visit sessions with low MEI, but allows programmatic play()
+      // when the page has user activation (set by the "Start" button tap).
+      el.playAsync?.().catch(() => {});
+    }
   }, []);
 
   // Detached from `phase` on purpose: the displayed video must not restart

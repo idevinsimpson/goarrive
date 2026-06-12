@@ -11,7 +11,7 @@
  * Special block phases: ready → [special] → next
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { playCue } from '../lib/audioCues';
+import { playCue, unlockAudio } from '../lib/audioCues';
 import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess } from '../lib/haptics';
 import type { StepType } from './useWorkoutFlatten';
 
@@ -242,6 +242,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
   // ── Controls ────────────────────────────────────────────────────────
   const handleStart = useCallback(() => {
     if (total === 0) return;
+    unlockAudio();
     setIsSkippingRep(false);
 
     const firstStep = flatMovements[0];
