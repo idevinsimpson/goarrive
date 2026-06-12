@@ -284,8 +284,8 @@ export default function WorkoutFolderPage({
   const [ioUploading, setIoUploading] = useState<'intro' | 'outro' | null>(null);
   const [ioUploadProgress, setIoUploadProgress] = useState(0);
   // Intro/Outro crop state
-  const [introCrop, setIntroCrop] = useState<CropValues>({ cropScale: 1, cropTranslateX: 0, cropTranslateY: 0 });
-  const [outroCrop, setOutroCrop] = useState<CropValues>({ cropScale: 1, cropTranslateX: 0, cropTranslateY: 0 });
+  const [introCrop, setIntroCrop] = useState<CropValues>({ cropScale: 1, cropTranslateX: 0, cropTranslateY: 0, cropFrameWidth: 0, cropFrameHeight: 0 });
+  const [outroCrop, setOutroCrop] = useState<CropValues>({ cropScale: 1, cropTranslateX: 0, cropTranslateY: 0, cropFrameWidth: 0, cropFrameHeight: 0 });
   // After upload: open crop modal with the freshly uploaded URL
   const [cropTarget, setCropTarget] = useState<{ target: 'intro' | 'outro'; videoUrl: string } | null>(null);
 
@@ -688,11 +688,15 @@ export default function WorkoutFolderPage({
           cropScale: data.introCropScale ?? 1,
           cropTranslateX: data.introCropTranslateX ?? 0,
           cropTranslateY: data.introCropTranslateY ?? 0,
+          cropFrameWidth: data.introCropFrameWidth ?? 0,
+          cropFrameHeight: data.introCropFrameHeight ?? 0,
         });
         setOutroCrop({
           cropScale: data.outroCropScale ?? 1,
           cropTranslateX: data.outroCropTranslateX ?? 0,
           cropTranslateY: data.outroCropTranslateY ?? 0,
+          cropFrameWidth: data.outroCropFrameWidth ?? 0,
+          cropFrameHeight: data.outroCropFrameHeight ?? 0,
         });
         setOriginalData(data);
       }
@@ -2091,6 +2095,8 @@ export default function WorkoutFolderPage({
                                   borderColor: isReorderSource ? '#38BDF8' : isMovExpanded ? '#F5A623' : isReorderTarget ? 'rgba(56,189,248,0.4)' : 'transparent',
                                   borderWidth: isReorderSource ? 2 : isMovExpanded ? 2 : isReorderTarget ? 1 : 0,
                                   opacity: mov.hidden ? 0.4 : isReorderSource ? 0.6 : 1,
+                                  // Suppress iOS Safari native long-press context menu so hold-to-reorder fires
+                                  ...({ WebkitTouchCallout: 'none', userSelect: 'none' } as any),
                                 },
                               ]}
                               onPress={(e) => {
