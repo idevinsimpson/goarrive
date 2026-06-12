@@ -138,7 +138,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
         const duration =
           blockType === 'Follow-Along Video'
             ? (block.videoDurationSec ?? block.durationSec ?? 0)
-            : (block.durationSec ?? (blockType === 'Intro' || blockType === 'Outro' ? 10 : 30));
+            : (block.durationSec ?? (blockType === 'Intro' || blockType === 'Outro' ? 10 : (workout.restDurationSeconds ?? 30)));
 
         // For Demo blocks, look ahead to find the next exercise block's movements
         let demoMovements: FlatMovement['demoMovements'] = undefined;

@@ -284,8 +284,8 @@ export default function WorkoutFolderPage({
   const [ioUploading, setIoUploading] = useState<'intro' | 'outro' | null>(null);
   const [ioUploadProgress, setIoUploadProgress] = useState(0);
   // Intro/Outro crop state
-  const [introCrop, setIntroCrop] = useState<CropValues>({ cropScale: 1, cropTranslateX: 0, cropTranslateY: 0 });
-  const [outroCrop, setOutroCrop] = useState<CropValues>({ cropScale: 1, cropTranslateX: 0, cropTranslateY: 0 });
+  const [introCrop, setIntroCrop] = useState<CropValues>({ cropScale: 1, cropTranslateX: 0, cropTranslateY: 0, cropFrameWidth: 0, cropFrameHeight: 0 });
+  const [outroCrop, setOutroCrop] = useState<CropValues>({ cropScale: 1, cropTranslateX: 0, cropTranslateY: 0, cropFrameWidth: 0, cropFrameHeight: 0 });
   // After upload: open crop modal with the freshly uploaded URL
   const [cropTarget, setCropTarget] = useState<{ target: 'intro' | 'outro'; videoUrl: string } | null>(null);
 
@@ -407,6 +407,7 @@ export default function WorkoutFolderPage({
   const [showTitleMenu, setShowTitleMenu] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [showDescriptionEdit, setShowDescriptionEdit] = useState(false);
+  const [restDurationSeconds, setRestDurationSeconds] = useState(30);
   const [showIntroOutroPage, setShowIntroOutroPage] = useState(false);
   const [showMoveTo, setShowMoveTo] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -680,6 +681,7 @@ export default function WorkoutFolderPage({
             }),
           );
         }
+        setRestDurationSeconds(data.restDurationSeconds ?? 30);
         setIntroVideoUrl(data.introVideoUrl ?? null);
         setIntroGifUrl(data.introGifUrl ?? null);
         setOutroVideoUrl(data.outroVideoUrl ?? null);
@@ -688,11 +690,15 @@ export default function WorkoutFolderPage({
           cropScale: data.introCropScale ?? 1,
           cropTranslateX: data.introCropTranslateX ?? 0,
           cropTranslateY: data.introCropTranslateY ?? 0,
+          cropFrameWidth: data.introCropFrameWidth ?? 0,
+          cropFrameHeight: data.introCropFrameHeight ?? 0,
         });
         setOutroCrop({
           cropScale: data.outroCropScale ?? 1,
           cropTranslateX: data.outroCropTranslateX ?? 0,
           cropTranslateY: data.outroCropTranslateY ?? 0,
+          cropFrameWidth: data.outroCropFrameWidth ?? 0,
+          cropFrameHeight: data.outroCropFrameHeight ?? 0,
         });
         setOriginalData(data);
       }
@@ -1585,6 +1591,18 @@ export default function WorkoutFolderPage({
       console.error('[WorkoutFolder] Save description error:', err);
     }
   }, [workoutId, workoutDescription]);
+
+  // ── Rest duration save ────────────────────────────────────────────────────
+  const saveRestDuration = useCallback(async (val: number) => {
+    try {
+      await updateDoc(doc(db, 'workouts', workoutId), {
+        restDurationSeconds: val,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err: any) {
+      console.error('[WorkoutFolder] Save rest duration error:', err);
+    }
+  }, [workoutId]);
 
   // ── Loading state ─────────────────────────────────────────────────────────
   if (loading) {
@@ -2754,6 +2772,24 @@ export default function WorkoutFolderPage({
               numberOfLines={4}
               autoFocus
             />
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#1E2A3A' }}>
+              <Text style={{ color: '#8A95A3', fontSize: 14, fontFamily: FB }}>Rest between blocks</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <TouchableOpacity
+                  style={st.stepperBtn}
+                  onPress={() => { const v = Math.max(5, restDurationSeconds - 5); setRestDurationSeconds(v); saveRestDuration(v); }}
+                >
+                  <Text style={st.stepperBtnText}>−</Text>
+                </TouchableOpacity>
+                <Text style={st.stepperValue}>{restDurationSeconds}s</Text>
+                <TouchableOpacity
+                  style={st.stepperBtn}
+                  onPress={() => { const v = restDurationSeconds + 5; setRestDurationSeconds(v); saveRestDuration(v); }}
+                >
+                  <Text style={st.stepperBtnText}>+</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
             <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
               <Pressable style={[st.descBtn, { backgroundColor: '#1E2A3A' }]} onPress={() => setShowDescriptionEdit(false)}>
                 <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
