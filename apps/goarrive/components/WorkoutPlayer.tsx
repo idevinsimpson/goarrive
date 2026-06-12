@@ -300,6 +300,23 @@ export default function WorkoutPlayer({
     extendControlsTimer();
   }, [handleRepDone, extendControlsTimer]);
 
+  const handleSeek10 = useCallback(async (deltaSec: number) => {
+    if (!videoRef.current) return;
+    try {
+      const status = await videoRef.current.getStatusAsync();
+      if (!status.isLoaded) return;
+      const newPos = Math.max(
+        0,
+        Math.min(
+          status.positionMillis + deltaSec * 1000,
+          status.durationMillis ?? status.positionMillis,
+        ),
+      );
+      await videoRef.current.setPositionAsync(newPos);
+    } catch {}
+    extendControlsTimer();
+  }, [extendControlsTimer]);
+
   useEffect(() => {
     return () => {
       if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
@@ -1322,16 +1339,26 @@ export default function WorkoutPlayer({
               {renderHeader(true)}
             </View>
             <View style={st.sharedOverlayCenterStack} pointerEvents="box-none">
-              {phase === 'work' && isRepBased ? (
-                <TouchableOpacity style={st.sharedOverlayCenterBtn} onPress={handleRepDoneFromOverlay}>
-                  <Icon name="check" size={32} color="#0E1117" />
-                  <Text style={st.sharedOverlayDoneText}>Done</Text>
+              <View style={st.seekRow}>
+                <TouchableOpacity style={st.seekBtn10} onPress={() => handleSeek10(-10)}>
+                  <Text style={st.seekBtn10Label}>‹‹</Text>
+                  <Text style={st.seekBtn10Sec}>10s</Text>
                 </TouchableOpacity>
-              ) : (
-                <TouchableOpacity style={st.sharedOverlayCenterBtn} onPress={handlePauseResumeFromOverlay}>
-                  <Icon name={isPaused ? 'play' : 'pause'} size={36} color="#0E1117" />
+                {phase === 'work' && isRepBased ? (
+                  <TouchableOpacity style={st.sharedOverlayCenterBtn} onPress={handleRepDoneFromOverlay}>
+                    <Icon name="check" size={32} color="#0E1117" />
+                    <Text style={st.sharedOverlayDoneText}>Done</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity style={st.sharedOverlayCenterBtn} onPress={handlePauseResumeFromOverlay}>
+                    <Icon name={isPaused ? 'play' : 'pause'} size={36} color="#0E1117" />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity style={st.seekBtn10} onPress={() => handleSeek10(10)}>
+                  <Text style={st.seekBtn10Sec}>10s</Text>
+                  <Text style={st.seekBtn10Label}>››</Text>
                 </TouchableOpacity>
-              )}
+              </View>
               <TouchableOpacity style={st.sharedOverlaySkipBtn} onPress={handleSkipFromOverlay}>
                 <Icon name="skip-forward" size={18} color="#F5A623" />
                 <Text style={st.sharedOverlaySkipText}>Skip</Text>
@@ -1935,6 +1962,24 @@ const st = StyleSheet.create({
   },
   sharedOverlaySkipText: {
     fontSize: 15, fontWeight: '600', color: '#F5A623', fontFamily: FH,
+  },
+  seekRow: {
+    flexDirection: 'row' as any,
+    alignItems: 'center' as any,
+    gap: 24,
+  },
+  seekBtn10: {
+    width: 60, height: 60, borderRadius: 30,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)',
+    justifyContent: 'center' as any, alignItems: 'center' as any,
+  },
+  seekBtn10Label: {
+    fontSize: 18, color: '#F0F4F8', fontWeight: '700' as any, lineHeight: 18,
+    fontFamily: FH,
+  },
+  seekBtn10Sec: {
+    fontSize: 10, color: '#8A95A3', fontWeight: '600' as any, lineHeight: 12,
+    fontFamily: FH,
   },
 
   // Legacy styles
