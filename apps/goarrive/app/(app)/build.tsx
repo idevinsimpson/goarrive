@@ -896,6 +896,17 @@ function BuildScreenInner() {
           }}
           backLabel="Back to Workout"
         />
+        <MovementForm
+          visible={isMovementFormOpen}
+          onClose={() => {
+            setIsMovementFormOpen(false);
+            setEditMovement(null);
+          }}
+          coachId={coachId}
+          tenantId={tenantId}
+          editMovement={editMovement}
+          existingMovements={existingMovementNames}
+        />
       </View>
     );
   }
