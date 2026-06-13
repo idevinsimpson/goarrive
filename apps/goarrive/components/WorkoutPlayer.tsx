@@ -107,7 +107,7 @@ export default function WorkoutPlayer({
     phase, currentIndex, timeLeft, swapSide, isPaused,
     current, next, total, isRepBased, progressPct, isSpecialPhase,
     handleStart, handlePauseResume, handleSkip, handleRepDone,
-    advanceToNext,
+    seekRelative, advanceToNext,
   } = timer;
 
   useWakeLock(phase !== 'ready' && phase !== 'complete');
@@ -300,22 +300,10 @@ export default function WorkoutPlayer({
     extendControlsTimer();
   }, [handleRepDone, extendControlsTimer]);
 
-  const handleSeek10 = useCallback(async (deltaSec: number) => {
-    if (!videoRef.current) return;
-    try {
-      const status = await videoRef.current.getStatusAsync();
-      if (!status.isLoaded) return;
-      const newPos = Math.max(
-        0,
-        Math.min(
-          status.positionMillis + deltaSec * 1000,
-          status.durationMillis ?? status.positionMillis,
-        ),
-      );
-      await videoRef.current.setPositionAsync(newPos);
-    } catch {}
+  const handleSeek10 = useCallback((deltaSec: number) => {
+    seekRelative(deltaSec);
     extendControlsTimer();
-  }, [extendControlsTimer]);
+  }, [seekRelative, extendControlsTimer]);
 
   useEffect(() => {
     return () => {
