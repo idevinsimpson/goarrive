@@ -18,7 +18,9 @@ export interface MovementDerivatives {
   videoUrl?: string;
   /** High-quality GIF (240×300) — also stored as thumbnailUrl for backwards compat */
   thumbnailUrl?: string;
-  /** First-frame JPEG (240×300) */
+  /** First-frame JPEG (240×300) — static poster, loads instantly on mobile */
+  posterUrl?: string;
+  /** First-frame JPEG (240×300) — legacy alias for posterUrl */
   thumbnailImageUrl?: string;
   /** Low-quality GIF (120×150) */
   gifLowUrl?: string;
