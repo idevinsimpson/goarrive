@@ -58,6 +58,112 @@ function swapWindowOf(mov: FlatMovement | null): number {
   return DEFAULT_SWAP_WINDOW_SEC;
 }
 
+// ── seekRelative helpers (pure, module-level) ────────────────────────────────
+// These reconstruct the phase sequence from flatMovements without any history
+// tracking, enabling boundary-crossing forward/backward seeks.
+
+interface PhaseSlot {
+  phase: Phase;
+  idx: number;
+  side: 'L' | 'R';
+  dur: number;
+}
+
+function phaseDuration(ph: Phase, idx: number, side: 'L' | 'R', moves: FlatMovement[]): number {
+  const mov = moves[idx] ?? null;
+  if (!mov) return 0;
+  switch (ph) {
+    case 'work': return Math.max(0, sideDuration(mov));
+    case 'swap': return swapWindowOf(mov);
+    case 'rest': return mov.restAfter ?? 0;
+    default: return mov.duration ?? 10; // special phases
+  }
+}
+
+function firstPhaseOf(idx: number, moves: FlatMovement[]): PhaseSlot | null {
+  const mov = moves[idx];
+  if (!mov) return null;
+  const st = mov.stepType;
+  if (st && st !== 'exercise') {
+    return { phase: stepTypeToPhase(st), idx, side: 'L', dur: mov.duration ?? 10 };
+  }
+  if (mov.duration <= 0 && mov.restAfter > 0) {
+    return { phase: 'rest', idx, side: 'L', dur: mov.restAfter };
+  }
+  return { phase: 'work', idx, side: 'L', dur: sideDuration(mov) };
+}
+
+function lastPhaseOf(idx: number, moves: FlatMovement[]): PhaseSlot | null {
+  const mov = moves[idx];
+  if (!mov) return null;
+  const st = mov.stepType;
+  if (st && st !== 'exercise') {
+    return { phase: stepTypeToPhase(st), idx, side: 'L', dur: mov.duration ?? 10 };
+  }
+  if (mov.duration <= 0 && mov.restAfter > 0) {
+    return { phase: 'rest', idx, side: 'L', dur: mov.restAfter };
+  }
+  if (mov.restAfter > 0) {
+    return { phase: 'rest', idx, side: mov.swapSides ? 'R' : 'L', dur: mov.restAfter };
+  }
+  if (mov.swapSides) {
+    return { phase: 'work', idx, side: 'R', dur: sideDuration(mov) };
+  }
+  return { phase: 'work', idx, side: 'L', dur: sideDuration(mov) };
+}
+
+function nextPhaseSlot(ph: Phase, idx: number, side: 'L' | 'R', moves: FlatMovement[]): PhaseSlot | null {
+  const mov = moves[idx] ?? null;
+  switch (ph) {
+    case 'work':
+      if (mov?.swapSides && side === 'L') {
+        const w = swapWindowOf(mov);
+        return w <= 0
+          ? { phase: 'work', idx, side: 'R', dur: sideDuration(mov) }
+          : { phase: 'swap', idx, side: 'R', dur: w };
+      }
+      if ((mov?.restAfter ?? 0) > 0) {
+        return { phase: 'rest', idx, side, dur: mov!.restAfter };
+      }
+      return firstPhaseOf(idx + 1, moves);
+    case 'swap':
+      return { phase: 'work', idx, side: 'R', dur: sideDuration(mov) };
+    default: // rest and all special phases
+      return firstPhaseOf(idx + 1, moves);
+  }
+}
+
+function prevPhaseSlot(ph: Phase, idx: number, side: 'L' | 'R', moves: FlatMovement[]): PhaseSlot | null {
+  const mov = moves[idx] ?? null;
+  switch (ph) {
+    case 'swap':
+      return { phase: 'work', idx, side: 'L', dur: sideDuration(mov) };
+    case 'work':
+      if (side === 'R') {
+        const w = swapWindowOf(mov);
+        return w <= 0
+          ? { phase: 'work', idx, side: 'L', dur: sideDuration(mov) }
+          : { phase: 'swap', idx, side: 'R', dur: w };
+      }
+      // work-L: go to last phase of previous movement
+      return idx > 0 ? lastPhaseOf(idx - 1, moves) : null;
+    case 'rest':
+      // If this is a synthetic rest-only step (no work phase): go to prev movement
+      if (!mov || mov.duration <= 0) {
+        return idx > 0 ? lastPhaseOf(idx - 1, moves) : null;
+      }
+      if (mov.swapSides) {
+        const w = swapWindowOf(mov);
+        return w <= 0
+          ? { phase: 'work', idx, side: 'R', dur: sideDuration(mov) }
+          : { phase: 'swap', idx, side: 'R', dur: w };
+      }
+      return { phase: 'work', idx, side: 'L', dur: sideDuration(mov) };
+    default: // special phases: go to last phase of previous movement
+      return idx > 0 ? lastPhaseOf(idx - 1, moves) : null;
+  }
+}
+
 interface UseWorkoutTimerOptions {
   flatMovements: FlatMovement[];
   onComplete?: () => void;
@@ -376,6 +482,93 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     setIsSkippingRep(false);
   }, []);
 
+  // Advance or rewind the workout's phase timeline by deltaSec real seconds,
+  // crossing block/movement boundaries as needed. All audio suppressed during
+  // the seek (forceSilent equivalent). Clamps at workout start and 'complete'.
+  const seekRelative = useCallback((deltaSec: number) => {
+    if (phase === 'ready' || phase === 'complete') return;
+    if (deltaSec === 0) return;
+
+    const MAX_ITER = 200;
+
+    if (deltaSec > 0) {
+      let left = deltaSec;
+      let tl = timeLeft;
+      let ph: Phase = phase;
+      let idx = currentIndex;
+      let side: 'L' | 'R' = swapSide;
+
+      for (let i = 0; i < MAX_ITER; i++) {
+        // Skip zero-duration phases (rep-based work has duration 0)
+        if (tl <= 0) {
+          const n = nextPhaseSlot(ph, idx, side, flatMovements);
+          if (!n) { setPhase('complete'); return; }
+          ph = n.phase; idx = n.idx; side = n.side; tl = n.dur;
+          continue;
+        }
+        if (tl > left) {
+          setPhase(ph);
+          setCurrentIndex(idx);
+          setSwapSide(side);
+          setTimeLeft(tl - left);
+          return;
+        }
+        left -= tl;
+        const n = nextPhaseSlot(ph, idx, side, flatMovements);
+        if (!n) { setPhase('complete'); return; }
+        ph = n.phase; idx = n.idx; side = n.side; tl = n.dur;
+      }
+      setPhase('complete');
+
+    } else {
+      const left0 = Math.abs(deltaSec);
+      const curDur = phaseDuration(phase, currentIndex, swapSide, flatMovements);
+      const elapsed = Math.max(0, curDur - timeLeft);
+
+      if (left0 <= elapsed) {
+        // Stays in current phase
+        setTimeLeft(Math.min(curDur, timeLeft + left0));
+        return;
+      }
+
+      let left = left0 - elapsed;
+      let ph: Phase = phase;
+      let idx = currentIndex;
+      let side: 'L' | 'R' = swapSide;
+
+      for (let i = 0; i < MAX_ITER; i++) {
+        const p = prevPhaseSlot(ph, idx, side, flatMovements);
+        if (!p) {
+          // Clamp to start of workout
+          const fp = firstPhaseOf(0, flatMovements);
+          if (!fp) return;
+          setPhase(fp.phase);
+          setCurrentIndex(0);
+          setSwapSide(fp.side);
+          setTimeLeft(fp.dur);
+          return;
+        }
+        if (left < p.dur) {
+          setPhase(p.phase);
+          setCurrentIndex(p.idx);
+          setSwapSide(p.side);
+          setTimeLeft(p.dur - left);
+          return;
+        }
+        left -= p.dur;
+        ph = p.phase; idx = p.idx; side = p.side;
+      }
+
+      // Guard: clamp to start
+      const fp = firstPhaseOf(0, flatMovements);
+      if (!fp) return;
+      setPhase(fp.phase);
+      setCurrentIndex(0);
+      setSwapSide(fp.side);
+      setTimeLeft(fp.dur);
+    }
+  }, [phase, currentIndex, timeLeft, swapSide, flatMovements]);
+
   return {
     phase,
     currentIndex,
@@ -392,6 +585,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     handlePauseResume,
     handleSkip,
     handleRepDone,
+    seekRelative,
     advanceToNext,
     reset,
   };
