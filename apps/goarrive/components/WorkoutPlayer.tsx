@@ -563,6 +563,57 @@ export default function WorkoutPlayer({
   const [videoLayers, setVideoLayers] = useState<Array<{ url: string; ready: boolean }>>([]);
   const [displayedUrl, setDisplayedUrl] = useState<string | null>(null);
 
+  // Saved crop keyed by videoUrl so the videoLayers crossfade can look up
+  // crop from a URL alone (layers only store {url, ready}).
+  const cropByUrl = useMemo(() => {
+    const map = new Map<string, {
+      cropScale: number;
+      cropTranslateX: number;
+      cropTranslateY: number;
+      cropFrameWidth?: number;
+      cropFrameHeight?: number;
+    }>();
+    for (const m of flatMovements as any[]) {
+      const url = m?.videoUrl;
+      if (!url || map.has(url)) continue;
+      const scale = m.cropScale ?? 1;
+      const tx = m.cropTranslateX ?? 0;
+      const ty = m.cropTranslateY ?? 0;
+      if (scale !== 1 || tx !== 0 || ty !== 0) {
+        map.set(url, {
+          cropScale: scale,
+          cropTranslateX: tx,
+          cropTranslateY: ty,
+          cropFrameWidth: m.cropFrameWidth,
+          cropFrameHeight: m.cropFrameHeight,
+        });
+      }
+    }
+    return map;
+  }, [flatMovements]);
+
+  // Returns the transform array for a crop object.
+  // cropTranslateX/Y are saved in modal-pixel units relative to
+  // cropFrameWidth/cropFrameHeight; scale them to the actual player frame
+  // so the framing matches what the coach set in VideoCropModal.
+  const getCropTransform = useCallback(
+    (
+      crop: any,
+      playerW: number,
+      playerH: number,
+    ): object[] => {
+      if (!crop) return [];
+      const scale = crop.cropScale ?? 1;
+      const rawTX = crop.cropTranslateX ?? 0;
+      const rawTY = crop.cropTranslateY ?? 0;
+      if (scale === 1 && rawTX === 0 && rawTY === 0) return [];
+      const tx = rawTX * (playerW / (crop.cropFrameWidth ?? playerW));
+      const ty = rawTY * (playerH / (crop.cropFrameHeight ?? playerH));
+      return [{ scale }, { translateX: tx }, { translateY: ty }];
+    },
+    [],
+  );
+
   // Mount the active layer if not already in the stack.
   useEffect(() => {
     if (!activeVideoUrl) return;
@@ -944,7 +995,10 @@ export default function WorkoutPlayer({
         })()}
 
         {/* ── TRANSITION — Full-media with overlay text ───────── */}
-        {phase === 'transition' && current && (
+        {phase === 'transition' && current && (() => {
+          const transitionCropT = getCropTransform(current, mediaInnerSize.width, mediaInnerSize.height);
+          const transitionCropStyle: any = transitionCropT.length ? { transform: transitionCropT } : null;
+          return (
           <View style={[st.workContainer, webSafeBottomStyle]}>
             {renderLogoSlot()}
             {renderTitleTimerSlot(
@@ -975,7 +1029,7 @@ export default function WorkoutPlayer({
                     isLooping
                     shouldPlay={!isPaused}
                     isMuted
-                    style={st.videoPlayer}
+                    style={[st.videoPlayer, transitionCropStyle]}
                     videoStyle={
                       Platform.OS === 'web'
                         ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
@@ -997,7 +1051,8 @@ export default function WorkoutPlayer({
             </View>
             {renderNextUpSlot(renderNextUp())}
           </View>
-        )}
+          );
+        })()}
 
         {/* ── GRAB EQUIPMENT — Equipment preparation ─────────── */}
         {phase === 'grabEquipment' && current && (
@@ -1035,19 +1090,8 @@ export default function WorkoutPlayer({
         {phase === 'followAlongVideo' && current && (() => {
           const followVideoUrl = current.videoUrl || activeVideoUrl;
           const followMuted = isMuted || current.soundEnabled === false;
-          const hasCrop =
-            (current.cropScale ?? 1) !== 1
-            || (current.cropTranslateX ?? 0) !== 0
-            || (current.cropTranslateY ?? 0) !== 0;
-          const cropTransform = hasCrop
-            ? {
-                transform: [
-                  { scale: current.cropScale ?? 1 },
-                  { translateX: current.cropTranslateX ?? 0 },
-                  { translateY: current.cropTranslateY ?? 0 },
-                ],
-              }
-            : undefined;
+          const followCropT = getCropTransform(current, mediaInnerSize.width, mediaInnerSize.height);
+          const cropTransform = followCropT.length ? { transform: followCropT } : undefined;
           return (
             <View style={[st.workContainer, webSafeBottomStyle]}>
               {renderLogoSlot()}
@@ -1090,7 +1134,10 @@ export default function WorkoutPlayer({
           );
         })()}
 
-        {phase === 'waterBreak' && current && (
+        {phase === 'waterBreak' && current && (() => {
+          const waterCropT = getCropTransform(current, mediaInnerSize.width, mediaInnerSize.height);
+          const waterCropStyle: any = waterCropT.length ? { transform: waterCropT } : null;
+          return (
           <View style={[st.workContainer, webSafeBottomStyle]}>
             {renderLogoSlot()}
             {renderTitleTimerSlot(
@@ -1108,7 +1155,7 @@ export default function WorkoutPlayer({
                     isLooping
                     shouldPlay={!isPaused}
                     isMuted
-                    style={st.videoPlayer}
+                    style={[st.videoPlayer, waterCropStyle]}
                     videoStyle={
                       Platform.OS === 'web'
                         ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
@@ -1133,7 +1180,8 @@ export default function WorkoutPlayer({
             </View>
             {renderNextUpSlot(null)}
           </View>
-        )}
+          );
+        })()}
 
         {/* ── WORK + REST + SWAP — share one Video element so the asset    */}
         {/* persists across phase boundaries. Rest overlays a REST label on  */}
@@ -1149,6 +1197,16 @@ export default function WorkoutPlayer({
           const isMirrored = !!current.swapSides
             && ((phase === 'work' && swapSide === 'R') || phase === 'swap');
           const mirrorStyle = isMirrored ? { transform: [{ scaleX: -1 }] } as any : null;
+          // RN does not merge `transform` across style objects — last one wins.
+          // Compose crop + mirror into one array: crop first, mirror last.
+          const buildLayerStyle = (url: string): any => {
+            const crop = cropByUrl.get(url);
+            const t = [
+              ...getCropTransform(crop ?? null, mediaInnerSize.width, mediaInnerSize.height),
+              ...(isMirrored ? [{ scaleX: -1 }] : []),
+            ];
+            return t.length ? { transform: t } : null;
+          };
           return (
           <View style={[st.workContainer, webSafeBottomStyle]}>
             {renderLogoSlot()}
@@ -1230,7 +1288,7 @@ export default function WorkoutPlayer({
                           isLooping
                           shouldPlay={!isPaused}
                           isMuted
-                          style={[st.videoPlayer, st.videoLayer, { opacity } as any, mirrorStyle]}
+                          style={[st.videoPlayer, st.videoLayer, { opacity } as any, buildLayerStyle(layer.url)]}
                           videoStyle={
                             Platform.OS === 'web'
                               ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
