@@ -2026,6 +2026,24 @@ export default function WorkoutFolderPage({
                           <Text style={st.specialDuration}>{block.durationSec}s</Text>
                         )
                       )}
+                      {isBlockExpanded && block.type === 'Water Break' && (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                          <Text style={st.overlaySectionHint}>Duration</Text>
+                          <TouchableOpacity
+                            style={st.stepperBtn}
+                            onPress={(e) => { e.stopPropagation(); updateBlockField(blockIdx, 'durationSec', Math.max(5, (block.durationSec ?? 30) - 5)); }}
+                          >
+                            <Text style={st.stepperBtnText}>−</Text>
+                          </TouchableOpacity>
+                          <Text style={st.stepperValue}>{block.durationSec ?? 30}s</Text>
+                          <TouchableOpacity
+                            style={st.stepperBtn}
+                            onPress={(e) => { e.stopPropagation(); updateBlockField(blockIdx, 'durationSec', (block.durationSec ?? 30) + 5); }}
+                          >
+                            <Text style={st.stepperBtnText}>+</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                       {isBlockExpanded && (
                         <Pressable
                           style={st.trashBtn}
@@ -2154,8 +2172,8 @@ export default function WorkoutFolderPage({
 
                               {/* Reorder indicator (shown on picked-up card) */}
                               {isReorderSource && (
-                                <View style={st.reorderIndicator}>
-                                  <Text style={st.reorderText}>Tap to place</Text>
+                                <View style={[st.reorderIndicator, { userSelect: 'none' } as any]}>
+                                  <Text style={st.reorderText} selectable={false}>Tap to place</Text>
                                 </View>
                               )}
 
