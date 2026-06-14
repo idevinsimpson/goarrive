@@ -484,10 +484,10 @@ export default function WorkoutPlayer({
     // grabEquipment, transition often carry no media of their own).
     const pickAsset = (item: any, indexOfItem: number) => {
       if (!item) return { activeVideoUrl: null, activeThumbUrl: null };
-      if (item.videoUrl || item.thumbnailUrl) {
+      if (item.videoUrl || item.thumbnailUrl || item.posterUrl) {
         return {
           activeVideoUrl: item.videoUrl ?? null,
-          activeThumbUrl: item.thumbnailUrl ?? null,
+          activeThumbUrl: item.thumbnailUrl ?? item.posterUrl ?? null,
         };
       }
       // Placeholder movements are exercises that intentionally have no video yet.
@@ -498,8 +498,8 @@ export default function WorkoutPlayer({
       }
       for (let i = indexOfItem + 1; i < flatMovements.length; i++) {
         const m = flatMovements[i];
-        if (m.stepType === 'exercise' && (m.videoUrl || m.thumbnailUrl)) {
-          return { activeVideoUrl: m.videoUrl ?? null, activeThumbUrl: m.thumbnailUrl ?? null };
+        if (m.stepType === 'exercise' && (m.videoUrl || m.thumbnailUrl || m.posterUrl)) {
+          return { activeVideoUrl: m.videoUrl ?? null, activeThumbUrl: m.thumbnailUrl ?? m.posterUrl ?? null };
         }
       }
       return { activeVideoUrl: null, activeThumbUrl: null };
@@ -1067,9 +1067,9 @@ export default function WorkoutPlayer({
                   color: '#F0F4F8',
                   marginTop: 2,
                 })}
-                {current.instructionText || current.description ? (
+                {current.grabEquipmentText || current.instructionText || current.description ? (
                   <Text style={[st.transitionInstructionInline, { fontSize: scaledLabels.transitionInline }]} numberOfLines={1}>
-                    {current.instructionText || current.description}
+                    {current.grabEquipmentText || current.instructionText || current.description}
                   </Text>
                 ) : null}
               </>,
