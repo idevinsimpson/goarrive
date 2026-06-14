@@ -50,6 +50,7 @@ import { FB, FH } from '../lib/theme';
 import VoiceAuditPanel from './VoiceAuditPanel';
 import { isStagingHost } from '../lib/runtimeEnv';
 import { installVoiceAuditCapture } from '../lib/voiceAuditLog';
+import PosterThumb from './PosterThumb';
 
 // Install [VOICE-AUDIT] console capture at module load on staging only so the
 // in-app debug panel can mirror the forensic trace without DevTools. Has zero
@@ -107,7 +108,7 @@ export default function WorkoutPlayer({
     phase, currentIndex, timeLeft, swapSide, isPaused,
     current, next, total, isRepBased, progressPct, isSpecialPhase,
     handleStart, handlePauseResume, handleSkip, handleRepDone,
-    advanceToNext,
+    seekRelative, advanceToNext,
   } = timer;
 
   useWakeLock(phase !== 'ready' && phase !== 'complete');
@@ -300,6 +301,11 @@ export default function WorkoutPlayer({
     extendControlsTimer();
   }, [handleRepDone, extendControlsTimer]);
 
+  const handleSeek10 = useCallback((deltaSec: number) => {
+    seekRelative(deltaSec);
+    extendControlsTimer();
+  }, [seekRelative, extendControlsTimer]);
+
   useEffect(() => {
     return () => {
       if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
@@ -484,10 +490,10 @@ export default function WorkoutPlayer({
     // grabEquipment, transition often carry no media of their own).
     const pickAsset = (item: any, indexOfItem: number) => {
       if (!item) return { activeVideoUrl: null, activeThumbUrl: null };
-      if (item.videoUrl || item.thumbnailUrl) {
+      if (item.videoUrl || item.thumbnailUrl || item.posterUrl) {
         return {
           activeVideoUrl: item.videoUrl ?? null,
-          activeThumbUrl: item.thumbnailUrl ?? null,
+          activeThumbUrl: item.thumbnailUrl ?? item.posterUrl ?? null,
         };
       }
       // Placeholder movements are exercises that intentionally have no video yet.
@@ -498,8 +504,8 @@ export default function WorkoutPlayer({
       }
       for (let i = indexOfItem + 1; i < flatMovements.length; i++) {
         const m = flatMovements[i];
-        if (m.stepType === 'exercise' && (m.videoUrl || m.thumbnailUrl)) {
-          return { activeVideoUrl: m.videoUrl ?? null, activeThumbUrl: m.thumbnailUrl ?? null };
+        if (m.stepType === 'exercise' && (m.videoUrl || m.thumbnailUrl || m.posterUrl)) {
+          return { activeVideoUrl: m.videoUrl ?? null, activeThumbUrl: m.thumbnailUrl ?? m.posterUrl ?? null };
         }
       }
       return { activeVideoUrl: null, activeThumbUrl: null };
@@ -733,8 +739,13 @@ export default function WorkoutPlayer({
             {next.blockName}{next.duration ? ` · ${next.duration}s` : ''}
           </Text>
         </View>
-        {next.thumbnailUrl ? (
-          <Image source={{ uri: next.thumbnailUrl }} style={[st.nextUpThumb, scaledNextUpThumb]} resizeMode="cover" />
+        {(next.posterUrl || next.thumbnailUrl) ? (
+          <PosterThumb
+            posterUrl={(next as any).posterUrl}
+            gifUrl={next.thumbnailUrl}
+            containerStyle={[st.nextUpThumb, scaledNextUpThumb]}
+            resizeMode="cover"
+          />
         ) : (
           <View style={[st.nextUpThumb, scaledNextUpThumb, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#1A2035' }]}>
             <Icon name={
@@ -842,21 +853,12 @@ export default function WorkoutPlayer({
                       <View style={st.readyThumbGrid}>
                         {mvs.map((mv: any, mi: number) => (
                           <View key={mi} style={st.readyThumbCell}>
-                            {mv.thumbnailUrl ? (
-                              <Image
-                                source={{ uri: mv.thumbnailUrl }}
-                                style={st.readyThumbImage}
-                                resizeMode="cover"
-                              />
-                            ) : (
-                              <View style={[st.readyThumbImage, st.placeholderLogoFrame]}>
-                                <Image
-                                  source={require('../assets/goarrive-icon.png')}
-                                  style={st.placeholderLogo}
-                                  resizeMode="cover"
-                                />
-                              </View>
-                            )}
+                            <PosterThumb
+                              posterUrl={mv.posterUrl}
+                              gifUrl={mv.thumbnailUrl}
+                              containerStyle={st.readyThumbImage}
+                              resizeMode="cover"
+                            />
                             <Text style={st.readyThumbName} numberOfLines={1}>{mv.movementName || mv.name || 'Movement'}</Text>
                           </View>
                         ))}
@@ -886,7 +888,7 @@ export default function WorkoutPlayer({
           // Use the intro block's own video, falling back to first exercise
           const firstExercise = flatMovements.find((f: any) => f.stepType === 'exercise');
           const introVideoUrl = current.videoUrl || firstExercise?.videoUrl;
-          const introThumbUrl = firstExercise?.thumbnailUrl;
+          const introThumbUrl = firstExercise?.posterUrl || firstExercise?.thumbnailUrl;
           return (
             <View style={st.introSplitContainer}>
               {/* Left: video panel */}
@@ -974,17 +976,12 @@ export default function WorkoutPlayer({
                 <View style={[st.demoGrid, mediaInnerSize]}>
                   {demos.map((mv: any, i: number) => (
                     <View key={i} style={[st.demoGridCell, { width: `${Math.floor(100 / cols) - 2}%` as any }]}>
-                      {mv.thumbnailUrl ? (
-                        <Image source={{ uri: mv.thumbnailUrl }} style={st.demoGridImage} resizeMode="cover" />
-                      ) : (
-                        <View style={[st.demoGridImage, st.placeholderLogoFrame]}>
-                          <Image
-                            source={require('../assets/goarrive-icon.png')}
-                            style={st.placeholderLogo}
-                            resizeMode="cover"
-                          />
-                        </View>
-                      )}
+                      <PosterThumb
+                        posterUrl={mv.posterUrl}
+                        gifUrl={mv.thumbnailUrl}
+                        containerStyle={st.demoGridImage}
+                        resizeMode="cover"
+                      />
                     </View>
                   ))}
                 </View>
@@ -1061,25 +1058,38 @@ export default function WorkoutPlayer({
             {renderTitleTimerSlot(
               <>
                 <Text style={[st.restPhaseLabel, { color: '#FB923C', fontSize: scaledLabels.restPhase }]}>GRAB EQUIPMENT</Text>
-                {renderAutoFitTitle(current.name, {
+                {renderAutoFitTitle(current.grabEquipmentText || current.name, {
                   hasTimer: true,
                   maxLines: 2,
                   color: '#F0F4F8',
                   marginTop: 2,
                 })}
-                {current.instructionText || current.description ? (
-                  <Text style={[st.transitionInstructionInline, { fontSize: scaledLabels.transitionInline }]} numberOfLines={1}>
-                    {current.instructionText || current.description}
-                  </Text>
-                ) : null}
               </>,
               renderGoldTimer(formatTime(timeLeft)),
             )}
             <View style={st.mediaSlot}>
-              <View style={[st.mediaInner, st.equipmentPanel, mediaInnerSize]}>
-                <View style={[st.specialIconCircle, { backgroundColor: 'rgba(251,146,60,0.15)' }]}>
-                  <Icon name="briefcase" size={48} color="#FB923C" />
-                </View>
+              <View style={[st.mediaInner, mediaInnerSize]}>
+                {current.grabEquipmentImageUrl ? (
+                  <>
+                    <Image
+                      source={{ uri: current.grabEquipmentImageUrl }}
+                      style={[st.videoPlayer, { borderRadius: 12 }]}
+                      resizeMode="cover"
+                    />
+                    <View
+                      style={[
+                        StyleSheet.absoluteFillObject,
+                        { backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 12 },
+                      ]}
+                    />
+                  </>
+                ) : (
+                  <View style={[st.videoPlayer, st.equipmentPanel]}>
+                    <View style={[st.specialIconCircle, { backgroundColor: 'rgba(251,146,60,0.15)' }]}>
+                      <Icon name="briefcase" size={48} color="#FB923C" />
+                    </View>
+                  </View>
+                )}
               </View>
             </View>
             {renderNextUpSlot(renderNextUp())}
@@ -1380,16 +1390,26 @@ export default function WorkoutPlayer({
               {renderHeader(true)}
             </View>
             <View style={st.sharedOverlayCenterStack} pointerEvents="box-none">
-              {phase === 'work' && isRepBased ? (
-                <TouchableOpacity style={st.sharedOverlayCenterBtn} onPress={handleRepDoneFromOverlay}>
-                  <Icon name="check" size={32} color="#0E1117" />
-                  <Text style={st.sharedOverlayDoneText}>Done</Text>
+              <View style={st.seekRow}>
+                <TouchableOpacity style={st.seekBtn10} onPress={() => handleSeek10(-10)}>
+                  <Text style={st.seekBtn10Label}>‹‹</Text>
+                  <Text style={st.seekBtn10Sec}>10s</Text>
                 </TouchableOpacity>
-              ) : (
-                <TouchableOpacity style={st.sharedOverlayCenterBtn} onPress={handlePauseResumeFromOverlay}>
-                  <Icon name={isPaused ? 'play' : 'pause'} size={36} color="#0E1117" />
+                {phase === 'work' && isRepBased ? (
+                  <TouchableOpacity style={st.sharedOverlayCenterBtn} onPress={handleRepDoneFromOverlay}>
+                    <Icon name="check" size={32} color="#0E1117" />
+                    <Text style={st.sharedOverlayDoneText}>Done</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity style={st.sharedOverlayCenterBtn} onPress={handlePauseResumeFromOverlay}>
+                    <Icon name={isPaused ? 'play' : 'pause'} size={36} color="#0E1117" />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity style={st.seekBtn10} onPress={() => handleSeek10(10)}>
+                  <Text style={st.seekBtn10Sec}>10s</Text>
+                  <Text style={st.seekBtn10Label}>››</Text>
                 </TouchableOpacity>
-              )}
+              </View>
               <TouchableOpacity style={st.sharedOverlaySkipBtn} onPress={handleSkipFromOverlay}>
                 <Icon name="skip-forward" size={18} color="#F5A623" />
                 <Text style={st.sharedOverlaySkipText}>Skip</Text>
@@ -1993,6 +2013,24 @@ const st = StyleSheet.create({
   },
   sharedOverlaySkipText: {
     fontSize: 15, fontWeight: '600', color: '#F5A623', fontFamily: FH,
+  },
+  seekRow: {
+    flexDirection: 'row' as any,
+    alignItems: 'center' as any,
+    gap: 24,
+  },
+  seekBtn10: {
+    width: 60, height: 60, borderRadius: 30,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)',
+    justifyContent: 'center' as any, alignItems: 'center' as any,
+  },
+  seekBtn10Label: {
+    fontSize: 18, color: '#F0F4F8', fontWeight: '700' as any, lineHeight: 18,
+    fontFamily: FH,
+  },
+  seekBtn10Sec: {
+    fontSize: 10, color: '#8A95A3', fontWeight: '600' as any, lineHeight: 12,
+    fontFamily: FH,
   },
 
   // Legacy styles

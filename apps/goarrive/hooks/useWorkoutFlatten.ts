@@ -50,6 +50,7 @@ export interface FlatMovement {
   weight?: string;
   videoUrl?: string;
   thumbnailUrl?: string;
+  posterUrl?: string;
   coachingCues?: string;
   movementId?: string;
   supersetLabel?: string;
@@ -66,9 +67,13 @@ export interface FlatMovement {
   /** What kind of step this is — determines which player screen renders */
   stepType: StepType;
   /** For Demo blocks: array of upcoming movement names to preview */
-  demoMovements?: { name: string; thumbnailUrl?: string; videoUrl?: string; movementId?: string }[];
+  demoMovements?: { name: string; thumbnailUrl?: string; posterUrl?: string; videoUrl?: string; movementId?: string }[];
   /** For Transition blocks: instruction text from coach */
   instructionText?: string;
+  /** For Grab Equipment blocks: equipment list text from coach */
+  grabEquipmentText?: string;
+  /** For Grab Equipment blocks: AI-generated background image URL */
+  grabEquipmentImageUrl?: string;
   /** For Intro/Outro: whether this is full-screen cinematic */
   isFullScreen?: boolean;
   /** Original block type string (e.g., 'Warm-Up', 'Circuit') */
@@ -138,7 +143,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
         const duration =
           blockType === 'Follow-Along Video'
             ? (block.videoDurationSec ?? block.durationSec ?? 0)
-            : (block.durationSec ?? (blockType === 'Intro' || blockType === 'Outro' ? 10 : 30));
+            : (block.durationSec ?? (blockType === 'Intro' || blockType === 'Outro' ? 10 : (workout.restDurationSeconds ?? 30)));
 
         // For Demo blocks, look ahead to find the next exercise block's movements
         let demoMovements: FlatMovement['demoMovements'] = undefined;
@@ -149,6 +154,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               demoMovements = (nextBlock.movements || []).map((m: any) => ({
                 name: m.movementName || m.name || 'Movement',
                 thumbnailUrl: m.thumbnailUrl || '',
+                posterUrl: m.posterUrl || '',
                 videoUrl: m.videoUrl || m.mediaUrl || '',
                 movementId: m.movementId || '',
               }));
@@ -170,6 +176,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
           stepType,
           demoMovements,
           instructionText: block.instructionText || '',
+          grabEquipmentText: block.grabEquipmentText || '',
+          grabEquipmentImageUrl: block.grabEquipmentImageUrl || undefined,
           isFullScreen: blockType === 'Intro' || blockType === 'Outro' || blockType === 'Follow-Along Video',
           originalBlockType: blockType,
           // Follow-Along Video: propagate sound + crop transform for the player
@@ -195,6 +203,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
         const demoMvs = (block.movements || []).map((m: any) => ({
           name: m.movementName || m.name || 'Movement',
           thumbnailUrl: m.thumbnailUrl || '',
+          posterUrl: m.posterUrl || '',
           videoUrl: m.videoUrl || m.mediaUrl || '',
           movementId: m.movementId || '',
         }));
@@ -282,6 +291,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               originalBlockType: blockType,
               videoUrl: firstMv?.videoUrl || firstMv?.mediaUrl || '',
               thumbnailUrl: firstMv?.thumbnailUrl || '',
+              posterUrl: firstMv?.posterUrl || '',
               movementId: '',
               blockType: bType,
               supersetLabel: '',
@@ -327,6 +337,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               weight: mv.weight,
               videoUrl: mv.videoUrl || mv.mediaUrl || '',
               thumbnailUrl: mv.thumbnailUrl || '',
+              posterUrl: mv.posterUrl || '',
               coachingCues: mv.coachingCues || mv.notes || '',
               movementId: mv.movementId || '',
               supersetLabel: makeLabel(bi, mi),
@@ -373,6 +384,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               originalBlockType: blockType,
               videoUrl: firstMv?.videoUrl || firstMv?.mediaUrl || '',
               thumbnailUrl: firstMv?.thumbnailUrl || '',
+              posterUrl: firstMv?.posterUrl || '',
               movementId: '',
               blockType: 'linear',
               supersetLabel: '',
@@ -415,6 +427,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               weight: mv.weight,
               videoUrl: mv.videoUrl || mv.mediaUrl || '',
               thumbnailUrl: mv.thumbnailUrl || '',
+              posterUrl: mv.posterUrl || '',
               coachingCues: mv.coachingCues || mv.notes || '',
               movementId: mv.movementId || '',
               blockType: 'linear',
