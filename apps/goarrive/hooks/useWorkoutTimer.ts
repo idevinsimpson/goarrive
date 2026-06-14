@@ -552,7 +552,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
           setPhase(p.phase);
           setCurrentIndex(p.idx);
           setSwapSide(p.side);
-          setTimeLeft(p.dur - left);
+          setTimeLeft(left);
           return;
         }
         left -= p.dur;
