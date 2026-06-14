@@ -493,7 +493,7 @@ export default function WorkoutPlayer({
       if (item.videoUrl || item.thumbnailUrl || item.posterUrl) {
         return {
           activeVideoUrl: item.videoUrl ?? null,
-          activeThumbUrl: item.posterUrl ?? item.thumbnailUrl ?? null,
+          activeThumbUrl: item.thumbnailUrl ?? item.posterUrl ?? null,
         };
       }
       // Placeholder movements are exercises that intentionally have no video yet.
@@ -505,7 +505,7 @@ export default function WorkoutPlayer({
       for (let i = indexOfItem + 1; i < flatMovements.length; i++) {
         const m = flatMovements[i];
         if (m.stepType === 'exercise' && (m.videoUrl || m.thumbnailUrl || m.posterUrl)) {
-          return { activeVideoUrl: m.videoUrl ?? null, activeThumbUrl: m.posterUrl ?? m.thumbnailUrl ?? null };
+          return { activeVideoUrl: m.videoUrl ?? null, activeThumbUrl: m.thumbnailUrl ?? m.posterUrl ?? null };
         }
       }
       return { activeVideoUrl: null, activeThumbUrl: null };
@@ -1064,9 +1064,9 @@ export default function WorkoutPlayer({
                   color: '#F0F4F8',
                   marginTop: 2,
                 })}
-                {current.instructionText || current.description ? (
+                {current.grabEquipmentText || current.instructionText || current.description ? (
                   <Text style={[st.transitionInstructionInline, { fontSize: scaledLabels.transitionInline }]} numberOfLines={1}>
-                    {current.instructionText || current.description}
+                    {current.grabEquipmentText || current.instructionText || current.description}
                   </Text>
                 ) : null}
               </>,

@@ -70,6 +70,8 @@ export interface FlatMovement {
   demoMovements?: { name: string; thumbnailUrl?: string; posterUrl?: string; videoUrl?: string; movementId?: string }[];
   /** For Transition blocks: instruction text from coach */
   instructionText?: string;
+  /** For Grab Equipment blocks: equipment list text from coach */
+  grabEquipmentText?: string;
   /** For Intro/Outro: whether this is full-screen cinematic */
   isFullScreen?: boolean;
   /** Original block type string (e.g., 'Warm-Up', 'Circuit') */
@@ -172,6 +174,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
           stepType,
           demoMovements,
           instructionText: block.instructionText || '',
+          grabEquipmentText: block.grabEquipmentText || '',
           isFullScreen: blockType === 'Intro' || blockType === 'Outro' || blockType === 'Follow-Along Video',
           originalBlockType: blockType,
           // Follow-Along Video: propagate sound + crop transform for the player
