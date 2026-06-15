@@ -9669,7 +9669,7 @@ export const generateEquipmentImage = onCall(
         if (!response.ok) {
           const errorText = await response.text();
           console.error('[generateEquipmentImage] OpenAI API error', { attempt, status: response.status, errorText });
-          lastError = new HttpsError('internal', `OpenAI API error: ${response.status}`);
+          lastError = new HttpsError('internal', `OpenAI API error: ${response.status}`, errorText.slice(0, 500));
           continue;
         }
 
