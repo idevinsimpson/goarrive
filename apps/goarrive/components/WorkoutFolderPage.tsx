@@ -145,6 +145,7 @@ interface WorkoutBlock {
   showGrabEquipment?: boolean;
   grabEquipmentDurationSec?: number;
   grabEquipmentText?: string;
+  grabEquipmentImageUrl?: string;
   beginningRestSec?: number;
   blockPreSequence?: ('demo' | 'grabEquipment')[];
   circuitStartRestSec?: number; // legacy compat
@@ -277,6 +278,8 @@ export default function WorkoutFolderPage({
   const [originalData, setOriginalData] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  // Tracks image generation state per block index: 'generating' | 'done' | 'error'
+  const [equipImgStatus, setEquipImgStatus] = useState<Record<number, 'generating' | 'done' | 'error'>>({});
   const [viewMode, setViewMode] = useState<'icon' | 'list'>('icon');
 
   // Intro / Outro — workout-level fields
@@ -649,6 +652,7 @@ export default function WorkoutFolderPage({
                 showGrabEquipment: b.showGrabEquipment ?? false,
                 grabEquipmentDurationSec: b.grabEquipmentDurationSec ?? undefined,
                 grabEquipmentText: b.grabEquipmentText ?? '',
+                grabEquipmentImageUrl: b.grabEquipmentImageUrl ?? undefined,
                 beginningRestSec: b.beginningRestSec ?? b.circuitStartRestSec ?? undefined,
                 blockPreSequence: b.blockPreSequence ?? undefined,
                 circuitStartRestSec: b.circuitStartRestSec ?? undefined,
@@ -980,6 +984,7 @@ export default function WorkoutFolderPage({
             clean.showGrabEquipment = true;
             if (b.grabEquipmentDurationSec) clean.grabEquipmentDurationSec = b.grabEquipmentDurationSec;
             if (b.grabEquipmentText) clean.grabEquipmentText = b.grabEquipmentText;
+            if (b.grabEquipmentImageUrl) clean.grabEquipmentImageUrl = b.grabEquipmentImageUrl;
           }
           if (b.blockPreSequence) clean.blockPreSequence = b.blockPreSequence;
           if (b.beginningRestSec != null && b.beginningRestSec > 0) {
@@ -1080,6 +1085,7 @@ export default function WorkoutFolderPage({
           clean.showGrabEquipment = true;
           if (b.grabEquipmentDurationSec) clean.grabEquipmentDurationSec = b.grabEquipmentDurationSec;
           if (b.grabEquipmentText) clean.grabEquipmentText = b.grabEquipmentText;
+          if (b.grabEquipmentImageUrl) clean.grabEquipmentImageUrl = b.grabEquipmentImageUrl;
         }
         if (b.blockPreSequence) clean.blockPreSequence = b.blockPreSequence;
         if (b.beginningRestSec != null && b.beginningRestSec > 0) {
@@ -1421,6 +1427,28 @@ export default function WorkoutFolderPage({
     (newBlocks[blockIdx] as any)[field] = value;
     updateBlocks(newBlocks);
   }, [blocks, updateBlocks]);
+
+  // ── Grab Equipment image generation ──────────────────────────────────────
+  const generateEquipImgFn = httpsCallable<{ grabEquipmentText: string }, { imageUrl: string }>(
+    functions, 'generateEquipmentImage',
+  );
+
+  const triggerEquipmentImageGen = useCallback(async (blockIdx: number, text: string) => {
+    if (!text.trim()) return;
+    setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'generating' }));
+    try {
+      const result = await generateEquipImgFn({ grabEquipmentText: text.trim() });
+      const imageUrl = result.data.imageUrl;
+      // Persist the URL onto the block
+      const newBlocks = [...blocks];
+      (newBlocks[blockIdx] as any).grabEquipmentImageUrl = imageUrl;
+      updateBlocks(newBlocks);
+      setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'done' }));
+    } catch (err) {
+      console.warn('[WorkoutFolder] generateEquipmentImage failed — ignoring', err);
+      setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'error' }));
+    }
+  }, [blocks, generateEquipImgFn, updateBlocks]);
 
   // ── Movement operations ───────────────────────────────────────────────────
   const addMovementToBlock = useCallback((blockIdx: number, movement: MovementOption) => {
@@ -2910,6 +2938,23 @@ export default function WorkoutFolderPage({
                           placeholder="e.g. Grab a pair of dumbbells"
                           placeholderTextColor="#4A5568"
                         />
+                        {/* Generate AI background image for this grab-equipment screen */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                          <TouchableOpacity
+                            style={[st.stepperBtn, { paddingHorizontal: 10 }]}
+                            disabled={equipImgStatus[bi] === 'generating' || !block.grabEquipmentText?.trim()}
+                            onPress={() => triggerEquipmentImageGen(bi, block.grabEquipmentText ?? '')}
+                          >
+                            <Text style={st.stepperBtnText}>
+                              {equipImgStatus[bi] === 'generating' ? 'generating…' : 'Generate image'}
+                            </Text>
+                          </TouchableOpacity>
+                          {equipImgStatus[bi] === 'done' && block.grabEquipmentImageUrl ? (
+                            <Text style={{ color: '#4ADE80', fontSize: 12 }}>Image ready</Text>
+                          ) : equipImgStatus[bi] === 'error' ? (
+                            <Text style={{ color: '#F87171', fontSize: 12 }}>Failed — try again</Text>
+                          ) : null}
+                        </View>
                       </View>
                     )}
                   </View>

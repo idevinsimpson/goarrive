@@ -1058,25 +1058,38 @@ export default function WorkoutPlayer({
             {renderTitleTimerSlot(
               <>
                 <Text style={[st.restPhaseLabel, { color: '#FB923C', fontSize: scaledLabels.restPhase }]}>GRAB EQUIPMENT</Text>
-                {renderAutoFitTitle(current.name, {
+                {renderAutoFitTitle(current.grabEquipmentText || current.name, {
                   hasTimer: true,
                   maxLines: 2,
                   color: '#F0F4F8',
                   marginTop: 2,
                 })}
-                {current.grabEquipmentText || current.instructionText || current.description ? (
-                  <Text style={[st.transitionInstructionInline, { fontSize: scaledLabels.transitionInline }]} numberOfLines={1}>
-                    {current.grabEquipmentText || current.instructionText || current.description}
-                  </Text>
-                ) : null}
               </>,
               renderGoldTimer(formatTime(timeLeft)),
             )}
             <View style={st.mediaSlot}>
-              <View style={[st.mediaInner, st.equipmentPanel, mediaInnerSize]}>
-                <View style={[st.specialIconCircle, { backgroundColor: 'rgba(251,146,60,0.15)' }]}>
-                  <Icon name="briefcase" size={48} color="#FB923C" />
-                </View>
+              <View style={[st.mediaInner, mediaInnerSize]}>
+                {current.grabEquipmentImageUrl ? (
+                  <>
+                    <Image
+                      source={{ uri: current.grabEquipmentImageUrl }}
+                      style={[st.videoPlayer, { borderRadius: 12 }]}
+                      resizeMode="cover"
+                    />
+                    <View
+                      style={[
+                        StyleSheet.absoluteFillObject,
+                        { backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 12 },
+                      ]}
+                    />
+                  </>
+                ) : (
+                  <View style={[st.videoPlayer, st.equipmentPanel]}>
+                    <View style={[st.specialIconCircle, { backgroundColor: 'rgba(251,146,60,0.15)' }]}>
+                      <Icon name="briefcase" size={48} color="#FB923C" />
+                    </View>
+                  </View>
+                )}
               </View>
             </View>
             {renderNextUpSlot(renderNextUp())}

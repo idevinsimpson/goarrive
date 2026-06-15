@@ -72,6 +72,8 @@ export interface FlatMovement {
   instructionText?: string;
   /** For Grab Equipment blocks: equipment list text from coach */
   grabEquipmentText?: string;
+  /** For Grab Equipment blocks: AI-generated background image URL */
+  grabEquipmentImageUrl?: string;
   /** For Intro/Outro: whether this is full-screen cinematic */
   isFullScreen?: boolean;
   /** Original block type string (e.g., 'Warm-Up', 'Circuit') */
@@ -175,6 +177,7 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
           demoMovements,
           instructionText: block.instructionText || '',
           grabEquipmentText: block.grabEquipmentText || '',
+          grabEquipmentImageUrl: block.grabEquipmentImageUrl || undefined,
           isFullScreen: blockType === 'Intro' || blockType === 'Outro' || blockType === 'Follow-Along Video',
           originalBlockType: blockType,
           // Follow-Along Video: propagate sound + crop transform for the player
