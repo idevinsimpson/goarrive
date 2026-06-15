@@ -195,33 +195,58 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
         return;
       }
 
-      // ── Auto-insert demo step when block.showDemo is true ─────────
-      // Demo duration comes from the coach's `demoDurationSec` setting on the block.
-      // Do NOT use `circuitStartRestSec` here — that is the beginning-rest value, a
-      // separate phase that plays AFTER the demo and before the first movement.
-      if (block.showDemo) {
-        const demoMvs = (block.movements || []).map((m: any) => ({
-          name: m.movementName || m.name || 'Movement',
-          thumbnailUrl: m.thumbnailUrl || '',
-          posterUrl: m.posterUrl || '',
-          videoUrl: m.videoUrl || m.mediaUrl || '',
-          movementId: m.movementId || '',
-        }));
-        flat.push({
-          name: block.label || block.name || `Block ${bi + 1}`,
-          duration: block.demoDurationSec ?? 20,
-          restAfter: 0,
-          blockName: block.label || block.name || `Block ${bi + 1}`,
-          blockIndex: bi,
-          movementIndex: 0,
-          swapSides: false,
-          description: '',
-          stepType: 'demo',
-          demoMovements: demoMvs,
-          instructionText: '',
-          isFullScreen: false,
-          originalBlockType: blockType,
-        });
+      // ── Auto-insert pre-sequence phases (demo and/or grabEquipment) ─────────
+      // blockPreSequence controls the order; defaults to ['demo', 'grabEquipment'].
+      // Only emits a phase for entries whose toggle is on.
+      // circuitStartRestSec is intentionally excluded here — it fires after demo/grabEquipment.
+      {
+        const preSequence: ('demo' | 'grabEquipment')[] =
+          (block.blockPreSequence && block.blockPreSequence.length > 0)
+            ? block.blockPreSequence
+            : ['demo', 'grabEquipment'];
+
+        for (const entry of preSequence) {
+          if (entry === 'demo' && block.showDemo) {
+            const demoMvs = (block.movements || []).map((m: any) => ({
+              name: m.movementName || m.name || 'Movement',
+              thumbnailUrl: m.thumbnailUrl || '',
+              posterUrl: m.posterUrl || '',
+              videoUrl: m.videoUrl || m.mediaUrl || '',
+              movementId: m.movementId || '',
+            }));
+            flat.push({
+              name: block.label || block.name || `Block ${bi + 1}`,
+              duration: block.demoDurationSec ?? 20,
+              restAfter: 0,
+              blockName: block.label || block.name || `Block ${bi + 1}`,
+              blockIndex: bi,
+              movementIndex: 0,
+              swapSides: false,
+              description: '',
+              stepType: 'demo',
+              demoMovements: demoMvs,
+              instructionText: '',
+              isFullScreen: false,
+              originalBlockType: blockType,
+            });
+          } else if (entry === 'grabEquipment' && block.showGrabEquipment) {
+            flat.push({
+              name: block.label || block.name || 'Grab Equipment',
+              duration: block.grabEquipmentDurationSec ?? 15,
+              restAfter: 0,
+              blockName: block.label || block.name || `Block ${bi + 1}`,
+              blockIndex: bi,
+              movementIndex: 0,
+              swapSides: false,
+              description: '',
+              stepType: 'grabEquipment',
+              grabEquipmentText: block.grabEquipmentText || '',
+              grabEquipmentImageUrl: block.grabEquipmentImageUrl || undefined,
+              isFullScreen: false,
+              originalBlockType: blockType,
+            });
+          }
+        }
       }
 
       // ── Exercise blocks ─────────────────────────────────────────────
