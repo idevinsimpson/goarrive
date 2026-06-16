@@ -55,6 +55,12 @@ import WorkoutPlayer from './WorkoutPlayer';
 import VideoCropModal, { CropValues } from './VideoCropModal';
 import { FB, FH } from '../lib/theme';
 import PosterThumb from './PosterThumb';
+import {
+  filterMovements,
+  EQUIPMENT_FILTER_OPTIONS,
+  MUSCLE_GROUP_FILTER_OPTIONS,
+  DIFFICULTY_FILTER_OPTIONS,
+} from '../hooks/useMovementFilters';
 
 
 // ── Fonts ───────────────────────────────────────────────────────────────────
@@ -165,6 +171,9 @@ interface MovementOption {
   id: string;
   name: string;
   category: string;
+  equipment?: string;
+  muscleGroups?: string[];
+  difficulty?: string;
   thumbnailUrl?: string | null;
   posterUrl?: string | null;
   mediaUrl?: string | null;
@@ -404,6 +413,10 @@ export default function WorkoutFolderPage({
   const [showMovementPicker, setShowMovementPicker] = useState(false);
   const [movementPickerBlockIdx, setMovementPickerBlockIdx] = useState<number | null>(null);
   const [movementSearch, setMovementSearch] = useState('');
+  const [pickerEquipmentFilter, setPickerEquipmentFilter] = useState('All');
+  const [pickerMuscleGroupFilter, setPickerMuscleGroupFilter] = useState('All');
+  const [pickerDifficultyFilter, setPickerDifficultyFilter] = useState('All');
+  const [showMovementPickerFilters, setShowMovementPickerFilters] = useState(false);
   const [showFollowAlongPicker, setShowFollowAlongPicker] = useState(false);
   /** Insert position remembered when opening the picker — null = append. */
   const [followAlongPickerInsertAt, setFollowAlongPickerInsertAt] = useState<number | null>(null);
@@ -734,6 +747,9 @@ export default function WorkoutFolderPage({
             id: d.id,
             name: cd.name ?? '',
             category: cd.category ?? '',
+            equipment: cd.equipment ?? undefined,
+            muscleGroups: cd.muscleGroups ?? undefined,
+            difficulty: cd.difficulty ?? undefined,
             thumbnailUrl: cd.thumbnailUrl ?? null,
             posterUrl: cd.posterUrl ?? cd.thumbnailImageUrl ?? null,
             mediaUrl: cd.mediaUrl ?? null,
@@ -752,6 +768,9 @@ export default function WorkoutFolderPage({
             id: d.id,
             name: gd.name ?? '',
             category: gd.category ?? '',
+            equipment: gd.equipment ?? undefined,
+            muscleGroups: gd.muscleGroups ?? undefined,
+            difficulty: gd.difficulty ?? undefined,
             thumbnailUrl: gd.thumbnailUrl ?? null,
             posterUrl: gd.posterUrl ?? gd.thumbnailImageUrl ?? null,
             mediaUrl: gd.mediaUrl ?? null,
@@ -1598,11 +1617,14 @@ export default function WorkoutFolderPage({
   }, [cropTarget, workoutId]);
 
   // ── Filtered movements for picker ─────────────────────────────────────────
-  const filteredMovements = useMemo(() => {
-    if (!movementSearch.trim()) return availableMovements;
-    const q = movementSearch.toLowerCase();
-    return availableMovements.filter(m => m.name.toLowerCase().includes(q));
-  }, [availableMovements, movementSearch]);
+  const filteredMovements = useMemo((): MovementOption[] => {
+    return filterMovements(availableMovements as any[], {
+      search: movementSearch,
+      equipment: pickerEquipmentFilter,
+      muscleGroup: pickerMuscleGroupFilter,
+      difficulty: pickerDifficultyFilter,
+    }) as MovementOption[];
+  }, [availableMovements, movementSearch, pickerEquipmentFilter, pickerMuscleGroupFilter, pickerDifficultyFilter]);
 
   // ── Filtered follow-alongs for picker ─────────────────────────────────────
   const filteredFollowAlongs = useMemo(() => {
@@ -2662,7 +2684,15 @@ export default function WorkoutFolderPage({
       {/* ── Movement Picker Modal ───────────────────────────────────────── */}
       <ModalSheet
         visible={showMovementPicker}
-        onClose={() => { setShowMovementPicker(false); setMovementPickerBlockIdx(null); }}
+        onClose={() => {
+          setShowMovementPicker(false);
+          setMovementPickerBlockIdx(null);
+          setMovementSearch('');
+          setPickerEquipmentFilter('All');
+          setPickerMuscleGroupFilter('All');
+          setPickerDifficultyFilter('All');
+          setShowMovementPickerFilters(false);
+        }}
         maxHeightPct={0.8}
         sheetBg="#1E2A3A"
         backdropColor="rgba(0,0,0,0.7)"
@@ -2670,21 +2700,74 @@ export default function WorkoutFolderPage({
       >
             <View style={st.pickerHeader}>
               <Text style={st.pickerTitle}>Add Movement</Text>
-              <Pressable onPress={() => { setShowMovementPicker(false); setMovementPickerBlockIdx(null); }}>
+              <Pressable onPress={() => {
+                setShowMovementPicker(false);
+                setMovementPickerBlockIdx(null);
+                setMovementSearch('');
+                setPickerEquipmentFilter('All');
+                setPickerMuscleGroupFilter('All');
+                setPickerDifficultyFilter('All');
+                setShowMovementPickerFilters(false);
+              }}>
                 <Icon name="close" size={20} color="#8A95A3" />
               </Pressable>
             </View>
-            <View style={st.pickerSearch}>
-              <Icon name="search" size={16} color="#4A5568" />
-              <TextInput
-                style={st.pickerSearchInput}
-                value={movementSearch}
-                onChangeText={setMovementSearch}
-                placeholder="Search movements..."
-                placeholderTextColor="#4A5568"
-                autoFocus
-              />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingBottom: 8 }}>
+              <View style={[st.pickerSearch, { flex: 1, marginHorizontal: 0 }]}>
+                <Icon name="search" size={16} color="#4A5568" />
+                <TextInput
+                  style={st.pickerSearchInput}
+                  value={movementSearch}
+                  onChangeText={setMovementSearch}
+                  placeholder="Search movements..."
+                  placeholderTextColor="#4A5568"
+                  autoFocus
+                />
+              </View>
+              <Pressable
+                onPress={() => setShowMovementPickerFilters(v => !v)}
+                style={{ padding: 8, borderRadius: 8, backgroundColor: showMovementPickerFilters ? '#F5A62320' : 'transparent' }}
+              >
+                <Icon name="filter" size={18} color={showMovementPickerFilters ? '#F5A623' : '#8A95A3'} />
+              </Pressable>
             </View>
+            {showMovementPickerFilters && (
+              <View style={{ paddingHorizontal: 16, paddingBottom: 8, gap: 6 }}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                  {EQUIPMENT_FILTER_OPTIONS.map((opt) => (
+                    <Pressable
+                      key={opt}
+                      onPress={() => setPickerEquipmentFilter(opt)}
+                      style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: pickerEquipmentFilter === opt ? '#F5A623' : '#2A3A4A' }}
+                    >
+                      <Text style={{ fontSize: 12, color: pickerEquipmentFilter === opt ? '#0E1117' : '#8A95A3', fontWeight: pickerEquipmentFilter === opt ? '700' : '400' }}>{opt}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                  {MUSCLE_GROUP_FILTER_OPTIONS.map((opt) => (
+                    <Pressable
+                      key={opt}
+                      onPress={() => setPickerMuscleGroupFilter(opt)}
+                      style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: pickerMuscleGroupFilter === opt ? '#F5A623' : '#2A3A4A' }}
+                    >
+                      <Text style={{ fontSize: 12, color: pickerMuscleGroupFilter === opt ? '#0E1117' : '#8A95A3', fontWeight: pickerMuscleGroupFilter === opt ? '700' : '400' }}>{opt}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                  {DIFFICULTY_FILTER_OPTIONS.map((opt) => (
+                    <Pressable
+                      key={opt}
+                      onPress={() => setPickerDifficultyFilter(opt)}
+                      style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: pickerDifficultyFilter === opt ? '#F5A623' : '#2A3A4A' }}
+                    >
+                      <Text style={{ fontSize: 12, color: pickerDifficultyFilter === opt ? '#0E1117' : '#8A95A3', fontWeight: pickerDifficultyFilter === opt ? '700' : '400' }}>{opt}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
             <ScrollView style={{ flex: 1 }} contentContainerStyle={st.pickerList} keyboardShouldPersistTaps="handled">
               {filteredMovements.map((mov) => (
                 <Pressable

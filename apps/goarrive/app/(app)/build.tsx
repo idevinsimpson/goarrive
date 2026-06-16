@@ -56,6 +56,11 @@ import FollowAlongVideoUploadSheet, { FollowAlongVideoPayload } from '../../comp
 import FollowAlongVideoDetail from '../../components/FollowAlongVideoDetail';
 import { usePreviewEngine } from '../../hooks/usePreviewEngine';
 import { AnimatedPreviewTile, MosaicPreviewTile } from '../../components/AnimatedPreviewTile';
+import {
+  EQUIPMENT_FILTER_OPTIONS,
+  MUSCLE_GROUP_FILTER_OPTIONS,
+  DIFFICULTY_FILTER_OPTIONS,
+} from '../../hooks/useMovementFilters';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -270,7 +275,10 @@ function BuildScreenInner() {
   const [isPlusOpen, setIsPlusOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [showArchived, setShowArchived] = useState(false);
-  
+  const [movEquipmentFilter, setMovEquipmentFilter] = useState('All');
+  const [movMuscleGroupFilter, setMovMuscleGroupFilter] = useState('All');
+  const [movDifficultyFilter, setMovDifficultyFilter] = useState('All');
+
   // Folders
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [folderStack, setFolderStack] = useState<{ id: string; name: string }[]>([]);
@@ -648,6 +656,24 @@ function BuildScreenInner() {
     if (activeType !== 'All') {
       list = list.filter(i => i.type === activeType || i.type === 'Folder');
     }
+    // Movement-specific filters (equipment / muscle group / difficulty)
+    if (activeType === 'Movements') {
+      if (movEquipmentFilter !== 'All') {
+        list = list.filter(i => i.equipment === movEquipmentFilter);
+      }
+      if (movMuscleGroupFilter !== 'All') {
+        list = list.filter(i =>
+          (i.muscleGroups as string[] | undefined || []).some(
+            (mg: string) => mg.toLowerCase() === movMuscleGroupFilter.toLowerCase(),
+          ),
+        );
+      }
+      if (movDifficultyFilter !== 'All') {
+        list = list.filter(i =>
+          (i.difficulty || '').toLowerCase() === movDifficultyFilter.toLowerCase(),
+        );
+      }
+    }
     // Sort: folders first, then by date
     list.sort((a, b) => {
       if (a.type === 'Folder' && b.type !== 'Folder') return -1;
@@ -655,7 +681,7 @@ function BuildScreenInner() {
       return (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0);
     });
     return list;
-  }, [enrichedItems, search, activeType, showArchived, currentFolderId]);
+  }, [enrichedItems, search, activeType, showArchived, currentFolderId, movEquipmentFilter, movMuscleGroupFilter, movDifficultyFilter]);
 
   // ── Render Helpers ─────────────────────────────────────────────────────
   const renderItem = ({ item }: { item: BuildItem }) => {
@@ -983,7 +1009,14 @@ function BuildScreenInner() {
               <Pressable
                 key={type}
                 style={[s.filterChip, activeType === type && s.filterChipActive]}
-                onPress={() => setActiveType(type as any)}
+                onPress={() => {
+                  setActiveType(type as any);
+                  if (type !== 'Movements') {
+                    setMovEquipmentFilter('All');
+                    setMovMuscleGroupFilter('All');
+                    setMovDifficultyFilter('All');
+                  }
+                }}
               >
                 <Text style={[s.filterChipText, activeType === type && s.filterChipTextActive]}>
                   {type}
@@ -991,7 +1024,48 @@ function BuildScreenInner() {
               </Pressable>
             ))}
           </ScrollView>
-          
+
+          {activeType === 'Movements' && (
+            <>
+              <Text style={s.filterTitle}>Equipment</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.filterRow} contentContainerStyle={s.filterRowContent}>
+                {EQUIPMENT_FILTER_OPTIONS.map((opt) => (
+                  <Pressable
+                    key={opt}
+                    style={[s.filterChip, movEquipmentFilter === opt && s.filterChipActive]}
+                    onPress={() => setMovEquipmentFilter(opt)}
+                  >
+                    <Text style={[s.filterChipText, movEquipmentFilter === opt && s.filterChipTextActive]}>{opt}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              <Text style={s.filterTitle}>Muscle Group</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.filterRow} contentContainerStyle={s.filterRowContent}>
+                {MUSCLE_GROUP_FILTER_OPTIONS.map((opt) => (
+                  <Pressable
+                    key={opt}
+                    style={[s.filterChip, movMuscleGroupFilter === opt && s.filterChipActive]}
+                    onPress={() => setMovMuscleGroupFilter(opt)}
+                  >
+                    <Text style={[s.filterChipText, movMuscleGroupFilter === opt && s.filterChipTextActive]}>{opt}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              <Text style={s.filterTitle}>Difficulty</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.filterRow} contentContainerStyle={s.filterRowContent}>
+                {DIFFICULTY_FILTER_OPTIONS.map((opt) => (
+                  <Pressable
+                    key={opt}
+                    style={[s.filterChip, movDifficultyFilter === opt && s.filterChipActive]}
+                    onPress={() => setMovDifficultyFilter(opt)}
+                  >
+                    <Text style={[s.filterChipText, movDifficultyFilter === opt && s.filterChipTextActive]}>{opt}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </>
+          )}
+
           <View style={s.filterActions}>
             <Pressable 
               style={s.filterActionBtn}
