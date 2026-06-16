@@ -84,6 +84,10 @@ export interface FlatMovement {
   cropFrameWidth?: number;
   /** Follow-Along Video: original frame height used during cropping */
   cropFrameHeight?: number;
+  /** Number of movements in the parent block — 1 means this is a Tabata-style single-movement block */
+  blockMovCount?: number;
+  /** 0-indexed round number within the parent block — used to suppress repeated movement announcements */
+  blockRound?: number;
 }
 
 export function resolveBlockType(blockType: string | undefined): 'linear' | 'superset' | 'circuit' {
@@ -324,6 +328,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropTranslateX: 0,
               cropTranslateY: 0,
               voiceUrl: '',
+              blockMovCount: movements.length,
+              blockRound: round,
             });
           }
 
@@ -374,6 +380,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropTranslateY: mv.cropTranslateY ?? 0,
               voiceUrl: mv.voiceUrl || '',
               prescriptionVoiceUrl: mv.prescriptionVoiceUrl || '',
+              blockMovCount: movements.length,
+              blockRound: round,
             });
           });
         }
@@ -417,6 +425,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropTranslateX: 0,
               cropTranslateY: 0,
               voiceUrl: '',
+              blockMovCount: movements.length,
+              blockRound: setNum,
             });
           }
 
@@ -463,6 +473,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropTranslateY: mv.cropTranslateY ?? 0,
               voiceUrl: mv.voiceUrl || '',
               prescriptionVoiceUrl: mv.prescriptionVoiceUrl || '',
+              blockMovCount: movements.length,
+              blockRound: setNum,
             });
           });
         }
