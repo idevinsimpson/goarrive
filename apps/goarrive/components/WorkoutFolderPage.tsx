@@ -2034,7 +2034,7 @@ export default function WorkoutFolderPage({
       {/* ── Main content: blocks ─────────────────────────────────────────── */}
       <ScrollView
         style={st.scrollArea}
-        contentContainerStyle={{ paddingHorizontal: GRID_PADDING, paddingBottom: 120 }}
+        contentContainerStyle={{ paddingHorizontal: GRID_PADDING, paddingBottom: 200 }}
         showsVerticalScrollIndicator={false}
         onScrollBeginDrag={dismissAll}
       >
