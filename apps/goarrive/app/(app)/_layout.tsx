@@ -39,7 +39,16 @@ export default function AppLayout() {
   }
 
   return (
-    <View style={{ flex: 1 }}>
+    <View
+      style={[
+        { flex: 1 },
+        // iOS PWA standalone: lock to dynamic viewport + disable body scroll so
+        // sticky AppHeader can't be overlapped by content sliding up behind it.
+        Platform.OS === 'web'
+          ? ({ height: '100dvh', maxHeight: '100dvh', overflow: 'hidden', overscrollBehavior: 'none' } as any)
+          : null,
+      ]}
+    >
       {adminCoachOverride && (
         <View style={[styles.overrideBanner, { paddingTop: bannerTopPad }]}>
           <Text style={styles.overrideText}>
