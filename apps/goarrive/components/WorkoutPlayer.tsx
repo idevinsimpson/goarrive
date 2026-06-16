@@ -821,9 +821,35 @@ export default function WorkoutPlayer({
       <View style={[st.container, dimsValid && { width: frameW, height: frameH, maxWidth: frameW }]}>
         {/* ── READY state — Block overview grid ─────────────────── */}
         {phase === 'ready' && (() => {
+          const isTabataBlock = (b: any) =>
+            Array.isArray(b?.movements) && b.movements.length === 1;
+
           const exerciseBlocks = (workout?.blocks || []).filter(
             (b: any) => !['Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment'].includes(b.type || '')
           );
+
+          // Group consecutive Tabata blocks into merged segment cards.
+          // Non-Tabata blocks pass through as individual cards.
+          type DisplayItem =
+            | { kind: 'tabata'; blocks: any[] }
+            | { kind: 'single'; block: any };
+          const displayItems: DisplayItem[] = [];
+          let i = 0;
+          while (i < exerciseBlocks.length) {
+            const b = exerciseBlocks[i];
+            if (isTabataBlock(b)) {
+              const run: any[] = [b];
+              while (i + 1 < exerciseBlocks.length && isTabataBlock(exerciseBlocks[i + 1])) {
+                i++;
+                run.push(exerciseBlocks[i]);
+              }
+              displayItems.push({ kind: 'tabata', blocks: run });
+            } else {
+              displayItems.push({ kind: 'single', block: b });
+            }
+            i++;
+          }
+
           return (
             <>
               {renderHeader(false)}
@@ -832,18 +858,58 @@ export default function WorkoutPlayer({
                 contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 100 }}
                 showsVerticalScrollIndicator={false}
               >
-                {exerciseBlocks.map((block: any, bi: number) => {
+                {displayItems.map((item, displayIdx) => {
+                  const badgeNum = displayIdx + 1;
+                  if (item.kind === 'tabata') {
+                    return (
+                      <View key={displayIdx} style={{ marginBottom: 16 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                          <View style={st.readyBlockBadge}>
+                            <Text style={st.readyBlockBadgeText}>{badgeNum}</Text>
+                          </View>
+                          <Text style={st.readyBlockLabel}>Tabata</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                          {item.blocks.map((blk: any, blki: number) => {
+                            const mv = (blk.movements || [])[0];
+                            if (!mv) return null;
+                            const blkRounds = blk.rounds ?? blk.sets ?? 1;
+                            return (
+                              <View key={blki} style={st.readyThumbCell}>
+                                <PosterThumb
+                                  posterUrl={mv.posterUrl}
+                                  gifUrl={mv.thumbnailUrl}
+                                  containerStyle={st.readyThumbImage}
+                                  resizeMode="cover"
+                                />
+                                <Text style={st.readyThumbName} numberOfLines={1}>
+                                  {mv.movementName || mv.name || 'Movement'}
+                                </Text>
+                                {blkRounds > 1 && (
+                                  <Text style={[st.readyThumbName, { color: '#8A95A3' }]}>
+                                    {blkRounds}×
+                                  </Text>
+                                )}
+                              </View>
+                            );
+                          })}
+                        </View>
+                      </View>
+                    );
+                  }
+                  // Single block (non-Tabata)
+                  const block = item.block;
                   const mvs = (block.movements || []).filter(
                     (mv: any) => mv.showOnPreview !== false
                   );
                   if (mvs.length === 0) return null;
                   const rounds = block.rounds ?? block.sets ?? 1;
-                  const blockLabel = block.label || block.name || `Block ${bi + 1}`;
+                  const blockLabel = block.label || block.name || `Block ${badgeNum}`;
                   return (
-                    <View key={bi} style={{ marginBottom: 16 }}>
+                    <View key={displayIdx} style={{ marginBottom: 16 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
                         <View style={st.readyBlockBadge}>
-                          <Text style={st.readyBlockBadgeText}>{bi + 1}</Text>
+                          <Text style={st.readyBlockBadgeText}>{badgeNum}</Text>
                         </View>
                         <Text style={st.readyBlockLabel}>{blockLabel}</Text>
                         {rounds > 1 && (

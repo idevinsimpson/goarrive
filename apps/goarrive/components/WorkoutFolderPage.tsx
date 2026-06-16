@@ -80,7 +80,10 @@ const BLOCK_COLORS: Record<string, string> = {
   'AMRAP': '#34D399', 'EMOM': '#34D399', 'Cool-Down': '#60A5FA',
   'Rest': '#4A5568',
   'Transition': '#94A3B8', 'Water Break': '#38BDF8', 'Follow-Along Video': '#22D3EE',
+  'Tabata': '#34D399',
 };
+const isTabata = (block: any): boolean =>
+  Array.isArray(block?.movements) && block.movements.length === 1;
 const DEFAULT_ROUNDS = 3;
 const DEFAULT_DURATION_SEC = 40;
 const DEFAULT_REST_SEC = 20;
@@ -2056,7 +2059,8 @@ export default function WorkoutFolderPage({
           </View>
         ) : (
           blocks.map((block, blockIdx) => {
-            const blockColor = BLOCK_COLORS[block.type] || '#4A5568';
+            const displayType = isTabata(block) ? 'Tabata' : block.type;
+            const blockColor = BLOCK_COLORS[displayType] || '#4A5568';
             const isSpecial = NO_MOVEMENT_BLOCKS.includes(block.type);
             const isBlockExpanded = expandedBlockIdx === blockIdx;
             const hasNoMovements = !isSpecial && block.movements.length === 0;
@@ -2936,13 +2940,13 @@ export default function WorkoutFolderPage({
           const bi = blockOverlayIndex ?? 0;
           const block = blocks[bi];
           if (blockOverlayIndex == null || !block) return null;
-          const blockColor = BLOCK_COLORS[block.type] || '#4A5568';
+          const blockColor = BLOCK_COLORS[isTabata(block) ? 'Tabata' : block.type] || '#4A5568';
           return (
             <Pressable style={st.modalBackdrop} onPress={() => setBlockOverlayIndex(null)}>
               <Pressable style={st.overlaySheet} onPress={(e) => e.stopPropagation()}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 }}>
                   <Text style={{ fontSize: 18, fontWeight: '700', color: '#F0F4F8', fontFamily: FH }}>
-                    {block.label || block.type} Settings
+                    {isTabata(block) ? 'Tabata' : (block.label || block.type)} Settings
                   </Text>
                   <TouchableOpacity onPress={() => setBlockOverlayIndex(null)} hitSlop={8}>
                     <Icon name="x" size={22} color="#8A95A3" />
@@ -3187,7 +3191,7 @@ export default function WorkoutFolderPage({
                       style={st.deleteBlockBtn}
                       onPress={() => {
                         if (Platform.OS === 'web') {
-                          if (window.confirm('Delete "' + (block.label || block.type) + '" block? This cannot be undone.')) {
+                          if (window.confirm('Delete "' + (isTabata(block) ? 'Tabata' : (block.label || block.type)) + '" block? This cannot be undone.')) {
                             const idx = bi;
                             setBlockOverlayIndex(null);
                             removeBlock(idx);
@@ -3195,7 +3199,7 @@ export default function WorkoutFolderPage({
                         } else {
                           Alert.alert(
                             'Delete Block',
-                            'Delete "' + (block.label || block.type) + '" block? This cannot be undone.',
+                            'Delete "' + (isTabata(block) ? 'Tabata' : (block.label || block.type)) + '" block? This cannot be undone.',
                             [
                               { text: 'Cancel', style: 'cancel' },
                               { text: 'Delete', style: 'destructive', onPress: () => { setBlockOverlayIndex(null); removeBlock(bi); } },

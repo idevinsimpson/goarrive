@@ -661,7 +661,11 @@ export function useWorkoutTTS({
         // so the check is exact (no false negatives from the previous
         // movement's restAnnounced state).
         const restAnnouncedName = restAnnouncedVoiceUrlForIndexRef.current === currentIndex;
-        if (!restAnnouncedName && !returningFromSwap) {
+        // Single-movement (Tabata) blocks: only announce on round 0. Subsequent
+        // rounds are silent — member already knows the movement.
+        const isTabataRound2Plus =
+          (current as any).blockMovCount === 1 && ((current as any).blockRound ?? 0) > 0;
+        if (!restAnnouncedName && !returningFromSwap && !isTabataRound2Plus) {
           // Prescription clip ("Cable Curls. 75 pounds, 15 reps.") wins over the
           // base name-only clip when the coach has set weight or reps on this
           // block-movement. Falls back cleanly if prescription URL is missing.
@@ -689,7 +693,16 @@ export function useWorkoutTTS({
         // Synthetic "Get Ready" prep-rest step (movementIndex === -1) plays BEFORE
         // the first movement of a block.
         const isPrepRest = current?.movementIndex === -1;
-        if (nextName) {
+        // Single-movement (Tabata) inter-round rest: skip "Next Up" + voice
+        // because the next round is the same movement the member just did.
+        // The prep-rest (movementIndex === -1) is exempt — it introduces the
+        // movement for the first time and must announce it.
+        const isTabataInterRound =
+          !isPrepRest &&
+          (current as any).blockMovCount === 1 &&
+          next != null &&
+          (next as any).blockIndex === (current as any).blockIndex;
+        if (nextName && !isTabataInterRound) {
           // Two reliably-cached pieces sequenced via the queue: the static
           // `next_up` MP3, then the next movement's OpenAI voiceUrl. Both
           // succeed or fail independently — a missing voiceUrl only mutes
@@ -711,7 +724,7 @@ export function useWorkoutTTS({
               nextName,
             });
           }
-        } else if (!isPrepRest) {
+        } else if (!isPrepRest && !isTabataInterRound) {
           enqueueCue('rest_now', `rest_${currentIndex}_rest_now`);
         }
       }
