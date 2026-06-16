@@ -108,6 +108,7 @@ const CUES = {
   switch_sides: CUE_URL('switch_sides'),
   other_side: CUE_URL('other_side'),
   water_break: CUE_URL('water_break'),
+  heres_whats_coming_up: CUE_URL('heres_whats_coming_up'),
   warm_up: CUE_URL('warm_up'),
   cool_down: CUE_URL('cool_down'),
   stretch: CUE_URL('stretch'),
@@ -581,20 +582,12 @@ export function useWorkoutTTS({
       return;
     }
 
-    // Demo block. Until there's an OpenAI/MP3 cue for "Here's what's coming
-    // up" + the demo movement names, we stay silent (visual list is shown on
-    // screen). Device speech would read the list aloud in the robotic voice,
-    // which clashes with the OpenAI-voiced rest of the player.
+    // Demo block — plays "Here's what's coming up" once on phase entry.
     if (phase === 'demo' || (phase === 'work' && stepType === 'demo')) {
       const key = `demo_${currentIndex}`;
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
-        const movements = current.demoMovements || [];
-        const names = movements.map((m: any) => m.name).join(', then ');
-        logSpeechSuppressed(
-          `demo_block_${currentIndex}`,
-          names ? `Here's what's coming up: ${names}` : "Here's what's coming up",
-        );
+        enqueueCue('heres_whats_coming_up', key);
       }
       return;
     }

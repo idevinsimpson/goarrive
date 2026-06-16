@@ -54,6 +54,13 @@ import { Icon } from './Icon';
 import WorkoutPlayer from './WorkoutPlayer';
 import VideoCropModal, { CropValues } from './VideoCropModal';
 import { FB, FH } from '../lib/theme';
+import PosterThumb from './PosterThumb';
+import {
+  filterMovements,
+  EQUIPMENT_FILTER_OPTIONS,
+  MUSCLE_GROUP_FILTER_OPTIONS,
+  DIFFICULTY_FILTER_OPTIONS,
+} from '../hooks/useMovementFilters';
 
 
 // ── Fonts ───────────────────────────────────────────────────────────────────
@@ -118,6 +125,7 @@ interface BlockMovement {
   restSec?: number;
   notes?: string;
   thumbnailUrl?: string;
+  posterUrl?: string;
   swapSides?: boolean;
   swapMode?: 'split' | 'duplicate';
   swapWindowSec?: number;
@@ -143,6 +151,7 @@ interface WorkoutBlock {
   showGrabEquipment?: boolean;
   grabEquipmentDurationSec?: number;
   grabEquipmentText?: string;
+  grabEquipmentImageUrl?: string;
   beginningRestSec?: number;
   blockPreSequence?: ('demo' | 'grabEquipment')[];
   circuitStartRestSec?: number; // legacy compat
@@ -162,7 +171,11 @@ interface MovementOption {
   id: string;
   name: string;
   category: string;
+  equipment?: string;
+  muscleGroups?: string[];
+  difficulty?: string;
   thumbnailUrl?: string | null;
+  posterUrl?: string | null;
   mediaUrl?: string | null;
   videoUrl?: string | null;
   swapSides?: boolean;
@@ -274,6 +287,8 @@ export default function WorkoutFolderPage({
   const [originalData, setOriginalData] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [equipImgStatus, setEquipImgStatus] = useState<Record<number, 'generating' | 'done' | 'error'>>({});
+  const [equipImgError, setEquipImgError] = useState<Record<number, string>>({});
   const [viewMode, setViewMode] = useState<'icon' | 'list'>('icon');
 
   // Intro / Outro — workout-level fields
@@ -284,8 +299,8 @@ export default function WorkoutFolderPage({
   const [ioUploading, setIoUploading] = useState<'intro' | 'outro' | null>(null);
   const [ioUploadProgress, setIoUploadProgress] = useState(0);
   // Intro/Outro crop state
-  const [introCrop, setIntroCrop] = useState<CropValues>({ cropScale: 1, cropTranslateX: 0, cropTranslateY: 0 });
-  const [outroCrop, setOutroCrop] = useState<CropValues>({ cropScale: 1, cropTranslateX: 0, cropTranslateY: 0 });
+  const [introCrop, setIntroCrop] = useState<CropValues>({ cropScale: 1, cropTranslateX: 0, cropTranslateY: 0, cropFrameWidth: 0, cropFrameHeight: 0 });
+  const [outroCrop, setOutroCrop] = useState<CropValues>({ cropScale: 1, cropTranslateX: 0, cropTranslateY: 0, cropFrameWidth: 0, cropFrameHeight: 0 });
   // After upload: open crop modal with the freshly uploaded URL
   const [cropTarget, setCropTarget] = useState<{ target: 'intro' | 'outro'; videoUrl: string } | null>(null);
 
@@ -398,6 +413,10 @@ export default function WorkoutFolderPage({
   const [showMovementPicker, setShowMovementPicker] = useState(false);
   const [movementPickerBlockIdx, setMovementPickerBlockIdx] = useState<number | null>(null);
   const [movementSearch, setMovementSearch] = useState('');
+  const [pickerEquipmentFilter, setPickerEquipmentFilter] = useState('All');
+  const [pickerMuscleGroupFilter, setPickerMuscleGroupFilter] = useState('All');
+  const [pickerDifficultyFilter, setPickerDifficultyFilter] = useState('All');
+  const [showMovementPickerFilters, setShowMovementPickerFilters] = useState(false);
   const [showFollowAlongPicker, setShowFollowAlongPicker] = useState(false);
   /** Insert position remembered when opening the picker — null = append. */
   const [followAlongPickerInsertAt, setFollowAlongPickerInsertAt] = useState<number | null>(null);
@@ -407,6 +426,7 @@ export default function WorkoutFolderPage({
   const [showTitleMenu, setShowTitleMenu] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [showDescriptionEdit, setShowDescriptionEdit] = useState(false);
+  const [restDurationSeconds, setRestDurationSeconds] = useState(30);
   const [showIntroOutroPage, setShowIntroOutroPage] = useState(false);
   const [showMoveTo, setShowMoveTo] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -645,6 +665,7 @@ export default function WorkoutFolderPage({
                 showGrabEquipment: b.showGrabEquipment ?? false,
                 grabEquipmentDurationSec: b.grabEquipmentDurationSec ?? undefined,
                 grabEquipmentText: b.grabEquipmentText ?? '',
+                grabEquipmentImageUrl: b.grabEquipmentImageUrl ?? undefined,
                 beginningRestSec: b.beginningRestSec ?? b.circuitStartRestSec ?? undefined,
                 blockPreSequence: b.blockPreSequence ?? undefined,
                 circuitStartRestSec: b.circuitStartRestSec ?? undefined,
@@ -660,6 +681,7 @@ export default function WorkoutFolderPage({
                   restSec: m.restSec ?? undefined,
                   notes: m.notes ?? '',
                   thumbnailUrl: m.thumbnailUrl ?? undefined,
+                  posterUrl: m.posterUrl ?? undefined,
                   swapSides: m.swapSides ?? undefined,
                   swapMode: m.swapMode ?? undefined,
                   swapWindowSec: m.swapWindowSec ?? undefined,
@@ -680,6 +702,7 @@ export default function WorkoutFolderPage({
             }),
           );
         }
+        setRestDurationSeconds(data.restDurationSeconds ?? 30);
         setIntroVideoUrl(data.introVideoUrl ?? null);
         setIntroGifUrl(data.introGifUrl ?? null);
         setOutroVideoUrl(data.outroVideoUrl ?? null);
@@ -688,11 +711,15 @@ export default function WorkoutFolderPage({
           cropScale: data.introCropScale ?? 1,
           cropTranslateX: data.introCropTranslateX ?? 0,
           cropTranslateY: data.introCropTranslateY ?? 0,
+          cropFrameWidth: data.introCropFrameWidth ?? 0,
+          cropFrameHeight: data.introCropFrameHeight ?? 0,
         });
         setOutroCrop({
           cropScale: data.outroCropScale ?? 1,
           cropTranslateX: data.outroCropTranslateX ?? 0,
           cropTranslateY: data.outroCropTranslateY ?? 0,
+          cropFrameWidth: data.outroCropFrameWidth ?? 0,
+          cropFrameHeight: data.outroCropFrameHeight ?? 0,
         });
         setOriginalData(data);
       }
@@ -720,7 +747,11 @@ export default function WorkoutFolderPage({
             id: d.id,
             name: cd.name ?? '',
             category: cd.category ?? '',
+            equipment: cd.equipment ?? undefined,
+            muscleGroups: cd.muscleGroups ?? undefined,
+            difficulty: cd.difficulty ?? undefined,
             thumbnailUrl: cd.thumbnailUrl ?? null,
+            posterUrl: cd.posterUrl ?? cd.thumbnailImageUrl ?? null,
             mediaUrl: cd.mediaUrl ?? null,
             videoUrl: cd.videoUrl ?? null,
             swapSides: cd.swapSides ?? false,
@@ -737,7 +768,11 @@ export default function WorkoutFolderPage({
             id: d.id,
             name: gd.name ?? '',
             category: gd.category ?? '',
+            equipment: gd.equipment ?? undefined,
+            muscleGroups: gd.muscleGroups ?? undefined,
+            difficulty: gd.difficulty ?? undefined,
             thumbnailUrl: gd.thumbnailUrl ?? null,
+            posterUrl: gd.posterUrl ?? gd.thumbnailImageUrl ?? null,
             mediaUrl: gd.mediaUrl ?? null,
             videoUrl: gd.videoUrl ?? null,
             swapSides: gd.swapSides ?? false,
@@ -799,11 +834,15 @@ export default function WorkoutFolderPage({
     const enriched = blocks.map((b) => ({
       ...b,
       movements: b.movements.map((m) => {
-        if (m.thumbnailUrl) return m;
+        if (m.thumbnailUrl && m.posterUrl) return m;
         const found = availableMovements.find((am) => am.id === m.movementId);
-        if (found && (found.thumbnailUrl || found.mediaUrl)) {
+        if (found && (found.thumbnailUrl || found.mediaUrl || found.posterUrl)) {
           changed = true;
-          return { ...m, thumbnailUrl: found.thumbnailUrl ?? found.mediaUrl ?? undefined };
+          return {
+            ...m,
+            thumbnailUrl: m.thumbnailUrl ?? found.thumbnailUrl ?? found.mediaUrl ?? undefined,
+            posterUrl: m.posterUrl ?? found.posterUrl ?? undefined,
+          };
         }
         return m;
       }),
@@ -950,6 +989,7 @@ export default function WorkoutFolderPage({
               restSec: m.restSec ?? undefined,
               notes: m.notes ?? '',
               thumbnailUrl: m.thumbnailUrl ?? undefined,
+              posterUrl: m.posterUrl ?? undefined,
               swapSides: m.swapSides ?? undefined,
               swapMode: m.swapMode ?? undefined,
               swapWindowSec: m.swapWindowSec ?? undefined,
@@ -963,6 +1003,7 @@ export default function WorkoutFolderPage({
             clean.showGrabEquipment = true;
             if (b.grabEquipmentDurationSec) clean.grabEquipmentDurationSec = b.grabEquipmentDurationSec;
             if (b.grabEquipmentText) clean.grabEquipmentText = b.grabEquipmentText;
+            if (b.grabEquipmentImageUrl) clean.grabEquipmentImageUrl = b.grabEquipmentImageUrl;
           }
           if (b.blockPreSequence) clean.blockPreSequence = b.blockPreSequence;
           if (b.beginningRestSec != null && b.beginningRestSec > 0) {
@@ -1051,6 +1092,7 @@ export default function WorkoutFolderPage({
             weight: m.weight ?? undefined,
             durationSec: m.durationSec ?? undefined, restSec: m.restSec ?? undefined,
             notes: m.notes ?? '', thumbnailUrl: m.thumbnailUrl ?? undefined,
+            posterUrl: m.posterUrl ?? undefined,
             swapSides: m.swapSides ?? undefined,
             swapMode: m.swapMode ?? undefined,
             swapWindowSec: m.swapWindowSec ?? undefined,
@@ -1062,6 +1104,7 @@ export default function WorkoutFolderPage({
           clean.showGrabEquipment = true;
           if (b.grabEquipmentDurationSec) clean.grabEquipmentDurationSec = b.grabEquipmentDurationSec;
           if (b.grabEquipmentText) clean.grabEquipmentText = b.grabEquipmentText;
+          if (b.grabEquipmentImageUrl) clean.grabEquipmentImageUrl = b.grabEquipmentImageUrl;
         }
         if (b.blockPreSequence) clean.blockPreSequence = b.blockPreSequence;
         if (b.beginningRestSec != null && b.beginningRestSec > 0) {
@@ -1141,6 +1184,7 @@ export default function WorkoutFolderPage({
               weight: m.weight ?? undefined,
               durationSec: m.durationSec ?? undefined, restSec: m.restSec ?? undefined,
               notes: m.notes ?? '', thumbnailUrl: m.thumbnailUrl ?? undefined,
+              posterUrl: m.posterUrl ?? undefined,
               swapSides: m.swapSides ?? undefined,
               swapMode: m.swapMode ?? undefined,
               swapWindowSec: m.swapWindowSec ?? undefined,
@@ -1403,6 +1447,30 @@ export default function WorkoutFolderPage({
     updateBlocks(newBlocks);
   }, [blocks, updateBlocks]);
 
+  // ── Grab Equipment image generation ──────────────────────────────────────
+  const generateEquipImgFn = httpsCallable<{ grabEquipmentText: string }, { imageUrl: string }>(
+    functions, 'generateEquipmentImage',
+  );
+
+  const triggerEquipmentImageGen = useCallback(async (blockIdx: number, text: string) => {
+    if (!text.trim()) return;
+    setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'generating' }));
+    setEquipImgError(prev => { const next = { ...prev }; delete next[blockIdx]; return next; });
+    try {
+      const result = await generateEquipImgFn({ grabEquipmentText: text.trim() });
+      const imageUrl = result.data.imageUrl;
+      const newBlocks = [...blocks];
+      (newBlocks[blockIdx] as any).grabEquipmentImageUrl = imageUrl;
+      updateBlocks(newBlocks);
+      setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'done' }));
+    } catch (err: any) {
+      console.warn('[WorkoutFolder] generateEquipmentImage failed', err);
+      const msg = err?.details ?? err?.message ?? 'Unknown error';
+      setEquipImgError(prev => ({ ...prev, [blockIdx]: String(msg) }));
+      setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'error' }));
+    }
+  }, [blocks, generateEquipImgFn, updateBlocks]);
+
   // ── Movement operations ───────────────────────────────────────────────────
   const addMovementToBlock = useCallback((blockIdx: number, movement: MovementOption) => {
     const newBlocks = [...blocks];
@@ -1413,6 +1481,7 @@ export default function WorkoutFolderPage({
       restSec: DEFAULT_REST_SEC,
       sets: 1,
       thumbnailUrl: movement.thumbnailUrl ?? movement.mediaUrl ?? undefined,
+      posterUrl: movement.posterUrl ?? undefined,
     };
     if (movement.swapSides) {
       next.swapSides = true;
@@ -1548,11 +1617,14 @@ export default function WorkoutFolderPage({
   }, [cropTarget, workoutId]);
 
   // ── Filtered movements for picker ─────────────────────────────────────────
-  const filteredMovements = useMemo(() => {
-    if (!movementSearch.trim()) return availableMovements;
-    const q = movementSearch.toLowerCase();
-    return availableMovements.filter(m => m.name.toLowerCase().includes(q));
-  }, [availableMovements, movementSearch]);
+  const filteredMovements = useMemo((): MovementOption[] => {
+    return filterMovements(availableMovements as any[], {
+      search: movementSearch,
+      equipment: pickerEquipmentFilter,
+      muscleGroup: pickerMuscleGroupFilter,
+      difficulty: pickerDifficultyFilter,
+    }) as MovementOption[];
+  }, [availableMovements, movementSearch, pickerEquipmentFilter, pickerMuscleGroupFilter, pickerDifficultyFilter]);
 
   // ── Filtered follow-alongs for picker ─────────────────────────────────────
   const filteredFollowAlongs = useMemo(() => {
@@ -1585,6 +1657,18 @@ export default function WorkoutFolderPage({
       console.error('[WorkoutFolder] Save description error:', err);
     }
   }, [workoutId, workoutDescription]);
+
+  // ── Rest duration save ────────────────────────────────────────────────────
+  const saveRestDuration = useCallback(async (val: number) => {
+    try {
+      await updateDoc(doc(db, 'workouts', workoutId), {
+        restDurationSeconds: val,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err: any) {
+      console.error('[WorkoutFolder] Save rest duration error:', err);
+    }
+  }, [workoutId]);
 
   // ── Loading state ─────────────────────────────────────────────────────────
   if (loading) {
@@ -1950,7 +2034,7 @@ export default function WorkoutFolderPage({
       {/* ── Main content: blocks ─────────────────────────────────────────── */}
       <ScrollView
         style={st.scrollArea}
-        contentContainerStyle={{ paddingHorizontal: GRID_PADDING, paddingBottom: 120 }}
+        contentContainerStyle={{ paddingHorizontal: GRID_PADDING, paddingBottom: 200 }}
         showsVerticalScrollIndicator={false}
         onScrollBeginDrag={dismissAll}
       >
@@ -2026,6 +2110,24 @@ export default function WorkoutFolderPage({
                           <Text style={st.specialDuration}>{block.durationSec}s</Text>
                         )
                       )}
+                      {isBlockExpanded && block.type === 'Water Break' && (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                          <Text style={st.overlaySectionHint}>Duration</Text>
+                          <TouchableOpacity
+                            style={st.stepperBtn}
+                            onPress={(e) => { e.stopPropagation(); updateBlockField(blockIdx, 'durationSec', Math.max(5, (block.durationSec ?? 30) - 5)); }}
+                          >
+                            <Text style={st.stepperBtnText}>−</Text>
+                          </TouchableOpacity>
+                          <Text style={st.stepperValue}>{block.durationSec ?? 30}s</Text>
+                          <TouchableOpacity
+                            style={st.stepperBtn}
+                            onPress={(e) => { e.stopPropagation(); updateBlockField(blockIdx, 'durationSec', (block.durationSec ?? 30) + 5); }}
+                          >
+                            <Text style={st.stepperBtnText}>+</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                       {isBlockExpanded && (
                         <Pressable
                           style={st.trashBtn}
@@ -2091,6 +2193,8 @@ export default function WorkoutFolderPage({
                                   borderColor: isReorderSource ? '#38BDF8' : isMovExpanded ? '#F5A623' : isReorderTarget ? 'rgba(56,189,248,0.4)' : 'transparent',
                                   borderWidth: isReorderSource ? 2 : isMovExpanded ? 2 : isReorderTarget ? 1 : 0,
                                   opacity: mov.hidden ? 0.4 : isReorderSource ? 0.6 : 1,
+                                  // Suppress iOS Safari native long-press context menu so hold-to-reorder fires
+                                  ...({ WebkitTouchCallout: 'none', userSelect: 'none' } as any),
                                 },
                               ]}
                               onPress={(e) => {
@@ -2119,22 +2223,13 @@ export default function WorkoutFolderPage({
                                 setReorderSource({ blockIdx, movIdx });
                               }}
                             >
-                              {/* GIF thumbnail background */}
-                              {thumbUri ? (
-                                <Image
-                                  source={{ uri: thumbUri }}
-                                  style={{ width: '100%', height: '100%' }}
-                                  resizeMode="cover"
-                                />
-                              ) : (
-                                <View style={st.placeholderLogoFrame}>
-                                  <Image
-                                    source={require('../assets/goarrive-icon.png')}
-                                    style={st.placeholderLogo}
-                                    resizeMode="cover"
-                                  />
-                                </View>
-                              )}
+                              {/* Poster (static) → GIF (lazy swap on intersection) */}
+                              <PosterThumb
+                                posterUrl={mov.posterUrl}
+                                gifUrl={thumbUri}
+                                containerStyle={{ width: '100%', height: '100%' }}
+                                resizeMode="cover"
+                              />
 
                               {/* Hidden badge (shown when controls are closed and movement is hidden) — tap to unhide */}
                               {!isMovExpanded && mov.hidden && (
@@ -2154,8 +2249,8 @@ export default function WorkoutFolderPage({
 
                               {/* Reorder indicator (shown on picked-up card) */}
                               {isReorderSource && (
-                                <View style={st.reorderIndicator}>
-                                  <Text style={st.reorderText}>Tap to place</Text>
+                                <View style={[st.reorderIndicator, { userSelect: 'none' } as any]}>
+                                  <Text style={st.reorderText} selectable={false}>Tap to place</Text>
                                 </View>
                               )}
 
@@ -2374,17 +2469,12 @@ export default function WorkoutFolderPage({
                               }}
                             >
                               <View style={st.listThumb}>
-                                {thumbUri ? (
-                                  <Image source={{ uri: thumbUri }} style={st.listThumbImg} resizeMode="cover" />
-                                ) : (
-                                  <View style={st.placeholderLogoFrame}>
-                                    <Image
-                                      source={require('../assets/goarrive-icon.png')}
-                                      style={st.placeholderLogo}
-                                      resizeMode="cover"
-                                    />
-                                  </View>
-                                )}
+                                <PosterThumb
+                                  posterUrl={mov.posterUrl}
+                                  gifUrl={thumbUri}
+                                  containerStyle={st.listThumbImg}
+                                  resizeMode="cover"
+                                />
                               </View>
                               <Text style={st.listMovName} numberOfLines={1}>{mov.movementName}</Text>
                             </Pressable>
@@ -2594,7 +2684,15 @@ export default function WorkoutFolderPage({
       {/* ── Movement Picker Modal ───────────────────────────────────────── */}
       <ModalSheet
         visible={showMovementPicker}
-        onClose={() => { setShowMovementPicker(false); setMovementPickerBlockIdx(null); }}
+        onClose={() => {
+          setShowMovementPicker(false);
+          setMovementPickerBlockIdx(null);
+          setMovementSearch('');
+          setPickerEquipmentFilter('All');
+          setPickerMuscleGroupFilter('All');
+          setPickerDifficultyFilter('All');
+          setShowMovementPickerFilters(false);
+        }}
         maxHeightPct={0.8}
         sheetBg="#1E2A3A"
         backdropColor="rgba(0,0,0,0.7)"
@@ -2602,21 +2700,74 @@ export default function WorkoutFolderPage({
       >
             <View style={st.pickerHeader}>
               <Text style={st.pickerTitle}>Add Movement</Text>
-              <Pressable onPress={() => { setShowMovementPicker(false); setMovementPickerBlockIdx(null); }}>
+              <Pressable onPress={() => {
+                setShowMovementPicker(false);
+                setMovementPickerBlockIdx(null);
+                setMovementSearch('');
+                setPickerEquipmentFilter('All');
+                setPickerMuscleGroupFilter('All');
+                setPickerDifficultyFilter('All');
+                setShowMovementPickerFilters(false);
+              }}>
                 <Icon name="close" size={20} color="#8A95A3" />
               </Pressable>
             </View>
-            <View style={st.pickerSearch}>
-              <Icon name="search" size={16} color="#4A5568" />
-              <TextInput
-                style={st.pickerSearchInput}
-                value={movementSearch}
-                onChangeText={setMovementSearch}
-                placeholder="Search movements..."
-                placeholderTextColor="#4A5568"
-                autoFocus
-              />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingBottom: 8 }}>
+              <View style={[st.pickerSearch, { flex: 1, marginHorizontal: 0 }]}>
+                <Icon name="search" size={16} color="#4A5568" />
+                <TextInput
+                  style={st.pickerSearchInput}
+                  value={movementSearch}
+                  onChangeText={setMovementSearch}
+                  placeholder="Search movements..."
+                  placeholderTextColor="#4A5568"
+                  autoFocus
+                />
+              </View>
+              <Pressable
+                onPress={() => setShowMovementPickerFilters(v => !v)}
+                style={{ padding: 8, borderRadius: 8, backgroundColor: showMovementPickerFilters ? '#F5A62320' : 'transparent' }}
+              >
+                <Icon name="filter" size={18} color={showMovementPickerFilters ? '#F5A623' : '#8A95A3'} />
+              </Pressable>
             </View>
+            {showMovementPickerFilters && (
+              <View style={{ paddingHorizontal: 16, paddingBottom: 8, gap: 6 }}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                  {EQUIPMENT_FILTER_OPTIONS.map((opt) => (
+                    <Pressable
+                      key={opt}
+                      onPress={() => setPickerEquipmentFilter(opt)}
+                      style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: pickerEquipmentFilter === opt ? '#F5A623' : '#2A3A4A' }}
+                    >
+                      <Text style={{ fontSize: 12, color: pickerEquipmentFilter === opt ? '#0E1117' : '#8A95A3', fontWeight: pickerEquipmentFilter === opt ? '700' : '400' }}>{opt}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                  {MUSCLE_GROUP_FILTER_OPTIONS.map((opt) => (
+                    <Pressable
+                      key={opt}
+                      onPress={() => setPickerMuscleGroupFilter(opt)}
+                      style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: pickerMuscleGroupFilter === opt ? '#F5A623' : '#2A3A4A' }}
+                    >
+                      <Text style={{ fontSize: 12, color: pickerMuscleGroupFilter === opt ? '#0E1117' : '#8A95A3', fontWeight: pickerMuscleGroupFilter === opt ? '700' : '400' }}>{opt}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                  {DIFFICULTY_FILTER_OPTIONS.map((opt) => (
+                    <Pressable
+                      key={opt}
+                      onPress={() => setPickerDifficultyFilter(opt)}
+                      style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: pickerDifficultyFilter === opt ? '#F5A623' : '#2A3A4A' }}
+                    >
+                      <Text style={{ fontSize: 12, color: pickerDifficultyFilter === opt ? '#0E1117' : '#8A95A3', fontWeight: pickerDifficultyFilter === opt ? '700' : '400' }}>{opt}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
             <ScrollView style={{ flex: 1 }} contentContainerStyle={st.pickerList} keyboardShouldPersistTaps="handled">
               {filteredMovements.map((mov) => (
                 <Pressable
@@ -2631,17 +2782,12 @@ export default function WorkoutFolderPage({
                   }}
                 >
                   <View style={st.pickerThumb}>
-                    {mov.thumbnailUrl || mov.mediaUrl ? (
-                      <Image source={{ uri: mov.thumbnailUrl || mov.mediaUrl || '' }} style={st.pickerThumbImg} resizeMode="cover" />
-                    ) : (
-                      <View style={st.placeholderLogoFrame}>
-                        <Image
-                          source={require('../assets/goarrive-icon.png')}
-                          style={st.placeholderLogo}
-                          resizeMode="cover"
-                        />
-                      </View>
-                    )}
+                    <PosterThumb
+                      posterUrl={mov.posterUrl}
+                      gifUrl={mov.thumbnailUrl || mov.mediaUrl}
+                      containerStyle={st.pickerThumbImg}
+                      resizeMode="cover"
+                    />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={st.pickerItemName}>{mov.name}</Text>
@@ -2754,6 +2900,24 @@ export default function WorkoutFolderPage({
               numberOfLines={4}
               autoFocus
             />
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#1E2A3A' }}>
+              <Text style={{ color: '#8A95A3', fontSize: 14, fontFamily: FB }}>Rest between blocks</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <TouchableOpacity
+                  style={st.stepperBtn}
+                  onPress={() => { const v = Math.max(5, restDurationSeconds - 5); setRestDurationSeconds(v); saveRestDuration(v); }}
+                >
+                  <Text style={st.stepperBtnText}>−</Text>
+                </TouchableOpacity>
+                <Text style={st.stepperValue}>{restDurationSeconds}s</Text>
+                <TouchableOpacity
+                  style={st.stepperBtn}
+                  onPress={() => { const v = restDurationSeconds + 5; setRestDurationSeconds(v); saveRestDuration(v); }}
+                >
+                  <Text style={st.stepperBtnText}>+</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
             <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
               <Pressable style={[st.descBtn, { backgroundColor: '#1E2A3A' }]} onPress={() => setShowDescriptionEdit(false)}>
                 <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
@@ -2859,6 +3023,53 @@ export default function WorkoutFolderPage({
                           placeholder="e.g. Grab a pair of dumbbells"
                           placeholderTextColor="#4A5568"
                         />
+                        {/* Generate AI background image for this grab-equipment screen */}
+                        <View style={{ marginTop: 8 }}>
+                          <TouchableOpacity
+                            style={{
+                              backgroundColor: '#7C3AED',
+                              borderRadius: 10,
+                              paddingVertical: 13,
+                              paddingHorizontal: 16,
+                              flexDirection: 'row' as const,
+                              alignItems: 'center' as const,
+                              justifyContent: 'center' as const,
+                              gap: 8,
+                              opacity: (equipImgStatus[bi] === 'generating' || !block.grabEquipmentText?.trim()) ? 0.6 : 1,
+                            }}
+                            disabled={equipImgStatus[bi] === 'generating' || !block.grabEquipmentText?.trim()}
+                            onPress={() => triggerEquipmentImageGen(bi, block.grabEquipmentText ?? '')}
+                          >
+                            {equipImgStatus[bi] === 'generating' ? (
+                              <>
+                                <ActivityIndicator size="small" color="#F0F4F8" />
+                                <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8', fontFamily: FH }}>
+                                  Generating…
+                                </Text>
+                              </>
+                            ) : (
+                              <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8', fontFamily: FH }}>
+                                {block.grabEquipmentImageUrl ? 'Regenerate image' : 'Generate AI image'}
+                              </Text>
+                            )}
+                          </TouchableOpacity>
+                          {equipImgStatus[bi] === 'done' && block.grabEquipmentImageUrl ? (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                              <Image
+                                source={{ uri: block.grabEquipmentImageUrl }}
+                                style={{ width: 48, height: 48, borderRadius: 6 }}
+                              />
+                              <Text style={{ color: '#4ADE80', fontSize: 13, fontFamily: FB, flex: 1 }}>
+                                Image generated
+                              </Text>
+                            </View>
+                          ) : null}
+                          {equipImgStatus[bi] === 'error' && equipImgError[bi] ? (
+                            <Text style={{ color: '#F87171', fontSize: 12, fontFamily: FB, marginTop: 6 }}>
+                              {equipImgError[bi]}
+                            </Text>
+                          ) : null}
+                        </View>
                       </View>
                     )}
                   </View>

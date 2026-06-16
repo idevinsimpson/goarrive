@@ -283,6 +283,12 @@ export default function WorkoutPreview({
                       : ''}
                   </Text>
                 </View>
+                {block.grabEquipmentText ? (
+                  <View style={st.grabEquipmentRow}>
+                    <Icon name="package" size={13} color="#F5A623" />
+                    <Text style={st.grabEquipmentText}>{block.grabEquipmentText}</Text>
+                  </View>
+                ) : null}
                 {(block.movements || [])
                   .filter((mv: any) => mv.showOnPreview !== false)
                   .map((mv: any, mi: number) => (
@@ -527,6 +533,22 @@ const st = StyleSheet.create({
     fontSize: 12,
     color: '#8A95A3',
     fontFamily: FB,
+  },
+  grabEquipmentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(245,166,35,0.06)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    marginBottom: 8,
+  },
+  grabEquipmentText: {
+    fontSize: 13,
+    color: '#F5A623',
+    fontFamily: FB,
+    flex: 1,
   },
   movementRow: {
     flexDirection: 'row',
