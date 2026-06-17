@@ -414,10 +414,12 @@ export function useWorkoutTTS({
       // next enqueue.
       if (myRunId !== runIdRef.current) return;
       if (gapTimerRef.current) clearTimeout(gapTimerRef.current);
+      const nextItemKind = queueRef.current[0]?.kind;
+      const gapMs = (item.kind === 'cue' && nextItemKind === 'voice') ? 0 : QUEUE_GAP_MS;
       gapTimerRef.current = setTimeout(() => {
         gapTimerRef.current = null;
         pumpQueue();
-      }, QUEUE_GAP_MS);
+      }, gapMs);
     };
 
     audio.addEventListener('ended', () => onDone('ended'), listenerOpts);
