@@ -260,6 +260,7 @@ export function useWorkoutTTS({
   // decide whether to fire a voiceUrl fallback — if rest's voiceUrl was empty
   // (legacy/regenerating movement), the work branch announces the name then.
   const restAnnouncedVoiceUrlForIndexRef = useRef<number>(-1);
+  const lastGoEnqueuedAtRef = useRef<number>(0);
   // Mirror isPaused for synchronous use inside the queue pump callbacks.
   const isPausedRef = useRef(isPaused);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
@@ -671,6 +672,7 @@ export function useWorkoutTTS({
           // Prescription clip ("Cable Curls. 75 pounds, 15 reps.") wins over the
           // base name-only clip when the coach has set weight or reps on this
           // block-movement. Falls back cleanly if prescription URL is missing.
+          if (Date.now() - lastGoEnqueuedAtRef.current < 2000) return;
           const voiceUrl = (current as any).prescriptionVoiceUrl || current.voiceUrl;
           if (voiceUrl) {
             console.info('[VOICE-AUDIT] work-start fallback voiceUrl enqueue', {
@@ -859,6 +861,7 @@ export function useWorkoutTTS({
       const nextIsExercise = next
         && (!(next as any).stepType || (next as any).stepType === 'exercise');
       if (nextIsExercise) {
+        lastGoEnqueuedAtRef.current = Date.now();
         enqueueCue('go', `rest_end_${currentIndex}`);
       } else {
         console.warn(
