@@ -509,6 +509,16 @@ export function useWorkoutTTS({
         return;
       }
       console.info('[VOICE-AUDIT] enqueueVoice queued', { context, urlPreview: url.slice(0, 80) });
+      const poolKey = poolKeyForVoice(url);
+      if (!audioPool[poolKey]) {
+        try {
+          const audio = new (window as any).Audio(url);
+          audio.preload = 'auto';
+          audioPool[poolKey] = audio;
+        } catch {
+          // preload failed — pumpQueue will allocate on dequeue
+        }
+      }
       queueRef.current.push({ kind: 'voice', url, context, runId: runIdRef.current });
       pumpQueue();
     },
