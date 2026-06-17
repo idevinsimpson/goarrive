@@ -484,11 +484,12 @@ export default function WorkoutPlayer({
   //
   // Exception: swap-sides movements stay on the current movement during the L-side
   // lookahead (the R side of the same movement is coming next, not a new item).
-  const { activeVideoUrl, activeThumbUrl } = useMemo<{
+  const { activeVideoUrl, activeThumbUrl, isInRevealWindow } = useMemo<{
     activeVideoUrl: string | null;
     activeThumbUrl: string | null;
+    isInRevealWindow: boolean;
   }>(() => {
-    if (!current) return { activeVideoUrl: null, activeThumbUrl: null };
+    if (!current) return { activeVideoUrl: null, activeThumbUrl: null, isInRevealWindow: false };
 
     // Resolve a timeline item to a displayable {video, thumb} pair, falling back
     // to the next exercise's media if the item itself has none (e.g. waterBreak,
@@ -518,9 +519,13 @@ export default function WorkoutPlayer({
 
     let displayItem: any = current;
     let displayIndex = currentIndex;
+    let inRevealWindow = false;
 
+    // Suppress the reveal only during work-L of a swap-sides movement — the R
+    // side of the SAME movement is coming next, not a new item. work-R is NOT
+    // suppressed: its reveal shows the next movement's start (always unmirrored).
     const stayingOnSameMovement =
-      phase === 'work' && current?.swapSides === true;
+      phase === 'work' && current?.swapSides === true && swapSide === 'L';
 
     const isTimedRevealPhase =
       phase === 'work' || phase === 'transition' || phase === 'waterBreak'
@@ -530,6 +535,7 @@ export default function WorkoutPlayer({
       // Rest is the bridge between current and next; show next throughout.
       displayItem = next;
       displayIndex = currentIndex + 1;
+      inRevealWindow = true;
     } else if (
       isTimedRevealPhase
       && !isRepBased
@@ -541,9 +547,10 @@ export default function WorkoutPlayer({
       // Last 3.5s of any timed phase: preview the next timeline item.
       displayItem = next;
       displayIndex = currentIndex + 1;
+      inRevealWindow = true;
     }
 
-    return pickAsset(displayItem, displayIndex);
+    return { ...pickAsset(displayItem, displayIndex), isInRevealWindow: inRevealWindow };
   }, [phase, timeLeft, current, next, currentIndex, isRepBased, swapSide, flatMovements]);
 
   // ── Double-buffered video layers, with eager preload ─────────────────
@@ -1263,30 +1270,36 @@ export default function WorkoutPlayer({
         {/* the same video; swap keeps the video mounted (mirrored if going  */}
         {/* to R) so the member sees the next side instead of an empty card. */}
         {(phase === 'work' || phase === 'rest' || phase === 'swap') && current && (() => {
-          // Mirror logic: each video layer decides independently based on its own
-          // URL. A layer mirrors only when its URL is the current swap-sides
-          // movement's videoUrl AND the phase is swap or work-R. The preloaded
-          // next layer never mirrors, so there is no flip when it promotes.
-          // The global isMirrored is kept solely for the static poster/thumb
-          // fallback Image rendered when no video layer is available — those
-          // have no per-URL identity, so the timer-state mirror is correct for them.
-          const layerIsMirrored = (url: string) =>
-            !!current.swapSides
-            && url === current.videoUrl
-            && ((phase === 'work' && swapSide === 'R') || phase === 'swap');
-          const isMirrored = !!current.swapSides
+          // Single authoritative mirror flag driven by timer state (currentIndex,
+          // phase, swapSide). Mirror is ON for swap phase and work-R, OFF otherwise.
+          // Gated by isInRevealWindow: when the display has already switched to the
+          // next movement's preview (3-2-1 countdown), that preview is always
+          // unmirrored regardless of the current side — the next movement starts at
+          // work-L. This fixes the Tabata bug where work-R's reveal window showed
+          // the round-2 video still mirrored despite previewing round-2's work-L.
+          const isMirrored = !isInRevealWindow
+            && !!current.swapSides
             && ((phase === 'work' && swapSide === 'R') || phase === 'swap');
           const mirrorStyle = isMirrored ? { transform: [{ scaleX: -1 }] } as any : null;
-          // RN does not merge `transform` across style objects — last one wins.
-          // Compose crop + mirror into one array: crop first, mirror last.
+          // RN does not merge `transform` arrays across style objects — last wins.
+          // Crop goes in `style` (applied to the outer wrapper) on all platforms.
+          // Mirror goes in `style` on native and in `videoStyle` on web so that
+          // the CSS transform is applied directly to the <video> element — this
+          // avoids a one-frame delay if expo-av's wrapper doesn't re-apply the
+          // outer style transform synchronously on prop change.
           const buildLayerStyle = (url: string): any => {
             const crop = cropByUrl.get(url);
             const t = [
               ...getCropTransform(crop ?? null, mediaInnerSize.width, mediaInnerSize.height),
-              ...(layerIsMirrored(url) ? [{ scaleX: -1 }] : []),
+              ...(isMirrored && Platform.OS !== 'web' ? [{ scaleX: -1 }] : []),
             ];
             return t.length ? { transform: t } : null;
           };
+          const layerVideoStyle: any = Platform.OS === 'web'
+            ? (isMirrored
+              ? { width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }
+              : { width: '100%', height: '100%', objectFit: 'cover' })
+            : undefined;
           return (
           <View style={[st.workContainer, webSafeBottomStyle]}>
             {renderLogoSlot()}
@@ -1347,28 +1360,6 @@ export default function WorkoutPlayer({
             {/* Shared media slot — Video stays mounted across work↔rest↔swap. */}
             <View style={st.mediaSlot}>
               <View style={[st.mediaInner, mediaInnerSize]}>
-                {/* ── Staging-only diagnostic overlay ── */}
-                {(() => {
-                  const showDebugOverlay = (() => { try { if (Platform.OS !== 'web') return false; const h = (typeof window !== 'undefined' ? window.location.hostname : ''); const q = (typeof window !== 'undefined' ? window.location.search : ''); return h.includes('goarrive--') || h.includes('staging') || q.includes('debugOverlay=1'); } catch { return false; } })();
-                  if (!showDebugOverlay) return null;
-                  const basename = (u: string | null | undefined) => { if (!u) return '-'; try { const s = u.split('?')[0]; const p = s.split('/'); return p[p.length - 1].slice(0, 24); } catch { return (u ?? '').slice(0, 24); } };
-                  const monoStyle: any = { color: '#fff', fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', lineHeight: 13 };
-                  return (
-                    <View pointerEvents="none" style={{ position: 'absolute', top: 4, left: 4, backgroundColor: 'rgba(0,0,0,0.7)', padding: 4, borderRadius: 4, zIndex: 999 }}>
-                      <Text style={monoStyle}>phase={phase} side={swapSide} swapSides={String(!!current.swapSides)}</Text>
-                      <Text style={monoStyle}>cur={basename(current.videoUrl)}</Text>
-                      <Text style={monoStyle}>disp={basename(displayedUrl)}</Text>
-                      <Text style={monoStyle}>active={basename(activeVideoUrl)}</Text>
-                      <Text style={monoStyle}>preload={basename(preloadVideoUrl)}</Text>
-                      {videoLayers.map((layer, i) => {
-                        const isDisplayed = layer.url === displayedUrl;
-                        return (
-                          <Text key={layer.url} style={monoStyle}>L{i}:{basename(layer.url)} match={String(layer.url === current.videoUrl)} mir={String(layerIsMirrored(layer.url))} rdy={String(layer.ready)} op={isDisplayed ? 1 : 0}</Text>
-                        );
-                      })}
-                    </View>
-                  );
-                })()}
                 {videoLayers.length > 0 ? (
                   <>
                     {videoLayers.map((layer) => {
@@ -1391,11 +1382,7 @@ export default function WorkoutPlayer({
                           shouldPlay={!isPaused}
                           isMuted
                           style={[st.videoPlayer, st.videoLayer, { opacity } as any, buildLayerStyle(layer.url)]}
-                          videoStyle={
-                            Platform.OS === 'web'
-                              ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
-                              : undefined
-                          }
+                          videoStyle={layerVideoStyle}
                           onReadyForDisplay={() => handleLayerReady(layer.url)}
                           onPlaybackStatusUpdate={(status: any) => {
                             if (!status?.isLoaded) return;
