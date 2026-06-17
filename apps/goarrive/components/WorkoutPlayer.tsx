@@ -484,11 +484,12 @@ export default function WorkoutPlayer({
   //
   // Exception: swap-sides movements stay on the current movement during the L-side
   // lookahead (the R side of the same movement is coming next, not a new item).
-  const { activeVideoUrl, activeThumbUrl } = useMemo<{
+  const { activeVideoUrl, activeThumbUrl, isDisplayingCurrent } = useMemo<{
     activeVideoUrl: string | null;
     activeThumbUrl: string | null;
+    isDisplayingCurrent: boolean;
   }>(() => {
-    if (!current) return { activeVideoUrl: null, activeThumbUrl: null };
+    if (!current) return { activeVideoUrl: null, activeThumbUrl: null, isDisplayingCurrent: true };
 
     // Resolve a timeline item to a displayable {video, thumb} pair, falling back
     // to the next exercise's media if the item itself has none (e.g. waterBreak,
@@ -518,6 +519,7 @@ export default function WorkoutPlayer({
 
     let displayItem: any = current;
     let displayIndex = currentIndex;
+    let isDisplayingCurrent = true;
 
     const stayingOnSameMovement =
       phase === 'work' && current?.swapSides === true && swapSide === 'L';
@@ -530,6 +532,7 @@ export default function WorkoutPlayer({
       // Rest is the bridge between current and next; show next throughout.
       displayItem = next;
       displayIndex = currentIndex + 1;
+      isDisplayingCurrent = false;
     } else if (
       isTimedRevealPhase
       && !isRepBased
@@ -541,9 +544,10 @@ export default function WorkoutPlayer({
       // Last 3.5s of any timed phase: preview the next timeline item.
       displayItem = next;
       displayIndex = currentIndex + 1;
+      isDisplayingCurrent = false;
     }
 
-    return pickAsset(displayItem, displayIndex);
+    return { ...pickAsset(displayItem, displayIndex), isDisplayingCurrent };
   }, [phase, timeLeft, current, next, currentIndex, isRepBased, swapSide, flatMovements]);
 
   // ── Double-buffered video layers, with eager preload ─────────────────
@@ -1270,7 +1274,8 @@ export default function WorkoutPlayer({
           // way GIFs, MP4s, and image thumbnails all mirror with the same
           // primitive — no per-source branching required.
           const isMirrored = !!current.swapSides
-            && ((phase === 'work' && swapSide === 'R') || phase === 'swap');
+            && ((phase === 'work' && swapSide === 'R') || phase === 'swap')
+            && isDisplayingCurrent;
           const mirrorStyle = isMirrored ? { transform: [{ scaleX: -1 }] } as any : null;
           // RN does not merge `transform` across style objects — last one wins.
           // Compose crop + mirror into one array: crop first, mirror last.
