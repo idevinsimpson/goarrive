@@ -455,7 +455,6 @@ export default function WorkoutPlayer({
   // Title-slot label fonts (scale with frame). The main title text inside
   // the title module is sized by renderAutoFitTitle, not by scaledLabels.
   const scaledLabels = {
-    superset: fs(16),
     restPhase: fs(18),
     waterBreakLabel: fs(20),
     transitionInline: fs(13),
@@ -1287,12 +1286,9 @@ export default function WorkoutPlayer({
             {renderLogoSlot()}
             {phase === 'work' && renderTitleTimerSlot(
               <>
-                {current.supersetLabel && (
-                  <Text style={[st.supersetLabel, { fontSize: scaledLabels.superset }]}>{current.supersetLabel}</Text>
-                )}
                 {renderAutoFitTitle(composePrescriptionLabel(current.name, current.weight, current.reps), {
                   hasTimer: !isRepBased,
-                  maxLines: current.supersetLabel ? 2 : NAME_MAX_LINES,
+                  maxLines: NAME_MAX_LINES,
                 })}
                 {/* Swap-mode badge stacks naturally below the title — the */}
                 {/* title column is center-aligned, so it appears centered  */}
@@ -1319,7 +1315,7 @@ export default function WorkoutPlayer({
                 <Text style={[st.restPhaseLabel, { fontSize: scaledLabels.restPhase }]}>REST</Text>
                 {next && renderAutoFitTitle(`Next: ${composePrescriptionLabel(next.name, next.weight, next.reps)}`, {
                   hasTimer: true,
-                  maxLines: 2,
+                  maxLines: 3,
                   color: '#F0F4F8',
                   marginTop: 2,
                 })}
@@ -1947,10 +1943,6 @@ const st = StyleSheet.create({
     justifyContent: 'space-between', paddingHorizontal: 4, marginBottom: 8,
   },
   nameColumn: { flex: 1, marginRight: 12 },
-  supersetLabel: {
-    fontSize: 16, fontWeight: '700', color: '#F5A623', fontFamily: FH,
-    letterSpacing: 1, marginBottom: 4, textAlign: 'center',
-  },
   workMovementName: {
     fontWeight: '800', color: '#FFFFFF', fontFamily: FH, textAlign: 'center',
   },
