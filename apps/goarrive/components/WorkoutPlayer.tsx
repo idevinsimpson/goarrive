@@ -552,19 +552,13 @@ export default function WorkoutPlayer({
   // changes once a new layer reports ready, so the outgoing video keeps
   // playing visibly until the incoming one can take over without a gap.
   const preloadVideoUrl = useMemo<string | null>(() => {
-    // Walk forward until we find an exercise video URL that differs from
-    // the active one — that's what should be loading in the background.
     if (!activeVideoUrl) return null;
-    let foundActive = false;
-    for (let i = 0; i < flatMovements.length; i++) {
-      const m = flatMovements[i];
-      const url = m?.videoUrl;
-      if (!url) continue;
-      if (foundActive && url !== activeVideoUrl) return url;
-      if (url === activeVideoUrl) foundActive = true;
+    for (let offset = 1; offset <= 3; offset++) {
+      const url = flatMovements[currentIndex + offset]?.videoUrl;
+      if (url && url !== activeVideoUrl) return url;
     }
     return null;
-  }, [activeVideoUrl, flatMovements]);
+  }, [activeVideoUrl, currentIndex, flatMovements]);
 
   const [videoLayers, setVideoLayers] = useState<Array<{ url: string; ready: boolean }>>([]);
   const [displayedUrl, setDisplayedUrl] = useState<string | null>(null);
