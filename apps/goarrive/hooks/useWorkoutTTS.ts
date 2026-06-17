@@ -260,6 +260,7 @@ export function useWorkoutTTS({
   // decide whether to fire a voiceUrl fallback — if rest's voiceUrl was empty
   // (legacy/regenerating movement), the work branch announces the name then.
   const restAnnouncedVoiceUrlForIndexRef = useRef<number>(-1);
+  const lastGoEnqueuedAtRef = useRef<number>(0);
   // Mirror isPaused for synchronous use inside the queue pump callbacks.
   const isPausedRef = useRef(isPaused);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
@@ -414,10 +415,12 @@ export function useWorkoutTTS({
       // next enqueue.
       if (myRunId !== runIdRef.current) return;
       if (gapTimerRef.current) clearTimeout(gapTimerRef.current);
+      const nextItemKind = queueRef.current[0]?.kind;
+      const gapMs = (item.kind === 'cue' && nextItemKind === 'voice') ? 0 : QUEUE_GAP_MS;
       gapTimerRef.current = setTimeout(() => {
         gapTimerRef.current = null;
         pumpQueue();
-      }, QUEUE_GAP_MS);
+      }, gapMs);
     };
 
     audio.addEventListener('ended', () => onDone('ended'), listenerOpts);
@@ -506,6 +509,16 @@ export function useWorkoutTTS({
         return;
       }
       console.info('[VOICE-AUDIT] enqueueVoice queued', { context, urlPreview: url.slice(0, 80) });
+      const poolKey = poolKeyForVoice(url);
+      if (!audioPool[poolKey]) {
+        try {
+          const audio = new (window as any).Audio(url);
+          audio.preload = 'auto';
+          audioPool[poolKey] = audio;
+        } catch {
+          // preload failed — pumpQueue will allocate on dequeue
+        }
+      }
       queueRef.current.push({ kind: 'voice', url, context, runId: runIdRef.current });
       pumpQueue();
     },
@@ -669,6 +682,7 @@ export function useWorkoutTTS({
           // Prescription clip ("Cable Curls. 75 pounds, 15 reps.") wins over the
           // base name-only clip when the coach has set weight or reps on this
           // block-movement. Falls back cleanly if prescription URL is missing.
+          if (Date.now() - lastGoEnqueuedAtRef.current < 2000) return;
           const voiceUrl = (current as any).prescriptionVoiceUrl || current.voiceUrl;
           if (voiceUrl) {
             console.info('[VOICE-AUDIT] work-start fallback voiceUrl enqueue', {
@@ -857,6 +871,7 @@ export function useWorkoutTTS({
       const nextIsExercise = next
         && (!(next as any).stepType || (next as any).stepType === 'exercise');
       if (nextIsExercise) {
+        lastGoEnqueuedAtRef.current = Date.now();
         enqueueCue('go', `rest_end_${currentIndex}`);
       } else {
         console.warn(

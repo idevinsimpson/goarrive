@@ -221,6 +221,8 @@ export default function WorkoutPlayer({
 
   // ── Video ref ────────────────────────────────
   const videoRef = useRef<any>(null);
+  // Stall watchdog: tracks {pos, ts} per URL to detect frozen playback.
+  const lastPositionUpdateAtRef = useRef<Map<string, { pos: number; ts: number }>>(new Map());
 
   // Track every mounted <Video> so we can imperatively pause/play them all on
   // isPaused changes. The declarative `shouldPlay` prop alone doesn't reliably
@@ -552,19 +554,13 @@ export default function WorkoutPlayer({
   // changes once a new layer reports ready, so the outgoing video keeps
   // playing visibly until the incoming one can take over without a gap.
   const preloadVideoUrl = useMemo<string | null>(() => {
-    // Walk forward until we find an exercise video URL that differs from
-    // the active one — that's what should be loading in the background.
     if (!activeVideoUrl) return null;
-    let foundActive = false;
-    for (let i = 0; i < flatMovements.length; i++) {
-      const m = flatMovements[i];
-      const url = m?.videoUrl;
-      if (!url) continue;
-      if (foundActive && url !== activeVideoUrl) return url;
-      if (url === activeVideoUrl) foundActive = true;
+    for (let offset = 1; offset <= 3; offset++) {
+      const url = flatMovements[currentIndex + offset]?.videoUrl;
+      if (url && url !== activeVideoUrl) return url;
     }
     return null;
-  }, [activeVideoUrl, flatMovements]);
+  }, [activeVideoUrl, currentIndex, flatMovements]);
 
   const [videoLayers, setVideoLayers] = useState<Array<{ url: string; ready: boolean }>>([]);
   const [displayedUrl, setDisplayedUrl] = useState<string | null>(null);
@@ -1371,6 +1367,20 @@ export default function WorkoutPlayer({
                               : undefined
                           }
                           onReadyForDisplay={() => handleLayerReady(layer.url)}
+                          onPlaybackStatusUpdate={(status: any) => {
+                            if (!status?.isLoaded) return;
+                            if (status.error) {
+                              console.warn('[WorkoutPlayer] video error', { url: layer.url });
+                              return;
+                            }
+                            const now = Date.now();
+                            const prev = lastPositionUpdateAtRef.current.get(layer.url);
+                            if (prev === undefined || status.positionMillis !== prev.pos) {
+                              lastPositionUpdateAtRef.current.set(layer.url, { pos: status.positionMillis, ts: now });
+                            } else if (status.shouldPlay && now - prev.ts >= 5000) {
+                              console.warn('[WorkoutPlayer] video stall detected', { url: layer.url, stallMs: now - prev.ts });
+                            }
+                          }}
                         />
                       );
                     })}
