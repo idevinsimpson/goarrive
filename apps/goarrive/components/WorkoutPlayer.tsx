@@ -520,7 +520,7 @@ export default function WorkoutPlayer({
     let displayIndex = currentIndex;
 
     const stayingOnSameMovement =
-      phase === 'work' && current?.swapSides === true && swapSide === 'L';
+      phase === 'work' && current?.swapSides === true;
 
     const isTimedRevealPhase =
       phase === 'work' || phase === 'transition' || phase === 'waterBreak'
