@@ -221,6 +221,8 @@ export default function WorkoutPlayer({
 
   // ── Video ref ────────────────────────────────
   const videoRef = useRef<any>(null);
+  // Stall watchdog: tracks {pos, ts} per URL to detect frozen playback.
+  const lastPositionUpdateAtRef = useRef<Map<string, { pos: number; ts: number }>>(new Map());
 
   // Track every mounted <Video> so we can imperatively pause/play them all on
   // isPaused changes. The declarative `shouldPlay` prop alone doesn't reliably
@@ -1365,6 +1367,20 @@ export default function WorkoutPlayer({
                               : undefined
                           }
                           onReadyForDisplay={() => handleLayerReady(layer.url)}
+                          onPlaybackStatusUpdate={(status: any) => {
+                            if (!status?.isLoaded) return;
+                            if (status.error) {
+                              console.warn('[WorkoutPlayer] video error', { url: layer.url });
+                              return;
+                            }
+                            const now = Date.now();
+                            const prev = lastPositionUpdateAtRef.current.get(layer.url);
+                            if (prev === undefined || status.positionMillis !== prev.pos) {
+                              lastPositionUpdateAtRef.current.set(layer.url, { pos: status.positionMillis, ts: now });
+                            } else if (status.shouldPlay && now - prev.ts >= 5000) {
+                              console.warn('[WorkoutPlayer] video stall detected', { url: layer.url, stallMs: now - prev.ts });
+                            }
+                          }}
                         />
                       );
                     })}
