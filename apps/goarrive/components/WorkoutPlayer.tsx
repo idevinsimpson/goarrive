@@ -1347,6 +1347,28 @@ export default function WorkoutPlayer({
             {/* Shared media slot — Video stays mounted across work↔rest↔swap. */}
             <View style={st.mediaSlot}>
               <View style={[st.mediaInner, mediaInnerSize]}>
+                {/* ── Staging-only diagnostic overlay ── */}
+                {(() => {
+                  const showDebugOverlay = (() => { try { if (Platform.OS !== 'web') return false; const h = (typeof window !== 'undefined' ? window.location.hostname : ''); const q = (typeof window !== 'undefined' ? window.location.search : ''); return h.includes('goarrive--') || h.includes('staging') || q.includes('debugOverlay=1'); } catch { return false; } })();
+                  if (!showDebugOverlay) return null;
+                  const basename = (u: string | null | undefined) => { if (!u) return '-'; try { const s = u.split('?')[0]; const p = s.split('/'); return p[p.length - 1].slice(0, 24); } catch { return (u ?? '').slice(0, 24); } };
+                  const monoStyle: any = { color: '#fff', fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', lineHeight: 13 };
+                  return (
+                    <View pointerEvents="none" style={{ position: 'absolute', top: 4, left: 4, backgroundColor: 'rgba(0,0,0,0.7)', padding: 4, borderRadius: 4, zIndex: 999 }}>
+                      <Text style={monoStyle}>phase={phase} side={swapSide} swapSides={String(!!current.swapSides)}</Text>
+                      <Text style={monoStyle}>cur={basename(current.videoUrl)}</Text>
+                      <Text style={monoStyle}>disp={basename(displayedUrl)}</Text>
+                      <Text style={monoStyle}>active={basename(activeVideoUrl)}</Text>
+                      <Text style={monoStyle}>preload={basename(preloadVideoUrl)}</Text>
+                      {videoLayers.map((layer, i) => {
+                        const isDisplayed = layer.url === displayedUrl;
+                        return (
+                          <Text key={layer.url} style={monoStyle}>L{i}:{basename(layer.url)} match={String(layer.url === current.videoUrl)} mir={String(layerIsMirrored(layer.url))} rdy={String(layer.ready)} op={isDisplayed ? 1 : 0}</Text>
+                        );
+                      })}
+                    </View>
+                  );
+                })()}
                 {videoLayers.length > 0 ? (
                   <>
                     {videoLayers.map((layer) => {
