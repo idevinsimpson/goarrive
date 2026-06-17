@@ -15,22 +15,19 @@ export function composePrescriptionLabel(name: string, weight?: string, reps?: s
   return parts.length === 0 ? name : `${name}, ${parts.join(', ')}`;
 }
 
-// Walk-by-URL strategy: find the first occurrence of activeVideoUrl, then
-// return the next URL that differs. On main this is the production behavior;
-// the fix branch changes this to peek by index instead.
-// (_currentIndex accepted for forward-compatibility with the fix branch API.)
+// Peek by index: scan currentIndex+1 through currentIndex+3 for the first
+// distinct videoUrl. Bounded lookahead avoids returning a far-future URL when
+// the next several movements all share the active URL (which is the all-same-
+// URL regression: walk-by-URL would skip to the next change wherever it is).
 export function computePreloadVideoUrl(
   activeVideoUrl: string | null,
-  _currentIndex: number,
+  currentIndex: number,
   flatMovements: Array<{ videoUrl?: string }>,
 ): string | null {
   if (!activeVideoUrl) return null;
-  let foundActive = false;
-  for (let i = 0; i < flatMovements.length; i++) {
-    const url = flatMovements[i]?.videoUrl;
-    if (!url) continue;
-    if (foundActive && url !== activeVideoUrl) return url;
-    if (url === activeVideoUrl) foundActive = true;
+  for (let offset = 1; offset <= 3; offset++) {
+    const url = flatMovements[currentIndex + offset]?.videoUrl;
+    if (url && url !== activeVideoUrl) return url;
   }
   return null;
 }

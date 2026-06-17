@@ -1,15 +1,9 @@
-// EXPECTED RED ON MAIN — green after fix/workout-player-stability merges
-// The walk-by-URL strategy on main returns null when all movements share the
-// same videoUrl; the fix branch switches to peek-by-index which always returns
-// the next movement's URL regardless of duplication.
-
 /**
  * Regression tests for WorkoutPlayer preloadVideoUrl calculation.
  *
- * Guards against the walk-by-URL bug where all movements share the same
- * videoUrl (common in paired L/R clips or reused warmup videos), causing
- * the preload URL to be null and the next movement's video to not buffer
- * during the current phase.
+ * Guards the peek-by-index strategy that replaced walk-by-URL: bounded
+ * lookahead (offsets 1..3) prevents preloading a far-future URL when the
+ * next several movements share the active URL.
  */
 
 import { computePreloadVideoUrl } from '../WorkoutPlayer.helpers';
@@ -17,19 +11,20 @@ import { computePreloadVideoUrl } from '../WorkoutPlayer.helpers';
 const URL_A = 'https://storage.example.com/squat.mp4';
 const URL_B = 'https://storage.example.com/lunge.mp4';
 
-describe('computePreloadVideoUrl — walk-by-URL vs peek-by-index', () => {
-  // EXPECTED RED ON MAIN — green after fix/workout-player-stability merges
-  // When all three movements share the same URL, the walk-by-URL strategy
-  // never finds a "distinct" URL and returns null. The fix (peek-by-index)
-  // returns movements[currentIndex + 1].videoUrl directly.
-  test('returns non-null when all movements share the same videoUrl [EXPECTED RED ON MAIN]', () => {
+describe('computePreloadVideoUrl — peek-by-index', () => {
+  // Regression guard: walk-by-URL would scan past the four URL_A entries and
+  // wrongly preload URL_B at index 4. Peek-by-index with offset cap 3 returns
+  // null instead, which is correct — we don't preload a video that belongs to
+  // a movement four steps ahead.
+  test('returns null when next 3 movements share active URL (peek-by-index cap)', () => {
     const movements = [
       { videoUrl: URL_A },
       { videoUrl: URL_A },
       { videoUrl: URL_A },
+      { videoUrl: URL_A },
+      { videoUrl: URL_B },
     ];
-    const result = computePreloadVideoUrl(URL_A, 0, movements);
-    expect(result).not.toBeNull();
+    expect(computePreloadVideoUrl(URL_A, 0, movements)).toBeNull();
   });
 
   // Passes on both main and fix: walk-by-URL skips the duplicate and returns URL_B;

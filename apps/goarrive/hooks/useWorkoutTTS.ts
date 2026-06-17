@@ -204,12 +204,12 @@ export const QUEUE_GAP_MS = 90;
 export type QueueItemKind = 'cue' | 'voice';
 
 // Returns the gap (ms) to insert between two consecutive audio queue items.
-// On main: always QUEUE_GAP_MS. The fix branch changes this so cue→voice = 0.
+// cue→voice = 0 so "next up, [movement]" plays as one continuous statement.
 export function calcQueueGapMs(
   currentKind: QueueItemKind,
   nextItemKind: QueueItemKind | null,
 ): number {
-  void currentKind; void nextItemKind; // unused until fix lands
+  if (currentKind === 'cue' && nextItemKind === 'voice') return 0;
   return QUEUE_GAP_MS;
 }
 
