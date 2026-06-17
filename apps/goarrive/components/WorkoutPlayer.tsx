@@ -77,6 +77,9 @@ export function composePrescriptionLabel(name: string, weight?: string, reps?: s
   return parts.length === 0 ? name : `${name}, ${parts.join(', ')}`;
 }
 
+// Pure helpers live in WorkoutPlayer.helpers.ts (no Firebase dep — safe to import in tests).
+export { computePreloadVideoUrl, handleVideoLayerPlaybackStatus } from './WorkoutPlayer.helpers';
+
 // ── Types ──────────────────────────────────────────────────────────────────
 interface WorkoutPlayerProps {
   visible: boolean;
