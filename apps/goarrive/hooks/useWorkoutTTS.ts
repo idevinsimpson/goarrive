@@ -198,7 +198,28 @@ function swapWindowSeconds(mov: any): number {
 // "Next up" and movement-name clips was the main offender, and 220ms
 // between [rest]→[combined phrase] still felt awkward. 90ms reads as a
 // natural sentence boundary without bleeding clips into each other.
-const QUEUE_GAP_MS = 90;
+export const QUEUE_GAP_MS = 90;
+
+// Pure helpers exported for testing.
+export type QueueItemKind = 'cue' | 'voice';
+
+// Returns the gap (ms) to insert between two consecutive audio queue items.
+// On main: always QUEUE_GAP_MS. The fix branch changes this so cue→voice = 0.
+export function calcQueueGapMs(
+  currentKind: QueueItemKind,
+  nextItemKind: QueueItemKind | null,
+): number {
+  void currentKind; void nextItemKind; // unused until fix lands
+  return QUEUE_GAP_MS;
+}
+
+// Drops queue items whose runId doesn't match currentRunId.
+export function filterStaleQueueItems<T extends { runId: number }>(
+  items: T[],
+  currentRunId: number,
+): T[] {
+  return items.filter((item) => item.runId === currentRunId);
+}
 
 // ── Types ────────────────────────────────────────────────────────────
 type Phase = 'ready' | 'work' | 'rest' | 'swap' | 'complete'
