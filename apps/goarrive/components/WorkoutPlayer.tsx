@@ -484,12 +484,11 @@ export default function WorkoutPlayer({
   //
   // Exception: swap-sides movements stay on the current movement during the L-side
   // lookahead (the R side of the same movement is coming next, not a new item).
-  const { activeVideoUrl, activeThumbUrl, isDisplayingCurrent } = useMemo<{
+  const { activeVideoUrl, activeThumbUrl } = useMemo<{
     activeVideoUrl: string | null;
     activeThumbUrl: string | null;
-    isDisplayingCurrent: boolean;
   }>(() => {
-    if (!current) return { activeVideoUrl: null, activeThumbUrl: null, isDisplayingCurrent: true };
+    if (!current) return { activeVideoUrl: null, activeThumbUrl: null };
 
     // Resolve a timeline item to a displayable {video, thumb} pair, falling back
     // to the next exercise's media if the item itself has none (e.g. waterBreak,
@@ -519,7 +518,6 @@ export default function WorkoutPlayer({
 
     let displayItem: any = current;
     let displayIndex = currentIndex;
-    let isDisplayingCurrent = true;
 
     const stayingOnSameMovement =
       phase === 'work' && current?.swapSides === true && swapSide === 'L';
@@ -532,7 +530,6 @@ export default function WorkoutPlayer({
       // Rest is the bridge between current and next; show next throughout.
       displayItem = next;
       displayIndex = currentIndex + 1;
-      isDisplayingCurrent = false;
     } else if (
       isTimedRevealPhase
       && !isRepBased
@@ -544,10 +541,9 @@ export default function WorkoutPlayer({
       // Last 3.5s of any timed phase: preview the next timeline item.
       displayItem = next;
       displayIndex = currentIndex + 1;
-      isDisplayingCurrent = false;
     }
 
-    return { ...pickAsset(displayItem, displayIndex), isDisplayingCurrent };
+    return pickAsset(displayItem, displayIndex);
   }, [phase, timeLeft, current, next, currentIndex, isRepBased, swapSide, flatMovements]);
 
   // ── Double-buffered video layers, with eager preload ─────────────────
@@ -1267,15 +1263,19 @@ export default function WorkoutPlayer({
         {/* the same video; swap keeps the video mounted (mirrored if going  */}
         {/* to R) so the member sees the next side instead of an empty card. */}
         {(phase === 'work' || phase === 'rest' || phase === 'swap') && current && (() => {
-          // Mirror the media when about to enter / already on the R side of
-          // a swap-sides movement. `transform: [{ scaleX: -1 }]` works for
-          // both <Video> and <Image>; on web RN translates it to CSS
-          // `transform: scaleX(-1)` which the HTMLVideoElement honors. This
-          // way GIFs, MP4s, and image thumbnails all mirror with the same
-          // primitive — no per-source branching required.
+          // Mirror logic: each video layer decides independently based on its own
+          // URL. A layer mirrors only when its URL is the current swap-sides
+          // movement's videoUrl AND the phase is swap or work-R. The preloaded
+          // next layer never mirrors, so there is no flip when it promotes.
+          // The global isMirrored is kept solely for the static poster/thumb
+          // fallback Image rendered when no video layer is available — those
+          // have no per-URL identity, so the timer-state mirror is correct for them.
+          const layerIsMirrored = (url: string) =>
+            !!current.swapSides
+            && url === current.videoUrl
+            && ((phase === 'work' && swapSide === 'R') || phase === 'swap');
           const isMirrored = !!current.swapSides
-            && ((phase === 'work' && swapSide === 'R') || phase === 'swap')
-            && isDisplayingCurrent;
+            && ((phase === 'work' && swapSide === 'R') || phase === 'swap');
           const mirrorStyle = isMirrored ? { transform: [{ scaleX: -1 }] } as any : null;
           // RN does not merge `transform` across style objects — last one wins.
           // Compose crop + mirror into one array: crop first, mirror last.
@@ -1283,7 +1283,7 @@ export default function WorkoutPlayer({
             const crop = cropByUrl.get(url);
             const t = [
               ...getCropTransform(crop ?? null, mediaInnerSize.width, mediaInnerSize.height),
-              ...(isMirrored ? [{ scaleX: -1 }] : []),
+              ...(layerIsMirrored(url) ? [{ scaleX: -1 }] : []),
             ];
             return t.length ? { transform: t } : null;
           };
