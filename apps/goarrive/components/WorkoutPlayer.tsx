@@ -362,13 +362,16 @@ export default function WorkoutPlayer({
     text: string,
     baseAvailWidth: number,
     maxLines: number = NAME_MAX_LINES,
+    maxFontSize?: number,
   ): { fontSize: number; lineHeight: number } => {
     const words = (text || '').trim().split(/\s+/).filter(Boolean);
     if (words.length === 0) {
-      return { fontSize: fs(NAME_TIERS[0].size), lineHeight: fs(NAME_TIERS[0].line) };
+      const top = NAME_TIERS.find(t => maxFontSize == null || t.size <= maxFontSize) ?? NAME_TIERS[NAME_TIERS.length - 1];
+      return { fontSize: fs(top.size), lineHeight: fs(top.line) };
     }
     const longestWordLen = words.reduce((n, w) => (w.length > n ? w.length : n), 0);
     for (const t of NAME_TIERS) {
+      if (maxFontSize != null && t.size > maxFontSize) continue;
       const charW = t.size * NAME_CHAR_W_FACTOR;
       if (longestWordLen * charW > baseAvailWidth) continue;
       const maxCharsPerLine = Math.max(1, Math.floor(baseAvailWidth / charW));
@@ -405,7 +408,7 @@ export default function WorkoutPlayer({
   // 112-unit title module; the work phase keeps the original 3-line budget.
   const renderAutoFitTitle = (
     text: string,
-    opts: { hasTimer?: boolean; maxLines?: number; color?: string; marginTop?: number } = {},
+    opts: { hasTimer?: boolean; maxLines?: number; color?: string; marginTop?: number; maxFontSize?: number } = {},
   ): React.ReactNode => {
     const hasTimer = opts.hasTimer ?? true;
     const maxLines = opts.maxLines ?? NAME_MAX_LINES;
@@ -419,7 +422,7 @@ export default function WorkoutPlayer({
           st.workMovementName,
           { color },
           opts.marginTop != null ? { marginTop: fs(opts.marginTop) } : null,
-          getNameFontStyle(text, baseWidth, maxLines),
+          getNameFontStyle(text, baseWidth, maxLines, opts.maxFontSize),
           Platform.OS === 'web'
             ? ({ wordBreak: 'normal', overflowWrap: 'break-word' } as any)
             : null,
@@ -1068,6 +1071,7 @@ export default function WorkoutPlayer({
                 {renderAutoFitTitle(current.name, {
                   hasTimer: true,
                   maxLines: 2,
+                  maxFontSize: 34,
                   color: '#F0F4F8',
                   marginTop: 2,
                 })}
@@ -1125,6 +1129,7 @@ export default function WorkoutPlayer({
                 {renderAutoFitTitle(current.grabEquipmentText || current.name, {
                   hasTimer: true,
                   maxLines: 2,
+                  maxFontSize: 34,
                   color: '#F0F4F8',
                   marginTop: 2,
                 })}
@@ -1316,6 +1321,7 @@ export default function WorkoutPlayer({
                 {next && renderAutoFitTitle(`Next: ${composePrescriptionLabel(next.name, next.weight, next.reps)}`, {
                   hasTimer: true,
                   maxLines: 3,
+                  maxFontSize: 24,
                   color: '#F0F4F8',
                   marginTop: 2,
                 })}
@@ -1328,6 +1334,7 @@ export default function WorkoutPlayer({
                 {renderAutoFitTitle(composePrescriptionLabel(current.name, current.weight, current.reps), {
                   hasTimer: true,
                   maxLines: 2,
+                  maxFontSize: 34,
                   color: '#F0F4F8',
                   marginTop: 2,
                 })}
