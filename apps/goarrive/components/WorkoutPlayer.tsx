@@ -1071,6 +1071,7 @@ export default function WorkoutPlayer({
                 {renderAutoFitTitle(current.name, {
                   hasTimer: true,
                   maxLines: 2,
+                  maxFontSize: 34,
                   color: '#F0F4F8',
                   marginTop: 2,
                 })}
@@ -1128,6 +1129,7 @@ export default function WorkoutPlayer({
                 {renderAutoFitTitle(current.grabEquipmentText || current.name, {
                   hasTimer: true,
                   maxLines: 2,
+                  maxFontSize: 34,
                   color: '#F0F4F8',
                   marginTop: 2,
                 })}
@@ -1332,6 +1334,7 @@ export default function WorkoutPlayer({
                 {renderAutoFitTitle(composePrescriptionLabel(current.name, current.weight, current.reps), {
                   hasTimer: true,
                   maxLines: 2,
+                  maxFontSize: 34,
                   color: '#F0F4F8',
                   marginTop: 2,
                 })}
