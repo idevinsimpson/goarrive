@@ -732,69 +732,68 @@ export default function WorkoutFolderPage({
   }, [workoutId]);
 
   // ── Load movement library ─────────────────────────────────────────────────
-  const loadMovements = useCallback(async () => {
-    if (movementsLoaded || !coachId) return;
-    try {
-      const coachQ = query(collection(db, 'movements'), where('coachId', '==', coachId));
-      const coachSnap = await getDocs(coachQ);
-      const globalQ = query(collection(db, 'movements'), where('isGlobal', '==', true));
-      const globalSnap = await getDocs(globalQ);
-
-      const seen = new Set<string>();
-      const list: MovementOption[] = [];
-      coachSnap.docs.forEach((d) => {
-        const cd = d.data();
-        if (!seen.has(d.id) && !cd.isArchived) {
-          seen.add(d.id);
-          list.push({
-            id: d.id,
-            name: cd.name ?? '',
-            category: cd.category ?? '',
-            equipment: cd.equipment ?? undefined,
-            muscleGroups: cd.muscleGroups ?? undefined,
-            difficulty: cd.difficulty ?? undefined,
-            thumbnailUrl: cd.thumbnailUrl ?? null,
-            posterUrl: cd.posterUrl ?? cd.thumbnailImageUrl ?? null,
-            mediaUrl: cd.mediaUrl ?? null,
-            videoUrl: cd.videoUrl ?? null,
-            swapSides: cd.swapSides ?? false,
-            swapMode: cd.swapMode ?? undefined,
-            swapWindowSec: cd.swapWindowSec ?? undefined,
-          });
-        }
-      });
-      globalSnap.docs.forEach((d) => {
-        const gd = d.data();
-        if (!seen.has(d.id) && !gd.isArchived) {
-          seen.add(d.id);
-          list.push({
-            id: d.id,
-            name: gd.name ?? '',
-            category: gd.category ?? '',
-            equipment: gd.equipment ?? undefined,
-            muscleGroups: gd.muscleGroups ?? undefined,
-            difficulty: gd.difficulty ?? undefined,
-            thumbnailUrl: gd.thumbnailUrl ?? null,
-            posterUrl: gd.posterUrl ?? gd.thumbnailImageUrl ?? null,
-            mediaUrl: gd.mediaUrl ?? null,
-            videoUrl: gd.videoUrl ?? null,
-            swapSides: gd.swapSides ?? false,
-            swapMode: gd.swapMode ?? undefined,
-            swapWindowSec: gd.swapWindowSec ?? undefined,
-          });
-        }
-      });
-      list.sort((a, b) => a.name.localeCompare(b.name));
-      setAvailableMovements(list);
-      setMovementsLoaded(true);
-    } catch (err: any) {
-      console.error('[WorkoutFolder] Load movements error:', err?.message ?? err);
-    }
-  }, [coachId, movementsLoaded]);
-
+  // Live snapshot subscription for movement library — replaces one-shot getDocs.
+  // Both coach and global queries share coachMap/globalMap so either snapshot
+  // can trigger a re-merge without waiting for the other.
   useEffect(() => {
-    if (!movementsLoaded && coachId) loadMovements();
-  }, [coachId, movementsLoaded, loadMovements]);
+    if (!coachId) return;
+
+    const coachMap = new Map<string, MovementOption>();
+    const globalMap = new Map<string, MovementOption>();
+
+    const toOption = (id: string, d: Record<string, any>): MovementOption => ({
+      id,
+      name: d.name ?? '',
+      category: d.category ?? '',
+      equipment: d.equipment ?? undefined,
+      muscleGroups: d.muscleGroups ?? undefined,
+      difficulty: d.difficulty ?? undefined,
+      thumbnailUrl: d.thumbnailUrl ?? null,
+      posterUrl: d.posterUrl ?? d.thumbnailImageUrl ?? null,
+      mediaUrl: d.mediaUrl ?? null,
+      videoUrl: d.videoUrl ?? null,
+      swapSides: d.swapSides ?? false,
+      swapMode: d.swapMode ?? undefined,
+      swapWindowSec: d.swapWindowSec ?? undefined,
+    });
+
+    const mergeAndSet = () => {
+      // Coach wins on dedupe; build coach list first, then append non-duplicate globals
+      const seen = new Set<string>();
+      const deduped: MovementOption[] = [];
+      coachMap.forEach((m) => { if (!seen.has(m.id)) { seen.add(m.id); deduped.push(m); } });
+      globalMap.forEach((m) => { if (!seen.has(m.id)) { seen.add(m.id); deduped.push(m); } });
+      deduped.sort((a, b) => a.name.localeCompare(b.name));
+      setAvailableMovements(deduped);
+      setMovementsLoaded(true);
+    };
+
+    const coachQ = query(collection(db, 'movements'), where('coachId', '==', coachId));
+    const globalQ = query(collection(db, 'movements'), where('isGlobal', '==', true));
+
+    const unsubCoach = onSnapshot(coachQ, (snap) => {
+      coachMap.clear();
+      snap.forEach((d) => {
+        const data = d.data();
+        if (!data.isArchived) coachMap.set(d.id, toOption(d.id, data));
+      });
+      mergeAndSet();
+    }, (err) => console.error('[WorkoutFolder] Coach movements snapshot error:', err));
+
+    const unsubGlobal = onSnapshot(globalQ, (snap) => {
+      globalMap.clear();
+      snap.forEach((d) => {
+        const data = d.data();
+        if (!data.isArchived) globalMap.set(d.id, toOption(d.id, data));
+      });
+      mergeAndSet();
+    }, (err) => console.error('[WorkoutFolder] Global movements snapshot error:', err));
+
+    return () => {
+      unsubCoach();
+      unsubGlobal();
+    };
+  }, [coachId]);
 
   // ── Load follow-along library ─────────────────────────────────────────────
   const loadFollowAlongs = useCallback(async () => {
@@ -2151,7 +2150,6 @@ export default function WorkoutFolderPage({
                           setMovementPickerBlockIdx(blockIdx);
                           setShowMovementPicker(true);
                           setMovementSearch('');
-                          if (!movementsLoaded) loadMovements();
                         }}
                       >
                         <Icon name="plus" size={24} color="#F5A623" />
@@ -2441,7 +2439,6 @@ export default function WorkoutFolderPage({
                           setMovementPickerBlockIdx(blockIdx);
                           setShowMovementPicker(true);
                           setMovementSearch('');
-                          if (!movementsLoaded) loadMovements();
                         }}
                       >
                         <Icon name="plus" size={18} color="#4A5568" />
@@ -2569,7 +2566,6 @@ export default function WorkoutFolderPage({
                           setMovementPickerBlockIdx(blockIdx);
                           setShowMovementPicker(true);
                           setMovementSearch('');
-                          if (!movementsLoaded) loadMovements();
                         }}
                       >
                         <Icon name="plus" size={14} color="#4A5568" />
@@ -2659,7 +2655,6 @@ export default function WorkoutFolderPage({
                     setMovementPickerBlockIdx(newIdx);
                     setShowMovementPicker(true);
                     setMovementSearch('');
-                    if (!movementsLoaded) loadMovements();
                     setAddBlockAtIndex(null);
                   } else if (opt.type === 'follow-along') {
                     // Open Follow-Along asset picker; we'll create the block on selection,
