@@ -307,9 +307,14 @@ export default function WorkoutPlayer({
   }, [handleRepDone, extendControlsTimer]);
 
   const handleSeek10 = useCallback((deltaSec: number) => {
+    // Cancel any in-flight audio + queued cues BEFORE seeking. seekRelative can
+    // cross multiple phase boundaries in one jump; each crossing would otherwise
+    // enqueue that phase's voice/cues, replaying the spanned audio in order.
+    // Mirrors the Skip button's behavior (handleSkipFromOverlay above).
+    stopAllAudio();
     seekRelative(deltaSec);
     extendControlsTimer();
-  }, [seekRelative, extendControlsTimer]);
+  }, [seekRelative, extendControlsTimer, stopAllAudio]);
 
   useEffect(() => {
     return () => {
