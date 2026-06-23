@@ -116,6 +116,52 @@ function normalizeMovementName(raw: string | null | undefined): string {
   return String(raw).trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+// Propagate swap field changes from the movement library into every workout
+// block that references this movement.  Fire-and-forget — never blocks the UI.
+async function propagateSwapToWorkouts(
+  movementId: string,
+  coachId: string,
+  swap: { swapSides: boolean; swapMode: 'split' | 'duplicate'; swapWindowSec: number },
+) {
+  try {
+    const wq = query(collection(db, 'workouts'), where('coachId', '==', coachId));
+    const snap = await getDocs(wq);
+    const writes: Promise<void>[] = [];
+    snap.forEach((wdoc) => {
+      const data = wdoc.data();
+      const blocks = data.blocks;
+      if (!Array.isArray(blocks)) return;
+      let changed = false;
+      const newBlocks = blocks.map((b: any) => {
+        if (!b || !Array.isArray(b.movements)) return b;
+        let blockChanged = false;
+        const newMovs = b.movements.map((m: any) => {
+          if (m && m.movementId === movementId) {
+            if (
+              m.swapSides !== swap.swapSides ||
+              m.swapMode !== swap.swapMode ||
+              m.swapWindowSec !== swap.swapWindowSec
+            ) {
+              blockChanged = true;
+              return { ...m, swapSides: swap.swapSides, swapMode: swap.swapMode, swapWindowSec: swap.swapWindowSec };
+            }
+          }
+          return m;
+        });
+        if (blockChanged) { changed = true; return { ...b, movements: newMovs }; }
+        return b;
+      });
+      if (changed) {
+        writes.push(updateDoc(doc(db, 'workouts', wdoc.id), { blocks: newBlocks, updatedAt: serverTimestamp() }));
+      }
+    });
+    await Promise.all(writes);
+    console.log(`[MovementForm] Propagated swap to ${writes.length} workouts`);
+  } catch (err) {
+    console.warn('[MovementForm] Swap propagation failed:', err);
+  }
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 interface MovementFormProps {
   visible: boolean;
@@ -1156,6 +1202,11 @@ export default function MovementForm({
         setSaveStatus('saved');
         savedTimerRef.current = setTimeout(() => setSaveStatus('idle'), 3000);
         regenerateVoiceIfRenamed(editMovement.id);
+        propagateSwapToWorkouts(
+          editMovement.id,
+          editMovement.coachId ?? coachId,
+          { swapSides: data.swapSides, swapMode: data.swapMode, swapWindowSec: data.swapWindowSec },
+        );
       } catch (err: any) {
         console.error('[MovementForm] Auto-save error:', err?.message ?? err);
         setSaveStatus('idle');
@@ -1176,6 +1227,11 @@ export default function MovementForm({
         const data = buildEditPayload();
         await updateDoc(doc(db, 'movements', editMovement.id), data);
         dirtyRef.current = false;
+        propagateSwapToWorkouts(
+          editMovement.id,
+          editMovement.coachId ?? coachId,
+          { swapSides: data.swapSides, swapMode: data.swapMode, swapWindowSec: data.swapWindowSec },
+        );
       }
       // Always check for a pending rename, even when dirtyRef is already
       // false (e.g. autoSave's debounced write committed before the user
@@ -1282,6 +1338,11 @@ export default function MovementForm({
       const docId = editMovement!.id;
       await updateDoc(doc(db, 'movements', docId), data);
       savedDocIdRef.current = docId;
+      propagateSwapToWorkouts(
+        docId,
+        editMovement!.coachId ?? coachId,
+        { swapSides, swapMode, swapWindowSec },
+      );
 
       // Regenerate voice if name changed.
       // Clear voiceUrl immediately so the player can't speak the old name in
