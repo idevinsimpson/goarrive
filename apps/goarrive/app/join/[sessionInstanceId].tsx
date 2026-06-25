@@ -1,17 +1,16 @@
 /**
- * Join in app (beta) — Zoom Meeting SDK Client View
+ * Join in app (beta) — embedded Zoom Meeting SDK Component View
  *
  * Beta entry point, separate from the primary "Join Session" button which still
  * uses Linking.openURL(inst.zoomJoinUrl). This route joins the member into the
- * Zoom meeting in-app via the Web Meeting SDK Client View (ZoomMtg).
- *
- * Client View (ZoomMtg) is used instead of Component View (ZoomMtgEmbedded)
- * because Component View is desktop-only and cannot send camera/mic from iOS
- * Safari. Client View renders Zoom's prebuilt fullscreen UI into #zmmtg-root
- * and supports iOS Safari camera + microphone.
+ * Zoom meeting in-app via the Web Meeting SDK embedded Component View
+ * (ZoomMtgEmbedded). Component View renders into a contained <div>, so the
+ * page is NOT taken over fullscreen and a workout overlay can sit on top
+ * without hiding the Zoom video tile.
  *
  * Phase 1 (participant/member beta):
  *   - Web proof first. Native shows a placeholder until the dev-client lands.
+ *   - role is always 0 (participant). No coach host-start UI yet.
  *   - If anything goes wrong, we show a "Join in browser instead" fallback
  *     that reuses the existing zoomJoinUrl flow.
  *
@@ -37,7 +36,6 @@ import { httpsCallable } from 'firebase/functions';
 import { useAuth } from '../../lib/AuthContext';
 import { db, functions } from '../../lib/firebase';
 import { SessionInstance } from '../../lib/schedulingTypes';
-import WorkoutPlayer from '../../components/WorkoutPlayer';
 
 const BG = '#0E1117';
 const CARD_BG = '#151B26';
@@ -50,30 +48,11 @@ const TEXT_SECONDARY = '#A0AEC0';
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
-// Zoom Web Meeting SDK (Client View) — loaded via CDN at runtime so we don't
-// bloat the Expo Web bundle. Keep in sync with docs/ZOOM_MEETING_SDK_SETUP.md.
+// Zoom Web Meeting SDK (embedded Component View) — loaded via CDN at runtime so
+// we don't bloat the Expo Web bundle. Keep in sync with the SDK version docs
+// in docs/ZOOM_MEETING_SDK_SETUP.md. Pin to a fixed 3.x release for stability.
 const ZOOM_SDK_VERSION = '3.11.2';
 const ZOOM_SDK_BASE = `https://source.zoom.us/${ZOOM_SDK_VERSION}`;
-
-// Path A demo workout (Phase 2 prototype). Minimal inline workout so the
-// player has something to tick through while the Zoom session runs underneath.
-const DEMO_WORKOUT = {
-  name: 'Path A Demo',
-  difficulty: 'Intermediate',
-  blocks: [
-    {
-      type: 'Circuit',
-      label: 'Warm-up',
-      rounds: 1,
-      restBetweenSec: 5,
-      movements: [
-        { movementName: 'Standing Mobility', duration: 20 },
-        { movementName: 'Bodyweight Squat', duration: 20 },
-        { movementName: 'Light Stretch', duration: 20 },
-      ],
-    },
-  ],
-};
 
 type JoinConfig = {
   meetingNumber: string;
@@ -121,7 +100,9 @@ function ensureStylesheet(href: string): void {
   document.head.appendChild(link);
 }
 
-async function loadZoomClientView(): Promise<any> {
+async function loadZoomEmbedded(): Promise<any> {
+  // Zoom ships a CommonJS bundle under zoom-meeting-embedded. The UMD build
+  // attaches ZoomMtgEmbedded to window.
   ensureStylesheet(`${ZOOM_SDK_BASE}/css/bootstrap.css`);
   ensureStylesheet(`${ZOOM_SDK_BASE}/css/react-select.css`);
   await ensureScript(`${ZOOM_SDK_BASE}/lib/vendor/react.min.js`);
@@ -129,14 +110,100 @@ async function loadZoomClientView(): Promise<any> {
   await ensureScript(`${ZOOM_SDK_BASE}/lib/vendor/redux.min.js`);
   await ensureScript(`${ZOOM_SDK_BASE}/lib/vendor/redux-thunk.min.js`);
   await ensureScript(`${ZOOM_SDK_BASE}/lib/vendor/lodash.min.js`);
-  // Client View main bundle (not embedded)
-  await ensureScript(`${ZOOM_SDK_BASE}/zoom-meeting-${ZOOM_SDK_VERSION}.min.js`);
-  const ZoomMtg = (globalThis as any).ZoomMtg;
-  if (!ZoomMtg) throw new Error('ZoomMtg not available after load');
-  ZoomMtg.setZoomJSLib(ZOOM_SDK_BASE, '/av');
-  ZoomMtg.preLoadWasm();
-  ZoomMtg.prepareWebSDK();
-  return ZoomMtg;
+  await ensureScript(`${ZOOM_SDK_BASE}/zoom-meeting-embedded-${ZOOM_SDK_VERSION}.min.js`);
+  const ZoomMtgEmbedded = (globalThis as any).ZoomMtgEmbedded;
+  if (!ZoomMtgEmbedded) throw new Error('ZoomMtgEmbedded not available after load');
+  return ZoomMtgEmbedded;
+}
+
+// ── Toolbar auto-click (default-on workaround) ───────────────────────────────
+
+// Probe Zoom's rendered toolbar inside #zoom-meeting-sdk-root for a button
+// whose aria-label loosely matches any of the given patterns. Returns the
+// first match or null. Case-insensitive substring match handles language
+// variants ("start video", "Start Video", "Start my video") and avoids
+// false-positives like "stop video".
+function findToolbarButton(
+  root: ParentNode,
+  includeAny: string[],
+  excludeAny: string[] = [],
+): HTMLElement | null {
+  const buttons = root.querySelectorAll<HTMLElement>('[aria-label]');
+  for (const el of Array.from(buttons)) {
+    const raw = el.getAttribute('aria-label') || '';
+    const label = raw.toLowerCase();
+    if (excludeAny.some((bad) => label.includes(bad))) continue;
+    if (includeAny.some((good) => label.includes(good))) return el;
+  }
+  return null;
+}
+
+// Click the start-video and join-audio/unmute buttons via DOM after join.
+// Retries every 250ms for ~6s because the toolbar mounts asynchronously
+// after client.join() resolves. Each button only clicks once (tracked via
+// `videoClicked` / `audioClicked` flags) so we don't toggle the user off
+// if Zoom re-renders during retries.
+function autoStartMediaViaToolbar(log: (msg: string) => void): void {
+  if (typeof document === 'undefined') return;
+  let videoClicked = false;
+  let audioClicked = false;
+  let attempts = 0;
+  const MAX_ATTEMPTS = 24; // 24 × 250ms = 6s window
+
+  const tick = () => {
+    attempts += 1;
+    const root =
+      document.getElementById('zoom-meeting-sdk-root') || document.body;
+
+    if (!videoClicked) {
+      // "start video" matches Zoom's off-state. Exclude "stop video" so we
+      // never click when the camera is already on.
+      const camBtn = findToolbarButton(
+        root,
+        ['start video', 'start my video', 'turn on camera'],
+        ['stop video', 'stop my video'],
+      );
+      if (camBtn) {
+        try {
+          camBtn.click();
+          videoClicked = true;
+          log(`auto-start camera → clicked (attempt ${attempts})`);
+        } catch (err: any) {
+          log(`auto-start camera → click failed: ${err?.message || err}`);
+        }
+      }
+    }
+
+    if (!audioClicked) {
+      // Before audio is joined Zoom shows "Join Audio". After joined but
+      // muted it shows "Unmute". Either is the right target. Exclude "mute"
+      // (when audio is live and unmuted) so we never silence the user.
+      const audBtn = findToolbarButton(
+        root,
+        ['join audio', 'unmute', 'turn on microphone'],
+        ['mute my', 'mute microphone'],
+      );
+      if (audBtn) {
+        try {
+          audBtn.click();
+          audioClicked = true;
+          log(`auto-start mic → clicked (attempt ${attempts})`);
+        } catch (err: any) {
+          log(`auto-start mic → click failed: ${err?.message || err}`);
+        }
+      }
+    }
+
+    if ((videoClicked && audioClicked) || attempts >= MAX_ATTEMPTS) {
+      if (!videoClicked) log('auto-start camera → not found, user must tap');
+      if (!audioClicked) log('auto-start mic → not found, user must tap');
+      return;
+    }
+    setTimeout(tick, 250);
+  };
+
+  // First tick after a short delay so the toolbar has a chance to mount.
+  setTimeout(tick, 250);
 }
 
 // ── Screen ───────────────────────────────────────────────────────────────────
@@ -153,11 +220,17 @@ export default function JoinBetaScreen() {
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [inst, setInst] = useState<SessionInstance | null>(null);
   const [joinConfig, setJoinConfig] = useState<JoinConfig | null>(null);
-  // Path A overlay: once we're in the meeting, surface the workout player on
-  // top of the Zoom UI. The Zoom mic/cam/recording continue underneath.
-  // While the overlay is visible we hide #zmmtg-root (same content, no
-  // z-index battle needed). Toggling lets the member drop back to bare Zoom.
-  const [showWorkoutOverlay, setShowWorkoutOverlay] = useState(false);
+  // On-screen breadcrumb log: surfaces each step in handleJoin so iOS Safari
+  // users can read where the join flow stalls without a Web Inspector.
+  const [debugLog, setDebugLog] = useState<string[]>([]);
+  const appendLog = useCallback((line: string) => {
+    const stamp = new Date().toISOString().slice(11, 23);
+    setDebugLog((prev) => [...prev, `${stamp}  ${line}`]);
+    console.log(`[JoinBeta] ${line}`);
+  }, []);
+
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const clientRef = useRef<any>(null);
 
   const goBack = useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -220,36 +293,15 @@ export default function JoinBetaScreen() {
     };
   }, [authLoading, user, sessionInstanceId]);
 
-  // 2. Toggle #zmmtg-root visibility while the WorkoutPlayer overlay is up.
-  //    Hiding Zoom's fullscreen root eliminates z-index conflicts — the
-  //    WorkoutPlayer Modal (a React Native Web portal appended to body) is
-  //    the only fixed layer visible while the overlay is active.
-  useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    const STYLE_ID = 'zoom-root-hidden';
-    let styleEl = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
-    if (showWorkoutOverlay && phase === 'in-meeting') {
-      if (!styleEl) {
-        styleEl = document.createElement('style');
-        styleEl.id = STYLE_ID;
-        document.head.appendChild(styleEl);
-      }
-      styleEl.textContent = '#zmmtg-root { display: none !important; }';
-    } else {
-      styleEl?.remove();
-    }
-    return () => {
-      document.getElementById(STYLE_ID)?.remove();
-    };
-  }, [showWorkoutOverlay, phase]);
-
-  // 3. Join the meeting once we have config (web only for now)
+  // 2. Join the meeting once we have config (web only for now)
   const handleJoin = useCallback(async () => {
     if (!joinConfig) return;
     if (Platform.OS !== 'web') {
       setPhase('unsupported');
       return;
     }
+
+    appendLog('handleJoin click received');
 
     // iOS Safari requires getUserMedia() to be called inside the user-gesture
     // activation window. The Zoom SDK load → init → join chain takes seconds,
@@ -263,18 +315,23 @@ export default function JoinBetaScreen() {
     let prewarmStream: MediaStream | null = null;
     try {
       if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
+        appendLog('pre-warm getUserMedia → requesting');
         prewarmStream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: true,
         });
+        appendLog('pre-warm getUserMedia → granted');
       }
-    } catch (prewarmErr) {
+    } catch (prewarmErr: any) {
+      appendLog(`pre-warm getUserMedia → failed: ${prewarmErr?.message || prewarmErr}`);
       console.warn('[JoinBeta] camera/mic pre-warm failed:', prewarmErr);
     }
 
     setPhase('joining');
     try {
-      const ZoomMtg = await loadZoomClientView();
+      appendLog('loadZoomEmbedded → scripts loading');
+      const ZoomMtgEmbedded = await loadZoomEmbedded();
+      appendLog('loadZoomEmbedded → scripts loaded');
 
       // Release the pre-warm tracks before Zoom claims the devices.
       // Permission stays granted at the browser level once stopped.
@@ -283,59 +340,126 @@ export default function JoinBetaScreen() {
           prewarmStream.getTracks().forEach((t) => t.stop());
         } catch {}
         prewarmStream = null;
+        appendLog('pre-warm tracks released');
       }
 
-      const leaveUrl =
-        typeof window !== 'undefined'
-          ? `${window.location.origin}/(member)/my-sessions`
-          : '/';
+      const client = ZoomMtgEmbedded.createClient();
+      clientRef.current = client;
+      const root = containerRef.current;
+      if (!root) throw new Error('Join container not mounted');
 
-      await new Promise<void>((resolve, reject) => {
-        ZoomMtg.init({
-          leaveUrl,
-          success: () => {
-            ZoomMtg.join({
-              signature: joinConfig.signature,
-              sdkKey: joinConfig.sdkKey,
-              meetingNumber: joinConfig.meetingNumber,
-              // Client View uses passWord (capital W)
-              passWord: joinConfig.password || '',
-              userName: joinConfig.userName || 'Member',
-              userEmail: joinConfig.userEmail || '',
-              // Pass ZAK when the server promoted us to host (role=1). Zoom
-              // needs this to recognize a host and auto-start cloud recording.
-              ...(joinConfig.zak ? { zak: joinConfig.zak } : {}),
-              success: () => resolve(),
-              error: (e: any) => reject(e),
-            });
+      appendLog('client.init → calling');
+      await client.init({
+        zoomAppRoot: root,
+        language: 'en-US',
+        patchJsMedia: true,
+        // Strip down the prebuilt UI: cloud recording is server-managed and we
+        // don't want invite / phone-call-out / report / screen share in a 1:1
+        // coaching session. Member only needs mic, camera, and leave.
+        disableInvite: true,
+        disableCallOut: true,
+        disableRecord: true,
+        disableReport: true,
+        screenShare: false,
+        customize: {
+          video: {
+            isResizable: true,
+            viewSizes: { default: { width: 1000, height: 600 } },
           },
-          error: (e: any) => reject(e),
-        });
+          meetingInfo: ['topic'],
+        },
       });
+      appendLog('client.init → success');
+
+      appendLog('client.join → calling');
+      await client.join({
+        sdkKey: joinConfig.sdkKey,
+        signature: joinConfig.signature,
+        meetingNumber: joinConfig.meetingNumber,
+        password: joinConfig.password || '',
+        userName: joinConfig.userName || 'Member',
+        userEmail: joinConfig.userEmail || '',
+        // Pass ZAK when the server promoted us to host (role=1). Zoom needs
+        // this to recognize a host and auto-start cloud recording.
+        ...(joinConfig.zak ? { zak: joinConfig.zak } : {}),
+      });
+      appendLog('client.join → success');
+
+      // Zoom Web SDK has no public startVideo/startAudio API for self (confirmed
+      // in embedded.d.ts + on-record from Tommy Gaessler at Zoom: "The Web SDK
+      // does not support default video on"). Community-validated workaround:
+      // after join resolves, locate Zoom's own toolbar buttons by aria-label
+      // and dispatch a synthetic click. Pre-warm already granted persistent
+      // mic/camera permission at the origin level, so this doesn't need a
+      // fresh user-gesture round-trip.
+      autoStartMediaViaToolbar(appendLog);
 
       setPhase('in-meeting');
-      // Surface the workout player on top once the meeting is live.
-      setShowWorkoutOverlay(true);
     } catch (err: any) {
+      appendLog(`zoom error: ${err?.reason || err?.message || JSON.stringify(err)}`);
       console.error('[JoinBeta] Zoom join failed:', err);
-      if (prewarmStream) {
-        try {
-          prewarmStream.getTracks().forEach((t) => t.stop());
-        } catch {}
-      }
       setErrorMsg(
         err?.reason || err?.message || 'The in-app join failed. Try the browser fallback.',
       );
       setPhase('error');
     }
-  }, [joinConfig]);
+  }, [joinConfig, appendLog]);
+
+  // 3. Hide the Zoom toolbar buttons we don't want in a coaching session.
+  //    The init() disable* flags handle invite/callout/record/report. CSS
+  //    handles the rest (chat, participants, reactions, AI Companion, apps,
+  //    settings, more menu) by targeting Zoom's aria-labels — those are
+  //    semantic and don't change across SDK minor versions like classnames do.
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    if (typeof document === 'undefined') return;
+    const STYLE_ID = 'zoom-toolbar-strip';
+    if (document.getElementById(STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = STYLE_ID;
+    style.textContent = `
+      #zoom-meeting-sdk-root [aria-label="Chat"],
+      #zoom-meeting-sdk-root [aria-label="Open chat panel"],
+      #zoom-meeting-sdk-root [aria-label="Participants"],
+      #zoom-meeting-sdk-root [aria-label="Manage participants"],
+      #zoom-meeting-sdk-root [aria-label="Open the participants list pane"],
+      #zoom-meeting-sdk-root [aria-label="Reactions"],
+      #zoom-meeting-sdk-root [aria-label="More meeting controls"],
+      #zoom-meeting-sdk-root [aria-label="More"],
+      #zoom-meeting-sdk-root [aria-label="Settings"],
+      #zoom-meeting-sdk-root [aria-label="Apps"],
+      #zoom-meeting-sdk-root [aria-label="Open Apps"],
+      #zoom-meeting-sdk-root [aria-label="AI Companion"],
+      #zoom-meeting-sdk-root [aria-label="Companion mode"],
+      #zoom-meeting-sdk-root [aria-label*="Security"],
+      #zoom-meeting-sdk-root [aria-label*="Encryption"],
+      #zoom-meeting-sdk-root [aria-label*="Share Screen"],
+      #zoom-meeting-sdk-root [aria-label*="Share screen"],
+      #zoom-meeting-sdk-root [aria-label*="share screen"],
+      #zoom-meeting-sdk-root [aria-label*="Share Content"],
+      #zoom-meeting-sdk-root [aria-label*="Record"],
+      #zoom-meeting-sdk-root [aria-label*="record"] {
+        display: none !important;
+      }
+    `;
+    document.head.appendChild(style);
+    return () => {
+      style.remove();
+    };
+  }, []);
 
   // 4. Cleanup on unmount
   useEffect(() => {
     return () => {
-      try {
-        (globalThis as any).ZoomMtg?.leaveMeeting?.({});
-      } catch {}
+      const client = clientRef.current;
+      if (client) {
+        try {
+          client.leaveMeeting?.();
+        } catch {}
+        try {
+          (globalThis as any).ZoomMtgEmbedded?.destroyClient?.();
+        } catch {}
+      }
     };
   }, []);
 
@@ -409,6 +533,14 @@ export default function JoinBetaScreen() {
           <View style={s.card}>
             <ActivityIndicator color={GOLD} />
             <Text style={s.cardText}>Connecting to your session…</Text>
+            {debugLog.length > 0 && (
+              <View style={s.debugBox}>
+                <Text style={s.debugTitle}>Debug log</Text>
+                {debugLog.map((line, i) => (
+                  <Text key={i} style={s.debugLine}>{line}</Text>
+                ))}
+              </View>
+            )}
           </View>
         )}
 
@@ -441,25 +573,50 @@ export default function JoinBetaScreen() {
             <Pressable style={s.secondaryBtn} onPress={goBack}>
               <Text style={s.secondaryBtnText}>Back to sessions</Text>
             </Pressable>
+            {debugLog.length > 0 && (
+              <View style={s.debugBox}>
+                <Text style={s.debugTitle}>Debug log</Text>
+                {debugLog.map((line, i) => (
+                  <Text key={i} style={s.debugLine}>{line}</Text>
+                ))}
+              </View>
+            )}
           </View>
         )}
 
-        {phase === 'in-meeting' && !showWorkoutOverlay && (
-          <Pressable style={[s.primaryBtn, { marginTop: 12 }]} onPress={() => setShowWorkoutOverlay(true)}>
-            <Text style={s.primaryBtnText}>Show workout overlay</Text>
-          </Pressable>
+        {/* Zoom Meeting SDK renders inside this div (web only). */}
+        {Platform.OS === 'web' && (
+          <View style={s.zoomWrap}>
+            <div
+              ref={containerRef as any}
+              id="zoom-meeting-sdk-root"
+              style={{
+                width: '100%',
+                minHeight: phase === 'in-meeting' ? 640 : 0,
+                display: phase === 'in-meeting' ? 'block' : 'none',
+              }}
+            />
+          </View>
         )}
+
       </ScrollView>
 
-      {/* Path A: workout player overlays Zoom while audio/video/recording
-          continue underneath. #zmmtg-root is hidden while this is visible
-          (see useEffect above) — no z-index competition needed. */}
-      <WorkoutPlayer
-        visible={phase === 'in-meeting' && showWorkoutOverlay}
-        workout={DEMO_WORKOUT}
-        onClose={() => setShowWorkoutOverlay(false)}
-        onComplete={() => setShowWorkoutOverlay(false)}
-      />
+      {/* Persistent debug overlay — pinned to the top of the viewport so it
+          stays readable on iOS Safari even after Zoom takes over the page
+          area. Tap to dismiss. */}
+      {phase === 'in-meeting' && debugLog.length > 0 && (
+        <Pressable
+          style={[s.debugOverlay, { top: Math.max(8, insets.top + 4) }]}
+          onPress={() => setDebugLog([])}
+        >
+          <Text style={s.debugTitle}>Debug log (tap to clear)</Text>
+          <ScrollView style={s.debugScroll}>
+            {debugLog.map((line, i) => (
+              <Text key={i} style={s.debugLine}>{line}</Text>
+            ))}
+          </ScrollView>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -536,4 +693,45 @@ const s = StyleSheet.create({
     alignItems: 'center',
   },
   secondaryBtnText: { color: TEXT_PRIMARY, fontSize: 14, fontFamily: FH, fontWeight: '600' },
+  zoomWrap: {
+    width: '100%',
+    marginTop: 8,
+  },
+  debugBox: {
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 12,
+    gap: 2,
+  },
+  debugTitle: {
+    color: TEXT_SECONDARY,
+    fontSize: 11,
+    fontFamily: FH,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  debugLine: {
+    color: TEXT_PRIMARY,
+    fontSize: 11,
+    fontFamily: Platform.OS === 'web' ? 'monospace' : FB,
+    lineHeight: 16,
+  },
+  debugOverlay: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    maxHeight: 220,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    borderColor: GOLD,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    zIndex: 9999,
+    ...(Platform.OS === 'web' ? ({ position: 'fixed' } as any) : {}),
+  },
+  debugScroll: {
+    maxHeight: 180,
+  },
 });
