@@ -191,16 +191,19 @@ function autoStartMediaViaToolbar(log: (msg: string) => void): void {
     }
 
     if (!videoClicked) {
+      // iOS Safari Zoom renders camera-off state as "Video Off Meeting6" and
+      // camera-on state as "Video On Meeting6". Click only when off. Keep
+      // desktop labels as fallback in case Zoom unifies them later.
       const camBtn = findToolbarButton(
         root,
         [
+          'video off',
           'start video',
           'start my video',
           'turn on camera',
           'start camera',
-          'video on',
         ],
-        ['stop video', 'stop my video', 'turn off camera'],
+        ['video on', 'stop video', 'stop my video', 'turn off camera'],
       );
       if (camBtn) {
         try {
@@ -215,16 +218,21 @@ function autoStartMediaViaToolbar(log: (msg: string) => void): void {
     }
 
     if (!audioClicked) {
+      // iOS Safari Zoom renders the not-yet-connected audio button as
+      // "Headphone Meeting6". Once audio is joined the button toggles to
+      // "Mute Meeting6" / "Unmute Meeting6". Click headphone first; if
+      // it opens a chooser, the user picks. Exclude "mute meeting" so we
+      // don't silence a live mic on a retry tick.
       const audBtn = findToolbarButton(
         root,
         [
+          'headphone',
           'join audio',
           'unmute',
           'turn on microphone',
-          'audio on',
           'connect audio',
         ],
-        ['mute my', 'mute microphone', 'turn off microphone'],
+        ['mute meeting', 'mute my', 'mute microphone', 'turn off microphone'],
       );
       if (audBtn) {
         try {
