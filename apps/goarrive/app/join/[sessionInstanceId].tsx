@@ -1,9 +1,12 @@
 /**
- * Join in app (beta) — embedded Zoom Meeting SDK Client View
+ * Join in app (beta) — embedded Zoom Meeting SDK Component View
  *
  * Beta entry point, separate from the primary "Join Session" button which still
  * uses Linking.openURL(inst.zoomJoinUrl). This route joins the member into the
- * Zoom meeting in-app via the Web Meeting SDK embedded client.
+ * Zoom meeting in-app via the Web Meeting SDK embedded Component View
+ * (ZoomMtgEmbedded). Component View renders into a contained <div>, so the
+ * page is NOT taken over fullscreen and a workout overlay can sit on top
+ * without hiding the Zoom video tile.
  *
  * Phase 1 (participant/member beta):
  *   - Web proof first. Native shows a placeholder until the dev-client lands.
@@ -45,7 +48,7 @@ const TEXT_SECONDARY = '#A0AEC0';
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
-// Zoom Web Meeting SDK (embedded / Client View) — loaded via CDN at runtime so
+// Zoom Web Meeting SDK (embedded Component View) — loaded via CDN at runtime so
 // we don't bloat the Expo Web bundle. Keep in sync with the SDK version docs
 // in docs/ZOOM_MEETING_SDK_SETUP.md. Pin to a fixed 3.x release for stability.
 const ZOOM_SDK_VERSION = '3.11.2';
@@ -113,6 +116,147 @@ async function loadZoomEmbedded(): Promise<any> {
   return ZoomMtgEmbedded;
 }
 
+// ── Toolbar auto-click (default-on workaround) ───────────────────────────────
+
+// Probe Zoom's rendered toolbar inside #zoom-meeting-sdk-root for a button
+// whose aria-label loosely matches any of the given patterns. Returns the
+// first match or null. Case-insensitive substring match handles language
+// variants ("start video", "Start Video", "Start my video") and avoids
+// false-positives like "stop video".
+function findToolbarButton(
+  root: ParentNode,
+  includeAny: string[],
+  excludeAny: string[] = [],
+): HTMLElement | null {
+  const buttons = root.querySelectorAll<HTMLElement>('[aria-label]');
+  for (const el of Array.from(buttons)) {
+    const raw = el.getAttribute('aria-label') || '';
+    const label = raw.toLowerCase();
+    if (excludeAny.some((bad) => label.includes(bad))) continue;
+    if (includeAny.some((good) => label.includes(good))) return el;
+  }
+  return null;
+}
+
+// Click the start-video and join-audio/unmute buttons via DOM after join.
+// Retries every 250ms for ~6s because the toolbar mounts asynchronously
+// after client.join() resolves. Each button only clicks once (tracked via
+// `videoClicked` / `audioClicked` flags) so we don't toggle the user off
+// if Zoom re-renders during retries.
+function autoStartMediaViaToolbar(log: (msg: string) => void): void {
+  if (typeof document === 'undefined') return;
+  let videoClicked = false;
+  let audioClicked = false;
+  let dumpedLabels = false;
+  let attempts = 0;
+  const MAX_ATTEMPTS = 32; // 32 × 250ms = 8s window
+
+  const tick = () => {
+    attempts += 1;
+    const root =
+      document.getElementById('zoom-meeting-sdk-root') || document.body;
+
+    // On attempt 3 (toolbar has had time to mount), dump every aria-label
+    // we can see inside the Zoom container so the debug overlay shows what
+    // Zoom is actually rendering on this device. This makes the next test
+    // self-diagnosing — we can see in the log exactly which label to match.
+    if (!dumpedLabels && attempts === 3) {
+      try {
+        const labeled = root.querySelectorAll<HTMLElement>('[aria-label]');
+        const labels = Array.from(labeled)
+          .map((el) => el.getAttribute('aria-label'))
+          .filter((l): l is string => !!l && l.trim().length > 0);
+        log(`toolbar probe → ${labels.length} aria-labels found`);
+        // Slice to avoid flooding the overlay; first 24 covers any toolbar.
+        labels.slice(0, 24).forEach((l, i) => log(`  [${i}] "${l}"`));
+        if (labels.length === 0) {
+          // Fall back to dumping <button> elements without aria-label so
+          // we can see if Zoom is using icon-only buttons.
+          const buttons = root.querySelectorAll<HTMLElement>(
+            'button, [role="button"]',
+          );
+          log(`fallback → ${buttons.length} button-like elements`);
+          Array.from(buttons)
+            .slice(0, 12)
+            .forEach((b, i) => {
+              const cls = (b.className || '').toString().slice(0, 60);
+              const title = b.getAttribute('title') || '';
+              log(`  btn[${i}] class="${cls}" title="${title}"`);
+            });
+        }
+      } catch (err: any) {
+        log(`toolbar probe failed: ${err?.message || err}`);
+      }
+      dumpedLabels = true;
+    }
+
+    if (!videoClicked) {
+      // iOS Safari Zoom renders camera-off state as "Video Off Meeting6" and
+      // camera-on state as "Video On Meeting6". Click only when off. Keep
+      // desktop labels as fallback in case Zoom unifies them later.
+      const camBtn = findToolbarButton(
+        root,
+        [
+          'video off',
+          'start video',
+          'start my video',
+          'turn on camera',
+          'start camera',
+        ],
+        ['video on', 'stop video', 'stop my video', 'turn off camera'],
+      );
+      if (camBtn) {
+        try {
+          camBtn.click();
+          videoClicked = true;
+          const label = (camBtn.getAttribute('aria-label') || '').slice(0, 40);
+          log(`auto-start camera → clicked "${label}" (attempt ${attempts})`);
+        } catch (err: any) {
+          log(`auto-start camera → click failed: ${err?.message || err}`);
+        }
+      }
+    }
+
+    if (!audioClicked) {
+      // iOS Safari Zoom renders the not-yet-connected audio button as
+      // "Headphone Meeting6". Once audio is joined the button toggles to
+      // "Mute Meeting6" / "Unmute Meeting6". Click headphone first; if
+      // it opens a chooser, the user picks. Exclude "mute meeting" so we
+      // don't silence a live mic on a retry tick.
+      const audBtn = findToolbarButton(
+        root,
+        [
+          'headphone',
+          'join audio',
+          'unmute',
+          'turn on microphone',
+          'connect audio',
+        ],
+        ['mute meeting', 'mute my', 'mute microphone', 'turn off microphone'],
+      );
+      if (audBtn) {
+        try {
+          audBtn.click();
+          audioClicked = true;
+          const label = (audBtn.getAttribute('aria-label') || '').slice(0, 40);
+          log(`auto-start mic → clicked "${label}" (attempt ${attempts})`);
+        } catch (err: any) {
+          log(`auto-start mic → click failed: ${err?.message || err}`);
+        }
+      }
+    }
+
+    if ((videoClicked && audioClicked) || attempts >= MAX_ATTEMPTS) {
+      if (!videoClicked) log('auto-start camera → not found, user must tap');
+      if (!audioClicked) log('auto-start mic → not found, user must tap');
+      return;
+    }
+    setTimeout(tick, 250);
+  };
+
+  setTimeout(tick, 250);
+}
+
 // ── Screen ───────────────────────────────────────────────────────────────────
 
 export default function JoinBetaScreen() {
@@ -127,6 +271,14 @@ export default function JoinBetaScreen() {
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [inst, setInst] = useState<SessionInstance | null>(null);
   const [joinConfig, setJoinConfig] = useState<JoinConfig | null>(null);
+  // On-screen breadcrumb log: surfaces each step in handleJoin so iOS Safari
+  // users can read where the join flow stalls without a Web Inspector.
+  const [debugLog, setDebugLog] = useState<string[]>([]);
+  const appendLog = useCallback((line: string) => {
+    const stamp = new Date().toISOString().slice(11, 23);
+    setDebugLog((prev) => [...prev, `${stamp}  ${line}`]);
+    console.log(`[JoinBeta] ${line}`);
+  }, []);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const clientRef = useRef<any>(null);
@@ -199,27 +351,78 @@ export default function JoinBetaScreen() {
       setPhase('unsupported');
       return;
     }
+
+    appendLog('handleJoin click received');
+
+    // iOS Safari requires getUserMedia() to be called inside the user-gesture
+    // activation window. The Zoom SDK load → init → join chain takes seconds,
+    // which is well past Safari's gesture timeout — so its own camera/mic
+    // calls silently fail and the green dot never lights up.
+    //
+    // Pre-warm here, synchronously with the click: prompt for + grant
+    // permission, then stop the tracks so Zoom can claim the devices. Once
+    // browser-level permission is granted, Zoom's later calls succeed without
+    // needing a fresh gesture. Failures are non-fatal.
+    let prewarmStream: MediaStream | null = null;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
+        appendLog('pre-warm getUserMedia → requesting');
+        prewarmStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true,
+        });
+        appendLog('pre-warm getUserMedia → granted');
+      }
+    } catch (prewarmErr: any) {
+      appendLog(`pre-warm getUserMedia → failed: ${prewarmErr?.message || prewarmErr}`);
+      console.warn('[JoinBeta] camera/mic pre-warm failed:', prewarmErr);
+    }
+
     setPhase('joining');
     try {
+      appendLog('loadZoomEmbedded → scripts loading');
       const ZoomMtgEmbedded = await loadZoomEmbedded();
+      appendLog('loadZoomEmbedded → scripts loaded');
+
+      // Release the pre-warm tracks before Zoom claims the devices.
+      // Permission stays granted at the browser level once stopped.
+      if (prewarmStream) {
+        try {
+          prewarmStream.getTracks().forEach((t) => t.stop());
+        } catch {}
+        prewarmStream = null;
+        appendLog('pre-warm tracks released');
+      }
+
       const client = ZoomMtgEmbedded.createClient();
       clientRef.current = client;
       const root = containerRef.current;
       if (!root) throw new Error('Join container not mounted');
 
+      appendLog('client.init → calling');
       await client.init({
         zoomAppRoot: root,
         language: 'en-US',
         patchJsMedia: true,
+        // Strip down the prebuilt UI: cloud recording is server-managed and we
+        // don't want invite / phone-call-out / report / screen share in a 1:1
+        // coaching session. Member only needs mic, camera, and leave.
+        disableInvite: true,
+        disableCallOut: true,
+        disableRecord: true,
+        disableReport: true,
+        screenShare: false,
         customize: {
           video: {
             isResizable: true,
             viewSizes: { default: { width: 1000, height: 600 } },
           },
-          meetingInfo: ['topic', 'host', 'participant', 'dc'],
+          meetingInfo: ['topic'],
         },
       });
+      appendLog('client.init → success');
 
+      appendLog('client.join → calling');
       await client.join({
         sdkKey: joinConfig.sdkKey,
         signature: joinConfig.signature,
@@ -227,20 +430,76 @@ export default function JoinBetaScreen() {
         password: joinConfig.password || '',
         userName: joinConfig.userName || 'Member',
         userEmail: joinConfig.userEmail || '',
-        // zak omitted for role=0 (participant). Host-start will pass zak later.
+        // Pass ZAK when the server promoted us to host (role=1). Zoom needs
+        // this to recognize a host and auto-start cloud recording.
+        ...(joinConfig.zak ? { zak: joinConfig.zak } : {}),
       });
+      appendLog('client.join → success');
+
+      // Zoom Web SDK has no public startVideo/startAudio API for self (confirmed
+      // in embedded.d.ts + on-record from Tommy Gaessler at Zoom: "The Web SDK
+      // does not support default video on"). Community-validated workaround:
+      // after join resolves, locate Zoom's own toolbar buttons by aria-label
+      // and dispatch a synthetic click. Pre-warm already granted persistent
+      // mic/camera permission at the origin level, so this doesn't need a
+      // fresh user-gesture round-trip.
+      autoStartMediaViaToolbar(appendLog);
 
       setPhase('in-meeting');
     } catch (err: any) {
+      appendLog(`zoom error: ${err?.reason || err?.message || JSON.stringify(err)}`);
       console.error('[JoinBeta] Zoom join failed:', err);
       setErrorMsg(
         err?.reason || err?.message || 'The in-app join failed. Try the browser fallback.',
       );
       setPhase('error');
     }
-  }, [joinConfig]);
+  }, [joinConfig, appendLog]);
 
-  // 3. Cleanup on unmount
+  // 3. Hide the Zoom toolbar buttons we don't want in a coaching session.
+  //    The init() disable* flags handle invite/callout/record/report. CSS
+  //    handles the rest (chat, participants, reactions, AI Companion, apps,
+  //    settings, more menu) by targeting Zoom's aria-labels — those are
+  //    semantic and don't change across SDK minor versions like classnames do.
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    if (typeof document === 'undefined') return;
+    const STYLE_ID = 'zoom-toolbar-strip';
+    if (document.getElementById(STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = STYLE_ID;
+    style.textContent = `
+      #zoom-meeting-sdk-root [aria-label="Chat"],
+      #zoom-meeting-sdk-root [aria-label="Open chat panel"],
+      #zoom-meeting-sdk-root [aria-label="Participants"],
+      #zoom-meeting-sdk-root [aria-label="Manage participants"],
+      #zoom-meeting-sdk-root [aria-label="Open the participants list pane"],
+      #zoom-meeting-sdk-root [aria-label="Reactions"],
+      #zoom-meeting-sdk-root [aria-label="More meeting controls"],
+      #zoom-meeting-sdk-root [aria-label="More"],
+      #zoom-meeting-sdk-root [aria-label="Settings"],
+      #zoom-meeting-sdk-root [aria-label="Apps"],
+      #zoom-meeting-sdk-root [aria-label="Open Apps"],
+      #zoom-meeting-sdk-root [aria-label="AI Companion"],
+      #zoom-meeting-sdk-root [aria-label="Companion mode"],
+      #zoom-meeting-sdk-root [aria-label*="Security"],
+      #zoom-meeting-sdk-root [aria-label*="Encryption"],
+      #zoom-meeting-sdk-root [aria-label*="Share Screen"],
+      #zoom-meeting-sdk-root [aria-label*="Share screen"],
+      #zoom-meeting-sdk-root [aria-label*="share screen"],
+      #zoom-meeting-sdk-root [aria-label*="Share Content"],
+      #zoom-meeting-sdk-root [aria-label*="Record"],
+      #zoom-meeting-sdk-root [aria-label*="record"] {
+        display: none !important;
+      }
+    `;
+    document.head.appendChild(style);
+    return () => {
+      style.remove();
+    };
+  }, []);
+
+  // 4. Cleanup on unmount
   useEffect(() => {
     return () => {
       const client = clientRef.current;
@@ -325,6 +584,14 @@ export default function JoinBetaScreen() {
           <View style={s.card}>
             <ActivityIndicator color={GOLD} />
             <Text style={s.cardText}>Connecting to your session…</Text>
+            {debugLog.length > 0 && (
+              <View style={s.debugBox}>
+                <Text style={s.debugTitle}>Debug log</Text>
+                {debugLog.map((line, i) => (
+                  <Text key={i} style={s.debugLine}>{line}</Text>
+                ))}
+              </View>
+            )}
           </View>
         )}
 
@@ -357,6 +624,14 @@ export default function JoinBetaScreen() {
             <Pressable style={s.secondaryBtn} onPress={goBack}>
               <Text style={s.secondaryBtnText}>Back to sessions</Text>
             </Pressable>
+            {debugLog.length > 0 && (
+              <View style={s.debugBox}>
+                <Text style={s.debugTitle}>Debug log</Text>
+                {debugLog.map((line, i) => (
+                  <Text key={i} style={s.debugLine}>{line}</Text>
+                ))}
+              </View>
+            )}
           </View>
         )}
 
@@ -374,7 +649,35 @@ export default function JoinBetaScreen() {
             />
           </View>
         )}
+
       </ScrollView>
+
+      {/* Persistent debug overlay — pinned to the top of the viewport so it
+          stays readable on iOS Safari even after Zoom takes over the page
+          area. A dedicated small Clear button (not the whole overlay) handles
+          dismissal so accidental taps don't wipe the log mid-test. */}
+      {phase === 'in-meeting' && debugLog.length > 0 && (
+        <View
+          style={[s.debugOverlay, { top: Math.max(8, insets.top + 4) }]}
+          pointerEvents="box-none"
+        >
+          <View style={s.debugHeaderRow} pointerEvents="auto">
+            <Text style={s.debugTitle}>Debug log</Text>
+            <Pressable
+              onPress={() => setDebugLog([])}
+              style={s.debugClearBtn}
+              hitSlop={10}
+            >
+              <Text style={s.debugClearText}>Clear</Text>
+            </Pressable>
+          </View>
+          <ScrollView style={s.debugScroll} pointerEvents="auto">
+            {debugLog.map((line, i) => (
+              <Text key={i} style={s.debugLine}>{line}</Text>
+            ))}
+          </ScrollView>
+        </View>
+      )}
     </View>
   );
 }
@@ -454,5 +757,62 @@ const s = StyleSheet.create({
   zoomWrap: {
     width: '100%',
     marginTop: 8,
+  },
+  debugBox: {
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 12,
+    gap: 2,
+  },
+  debugTitle: {
+    color: TEXT_SECONDARY,
+    fontSize: 11,
+    fontFamily: FH,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  debugLine: {
+    color: TEXT_PRIMARY,
+    fontSize: 11,
+    fontFamily: Platform.OS === 'web' ? 'monospace' : FB,
+    lineHeight: 16,
+  },
+  debugOverlay: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    maxHeight: 340,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    borderColor: GOLD,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    zIndex: 9999,
+    ...(Platform.OS === 'web' ? ({ position: 'fixed' } as any) : {}),
+  },
+  debugScroll: {
+    maxHeight: 290,
+  },
+  debugHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  debugClearBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(245,166,35,0.2)',
+    borderColor: GOLD,
+    borderWidth: 1,
+    borderRadius: 6,
+  },
+  debugClearText: {
+    color: GOLD,
+    fontSize: 11,
+    fontFamily: FH,
+    fontWeight: '700',
   },
 });
