@@ -147,27 +147,67 @@ function autoStartMediaViaToolbar(log: (msg: string) => void): void {
   if (typeof document === 'undefined') return;
   let videoClicked = false;
   let audioClicked = false;
+  let dumpedLabels = false;
   let attempts = 0;
-  const MAX_ATTEMPTS = 24; // 24 × 250ms = 6s window
+  const MAX_ATTEMPTS = 32; // 32 × 250ms = 8s window
 
   const tick = () => {
     attempts += 1;
     const root =
       document.getElementById('zoom-meeting-sdk-root') || document.body;
 
+    // On attempt 3 (toolbar has had time to mount), dump every aria-label
+    // we can see inside the Zoom container so the debug overlay shows what
+    // Zoom is actually rendering on this device. This makes the next test
+    // self-diagnosing — we can see in the log exactly which label to match.
+    if (!dumpedLabels && attempts === 3) {
+      try {
+        const labeled = root.querySelectorAll<HTMLElement>('[aria-label]');
+        const labels = Array.from(labeled)
+          .map((el) => el.getAttribute('aria-label'))
+          .filter((l): l is string => !!l && l.trim().length > 0);
+        log(`toolbar probe → ${labels.length} aria-labels found`);
+        // Slice to avoid flooding the overlay; first 24 covers any toolbar.
+        labels.slice(0, 24).forEach((l, i) => log(`  [${i}] "${l}"`));
+        if (labels.length === 0) {
+          // Fall back to dumping <button> elements without aria-label so
+          // we can see if Zoom is using icon-only buttons.
+          const buttons = root.querySelectorAll<HTMLElement>(
+            'button, [role="button"]',
+          );
+          log(`fallback → ${buttons.length} button-like elements`);
+          Array.from(buttons)
+            .slice(0, 12)
+            .forEach((b, i) => {
+              const cls = (b.className || '').toString().slice(0, 60);
+              const title = b.getAttribute('title') || '';
+              log(`  btn[${i}] class="${cls}" title="${title}"`);
+            });
+        }
+      } catch (err: any) {
+        log(`toolbar probe failed: ${err?.message || err}`);
+      }
+      dumpedLabels = true;
+    }
+
     if (!videoClicked) {
-      // "start video" matches Zoom's off-state. Exclude "stop video" so we
-      // never click when the camera is already on.
       const camBtn = findToolbarButton(
         root,
-        ['start video', 'start my video', 'turn on camera'],
-        ['stop video', 'stop my video'],
+        [
+          'start video',
+          'start my video',
+          'turn on camera',
+          'start camera',
+          'video on',
+        ],
+        ['stop video', 'stop my video', 'turn off camera'],
       );
       if (camBtn) {
         try {
           camBtn.click();
           videoClicked = true;
-          log(`auto-start camera → clicked (attempt ${attempts})`);
+          const label = (camBtn.getAttribute('aria-label') || '').slice(0, 40);
+          log(`auto-start camera → clicked "${label}" (attempt ${attempts})`);
         } catch (err: any) {
           log(`auto-start camera → click failed: ${err?.message || err}`);
         }
@@ -175,19 +215,23 @@ function autoStartMediaViaToolbar(log: (msg: string) => void): void {
     }
 
     if (!audioClicked) {
-      // Before audio is joined Zoom shows "Join Audio". After joined but
-      // muted it shows "Unmute". Either is the right target. Exclude "mute"
-      // (when audio is live and unmuted) so we never silence the user.
       const audBtn = findToolbarButton(
         root,
-        ['join audio', 'unmute', 'turn on microphone'],
-        ['mute my', 'mute microphone'],
+        [
+          'join audio',
+          'unmute',
+          'turn on microphone',
+          'audio on',
+          'connect audio',
+        ],
+        ['mute my', 'mute microphone', 'turn off microphone'],
       );
       if (audBtn) {
         try {
           audBtn.click();
           audioClicked = true;
-          log(`auto-start mic → clicked (attempt ${attempts})`);
+          const label = (audBtn.getAttribute('aria-label') || '').slice(0, 40);
+          log(`auto-start mic → clicked "${label}" (attempt ${attempts})`);
         } catch (err: any) {
           log(`auto-start mic → click failed: ${err?.message || err}`);
         }
@@ -202,7 +246,6 @@ function autoStartMediaViaToolbar(log: (msg: string) => void): void {
     setTimeout(tick, 250);
   };
 
-  // First tick after a short delay so the toolbar has a chance to mount.
   setTimeout(tick, 250);
 }
 
@@ -603,19 +646,29 @@ export default function JoinBetaScreen() {
 
       {/* Persistent debug overlay — pinned to the top of the viewport so it
           stays readable on iOS Safari even after Zoom takes over the page
-          area. Tap to dismiss. */}
+          area. A dedicated small Clear button (not the whole overlay) handles
+          dismissal so accidental taps don't wipe the log mid-test. */}
       {phase === 'in-meeting' && debugLog.length > 0 && (
-        <Pressable
+        <View
           style={[s.debugOverlay, { top: Math.max(8, insets.top + 4) }]}
-          onPress={() => setDebugLog([])}
+          pointerEvents="box-none"
         >
-          <Text style={s.debugTitle}>Debug log (tap to clear)</Text>
-          <ScrollView style={s.debugScroll}>
+          <View style={s.debugHeaderRow} pointerEvents="auto">
+            <Text style={s.debugTitle}>Debug log</Text>
+            <Pressable
+              onPress={() => setDebugLog([])}
+              style={s.debugClearBtn}
+              hitSlop={10}
+            >
+              <Text style={s.debugClearText}>Clear</Text>
+            </Pressable>
+          </View>
+          <ScrollView style={s.debugScroll} pointerEvents="auto">
             {debugLog.map((line, i) => (
               <Text key={i} style={s.debugLine}>{line}</Text>
             ))}
           </ScrollView>
-        </Pressable>
+        </View>
       )}
     </View>
   );
@@ -722,8 +775,8 @@ const s = StyleSheet.create({
     position: 'absolute',
     left: 8,
     right: 8,
-    maxHeight: 220,
-    backgroundColor: 'rgba(0,0,0,0.85)',
+    maxHeight: 340,
+    backgroundColor: 'rgba(0,0,0,0.92)',
     borderColor: GOLD,
     borderWidth: 1,
     borderRadius: 8,
@@ -732,6 +785,26 @@ const s = StyleSheet.create({
     ...(Platform.OS === 'web' ? ({ position: 'fixed' } as any) : {}),
   },
   debugScroll: {
-    maxHeight: 180,
+    maxHeight: 290,
+  },
+  debugHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  debugClearBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(245,166,35,0.2)',
+    borderColor: GOLD,
+    borderWidth: 1,
+    borderRadius: 6,
+  },
+  debugClearText: {
+    color: GOLD,
+    fontSize: 11,
+    fontFamily: FH,
+    fontWeight: '700',
   },
 });
