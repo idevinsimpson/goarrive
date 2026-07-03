@@ -1128,6 +1128,175 @@ const APPRENTICESHIP_SCENARIO_LAUNCH_READINESS: MemberScenario = {
     'Close, but launch readiness matters. The apprenticeship path exists to help coaches grow safely and confidently before independent coaching.',
 };
 
+// ── Setup Checklist content ────────────────────────────────────────────────────
+
+interface SetupCategory {
+  title: string;
+  body: string;
+  examples: string[];
+  coachFocus: string;
+}
+
+const SETUP_CATEGORIES: SetupCategory[] = [
+  {
+    title: 'Profile + Identity',
+    body:
+      'Your profile helps members and the GoArrive team know who you are, how to contact you, and how to represent you clearly inside the system.',
+    examples: [
+      'Display name',
+      'Email',
+      'Phone',
+      'Profile photo',
+      'Coach bio, if applicable',
+    ],
+    coachFocus: 'Make your presence feel professional and trustworthy.',
+  },
+  {
+    title: 'Certifications + Qualifications',
+    body:
+      'GoArrive needs coaches to maintain appropriate certifications and continue growing professionally.',
+    examples: [
+      'Current fitness coaching certification',
+      'CPR/AED if required',
+      'Specialty credentials, if applicable',
+      'Any documentation GoArrive requests',
+    ],
+    coachFocus: 'Keep your qualifications current and easy to verify.',
+  },
+  {
+    title: 'Connected Tools',
+    body: 'Your connected tools help the coaching experience run smoothly.',
+    examples: [
+      'Stripe Connect / payout readiness',
+      'Zoom connection or approved session access',
+      'Google Calendar connection, if used',
+      'Device, camera, mic, and stable internet',
+    ],
+    coachFocus: 'Test the tools before the member is depending on them.',
+  },
+  {
+    title: 'Coaching Resources',
+    body:
+      'Before launch, coaches should understand how to use the core resources needed to serve members well.',
+    examples: [
+      'Movement Library',
+      'Workout Builder',
+      'Plan Builder',
+      'Member notes and details',
+      'Session recordings and feedback tools',
+    ],
+    coachFocus: 'Know where to go before you need it live.',
+  },
+  {
+    title: 'First Member Readiness',
+    body:
+      'A coach should be ready to guide a member from intake to plan, scheduling, sessions, feedback, and check-ins.',
+    examples: [
+      'Understand the intake flow',
+      'Build or review a member plan',
+      'Know how scheduling works',
+      'Know how to follow up after sessions',
+      'Know when to ask for help',
+    ],
+    coachFocus: 'Make the first member experience feel calm, clear, and cared for.',
+  },
+];
+
+interface SetupChecklistItem {
+  id: string;
+  text: string;
+}
+
+const SETUP_CHECKLIST_ITEMS: SetupChecklistItem[] = [
+  {
+    id: 'profile',
+    text: 'I understand where to complete or update my coach profile.',
+  },
+  {
+    id: 'certifications',
+    text:
+      'I understand what certifications or qualifications GoArrive may need from me.',
+  },
+  {
+    id: 'stripe',
+    text:
+      'I understand that Stripe Connect / payout readiness must be completed in the proper app area before payments can work.',
+  },
+  {
+    id: 'zoom',
+    text:
+      'I understand that Zoom/session access must be tested before serving members.',
+  },
+  {
+    id: 'calendar',
+    text:
+      'I understand that calendar and scheduling setup should be reviewed before member sessions begin.',
+  },
+  {
+    id: 'coachingTools',
+    text:
+      'I understand where to find core coaching tools like Plan Builder, Build tools, and member details.',
+  },
+  {
+    id: 'firstMember',
+    text:
+      'I understand that my first member experience should feel clear, professional, and supported.',
+  },
+  {
+    id: 'agreement',
+    text: 'I understand that the final Coach Agreement is still required before launch.',
+  },
+];
+
+const SETUP_CLARITY_POINTS: string[] = [
+  'This checklist helps you understand launch readiness.',
+  'This checklist does not verify live setup status.',
+  'This checklist does not connect Stripe, Zoom, or calendar tools.',
+  'This checklist does not upload certifications.',
+  'This checklist does not replace approval from GoArrive or your Coach Mentor.',
+  'This checklist does not replace the Coach Agreement.',
+];
+
+const SETUP_CONFIDENCE_OPTIONS = [
+  'Profile + identity',
+  'Certifications + qualifications',
+  'Connected tools',
+  'Coaching resources',
+  'First member readiness',
+  'I am still getting oriented',
+];
+
+const SETUP_SCENARIO_UNTESTED_TOOL: MemberScenario = {
+  eyebrow: 'SCENARIO',
+  title: 'You are almost ready, but one tool is not tested.',
+  prompt:
+    'You feel ready to start coaching, but you have not tested your Zoom/session access or reviewed the scheduling flow yet. What response best reflects GoArrive launch readiness?',
+  options: [
+    {
+      letter: 'A',
+      text: 'Launch anyway because you can figure it out during the first session.',
+    },
+    {
+      letter: 'B',
+      text: 'Delay everything indefinitely until you feel completely perfect.',
+    },
+    {
+      letter: 'C',
+      text:
+        'Test the tool, review the flow, ask for help if needed, and protect the member experience before launch.',
+    },
+    {
+      letter: 'D',
+      text: 'Tell the member to handle the technical setup themselves.',
+    },
+  ],
+  correct: 'C',
+  correctFeedback:
+    'That is the G\u27B2A way. Launch readiness protects the member experience. A prepared coach reduces friction, builds trust, and knows when to ask for support.',
+  wrongFeedback:
+    'Close, but remember the goal: we do not need perfection, and we do not wing it with members. We prepare, test, ask for help, and protect the experience.',
+};
+
 // ── Firestore doc shape ────────────────────────────────────────────────────────
 
 interface CoachLaunchDoc {
@@ -1160,6 +1329,10 @@ interface CoachLaunchDoc {
     apprenticeshipGrowthArea?: string;
     apprenticeshipScenarioFeedback?: string;
     apprenticeshipScenarioLaunchReadiness?: string;
+    setupReadinessAcknowledgedItems?: string[];
+    setupConfidenceArea?: string;
+    setupHelpArea?: string;
+    setupScenarioUntestedTool?: string;
   };
   startedAt?: any;
   updatedAt?: any;
@@ -1245,6 +1418,13 @@ export default function CoachLaunchScreen() {
     apprenticeshipScenarioLaunchReadinessDraft,
     setApprenticeshipScenarioLaunchReadinessDraft,
   ] = useState('');
+  const [setupChecklistDraft, setSetupChecklistDraft] = useState<string[]>([]);
+  const [setupConfidenceAreaDraft, setSetupConfidenceAreaDraft] = useState('');
+  const [setupHelpAreaDraft, setSetupHelpAreaDraft] = useState('');
+  const [
+    setupScenarioUntestedToolDraft,
+    setSetupScenarioUntestedToolDraft,
+  ] = useState('');
 
   const agreementUrl = (process.env.EXPO_PUBLIC_COACH_AGREEMENT_URL || '').trim();
 
@@ -1328,6 +1508,18 @@ export default function CoachLaunchScreen() {
           );
           setApprenticeshipScenarioLaunchReadinessDraft(
             data.responses?.apprenticeshipScenarioLaunchReadiness ?? ''
+          );
+          setSetupChecklistDraft(
+            Array.isArray(data.responses?.setupReadinessAcknowledgedItems)
+              ? data.responses!.setupReadinessAcknowledgedItems!
+              : []
+          );
+          setSetupConfidenceAreaDraft(
+            data.responses?.setupConfidenceArea ?? ''
+          );
+          setSetupHelpAreaDraft(data.responses?.setupHelpArea ?? '');
+          setSetupScenarioUntestedToolDraft(
+            data.responses?.setupScenarioUntestedTool ?? ''
           );
         } else {
           setProgress(emptyDoc(coachId));
@@ -1501,6 +1693,21 @@ export default function CoachLaunchScreen() {
           apprenticeshipScenarioLaunchReadinessDraft;
       }
     }
+    if (moduleId === 'setupChecklist') {
+      if (setupChecklistDraft.length > 0) {
+        nextResponses.setupReadinessAcknowledgedItems = setupChecklistDraft;
+      }
+      if (setupConfidenceAreaDraft) {
+        nextResponses.setupConfidenceArea = setupConfidenceAreaDraft;
+      }
+      if (setupHelpAreaDraft.trim()) {
+        nextResponses.setupHelpArea = setupHelpAreaDraft.trim();
+      }
+      if (setupScenarioUntestedToolDraft) {
+        nextResponses.setupScenarioUntestedTool =
+          setupScenarioUntestedToolDraft;
+      }
+    }
 
     const nextCompleted = alreadyComplete ? completed : [...completed, moduleId];
     // Point currentModuleId at the next un-completed module (or same if this was the last)
@@ -1643,6 +1850,14 @@ export default function CoachLaunchScreen() {
             setApprenticeshipScenarioFeedbackDraft={setApprenticeshipScenarioFeedbackDraft}
             apprenticeshipScenarioLaunchReadinessDraft={apprenticeshipScenarioLaunchReadinessDraft}
             setApprenticeshipScenarioLaunchReadinessDraft={setApprenticeshipScenarioLaunchReadinessDraft}
+            setupChecklistDraft={setupChecklistDraft}
+            setSetupChecklistDraft={setSetupChecklistDraft}
+            setupConfidenceAreaDraft={setupConfidenceAreaDraft}
+            setSetupConfidenceAreaDraft={setSetupConfidenceAreaDraft}
+            setupHelpAreaDraft={setupHelpAreaDraft}
+            setSetupHelpAreaDraft={setSetupHelpAreaDraft}
+            setupScenarioUntestedToolDraft={setupScenarioUntestedToolDraft}
+            setSetupScenarioUntestedToolDraft={setSetupScenarioUntestedToolDraft}
             agreementUrl={agreementUrl}
             onComplete={() => completeModule(activeModule.id)}
             onBack={() => setActiveModuleId(null)}
@@ -1922,6 +2137,14 @@ interface ModuleDetailProps {
   setApprenticeshipScenarioFeedbackDraft: (v: string) => void;
   apprenticeshipScenarioLaunchReadinessDraft: string;
   setApprenticeshipScenarioLaunchReadinessDraft: (v: string) => void;
+  setupChecklistDraft: string[];
+  setSetupChecklistDraft: React.Dispatch<React.SetStateAction<string[]>>;
+  setupConfidenceAreaDraft: string;
+  setSetupConfidenceAreaDraft: (v: string) => void;
+  setupHelpAreaDraft: string;
+  setSetupHelpAreaDraft: (v: string) => void;
+  setupScenarioUntestedToolDraft: string;
+  setSetupScenarioUntestedToolDraft: (v: string) => void;
   agreementUrl: string;
   onComplete: () => void;
   onBack: () => void;
@@ -1982,6 +2205,14 @@ function ModuleDetail({
   setApprenticeshipScenarioFeedbackDraft,
   apprenticeshipScenarioLaunchReadinessDraft,
   setApprenticeshipScenarioLaunchReadinessDraft,
+  setupChecklistDraft,
+  setSetupChecklistDraft,
+  setupConfidenceAreaDraft,
+  setSetupConfidenceAreaDraft,
+  setupHelpAreaDraft,
+  setSetupHelpAreaDraft,
+  setupScenarioUntestedToolDraft,
+  setSetupScenarioUntestedToolDraft,
   agreementUrl,
   onComplete,
   onBack,
@@ -2067,6 +2298,17 @@ function ModuleDetail({
         apprenticeshipGrowthAreaDraft.trim().length > 0 &&
         apprenticeshipScenarioFeedbackDraft === 'C' &&
         apprenticeshipScenarioLaunchReadinessDraft === 'B'
+      );
+    }
+    if (module.id === 'setupChecklist') {
+      const allChecked = SETUP_CHECKLIST_ITEMS.every((item) =>
+        setupChecklistDraft.includes(item.id)
+      );
+      return (
+        allChecked &&
+        !!setupConfidenceAreaDraft &&
+        setupHelpAreaDraft.trim().length > 0 &&
+        setupScenarioUntestedToolDraft === 'C'
       );
     }
     return true;
@@ -3660,14 +3902,238 @@ function ModuleDetail({
           </>
         )}
 
-        {/* Placeholder body for modules without dedicated content yet */}
-        {['setupChecklist'].includes(module.id) && (
-          <View style={s.placeholderBlock}>
-            <Text style={s.placeholderText}>
-              Deeper content for this module is coming soon. For now, read the intro above,
-              then mark the module complete to keep moving.
-            </Text>
-          </View>
+        {/* Setup Checklist — education + self-review only: categories, 8-item checklist, clarity, reflection, 1 scenario */}
+        {module.id === 'setupChecklist' && (
+          <>
+            <View style={s.heroCard}>
+              <Text style={s.heroEyebrow}>SETUP CHECKLIST</Text>
+              <Text style={s.heroHeading}>Get practically ready to launch.</Text>
+              <Text style={s.heroBody}>
+                Coach Launch helps you understand the mission and standard.
+                Setup readiness helps make sure your profile, tools, systems,
+                and first coaching workflows are prepared before you begin
+                serving members inside G➲A.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>
+                A great launch is not just about excitement. It is about
+                reducing friction.
+              </Text>
+              <Text style={s.sectionBody}>
+                When your setup is clean, members experience confidence.
+                Sessions run smoother. Communication is clearer. Payments are
+                less confusing. Your Coach Mentor and GoArrive team can support
+                you more effectively.
+              </Text>
+              <Text style={s.sectionBody}>
+                This checklist is a readiness map. It does not replace the
+                actual setup screens, approvals, or agreement. It helps you
+                understand what needs to be completed before launch.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>Readiness categories.</Text>
+              <Text style={s.sectionBody}>
+                Five areas to bring into shape before launch.
+              </Text>
+            </View>
+
+            <View style={{ gap: 10 }}>
+              {SETUP_CATEGORIES.map((c, i) => (
+                <View key={c.title} style={s.setupCategoryCard}>
+                  <Text style={s.setupCategoryNumber}>
+                    {String(i + 1).padStart(2, '0')}
+                  </Text>
+                  <Text style={s.setupCategoryTitle}>{c.title}</Text>
+                  <Text style={s.setupCategoryBody}>{c.body}</Text>
+                  <View style={s.setupCategoryExamplesBox}>
+                    <Text style={s.setupCategoryExamplesLabel}>EXAMPLES</Text>
+                    {c.examples.map((ex) => (
+                      <View key={ex} style={s.setupCategoryExampleRow}>
+                        <Text style={s.setupCategoryExampleBullet}>•</Text>
+                        <Text style={s.setupCategoryExampleText}>{ex}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  <View style={s.setupCategoryFocusBox}>
+                    <Text style={s.setupCategoryFocusLabel}>COACH FOCUS</Text>
+                    <Text style={s.setupCategoryFocusText}>{c.coachFocus}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>Launch readiness self-review.</Text>
+              <Text style={s.sectionBody}>
+                These are Coach Launch self-review checkboxes only. They do not
+                verify live setup status.
+              </Text>
+            </View>
+
+            <View style={s.checklistCard}>
+              {SETUP_CHECKLIST_ITEMS.map((item) => {
+                const checked = setupChecklistDraft.includes(item.id);
+                return (
+                  <Pressable
+                    key={item.id}
+                    onPress={() =>
+                      setSetupChecklistDraft((prev) =>
+                        prev.includes(item.id)
+                          ? prev.filter((id) => id !== item.id)
+                          : [...prev, item.id]
+                      )
+                    }
+                    style={[
+                      s.checklistRow,
+                      checked && s.checklistRowChecked,
+                    ]}
+                  >
+                    <View
+                      style={[
+                        s.checklistBox,
+                        checked && s.checklistBoxChecked,
+                      ]}
+                    >
+                      {checked && (
+                        <Icon name="check" size={12} color={GREEN} />
+                      )}
+                    </View>
+                    <Text
+                      style={[
+                        s.checklistText,
+                        checked && s.checklistTextChecked,
+                      ]}
+                    >
+                      {item.text}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>
+                What this checklist does — and does not do.
+              </Text>
+              <Text style={s.sectionBody}>
+                A quick clarity check before you keep going.
+              </Text>
+            </View>
+
+            <View style={s.clarityCard}>
+              {SETUP_CLARITY_POINTS.map((point) => (
+                <View key={point} style={s.clarityRow}>
+                  <Text style={s.clarityBullet}>•</Text>
+                  <Text style={s.clarityText}>{point}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.responseLabel}>
+                Which setup area do you feel most confident about right now?
+              </Text>
+              <View style={s.optionList}>
+                {SETUP_CONFIDENCE_OPTIONS.map((opt) => {
+                  const picked = setupConfidenceAreaDraft === opt;
+                  return (
+                    <Pressable
+                      key={opt}
+                      onPress={() => setSetupConfidenceAreaDraft(opt)}
+                      style={[s.optionRow, picked && s.optionRowSelected]}
+                    >
+                      <View style={[s.radio, picked && s.radioSelected]}>
+                        {picked && <View style={s.radioDot} />}
+                      </View>
+                      <Text
+                        style={[
+                          s.optionText,
+                          picked && s.optionTextSelected,
+                        ]}
+                      >
+                        {opt}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.responseLabel}>
+                What is one setup area you want help with before launch?
+              </Text>
+              <TextInput
+                value={setupHelpAreaDraft}
+                onChangeText={setSetupHelpAreaDraft}
+                placeholder="A short reflection…"
+                placeholderTextColor="#4A5568"
+                multiline
+                style={s.textArea}
+              />
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.scenarioEyebrow}>
+                {SETUP_SCENARIO_UNTESTED_TOOL.eyebrow}
+              </Text>
+              <Text style={s.responseLabel}>
+                {SETUP_SCENARIO_UNTESTED_TOOL.title}
+              </Text>
+              <Text style={s.sectionBody}>
+                {SETUP_SCENARIO_UNTESTED_TOOL.prompt}
+              </Text>
+              <View style={s.optionList}>
+                {SETUP_SCENARIO_UNTESTED_TOOL.options.map((opt) => {
+                  const picked = setupScenarioUntestedToolDraft === opt.letter;
+                  return (
+                    <Pressable
+                      key={opt.letter}
+                      onPress={() =>
+                        setSetupScenarioUntestedToolDraft(opt.letter)
+                      }
+                      style={[s.optionRow, picked && s.optionRowSelected]}
+                    >
+                      <View style={[s.radio, picked && s.radioSelected]}>
+                        {picked && <View style={s.radioDot} />}
+                      </View>
+                      <Text style={s.scenarioLetter}>{opt.letter}.</Text>
+                      <Text
+                        style={[
+                          s.optionText,
+                          picked && s.optionTextSelected,
+                        ]}
+                      >
+                        {opt.text}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {setupScenarioUntestedToolDraft ===
+                SETUP_SCENARIO_UNTESTED_TOOL.correct && (
+                <View style={s.scenarioFeedbackCorrect}>
+                  <Icon name="check-circle" size={16} color={GREEN} />
+                  <Text style={s.scenarioFeedbackCorrectText}>
+                    {SETUP_SCENARIO_UNTESTED_TOOL.correctFeedback}
+                  </Text>
+                </View>
+              )}
+              {!!setupScenarioUntestedToolDraft &&
+                setupScenarioUntestedToolDraft !==
+                  SETUP_SCENARIO_UNTESTED_TOOL.correct && (
+                  <View style={s.scenarioFeedbackTryAgain}>
+                    <Text style={s.scenarioFeedbackTryAgainText}>
+                      {SETUP_SCENARIO_UNTESTED_TOOL.wrongFeedback}
+                    </Text>
+                  </View>
+                )}
+            </View>
+          </>
         )}
       </View>
 
@@ -5044,5 +5510,138 @@ const s = StyleSheet.create({
     color: MUTED,
     fontFamily: FB,
     lineHeight: 19,
+  },
+
+  // Setup Checklist — readiness category cards
+  setupCategoryCard: {
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 14,
+    padding: 14,
+    gap: 8,
+  },
+  setupCategoryNumber: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: GOLD,
+    fontFamily: FH,
+    letterSpacing: 0.5,
+  },
+  setupCategoryTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: FG,
+    fontFamily: FH,
+    lineHeight: 21,
+  },
+  setupCategoryBody: {
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 19,
+  },
+  setupCategoryExamplesBox: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 4,
+  },
+  setupCategoryExamplesLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: MUTED,
+    fontFamily: FB,
+    marginBottom: 2,
+  },
+  setupCategoryExampleRow: {
+    flexDirection: 'row',
+    gap: 6,
+    alignItems: 'flex-start',
+  },
+  setupCategoryExampleBullet: {
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 18,
+  },
+  setupCategoryExampleText: {
+    flex: 1,
+    fontSize: 13,
+    color: FG,
+    fontFamily: FB,
+    lineHeight: 18,
+  },
+  setupCategoryFocusBox: {
+    backgroundColor: 'rgba(74,144,226,0.06)',
+    borderLeftWidth: 2,
+    borderLeftColor: 'rgba(74,144,226,0.55)',
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 3,
+  },
+  setupCategoryFocusLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: BLUE,
+    fontFamily: FB,
+  },
+  setupCategoryFocusText: {
+    fontSize: 13,
+    color: FG,
+    fontFamily: FB,
+    lineHeight: 18,
+    fontWeight: '500',
+  },
+
+  // Setup Checklist — 8-item self-review checklist
+  checklistCard: {
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 14,
+    padding: 6,
+    gap: 2,
+  },
+  checklistRow: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'flex-start',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+  },
+  checklistRowChecked: {
+    backgroundColor: 'rgba(110,187,122,0.06)',
+  },
+  checklistBox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: BORDER,
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  checklistBoxChecked: {
+    borderColor: GREEN,
+    backgroundColor: 'rgba(110,187,122,0.14)',
+  },
+  checklistText: {
+    flex: 1,
+    fontSize: 13,
+    color: FG,
+    fontFamily: FB,
+    lineHeight: 19,
+  },
+  checklistTextChecked: {
+    color: FG,
+    fontWeight: '500',
   },
 });
