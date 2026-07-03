@@ -203,7 +203,8 @@ export function coachWelcomeEmail(coachName: string, appUrl: string = 'https://g
   const subject = `Welcome to GoArrive, ${firstName} — your coaching business starts here`;
   const body = `Welcome to GoArrive, ${firstName}! You're officially a GoArrive coach. Here's how to get rolling: 1) Sign in at ${appUrl} and open your Command Center. 2) Work through your Coach Launch journey — it walks you through everything from your profile to your first member. 3) Build your first workout in the Build tab. Your members show up because you do. Let's go. — The GoArrive Team`;
 
-  const logoUrl = 'https://goarrive.fit/logo-header.png';
+  // Optimized 6.7KB email version (the app's logo-header.png is 148KB — too slow for email)
+  const logoUrl = 'https://firebasestorage.googleapis.com/v0/b/goarrive.firebasestorage.app/o/email-assets%2Fgoarrive-email-logo.png?alt=media&token=849e59ce-a58a-40b4-acce-af0089c0358a';
 
   // Full HTML doc with color-scheme meta + table layout + bgcolor attributes:
   // required so Gmail (esp. iOS dark mode) does not invert the dark theme.
