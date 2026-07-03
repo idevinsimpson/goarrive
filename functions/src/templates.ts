@@ -195,6 +195,40 @@ function recordingReady(data: TemplateData): RenderedMessage {
   return { subject, body, htmlBody };
 }
 
+// ─── Coach Welcome ───────────────────────────────────────────────────────────
+
+export function coachWelcomeEmail(coachName: string, appUrl: string = 'https://goarrive.fit'): RenderedMessage {
+  const firstName = (coachName || '').split(' ')[0] || 'Coach';
+
+  const subject = `Welcome to GoArrive, ${firstName} — your coaching business starts here`;
+  const body = `Welcome to GoArrive, ${firstName}! You're officially a GoArrive coach. Here's how to get rolling: 1) Sign in at ${appUrl} and open your Command Center. 2) Work through your Coach Launch journey — it walks you through everything from your profile to your first member. 3) Build your first workout in the Build tab. Your members show up because you do. Let's go. — The GoArrive Team`;
+
+  const htmlBody = `
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; color: #E8E6E3; background: #0F1117;">
+  <div style="text-align: center; padding: 8px 0 20px 0;">
+    <span style="font-size: 26px; font-weight: 800; letter-spacing: 1px;"><span style="color: #7BA05B;">GO</span><span style="color: #F5A623;">&#10162;</span><span style="color: #7BA7D4;">ARRIVE</span></span>
+    <div style="width: 64px; height: 3px; background: #F5A623; border-radius: 2px; margin: 10px auto 0 auto;"></div>
+  </div>
+  <div style="background: #1A1D23; border-radius: 12px; padding: 24px;">
+    <h2 style="color: #4ADE80; margin: 0 0 16px 0; font-size: 22px;">Welcome, Coach ${firstName}</h2>
+    <p style="margin: 0 0 12px 0; line-height: 1.5;">You're officially a <strong>GoArrive coach</strong>. Your coaching business now has a home — and your members are going to feel the difference.</p>
+    <div style="background: #252830; border-radius: 8px; padding: 16px; margin: 16px 0;">
+      <p style="margin: 0 0 10px 0; color: #E8E6E3;"><strong style="color: #F5A623;">1.</strong> Sign in and open your <strong>Command Center</strong></p>
+      <p style="margin: 0 0 10px 0; color: #E8E6E3;"><strong style="color: #F5A623;">2.</strong> Complete your <strong>Coach Launch</strong> journey — profile, agreement, and setup, step by step</p>
+      <p style="margin: 0; color: #E8E6E3;"><strong style="color: #F5A623;">3.</strong> Build your first <strong>workout</strong> and invite your first member</p>
+    </div>
+    <div style="text-align: center;">
+      <a href="${appUrl}" style="display: inline-block; background: #7BA05B; color: #0F1117; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700; margin: 12px 0;">Open Your Command Center</a>
+    </div>
+    <p style="margin: 16px 0 0 0; color: #9CA3AF; line-height: 1.5;">Your members show up because you do. Let's go.</p>
+    <p style="margin: 12px 0 0 0; color: #9CA3AF;">— The GoArrive Team</p>
+  </div>
+  <p style="text-align: center; color: #7A7F94; font-size: 12px; margin: 20px 0 0 0;">GoArrive · Coaching, arrived.</p>
+</div>`;
+
+  return { subject, body, htmlBody };
+}
+
 // ─── Formatting Helpers ──────────────────────────────────────────────────────
 
 function formatSessionType(type: string): string {
