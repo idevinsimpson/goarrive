@@ -46,6 +46,7 @@ import {
   COACH_AGREEMENT_VERSION,
 } from '../../constants/coachAgreement';
 import { CoachAgreementSignaturePad } from '../../components/CoachAgreementSignaturePad';
+import ConfettiBurst from '../../components/ConfettiBurst';
 
 // ── Modules (order matters — this is the journey sequence) ─────────────────────
 
@@ -2595,35 +2596,48 @@ function ModuleDetail({
   onFinish,
   scrollRef,
 }: ModuleDetailProps) {
+  const [confettiVisible, setConfettiVisible] = useState(false);
+  // Celebrate every arrival at the Launch Celebration module.
+  useEffect(() => {
+    if (module.id === 'launchCelebration') setConfettiVisible(true);
+  }, [module.id]);
   const signedAgreementSigned =
     !!signedAgreement && signedAgreement.status === 'signed';
   // Launch Celebration is its own layout
   if (module.id === 'launchCelebration') {
     return (
-      <View style={s.celebrateCard}>
-        <View style={s.celebrateBadge}>
-          <Icon name="star-filled" size={32} color={GOLD} />
-        </View>
-        <Text style={s.celebrateHeading}>Welcome to the team.</Text>
-        <Text style={s.celebrateBody}>
-          You've completed the first pass through Coach Launch. Your next step is to keep
-          building skill, confidence, and member readiness through apprenticeship and
-          ongoing support.
-        </Text>
-        {!isComplete && (
-          <Pressable
-            style={[s.primaryBtn, saving && s.btnDisabled]}
-            onPress={onComplete}
-            disabled={saving}
-          >
-            <Text style={s.primaryBtnText}>
-              {saving ? 'Saving…' : 'Mark Complete'}
-            </Text>
+      <View>
+        <View style={s.celebrateCard}>
+          <View style={s.celebrateBadge}>
+            <Icon name="star-filled" size={32} color={GOLD} />
+          </View>
+          <Text style={s.celebrateHeading}>Welcome to the team.</Text>
+          <Text style={s.celebrateBody}>
+            You've completed the first pass through Coach Launch. Your next step is to keep
+            building skill, confidence, and member readiness through apprenticeship and
+            ongoing support.
+          </Text>
+          {!isComplete && (
+            <Pressable
+              style={[s.primaryBtn, saving && s.btnDisabled]}
+              onPress={() => {
+                setConfettiVisible(true);
+                onComplete();
+              }}
+              disabled={saving}
+            >
+              <Text style={s.primaryBtnText}>
+                {saving ? 'Saving…' : 'Mark Complete'}
+              </Text>
+            </Pressable>
+          )}
+          <Pressable style={[s.primaryBtn, { marginTop: 10 }]} onPress={onFinish}>
+            <Text style={s.primaryBtnText}>Go to Coach Dashboard</Text>
           </Pressable>
+        </View>
+        {confettiVisible && (
+          <ConfettiBurst onDone={() => setConfettiVisible(false)} />
         )}
-        <Pressable style={[s.primaryBtn, { marginTop: 10 }]} onPress={onFinish}>
-          <Text style={s.primaryBtnText}>Go to Coach Dashboard</Text>
-        </Pressable>
       </View>
     );
   }

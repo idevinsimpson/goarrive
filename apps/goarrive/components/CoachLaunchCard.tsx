@@ -6,7 +6,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { router } from 'expo-router';
 import { db } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
@@ -22,6 +22,7 @@ export default function CoachLaunchCard() {
   const [completedCount, setCompletedCount] = useState(0);
   const [loaded, setLoaded] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const [completionDismissed, setCompletionDismissed] = useState(false);
 
   useEffect(() => {
     if (!coachId) return;
@@ -32,6 +33,7 @@ export default function CoachLaunchCard() {
           const data = snap.data() as any;
           const arr: string[] = Array.isArray(data.completedModuleIds) ? data.completedModuleIds : [];
           setCompletedCount(arr.length);
+          setCompletionDismissed(!!data.completionCardDismissed);
         }
         setLoaded(true);
       },
@@ -49,9 +51,45 @@ export default function CoachLaunchCard() {
   const started = completedCount > 0;
   const done = completedCount === TOTAL_MODULES;
 
-  // Once the journey is complete, hide the card by default — the coach can
-  // still access it from any other entry point we add later.
-  if (done) return null;
+  // Once the journey is complete, show a celebratory completion card until
+  // the coach dismisses it (dismissal persists on the coach_launch doc).
+  if (done) {
+    if (completionDismissed) return null;
+    return (
+      <Pressable
+        style={({ pressed }) => [s.card, s.doneCard, pressed && s.cardPressed]}
+        onPress={() => router.push('/(app)/coach-launch' as any)}
+      >
+        <View style={s.headerRow}>
+          <View style={s.doneBadge}>
+            <Icon name="check" size={22} color="#0E1117" />
+          </View>
+          <Pressable
+            onPress={() => {
+              setCompletionDismissed(true);
+              setDoc(
+                doc(db, 'coach_launch', coachId),
+                { completionCardDismissed: true },
+                { merge: true }
+              ).catch((err) =>
+                console.error('[CoachLaunchCard] dismiss save error:', err)
+              );
+            }}
+            hitSlop={10}
+            style={s.dismissBtn}
+          >
+            <Icon name="x" size={16} color="#4A5568" />
+          </Pressable>
+        </View>
+        <Text style={s.eyebrow}>GUIDED JOURNEY</Text>
+        <Text style={s.doneTitle}>Launch complete. Welcome to the team.</Text>
+        <Text style={s.body}>
+          You finished all {TOTAL_MODULES} Coach Launch modules. Your coaching journey
+          starts now — keep building skill, confidence, and member readiness.
+        </Text>
+      </Pressable>
+    );
+  }
 
   return (
     <Pressable
@@ -105,6 +143,25 @@ const s = StyleSheet.create({
   },
   cardPressed: {
     backgroundColor: '#151E2E',
+  },
+  doneCard: {
+    borderColor: 'rgba(245,166,35,0.6)',
+    backgroundColor: '#16130B',
+  },
+  doneBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: GOLD,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  doneTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: GOLD,
+    fontFamily: FH,
+    marginTop: -6,
   },
   headerRow: {
     flexDirection: 'row',
