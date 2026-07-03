@@ -25,7 +25,7 @@
  * - Any substantive legal edit MUST bump COACH_AGREEMENT_VERSION.
  */
 
-export const COACH_AGREEMENT_VERSION = '2026-07-coach-program-terms-v1';
+export const COACH_AGREEMENT_VERSION = '2026-07-coach-program-terms-v2';
 export const COACH_AGREEMENT_TITLE =
   'GoArrive Program Terms & Contractual Agreements';
 export const COACH_AGREEMENT_SOURCE_URL =
@@ -55,8 +55,8 @@ export const COACH_AGREEMENT_SECTIONS: CoachAgreementSection[] = [
       '\u2022 Assisting — the apprentice supports sessions.',
       '\u2022 Watching — the apprentice runs sessions with observation.',
       '\u2022 Launching — independent coaching.',
-      'New coaches may acquire members during apprenticeship with guidance from their Coach Mentor and GoArrive.',
-      'Completion does not guarantee income, a specific number of members, or continued engagement with GoArrive.',
+      'New coaches are encouraged to begin acquiring members during apprenticeship. The Coach Mentor and/or GoArrive will provide guidance to help the new coach manage members well.',
+      'By participating, the coach agrees to actively engage in the process, follow guidance, and uphold GoArrive standards. Completion does not guarantee income, a specific number of members, or continued engagement with GoArrive.',
     ],
   },
   {
@@ -139,7 +139,7 @@ export const COACH_AGREEMENT_SECTIONS: CoachAgreementSection[] = [
       'The annual cap is set each calendar year and prorated for mid-year starts. Revenue from New Business counts toward the cap.',
       'After the cap is reached, the Coach retains 100% of additional New Business revenue for the remainder of that calendar year and through the remainder of each affected member\u2019s first year, minus the monthly admin technology fee.',
       'A monthly admin technology fee may be deducted. The fee amount may change. GoArrive will provide notice consistent with the Modification of Terms section.',
-      'Inter-coach referral and member referral reward obligations still apply after the cap is reached.',
+      'Referral programs still apply after the cap is reached: the receiving Coach still owes the 7% inter-coach referral share on eligible referrals, and the Coach still participates in member referral reward refund obligations under that program, if triggered.',
       'GoArrive provides dashboard tracking with monthly updates.',
       'Cap resets each year on January 1.',
       'By signing/participating, the Coach acknowledges and agrees to the earnings cap model and understands terms may be reviewed and adjusted annually with notice.',
@@ -215,7 +215,7 @@ export const COACH_AGREEMENT_SECTIONS: CoachAgreementSection[] = [
       'Coaches may use IP only to fulfill GoArrive duties. Any external use requires prior written consent from GoArrive.',
       'GoArrive may credit coaches as creators without granting ownership.',
       'Coaches may not share GoArrive IP with third parties without written consent and must use reasonable safeguards.',
-      'IP disputes may be handled through mediation or binding arbitration.',
+      'IP disputes may be handled through mediation or binding arbitration as specified in the general engagement terms.',
       'Upon termination, the Coach must cease use of GoArrive IP and return or destroy IP materials upon request unless GoArrive grants written permission. Ownership and confidentiality obligations related to IP survive termination.',
     ],
   },
@@ -228,8 +228,8 @@ export const COACH_AGREEMENT_SECTIONS: CoachAgreementSection[] = [
     body: [
       'Confidentiality protects members, coaches, and the company. This agreement applies during engagement and continues after.',
       'Confidential information includes member data, workout plans, personal health information, business strategies, pricing, operational systems, technological data, internal documents, and any non-public information accessed through GoArrive.',
-      'Coaches must use confidential information only to fulfill GoArrive duties, use reasonable precautions to prevent unauthorized disclosure, and not disclose without GoArrive\u2019s written consent.',
-      'If legally required to disclose, Coaches notify GoArrive promptly and cooperate to minimize disclosure unless prohibited by law. If unauthorized disclosure occurs, notify GoArrive immediately.',
+      'Coaches must use confidential information only to fulfill GoArrive duties, use reasonable precautions to prevent unauthorized disclosure \u2014 including securing digital or physical records and limiting access \u2014 and not disclose without GoArrive\u2019s written consent.',
+      'If legally required to disclose, Coaches notify GoArrive promptly and cooperate to minimize disclosure unless prohibited by law. If unauthorized disclosure occurs, notify GoArrive immediately and assist in recovering the information and mitigating potential damage.',
       'The agreement applies throughout engagement and continues indefinitely unless GoArrive releases the Coach in writing.',
       'Breach may result in disciplinary action up to termination and potential legal action for damages.',
     ],
