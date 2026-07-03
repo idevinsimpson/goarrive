@@ -289,6 +289,135 @@ const VISION_EXCITEMENT_OPTIONS = [
   'Being part of something early and meaningful',
 ];
 
+// ── Member Experience content ─────────────────────────────────────────────────
+
+interface MemberJourneyStep {
+  title: string;
+  body: string;
+  coachFocus: string;
+}
+
+const MEMBER_JOURNEY_STEPS: MemberJourneyStep[] = [
+  {
+    title: 'A member is looking for help.',
+    body:
+      'They may feel stuck, inconsistent, overwhelmed, or unsure where to start. Your first opportunity is to listen well and build trust.',
+    coachFocus:
+      'Ask good questions. Listen before prescribing. Help them feel seen.',
+  },
+  {
+    title: 'They share their story.',
+    body:
+      'The intake helps us understand goals, schedule, health history, barriers, motivation, and lifestyle. This gives the coach context before building a plan.',
+    coachFocus:
+      'Look for patterns, constraints, and what matters most to the member.',
+  },
+  {
+    title: 'They receive a tailored path.',
+    body:
+      'The coach uses the intake and plan-building process to create a personalized path that moves the member from confusion to clarity.',
+    coachFocus:
+      'Make the plan feel specific, understandable, and connected to the member\u2019s goals.',
+  },
+  {
+    title: 'They choose to begin.',
+    body:
+      'After the plan is presented, the member accepts, chooses their payment option, and steps into the program.',
+    coachFocus:
+      'Be clear, calm, and confident. This should feel like a professional start, not a sales handoff.',
+  },
+  {
+    title: 'They get rhythm.',
+    body:
+      'Recurring sessions create structure. The member should know when they are showing up, what to expect, and how to stay consistent.',
+    coachFocus:
+      'Protect clarity. Reduce confusion. Make the next step obvious.',
+  },
+  {
+    title: 'They show up and move.',
+    body:
+      'Sessions happen online through the GoArrive system. Depending on the plan phase, the coach may be present for the full session, part of the session, or reviewing afterward.',
+    coachFocus:
+      'Coach for safety, form, confidence, and consistency.',
+  },
+  {
+    title: 'They receive support beyond the session.',
+    body:
+      'Session recordings and feedback help the coach review form, reinforce progress, and give targeted support when needed.',
+    coachFocus:
+      'Use feedback to build confidence, not shame. Be specific, timely, and encouraging.',
+  },
+  {
+    title: 'They reflect and adjust.',
+    body:
+      'Regular check-ins help the member review progress, identify barriers, adjust the plan, and keep momentum.',
+    coachFocus:
+      'Celebrate wins, address friction, and reset the next step.',
+  },
+  {
+    title: 'They grow in confidence.',
+    body:
+      'The goal is not dependence forever. The goal is to help members build lasting habits, confidence, and self-reliance with the right level of support.',
+    coachFocus:
+      'Equip the member to own their progress while still feeling supported.',
+  },
+];
+
+interface MemberNeed {
+  title: string;
+  body: string;
+}
+
+const MEMBER_NEEDS: MemberNeed[] = [
+  { title: 'Clarity', body: 'Members need to know what to do next.' },
+  {
+    title: 'Care',
+    body: 'Members need to know their coach sees them as a person, not a plan.',
+  },
+  {
+    title: 'Accountability',
+    body: 'Members need supportive follow-through when consistency slips.',
+  },
+  {
+    title: 'Confidence',
+    body: 'Members need to feel capable of building long-term habits.',
+  },
+];
+
+interface MemberScenario {
+  eyebrow: string;
+  title: string;
+  prompt: string;
+  options: { letter: ScenarioLetter; text: string }[];
+  correct: ScenarioLetter;
+  correctFeedback: string;
+  wrongFeedback: string;
+}
+
+const MEMBER_EXPERIENCE_SCENARIO: MemberScenario = {
+  eyebrow: 'SCENARIO',
+  title: 'A member feels overwhelmed.',
+  prompt:
+    'A new member completes intake and says, \u201CI know I need this, but I\u2019m nervous I won\u2019t be able to keep up.\u201D What response best reflects the GoArrive member experience?',
+  options: [
+    { letter: 'A', text: '\u201CYou\u2019ll be fine. Just follow the plan.\u201D' },
+    {
+      letter: 'B',
+      text: '\u201CThis is hard for everyone, so you\u2019ll need to push through.\u201D',
+    },
+    {
+      letter: 'C',
+      text: '\u201CThat makes sense. We\u2019ll start where you are, keep the next step clear, and build confidence one session at a time.\u201D',
+    },
+    { letter: 'D', text: '\u201CMaybe wait until you feel more ready.\u201D' },
+  ],
+  correct: 'C',
+  correctFeedback:
+    'That is the G\u27B2A way. We do not minimize the member\u2019s concern, and we do not add pressure. We bring clarity, care, and confidence to the next step.',
+  wrongFeedback:
+    'Close, but think about what the member needs in that moment: clarity, care, and confidence. Let them feel supported while still helping them move forward.',
+};
+
 // ── Firestore doc shape ────────────────────────────────────────────────────────
 
 interface CoachLaunchDoc {
@@ -304,6 +433,8 @@ interface CoachLaunchDoc {
     memberFeelingGoal?: string;
     cultureScenarioMemberSlipping?: string;
     cultureScenarioCoachFit?: string;
+    memberFirstInteractionGoal?: string;
+    memberExperienceScenarioOverwhelmed?: string;
   };
   startedAt?: any;
   updatedAt?: any;
@@ -352,6 +483,10 @@ export default function CoachLaunchScreen() {
   const [memberFeelingGoalDraft, setMemberFeelingGoalDraft] = useState('');
   const [scenarioSlippingDraft, setScenarioSlippingDraft] = useState('');
   const [scenarioCoachFitDraft, setScenarioCoachFitDraft] = useState('');
+  const [memberFirstInteractionGoalDraft, setMemberFirstInteractionGoalDraft] =
+    useState('');
+  const [memberExperienceScenarioDraft, setMemberExperienceScenarioDraft] =
+    useState('');
 
   const agreementUrl = (process.env.EXPO_PUBLIC_COACH_AGREEMENT_URL || '').trim();
 
@@ -384,6 +519,12 @@ export default function CoachLaunchScreen() {
           );
           setScenarioCoachFitDraft(
             data.responses?.cultureScenarioCoachFit ?? ''
+          );
+          setMemberFirstInteractionGoalDraft(
+            data.responses?.memberFirstInteractionGoal ?? ''
+          );
+          setMemberExperienceScenarioDraft(
+            data.responses?.memberExperienceScenarioOverwhelmed ?? ''
           );
         } else {
           setProgress(emptyDoc(coachId));
@@ -481,6 +622,16 @@ export default function CoachLaunchScreen() {
       }
       if (scenarioCoachFitDraft) {
         nextResponses.cultureScenarioCoachFit = scenarioCoachFitDraft;
+      }
+    }
+    if (moduleId === 'memberExperience') {
+      if (memberFirstInteractionGoalDraft.trim()) {
+        nextResponses.memberFirstInteractionGoal =
+          memberFirstInteractionGoalDraft.trim();
+      }
+      if (memberExperienceScenarioDraft) {
+        nextResponses.memberExperienceScenarioOverwhelmed =
+          memberExperienceScenarioDraft;
       }
     }
 
@@ -591,6 +742,10 @@ export default function CoachLaunchScreen() {
             setScenarioSlippingDraft={setScenarioSlippingDraft}
             scenarioCoachFitDraft={scenarioCoachFitDraft}
             setScenarioCoachFitDraft={setScenarioCoachFitDraft}
+            memberFirstInteractionGoalDraft={memberFirstInteractionGoalDraft}
+            setMemberFirstInteractionGoalDraft={setMemberFirstInteractionGoalDraft}
+            memberExperienceScenarioDraft={memberExperienceScenarioDraft}
+            setMemberExperienceScenarioDraft={setMemberExperienceScenarioDraft}
             agreementUrl={agreementUrl}
             onComplete={() => completeModule(activeModule.id)}
             onBack={() => setActiveModuleId(null)}
@@ -836,6 +991,10 @@ interface ModuleDetailProps {
   setScenarioSlippingDraft: (v: string) => void;
   scenarioCoachFitDraft: string;
   setScenarioCoachFitDraft: (v: string) => void;
+  memberFirstInteractionGoalDraft: string;
+  setMemberFirstInteractionGoalDraft: (v: string) => void;
+  memberExperienceScenarioDraft: string;
+  setMemberExperienceScenarioDraft: (v: string) => void;
   agreementUrl: string;
   onComplete: () => void;
   onBack: () => void;
@@ -862,6 +1021,10 @@ function ModuleDetail({
   setScenarioSlippingDraft,
   scenarioCoachFitDraft,
   setScenarioCoachFitDraft,
+  memberFirstInteractionGoalDraft,
+  setMemberFirstInteractionGoalDraft,
+  memberExperienceScenarioDraft,
+  setMemberExperienceScenarioDraft,
   agreementUrl,
   onComplete,
   onBack,
@@ -910,6 +1073,12 @@ function ModuleDetail({
         memberFeelingGoalDraft.trim().length > 0 &&
         scenarioSlippingDraft === 'C' &&
         scenarioCoachFitDraft === 'B'
+      );
+    }
+    if (module.id === 'memberExperience') {
+      return (
+        memberFirstInteractionGoalDraft.trim().length > 0 &&
+        memberExperienceScenarioDraft === 'C'
       );
     }
     return true;
@@ -1288,8 +1457,171 @@ function ModuleDetail({
           </View>
         )}
 
+        {/* Member Experience — hero, journey timeline, needs cards, reflection, scenario */}
+        {module.id === 'memberExperience' && (
+          <>
+            <View style={s.heroCard}>
+              <Text style={s.heroEyebrow}>THE MEMBER EXPERIENCE</Text>
+              <Text style={s.heroHeading}>
+                See the journey through the member{'\u2019'}s eyes.
+              </Text>
+              <Text style={s.heroBody}>
+                A great GoArrive coach does not just understand the tools. They
+                understand what the member is feeling at each step —
+                uncertainty, hope, friction, momentum, and the need for steady
+                support.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>Before coach workflows, this.</Text>
+              <Text style={s.sectionBody}>
+                Before we talk more about coach workflows, we need to look at
+                the member experience.
+              </Text>
+              <Text style={s.sectionBody}>
+                Members come to G➲A looking for more than random workouts. They
+                are looking for clarity, structure, accountability, and a coach
+                who helps them keep going when life gets busy.
+              </Text>
+              <Text style={s.sectionBody}>
+                The better you understand the member journey, the better you
+                can serve them with care and confidence.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>The member journey.</Text>
+              <Text style={s.sectionBody}>
+                The path a member travels from first interest to long-term
+                self-reliance.
+              </Text>
+            </View>
+
+            <View style={s.timeline}>
+              {MEMBER_JOURNEY_STEPS.map((step, i) => {
+                const isLast = i === MEMBER_JOURNEY_STEPS.length - 1;
+                return (
+                  <View key={step.title} style={s.timelineRow}>
+                    <View style={s.timelineLeft}>
+                      <View style={s.timelineDot}>
+                        <Text style={s.timelineDotNumber}>
+                          {String(i + 1).padStart(2, '0')}
+                        </Text>
+                      </View>
+                      {!isLast && <View style={s.timelineConnector} />}
+                    </View>
+                    <View style={s.timelineCard}>
+                      <Text style={s.timelineStepEyebrow}>
+                        STEP {String(i + 1).padStart(2, '0')}
+                      </Text>
+                      <Text style={s.timelineStepTitle}>{step.title}</Text>
+                      <Text style={s.timelineStepBody}>{step.body}</Text>
+                      <View style={s.coachFocusBox}>
+                        <Text style={s.coachFocusLabel}>COACH FOCUS</Text>
+                        <Text style={s.coachFocusText}>{step.coachFocus}</Text>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>
+                What the member needs from the coach.
+              </Text>
+              <Text style={s.sectionBody}>
+                Four things every member is quietly asking for.
+              </Text>
+            </View>
+
+            <View style={{ gap: 10 }}>
+              {MEMBER_NEEDS.map((n) => (
+                <View key={n.title} style={s.needsCard}>
+                  <Text style={s.needsTitle}>{n.title}</Text>
+                  <Text style={s.needsBody}>{n.body}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.responseLabel}>
+                When a member is new and unsure, what do you want them to feel
+                after their first interaction with you?
+              </Text>
+              <TextInput
+                value={memberFirstInteractionGoalDraft}
+                onChangeText={setMemberFirstInteractionGoalDraft}
+                placeholder="A short reflection…"
+                placeholderTextColor="#4A5568"
+                multiline
+                style={s.textArea}
+              />
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.scenarioEyebrow}>
+                {MEMBER_EXPERIENCE_SCENARIO.eyebrow}
+              </Text>
+              <Text style={s.responseLabel}>
+                {MEMBER_EXPERIENCE_SCENARIO.title}
+              </Text>
+              <Text style={s.sectionBody}>
+                {MEMBER_EXPERIENCE_SCENARIO.prompt}
+              </Text>
+              <View style={s.optionList}>
+                {MEMBER_EXPERIENCE_SCENARIO.options.map((opt) => {
+                  const picked =
+                    memberExperienceScenarioDraft === opt.letter;
+                  return (
+                    <Pressable
+                      key={opt.letter}
+                      onPress={() =>
+                        setMemberExperienceScenarioDraft(opt.letter)
+                      }
+                      style={[s.optionRow, picked && s.optionRowSelected]}
+                    >
+                      <View style={[s.radio, picked && s.radioSelected]}>
+                        {picked && <View style={s.radioDot} />}
+                      </View>
+                      <Text style={s.scenarioLetter}>{opt.letter}.</Text>
+                      <Text
+                        style={[
+                          s.optionText,
+                          picked && s.optionTextSelected,
+                        ]}
+                      >
+                        {opt.text}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {memberExperienceScenarioDraft ===
+                MEMBER_EXPERIENCE_SCENARIO.correct && (
+                <View style={s.scenarioFeedbackCorrect}>
+                  <Icon name="check-circle" size={16} color={GREEN} />
+                  <Text style={s.scenarioFeedbackCorrectText}>
+                    {MEMBER_EXPERIENCE_SCENARIO.correctFeedback}
+                  </Text>
+                </View>
+              )}
+              {!!memberExperienceScenarioDraft &&
+                memberExperienceScenarioDraft !==
+                  MEMBER_EXPERIENCE_SCENARIO.correct && (
+                  <View style={s.scenarioFeedbackTryAgain}>
+                    <Text style={s.scenarioFeedbackTryAgainText}>
+                      {MEMBER_EXPERIENCE_SCENARIO.wrongFeedback}
+                    </Text>
+                  </View>
+                )}
+            </View>
+          </>
+        )}
+
         {/* Placeholder body for modules without dedicated content yet */}
-        {['memberExperience', 'coachExperience', 'howWeCoach', 'moneyGrowth', 'apprenticeshipPath', 'setupChecklist'].includes(module.id) && (
+        {['coachExperience', 'howWeCoach', 'moneyGrowth', 'apprenticeshipPath', 'setupChecklist'].includes(module.id) && (
           <View style={s.placeholderBlock}>
             <Text style={s.placeholderText}>
               Deeper content for this module is coming soon. For now, read the intro above,
@@ -2024,5 +2356,118 @@ const s = StyleSheet.create({
     fontFamily: FB,
     lineHeight: 20,
     textAlign: 'center',
+  },
+
+  // Member Experience — journey timeline
+  timeline: {
+    gap: 0,
+  },
+  timelineRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 12,
+  },
+  timelineLeft: {
+    width: 36,
+    alignItems: 'center',
+  },
+  timelineDot: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: 'rgba(245,166,35,0.55)',
+    backgroundColor: 'rgba(245,166,35,0.10)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  timelineDotNumber: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: GOLD,
+    fontFamily: FH,
+  },
+  timelineConnector: {
+    flex: 1,
+    width: 2,
+    backgroundColor: 'rgba(245,166,35,0.20)',
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  timelineCard: {
+    flex: 1,
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 14,
+    padding: 14,
+    gap: 6,
+    marginBottom: 12,
+  },
+  timelineStepEyebrow: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: GOLD,
+    fontFamily: FB,
+  },
+  timelineStepTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: FG,
+    fontFamily: FH,
+    lineHeight: 21,
+  },
+  timelineStepBody: {
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 19,
+  },
+  coachFocusBox: {
+    marginTop: 6,
+    backgroundColor: 'rgba(245,166,35,0.06)',
+    borderLeftWidth: 2,
+    borderLeftColor: 'rgba(245,166,35,0.55)',
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 3,
+  },
+  coachFocusLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: GOLD,
+    fontFamily: FB,
+  },
+  coachFocusText: {
+    fontSize: 13,
+    color: FG,
+    fontFamily: FB,
+    lineHeight: 18,
+    fontWeight: '500',
+  },
+
+  // Member Experience — needs cards
+  needsCard: {
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 12,
+    padding: 14,
+    gap: 4,
+  },
+  needsTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: GOLD,
+    fontFamily: FH,
+  },
+  needsBody: {
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 19,
   },
 });
