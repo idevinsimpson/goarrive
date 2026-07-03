@@ -1879,7 +1879,18 @@ export default function CoachLaunchScreen() {
   // ── Phase 10B — Coach Agreement submit ──────────────────────────────────────
   async function submitCoachAgreement() {
     if (!coachId || !progress) return;
-    if (signedAgreement) return; // already signed — client-immutable
+    if (signedAgreement) {
+      if (signedAgreement.agreementVersion !== COACH_AGREEMENT_VERSION) {
+        // A prior-version record occupies coach_agreements/{coachId}. The
+        // doc is client-immutable (rules: update/delete false), so signing
+        // the current version requires an admin to remove the old record.
+        setAgreementSubmitError(
+          'A previous agreement version is on file. It must be removed by ' +
+            'a GoArrive admin before the current version can be signed.'
+        );
+      }
+      return; // already signed — client-immutable
+    }
     if (!isSigningAsSelf) {
       // Admin impersonation cannot sign — legal signature must come from
       // the actual coach account owner. Firestore rules also enforce
@@ -4628,7 +4639,17 @@ function AgreementModule({
   }, [expandedSectionId, scrollRef]);
 
   const alreadySigned =
-    !!signedAgreement && signedAgreement.status === 'signed';
+    !!signedAgreement &&
+    signedAgreement.status === 'signed' &&
+    signedAgreement.agreementVersion === COACH_AGREEMENT_VERSION;
+  // Signed record from an earlier agreement version — do NOT treat as
+  // current signed state. The coach must review + sign the current version.
+  const staleSignedVersion =
+    !!signedAgreement &&
+    signedAgreement.status === 'signed' &&
+    signedAgreement.agreementVersion !== COACH_AGREEMENT_VERSION
+      ? signedAgreement.agreementVersion || 'unknown'
+      : null;
 
   if (alreadySigned) {
     const signedName =
@@ -4856,6 +4877,24 @@ function AgreementModule({
 
   return (
     <>
+      {staleSignedVersion ? (
+        <View style={s.impersonationBlockCard}>
+          <View style={s.impersonationBlockIconWrap}>
+            <Icon name="alert-circle" size={22} color={GOLD} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.impersonationBlockTitle}>
+              Previous agreement version on file
+            </Text>
+            <Text style={s.impersonationBlockBody}>
+              A previous agreement version ({staleSignedVersion}) is on
+              file. The current agreement version must be reviewed and
+              signed. The previous record cannot be changed from the app —
+              contact GoArrive if you believe this is an error.
+            </Text>
+          </View>
+        </View>
+      ) : null}
       <View style={s.heroCard}>
         <Text style={s.heroEyebrow}>AGREEMENT</Text>
         <Text style={s.heroHeading}>
