@@ -6,7 +6,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { router } from 'expo-router';
 import { db } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
@@ -25,20 +25,22 @@ export default function CoachLaunchCard() {
 
   useEffect(() => {
     if (!coachId) return;
-    (async () => {
-      try {
-        const snap = await getDoc(doc(db, 'coach_launch', coachId));
+    const unsub = onSnapshot(
+      doc(db, 'coach_launch', coachId),
+      (snap) => {
         if (snap.exists()) {
           const data = snap.data() as any;
           const arr: string[] = Array.isArray(data.completedModuleIds) ? data.completedModuleIds : [];
           setCompletedCount(arr.length);
         }
-      } catch (err) {
+        setLoaded(true);
+      },
+      (err) => {
         console.error('[CoachLaunchCard] load error:', err);
-      } finally {
         setLoaded(true);
       }
-    })();
+    );
+    return unsub;
   }, [coachId]);
 
   if (!loaded || dismissed) return null;
