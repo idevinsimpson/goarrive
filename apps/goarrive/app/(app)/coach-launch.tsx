@@ -683,6 +683,212 @@ const HOW_WE_COACH_SCENARIO_MISSED: MemberScenario = {
     'Close, but think about care and accountability together. We do not ignore the miss, and we do not bury the member in shame.',
 };
 
+interface GrowthPrinciple {
+  name: string;
+  definition: string;
+  body: string;
+}
+
+const GROWTH_PRINCIPLES: GrowthPrinciple[] = [
+  {
+    name: 'Member Engagement',
+    definition:
+      'Growth starts with serving members well and helping them stay consistent.',
+    body:
+      'The strongest growth comes from trust, outcomes, communication, and care \u2014 not pressure.',
+  },
+  {
+    name: 'Progressive Compensation',
+    definition:
+      'As active member count grows, the coach share increases.',
+    body:
+      'The model is designed to reward coaches as they grow their member base and continue serving with excellence.',
+  },
+  {
+    name: 'Collaboration',
+    definition:
+      'GoArrive rewards coaches who connect members to the right coach and support fellow coaches.',
+    body: 'A support-driven coaching culture means the best fit wins.',
+  },
+  {
+    name: 'Long-Term Contribution',
+    definition:
+      'Coaches who recruit, mentor, and build well can participate in broader growth opportunities.',
+    body:
+      'Profit sharing is designed to recognize the value of helping grow the coaching community.',
+  },
+];
+
+interface CompensationTier {
+  title: string;
+  range: string;
+  split: string;
+  body: string;
+}
+
+const PROGRESSIVE_TIERS: CompensationTier[] = [
+  {
+    title: 'Tier 1',
+    range: '1\u20133 active members',
+    split: '60% coach / 40% G\u27B2A',
+    body:
+      'This is the starting tier as a coach begins serving active members inside GoArrive.',
+  },
+  {
+    title: 'Tier 2',
+    range: '4\u20136 active members',
+    split: '65% coach / 35% G\u27B2A',
+    body:
+      'This tier reflects growth in member engagement and active coaching responsibility.',
+  },
+  {
+    title: 'Tier 3',
+    range: '7+ active members',
+    split: '70% coach / 30% G\u27B2A',
+    body: 'This tier rewards continued growth and sustained member service.',
+  },
+];
+
+interface SimpleCard {
+  title: string;
+  body: string;
+}
+
+const EARNINGS_CAP_CARDS: SimpleCard[] = [
+  {
+    title: 'First-year member revenue',
+    body:
+      'The cap is tied to revenue from members in their first year with GoArrive.',
+  },
+  {
+    title: 'Annual reset',
+    body: 'The cap resets each year on January 1.',
+  },
+  {
+    title: 'Prorated starts',
+    body:
+      'If a coach starts mid-year, the annual cap is prorated based on the remaining months.',
+  },
+];
+
+interface GrowthPathway {
+  title: string;
+  body: string;
+  rule?: string;
+}
+
+const GROWTH_PATHWAYS: GrowthPathway[] = [
+  {
+    title: 'Serve members well',
+    body:
+      'Strong member engagement creates trust, retention, and opportunities for growth.',
+  },
+  {
+    title: 'Invite new members',
+    body:
+      'Members who love the experience may invite others into the community. The member referral reward creates a clear structure for celebrating that growth.',
+  },
+  {
+    title: 'Connect the right fit',
+    body:
+      'When another coach is a better fit for a new member, the inter-coach referral program supports collaboration and shared success.',
+    rule:
+      'Eligible inter-coach member referrals are 7% of net revenue for the first year, when recorded in advance and subject to the formal program terms.',
+  },
+  {
+    title: 'Recruit and mentor coaches',
+    body:
+      'Coaches who help grow the coaching community can participate in profit sharing from direct and secondary recruits, subject to caps and eligibility.',
+    rule:
+      'Direct recruits can generate 5% profit share, and secondary recruits can generate 3% profit share, subject to the recruited coach\u2019s earnings cap and formal program terms.',
+  },
+];
+
+const MONEY_GROWTH_CLARITY_POINTS: string[] = [
+  'This is a high-level education module.',
+  'This is not a live earnings calculator.',
+  'This is not a guarantee of income.',
+  'Final terms are governed by the Coach Agreement.',
+  'GoArrive may adjust program terms with proper notice.',
+  'Coaches should review the final agreement carefully before signing.',
+];
+
+const MONEY_GROWTH_INTEREST_OPTIONS = [
+  'Progressive compensation',
+  'Earnings cap',
+  'Member referral reward',
+  'Inter-coach referrals',
+  'Profit sharing',
+  'Tracking and transparency',
+  'Member engagement strategy',
+];
+
+const MONEY_GROWTH_SCENARIO_TIER: MemberScenario = {
+  eyebrow: 'SCENARIO 1',
+  title: 'You reach a new member-count tier.',
+  prompt:
+    'A coach grows from 3 active members to 4 active members. What should they understand about the progressive compensation model?',
+  options: [
+    {
+      letter: 'A',
+      text:
+        'Their coach share may increase according to the tier structure and current GoArrive records.',
+    },
+    {
+      letter: 'B',
+      text:
+        'Their pay is automatically guaranteed forever at the higher tier no matter what happens.',
+    },
+    {
+      letter: 'C',
+      text:
+        'The tier change means they no longer need to follow GoArrive standards.',
+    },
+    {
+      letter: 'D',
+      text:
+        'The tier change creates a custom split they can negotiate per member.',
+    },
+  ],
+  correct: 'A',
+  correctFeedback:
+    'That is the G\u27B2A way. Progressive compensation rewards growth, but tier movement is still based on active member count, current records, and the formal program terms.',
+  wrongFeedback:
+    'Close, but keep the structure clear. Tier movement is based on active member count and GoArrive records, not custom exceptions or guarantees.',
+};
+
+const MONEY_GROWTH_SCENARIO_REFERRAL: MemberScenario = {
+  eyebrow: 'SCENARIO 2',
+  title: 'Another coach is the better fit.',
+  prompt:
+    'You meet a prospective member, but another GoArrive coach is clearly a better fit. What response best reflects the money and culture model together?',
+  options: [
+    {
+      letter: 'A',
+      text: 'Keep the member no matter what because you found them first.',
+    },
+    {
+      letter: 'B',
+      text:
+        'Connect the member to the better-fit coach and make sure the referral is recorded in advance if eligible.',
+    },
+    {
+      letter: 'C',
+      text:
+        'Wait until after the member signs up, then mention the referral later.',
+    },
+    {
+      letter: 'D',
+      text: 'Avoid collaboration because it reduces your opportunity.',
+    },
+  ],
+  correct: 'B',
+  correctFeedback:
+    'That is the G\u27B2A way. The right-fit coach serves the member best, and the inter-coach referral structure supports collaboration when properly recorded and eligible.',
+  wrongFeedback:
+    'Close, but remember: GoArrive is building a support-driven coaching culture. Collaboration matters, and eligible referrals need to be recorded in advance.',
+};
+
 const COACH_EXPERIENCE_SCENARIO: MemberScenario = {
   eyebrow: 'SCENARIO',
   title: 'Your coaching day feels scattered.',
@@ -756,6 +962,10 @@ interface CoachLaunchDoc {
     coachingCommunicationHabit?: string;
     howWeCoachScenarioUnsafeForm?: string;
     howWeCoachScenarioMissedWorkouts?: string;
+    moneyGrowthInterest?: string;
+    moneyGrowthQuestion?: string;
+    moneyGrowthScenarioTier?: string;
+    moneyGrowthScenarioReferral?: string;
   };
   startedAt?: any;
   updatedAt?: any;
@@ -821,6 +1031,12 @@ export default function CoachLaunchScreen() {
     useState('');
   const [howWeCoachScenarioMissedDraft, setHowWeCoachScenarioMissedDraft] =
     useState('');
+  const [moneyGrowthInterestDraft, setMoneyGrowthInterestDraft] = useState('');
+  const [moneyGrowthQuestionDraft, setMoneyGrowthQuestionDraft] = useState('');
+  const [moneyGrowthScenarioTierDraft, setMoneyGrowthScenarioTierDraft] =
+    useState('');
+  const [moneyGrowthScenarioReferralDraft, setMoneyGrowthScenarioReferralDraft] =
+    useState('');
 
   const agreementUrl = (process.env.EXPO_PUBLIC_COACH_AGREEMENT_URL || '').trim();
 
@@ -880,6 +1096,18 @@ export default function CoachLaunchScreen() {
           );
           setHowWeCoachScenarioMissedDraft(
             data.responses?.howWeCoachScenarioMissedWorkouts ?? ''
+          );
+          setMoneyGrowthInterestDraft(
+            data.responses?.moneyGrowthInterest ?? ''
+          );
+          setMoneyGrowthQuestionDraft(
+            data.responses?.moneyGrowthQuestion ?? ''
+          );
+          setMoneyGrowthScenarioTierDraft(
+            data.responses?.moneyGrowthScenarioTier ?? ''
+          );
+          setMoneyGrowthScenarioReferralDraft(
+            data.responses?.moneyGrowthScenarioReferral ?? ''
           );
         } else {
           setProgress(emptyDoc(coachId));
@@ -1020,6 +1248,21 @@ export default function CoachLaunchScreen() {
           howWeCoachScenarioMissedDraft;
       }
     }
+    if (moduleId === 'moneyGrowth') {
+      if (moneyGrowthInterestDraft) {
+        nextResponses.moneyGrowthInterest = moneyGrowthInterestDraft;
+      }
+      if (moneyGrowthQuestionDraft.trim()) {
+        nextResponses.moneyGrowthQuestion = moneyGrowthQuestionDraft.trim();
+      }
+      if (moneyGrowthScenarioTierDraft) {
+        nextResponses.moneyGrowthScenarioTier = moneyGrowthScenarioTierDraft;
+      }
+      if (moneyGrowthScenarioReferralDraft) {
+        nextResponses.moneyGrowthScenarioReferral =
+          moneyGrowthScenarioReferralDraft;
+      }
+    }
 
     const nextCompleted = alreadyComplete ? completed : [...completed, moduleId];
     // Point currentModuleId at the next un-completed module (or same if this was the last)
@@ -1146,6 +1389,14 @@ export default function CoachLaunchScreen() {
             setHowWeCoachScenarioUnsafeDraft={setHowWeCoachScenarioUnsafeDraft}
             howWeCoachScenarioMissedDraft={howWeCoachScenarioMissedDraft}
             setHowWeCoachScenarioMissedDraft={setHowWeCoachScenarioMissedDraft}
+            moneyGrowthInterestDraft={moneyGrowthInterestDraft}
+            setMoneyGrowthInterestDraft={setMoneyGrowthInterestDraft}
+            moneyGrowthQuestionDraft={moneyGrowthQuestionDraft}
+            setMoneyGrowthQuestionDraft={setMoneyGrowthQuestionDraft}
+            moneyGrowthScenarioTierDraft={moneyGrowthScenarioTierDraft}
+            setMoneyGrowthScenarioTierDraft={setMoneyGrowthScenarioTierDraft}
+            moneyGrowthScenarioReferralDraft={moneyGrowthScenarioReferralDraft}
+            setMoneyGrowthScenarioReferralDraft={setMoneyGrowthScenarioReferralDraft}
             agreementUrl={agreementUrl}
             onComplete={() => completeModule(activeModule.id)}
             onBack={() => setActiveModuleId(null)}
@@ -1409,6 +1660,14 @@ interface ModuleDetailProps {
   setHowWeCoachScenarioUnsafeDraft: (v: string) => void;
   howWeCoachScenarioMissedDraft: string;
   setHowWeCoachScenarioMissedDraft: (v: string) => void;
+  moneyGrowthInterestDraft: string;
+  setMoneyGrowthInterestDraft: (v: string) => void;
+  moneyGrowthQuestionDraft: string;
+  setMoneyGrowthQuestionDraft: (v: string) => void;
+  moneyGrowthScenarioTierDraft: string;
+  setMoneyGrowthScenarioTierDraft: (v: string) => void;
+  moneyGrowthScenarioReferralDraft: string;
+  setMoneyGrowthScenarioReferralDraft: (v: string) => void;
   agreementUrl: string;
   onComplete: () => void;
   onBack: () => void;
@@ -1453,6 +1712,14 @@ function ModuleDetail({
   setHowWeCoachScenarioUnsafeDraft,
   howWeCoachScenarioMissedDraft,
   setHowWeCoachScenarioMissedDraft,
+  moneyGrowthInterestDraft,
+  setMoneyGrowthInterestDraft,
+  moneyGrowthQuestionDraft,
+  setMoneyGrowthQuestionDraft,
+  moneyGrowthScenarioTierDraft,
+  setMoneyGrowthScenarioTierDraft,
+  moneyGrowthScenarioReferralDraft,
+  setMoneyGrowthScenarioReferralDraft,
   agreementUrl,
   onComplete,
   onBack,
@@ -1522,6 +1789,14 @@ function ModuleDetail({
         coachingCommunicationHabitDraft.trim().length > 0 &&
         howWeCoachScenarioUnsafeDraft === 'B' &&
         howWeCoachScenarioMissedDraft === 'C'
+      );
+    }
+    if (module.id === 'moneyGrowth') {
+      return (
+        !!moneyGrowthInterestDraft &&
+        moneyGrowthQuestionDraft.trim().length > 0 &&
+        moneyGrowthScenarioTierDraft === 'A' &&
+        moneyGrowthScenarioReferralDraft === 'B'
       );
     }
     return true;
@@ -2505,8 +2780,328 @@ function ModuleDetail({
           </>
         )}
 
+        {/* Money + Growth — education only: principles, tiers, cap, pathways, reflection, 2 scenarios */}
+        {module.id === 'moneyGrowth' && (
+          <>
+            <View style={s.heroCard}>
+              <Text style={s.heroEyebrow}>MONEY + GROWTH</Text>
+              <Text style={s.heroHeading}>
+                Growth should be clear, shared, and trackable.
+              </Text>
+              <Text style={s.heroBody}>
+                Inside GoArrive, the money model is designed to reward member
+                engagement, coaching growth, collaboration, and long-term
+                contribution — while keeping the mission bigger than the money.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>
+                Coaches are stakeholders in G➲A's success.
+              </Text>
+              <Text style={s.sectionBody}>
+                That means growth should not feel mysterious. You should
+                understand how member count affects your progressive
+                compensation, how the earnings cap rewards momentum, how
+                referrals support collaboration, and how profit sharing creates
+                opportunity for coaches who help build the coaching community.
+              </Text>
+              <Text style={s.sectionBody}>
+                This module is not a live earnings calculator or a guarantee of
+                income. It is a high-level guide to help you understand the
+                structure before you review the formal agreement.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>Growth principles.</Text>
+              <Text style={s.sectionBody}>
+                Four ideas that shape how the money model works.
+              </Text>
+            </View>
+
+            <View style={{ gap: 10 }}>
+              {GROWTH_PRINCIPLES.map((p, i) => (
+                <View key={p.name} style={s.principleCard}>
+                  <Text style={s.principleNumber}>
+                    {String(i + 1).padStart(2, '0')}
+                  </Text>
+                  <Text style={s.principleName}>{p.name}</Text>
+                  <Text style={s.principleDefinition}>{p.definition}</Text>
+                  <Text style={s.principleBody}>{p.body}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>
+                Progressive compensation tiers.
+              </Text>
+              <Text style={s.sectionBody}>
+                As your active member count grows, the coach share grows with
+                it.
+              </Text>
+            </View>
+
+            <View style={{ gap: 10 }}>
+              {PROGRESSIVE_TIERS.map((t) => (
+                <View key={t.title} style={s.tierCard}>
+                  <Text style={s.tierCardTitle}>{t.title}</Text>
+                  <Text style={s.tierCardRange}>{t.range}</Text>
+                  <View style={s.tierSplitBox}>
+                    <Text style={s.tierSplitLabel}>SPLIT</Text>
+                    <Text style={s.tierSplitValue}>{t.split}</Text>
+                  </View>
+                  <Text style={s.tierCardBody}>{t.body}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={s.fineNoteBox}>
+              <Text style={s.fineNoteText}>
+                Tier movement is based on active member count as reflected in
+                GoArrive records. Tier changes apply according to the formal
+                program terms and current system records.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>
+                The earnings cap rewards momentum.
+              </Text>
+              <Text style={s.sectionBody}>
+                The earnings cap is a yearly threshold tied to first-year member
+                revenue. Once a coach reaches the annual cap, the coach can
+                retain 100% of additional eligible first-year member revenue for
+                the applicable period, minus the monthly admin technology fee
+                and subject to the formal program terms.
+              </Text>
+            </View>
+
+            <View style={{ gap: 10 }}>
+              {EARNINGS_CAP_CARDS.map((c) => (
+                <View key={c.title} style={s.capCard}>
+                  <Text style={s.capCardTitle}>{c.title}</Text>
+                  <Text style={s.capCardBody}>{c.body}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={s.fineNoteBox}>
+              <Text style={s.fineNoteText}>
+                Referral obligations and program rules can still apply after the
+                cap is reached, as described in the formal agreement.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>
+                Ways growth can happen inside G➲A.
+              </Text>
+              <Text style={s.sectionBody}>
+                Four pathways that shape long-term growth.
+              </Text>
+            </View>
+
+            <View style={{ gap: 10 }}>
+              {GROWTH_PATHWAYS.map((p, i) => (
+                <View key={p.title} style={s.pathwayCard}>
+                  <Text style={s.pathwayNumber}>
+                    {String(i + 1).padStart(2, '0')}
+                  </Text>
+                  <Text style={s.pathwayTitle}>{p.title}</Text>
+                  <Text style={s.pathwayBody}>{p.body}</Text>
+                  {p.rule && (
+                    <View style={s.pathwayRuleBox}>
+                      <Text style={s.pathwayRuleLabel}>KEY RULE</Text>
+                      <Text style={s.pathwayRuleText}>{p.rule}</Text>
+                    </View>
+                  )}
+                </View>
+              ))}
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>
+                What this module is — and is not.
+              </Text>
+              <Text style={s.sectionBody}>
+                A quick clarity check before you keep going.
+              </Text>
+            </View>
+
+            <View style={s.clarityCard}>
+              {MONEY_GROWTH_CLARITY_POINTS.map((point) => (
+                <View key={point} style={s.clarityRow}>
+                  <Text style={s.clarityBullet}>•</Text>
+                  <Text style={s.clarityText}>{point}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.responseLabel}>
+                Which part of the GoArrive growth model are you most interested
+                in learning more about?
+              </Text>
+              <View style={s.optionList}>
+                {MONEY_GROWTH_INTEREST_OPTIONS.map((opt) => {
+                  const picked = moneyGrowthInterestDraft === opt;
+                  return (
+                    <Pressable
+                      key={opt}
+                      onPress={() => setMoneyGrowthInterestDraft(opt)}
+                      style={[s.optionRow, picked && s.optionRowSelected]}
+                    >
+                      <View style={[s.radio, picked && s.radioSelected]}>
+                        {picked && <View style={s.radioDot} />}
+                      </View>
+                      <Text
+                        style={[
+                          s.optionText,
+                          picked && s.optionTextSelected,
+                        ]}
+                      >
+                        {opt}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.responseLabel}>
+                What is one question you still have about money, growth, or
+                compensation?
+              </Text>
+              <TextInput
+                value={moneyGrowthQuestionDraft}
+                onChangeText={setMoneyGrowthQuestionDraft}
+                placeholder="A short reflection…"
+                placeholderTextColor="#4A5568"
+                multiline
+                style={s.textArea}
+              />
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.scenarioEyebrow}>
+                {MONEY_GROWTH_SCENARIO_TIER.eyebrow}
+              </Text>
+              <Text style={s.responseLabel}>
+                {MONEY_GROWTH_SCENARIO_TIER.title}
+              </Text>
+              <Text style={s.sectionBody}>
+                {MONEY_GROWTH_SCENARIO_TIER.prompt}
+              </Text>
+              <View style={s.optionList}>
+                {MONEY_GROWTH_SCENARIO_TIER.options.map((opt) => {
+                  const picked = moneyGrowthScenarioTierDraft === opt.letter;
+                  return (
+                    <Pressable
+                      key={opt.letter}
+                      onPress={() => setMoneyGrowthScenarioTierDraft(opt.letter)}
+                      style={[s.optionRow, picked && s.optionRowSelected]}
+                    >
+                      <View style={[s.radio, picked && s.radioSelected]}>
+                        {picked && <View style={s.radioDot} />}
+                      </View>
+                      <Text style={s.scenarioLetter}>{opt.letter}.</Text>
+                      <Text
+                        style={[
+                          s.optionText,
+                          picked && s.optionTextSelected,
+                        ]}
+                      >
+                        {opt.text}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {moneyGrowthScenarioTierDraft ===
+                MONEY_GROWTH_SCENARIO_TIER.correct && (
+                <View style={s.scenarioFeedbackCorrect}>
+                  <Icon name="check-circle" size={16} color={GREEN} />
+                  <Text style={s.scenarioFeedbackCorrectText}>
+                    {MONEY_GROWTH_SCENARIO_TIER.correctFeedback}
+                  </Text>
+                </View>
+              )}
+              {!!moneyGrowthScenarioTierDraft &&
+                moneyGrowthScenarioTierDraft !==
+                  MONEY_GROWTH_SCENARIO_TIER.correct && (
+                  <View style={s.scenarioFeedbackTryAgain}>
+                    <Text style={s.scenarioFeedbackTryAgainText}>
+                      {MONEY_GROWTH_SCENARIO_TIER.wrongFeedback}
+                    </Text>
+                  </View>
+                )}
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.scenarioEyebrow}>
+                {MONEY_GROWTH_SCENARIO_REFERRAL.eyebrow}
+              </Text>
+              <Text style={s.responseLabel}>
+                {MONEY_GROWTH_SCENARIO_REFERRAL.title}
+              </Text>
+              <Text style={s.sectionBody}>
+                {MONEY_GROWTH_SCENARIO_REFERRAL.prompt}
+              </Text>
+              <View style={s.optionList}>
+                {MONEY_GROWTH_SCENARIO_REFERRAL.options.map((opt) => {
+                  const picked =
+                    moneyGrowthScenarioReferralDraft === opt.letter;
+                  return (
+                    <Pressable
+                      key={opt.letter}
+                      onPress={() =>
+                        setMoneyGrowthScenarioReferralDraft(opt.letter)
+                      }
+                      style={[s.optionRow, picked && s.optionRowSelected]}
+                    >
+                      <View style={[s.radio, picked && s.radioSelected]}>
+                        {picked && <View style={s.radioDot} />}
+                      </View>
+                      <Text style={s.scenarioLetter}>{opt.letter}.</Text>
+                      <Text
+                        style={[
+                          s.optionText,
+                          picked && s.optionTextSelected,
+                        ]}
+                      >
+                        {opt.text}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {moneyGrowthScenarioReferralDraft ===
+                MONEY_GROWTH_SCENARIO_REFERRAL.correct && (
+                <View style={s.scenarioFeedbackCorrect}>
+                  <Icon name="check-circle" size={16} color={GREEN} />
+                  <Text style={s.scenarioFeedbackCorrectText}>
+                    {MONEY_GROWTH_SCENARIO_REFERRAL.correctFeedback}
+                  </Text>
+                </View>
+              )}
+              {!!moneyGrowthScenarioReferralDraft &&
+                moneyGrowthScenarioReferralDraft !==
+                  MONEY_GROWTH_SCENARIO_REFERRAL.correct && (
+                  <View style={s.scenarioFeedbackTryAgain}>
+                    <Text style={s.scenarioFeedbackTryAgainText}>
+                      {MONEY_GROWTH_SCENARIO_REFERRAL.wrongFeedback}
+                    </Text>
+                  </View>
+                )}
+            </View>
+          </>
+        )}
+
         {/* Placeholder body for modules without dedicated content yet */}
-        {['moneyGrowth', 'apprenticeshipPath', 'setupChecklist'].includes(module.id) && (
+        {['apprenticeshipPath', 'setupChecklist'].includes(module.id) && (
           <View style={s.placeholderBlock}>
             <Text style={s.placeholderText}>
               Deeper content for this module is coming soon. For now, read the intro above,
@@ -3553,5 +4148,214 @@ const s = StyleSheet.create({
     fontFamily: FB,
     lineHeight: 18,
     fontWeight: '500',
+  },
+
+  // Money + Growth — principle cards
+  principleCard: {
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 14,
+    padding: 14,
+    gap: 4,
+  },
+  principleNumber: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: GOLD,
+    fontFamily: FH,
+    letterSpacing: 0.5,
+  },
+  principleName: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: FG,
+    fontFamily: FH,
+    lineHeight: 21,
+  },
+  principleDefinition: {
+    fontSize: 13,
+    color: FG,
+    fontFamily: FB,
+    lineHeight: 19,
+    fontWeight: '500',
+  },
+  principleBody: {
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 19,
+  },
+
+  // Money + Growth — progressive compensation tier cards
+  tierCard: {
+    backgroundColor: 'rgba(245,166,35,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.30)',
+    borderRadius: 14,
+    padding: 14,
+    gap: 6,
+  },
+  tierCardTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: GOLD,
+    fontFamily: FH,
+    letterSpacing: 0.5,
+  },
+  tierCardRange: {
+    fontSize: 14,
+    color: FG,
+    fontFamily: FB,
+    fontWeight: '600',
+  },
+  tierSplitBox: {
+    backgroundColor: 'rgba(126,211,33,0.06)',
+    borderLeftWidth: 2,
+    borderLeftColor: 'rgba(126,211,33,0.55)',
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 2,
+  },
+  tierSplitLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: GREEN,
+    fontFamily: FB,
+  },
+  tierSplitValue: {
+    fontSize: 14,
+    color: FG,
+    fontFamily: FB,
+    fontWeight: '700',
+  },
+  tierCardBody: {
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 19,
+  },
+
+  // Money + Growth — earnings cap sub cards
+  capCard: {
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 12,
+    padding: 12,
+    gap: 4,
+  },
+  capCardTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: GOLD,
+    fontFamily: FH,
+  },
+  capCardBody: {
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 19,
+  },
+
+  // Money + Growth — fine-print note box
+  fineNoteBox: {
+    marginTop: 4,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  fineNoteText: {
+    fontSize: 12,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 17,
+    fontStyle: 'italic',
+  },
+
+  // Money + Growth — pathway cards
+  pathwayCard: {
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 14,
+    padding: 14,
+    gap: 6,
+  },
+  pathwayNumber: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: GOLD,
+    fontFamily: FH,
+    letterSpacing: 0.5,
+  },
+  pathwayTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: FG,
+    fontFamily: FH,
+    lineHeight: 21,
+  },
+  pathwayBody: {
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 19,
+  },
+  pathwayRuleBox: {
+    marginTop: 6,
+    backgroundColor: 'rgba(74,144,226,0.06)',
+    borderLeftWidth: 2,
+    borderLeftColor: 'rgba(74,144,226,0.55)',
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 3,
+  },
+  pathwayRuleLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: BLUE,
+    fontFamily: FB,
+  },
+  pathwayRuleText: {
+    fontSize: 13,
+    color: FG,
+    fontFamily: FB,
+    lineHeight: 18,
+    fontWeight: '500',
+  },
+
+  // Money + Growth — clarity card
+  clarityCard: {
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 14,
+    padding: 14,
+    gap: 8,
+  },
+  clarityRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'flex-start',
+  },
+  clarityBullet: {
+    fontSize: 14,
+    color: GOLD,
+    fontFamily: FB,
+    lineHeight: 19,
+    fontWeight: '700',
+  },
+  clarityText: {
+    flex: 1,
+    fontSize: 13,
+    color: FG,
+    fontFamily: FB,
+    lineHeight: 19,
   },
 });
