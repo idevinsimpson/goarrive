@@ -4671,21 +4671,23 @@ function AgreementModule({
         {signedAgreement.signatureDataUrl && Platform.OS === 'web' ? (
           <View style={s.signedSignatureWrap}>
             <Text style={s.signedSignatureLabel}>Signature</Text>
-            {React.createElement('img', {
-              src: signedAgreement.signatureDataUrl,
-              alt: 'Signed signature',
-              style: {
-                display: 'block',
-                width: '100%',
-                maxHeight: 180,
-                objectFit: 'contain',
-                backgroundColor: '#ffffff',
-                borderRadius: 8,
-                borderWidth: 1,
-                borderColor: BORDER,
-                borderStyle: 'solid',
-              },
-            })}
+            <View style={s.signedSignatureFrame}>
+              {React.createElement('img', {
+                src: signedAgreement.signatureDataUrl,
+                alt: 'Signed signature',
+                style: {
+                  display: 'block',
+                  width: '100%',
+                  maxHeight: 180,
+                  objectFit: 'contain',
+                  backgroundColor: '#ffffff',
+                  // Invert renders dark strokes as white on a black
+                  // background — matches the app's dark theme. Underlying
+                  // PNG data is unchanged.
+                  filter: 'invert(1)',
+                },
+              })}
+            </View>
           </View>
         ) : null}
 
@@ -6934,6 +6936,12 @@ const s = StyleSheet.create({
     marginTop: 4,
     marginBottom: 8,
     gap: 6,
+  },
+  signedSignatureFrame: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: BORDER,
+    overflow: 'hidden',
   },
   signedSignatureLabel: {
     fontSize: 12,
