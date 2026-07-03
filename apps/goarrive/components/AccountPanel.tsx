@@ -49,7 +49,7 @@ interface MenuItem {
 }
 
 export default function AccountPanel({ visible, onClose }: Props) {
-  const { user, claims, signOut } = useAuth();
+  const { user, effectiveUid, claims, signOut } = useAuth();
   const slideAnim = useRef(new Animated.Value(PANEL_WIDTH)).current;
   const [toastMsg, setToastMsg] = useState('');
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -92,10 +92,10 @@ export default function AccountPanel({ visible, onClose }: Props) {
 
   // Load coach's personal Zoom from coach_brands on mount
   useEffect(() => {
-    if (!user?.uid) return;
+    if (!effectiveUid) return;
     (async () => {
       try {
-        const brandDoc = await getDoc(doc(db, 'coach_brands', user.uid));
+        const brandDoc = await getDoc(doc(db, 'coach_brands', effectiveUid));
         if (brandDoc.exists()) {
           const data = brandDoc.data();
           if (data.personalZoom) {
@@ -108,14 +108,14 @@ export default function AccountPanel({ visible, onClose }: Props) {
         console.warn('Failed to load personal Zoom:', e);
       }
     })();
-  }, [user?.uid]);
+  }, [effectiveUid]);
 
   async function handleSaveZoom() {
-    if (!user?.uid || !zoomEmail.trim()) return;
+    if (!effectiveUid || !zoomEmail.trim()) return;
     setZoomLoading(true);
     try {
       // Save to coach_brands
-      await setDoc(doc(db, 'coach_brands', user.uid), {
+      await setDoc(doc(db, 'coach_brands', effectiveUid), {
         personalZoom: {
           email: zoomEmail.trim(),
           label: zoomLabel.trim() || 'My Zoom',

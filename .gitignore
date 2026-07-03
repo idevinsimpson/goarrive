@@ -15,3 +15,9 @@ dist/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+# Debug/ad-hoc scripts that may contain secrets or personal data
+functions/check-zoom-*.js
+functions/create-zoom-test-session.js
+functions/zoom-disable-ai-companion.js
+functions/zoom-inspect-account-settings.js
