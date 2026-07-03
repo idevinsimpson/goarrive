@@ -394,6 +394,147 @@ interface MemberScenario {
   wrongFeedback: string;
 }
 
+// ── Coach Experience content ──────────────────────────────────────────────────
+
+interface CommandCenterArea {
+  title: string;
+  body: string;
+  coachFocus: string;
+}
+
+const COMMAND_CENTER_AREAS: CommandCenterArea[] = [
+  {
+    title: 'Start with what needs attention.',
+    body:
+      'The Command Center gives you a home base for your coaching day. It should help you see progress, next steps, member activity, and where to go next.',
+    coachFocus:
+      'Open with purpose. Look for what needs attention before jumping into tasks.',
+  },
+  {
+    title: 'Know who you serve.',
+    body:
+      'The Members area gives you access to your roster and each member\u2019s details. This is where you stay connected to the people behind the plans.',
+    coachFocus:
+      'Treat each member profile like a relationship hub, not a database row.',
+  },
+  {
+    title: 'Turn the intake into a path.',
+    body:
+      'The plan-building workflow helps translate a member\u2019s goals, schedule, motivation, and constraints into a clear coaching path.',
+    coachFocus:
+      'Build plans that feel specific, realistic, and connected to the member\u2019s why.',
+  },
+  {
+    title: 'Create the work they will actually do.',
+    body:
+      'The Build area is where workouts, movements, and coaching resources come together. This is where structure becomes action.',
+    coachFocus:
+      'Keep the workout clear, safe, and easy for the member to follow.',
+  },
+  {
+    title: 'Create rhythm.',
+    body:
+      'Scheduling helps members know when to show up and helps coaches protect consistency.',
+    coachFocus:
+      'Use scheduling to reduce confusion and build momentum.',
+  },
+  {
+    title: 'Coach beyond the live moment.',
+    body:
+      'Sessions and recordings help you support form, consistency, and follow-through. The recording is not just a file. It is a chance to review, encourage, and improve.',
+    coachFocus:
+      'Use recordings for targeted feedback, not nitpicking.',
+  },
+  {
+    title: 'Stay operationally ready.',
+    body:
+      'Your account setup, connected tools, and profile details help keep the coaching experience smooth.',
+    coachFocus:
+      'Keep your setup clean so members experience confidence, not friction.',
+  },
+  {
+    title: 'Understand the business side.',
+    body:
+      'Billing and growth tools help coaches understand member engagement, earnings progress, and the financial side of coaching inside GoArrive.',
+    coachFocus:
+      'See money as stewardship of growth, not the center of the mission.',
+  },
+];
+
+const COMMAND_CENTER_AREA_LABELS = [
+  'Dashboard / Command Center',
+  'Members',
+  'Plan Builder',
+  'Build',
+  'Scheduling',
+  'Sessions + Recordings',
+  'Account + Setup',
+  'Billing + Growth',
+];
+
+interface CoachRhythmStep {
+  name: string;
+  body: string;
+}
+
+const COACH_RHYTHM: CoachRhythmStep[] = [
+  {
+    name: 'Review',
+    body:
+      'Look at who needs attention, what is coming up, and where members may be slipping.',
+  },
+  {
+    name: 'Prepare',
+    body:
+      'Check plans, workouts, sessions, and notes before the member experience begins.',
+  },
+  {
+    name: 'Coach',
+    body: 'Show up with presence, clarity, and care.',
+  },
+  {
+    name: 'Respond',
+    body:
+      'Use feedback, check-ins, and adjustments to help the member take the next step.',
+  },
+];
+
+const COACH_EXPERIENCE_HELPFUL_OPTIONS = [
+  'Command Center visibility',
+  'Member relationship hub',
+  'Plan Builder',
+  'Build tools',
+  'Scheduling',
+  'Sessions and recordings',
+  'Feedback and check-ins',
+  'Billing and growth visibility',
+];
+
+const COACH_EXPERIENCE_SCENARIO: MemberScenario = {
+  eyebrow: 'SCENARIO',
+  title: 'Your coaching day feels scattered.',
+  prompt:
+    'You open the app and have several things competing for your attention: a member missed a workout, another member has a session later today, and you still need to review a plan. What response best reflects the GoArrive Coach Experience?',
+  options: [
+    { letter: 'A', text: 'Jump into whichever task feels easiest first.' },
+    { letter: 'B', text: 'Ignore the app and handle things from memory.' },
+    {
+      letter: 'C',
+      text:
+        'Use the Command Center to identify what needs attention, prepare for the next session, and take the next clear step.',
+    },
+    {
+      letter: 'D',
+      text: 'Wait until the end of the day and try to handle everything at once.',
+    },
+  ],
+  correct: 'C',
+  correctFeedback:
+    'That is the G\u27B2A way. The Command Center exists to reduce scattered effort and help you coach with clarity, preparation, and timely follow-through.',
+  wrongFeedback:
+    'Close, but remember the goal: the app should help you reduce friction, see what matters, and take the next clear step.',
+};
+
 const MEMBER_EXPERIENCE_SCENARIO: MemberScenario = {
   eyebrow: 'SCENARIO',
   title: 'A member feels overwhelmed.',
@@ -435,6 +576,9 @@ interface CoachLaunchDoc {
     cultureScenarioCoachFit?: string;
     memberFirstInteractionGoal?: string;
     memberExperienceScenarioOverwhelmed?: string;
+    coachExperienceMostHelpful?: string;
+    coachCommandCenterHabit?: string;
+    coachExperienceScenarioScattered?: string;
   };
   startedAt?: any;
   updatedAt?: any;
@@ -487,6 +631,12 @@ export default function CoachLaunchScreen() {
     useState('');
   const [memberExperienceScenarioDraft, setMemberExperienceScenarioDraft] =
     useState('');
+  const [coachExperienceMostHelpfulDraft, setCoachExperienceMostHelpfulDraft] =
+    useState('');
+  const [coachCommandCenterHabitDraft, setCoachCommandCenterHabitDraft] =
+    useState('');
+  const [coachExperienceScenarioDraft, setCoachExperienceScenarioDraft] =
+    useState('');
 
   const agreementUrl = (process.env.EXPO_PUBLIC_COACH_AGREEMENT_URL || '').trim();
 
@@ -525,6 +675,15 @@ export default function CoachLaunchScreen() {
           );
           setMemberExperienceScenarioDraft(
             data.responses?.memberExperienceScenarioOverwhelmed ?? ''
+          );
+          setCoachExperienceMostHelpfulDraft(
+            data.responses?.coachExperienceMostHelpful ?? ''
+          );
+          setCoachCommandCenterHabitDraft(
+            data.responses?.coachCommandCenterHabit ?? ''
+          );
+          setCoachExperienceScenarioDraft(
+            data.responses?.coachExperienceScenarioScattered ?? ''
           );
         } else {
           setProgress(emptyDoc(coachId));
@@ -632,6 +791,20 @@ export default function CoachLaunchScreen() {
       if (memberExperienceScenarioDraft) {
         nextResponses.memberExperienceScenarioOverwhelmed =
           memberExperienceScenarioDraft;
+      }
+    }
+    if (moduleId === 'coachExperience') {
+      if (coachExperienceMostHelpfulDraft) {
+        nextResponses.coachExperienceMostHelpful =
+          coachExperienceMostHelpfulDraft;
+      }
+      if (coachCommandCenterHabitDraft.trim()) {
+        nextResponses.coachCommandCenterHabit =
+          coachCommandCenterHabitDraft.trim();
+      }
+      if (coachExperienceScenarioDraft) {
+        nextResponses.coachExperienceScenarioScattered =
+          coachExperienceScenarioDraft;
       }
     }
 
@@ -746,6 +919,12 @@ export default function CoachLaunchScreen() {
             setMemberFirstInteractionGoalDraft={setMemberFirstInteractionGoalDraft}
             memberExperienceScenarioDraft={memberExperienceScenarioDraft}
             setMemberExperienceScenarioDraft={setMemberExperienceScenarioDraft}
+            coachExperienceMostHelpfulDraft={coachExperienceMostHelpfulDraft}
+            setCoachExperienceMostHelpfulDraft={setCoachExperienceMostHelpfulDraft}
+            coachCommandCenterHabitDraft={coachCommandCenterHabitDraft}
+            setCoachCommandCenterHabitDraft={setCoachCommandCenterHabitDraft}
+            coachExperienceScenarioDraft={coachExperienceScenarioDraft}
+            setCoachExperienceScenarioDraft={setCoachExperienceScenarioDraft}
             agreementUrl={agreementUrl}
             onComplete={() => completeModule(activeModule.id)}
             onBack={() => setActiveModuleId(null)}
@@ -995,6 +1174,12 @@ interface ModuleDetailProps {
   setMemberFirstInteractionGoalDraft: (v: string) => void;
   memberExperienceScenarioDraft: string;
   setMemberExperienceScenarioDraft: (v: string) => void;
+  coachExperienceMostHelpfulDraft: string;
+  setCoachExperienceMostHelpfulDraft: (v: string) => void;
+  coachCommandCenterHabitDraft: string;
+  setCoachCommandCenterHabitDraft: (v: string) => void;
+  coachExperienceScenarioDraft: string;
+  setCoachExperienceScenarioDraft: (v: string) => void;
   agreementUrl: string;
   onComplete: () => void;
   onBack: () => void;
@@ -1025,6 +1210,12 @@ function ModuleDetail({
   setMemberFirstInteractionGoalDraft,
   memberExperienceScenarioDraft,
   setMemberExperienceScenarioDraft,
+  coachExperienceMostHelpfulDraft,
+  setCoachExperienceMostHelpfulDraft,
+  coachCommandCenterHabitDraft,
+  setCoachCommandCenterHabitDraft,
+  coachExperienceScenarioDraft,
+  setCoachExperienceScenarioDraft,
   agreementUrl,
   onComplete,
   onBack,
@@ -1079,6 +1270,13 @@ function ModuleDetail({
       return (
         memberFirstInteractionGoalDraft.trim().length > 0 &&
         memberExperienceScenarioDraft === 'C'
+      );
+    }
+    if (module.id === 'coachExperience') {
+      return (
+        !!coachExperienceMostHelpfulDraft &&
+        coachCommandCenterHabitDraft.trim().length > 0 &&
+        coachExperienceScenarioDraft === 'C'
       );
     }
     return true;
@@ -1620,8 +1818,195 @@ function ModuleDetail({
           </>
         )}
 
+        {/* Coach Experience — Command Center tour, coach rhythm, reflection, scenario */}
+        {module.id === 'coachExperience' && (
+          <>
+            <View style={s.heroCard}>
+              <Text style={s.heroEyebrow}>THE COACH EXPERIENCE</Text>
+              <Text style={s.heroHeading}>
+                Your Command Center for coaching well.
+              </Text>
+              <Text style={s.heroBody}>
+                GoArrive is designed to reduce scattered tools and help you see
+                what matters: who you serve, what they need next, and how to
+                keep them moving with clarity and care.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>
+                A strong coach needs a clear operating system.
+              </Text>
+              <Text style={s.sectionBody}>
+                A strong coach does not need more chaos. A strong coach needs a
+                clear operating system.
+              </Text>
+              <Text style={s.sectionBody}>
+                The Coach Experience inside G➲A brings your member management,
+                plan building, scheduling, movement resources, workout creation,
+                feedback, and growth tools into one connected environment.
+              </Text>
+              <Text style={s.sectionBody}>
+                The goal is not to make you stare at software all day. The goal
+                is to help you coach with more focus, more consistency, and less
+                friction.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>Command Center tour.</Text>
+              <Text style={s.sectionBody}>
+                Eight areas of the Command Center and what each one is for.
+              </Text>
+            </View>
+
+            <View style={{ gap: 10 }}>
+              {COMMAND_CENTER_AREAS.map((area, i) => (
+                <View key={COMMAND_CENTER_AREA_LABELS[i]} style={s.tourCard}>
+                  <View style={s.tourCardHeader}>
+                    <Text style={s.tourCardNumber}>
+                      {String(i + 1).padStart(2, '0')}
+                    </Text>
+                    <Text style={s.tourCardArea}>
+                      {COMMAND_CENTER_AREA_LABELS[i]}
+                    </Text>
+                  </View>
+                  <Text style={s.tourCardTitle}>{area.title}</Text>
+                  <Text style={s.tourCardBody}>{area.body}</Text>
+                  <View style={s.coachFocusBox}>
+                    <Text style={s.coachFocusLabel}>COACH FOCUS</Text>
+                    <Text style={s.coachFocusText}>{area.coachFocus}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>
+                A simple rhythm for coaching inside G➲A.
+              </Text>
+              <Text style={s.sectionBody}>
+                Four moves you make on repeat.
+              </Text>
+            </View>
+
+            <View style={s.rhythmGrid}>
+              {COACH_RHYTHM.map((r, i) => (
+                <View key={r.name} style={s.rhythmCard}>
+                  <Text style={s.rhythmCardNumber}>
+                    {String(i + 1).padStart(2, '0')}
+                  </Text>
+                  <Text style={s.rhythmCardName}>{r.name}</Text>
+                  <Text style={s.rhythmCardBody}>{r.body}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.responseLabel}>
+                Which part of the Coach Experience do you think will help you
+                serve members most effectively?
+              </Text>
+              <View style={s.optionList}>
+                {COACH_EXPERIENCE_HELPFUL_OPTIONS.map((opt) => {
+                  const picked = coachExperienceMostHelpfulDraft === opt;
+                  return (
+                    <Pressable
+                      key={opt}
+                      onPress={() => setCoachExperienceMostHelpfulDraft(opt)}
+                      style={[s.optionRow, picked && s.optionRowSelected]}
+                    >
+                      <View style={[s.radio, picked && s.radioSelected]}>
+                        {picked && <View style={s.radioDot} />}
+                      </View>
+                      <Text
+                        style={[
+                          s.optionText,
+                          picked && s.optionTextSelected,
+                        ]}
+                      >
+                        {opt}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.responseLabel}>
+                What is one habit you want to build as you start using the
+                GoArrive Command Center?
+              </Text>
+              <TextInput
+                value={coachCommandCenterHabitDraft}
+                onChangeText={setCoachCommandCenterHabitDraft}
+                placeholder="A short reflection…"
+                placeholderTextColor="#4A5568"
+                multiline
+                style={s.textArea}
+              />
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.scenarioEyebrow}>
+                {COACH_EXPERIENCE_SCENARIO.eyebrow}
+              </Text>
+              <Text style={s.responseLabel}>
+                {COACH_EXPERIENCE_SCENARIO.title}
+              </Text>
+              <Text style={s.sectionBody}>
+                {COACH_EXPERIENCE_SCENARIO.prompt}
+              </Text>
+              <View style={s.optionList}>
+                {COACH_EXPERIENCE_SCENARIO.options.map((opt) => {
+                  const picked = coachExperienceScenarioDraft === opt.letter;
+                  return (
+                    <Pressable
+                      key={opt.letter}
+                      onPress={() => setCoachExperienceScenarioDraft(opt.letter)}
+                      style={[s.optionRow, picked && s.optionRowSelected]}
+                    >
+                      <View style={[s.radio, picked && s.radioSelected]}>
+                        {picked && <View style={s.radioDot} />}
+                      </View>
+                      <Text style={s.scenarioLetter}>{opt.letter}.</Text>
+                      <Text
+                        style={[
+                          s.optionText,
+                          picked && s.optionTextSelected,
+                        ]}
+                      >
+                        {opt.text}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {coachExperienceScenarioDraft ===
+                COACH_EXPERIENCE_SCENARIO.correct && (
+                <View style={s.scenarioFeedbackCorrect}>
+                  <Icon name="check-circle" size={16} color={GREEN} />
+                  <Text style={s.scenarioFeedbackCorrectText}>
+                    {COACH_EXPERIENCE_SCENARIO.correctFeedback}
+                  </Text>
+                </View>
+              )}
+              {!!coachExperienceScenarioDraft &&
+                coachExperienceScenarioDraft !==
+                  COACH_EXPERIENCE_SCENARIO.correct && (
+                  <View style={s.scenarioFeedbackTryAgain}>
+                    <Text style={s.scenarioFeedbackTryAgainText}>
+                      {COACH_EXPERIENCE_SCENARIO.wrongFeedback}
+                    </Text>
+                  </View>
+                )}
+            </View>
+          </>
+        )}
+
         {/* Placeholder body for modules without dedicated content yet */}
-        {['coachExperience', 'howWeCoach', 'moneyGrowth', 'apprenticeshipPath', 'setupChecklist'].includes(module.id) && (
+        {['howWeCoach', 'moneyGrowth', 'apprenticeshipPath', 'setupChecklist'].includes(module.id) && (
           <View style={s.placeholderBlock}>
             <Text style={s.placeholderText}>
               Deeper content for this module is coming soon. For now, read the intro above,
@@ -2465,6 +2850,81 @@ const s = StyleSheet.create({
     fontFamily: FH,
   },
   needsBody: {
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 19,
+  },
+
+  // Coach Experience — command center tour cards
+  tourCard: {
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 14,
+    padding: 14,
+    gap: 6,
+  },
+  tourCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  tourCardNumber: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: GOLD,
+    fontFamily: FH,
+    letterSpacing: 0.5,
+  },
+  tourCardArea: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: GOLD,
+    fontFamily: FB,
+    textTransform: 'uppercase',
+  },
+  tourCardTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: FG,
+    fontFamily: FH,
+    lineHeight: 21,
+  },
+  tourCardBody: {
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 19,
+  },
+
+  // Coach Experience — coach rhythm cards
+  rhythmGrid: {
+    gap: 10,
+  },
+  rhythmCard: {
+    backgroundColor: 'rgba(245,166,35,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.30)',
+    borderRadius: 12,
+    padding: 14,
+    gap: 4,
+  },
+  rhythmCardNumber: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: GOLD,
+    fontFamily: FH,
+    letterSpacing: 0.5,
+  },
+  rhythmCardName: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: FG,
+    fontFamily: FH,
+  },
+  rhythmCardBody: {
     fontSize: 13,
     color: MUTED,
     fontFamily: FB,
