@@ -18,6 +18,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Linking,
   Platform,
   Pressable,
@@ -335,6 +336,7 @@ export default function CoachLaunchScreen() {
   const [activeModuleId, setActiveModuleId] = useState<ModuleId | null>(null);
   const [pendingScrollTarget, setPendingScrollTarget] =
     useState<ModuleId | null>(null);
+  const [justCompletedId, setJustCompletedId] = useState<ModuleId | null>(null);
 
   // Scroll refs for post-completion auto-scroll to next incomplete module
   const scrollRef = useRef<ScrollView>(null);
@@ -492,14 +494,20 @@ export default function CoachLaunchScreen() {
       currentModuleId: nextCurrent,
       responses: nextResponses,
     });
-    // Only auto-scroll if there's a next module different from the one we
-    // just completed. When the final module is completed, nextCurrent === moduleId,
-    // and the list will show the celebration state — no scroll needed.
-    if (nextCurrent !== moduleId) {
-      setPendingScrollTarget(nextCurrent);
-    }
+    // Scroll back to the module the coach just completed so they see the
+    // "Complete" transition land. Also mark it as just-completed so the
+    // check circle animates in with a satisfying pop.
+    setJustCompletedId(moduleId);
+    setPendingScrollTarget(moduleId);
     setActiveModuleId(null);
   }
+
+  // Clear the just-completed highlight after the animation has had time to play.
+  useEffect(() => {
+    if (!justCompletedId) return;
+    const t = setTimeout(() => setJustCompletedId(null), 2400);
+    return () => clearTimeout(t);
+  }, [justCompletedId]);
 
   // After returning to the list with a pending scroll target, wait for
   // layout to settle then scroll the next-incomplete module into view.
@@ -597,6 +605,7 @@ export default function CoachLaunchScreen() {
             nextIncomplete={nextIncomplete}
             statusFor={statusFor}
             isUnlocked={isUnlocked}
+            justCompletedId={justCompletedId}
             onOpenModule={(id) => setActiveModuleId(id)}
             onListLayout={(y) => {
               moduleListYRef.current = y;
@@ -621,6 +630,7 @@ interface LaunchIndexProps {
   nextIncomplete: ModuleDef | null;
   statusFor: (id: ModuleId) => 'complete' | 'ready' | 'locked';
   isUnlocked: (id: ModuleId) => boolean;
+  justCompletedId: ModuleId | null;
   onOpenModule: (id: ModuleId) => void;
   onListLayout: (y: number) => void;
   onCardLayout: (id: ModuleId, y: number) => void;
@@ -634,6 +644,7 @@ function LaunchIndex({
   nextIncomplete,
   statusFor,
   isUnlocked,
+  justCompletedId,
   onOpenModule,
   onListLayout,
   onCardLayout,
@@ -718,9 +729,7 @@ function LaunchIndex({
             >
               <View style={s.moduleNumberWrap}>
                 {isComplete ? (
-                  <View style={s.moduleCheckCircle}>
-                    <Icon name="check" size={14} color="#0E1117" />
-                  </View>
+                  <AnimatedCheckCircle animate={justCompletedId === m.id} />
                 ) : (
                   <Text
                     style={[
@@ -760,6 +769,24 @@ function LaunchIndex({
         })}
       </View>
     </>
+  );
+}
+
+function AnimatedCheckCircle({ animate }: { animate: boolean }) {
+  const scale = useRef(new Animated.Value(animate ? 0.4 : 1)).current;
+  useEffect(() => {
+    if (!animate) return;
+    Animated.spring(scale, {
+      toValue: 1,
+      friction: 4,
+      tension: 140,
+      useNativeDriver: true,
+    }).start();
+  }, [animate, scale]);
+  return (
+    <Animated.View style={[s.moduleCheckCircle, { transform: [{ scale }] }]}>
+      <Icon name="check" size={14} color="#0E1117" />
+    </Animated.View>
   );
 }
 
