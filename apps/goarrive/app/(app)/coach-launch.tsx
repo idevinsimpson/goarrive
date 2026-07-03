@@ -15,7 +15,7 @@
  *   Agreement link is read from EXPO_PUBLIC_COACH_AGREEMENT_URL. If unset, the
  *   Agreement module's CTA is disabled with a helper note.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
@@ -333,6 +333,13 @@ export default function CoachLaunchScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activeModuleId, setActiveModuleId] = useState<ModuleId | null>(null);
+  const [pendingScrollTarget, setPendingScrollTarget] =
+    useState<ModuleId | null>(null);
+
+  // Scroll refs for post-completion auto-scroll to next incomplete module
+  const scrollRef = useRef<ScrollView>(null);
+  const moduleListYRef = useRef<number | null>(null);
+  const moduleCardYsRef = useRef<Record<string, number>>({});
 
   // Local response drafts (persisted on Complete Module)
   const [welcomeAcceptedDraft, setWelcomeAcceptedDraft] = useState(false);
@@ -485,8 +492,43 @@ export default function CoachLaunchScreen() {
       currentModuleId: nextCurrent,
       responses: nextResponses,
     });
+    // Only auto-scroll if there's a next module different from the one we
+    // just completed. When the final module is completed, nextCurrent === moduleId,
+    // and the list will show the celebration state — no scroll needed.
+    if (nextCurrent !== moduleId) {
+      setPendingScrollTarget(nextCurrent);
+    }
     setActiveModuleId(null);
   }
+
+  // After returning to the list with a pending scroll target, wait for
+  // layout to settle then scroll the next-incomplete module into view.
+  useEffect(() => {
+    if (activeModuleId || !pendingScrollTarget) return;
+    let cancelled = false;
+    let retries = 6;
+    const attempt = () => {
+      if (cancelled) return;
+      const listY = moduleListYRef.current;
+      const cardY = moduleCardYsRef.current[pendingScrollTarget];
+      if (listY != null && cardY != null && scrollRef.current) {
+        const targetY = Math.max(0, listY + cardY - 12);
+        scrollRef.current.scrollTo({ y: targetY, animated: true });
+        setPendingScrollTarget(null);
+        return;
+      }
+      if (retries-- > 0) {
+        setTimeout(attempt, 60);
+      } else {
+        setPendingScrollTarget(null);
+      }
+    };
+    const t = setTimeout(attempt, 60);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [activeModuleId, pendingScrollTarget]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -515,7 +557,11 @@ export default function CoachLaunchScreen() {
         <View style={{ width: 60 }} />
       </View>
 
-      <ScrollView contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={s.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {activeModule ? (
           <ModuleDetail
             module={activeModule}
@@ -552,6 +598,12 @@ export default function CoachLaunchScreen() {
             statusFor={statusFor}
             isUnlocked={isUnlocked}
             onOpenModule={(id) => setActiveModuleId(id)}
+            onListLayout={(y) => {
+              moduleListYRef.current = y;
+            }}
+            onCardLayout={(id, y) => {
+              moduleCardYsRef.current[id] = y;
+            }}
           />
         )}
       </ScrollView>
@@ -570,6 +622,8 @@ interface LaunchIndexProps {
   statusFor: (id: ModuleId) => 'complete' | 'ready' | 'locked';
   isUnlocked: (id: ModuleId) => boolean;
   onOpenModule: (id: ModuleId) => void;
+  onListLayout: (y: number) => void;
+  onCardLayout: (id: ModuleId, y: number) => void;
 }
 
 function LaunchIndex({
@@ -581,6 +635,8 @@ function LaunchIndex({
   statusFor,
   isUnlocked,
   onOpenModule,
+  onListLayout,
+  onCardLayout,
 }: LaunchIndexProps) {
   return (
     <>
@@ -639,31 +695,42 @@ function LaunchIndex({
       </View>
 
       {/* Module list */}
-      <View style={s.moduleList}>
+      <View
+        style={s.moduleList}
+        onLayout={(e) => onListLayout(e.nativeEvent.layout.y)}
+      >
         {MODULES.map((m) => {
           const status = statusFor(m.id);
           const unlocked = isUnlocked(m.id);
+          const isComplete = status === 'complete';
           return (
             <Pressable
               key={m.id}
               onPress={() => unlocked && onOpenModule(m.id)}
               disabled={!unlocked}
+              onLayout={(e) => onCardLayout(m.id, e.nativeEvent.layout.y)}
               style={({ pressed }) => [
                 s.moduleCard,
                 pressed && unlocked && s.moduleCardPressed,
                 !unlocked && s.moduleCardLocked,
+                isComplete && s.moduleCardComplete,
               ]}
             >
               <View style={s.moduleNumberWrap}>
-                <Text
-                  style={[
-                    s.moduleNumber,
-                    status === 'complete' && { color: GREEN },
-                    status === 'locked' && { color: MUTED },
-                  ]}
-                >
-                  {String(m.number).padStart(2, '0')}
-                </Text>
+                {isComplete ? (
+                  <View style={s.moduleCheckCircle}>
+                    <Icon name="check" size={14} color="#0E1117" />
+                  </View>
+                ) : (
+                  <Text
+                    style={[
+                      s.moduleNumber,
+                      status === 'locked' && { color: MUTED },
+                    ]}
+                  >
+                    {String(m.number).padStart(2, '0')}
+                  </Text>
+                )}
               </View>
 
               <View style={s.moduleBody}>
@@ -671,6 +738,7 @@ function LaunchIndex({
                   style={[
                     s.moduleTitle,
                     status === 'locked' && { color: MUTED },
+                    isComplete && { color: GREEN },
                   ]}
                 >
                   {m.title}
@@ -1388,6 +1456,18 @@ const s = StyleSheet.create({
   },
   moduleCardLocked: {
     opacity: 0.55,
+  },
+  moduleCardComplete: {
+    borderColor: 'rgba(110,187,122,0.40)',
+    backgroundColor: 'rgba(110,187,122,0.06)',
+  },
+  moduleCheckCircle: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: GREEN,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   moduleNumberWrap: {
     width: 34,
