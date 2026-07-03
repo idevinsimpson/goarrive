@@ -4688,6 +4688,74 @@ function AgreementModule({
             })}
           </View>
         ) : null}
+
+        {/* Read-only agreement text so the coach can review what they
+            signed after the fact. Same accordion pattern as the signing
+            flow, minus the review checkboxes. */}
+        <View style={s.sectionBlock}>
+          <Text style={s.sectionHeading}>Review what you signed</Text>
+          <Text style={s.sectionBody}>
+            Your signed copy of the {COACH_AGREEMENT_TITLE} is below in{' '}
+            {COACH_AGREEMENT_SECTIONS.length} sections. Tap any section
+            to read it. This record is retained by GoArrive.
+          </Text>
+        </View>
+        <View
+          style={s.agreementAccordion}
+          onLayout={(e) => {
+            accordionYRef.current = e.nativeEvent.layout.y;
+          }}
+        >
+          {COACH_AGREEMENT_SECTIONS.map((section) => {
+            const isOpen = expandedSectionId === section.id;
+            return (
+              <View
+                key={section.id}
+                style={s.agreementAccordionCard}
+                onLayout={(e) => {
+                  cardYsRef.current[section.id] = e.nativeEvent.layout.y;
+                }}
+              >
+                <Pressable
+                  style={s.agreementAccordionHeader}
+                  onPress={() =>
+                    setExpandedSectionId(isOpen ? null : section.id)
+                  }
+                >
+                  <View style={s.agreementSectionNumBox}>
+                    <Text style={s.agreementSectionNumText}>
+                      {String(section.number).padStart(2, '0')}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.agreementSectionTitle}>
+                      {section.title}
+                    </Text>
+                    <Text style={s.agreementSectionSummary}>
+                      {section.summary}
+                    </Text>
+                  </View>
+                  <View style={s.agreementAccordionRight}>
+                    <Text style={s.agreementAccordionChevron}>
+                      {isOpen ? '−' : '+'}
+                    </Text>
+                  </View>
+                </Pressable>
+
+                {isOpen ? (
+                  <View style={s.agreementAccordionBody}>
+                    {section.body.map((para, i) => (
+                      <Text key={i} style={s.agreementBodyText}>
+                        {para}
+                      </Text>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            );
+          })}
+        </View>
+
         <View style={s.clarityCard}>
           <Text style={s.clarityHeading}>What happens next</Text>
           <View style={s.clarityRow}>
