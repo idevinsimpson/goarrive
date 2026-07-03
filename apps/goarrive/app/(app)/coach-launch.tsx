@@ -2138,6 +2138,7 @@ export default function CoachLaunchScreen() {
             onComplete={() => completeModule(activeModule.id)}
             onBack={() => setActiveModuleId(null)}
             onFinish={() => router.replace('/(app)/dashboard' as any)}
+            scrollRef={scrollRef}
           />
         ) : (
           <LaunchIndex
@@ -2466,6 +2467,7 @@ interface ModuleDetailProps {
   onComplete: () => void;
   onBack: () => void;
   onFinish: () => void;
+  scrollRef: React.RefObject<ScrollView | null>;
 }
 
 function ModuleDetail({
@@ -2561,6 +2563,7 @@ function ModuleDetail({
   onComplete,
   onBack,
   onFinish,
+  scrollRef,
 }: ModuleDetailProps) {
   const signedAgreementSigned =
     !!signedAgreement && signedAgreement.status === 'signed';
@@ -3032,6 +3035,7 @@ function ModuleDetail({
             submitError={agreementSubmitError}
             signedAgreement={signedAgreement}
             onSubmit={onSubmitAgreement}
+            scrollRef={scrollRef}
           />
         )}
 
@@ -4552,6 +4556,7 @@ interface AgreementModuleProps {
     status?: string;
   } | null;
   onSubmit: () => void;
+  scrollRef: React.RefObject<ScrollView | null>;
 }
 
 function AgreementModule({
@@ -4573,7 +4578,33 @@ function AgreementModule({
   submitError,
   signedAgreement,
   onSubmit,
+  scrollRef,
 }: AgreementModuleProps) {
+  const accordionYRef = useRef<number | null>(null);
+  const cardYsRef = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!expandedSectionId) return;
+    let cancelled = false;
+    let retries = 6;
+    const attempt = () => {
+      if (cancelled) return;
+      const accordionY = accordionYRef.current;
+      const cardY = cardYsRef.current[expandedSectionId];
+      if (accordionY != null && cardY != null && scrollRef.current) {
+        const targetY = Math.max(0, accordionY + cardY - 12);
+        scrollRef.current.scrollTo({ y: targetY, animated: true });
+        return;
+      }
+      if (retries-- > 0) setTimeout(attempt, 40);
+    };
+    const t = setTimeout(attempt, 40);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [expandedSectionId, scrollRef]);
+
   const alreadySigned =
     !!signedAgreement && signedAgreement.status === 'signed';
 
@@ -4702,7 +4733,12 @@ function AgreementModule({
         </Text>
       </View>
 
-      <View style={s.agreementAccordion}>
+      <View
+        style={s.agreementAccordion}
+        onLayout={(e) => {
+          accordionYRef.current = e.nativeEvent.layout.y;
+        }}
+      >
         {COACH_AGREEMENT_SECTIONS.map((section) => {
           const isReviewed = reviewedIds.includes(section.id);
           const isOpen = expandedSectionId === section.id;
@@ -4713,6 +4749,9 @@ function AgreementModule({
                 s.agreementAccordionCard,
                 isReviewed && s.agreementAccordionCardReviewed,
               ]}
+              onLayout={(e) => {
+                cardYsRef.current[section.id] = e.nativeEvent.layout.y;
+              }}
             >
               <Pressable
                 style={s.agreementAccordionHeader}
