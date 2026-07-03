@@ -133,6 +133,18 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
+    // COACH LAUNCH — Guided onboarding journey progress
+    // Keyed by coachId. Coaches read/write their own progress doc; admins can read/write any.
+    // ─────────────────────────────────────────────
+
+    match /coach_launch/{coachId} {
+      allow read: if isOwnDoc(coachId) || isPlatformAdmin() || isCoachByUid(coachId);
+      allow create: if isOwnDoc(coachId) || isPlatformAdmin();
+      allow update: if isOwnDoc(coachId) || isPlatformAdmin();
+      allow delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
     // MEMBER PLANS
     // ─────────────────────────────────────────────
 

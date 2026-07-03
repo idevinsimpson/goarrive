@@ -145,6 +145,7 @@ export default function AppLayout() {
       <Tabs.Screen name="account" options={{ href: null }} />
       <Tabs.Screen name="my-page" options={{ href: null }} />
       <Tabs.Screen name="billing" options={{ href: null }} />
+      <Tabs.Screen name="coach-launch" options={{ href: null }} />
       {/* member-plan: full-screen immersive, no tab bar */}
       <Tabs.Screen
         name="member-plan/[memberId]"
