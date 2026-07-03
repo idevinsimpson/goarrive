@@ -938,6 +938,196 @@ const MEMBER_EXPERIENCE_SCENARIO: MemberScenario = {
     'Close, but think about what the member needs in that moment: clarity, care, and confidence. Let them feel supported while still helping them move forward.',
 };
 
+// ── Apprenticeship Path content ────────────────────────────────────────────────
+
+const APPRENTICESHIP_OVERVIEW_CARDS: SimpleCard[] = [
+  {
+    title: 'Timeline',
+    body:
+      'The apprenticeship is designed to run for three months or 60 hours of apprenticeship activity, whichever comes first, unless adjusted by GoArrive in writing.',
+  },
+  {
+    title: 'Mentorship',
+    body:
+      'Each Apprentice Coach is paired with a Coach Mentor who helps model the standard, provide feedback, and support launch readiness.',
+  },
+  {
+    title: 'Flexible readiness',
+    body:
+      'Progression is based on demonstrated skill, systems understanding, professionalism, and readiness to serve members well.',
+  },
+];
+
+interface LadderPhase {
+  title: string;
+  shortDefinition: string;
+  body: string;
+  apprenticeFocus: string;
+  readinessLooksLike: string;
+}
+
+const APPRENTICESHIP_LADDER_PHASES: LadderPhase[] = [
+  {
+    title: 'Modeling',
+    shortDefinition: 'Watch the standard.',
+    body:
+      'The Coach Mentor demonstrates effective coaching, member interaction, session management, communication, and use of the GoArrive system.',
+    apprenticeFocus:
+      'Observe carefully. Ask good questions. Notice how the coach leads the member, not just the workout.',
+    readinessLooksLike:
+      'You can explain what you observed and identify why the coach made key decisions.',
+  },
+  {
+    title: 'Assisting',
+    shortDefinition: 'Support the session.',
+    body:
+      'The Apprentice Coach begins supporting sessions under supervision, gradually taking on more responsibility while the Coach Mentor remains actively involved.',
+    apprenticeFocus:
+      'Practice small pieces of the coaching experience: setup, cues, check-ins, communication, and follow-through.',
+    readinessLooksLike:
+      'You can contribute without creating confusion and you respond well to mentor feedback.',
+  },
+  {
+    title: 'Watching',
+    shortDefinition: 'Lead while being observed.',
+    body:
+      'The Apprentice Coach leads sessions while the Coach Mentor watches, evaluates, and gives constructive feedback.',
+    apprenticeFocus:
+      'Lead with clarity, safety, care, and confidence while staying open to correction.',
+    readinessLooksLike:
+      'You can guide a member through a session, make appropriate adjustments, communicate clearly, and receive feedback without defensiveness.',
+  },
+  {
+    title: 'Launching',
+    shortDefinition: 'Step into independent coaching with support.',
+    body:
+      'Once the Apprentice Coach demonstrates readiness, they are cleared to coach members independently while continued support remains available.',
+    apprenticeFocus:
+      'Serve members well, keep growing, and stay connected to the support-driven coaching culture.',
+    readinessLooksLike:
+      'You can coach responsibly, use the system, communicate professionally, and uphold GoArrive standards.',
+  },
+];
+
+const APPRENTICESHIP_READINESS_SIGNALS: SimpleCard[] = [
+  {
+    title: 'Skill',
+    body: 'You can coach movement safely and clearly.',
+  },
+  {
+    title: 'Presence',
+    body: 'You show up prepared, focused, and professional.',
+  },
+  {
+    title: 'Communication',
+    body:
+      'You communicate promptly, respectfully, and clearly with members and coaches.',
+  },
+  {
+    title: 'Systems',
+    body:
+      'You understand the GoArrive tools and workflows needed to serve members well.',
+  },
+  {
+    title: 'Adaptability',
+    body:
+      'You can adjust coaching based on member needs, feedback, and real-life constraints.',
+  },
+  {
+    title: 'Humility',
+    body: 'You can receive feedback and keep improving.',
+  },
+];
+
+const APPRENTICESHIP_MENTOR_CARDS: SimpleCard[] = [
+  {
+    title: 'Watch actively',
+    body: 'Do not just observe what happens. Notice why it happens.',
+  },
+  {
+    title: 'Ask thoughtful questions',
+    body: 'Bring curiosity, not assumptions.',
+  },
+  {
+    title: 'Practice with humility',
+    body: 'Treat feedback as an opportunity to grow, not a threat.',
+  },
+  {
+    title: 'Own your next step',
+    body:
+      'After feedback, identify one thing to improve and act on it.',
+  },
+];
+
+const APPRENTICESHIP_EXCITEMENT_OPTIONS = [
+  'Modeling',
+  'Assisting',
+  'Watching',
+  'Launching',
+];
+
+const APPRENTICESHIP_SCENARIO_FEEDBACK: MemberScenario = {
+  eyebrow: 'SCENARIO 1',
+  title: 'You receive corrective feedback.',
+  prompt:
+    'Your Coach Mentor gives you feedback that your coaching cues were too complicated during a session. What response best reflects the G\u27B2A apprenticeship posture?',
+  options: [
+    {
+      letter: 'A',
+      text: 'Defend yourself and explain why the member should have understood.',
+    },
+    {
+      letter: 'B',
+      text: 'Ignore the feedback because your style is your style.',
+    },
+    {
+      letter: 'C',
+      text:
+        'Thank the mentor, ask what would make the cue clearer, and practice simplifying your next cue.',
+    },
+    {
+      letter: 'D',
+      text: 'Stop coaching because feedback means you are not ready.',
+    },
+  ],
+  correct: 'C',
+  correctFeedback:
+    'That is the G\u27B2A way. Apprenticeship works when feedback becomes growth. The goal is not perfection; the goal is humble improvement.',
+  wrongFeedback:
+    'Close, but remember the apprenticeship posture: receive feedback, clarify the next step, and practice with humility.',
+};
+
+const APPRENTICESHIP_SCENARIO_LAUNCH_READINESS: MemberScenario = {
+  eyebrow: 'SCENARIO 2',
+  title: 'You want to launch quickly.',
+  prompt:
+    'You are excited and want to start coaching members independently as soon as possible, but your Coach Mentor says you still need more supervised practice. What response best reflects the GoArrive launch path?',
+  options: [
+    {
+      letter: 'A',
+      text: 'Push to launch anyway because confidence matters more than readiness.',
+    },
+    {
+      letter: 'B',
+      text:
+        'Trust the process, ask what readiness signals need to improve, and keep practicing.',
+    },
+    {
+      letter: 'C',
+      text: 'Stop participating until someone clears you.',
+    },
+    {
+      letter: 'D',
+      text: 'Try to coach members outside the system to prove you are ready.',
+    },
+  ],
+  correct: 'B',
+  correctFeedback:
+    'That is the G\u27B2A way. Launch is based on readiness, not impatience. The goal is to protect the member, the coach, and the GoArrive standard.',
+  wrongFeedback:
+    'Close, but launch readiness matters. The apprenticeship path exists to help coaches grow safely and confidently before independent coaching.',
+};
+
 // ── Firestore doc shape ────────────────────────────────────────────────────────
 
 interface CoachLaunchDoc {
@@ -966,6 +1156,10 @@ interface CoachLaunchDoc {
     moneyGrowthQuestion?: string;
     moneyGrowthScenarioTier?: string;
     moneyGrowthScenarioReferral?: string;
+    apprenticeshipExcitementPhase?: string;
+    apprenticeshipGrowthArea?: string;
+    apprenticeshipScenarioFeedback?: string;
+    apprenticeshipScenarioLaunchReadiness?: string;
   };
   startedAt?: any;
   updatedAt?: any;
@@ -1037,6 +1231,20 @@ export default function CoachLaunchScreen() {
     useState('');
   const [moneyGrowthScenarioReferralDraft, setMoneyGrowthScenarioReferralDraft] =
     useState('');
+  const [
+    apprenticeshipExcitementPhaseDraft,
+    setApprenticeshipExcitementPhaseDraft,
+  ] = useState('');
+  const [apprenticeshipGrowthAreaDraft, setApprenticeshipGrowthAreaDraft] =
+    useState('');
+  const [
+    apprenticeshipScenarioFeedbackDraft,
+    setApprenticeshipScenarioFeedbackDraft,
+  ] = useState('');
+  const [
+    apprenticeshipScenarioLaunchReadinessDraft,
+    setApprenticeshipScenarioLaunchReadinessDraft,
+  ] = useState('');
 
   const agreementUrl = (process.env.EXPO_PUBLIC_COACH_AGREEMENT_URL || '').trim();
 
@@ -1108,6 +1316,18 @@ export default function CoachLaunchScreen() {
           );
           setMoneyGrowthScenarioReferralDraft(
             data.responses?.moneyGrowthScenarioReferral ?? ''
+          );
+          setApprenticeshipExcitementPhaseDraft(
+            data.responses?.apprenticeshipExcitementPhase ?? ''
+          );
+          setApprenticeshipGrowthAreaDraft(
+            data.responses?.apprenticeshipGrowthArea ?? ''
+          );
+          setApprenticeshipScenarioFeedbackDraft(
+            data.responses?.apprenticeshipScenarioFeedback ?? ''
+          );
+          setApprenticeshipScenarioLaunchReadinessDraft(
+            data.responses?.apprenticeshipScenarioLaunchReadiness ?? ''
           );
         } else {
           setProgress(emptyDoc(coachId));
@@ -1263,6 +1483,24 @@ export default function CoachLaunchScreen() {
           moneyGrowthScenarioReferralDraft;
       }
     }
+    if (moduleId === 'apprenticeshipPath') {
+      if (apprenticeshipExcitementPhaseDraft) {
+        nextResponses.apprenticeshipExcitementPhase =
+          apprenticeshipExcitementPhaseDraft;
+      }
+      if (apprenticeshipGrowthAreaDraft.trim()) {
+        nextResponses.apprenticeshipGrowthArea =
+          apprenticeshipGrowthAreaDraft.trim();
+      }
+      if (apprenticeshipScenarioFeedbackDraft) {
+        nextResponses.apprenticeshipScenarioFeedback =
+          apprenticeshipScenarioFeedbackDraft;
+      }
+      if (apprenticeshipScenarioLaunchReadinessDraft) {
+        nextResponses.apprenticeshipScenarioLaunchReadiness =
+          apprenticeshipScenarioLaunchReadinessDraft;
+      }
+    }
 
     const nextCompleted = alreadyComplete ? completed : [...completed, moduleId];
     // Point currentModuleId at the next un-completed module (or same if this was the last)
@@ -1397,6 +1635,14 @@ export default function CoachLaunchScreen() {
             setMoneyGrowthScenarioTierDraft={setMoneyGrowthScenarioTierDraft}
             moneyGrowthScenarioReferralDraft={moneyGrowthScenarioReferralDraft}
             setMoneyGrowthScenarioReferralDraft={setMoneyGrowthScenarioReferralDraft}
+            apprenticeshipExcitementPhaseDraft={apprenticeshipExcitementPhaseDraft}
+            setApprenticeshipExcitementPhaseDraft={setApprenticeshipExcitementPhaseDraft}
+            apprenticeshipGrowthAreaDraft={apprenticeshipGrowthAreaDraft}
+            setApprenticeshipGrowthAreaDraft={setApprenticeshipGrowthAreaDraft}
+            apprenticeshipScenarioFeedbackDraft={apprenticeshipScenarioFeedbackDraft}
+            setApprenticeshipScenarioFeedbackDraft={setApprenticeshipScenarioFeedbackDraft}
+            apprenticeshipScenarioLaunchReadinessDraft={apprenticeshipScenarioLaunchReadinessDraft}
+            setApprenticeshipScenarioLaunchReadinessDraft={setApprenticeshipScenarioLaunchReadinessDraft}
             agreementUrl={agreementUrl}
             onComplete={() => completeModule(activeModule.id)}
             onBack={() => setActiveModuleId(null)}
@@ -1668,6 +1914,14 @@ interface ModuleDetailProps {
   setMoneyGrowthScenarioTierDraft: (v: string) => void;
   moneyGrowthScenarioReferralDraft: string;
   setMoneyGrowthScenarioReferralDraft: (v: string) => void;
+  apprenticeshipExcitementPhaseDraft: string;
+  setApprenticeshipExcitementPhaseDraft: (v: string) => void;
+  apprenticeshipGrowthAreaDraft: string;
+  setApprenticeshipGrowthAreaDraft: (v: string) => void;
+  apprenticeshipScenarioFeedbackDraft: string;
+  setApprenticeshipScenarioFeedbackDraft: (v: string) => void;
+  apprenticeshipScenarioLaunchReadinessDraft: string;
+  setApprenticeshipScenarioLaunchReadinessDraft: (v: string) => void;
   agreementUrl: string;
   onComplete: () => void;
   onBack: () => void;
@@ -1720,6 +1974,14 @@ function ModuleDetail({
   setMoneyGrowthScenarioTierDraft,
   moneyGrowthScenarioReferralDraft,
   setMoneyGrowthScenarioReferralDraft,
+  apprenticeshipExcitementPhaseDraft,
+  setApprenticeshipExcitementPhaseDraft,
+  apprenticeshipGrowthAreaDraft,
+  setApprenticeshipGrowthAreaDraft,
+  apprenticeshipScenarioFeedbackDraft,
+  setApprenticeshipScenarioFeedbackDraft,
+  apprenticeshipScenarioLaunchReadinessDraft,
+  setApprenticeshipScenarioLaunchReadinessDraft,
   agreementUrl,
   onComplete,
   onBack,
@@ -1797,6 +2059,14 @@ function ModuleDetail({
         moneyGrowthQuestionDraft.trim().length > 0 &&
         moneyGrowthScenarioTierDraft === 'A' &&
         moneyGrowthScenarioReferralDraft === 'B'
+      );
+    }
+    if (module.id === 'apprenticeshipPath') {
+      return (
+        !!apprenticeshipExcitementPhaseDraft &&
+        apprenticeshipGrowthAreaDraft.trim().length > 0 &&
+        apprenticeshipScenarioFeedbackDraft === 'C' &&
+        apprenticeshipScenarioLaunchReadinessDraft === 'B'
       );
     }
     return true;
@@ -3100,8 +3370,298 @@ function ModuleDetail({
           </>
         )}
 
+        {/* Apprenticeship Path — education only: launch ladder, readiness, mentor cards, reflection, 2 scenarios */}
+        {module.id === 'apprenticeshipPath' && (
+          <>
+            <View style={s.heroCard}>
+              <Text style={s.heroEyebrow}>APPRENTICESHIP PATH</Text>
+              <Text style={s.heroHeading}>From learning to launching.</Text>
+              <Text style={s.heroBody}>
+                The G➲A apprenticeship path is designed to help a coach grow
+                in confidence, skill, systems mastery, and member readiness
+                before stepping fully into independent coaching.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>
+                Coach Launch gives you the foundation. Apprenticeship helps you
+                turn that foundation into practice.
+              </Text>
+              <Text style={s.sectionBody}>
+                Inside GoArrive, new coaches are not expected to figure
+                everything out alone. The apprenticeship path gives you
+                mentorship, exposure to real coaching rhythms, and a clear
+                progression from observing to leading.
+              </Text>
+              <Text style={s.sectionBody}>
+                The goal is not speed for speed’s sake. The goal is readiness.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>Apprenticeship overview.</Text>
+              <Text style={s.sectionBody}>
+                Three things to know before you start.
+              </Text>
+            </View>
+
+            <View style={{ gap: 10 }}>
+              {APPRENTICESHIP_OVERVIEW_CARDS.map((c) => (
+                <View key={c.title} style={s.capCard}>
+                  <Text style={s.capCardTitle}>{c.title}</Text>
+                  <Text style={s.capCardBody}>{c.body}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>The four-phase launch ladder.</Text>
+              <Text style={s.sectionBody}>
+                Each phase builds on the last. Readiness — not speed — moves
+                you up the ladder.
+              </Text>
+            </View>
+
+            <View style={{ gap: 0 }}>
+              {APPRENTICESHIP_LADDER_PHASES.map((p, i) => (
+                <View key={p.title}>
+                  <View style={s.ladderPhaseCard}>
+                    <View style={s.ladderPhaseHeader}>
+                      <View style={s.ladderPhaseBadge}>
+                        <Text style={s.ladderPhaseBadgeText}>
+                          {String(i + 1).padStart(2, '0')}
+                        </Text>
+                      </View>
+                      <View style={{ flex: 1, gap: 2 }}>
+                        <Text style={s.ladderPhaseTitle}>{p.title}</Text>
+                        <Text style={s.ladderPhaseShortDef}>
+                          {p.shortDefinition}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={s.ladderPhaseBody}>{p.body}</Text>
+                    <View style={s.ladderSubBox}>
+                      <Text style={s.ladderSubLabel}>APPRENTICE FOCUS</Text>
+                      <Text style={s.ladderSubText}>{p.apprenticeFocus}</Text>
+                    </View>
+                    <View style={s.ladderReadinessBox}>
+                      <Text style={s.ladderReadinessLabel}>
+                        WHAT READINESS LOOKS LIKE
+                      </Text>
+                      <Text style={s.ladderReadinessText}>
+                        {p.readinessLooksLike}
+                      </Text>
+                    </View>
+                  </View>
+                  {i < APPRENTICESHIP_LADDER_PHASES.length - 1 && (
+                    <View style={s.ladderConnector} />
+                  )}
+                </View>
+              ))}
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>
+                What launch readiness is built on.
+              </Text>
+              <Text style={s.sectionBody}>
+                Six signals mentors watch for as you grow.
+              </Text>
+            </View>
+
+            <View style={{ gap: 10 }}>
+              {APPRENTICESHIP_READINESS_SIGNALS.map((r) => (
+                <View key={r.title} style={s.readinessCard}>
+                  <Text style={s.readinessCardTitle}>{r.title}</Text>
+                  <Text style={s.readinessCardBody}>{r.body}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>
+                How to get the most from your Coach Mentor.
+              </Text>
+              <Text style={s.sectionBody}>
+                Four habits that turn mentorship into growth.
+              </Text>
+            </View>
+
+            <View style={{ gap: 10 }}>
+              {APPRENTICESHIP_MENTOR_CARDS.map((m) => (
+                <View key={m.title} style={s.capCard}>
+                  <Text style={s.capCardTitle}>{m.title}</Text>
+                  <Text style={s.capCardBody}>{m.body}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.responseLabel}>
+                Which apprenticeship phase are you most excited about?
+              </Text>
+              <View style={s.optionList}>
+                {APPRENTICESHIP_EXCITEMENT_OPTIONS.map((opt) => {
+                  const picked = apprenticeshipExcitementPhaseDraft === opt;
+                  return (
+                    <Pressable
+                      key={opt}
+                      onPress={() => setApprenticeshipExcitementPhaseDraft(opt)}
+                      style={[s.optionRow, picked && s.optionRowSelected]}
+                    >
+                      <View style={[s.radio, picked && s.radioSelected]}>
+                        {picked && <View style={s.radioDot} />}
+                      </View>
+                      <Text
+                        style={[
+                          s.optionText,
+                          picked && s.optionTextSelected,
+                        ]}
+                      >
+                        {opt}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.responseLabel}>
+                What is one area you want your Coach Mentor to help you grow
+                in?
+              </Text>
+              <TextInput
+                value={apprenticeshipGrowthAreaDraft}
+                onChangeText={setApprenticeshipGrowthAreaDraft}
+                placeholder="A short reflection…"
+                placeholderTextColor="#4A5568"
+                multiline
+                style={s.textArea}
+              />
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.scenarioEyebrow}>
+                {APPRENTICESHIP_SCENARIO_FEEDBACK.eyebrow}
+              </Text>
+              <Text style={s.responseLabel}>
+                {APPRENTICESHIP_SCENARIO_FEEDBACK.title}
+              </Text>
+              <Text style={s.sectionBody}>
+                {APPRENTICESHIP_SCENARIO_FEEDBACK.prompt}
+              </Text>
+              <View style={s.optionList}>
+                {APPRENTICESHIP_SCENARIO_FEEDBACK.options.map((opt) => {
+                  const picked =
+                    apprenticeshipScenarioFeedbackDraft === opt.letter;
+                  return (
+                    <Pressable
+                      key={opt.letter}
+                      onPress={() =>
+                        setApprenticeshipScenarioFeedbackDraft(opt.letter)
+                      }
+                      style={[s.optionRow, picked && s.optionRowSelected]}
+                    >
+                      <View style={[s.radio, picked && s.radioSelected]}>
+                        {picked && <View style={s.radioDot} />}
+                      </View>
+                      <Text style={s.scenarioLetter}>{opt.letter}.</Text>
+                      <Text
+                        style={[
+                          s.optionText,
+                          picked && s.optionTextSelected,
+                        ]}
+                      >
+                        {opt.text}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {apprenticeshipScenarioFeedbackDraft ===
+                APPRENTICESHIP_SCENARIO_FEEDBACK.correct && (
+                <View style={s.scenarioFeedbackCorrect}>
+                  <Icon name="check-circle" size={16} color={GREEN} />
+                  <Text style={s.scenarioFeedbackCorrectText}>
+                    {APPRENTICESHIP_SCENARIO_FEEDBACK.correctFeedback}
+                  </Text>
+                </View>
+              )}
+              {!!apprenticeshipScenarioFeedbackDraft &&
+                apprenticeshipScenarioFeedbackDraft !==
+                  APPRENTICESHIP_SCENARIO_FEEDBACK.correct && (
+                  <View style={s.scenarioFeedbackTryAgain}>
+                    <Text style={s.scenarioFeedbackTryAgainText}>
+                      {APPRENTICESHIP_SCENARIO_FEEDBACK.wrongFeedback}
+                    </Text>
+                  </View>
+                )}
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.scenarioEyebrow}>
+                {APPRENTICESHIP_SCENARIO_LAUNCH_READINESS.eyebrow}
+              </Text>
+              <Text style={s.responseLabel}>
+                {APPRENTICESHIP_SCENARIO_LAUNCH_READINESS.title}
+              </Text>
+              <Text style={s.sectionBody}>
+                {APPRENTICESHIP_SCENARIO_LAUNCH_READINESS.prompt}
+              </Text>
+              <View style={s.optionList}>
+                {APPRENTICESHIP_SCENARIO_LAUNCH_READINESS.options.map((opt) => {
+                  const picked =
+                    apprenticeshipScenarioLaunchReadinessDraft === opt.letter;
+                  return (
+                    <Pressable
+                      key={opt.letter}
+                      onPress={() =>
+                        setApprenticeshipScenarioLaunchReadinessDraft(opt.letter)
+                      }
+                      style={[s.optionRow, picked && s.optionRowSelected]}
+                    >
+                      <View style={[s.radio, picked && s.radioSelected]}>
+                        {picked && <View style={s.radioDot} />}
+                      </View>
+                      <Text style={s.scenarioLetter}>{opt.letter}.</Text>
+                      <Text
+                        style={[
+                          s.optionText,
+                          picked && s.optionTextSelected,
+                        ]}
+                      >
+                        {opt.text}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {apprenticeshipScenarioLaunchReadinessDraft ===
+                APPRENTICESHIP_SCENARIO_LAUNCH_READINESS.correct && (
+                <View style={s.scenarioFeedbackCorrect}>
+                  <Icon name="check-circle" size={16} color={GREEN} />
+                  <Text style={s.scenarioFeedbackCorrectText}>
+                    {APPRENTICESHIP_SCENARIO_LAUNCH_READINESS.correctFeedback}
+                  </Text>
+                </View>
+              )}
+              {!!apprenticeshipScenarioLaunchReadinessDraft &&
+                apprenticeshipScenarioLaunchReadinessDraft !==
+                  APPRENTICESHIP_SCENARIO_LAUNCH_READINESS.correct && (
+                  <View style={s.scenarioFeedbackTryAgain}>
+                    <Text style={s.scenarioFeedbackTryAgainText}>
+                      {APPRENTICESHIP_SCENARIO_LAUNCH_READINESS.wrongFeedback}
+                    </Text>
+                  </View>
+                )}
+            </View>
+          </>
+        )}
+
         {/* Placeholder body for modules without dedicated content yet */}
-        {['apprenticeshipPath', 'setupChecklist'].includes(module.id) && (
+        {['setupChecklist'].includes(module.id) && (
           <View style={s.placeholderBlock}>
             <Text style={s.placeholderText}>
               Deeper content for this module is coming soon. For now, read the intro above,
@@ -4355,6 +4915,133 @@ const s = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     color: FG,
+    fontFamily: FB,
+    lineHeight: 19,
+  },
+
+  // Apprenticeship Path — launch ladder phase cards
+  ladderPhaseCard: {
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderLeftWidth: 3,
+    borderLeftColor: GOLD,
+    borderRadius: 14,
+    padding: 14,
+    gap: 10,
+  },
+  ladderPhaseHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  ladderPhaseBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(245,166,35,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ladderPhaseBadgeText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: GOLD,
+    fontFamily: FH,
+    letterSpacing: 0.5,
+  },
+  ladderPhaseTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: FG,
+    fontFamily: FH,
+    lineHeight: 22,
+  },
+  ladderPhaseShortDef: {
+    fontSize: 13,
+    color: GOLD,
+    fontFamily: FB,
+    fontWeight: '600',
+    fontStyle: 'italic',
+  },
+  ladderPhaseBody: {
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 19,
+  },
+  ladderSubBox: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 3,
+  },
+  ladderSubLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: MUTED,
+    fontFamily: FB,
+  },
+  ladderSubText: {
+    fontSize: 13,
+    color: FG,
+    fontFamily: FB,
+    lineHeight: 18,
+  },
+  ladderReadinessBox: {
+    backgroundColor: 'rgba(110,187,122,0.06)',
+    borderLeftWidth: 2,
+    borderLeftColor: 'rgba(110,187,122,0.55)',
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 3,
+  },
+  ladderReadinessLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: GREEN,
+    fontFamily: FB,
+  },
+  ladderReadinessText: {
+    fontSize: 13,
+    color: FG,
+    fontFamily: FB,
+    lineHeight: 18,
+    fontWeight: '500',
+  },
+  ladderConnector: {
+    width: 2,
+    height: 18,
+    backgroundColor: 'rgba(245,166,35,0.4)',
+    marginLeft: 30,
+  },
+
+  // Apprenticeship Path — readiness signal cards
+  readinessCard: {
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderTopWidth: 2,
+    borderTopColor: 'rgba(74,144,226,0.55)',
+    borderRadius: 12,
+    padding: 12,
+    gap: 4,
+  },
+  readinessCardTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: BLUE,
+    fontFamily: FH,
+  },
+  readinessCardBody: {
+    fontSize: 13,
+    color: MUTED,
     fontFamily: FB,
     lineHeight: 19,
   },
