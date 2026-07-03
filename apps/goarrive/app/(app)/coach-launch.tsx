@@ -1297,6 +1297,89 @@ const SETUP_SCENARIO_UNTESTED_TOOL: MemberScenario = {
     'Close, but remember the goal: we do not need perfection, and we do not wing it with members. We prepare, test, ask for help, and protect the experience.',
 };
 
+// ── Phase 10: Agreement ────────────────────────────────────────────────────────
+
+interface AgreementRecapItem {
+  title: string;
+  body: string;
+}
+
+const AGREEMENT_JOURNEY_RECAP: AgreementRecapItem[] = [
+  {
+    title: 'Vision',
+    body: 'Why G\u27B2A exists and what we are building together.',
+  },
+  {
+    title: 'Culture',
+    body: 'How we show up for members and coaches.',
+  },
+  {
+    title: 'Member Experience',
+    body: 'What members feel from first interest to ongoing support.',
+  },
+  {
+    title: 'Coach Experience',
+    body: 'How the Command Center helps coaches lead with clarity.',
+  },
+  {
+    title: 'How We Coach',
+    body: 'The posture, communication, safety, and care expected inside G\u27B2A.',
+  },
+  {
+    title: 'Money + Growth',
+    body: 'The high-level structure for growth-based earnings and collaboration.',
+  },
+  {
+    title: 'Apprenticeship Path',
+    body: 'How a coach grows from learning to launching.',
+  },
+  {
+    title: 'Setup Checklist',
+    body: 'Practical readiness before serving members.',
+  },
+];
+
+interface AgreementCoverageCard {
+  title: string;
+  body: string;
+}
+
+const AGREEMENT_COVERAGE_CARDS: AgreementCoverageCard[] = [
+  {
+    title: 'Coaching standards',
+    body:
+      'Professional conduct, communication, safety, preparation, personalization, and member care.',
+  },
+  {
+    title: 'Services + delivery',
+    body:
+      'How GoArrive\u2019s online fitness coaching experience is delivered through approved systems, sessions, recordings, dashboards, and support workflows.',
+  },
+  {
+    title: 'Money + growth programs',
+    body:
+      'Progressive compensation, earnings cap, referral reward, inter-coach referrals, and profit sharing according to the formal terms.',
+  },
+  {
+    title: 'Confidentiality + IP',
+    body:
+      'Protection of member data, GoArrive systems, workout plans, internal operations, and intellectual property.',
+  },
+  {
+    title: 'Changes + termination',
+    body:
+      'How program terms may be modified with notice and how participation may end according to the formal agreement.',
+  },
+];
+
+const AGREEMENT_CLARITY_POINTS: string[] = [
+  'Coach Launch helps you understand the journey.',
+  'The Coach Agreement is the formal agreement.',
+  'Completing this module does not replace the required signature process.',
+  'GoArrive may require final review or approval before a coach is fully launched.',
+  'If anything in Coach Launch and the formal agreement ever seems different, the formal agreement controls.',
+];
+
 // ── Firestore doc shape ────────────────────────────────────────────────────────
 
 interface CoachLaunchDoc {
@@ -1333,6 +1416,11 @@ interface CoachLaunchDoc {
     setupConfidenceArea?: string;
     setupHelpArea?: string;
     setupScenarioUntestedTool?: string;
+    agreementOpened?: boolean;
+    agreementOpenedAt?: any;
+    agreementCoachLaunchNotReplacement?: boolean;
+    agreementSignatureRequired?: boolean;
+    agreementOpenedAcknowledged?: boolean;
   };
   startedAt?: any;
   updatedAt?: any;
@@ -1425,6 +1513,19 @@ export default function CoachLaunchScreen() {
     setupScenarioUntestedToolDraft,
     setSetupScenarioUntestedToolDraft,
   ] = useState('');
+  const [agreementOpenedDraft, setAgreementOpenedDraft] = useState(false);
+  const [
+    agreementNotReplacementDraft,
+    setAgreementNotReplacementDraft,
+  ] = useState(false);
+  const [
+    agreementSignatureRequiredDraft,
+    setAgreementSignatureRequiredDraft,
+  ] = useState(false);
+  const [
+    agreementOpenedAcknowledgedDraft,
+    setAgreementOpenedAcknowledgedDraft,
+  ] = useState(false);
 
   const agreementUrl = (process.env.EXPO_PUBLIC_COACH_AGREEMENT_URL || '').trim();
 
@@ -1520,6 +1621,16 @@ export default function CoachLaunchScreen() {
           setSetupHelpAreaDraft(data.responses?.setupHelpArea ?? '');
           setSetupScenarioUntestedToolDraft(
             data.responses?.setupScenarioUntestedTool ?? ''
+          );
+          setAgreementOpenedDraft(!!data.responses?.agreementOpened);
+          setAgreementNotReplacementDraft(
+            !!data.responses?.agreementCoachLaunchNotReplacement
+          );
+          setAgreementSignatureRequiredDraft(
+            !!data.responses?.agreementSignatureRequired
+          );
+          setAgreementOpenedAcknowledgedDraft(
+            !!data.responses?.agreementOpenedAcknowledged
           );
         } else {
           setProgress(emptyDoc(coachId));
@@ -1708,6 +1819,14 @@ export default function CoachLaunchScreen() {
           setupScenarioUntestedToolDraft;
       }
     }
+    if (moduleId === 'agreement') {
+      nextResponses.agreementOpened = agreementOpenedDraft;
+      nextResponses.agreementCoachLaunchNotReplacement =
+        agreementNotReplacementDraft;
+      nextResponses.agreementSignatureRequired = agreementSignatureRequiredDraft;
+      nextResponses.agreementOpenedAcknowledged =
+        agreementOpenedAcknowledgedDraft;
+    }
 
     const nextCompleted = alreadyComplete ? completed : [...completed, moduleId];
     // Point currentModuleId at the next un-completed module (or same if this was the last)
@@ -1865,6 +1984,23 @@ export default function CoachLaunchScreen() {
             setupScenarioUntestedToolDraft={setupScenarioUntestedToolDraft}
             setSetupScenarioUntestedToolDraft={setSetupScenarioUntestedToolDraft}
             agreementUrl={agreementUrl}
+            agreementOpenedDraft={agreementOpenedDraft}
+            setAgreementOpenedDraft={setAgreementOpenedDraft}
+            agreementNotReplacementDraft={agreementNotReplacementDraft}
+            setAgreementNotReplacementDraft={setAgreementNotReplacementDraft}
+            agreementSignatureRequiredDraft={agreementSignatureRequiredDraft}
+            setAgreementSignatureRequiredDraft={setAgreementSignatureRequiredDraft}
+            agreementOpenedAcknowledgedDraft={agreementOpenedAcknowledgedDraft}
+            setAgreementOpenedAcknowledgedDraft={setAgreementOpenedAcknowledgedDraft}
+            onAgreementOpened={() => {
+              setAgreementOpenedDraft(true);
+              save({
+                responses: {
+                  agreementOpened: true,
+                  agreementOpenedAt: serverTimestamp(),
+                },
+              });
+            }}
             onComplete={() => completeModule(activeModule.id)}
             onBack={() => setActiveModuleId(null)}
             onFinish={() => router.replace('/(app)/dashboard' as any)}
@@ -2152,6 +2288,15 @@ interface ModuleDetailProps {
   setupScenarioUntestedToolDraft: string;
   setSetupScenarioUntestedToolDraft: (v: string) => void;
   agreementUrl: string;
+  agreementOpenedDraft: boolean;
+  setAgreementOpenedDraft: (v: boolean) => void;
+  agreementNotReplacementDraft: boolean;
+  setAgreementNotReplacementDraft: (v: boolean) => void;
+  agreementSignatureRequiredDraft: boolean;
+  setAgreementSignatureRequiredDraft: (v: boolean) => void;
+  agreementOpenedAcknowledgedDraft: boolean;
+  setAgreementOpenedAcknowledgedDraft: (v: boolean) => void;
+  onAgreementOpened: () => void;
   onComplete: () => void;
   onBack: () => void;
   onFinish: () => void;
@@ -2220,6 +2365,15 @@ function ModuleDetail({
   setupScenarioUntestedToolDraft,
   setSetupScenarioUntestedToolDraft,
   agreementUrl,
+  agreementOpenedDraft,
+  setAgreementOpenedDraft,
+  agreementNotReplacementDraft,
+  setAgreementNotReplacementDraft,
+  agreementSignatureRequiredDraft,
+  setAgreementSignatureRequiredDraft,
+  agreementOpenedAcknowledgedDraft,
+  setAgreementOpenedAcknowledgedDraft,
+  onAgreementOpened,
   onComplete,
   onBack,
   onFinish,
@@ -2315,6 +2469,15 @@ function ModuleDetail({
         !!setupConfidenceAreaDraft &&
         setupHelpAreaDraft.trim().length > 0 &&
         setupScenarioUntestedToolDraft === 'C'
+      );
+    }
+    if (module.id === 'agreement') {
+      return (
+        agreementUrl.length > 0 &&
+        agreementOpenedDraft === true &&
+        agreementNotReplacementDraft === true &&
+        agreementSignatureRequiredDraft === true &&
+        agreementOpenedAcknowledgedDraft === true
       );
     }
     return true;
@@ -2667,30 +2830,245 @@ function ModuleDetail({
           </>
         )}
 
-        {/* Agreement — external link */}
+        {/* Agreement — final acknowledgment: hero, recap, coverage cards, link CTA, clarity, checkboxes */}
         {module.id === 'agreement' && (
-          <View style={s.responseBlock}>
-            <Text style={s.responseBody}>
-              Everything you've walked through in Coach Launch is summarized in the Coach
-              Agreement. This final step protects members, coaches, and GoArrive by putting
-              our shared expectations in writing.
-            </Text>
-            {agreementUrl ? (
-              <Pressable
-                style={s.primaryBtn}
-                onPress={() => Linking.openURL(agreementUrl)}
-              >
-                <Text style={s.primaryBtnText}>Review + Sign Coach Agreement</Text>
-              </Pressable>
-            ) : (
-              <View>
-                <View style={[s.primaryBtn, s.btnDisabled]}>
-                  <Text style={s.primaryBtnText}>Review + Sign Coach Agreement</Text>
+          <>
+            <View style={s.heroCard}>
+              <Text style={s.heroEyebrow}>AGREEMENT</Text>
+              <Text style={s.heroHeading}>
+                Confirm the shared expectations.
+              </Text>
+              <Text style={s.heroBody}>
+                You have walked through the heart, standards, systems, growth
+                model, apprenticeship path, and setup readiness for coaching
+                inside G➲A. The Coach Agreement is the formal step that puts
+                those shared expectations in writing.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionBody}>
+                Coach Launch is designed to help you understand the culture
+                before you sign the agreement.
+              </Text>
+              <Text style={s.sectionBody}>
+                The agreement is not meant to surprise you. It is meant to
+                formally summarize and protect what this journey has already
+                introduced: member care, coach expectations, compensation
+                structures, confidentiality, intellectual property, and
+                GoArrive{'\u2019'}s operating standards.
+              </Text>
+              <Text style={s.sectionBody}>
+                Before moving forward, review the Coach Agreement carefully and
+                complete the required signature process through the approved
+                agreement link.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>
+                What you have already walked through
+              </Text>
+            </View>
+
+            <View style={s.recapList}>
+              {AGREEMENT_JOURNEY_RECAP.map((item, i) => (
+                <View key={item.title} style={s.recapRow}>
+                  <View style={s.recapNumBox}>
+                    <Text style={s.recapNumText}>
+                      {String(i + 1).padStart(2, '0')}
+                    </Text>
+                  </View>
+                  <View style={s.recapBody}>
+                    <Text style={s.recapTitle}>{item.title}</Text>
+                    <Text style={s.recapText}>{item.body}</Text>
+                  </View>
                 </View>
-                <Text style={s.helperText}>Agreement link not configured yet.</Text>
+              ))}
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>
+                What the Coach Agreement covers
+              </Text>
+              <Text style={s.sectionBody}>
+                A high-level view of the areas the formal agreement addresses.
+                The formal agreement itself governs the exact terms.
+              </Text>
+            </View>
+
+            <View style={s.coverageGrid}>
+              {AGREEMENT_COVERAGE_CARDS.map((card) => (
+                <View key={card.title} style={s.coverageCard}>
+                  <Text style={s.coverageTitle}>{card.title}</Text>
+                  <Text style={s.coverageBody}>{card.body}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>
+                Review + sign the Coach Agreement
+              </Text>
+              <Text style={s.sectionBody}>
+                Open the approved Coach Agreement in a new tab and complete the
+                signature process there. Completion happens through the formal
+                agreement, not inside this module.
+              </Text>
+            </View>
+
+            <View style={s.responseBlock}>
+              {agreementUrl ? (
+                <>
+                  <Pressable
+                    style={s.primaryBtn}
+                    onPress={() => {
+                      Linking.openURL(agreementUrl);
+                      onAgreementOpened();
+                    }}
+                  >
+                    <Text style={s.primaryBtnText}>Open Coach Agreement</Text>
+                  </Pressable>
+                  {agreementOpenedDraft && (
+                    <View style={s.agreementOpenedNote}>
+                      <Icon name="check-circle" size={16} color={GREEN} />
+                      <Text style={s.agreementOpenedText}>
+                        Agreement link opened. Continue the signature process
+                        in the approved agreement tab.
+                      </Text>
+                    </View>
+                  )}
+                </>
+              ) : (
+                <View>
+                  <View style={[s.primaryBtn, s.btnDisabled]}>
+                    <Text style={s.primaryBtnText}>
+                      Agreement link not configured yet
+                    </Text>
+                  </View>
+                  <Text style={s.helperText}>
+                    The Coach Agreement link needs to be configured before this
+                    step can be completed.
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <View style={s.clarityCard}>
+              <Text style={s.clarityHeading}>Important clarity</Text>
+              {AGREEMENT_CLARITY_POINTS.map((point) => (
+                <View key={point} style={s.clarityRow}>
+                  <Text style={s.clarityBullet}>•</Text>
+                  <Text style={s.clarityText}>{point}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>Acknowledge before you launch</Text>
+              <Text style={s.sectionBody}>
+                These acknowledgements confirm your understanding of how Coach
+                Launch and the formal agreement relate. They are not a legal
+                signature.
+              </Text>
+            </View>
+
+            <Pressable
+              onPress={() =>
+                setAgreementNotReplacementDraft(!agreementNotReplacementDraft)
+              }
+              style={[
+                s.checklistRow,
+                agreementNotReplacementDraft && s.checklistRowChecked,
+              ]}
+            >
+              <View
+                style={[
+                  s.checklistBox,
+                  agreementNotReplacementDraft && s.checklistBoxChecked,
+                ]}
+              >
+                {agreementNotReplacementDraft && (
+                  <Icon name="check" size={14} color={BG} />
+                )}
               </View>
+              <Text
+                style={[
+                  s.checklistText,
+                  agreementNotReplacementDraft && s.checklistTextChecked,
+                ]}
+              >
+                I understand that Coach Launch does not replace the formal
+                Coach Agreement.
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() =>
+                setAgreementSignatureRequiredDraft(
+                  !agreementSignatureRequiredDraft
+                )
+              }
+              style={[
+                s.checklistRow,
+                agreementSignatureRequiredDraft && s.checklistRowChecked,
+              ]}
+            >
+              <View
+                style={[
+                  s.checklistBox,
+                  agreementSignatureRequiredDraft && s.checklistBoxChecked,
+                ]}
+              >
+                {agreementSignatureRequiredDraft && (
+                  <Icon name="check" size={14} color={BG} />
+                )}
+              </View>
+              <Text
+                style={[
+                  s.checklistText,
+                  agreementSignatureRequiredDraft && s.checklistTextChecked,
+                ]}
+              >
+                I understand that I need to review and complete the Coach
+                Agreement through the approved agreement link before launch.
+              </Text>
+            </Pressable>
+
+            {!!agreementUrl && agreementOpenedDraft && (
+              <Pressable
+                onPress={() =>
+                  setAgreementOpenedAcknowledgedDraft(
+                    !agreementOpenedAcknowledgedDraft
+                  )
+                }
+                style={[
+                  s.checklistRow,
+                  agreementOpenedAcknowledgedDraft && s.checklistRowChecked,
+                ]}
+              >
+                <View
+                  style={[
+                    s.checklistBox,
+                    agreementOpenedAcknowledgedDraft && s.checklistBoxChecked,
+                  ]}
+                >
+                  {agreementOpenedAcknowledgedDraft && (
+                    <Icon name="check" size={14} color={BG} />
+                  )}
+                </View>
+                <Text
+                  style={[
+                    s.checklistText,
+                    agreementOpenedAcknowledgedDraft && s.checklistTextChecked,
+                  ]}
+                >
+                  I have opened the Coach Agreement and understand that
+                  completion happens through the approved agreement process.
+                </Text>
+              </Pressable>
             )}
-          </View>
+          </>
         )}
 
         {/* Member Experience — hero, journey timeline, needs cards, reflection, scenario */}
@@ -5649,5 +6027,99 @@ const s = StyleSheet.create({
   checklistTextChecked: {
     color: FG,
     fontWeight: '500',
+  },
+  recapList: {
+    marginTop: 12,
+    marginBottom: 12,
+    gap: 10,
+  },
+  recapRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: CARD,
+  },
+  recapNumBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: BG,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  recapNumText: {
+    fontSize: 12,
+    color: GOLD,
+    fontFamily: FH,
+    letterSpacing: 0.6,
+  },
+  recapBody: {
+    flex: 1,
+  },
+  recapTitle: {
+    fontSize: 15,
+    color: FG,
+    fontFamily: FH,
+    marginBottom: 4,
+  },
+  recapText: {
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 19,
+  },
+  coverageGrid: {
+    marginTop: 12,
+    marginBottom: 12,
+    gap: 10,
+  },
+  coverageCard: {
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: CARD,
+  },
+  coverageTitle: {
+    fontSize: 15,
+    color: FG,
+    fontFamily: FH,
+    marginBottom: 6,
+  },
+  coverageBody: {
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 19,
+  },
+  clarityHeading: {
+    fontSize: 15,
+    color: FG,
+    fontFamily: FH,
+    marginBottom: 10,
+  },
+  agreementOpenedNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(110,187,122,0.35)',
+    backgroundColor: 'rgba(110,187,122,0.08)',
+  },
+  agreementOpenedText: {
+    flex: 1,
+    fontSize: 13,
+    color: FG,
+    fontFamily: FB,
+    lineHeight: 19,
   },
 });
