@@ -1000,8 +1000,8 @@ async function processStripeEvent(tag: string, event: Stripe.Event, res: any) {
     }
   } catch (err) {
     console.error(`[${tag}] Error processing event`, event.id, ':', err);
-    // Don't return 500 — Stripe will retry. Log and return 200 to avoid retry loops
-    // for non-transient errors. For transient errors, throw to trigger retry.
+    res.status(500).send('Internal error — Stripe will retry');
+    return;
   }
 
   res.status(200).send('OK');
@@ -1496,6 +1496,10 @@ async function handleChargeRefunded(charge: Stripe.Charge, eventId: string) {
 export const activateCtsOptIn = onCall(
   { secrets: [stripeSecretKey], invoker: 'public' },
   async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Authentication required');
+    }
+
     const { consentId, planId, memberId } = request.data as {
       consentId: string;
       planId: string;
@@ -1503,7 +1507,11 @@ export const activateCtsOptIn = onCall(
     };
 
     if (!consentId || !planId || !memberId) {
-      throw new Error('Missing required parameters: consentId, planId, memberId');
+      throw new HttpsError('invalid-argument', 'Missing required parameters: consentId, planId, memberId');
+    }
+
+    if (request.auth.uid !== memberId) {
+      throw new HttpsError('permission-denied', 'Caller must match the target member');
     }
 
     // 1. Load and validate consent document
@@ -4298,7 +4306,13 @@ import { MockZoomProvider } from './zoom';
 // ─── 22. getSystemHealth — Provider health check for admin dashboard ────────
 export const getSystemHealth = onCall(
   { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber], invoker: 'public' },
-  async () => {
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Authentication required');
+    }
+    if (!request.auth.token?.platformAdmin) {
+      throw new HttpsError('permission-denied', 'Platform admin access required');
+    }
     // Reset cached providers so health check reflects current secret availability
     resetNotificationProviders();
     const zoomProvider = getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
@@ -7816,6 +7830,13 @@ const voicemakerApiKey = defineSecret('VOICEMAKER_API_KEY');
 export const analyzeMovement = onCall(
   { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60, maxInstances: 20, invoker: 'public' },
   async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Authentication required');
+    }
+    if (!request.auth.token?.coach && !request.auth.token?.platformAdmin) {
+      throw new HttpsError('permission-denied', 'Coach access required');
+    }
+
     const { gifUrl, contactSheet } = request.data as {
       gifUrl?: string;
       contactSheet?: string; // base64 data URL (e.g. "data:image/jpeg;base64,...")
@@ -7831,7 +7852,6 @@ export const analyzeMovement = onCall(
       throw new HttpsError('internal', 'OpenAI API key not configured');
     }
     if (apiKey.length < 30) {
-      console.error('[analyzeMovement] API key appears truncated (length:', apiKey.length, ')');
       throw new HttpsError('internal', 'OpenAI API key appears invalid — check Firebase secrets');
     }
 

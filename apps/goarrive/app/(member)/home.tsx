@@ -14,6 +14,8 @@ import {
   ActivityIndicator,
   Platform,
   Pressable,
+  Linking,
+  Alert,
 } from 'react-native';
 import { useAuth } from '../../lib/AuthContext';
 import { FcmPermissionPrompt } from '../../lib/useFcmToken';
@@ -143,23 +145,28 @@ export default function MemberHome() {
   }
 
   const handleEditInfo = () => {
-    // Navigate to profile page
-    // router.push('/(member)/profile');
+    router.push('/(member)/profile');
   };
 
   const handleUploadPhoto = () => {
-    // Navigate to profile page for photo upload
-    // router.push('/(member)/profile');
+    router.push('/(member)/profile');
   };
 
   const handleViewPlan = () => {
     router.push('/(member)/my-plan');
   };
 
-  const handleContactCoach = () => {
-    if (coachData?.email) {
-      if (Platform.OS === 'web') {
-        window.open(`mailto:${coachData.email}`, '_blank');
+  const handleContactCoach = async () => {
+    if (!coachData?.email) return;
+    const url = `mailto:${coachData.email}`;
+    if (Platform.OS === 'web') {
+      window.open(url, '_blank');
+    } else {
+      const canOpen = await Linking.canOpenURL(url);
+      if (canOpen) {
+        Linking.openURL(url);
+      } else {
+        Alert.alert('No mail app', `Contact your coach at ${coachData.email}`);
       }
     }
   };
