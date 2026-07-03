@@ -157,6 +157,129 @@ const MODULES: ModuleDef[] = [
 
 const CULTURE_PILLARS = ['Show Up', 'People Over Ego', 'Create Moments', 'Traction'];
 
+interface PillarDetail {
+  name: string;
+  definition: string;
+  looksLike: string[];
+}
+
+const CULTURE_PILLAR_DETAILS: PillarDetail[] = [
+  {
+    name: 'Show Up',
+    definition: 'We are present, prepared, and consistent.',
+    looksLike: [
+      'Arriving ready before the session starts',
+      'Following through on what you said you would do',
+      'Checking in when a member starts drifting',
+      'Taking ownership instead of making excuses',
+    ],
+  },
+  {
+    name: 'People Over Ego',
+    definition:
+      'We protect the member, the team, and the mission above personal pride.',
+    looksLike: [
+      'Referring a member to another coach when it serves them better',
+      'Receiving feedback without defensiveness',
+      'Speaking with honor about fellow coaches',
+      'Choosing what helps the member, not what makes you look best',
+    ],
+  },
+  {
+    name: 'Create Moments',
+    definition:
+      'We look for small ways to make people feel seen, known, and encouraged.',
+    looksLike: [
+      "Celebrating a member's win",
+      'Sending a thoughtful follow-up',
+      'Remembering what matters to someone',
+      'Turning a normal check-in into a meaningful encouragement',
+    ],
+  },
+  {
+    name: 'Traction',
+    definition:
+      'We turn vision into movement through simple, consistent action.',
+    looksLike: [
+      'Keeping the next step clear',
+      'Helping members build momentum',
+      'Improving one thing at a time',
+      'Choosing progress over perfection',
+    ],
+  },
+];
+
+type ScenarioLetter = 'A' | 'B' | 'C' | 'D';
+
+interface CultureScenario {
+  key: 'memberSlipping' | 'coachFit';
+  responseField: 'cultureScenarioMemberSlipping' | 'cultureScenarioCoachFit';
+  eyebrow: string;
+  title: string;
+  prompt: string;
+  options: { letter: ScenarioLetter; text: string }[];
+  correct: ScenarioLetter;
+  correctFeedback: string;
+}
+
+const CULTURE_SCENARIOS: CultureScenario[] = [
+  {
+    key: 'memberSlipping',
+    responseField: 'cultureScenarioMemberSlipping',
+    eyebrow: 'SCENARIO 1',
+    title: 'A member starts slipping.',
+    prompt:
+      'A member has missed several workouts and seems discouraged. What response best reflects the G➲A culture?',
+    options: [
+      { letter: 'A', text: 'Wait for them to reach out when they are ready.' },
+      {
+        letter: 'B',
+        text: 'Send a harsh message so they know they need to be more disciplined.',
+      },
+      {
+        letter: 'C',
+        text: 'Check in with care, help them reset, and make the next step simple.',
+      },
+      {
+        letter: 'D',
+        text: 'Remove them from the plan until they prove they are serious.',
+      },
+    ],
+    correct: 'C',
+    correctFeedback:
+      'That is the G➲A way. Accountability should feel supportive, not shame-driven. We help members reset with care, clarity, and a next step they can actually take.',
+  },
+  {
+    key: 'coachFit',
+    responseField: 'cultureScenarioCoachFit',
+    eyebrow: 'SCENARIO 2',
+    title: 'Another coach is a better fit.',
+    prompt:
+      'You meet a potential member, but you realize another GoArrive coach may be a better fit for their goals. What response best reflects the G➲A culture?',
+    options: [
+      {
+        letter: 'A',
+        text: 'Keep the member because you found them first.',
+      },
+      {
+        letter: 'B',
+        text: 'Connect them with the better-fit coach and trust that collaboration strengthens the whole community.',
+      },
+      {
+        letter: 'C',
+        text: 'Avoid telling them so they do not get confused.',
+      },
+      {
+        letter: 'D',
+        text: 'Tell the other coach only after the member signs up.',
+      },
+    ],
+    correct: 'B',
+    correctFeedback:
+      'That is People Over Ego. Inside GoArrive, coaches are stakeholders in a shared mission. When the member wins, the culture wins.',
+  },
+];
+
 const VISION_EXCITEMENT_OPTIONS = [
   'Helping members build lasting consistency',
   'Growing inside a support-driven coaching culture',
@@ -177,6 +300,9 @@ interface CoachLaunchDoc {
     visionExcitement?: string;
     naturalCulturePillar?: string;
     growthCulturePillar?: string;
+    memberFeelingGoal?: string;
+    cultureScenarioMemberSlipping?: string;
+    cultureScenarioCoachFit?: string;
   };
   startedAt?: any;
   updatedAt?: any;
@@ -214,6 +340,9 @@ export default function CoachLaunchScreen() {
   const [visionExcitementDraft, setVisionExcitementDraft] = useState('');
   const [naturalPillarDraft, setNaturalPillarDraft] = useState('');
   const [growthPillarDraft, setGrowthPillarDraft] = useState('');
+  const [memberFeelingGoalDraft, setMemberFeelingGoalDraft] = useState('');
+  const [scenarioSlippingDraft, setScenarioSlippingDraft] = useState('');
+  const [scenarioCoachFitDraft, setScenarioCoachFitDraft] = useState('');
 
   const agreementUrl = (process.env.EXPO_PUBLIC_COACH_AGREEMENT_URL || '').trim();
 
@@ -240,6 +369,13 @@ export default function CoachLaunchScreen() {
           setVisionExcitementDraft(data.responses?.visionExcitement ?? '');
           setNaturalPillarDraft(data.responses?.naturalCulturePillar ?? '');
           setGrowthPillarDraft(data.responses?.growthCulturePillar ?? '');
+          setMemberFeelingGoalDraft(data.responses?.memberFeelingGoal ?? '');
+          setScenarioSlippingDraft(
+            data.responses?.cultureScenarioMemberSlipping ?? ''
+          );
+          setScenarioCoachFitDraft(
+            data.responses?.cultureScenarioCoachFit ?? ''
+          );
         } else {
           setProgress(emptyDoc(coachId));
         }
@@ -328,6 +464,15 @@ export default function CoachLaunchScreen() {
     if (moduleId === 'culture') {
       if (naturalPillarDraft) nextResponses.naturalCulturePillar = naturalPillarDraft;
       if (growthPillarDraft) nextResponses.growthCulturePillar = growthPillarDraft;
+      if (memberFeelingGoalDraft.trim()) {
+        nextResponses.memberFeelingGoal = memberFeelingGoalDraft.trim();
+      }
+      if (scenarioSlippingDraft) {
+        nextResponses.cultureScenarioMemberSlipping = scenarioSlippingDraft;
+      }
+      if (scenarioCoachFitDraft) {
+        nextResponses.cultureScenarioCoachFit = scenarioCoachFitDraft;
+      }
     }
 
     const nextCompleted = alreadyComplete ? completed : [...completed, moduleId];
@@ -386,6 +531,12 @@ export default function CoachLaunchScreen() {
             setNaturalPillarDraft={setNaturalPillarDraft}
             growthPillarDraft={growthPillarDraft}
             setGrowthPillarDraft={setGrowthPillarDraft}
+            memberFeelingGoalDraft={memberFeelingGoalDraft}
+            setMemberFeelingGoalDraft={setMemberFeelingGoalDraft}
+            scenarioSlippingDraft={scenarioSlippingDraft}
+            setScenarioSlippingDraft={setScenarioSlippingDraft}
+            scenarioCoachFitDraft={scenarioCoachFitDraft}
+            setScenarioCoachFitDraft={setScenarioCoachFitDraft}
             agreementUrl={agreementUrl}
             onComplete={() => completeModule(activeModule.id)}
             onBack={() => setActiveModuleId(null)}
@@ -584,6 +735,12 @@ interface ModuleDetailProps {
   setNaturalPillarDraft: (v: string) => void;
   growthPillarDraft: string;
   setGrowthPillarDraft: (v: string) => void;
+  memberFeelingGoalDraft: string;
+  setMemberFeelingGoalDraft: (v: string) => void;
+  scenarioSlippingDraft: string;
+  setScenarioSlippingDraft: (v: string) => void;
+  scenarioCoachFitDraft: string;
+  setScenarioCoachFitDraft: (v: string) => void;
   agreementUrl: string;
   onComplete: () => void;
   onBack: () => void;
@@ -604,6 +761,12 @@ function ModuleDetail({
   setNaturalPillarDraft,
   growthPillarDraft,
   setGrowthPillarDraft,
+  memberFeelingGoalDraft,
+  setMemberFeelingGoalDraft,
+  scenarioSlippingDraft,
+  setScenarioSlippingDraft,
+  scenarioCoachFitDraft,
+  setScenarioCoachFitDraft,
   agreementUrl,
   onComplete,
   onBack,
@@ -645,7 +808,15 @@ function ModuleDetail({
     if (module.id === 'vision') {
       return visionDraft.trim().length > 0 && !!visionExcitementDraft;
     }
-    if (module.id === 'culture') return !!naturalPillarDraft && !!growthPillarDraft;
+    if (module.id === 'culture') {
+      return (
+        !!naturalPillarDraft &&
+        !!growthPillarDraft &&
+        memberFeelingGoalDraft.trim().length > 0 &&
+        scenarioSlippingDraft === 'C' &&
+        scenarioCoachFitDraft === 'B'
+      );
+    }
     return true;
   })();
 
@@ -836,23 +1007,163 @@ function ModuleDetail({
           </>
         )}
 
-        {/* Culture — two pillar selections */}
+        {/* Culture — hero, pillars, reflection, scenarios */}
         {module.id === 'culture' && (
           <>
+            <View style={s.heroCard}>
+              <Text style={s.heroEyebrow}>CULTURE</Text>
+              <Text style={s.heroHeading}>
+                Culture is how we coach when nobody is watching.
+              </Text>
+              <Text style={s.heroBody}>
+                At G➲A, culture is not a poster. It is the way we show up for
+                members, support fellow coaches, communicate under pressure,
+                and protect the trust people place in us.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>Before every tool, this.</Text>
+              <Text style={s.sectionBody}>
+                Before a coach learns every tool, workflow, or agreement, they
+                need to understand the kind of community they are stepping
+                into.
+              </Text>
+              <Text style={s.sectionBody}>
+                GoArrive is building a support-driven coaching culture. That
+                means we care about skill, but we also care about presence. We
+                care about growth, but not at the expense of people. We care
+                about excellence, but we do not confuse excellence with ego.
+              </Text>
+              <Text style={s.sectionBody}>
+                These four pillars help shape how we lead:
+              </Text>
+            </View>
+
+            <View style={{ gap: 10 }}>
+              {CULTURE_PILLAR_DETAILS.map((p, i) => (
+                <View key={p.name} style={s.pillarDetailCard}>
+                  <View style={s.pillarDetailHeader}>
+                    <Text style={s.pillarDetailNumber}>
+                      {String(i + 1).padStart(2, '0')}
+                    </Text>
+                    <Text style={s.pillarDetailTitle}>{p.name}</Text>
+                  </View>
+                  <Text style={s.pillarDetailDef}>{p.definition}</Text>
+                  <Text style={s.pillarDetailLabel}>WHAT IT LOOKS LIKE</Text>
+                  {p.looksLike.map((item) => (
+                    <View key={item} style={s.pillarBulletRow}>
+                      <View style={s.pillarBulletDot} />
+                      <Text style={s.pillarBulletText}>{item}</Text>
+                    </View>
+                  ))}
+                </View>
+              ))}
+            </View>
+
             <View style={s.responseBlock}>
-              <Text style={s.responseLabel}>Which culture pillar feels most natural to you right now?</Text>
+              <Text style={s.responseLabel}>
+                Which culture pillar feels most natural to you right now?
+              </Text>
               <PillarPicker
                 value={naturalPillarDraft}
                 onChange={setNaturalPillarDraft}
               />
             </View>
             <View style={s.responseBlock}>
-              <Text style={s.responseLabel}>Which culture pillar do you want to grow in most?</Text>
+              <Text style={s.responseLabel}>
+                Which culture pillar do you want to grow in most?
+              </Text>
               <PillarPicker
                 value={growthPillarDraft}
                 onChange={setGrowthPillarDraft}
               />
             </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.responseLabel}>
+                What is one way you want members to feel after interacting with
+                you as their coach?
+              </Text>
+              <TextInput
+                value={memberFeelingGoalDraft}
+                onChangeText={setMemberFeelingGoalDraft}
+                placeholder="A short reflection…"
+                placeholderTextColor="#4A5568"
+                multiline
+                style={s.textArea}
+              />
+            </View>
+
+            {CULTURE_SCENARIOS.map((scn) => {
+              const selected =
+                scn.key === 'memberSlipping'
+                  ? scenarioSlippingDraft
+                  : scenarioCoachFitDraft;
+              const setSelected =
+                scn.key === 'memberSlipping'
+                  ? setScenarioSlippingDraft
+                  : setScenarioCoachFitDraft;
+              const isCorrect = selected === scn.correct;
+              const isWrong = !!selected && !isCorrect;
+              return (
+                <View key={scn.key} style={s.responseBlock}>
+                  <Text style={s.scenarioEyebrow}>{scn.eyebrow}</Text>
+                  <Text style={s.responseLabel}>{scn.title}</Text>
+                  <Text style={s.sectionBody}>{scn.prompt}</Text>
+                  <View style={s.optionList}>
+                    {scn.options.map((opt) => {
+                      const picked = selected === opt.letter;
+                      return (
+                        <Pressable
+                          key={opt.letter}
+                          onPress={() => setSelected(opt.letter)}
+                          style={[
+                            s.optionRow,
+                            picked && s.optionRowSelected,
+                          ]}
+                        >
+                          <View
+                            style={[
+                              s.radio,
+                              picked && s.radioSelected,
+                            ]}
+                          >
+                            {picked && <View style={s.radioDot} />}
+                          </View>
+                          <Text style={s.scenarioLetter}>{opt.letter}.</Text>
+                          <Text
+                            style={[
+                              s.optionText,
+                              picked && s.optionTextSelected,
+                            ]}
+                          >
+                            {opt.text}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                  {isCorrect && (
+                    <View style={s.scenarioFeedbackCorrect}>
+                      <Icon name="check-circle" size={16} color={GREEN} />
+                      <Text style={s.scenarioFeedbackCorrectText}>
+                        {scn.correctFeedback}
+                      </Text>
+                    </View>
+                  )}
+                  {isWrong && (
+                    <View style={s.scenarioFeedbackTryAgain}>
+                      <Text style={s.scenarioFeedbackTryAgainText}>
+                        Not quite. Take another look — the answer that reflects
+                        our culture leads with care for the member and honor
+                        for the team. Try again.
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              );
+            })}
           </>
         )}
 
@@ -1390,6 +1701,115 @@ const s = StyleSheet.create({
   },
   optionTextSelected: {
     color: FG,
+    fontWeight: '600',
+  },
+
+  // Culture — pillar detail cards
+  pillarDetailCard: {
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 14,
+    padding: 14,
+    gap: 8,
+  },
+  pillarDetailHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 10,
+  },
+  pillarDetailNumber: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: GOLD,
+    fontFamily: FH,
+    letterSpacing: 0.5,
+  },
+  pillarDetailTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: FG,
+    fontFamily: FH,
+  },
+  pillarDetailDef: {
+    fontSize: 14,
+    color: FG,
+    fontFamily: FB,
+    lineHeight: 20,
+  },
+  pillarDetailLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: MUTED,
+    fontFamily: FB,
+    marginTop: 4,
+  },
+  pillarBulletRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  pillarBulletDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: GOLD,
+    marginTop: 8,
+  },
+  pillarBulletText: {
+    flex: 1,
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 19,
+  },
+
+  // Culture — scenarios
+  scenarioEyebrow: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2,
+    color: GOLD,
+    fontFamily: FB,
+  },
+  scenarioLetter: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: GOLD,
+    fontFamily: FH,
+    width: 18,
+  },
+  scenarioFeedbackCorrect: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: 'rgba(110,187,122,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(110,187,122,0.35)',
+    borderRadius: 12,
+    padding: 12,
+  },
+  scenarioFeedbackCorrectText: {
+    flex: 1,
+    fontSize: 13,
+    color: GREEN,
+    fontFamily: FB,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
+  scenarioFeedbackTryAgain: {
+    backgroundColor: 'rgba(245,166,35,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.30)',
+    borderRadius: 12,
+    padding: 12,
+  },
+  scenarioFeedbackTryAgainText: {
+    fontSize: 13,
+    color: GOLD,
+    fontFamily: FB,
+    lineHeight: 18,
     fontWeight: '600',
   },
 
