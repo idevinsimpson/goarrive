@@ -157,6 +157,14 @@ const MODULES: ModuleDef[] = [
 
 const CULTURE_PILLARS = ['Show Up', 'People Over Ego', 'Create Moments', 'Traction'];
 
+const VISION_EXCITEMENT_OPTIONS = [
+  'Helping members build lasting consistency',
+  'Growing inside a support-driven coaching culture',
+  'Using better systems to coach with more clarity',
+  'Building long-term growth-based earnings',
+  'Being part of something early and meaningful',
+];
+
 // ── Firestore doc shape ────────────────────────────────────────────────────────
 
 interface CoachLaunchDoc {
@@ -164,7 +172,9 @@ interface CoachLaunchDoc {
   completedModuleIds: ModuleId[];
   currentModuleId: ModuleId;
   responses: {
+    welcomeCommitmentAccepted?: boolean;
     visionConnection?: string;
+    visionExcitement?: string;
     naturalCulturePillar?: string;
     growthCulturePillar?: string;
   };
@@ -199,7 +209,9 @@ export default function CoachLaunchScreen() {
   const [activeModuleId, setActiveModuleId] = useState<ModuleId | null>(null);
 
   // Local response drafts (persisted on Complete Module)
+  const [welcomeAcceptedDraft, setWelcomeAcceptedDraft] = useState(false);
   const [visionDraft, setVisionDraft] = useState('');
+  const [visionExcitementDraft, setVisionExcitementDraft] = useState('');
   const [naturalPillarDraft, setNaturalPillarDraft] = useState('');
   const [growthPillarDraft, setGrowthPillarDraft] = useState('');
 
@@ -223,7 +235,9 @@ export default function CoachLaunchScreen() {
             updatedAt: data.updatedAt,
             completedAt: data.completedAt,
           });
+          setWelcomeAcceptedDraft(!!data.responses?.welcomeCommitmentAccepted);
           setVisionDraft(data.responses?.visionConnection ?? '');
+          setVisionExcitementDraft(data.responses?.visionExcitement ?? '');
           setNaturalPillarDraft(data.responses?.naturalCulturePillar ?? '');
           setGrowthPillarDraft(data.responses?.growthCulturePillar ?? '');
         } else {
@@ -304,8 +318,12 @@ export default function CoachLaunchScreen() {
 
     // Collect module-specific responses
     const nextResponses = { ...progress.responses };
+    if (moduleId === 'welcome') {
+      nextResponses.welcomeCommitmentAccepted = welcomeAcceptedDraft;
+    }
     if (moduleId === 'vision') {
       nextResponses.visionConnection = visionDraft.trim();
+      if (visionExcitementDraft) nextResponses.visionExcitement = visionExcitementDraft;
     }
     if (moduleId === 'culture') {
       if (naturalPillarDraft) nextResponses.naturalCulturePillar = naturalPillarDraft;
@@ -358,8 +376,12 @@ export default function CoachLaunchScreen() {
             module={activeModule}
             isComplete={completed.includes(activeModule.id)}
             saving={saving}
+            welcomeAcceptedDraft={welcomeAcceptedDraft}
+            setWelcomeAcceptedDraft={setWelcomeAcceptedDraft}
             visionDraft={visionDraft}
             setVisionDraft={setVisionDraft}
+            visionExcitementDraft={visionExcitementDraft}
+            setVisionExcitementDraft={setVisionExcitementDraft}
             naturalPillarDraft={naturalPillarDraft}
             setNaturalPillarDraft={setNaturalPillarDraft}
             growthPillarDraft={growthPillarDraft}
@@ -552,8 +574,12 @@ interface ModuleDetailProps {
   module: ModuleDef;
   isComplete: boolean;
   saving: boolean;
+  welcomeAcceptedDraft: boolean;
+  setWelcomeAcceptedDraft: (v: boolean) => void;
   visionDraft: string;
   setVisionDraft: (v: string) => void;
+  visionExcitementDraft: string;
+  setVisionExcitementDraft: (v: string) => void;
   naturalPillarDraft: string;
   setNaturalPillarDraft: (v: string) => void;
   growthPillarDraft: string;
@@ -568,8 +594,12 @@ function ModuleDetail({
   module,
   isComplete,
   saving,
+  welcomeAcceptedDraft,
+  setWelcomeAcceptedDraft,
   visionDraft,
   setVisionDraft,
+  visionExcitementDraft,
+  setVisionExcitementDraft,
   naturalPillarDraft,
   setNaturalPillarDraft,
   growthPillarDraft,
@@ -611,7 +641,10 @@ function ModuleDetail({
   }
 
   const canComplete = (() => {
-    if (module.id === 'vision') return visionDraft.trim().length > 0;
+    if (module.id === 'welcome') return welcomeAcceptedDraft === true;
+    if (module.id === 'vision') {
+      return visionDraft.trim().length > 0 && !!visionExcitementDraft;
+    }
     if (module.id === 'culture') return !!naturalPillarDraft && !!growthPillarDraft;
     return true;
   })();
@@ -627,21 +660,180 @@ function ModuleDetail({
       <View style={s.detailBody}>
         <Text style={s.detailIntro}>{module.intro}</Text>
 
-        {/* Vision — free-text response */}
+        {/* Welcome — personal welcome + commitment */}
+        {module.id === 'welcome' && (
+          <>
+            <View style={s.heroCard}>
+              <Text style={s.heroEyebrow}>A NOTE FROM DEVIN</Text>
+              <Text style={s.heroHeading}>Welcome to G➲A.</Text>
+              <Text style={s.heroBody}>
+                I'm glad you're here. Coach Launch is my way of walking you into
+                GoArrive personally — the way I'd sit with a coach at a coffee
+                shop the week before their first member session. Take your time,
+                read carefully, and let each module actually land.
+              </Text>
+              <Text style={s.heroBody}>
+                You're not filling out paperwork. You're stepping into a
+                coaching culture. What you build here shapes the way real
+                members experience their bodies, their consistency, and their
+                confidence for years to come.
+              </Text>
+              <Text style={s.heroSignoff}>— Devin</Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>What Coach Launch is</Text>
+              <Text style={s.sectionBody}>
+                Coach Launch is a short, guided path — not a form, not a legal
+                checklist. It introduces the vision behind GoArrive, the culture
+                we hold each other to, the way members experience the app, and
+                the tools you'll use every day as a coach.
+              </Text>
+              <Text style={s.sectionBody}>
+                Each module is small on purpose. Move through them in order.
+                Your progress saves automatically.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>What you'll walk through</Text>
+              <View style={s.previewList}>
+                {MODULES.slice(1).map((m) => (
+                  <View key={m.id} style={s.previewRow}>
+                    <Text style={s.previewNumber}>
+                      {String(m.number).padStart(2, '0')}
+                    </Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.previewTitle}>{m.title}</Text>
+                      <Text style={s.previewDesc}>{m.description}</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            <Pressable
+              style={s.commitmentCard}
+              onPress={() => setWelcomeAcceptedDraft(!welcomeAcceptedDraft)}
+            >
+              <View
+                style={[
+                  s.checkbox,
+                  welcomeAcceptedDraft && s.checkboxChecked,
+                ]}
+              >
+                {welcomeAcceptedDraft && (
+                  <Icon name="check" size={14} color="#0E1117" />
+                )}
+              </View>
+              <Text style={s.commitmentText}>
+                I'm ready to walk through Coach Launch with focus, humility, and
+                a willingness to grow.
+              </Text>
+            </Pressable>
+          </>
+        )}
+
+        {/* Vision — hero, story, free-text, excitement picker */}
         {module.id === 'vision' && (
-          <View style={s.responseBlock}>
-            <Text style={s.responseLabel}>
-              What part of the GoArrive vision connects with you most?
-            </Text>
-            <TextInput
-              value={visionDraft}
-              onChangeText={setVisionDraft}
-              placeholder="Share a few sentences…"
-              placeholderTextColor="#4A5568"
-              multiline
-              style={s.textArea}
-            />
-          </View>
+          <>
+            <View style={s.heroCard}>
+              <Text style={s.heroEyebrow}>THE VISION</Text>
+              <Text style={s.heroHeading}>
+                We're building the future of fitness coaching.
+              </Text>
+              <Text style={s.heroBody}>
+                Personalized. Technology-enabled. Warm. Built around real
+                humans, not templates.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>The problem</Text>
+              <Text style={s.sectionBody}>
+                Most fitness experiences fail members quietly. Cookie-cutter
+                programs, disconnected apps, and transactional check-ins leave
+                people alone with their bodies and their goals. Coaches who
+                genuinely care get buried under admin work, scattered tools, and
+                unclear compensation. Both sides deserve better.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>What we're building</Text>
+              <Text style={s.sectionBody}>
+                GoArrive is one home for coach and member — personalized plans,
+                block-based workouts, guided playback, reflection, and
+                acknowledgment, all tied together by a coaching culture we
+                actively protect. The technology carries the weight so the
+                relationship can breathe.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>Why coaches matter here</Text>
+              <Text style={s.sectionBody}>
+                Software doesn't change lives. Coaches do. Our job is to give
+                you the systems, the support, and the growth-based earnings to
+                make coaching a real long-term career — while you give members
+                the presence, care, and consistency that changes how they see
+                themselves.
+              </Text>
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.responseLabel}>
+                What part of the GoArrive vision connects with you most?
+              </Text>
+              <TextInput
+                value={visionDraft}
+                onChangeText={setVisionDraft}
+                placeholder="Share a few sentences…"
+                placeholderTextColor="#4A5568"
+                multiline
+                style={s.textArea}
+              />
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.responseLabel}>
+                When you think about becoming a GoArrive coach, what excites you
+                most?
+              </Text>
+              <View style={s.optionList}>
+                {VISION_EXCITEMENT_OPTIONS.map((opt) => {
+                  const selected = visionExcitementDraft === opt;
+                  return (
+                    <Pressable
+                      key={opt}
+                      onPress={() => setVisionExcitementDraft(opt)}
+                      style={[
+                        s.optionRow,
+                        selected && s.optionRowSelected,
+                      ]}
+                    >
+                      <View
+                        style={[
+                          s.radio,
+                          selected && s.radioSelected,
+                        ]}
+                      >
+                        {selected && <View style={s.radioDot} />}
+                      </View>
+                      <Text
+                        style={[
+                          s.optionText,
+                          selected && s.optionTextSelected,
+                        ]}
+                      >
+                        {opt}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          </>
         )}
 
         {/* Culture — two pillar selections */}
@@ -691,7 +883,7 @@ function ModuleDetail({
         )}
 
         {/* Placeholder body for modules without dedicated content yet */}
-        {['welcome', 'memberExperience', 'coachExperience', 'howWeCoach', 'moneyGrowth', 'apprenticeshipPath', 'setupChecklist'].includes(module.id) && (
+        {['memberExperience', 'coachExperience', 'howWeCoach', 'moneyGrowth', 'apprenticeshipPath', 'setupChecklist'].includes(module.id) && (
           <View style={s.placeholderBlock}>
             <Text style={s.placeholderText}>
               Deeper content for this module is coming soon. For now, read the intro above,
@@ -1024,6 +1216,181 @@ const s = StyleSheet.create({
     color: MUTED,
     fontFamily: FB,
     fontStyle: 'italic',
+  },
+
+  // Hero card (Welcome + Vision)
+  heroCard: {
+    backgroundColor: '#131A27',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.30)',
+    borderRadius: 16,
+    padding: 18,
+    gap: 10,
+  },
+  heroEyebrow: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2,
+    color: GOLD,
+    fontFamily: FB,
+  },
+  heroHeading: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: FG,
+    fontFamily: FH,
+    lineHeight: 28,
+  },
+  heroBody: {
+    fontSize: 14,
+    color: FG,
+    fontFamily: FB,
+    lineHeight: 21,
+  },
+  heroSignoff: {
+    fontSize: 13,
+    color: GOLD,
+    fontFamily: FH,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+
+  // Section block (Welcome + Vision structured sections)
+  sectionBlock: {
+    gap: 8,
+  },
+  sectionHeading: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: FG,
+    fontFamily: FH,
+  },
+  sectionBody: {
+    fontSize: 14,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 21,
+  },
+
+  // Welcome — preview list of upcoming modules
+  previewList: {
+    gap: 8,
+    marginTop: 4,
+  },
+  previewRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  previewNumber: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: GOLD,
+    fontFamily: FH,
+    width: 22,
+    marginTop: 1,
+  },
+  previewTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: FG,
+    fontFamily: FH,
+  },
+  previewDesc: {
+    fontSize: 12,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 16,
+    marginTop: 2,
+  },
+
+  // Welcome — commitment checkbox
+  commitmentCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: 'rgba(245,166,35,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.30)',
+    borderRadius: 14,
+    padding: 14,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: BORDER,
+    backgroundColor: '#0E1421',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: GOLD,
+    borderColor: GOLD,
+  },
+  commitmentText: {
+    flex: 1,
+    fontSize: 13,
+    color: FG,
+    fontFamily: FB,
+    lineHeight: 19,
+    fontWeight: '600',
+  },
+
+  // Vision — radio option list
+  optionList: {
+    gap: 8,
+  },
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#0E1421',
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  optionRowSelected: {
+    borderColor: GOLD,
+    backgroundColor: 'rgba(245,166,35,0.08)',
+  },
+  radio: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: BORDER,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioSelected: {
+    borderColor: GOLD,
+  },
+  radioDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: GOLD,
+  },
+  optionText: {
+    flex: 1,
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 18,
+  },
+  optionTextSelected: {
+    color: FG,
+    fontWeight: '600',
   },
 
   // Pillar chips
