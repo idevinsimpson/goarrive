@@ -1378,6 +1378,12 @@ export default function CoachLaunchScreen() {
     claims?.role === 'platformAdmin' ||
     claims?.role === 'platform_admin' ||
     claims?.admin === true;
+  // Signature legally must be made by the actual coach account owner —
+  // admin impersonation is not allowed to sign on their behalf. This is
+  // also enforced by Firestore rules (coach_agreements/{coachId}: create
+  // requires request.auth.uid == coachId), but the UI blocks it earlier
+  // for a clean disabled state.
+  const isSigningAsSelf = !!user?.uid && user.uid === coachId;
 
   const [progress, setProgress] = useState<CoachLaunchDoc | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1874,6 +1880,16 @@ export default function CoachLaunchScreen() {
   async function submitCoachAgreement() {
     if (!coachId || !progress) return;
     if (signedAgreement) return; // already signed — client-immutable
+    if (!isSigningAsSelf) {
+      // Admin impersonation cannot sign — legal signature must come from
+      // the actual coach account owner. Firestore rules also enforce
+      // this at the create layer.
+      setAgreementSubmitError(
+        'Agreement must be signed by the coach account owner. Exit ' +
+          'impersonation and have the coach sign from their own account.'
+      );
+      return;
+    }
     const first = agreementFirstNameDraft.trim();
     const last = agreementLastNameDraft.trim();
     const allReviewed = COACH_AGREEMENT_SECTIONS.every((sec) =>
@@ -2135,6 +2151,7 @@ export default function CoachLaunchScreen() {
             agreementSubmitError={agreementSubmitError}
             signedAgreement={signedAgreement}
             onSubmitAgreement={submitCoachAgreement}
+            isSigningAsSelf={isSigningAsSelf}
             onComplete={() => completeModule(activeModule.id)}
             onBack={() => setActiveModuleId(null)}
             onFinish={() => router.replace('/(app)/dashboard' as any)}
@@ -2464,6 +2481,7 @@ interface ModuleDetailProps {
     status?: string;
   } | null;
   onSubmitAgreement: () => void;
+  isSigningAsSelf: boolean;
   onComplete: () => void;
   onBack: () => void;
   onFinish: () => void;
@@ -2560,6 +2578,7 @@ function ModuleDetail({
   agreementSubmitError,
   signedAgreement,
   onSubmitAgreement,
+  isSigningAsSelf,
   onComplete,
   onBack,
   onFinish,
@@ -3035,6 +3054,7 @@ function ModuleDetail({
             submitError={agreementSubmitError}
             signedAgreement={signedAgreement}
             onSubmit={onSubmitAgreement}
+            isSigningAsSelf={isSigningAsSelf}
             scrollRef={scrollRef}
           />
         )}
@@ -4556,6 +4576,7 @@ interface AgreementModuleProps {
     status?: string;
   } | null;
   onSubmit: () => void;
+  isSigningAsSelf: boolean;
   scrollRef: React.RefObject<ScrollView | null>;
 }
 
@@ -4578,6 +4599,7 @@ function AgreementModule({
   submitError,
   signedAgreement,
   onSubmit,
+  isSigningAsSelf,
   scrollRef,
 }: AgreementModuleProps) {
   const accordionYRef = useRef<number | null>(null);
@@ -4678,6 +4700,65 @@ function AgreementModule({
             <Text style={s.clarityBullet}>•</Text>
             <Text style={s.clarityText}>
               Return to Coach Launch to continue to Launch Celebration.
+            </Text>
+          </View>
+        </View>
+      </>
+    );
+  }
+
+  if (!isSigningAsSelf) {
+    // Admin impersonation cannot sign. Show a clear disabled state and
+    // route them out of the signing flow. Firestore rules also enforce
+    // this at the create layer.
+    return (
+      <>
+        <View style={s.heroCard}>
+          <Text style={s.heroEyebrow}>AGREEMENT</Text>
+          <Text style={s.heroHeading}>
+            Signing must be done by the coach.
+          </Text>
+          <Text style={s.heroBody}>
+            You are viewing this Coach Launch flow as a platform admin.
+            The Coach Agreement is a legal signature and must be signed
+            by the coach account owner from their own account.
+          </Text>
+        </View>
+        <View style={s.impersonationBlockCard}>
+          <View style={s.impersonationBlockIconWrap}>
+            <Icon name="lock" size={22} color={GOLD} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.impersonationBlockTitle}>
+              Signing disabled during impersonation
+            </Text>
+            <Text style={s.impersonationBlockBody}>
+              Agreement must be signed by the coach account owner. Exit
+              impersonation and have the coach sign from their own
+              account. As a platform admin you may still view a signed
+              agreement once it exists.
+            </Text>
+          </View>
+        </View>
+        <View style={s.clarityCard}>
+          <Text style={s.clarityHeading}>What to do</Text>
+          <View style={s.clarityRow}>
+            <Text style={s.clarityBullet}>•</Text>
+            <Text style={s.clarityText}>
+              Exit impersonation from the admin console.
+            </Text>
+          </View>
+          <View style={s.clarityRow}>
+            <Text style={s.clarityBullet}>•</Text>
+            <Text style={s.clarityText}>
+              Ask the coach to open Coach Launch → Coach Agreement and
+              sign from their own account.
+            </Text>
+          </View>
+          <View style={s.clarityRow}>
+            <Text style={s.clarityBullet}>•</Text>
+            <Text style={s.clarityText}>
+              Return here after the coach signs to review the record.
             </Text>
           </View>
         </View>
@@ -6720,6 +6801,38 @@ const s = StyleSheet.create({
     marginTop: 8,
     marginBottom: 8,
     alignItems: 'flex-start',
+  },
+  impersonationBlockCard: {
+    flexDirection: 'row',
+    gap: 12,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.5)',
+    backgroundColor: 'rgba(212,175,55,0.08)',
+    marginTop: 8,
+    marginBottom: 8,
+    alignItems: 'flex-start',
+  },
+  impersonationBlockIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(212,175,55,0.16)',
+  },
+  impersonationBlockTitle: {
+    fontSize: 15,
+    fontFamily: FH,
+    color: FG,
+    marginBottom: 4,
+  },
+  impersonationBlockBody: {
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 19,
   },
   signedBadgeIconWrap: {
     width: 36,
