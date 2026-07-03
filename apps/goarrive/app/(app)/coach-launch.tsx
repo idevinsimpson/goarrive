@@ -1734,6 +1734,12 @@ export default function CoachLaunchScreen() {
     return () => clearTimeout(t);
   }, [justCompletedId]);
 
+  // When opening a module, snap to the top so the hero is visible.
+  useEffect(() => {
+    if (!activeModuleId) return;
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [activeModuleId]);
+
   // After returning to the list with a pending scroll target, wait for
   // layout to settle then scroll the next-incomplete module into view.
   useEffect(() => {
