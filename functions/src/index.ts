@@ -9003,6 +9003,67 @@ export const generateVoice = onCall(
 );
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// NEW COACH — Branded welcome email
+// Fires whenever a coaches/{coachId} doc is created, regardless of the path
+// (invite activation, admin add, script), so every new coach gets welcomed.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export const onCoachCreated = onDocumentCreated(
+  { document: 'coaches/{coachId}', region: 'us-central1', secrets: [emailApiKey] },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const TAG = '[onCoachCreated]';
+
+    const data = snap.data() as {
+      email?: string;
+      name?: string;
+      welcomeEmailSentAt?: number;
+    };
+
+    if (data.welcomeEmailSentAt) {
+      console.log(TAG, 'Welcome email already sent — skipping', event.params.coachId);
+      return;
+    }
+    if (!data.email) {
+      console.log(TAG, 'No email on coach doc — skipping', event.params.coachId);
+      return;
+    }
+
+    const { sendNotification, resetNotificationProviders } = await import('./notifications');
+    resetNotificationProviders();
+    const { coachWelcomeEmail } = await import('./templates');
+
+    const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
+    const rendered = coachWelcomeEmail(data.name || '', appUrl);
+
+    const logId = await sendNotification({
+      messageType: 'coach_welcome',
+      channel: 'email',
+      recipient: {
+        uid: event.params.coachId,
+        email: data.email,
+        displayName: data.name,
+        role: 'coach',
+      },
+      subject: rendered.subject,
+      body: rendered.body,
+      htmlBody: rendered.htmlBody,
+      coachId: event.params.coachId,
+    });
+
+    const logSnap = await db.collection('notification_log').doc(logId).get();
+    const status = logSnap.data()?.status;
+    if (status === 'sent') {
+      await snap.ref.update({ welcomeEmailSentAt: Date.now() });
+      console.log(TAG, 'Welcome email sent to', data.email, '(log', logId + ')');
+    } else {
+      console.error(TAG, 'Welcome email not sent for', data.email, '— status:', status, '(log', logId + ')');
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // NEW MEMBER — Set custom claims + notify coach
 // Fires when a member self-signs up via the intake form. Sets role claims so
 // AuthContext picks up the correct role, and sends FCM push to the assigned coach.

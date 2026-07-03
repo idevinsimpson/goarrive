@@ -195,6 +195,72 @@ function recordingReady(data: TemplateData): RenderedMessage {
   return { subject, body, htmlBody };
 }
 
+// ─── Coach Welcome ───────────────────────────────────────────────────────────
+
+export function coachWelcomeEmail(coachName: string, appUrl: string = 'https://goarrive.fit'): RenderedMessage {
+  const firstName = (coachName || '').split(' ')[0] || 'Coach';
+
+  const subject = `Welcome to GoArrive, ${firstName} — your coaching business starts here`;
+  const body = `Welcome to GoArrive, ${firstName}! You're officially a GoArrive coach. Here's how to get rolling: 1) Sign in at ${appUrl} and open your Command Center. 2) Work through your Coach Launch journey — it walks you through everything from your profile to your first member. 3) Build your first workout in the Build tab. Your members show up because you do. Let's go. — The GoArrive Team`;
+
+  // Optimized 6.7KB email version (the app's logo-header.png is 148KB — too slow for email)
+  const logoUrl = 'https://firebasestorage.googleapis.com/v0/b/goarrive.firebasestorage.app/o/email-assets%2Fgoarrive-email-logo.png?alt=media&token=849e59ce-a58a-40b4-acce-af0089c0358a';
+
+  // Full HTML doc with color-scheme meta + table layout + bgcolor attributes:
+  // required so Gmail (esp. iOS dark mode) does not invert the dark theme.
+  const htmlBody = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="dark">
+<meta name="supported-color-schemes" content="dark">
+<style>
+  :root { color-scheme: dark; supported-color-schemes: dark; }
+  body { background-color: #0F1117 !important; }
+  @media (prefers-color-scheme: dark) {
+    body, .bg-page { background-color: #0F1117 !important; }
+    .bg-card { background-color: #1A1D27 !important; }
+    .bg-steps { background-color: #252830 !important; }
+    .txt { color: #E8EAF0 !important; }
+    .txt-muted { color: #9CA3AF !important; }
+  }
+</style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #0F1117;" bgcolor="#0F1117">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg-page" bgcolor="#0F1117" style="background-color: #0F1117;">
+<tr><td align="center" style="padding: 24px 12px;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0" style="max-width: 480px; width: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+  <tr><td align="center" style="padding: 8px 0 20px 0;">
+    <img src="${logoUrl}" alt="GoArrive" width="220" style="display: block; width: 220px; max-width: 80%; height: auto;">
+  </td></tr>
+  <tr><td class="bg-card" bgcolor="#1A1D27" style="background-color: #1A1D27; border-radius: 12px; padding: 24px;">
+    <h2 style="color: #4ADE80; margin: 0 0 16px 0; font-size: 22px;">Welcome, Coach ${firstName}</h2>
+    <p class="txt" style="margin: 0 0 12px 0; line-height: 1.5; color: #E8EAF0;">You're officially a <strong>GoArrive coach</strong>. Your coaching business now has a home — and your members are going to feel the difference.</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg-steps" bgcolor="#252830" style="background-color: #252830; border-radius: 8px; margin: 16px 0;">
+    <tr><td style="padding: 16px;">
+      <p class="txt" style="margin: 0 0 10px 0; color: #E8EAF0;"><strong style="color: #F5A623;">1.</strong> Sign in and open your <strong>Command Center</strong></p>
+      <p class="txt" style="margin: 0 0 10px 0; color: #E8EAF0;"><strong style="color: #F5A623;">2.</strong> Complete your <strong>Coach Launch</strong> journey — profile, agreement, and setup, step by step</p>
+      <p class="txt" style="margin: 0; color: #E8EAF0;"><strong style="color: #F5A623;">3.</strong> Build your first <strong>workout</strong> and invite your first member</p>
+    </td></tr>
+    </table>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="padding: 12px 0;">
+      <a href="${appUrl}" style="display: inline-block; background-color: #7BA05B; color: #0F1117; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700;">Open Your Command Center</a>
+    </td></tr></table>
+    <p class="txt-muted" style="margin: 16px 0 0 0; color: #9CA3AF; line-height: 1.5;">Your members show up because you do. Let's go.</p>
+    <p class="txt-muted" style="margin: 12px 0 0 0; color: #9CA3AF;">— The GoArrive Team</p>
+  </td></tr>
+  <tr><td align="center" style="padding: 20px 0 0 0;">
+    <p style="color: #7A7F94; font-size: 12px; margin: 0;">GoArrive · Coaching, arrived.</p>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+
+  return { subject, body, htmlBody };
+}
+
 // ─── Formatting Helpers ──────────────────────────────────────────────────────
 
 function formatSessionType(type: string): string {
