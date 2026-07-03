@@ -19,7 +19,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Animated,
-  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -40,6 +39,13 @@ import { db } from '../../lib/firebase';
 import { useAuth } from '../../lib/AuthContext';
 import { Icon } from '../../components/Icon';
 import { BG, BLUE, BORDER, CARD, FB, FG, FH, GOLD, GREEN, MUTED } from '../../lib/theme';
+import {
+  COACH_AGREEMENT_SECTIONS,
+  COACH_AGREEMENT_SOURCE_URL,
+  COACH_AGREEMENT_TITLE,
+  COACH_AGREEMENT_VERSION,
+} from '../../constants/coachAgreement';
+import { CoachAgreementSignaturePad } from '../../components/CoachAgreementSignaturePad';
 
 // ── Modules (order matters — this is the journey sequence) ─────────────────────
 
@@ -1297,89 +1303,6 @@ const SETUP_SCENARIO_UNTESTED_TOOL: MemberScenario = {
     'Close, but remember the goal: we do not need perfection, and we do not wing it with members. We prepare, test, ask for help, and protect the experience.',
 };
 
-// ── Phase 10: Agreement ────────────────────────────────────────────────────────
-
-interface AgreementRecapItem {
-  title: string;
-  body: string;
-}
-
-const AGREEMENT_JOURNEY_RECAP: AgreementRecapItem[] = [
-  {
-    title: 'Vision',
-    body: 'Why G\u27B2A exists and what we are building together.',
-  },
-  {
-    title: 'Culture',
-    body: 'How we show up for members and coaches.',
-  },
-  {
-    title: 'Member Experience',
-    body: 'What members feel from first interest to ongoing support.',
-  },
-  {
-    title: 'Coach Experience',
-    body: 'How the Command Center helps coaches lead with clarity.',
-  },
-  {
-    title: 'How We Coach',
-    body: 'The posture, communication, safety, and care expected inside G\u27B2A.',
-  },
-  {
-    title: 'Money + Growth',
-    body: 'The high-level structure for growth-based earnings and collaboration.',
-  },
-  {
-    title: 'Apprenticeship Path',
-    body: 'How a coach grows from learning to launching.',
-  },
-  {
-    title: 'Setup Checklist',
-    body: 'Practical readiness before serving members.',
-  },
-];
-
-interface AgreementCoverageCard {
-  title: string;
-  body: string;
-}
-
-const AGREEMENT_COVERAGE_CARDS: AgreementCoverageCard[] = [
-  {
-    title: 'Coaching standards',
-    body:
-      'Professional conduct, communication, safety, preparation, personalization, and member care.',
-  },
-  {
-    title: 'Services + delivery',
-    body:
-      'How GoArrive\u2019s online fitness coaching experience is delivered through approved systems, sessions, recordings, dashboards, and support workflows.',
-  },
-  {
-    title: 'Money + growth programs',
-    body:
-      'Progressive compensation, earnings cap, referral reward, inter-coach referrals, and profit sharing according to the formal terms.',
-  },
-  {
-    title: 'Confidentiality + IP',
-    body:
-      'Protection of member data, GoArrive systems, workout plans, internal operations, and intellectual property.',
-  },
-  {
-    title: 'Changes + termination',
-    body:
-      'How program terms may be modified with notice and how participation may end according to the formal agreement.',
-  },
-];
-
-const AGREEMENT_CLARITY_POINTS: string[] = [
-  'Coach Launch helps you understand the journey.',
-  'The Coach Agreement is the formal agreement.',
-  'Completing this module does not replace the required signature process.',
-  'GoArrive may require final review or approval before a coach is fully launched.',
-  'If anything in Coach Launch and the formal agreement ever seems different, the formal agreement controls.',
-];
-
 // ── Firestore doc shape ────────────────────────────────────────────────────────
 
 interface CoachLaunchDoc {
@@ -1421,6 +1344,15 @@ interface CoachLaunchDoc {
     agreementCoachLaunchNotReplacement?: boolean;
     agreementSignatureRequired?: boolean;
     agreementOpenedAcknowledged?: boolean;
+    // Phase 10B — in-app Coach Agreement signing
+    agreementReviewedSectionIds?: string[];
+    agreementTermsAccepted?: boolean;
+    agreementElectronicConsentAccepted?: boolean;
+    agreementElectronicConsentAcceptedAt?: any;
+    agreementCoachFirstName?: string;
+    agreementCoachLastName?: string;
+    agreementSignedVersion?: string;
+    agreementSignedAt?: any;
   };
   startedAt?: any;
   updatedAt?: any;
@@ -1527,7 +1459,57 @@ export default function CoachLaunchScreen() {
     setAgreementOpenedAcknowledgedDraft,
   ] = useState(false);
 
+  // ── Phase 10B — in-app Coach Agreement signing drafts ────────────────────────
+  const [
+    agreementReviewedSectionIdsDraft,
+    setAgreementReviewedSectionIdsDraft,
+  ] = useState<string[]>([]);
+  const [agreementTermsAcceptedDraft, setAgreementTermsAcceptedDraft] =
+    useState(false);
+  const [
+    agreementElectronicConsentDraft,
+    setAgreementElectronicConsentDraft,
+  ] = useState(false);
+  const [agreementFirstNameDraft, setAgreementFirstNameDraft] = useState('');
+  const [agreementLastNameDraft, setAgreementLastNameDraft] = useState('');
+  const [agreementSignatureDraft, setAgreementSignatureDraft] = useState('');
+  const [agreementExpandedSectionId, setAgreementExpandedSectionId] =
+    useState<string | null>(null);
+  const [agreementSubmitting, setAgreementSubmitting] = useState(false);
+  const [agreementSubmitError, setAgreementSubmitError] = useState<
+    string | null
+  >(null);
+  const [signedAgreement, setSignedAgreement] = useState<{
+    coachId: string;
+    coachFirstName?: string;
+    coachLastName?: string;
+    typedName?: string;
+    agreementVersion?: string;
+    agreementTitle?: string;
+    signedAt?: any;
+    clientSignedDate?: string;
+    reviewedSectionIds?: string[];
+    signatureDataUrl?: string;
+    status?: string;
+  } | null>(null);
+
   const agreementUrl = (process.env.EXPO_PUBLIC_COACH_AGREEMENT_URL || '').trim();
+
+  // Prefill first + last name from Firebase Auth displayName once, only if empty.
+  const nameSeededRef = useRef(false);
+  useEffect(() => {
+    if (nameSeededRef.current) return;
+    const displayName = (user?.displayName || '').trim();
+    if (!displayName) return;
+    if (!agreementFirstNameDraft && !agreementLastNameDraft) {
+      const parts = displayName.split(/\s+/);
+      const first = parts[0] || '';
+      const last = parts.slice(1).join(' ') || '';
+      if (first) setAgreementFirstNameDraft(first);
+      if (last) setAgreementLastNameDraft(last);
+      nameSeededRef.current = true;
+    }
+  }, [user?.displayName, agreementFirstNameDraft, agreementLastNameDraft]);
 
   // Load progress on mount
   useEffect(() => {
@@ -1632,6 +1614,28 @@ export default function CoachLaunchScreen() {
           setAgreementOpenedAcknowledgedDraft(
             !!data.responses?.agreementOpenedAcknowledged
           );
+          // Phase 10B drafts
+          setAgreementReviewedSectionIdsDraft(
+            Array.isArray(data.responses?.agreementReviewedSectionIds)
+              ? data.responses!.agreementReviewedSectionIds!
+              : []
+          );
+          setAgreementTermsAcceptedDraft(
+            !!data.responses?.agreementTermsAccepted
+          );
+          setAgreementElectronicConsentDraft(
+            !!data.responses?.agreementElectronicConsentAccepted
+          );
+          if (data.responses?.agreementCoachFirstName) {
+            setAgreementFirstNameDraft(
+              data.responses.agreementCoachFirstName
+            );
+            nameSeededRef.current = true;
+          }
+          if (data.responses?.agreementCoachLastName) {
+            setAgreementLastNameDraft(data.responses.agreementCoachLastName);
+            nameSeededRef.current = true;
+          }
         } else {
           setProgress(emptyDoc(coachId));
         }
@@ -1640,6 +1644,17 @@ export default function CoachLaunchScreen() {
         setProgress(emptyDoc(coachId));
       } finally {
         setLoading(false);
+      }
+
+      // Load signed Coach Agreement (if any) — independent of coach_launch doc.
+      try {
+        const signedSnap = await getDoc(doc(db, 'coach_agreements', coachId));
+        if (signedSnap.exists()) {
+          setSignedAgreement(signedSnap.data() as any);
+        }
+      } catch (err) {
+        // A missing doc is expected before signing; anything else we just log.
+        console.warn('[CoachLaunch] signed agreement load error:', err);
       }
     })();
   }, [coachId]);
@@ -1820,12 +1835,21 @@ export default function CoachLaunchScreen() {
       }
     }
     if (moduleId === 'agreement') {
-      nextResponses.agreementOpened = agreementOpenedDraft;
-      nextResponses.agreementCoachLaunchNotReplacement =
-        agreementNotReplacementDraft;
-      nextResponses.agreementSignatureRequired = agreementSignatureRequiredDraft;
-      nextResponses.agreementOpenedAcknowledged =
-        agreementOpenedAcknowledgedDraft;
+      // Phase 10B — persist review + signing intent state onto coach_launch.
+      // The actual signature record lives in coach_agreements/{coachId}.
+      nextResponses.agreementReviewedSectionIds =
+        agreementReviewedSectionIdsDraft;
+      nextResponses.agreementTermsAccepted = agreementTermsAcceptedDraft;
+      nextResponses.agreementElectronicConsentAccepted =
+        agreementElectronicConsentDraft;
+      if (agreementFirstNameDraft.trim()) {
+        nextResponses.agreementCoachFirstName =
+          agreementFirstNameDraft.trim();
+      }
+      if (agreementLastNameDraft.trim()) {
+        nextResponses.agreementCoachLastName = agreementLastNameDraft.trim();
+      }
+      nextResponses.agreementSignedVersion = COACH_AGREEMENT_VERSION;
     }
 
     const nextCompleted = alreadyComplete ? completed : [...completed, moduleId];
@@ -1844,6 +1868,92 @@ export default function CoachLaunchScreen() {
     setJustCompletedId(moduleId);
     setPendingScrollTarget(moduleId);
     setActiveModuleId(null);
+  }
+
+  // ── Phase 10B — Coach Agreement submit ──────────────────────────────────────
+  async function submitCoachAgreement() {
+    if (!coachId || !progress) return;
+    if (signedAgreement) return; // already signed — client-immutable
+    const first = agreementFirstNameDraft.trim();
+    const last = agreementLastNameDraft.trim();
+    const allReviewed = COACH_AGREEMENT_SECTIONS.every((sec) =>
+      agreementReviewedSectionIdsDraft.includes(sec.id)
+    );
+    if (
+      !allReviewed ||
+      !agreementTermsAcceptedDraft ||
+      !agreementElectronicConsentDraft ||
+      !first ||
+      !last ||
+      !agreementSignatureDraft
+    ) {
+      return;
+    }
+    setAgreementSubmitting(true);
+    setAgreementSubmitError(null);
+    try {
+      const today = new Date();
+      const y = today.getFullYear();
+      const m = String(today.getMonth() + 1).padStart(2, '0');
+      const d = String(today.getDate()).padStart(2, '0');
+      const clientSignedDate = `${y}-${m}-${d}`;
+      const payload: any = {
+        coachId,
+        coachEmail: user?.email || '',
+        coachFirstName: first,
+        coachLastName: last,
+        typedName: `${first} ${last}`.trim(),
+        agreementType: 'coach-program-terms',
+        agreementTitle: COACH_AGREEMENT_TITLE,
+        agreementVersion: COACH_AGREEMENT_VERSION,
+        reviewedSectionIds: [...agreementReviewedSectionIdsDraft],
+        termsAccepted: true,
+        electronicConsentAccepted: true,
+        electronicConsentAcceptedAt: serverTimestamp(),
+        signatureDataUrl: agreementSignatureDraft,
+        signedAt: serverTimestamp(),
+        clientSignedDate,
+        status: 'signed',
+        sourceUrl: COACH_AGREEMENT_SOURCE_URL,
+      };
+      await setDoc(doc(db, 'coach_agreements', coachId), payload);
+      setSignedAgreement({
+        ...payload,
+        signedAt: today,
+        electronicConsentAcceptedAt: today,
+      });
+      // Persist Coach Launch response + mark module complete + unlock next.
+      const nextResponses = { ...progress.responses };
+      nextResponses.agreementReviewedSectionIds = [
+        ...agreementReviewedSectionIdsDraft,
+      ];
+      nextResponses.agreementTermsAccepted = true;
+      nextResponses.agreementElectronicConsentAccepted = true;
+      nextResponses.agreementCoachFirstName = first;
+      nextResponses.agreementCoachLastName = last;
+      nextResponses.agreementSignedVersion = COACH_AGREEMENT_VERSION;
+      nextResponses.agreementSignedAt = serverTimestamp();
+      const alreadyComplete = completed.includes('agreement');
+      const nextCompleted = alreadyComplete
+        ? completed
+        : [...completed, 'agreement' as ModuleId];
+      const nextCurrent =
+        MODULES.find((mm) => !nextCompleted.includes(mm.id))?.id ??
+        'agreement';
+      await save({
+        completedModuleIds: nextCompleted,
+        currentModuleId: nextCurrent,
+        responses: nextResponses,
+      });
+    } catch (err: any) {
+      console.error('[CoachLaunch] agreement submit error:', err);
+      setAgreementSubmitError(
+        err?.message ||
+          'Something went wrong saving your signed agreement. Please try again.'
+      );
+    } finally {
+      setAgreementSubmitting(false);
+    }
   }
 
   // Clear the just-completed highlight after the animation has had time to play.
@@ -2001,6 +2111,30 @@ export default function CoachLaunchScreen() {
                 },
               });
             }}
+            agreementReviewedSectionIdsDraft={
+              agreementReviewedSectionIdsDraft
+            }
+            setAgreementReviewedSectionIdsDraft={
+              setAgreementReviewedSectionIdsDraft
+            }
+            agreementTermsAcceptedDraft={agreementTermsAcceptedDraft}
+            setAgreementTermsAcceptedDraft={setAgreementTermsAcceptedDraft}
+            agreementElectronicConsentDraft={agreementElectronicConsentDraft}
+            setAgreementElectronicConsentDraft={
+              setAgreementElectronicConsentDraft
+            }
+            agreementFirstNameDraft={agreementFirstNameDraft}
+            setAgreementFirstNameDraft={setAgreementFirstNameDraft}
+            agreementLastNameDraft={agreementLastNameDraft}
+            setAgreementLastNameDraft={setAgreementLastNameDraft}
+            agreementSignatureDraft={agreementSignatureDraft}
+            setAgreementSignatureDraft={setAgreementSignatureDraft}
+            agreementExpandedSectionId={agreementExpandedSectionId}
+            setAgreementExpandedSectionId={setAgreementExpandedSectionId}
+            agreementSubmitting={agreementSubmitting}
+            agreementSubmitError={agreementSubmitError}
+            signedAgreement={signedAgreement}
+            onSubmitAgreement={submitCoachAgreement}
             onComplete={() => completeModule(activeModule.id)}
             onBack={() => setActiveModuleId(null)}
             onFinish={() => router.replace('/(app)/dashboard' as any)}
@@ -2297,6 +2431,38 @@ interface ModuleDetailProps {
   agreementOpenedAcknowledgedDraft: boolean;
   setAgreementOpenedAcknowledgedDraft: (v: boolean) => void;
   onAgreementOpened: () => void;
+  // Phase 10B — in-app Coach Agreement signing
+  agreementReviewedSectionIdsDraft: string[];
+  setAgreementReviewedSectionIdsDraft: React.Dispatch<
+    React.SetStateAction<string[]>
+  >;
+  agreementTermsAcceptedDraft: boolean;
+  setAgreementTermsAcceptedDraft: (v: boolean) => void;
+  agreementElectronicConsentDraft: boolean;
+  setAgreementElectronicConsentDraft: (v: boolean) => void;
+  agreementFirstNameDraft: string;
+  setAgreementFirstNameDraft: (v: string) => void;
+  agreementLastNameDraft: string;
+  setAgreementLastNameDraft: (v: string) => void;
+  agreementSignatureDraft: string;
+  setAgreementSignatureDraft: (v: string) => void;
+  agreementExpandedSectionId: string | null;
+  setAgreementExpandedSectionId: (v: string | null) => void;
+  agreementSubmitting: boolean;
+  agreementSubmitError: string | null;
+  signedAgreement: {
+    coachFirstName?: string;
+    coachLastName?: string;
+    typedName?: string;
+    agreementVersion?: string;
+    agreementTitle?: string;
+    signedAt?: any;
+    clientSignedDate?: string;
+    reviewedSectionIds?: string[];
+    signatureDataUrl?: string;
+    status?: string;
+  } | null;
+  onSubmitAgreement: () => void;
   onComplete: () => void;
   onBack: () => void;
   onFinish: () => void;
@@ -2374,10 +2540,30 @@ function ModuleDetail({
   agreementOpenedAcknowledgedDraft,
   setAgreementOpenedAcknowledgedDraft,
   onAgreementOpened,
+  agreementReviewedSectionIdsDraft,
+  setAgreementReviewedSectionIdsDraft,
+  agreementTermsAcceptedDraft,
+  setAgreementTermsAcceptedDraft,
+  agreementElectronicConsentDraft,
+  setAgreementElectronicConsentDraft,
+  agreementFirstNameDraft,
+  setAgreementFirstNameDraft,
+  agreementLastNameDraft,
+  setAgreementLastNameDraft,
+  agreementSignatureDraft,
+  setAgreementSignatureDraft,
+  agreementExpandedSectionId,
+  setAgreementExpandedSectionId,
+  agreementSubmitting,
+  agreementSubmitError,
+  signedAgreement,
+  onSubmitAgreement,
   onComplete,
   onBack,
   onFinish,
 }: ModuleDetailProps) {
+  const signedAgreementSigned =
+    !!signedAgreement && signedAgreement.status === 'signed';
   // Launch Celebration is its own layout
   if (module.id === 'launchCelebration') {
     return (
@@ -2472,13 +2658,8 @@ function ModuleDetail({
       );
     }
     if (module.id === 'agreement') {
-      return (
-        agreementUrl.length > 0 &&
-        agreementOpenedDraft === true &&
-        agreementNotReplacementDraft === true &&
-        agreementSignatureRequiredDraft === true &&
-        agreementOpenedAcknowledgedDraft === true
-      );
+      // Complete requires a written signed agreement record.
+      return signedAgreementSigned === true;
     }
     return true;
   })();
@@ -2832,243 +3013,26 @@ function ModuleDetail({
 
         {/* Agreement — final acknowledgment: hero, recap, coverage cards, link CTA, clarity, checkboxes */}
         {module.id === 'agreement' && (
-          <>
-            <View style={s.heroCard}>
-              <Text style={s.heroEyebrow}>AGREEMENT</Text>
-              <Text style={s.heroHeading}>
-                Confirm the shared expectations.
-              </Text>
-              <Text style={s.heroBody}>
-                You have walked through the heart, standards, systems, growth
-                model, apprenticeship path, and setup readiness for coaching
-                inside G➲A. The Coach Agreement is the formal step that puts
-                those shared expectations in writing.
-              </Text>
-            </View>
-
-            <View style={s.sectionBlock}>
-              <Text style={s.sectionBody}>
-                Coach Launch is designed to help you understand the culture
-                before you sign the agreement.
-              </Text>
-              <Text style={s.sectionBody}>
-                The agreement is not meant to surprise you. It is meant to
-                formally summarize and protect what this journey has already
-                introduced: member care, coach expectations, compensation
-                structures, confidentiality, intellectual property, and
-                GoArrive{'\u2019'}s operating standards.
-              </Text>
-              <Text style={s.sectionBody}>
-                Before moving forward, review the Coach Agreement carefully and
-                complete the required signature process through the approved
-                agreement link.
-              </Text>
-            </View>
-
-            <View style={s.sectionBlock}>
-              <Text style={s.sectionHeading}>
-                What you have already walked through
-              </Text>
-            </View>
-
-            <View style={s.recapList}>
-              {AGREEMENT_JOURNEY_RECAP.map((item, i) => (
-                <View key={item.title} style={s.recapRow}>
-                  <View style={s.recapNumBox}>
-                    <Text style={s.recapNumText}>
-                      {String(i + 1).padStart(2, '0')}
-                    </Text>
-                  </View>
-                  <View style={s.recapBody}>
-                    <Text style={s.recapTitle}>{item.title}</Text>
-                    <Text style={s.recapText}>{item.body}</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-
-            <View style={s.sectionBlock}>
-              <Text style={s.sectionHeading}>
-                What the Coach Agreement covers
-              </Text>
-              <Text style={s.sectionBody}>
-                A high-level view of the areas the formal agreement addresses.
-                The formal agreement itself governs the exact terms.
-              </Text>
-            </View>
-
-            <View style={s.coverageGrid}>
-              {AGREEMENT_COVERAGE_CARDS.map((card) => (
-                <View key={card.title} style={s.coverageCard}>
-                  <Text style={s.coverageTitle}>{card.title}</Text>
-                  <Text style={s.coverageBody}>{card.body}</Text>
-                </View>
-              ))}
-            </View>
-
-            <View style={s.sectionBlock}>
-              <Text style={s.sectionHeading}>
-                Review + sign the Coach Agreement
-              </Text>
-              <Text style={s.sectionBody}>
-                Open the approved Coach Agreement in a new tab and complete the
-                signature process there. Completion happens through the formal
-                agreement, not inside this module.
-              </Text>
-            </View>
-
-            <View style={s.responseBlock}>
-              {agreementUrl ? (
-                <>
-                  <Pressable
-                    style={s.primaryBtn}
-                    onPress={() => {
-                      Linking.openURL(agreementUrl);
-                      onAgreementOpened();
-                    }}
-                  >
-                    <Text style={s.primaryBtnText}>Open Coach Agreement</Text>
-                  </Pressable>
-                  {agreementOpenedDraft && (
-                    <View style={s.agreementOpenedNote}>
-                      <Icon name="check-circle" size={16} color={GREEN} />
-                      <Text style={s.agreementOpenedText}>
-                        Agreement link opened. Continue the signature process
-                        in the approved agreement tab.
-                      </Text>
-                    </View>
-                  )}
-                </>
-              ) : (
-                <View>
-                  <View style={[s.primaryBtn, s.btnDisabled]}>
-                    <Text style={s.primaryBtnText}>
-                      Agreement link not configured yet
-                    </Text>
-                  </View>
-                  <Text style={s.helperText}>
-                    The Coach Agreement link needs to be configured before this
-                    step can be completed.
-                  </Text>
-                </View>
-              )}
-            </View>
-
-            <View style={s.clarityCard}>
-              <Text style={s.clarityHeading}>Important clarity</Text>
-              {AGREEMENT_CLARITY_POINTS.map((point) => (
-                <View key={point} style={s.clarityRow}>
-                  <Text style={s.clarityBullet}>•</Text>
-                  <Text style={s.clarityText}>{point}</Text>
-                </View>
-              ))}
-            </View>
-
-            <View style={s.sectionBlock}>
-              <Text style={s.sectionHeading}>Acknowledge before you launch</Text>
-              <Text style={s.sectionBody}>
-                These acknowledgements confirm your understanding of how Coach
-                Launch and the formal agreement relate. They are not a legal
-                signature.
-              </Text>
-            </View>
-
-            <Pressable
-              onPress={() =>
-                setAgreementNotReplacementDraft(!agreementNotReplacementDraft)
-              }
-              style={[
-                s.checklistRow,
-                agreementNotReplacementDraft && s.checklistRowChecked,
-              ]}
-            >
-              <View
-                style={[
-                  s.checklistBox,
-                  agreementNotReplacementDraft && s.checklistBoxChecked,
-                ]}
-              >
-                {agreementNotReplacementDraft && (
-                  <Icon name="check" size={14} color={BG} />
-                )}
-              </View>
-              <Text
-                style={[
-                  s.checklistText,
-                  agreementNotReplacementDraft && s.checklistTextChecked,
-                ]}
-              >
-                I understand that Coach Launch does not replace the formal
-                Coach Agreement.
-              </Text>
-            </Pressable>
-
-            <Pressable
-              onPress={() =>
-                setAgreementSignatureRequiredDraft(
-                  !agreementSignatureRequiredDraft
-                )
-              }
-              style={[
-                s.checklistRow,
-                agreementSignatureRequiredDraft && s.checklistRowChecked,
-              ]}
-            >
-              <View
-                style={[
-                  s.checklistBox,
-                  agreementSignatureRequiredDraft && s.checklistBoxChecked,
-                ]}
-              >
-                {agreementSignatureRequiredDraft && (
-                  <Icon name="check" size={14} color={BG} />
-                )}
-              </View>
-              <Text
-                style={[
-                  s.checklistText,
-                  agreementSignatureRequiredDraft && s.checklistTextChecked,
-                ]}
-              >
-                I understand that I need to review and complete the Coach
-                Agreement through the approved agreement link before launch.
-              </Text>
-            </Pressable>
-
-            {!!agreementUrl && agreementOpenedDraft && (
-              <Pressable
-                onPress={() =>
-                  setAgreementOpenedAcknowledgedDraft(
-                    !agreementOpenedAcknowledgedDraft
-                  )
-                }
-                style={[
-                  s.checklistRow,
-                  agreementOpenedAcknowledgedDraft && s.checklistRowChecked,
-                ]}
-              >
-                <View
-                  style={[
-                    s.checklistBox,
-                    agreementOpenedAcknowledgedDraft && s.checklistBoxChecked,
-                  ]}
-                >
-                  {agreementOpenedAcknowledgedDraft && (
-                    <Icon name="check" size={14} color={BG} />
-                  )}
-                </View>
-                <Text
-                  style={[
-                    s.checklistText,
-                    agreementOpenedAcknowledgedDraft && s.checklistTextChecked,
-                  ]}
-                >
-                  I have opened the Coach Agreement and understand that
-                  completion happens through the approved agreement process.
-                </Text>
-              </Pressable>
-            )}
-          </>
+          <AgreementModule
+            reviewedIds={agreementReviewedSectionIdsDraft}
+            setReviewedIds={setAgreementReviewedSectionIdsDraft}
+            termsAccepted={agreementTermsAcceptedDraft}
+            setTermsAccepted={setAgreementTermsAcceptedDraft}
+            electronicConsent={agreementElectronicConsentDraft}
+            setElectronicConsent={setAgreementElectronicConsentDraft}
+            firstName={agreementFirstNameDraft}
+            setFirstName={setAgreementFirstNameDraft}
+            lastName={agreementLastNameDraft}
+            setLastName={setAgreementLastNameDraft}
+            signatureDataUrl={agreementSignatureDraft}
+            setSignatureDataUrl={setAgreementSignatureDraft}
+            expandedSectionId={agreementExpandedSectionId}
+            setExpandedSectionId={setAgreementExpandedSectionId}
+            submitting={agreementSubmitting}
+            submitError={agreementSubmitError}
+            signedAgreement={signedAgreement}
+            onSubmit={onSubmitAgreement}
+          />
         )}
 
         {/* Member Experience — hero, journey timeline, needs cards, reflection, scenario */}
@@ -4521,31 +4485,483 @@ function ModuleDetail({
         )}
       </View>
 
-      {/* Actions */}
-      <View style={s.actionsRow}>
-        <Pressable style={s.secondaryBtn} onPress={onBack}>
-          <Text style={s.secondaryBtnText}>Back to Coach Launch</Text>
-        </Pressable>
-        <Pressable
-          style={[
-            s.primaryBtn,
-            { flex: 1 },
-            (!canComplete || saving) && s.btnDisabled,
-          ]}
-          onPress={onComplete}
-          disabled={!canComplete || saving}
-        >
-          <Text style={s.primaryBtnText}>
-            {saving
-              ? 'Saving…'
-              : isComplete
-              ? 'Mark Complete Again'
-              : 'Complete Module'}
-          </Text>
-        </Pressable>
-      </View>
+      {/* Actions — Agreement owns its own submit; hide the generic complete button. */}
+      {module.id === 'agreement' ? (
+        <View style={s.actionsRow}>
+          <Pressable style={[s.secondaryBtn, { flex: 1 }]} onPress={onBack}>
+            <Text style={s.secondaryBtnText}>Back to Coach Launch</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={s.actionsRow}>
+          <Pressable style={s.secondaryBtn} onPress={onBack}>
+            <Text style={s.secondaryBtnText}>Back to Coach Launch</Text>
+          </Pressable>
+          <Pressable
+            style={[
+              s.primaryBtn,
+              { flex: 1 },
+              (!canComplete || saving) && s.btnDisabled,
+            ]}
+            onPress={onComplete}
+            disabled={!canComplete || saving}
+          >
+            <Text style={s.primaryBtnText}>
+              {saving
+                ? 'Saving…'
+                : isComplete
+                ? 'Mark Complete Again'
+                : 'Complete Module'}
+            </Text>
+          </Pressable>
+        </View>
+      )}
     </View>
   );
+}
+
+// ── Phase 10B — In-app Coach Agreement signing UI ────────────────────────────
+
+interface AgreementModuleProps {
+  reviewedIds: string[];
+  setReviewedIds: React.Dispatch<React.SetStateAction<string[]>>;
+  termsAccepted: boolean;
+  setTermsAccepted: (v: boolean) => void;
+  electronicConsent: boolean;
+  setElectronicConsent: (v: boolean) => void;
+  firstName: string;
+  setFirstName: (v: string) => void;
+  lastName: string;
+  setLastName: (v: string) => void;
+  signatureDataUrl: string;
+  setSignatureDataUrl: (v: string) => void;
+  expandedSectionId: string | null;
+  setExpandedSectionId: (v: string | null) => void;
+  submitting: boolean;
+  submitError: string | null;
+  signedAgreement: {
+    coachFirstName?: string;
+    coachLastName?: string;
+    typedName?: string;
+    agreementVersion?: string;
+    agreementTitle?: string;
+    signedAt?: any;
+    clientSignedDate?: string;
+    reviewedSectionIds?: string[];
+    signatureDataUrl?: string;
+    status?: string;
+  } | null;
+  onSubmit: () => void;
+}
+
+function AgreementModule({
+  reviewedIds,
+  setReviewedIds,
+  termsAccepted,
+  setTermsAccepted,
+  electronicConsent,
+  setElectronicConsent,
+  firstName,
+  setFirstName,
+  lastName,
+  setLastName,
+  signatureDataUrl,
+  setSignatureDataUrl,
+  expandedSectionId,
+  setExpandedSectionId,
+  submitting,
+  submitError,
+  signedAgreement,
+  onSubmit,
+}: AgreementModuleProps) {
+  const alreadySigned =
+    !!signedAgreement && signedAgreement.status === 'signed';
+
+  if (alreadySigned) {
+    const signedName =
+      signedAgreement.typedName ||
+      [signedAgreement.coachFirstName, signedAgreement.coachLastName]
+        .filter(Boolean)
+        .join(' ');
+    const signedDate =
+      signedAgreement.clientSignedDate ||
+      formatSignedAt(signedAgreement.signedAt);
+    return (
+      <>
+        <View style={s.heroCard}>
+          <Text style={s.heroEyebrow}>AGREEMENT</Text>
+          <Text style={s.heroHeading}>Coach Agreement signed.</Text>
+          <Text style={s.heroBody}>
+            Your signed record is stored on file. You are ready to move into
+            Launch Celebration.
+          </Text>
+        </View>
+        <View style={s.signedBadge}>
+          <View style={s.signedBadgeIconWrap}>
+            <Icon name="check-circle" size={22} color={GREEN} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.signedBadgeLabel}>SIGNED</Text>
+            <Text style={s.signedBadgeName}>{signedName || 'Coach'}</Text>
+            {signedDate ? (
+              <Text style={s.signedBadgeMeta}>On {signedDate}</Text>
+            ) : null}
+            <Text style={s.signedBadgeMeta}>
+              {signedAgreement.agreementTitle || COACH_AGREEMENT_TITLE}
+            </Text>
+            <Text style={s.signedBadgeMeta}>
+              Version: {signedAgreement.agreementVersion ||
+                COACH_AGREEMENT_VERSION}
+            </Text>
+          </View>
+        </View>
+        {signedAgreement.signatureDataUrl && Platform.OS === 'web' ? (
+          <View style={s.signedSignatureWrap}>
+            <Text style={s.signedSignatureLabel}>Signature</Text>
+            {React.createElement('img', {
+              src: signedAgreement.signatureDataUrl,
+              alt: 'Signed signature',
+              style: {
+                display: 'block',
+                width: '100%',
+                maxHeight: 180,
+                objectFit: 'contain',
+                backgroundColor: '#ffffff',
+                borderRadius: 8,
+                borderWidth: 1,
+                borderColor: BORDER,
+                borderStyle: 'solid',
+              },
+            })}
+          </View>
+        ) : null}
+        <View style={s.clarityCard}>
+          <Text style={s.clarityHeading}>What happens next</Text>
+          <View style={s.clarityRow}>
+            <Text style={s.clarityBullet}>•</Text>
+            <Text style={s.clarityText}>
+              This signed record is retained by GoArrive.
+            </Text>
+          </View>
+          <View style={s.clarityRow}>
+            <Text style={s.clarityBullet}>•</Text>
+            <Text style={s.clarityText}>
+              Return to Coach Launch to continue to Launch Celebration.
+            </Text>
+          </View>
+        </View>
+      </>
+    );
+  }
+
+  const canSubmit =
+    !submitting &&
+    reviewedIds.length === COACH_AGREEMENT_SECTIONS.length &&
+    termsAccepted &&
+    electronicConsent &&
+    firstName.trim().length > 0 &&
+    lastName.trim().length > 0 &&
+    signatureDataUrl.length > 0;
+
+  const todayPretty = (() => {
+    const now = new Date();
+    return now.toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  })();
+
+  return (
+    <>
+      <View style={s.heroCard}>
+        <Text style={s.heroEyebrow}>AGREEMENT</Text>
+        <Text style={s.heroHeading}>
+          Review and sign the Coach Agreement.
+        </Text>
+        <Text style={s.heroBody}>
+          You have walked through the vision, culture, member experience,
+          coach experience, coaching standards, growth model, apprenticeship
+          path, and setup readiness. This is the formal step that puts the
+          shared expectations in writing.
+        </Text>
+      </View>
+
+      <View style={s.sectionBlock}>
+        <Text style={s.sectionHeading}>{COACH_AGREEMENT_TITLE}</Text>
+        <Text style={s.sectionBody}>
+          The full agreement is below in {COACH_AGREEMENT_SECTIONS.length}
+          {' '}sections. Open each section, review it, then check{' '}
+          <Text style={{ fontWeight: '700', color: FG }}>
+            &ldquo;I have reviewed this section&rdquo;
+          </Text>{' '}
+          before continuing.
+        </Text>
+        <Text style={s.helperText}>
+          Version: {COACH_AGREEMENT_VERSION}
+        </Text>
+      </View>
+
+      <View style={s.agreementAccordion}>
+        {COACH_AGREEMENT_SECTIONS.map((section) => {
+          const isReviewed = reviewedIds.includes(section.id);
+          const isOpen = expandedSectionId === section.id;
+          return (
+            <View
+              key={section.id}
+              style={[
+                s.agreementAccordionCard,
+                isReviewed && s.agreementAccordionCardReviewed,
+              ]}
+            >
+              <Pressable
+                style={s.agreementAccordionHeader}
+                onPress={() =>
+                  setExpandedSectionId(isOpen ? null : section.id)
+                }
+              >
+                <View style={s.agreementSectionNumBox}>
+                  <Text style={s.agreementSectionNumText}>
+                    {String(section.number).padStart(2, '0')}
+                  </Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.agreementSectionTitle}>{section.title}</Text>
+                  <Text style={s.agreementSectionSummary}>
+                    {section.summary}
+                  </Text>
+                </View>
+                <View style={s.agreementAccordionRight}>
+                  {isReviewed ? (
+                    <Icon name="check-circle" size={20} color={GREEN} />
+                  ) : (
+                    <Text style={s.agreementAccordionChevron}>
+                      {isOpen ? '−' : '+'}
+                    </Text>
+                  )}
+                </View>
+              </Pressable>
+
+              {isOpen ? (
+                <View style={s.agreementAccordionBody}>
+                  {section.body.map((para, i) => (
+                    <Text key={i} style={s.agreementBodyText}>
+                      {para}
+                    </Text>
+                  ))}
+                  <Pressable
+                    onPress={() =>
+                      setReviewedIds((prev) => {
+                        const has = prev.includes(section.id);
+                        if (has) return prev.filter((id) => id !== section.id);
+                        return [...prev, section.id];
+                      })
+                    }
+                    style={[
+                      s.checklistRow,
+                      isReviewed && s.checklistRowChecked,
+                      { marginTop: 12, marginBottom: 4 },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        s.checklistBox,
+                        isReviewed && s.checklistBoxChecked,
+                      ]}
+                    >
+                      {isReviewed && (
+                        <Icon name="check" size={14} color={BG} />
+                      )}
+                    </View>
+                    <Text
+                      style={[
+                        s.checklistText,
+                        isReviewed && s.checklistTextChecked,
+                      ]}
+                    >
+                      I have reviewed this section.
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : null}
+            </View>
+          );
+        })}
+      </View>
+
+      <View style={s.sectionBlock}>
+        <Text style={s.sectionHeading}>Terms of the agreement</Text>
+        <Text style={s.sectionBody}>
+          Confirm your agreement with the terms above.
+        </Text>
+      </View>
+
+      <Pressable
+        onPress={() => setTermsAccepted(!termsAccepted)}
+        style={[
+          s.checklistRow,
+          termsAccepted && s.checklistRowChecked,
+        ]}
+      >
+        <View
+          style={[s.checklistBox, termsAccepted && s.checklistBoxChecked]}
+        >
+          {termsAccepted && <Icon name="check" size={14} color={BG} />}
+        </View>
+        <Text
+          style={[
+            s.checklistText,
+            termsAccepted && s.checklistTextChecked,
+          ]}
+        >
+          I have read and agree to the {COACH_AGREEMENT_TITLE}, including all
+          {' '}{COACH_AGREEMENT_SECTIONS.length} sections above.
+        </Text>
+      </Pressable>
+
+      <View style={s.sectionBlock}>
+        <Text style={s.sectionHeading}>Electronic signature consent</Text>
+        <Text style={s.sectionBody}>
+          You are signing electronically. This has the same legal effect as a
+          paper signature.
+        </Text>
+      </View>
+
+      <Pressable
+        onPress={() => setElectronicConsent(!electronicConsent)}
+        style={[
+          s.checklistRow,
+          electronicConsent && s.checklistRowChecked,
+        ]}
+      >
+        <View
+          style={[
+            s.checklistBox,
+            electronicConsent && s.checklistBoxChecked,
+          ]}
+        >
+          {electronicConsent && <Icon name="check" size={14} color={BG} />}
+        </View>
+        <Text
+          style={[
+            s.checklistText,
+            electronicConsent && s.checklistTextChecked,
+          ]}
+        >
+          I consent to sign this agreement electronically and understand my
+          electronic signature is binding.
+        </Text>
+      </Pressable>
+
+      <View style={s.sectionBlock}>
+        <Text style={s.sectionHeading}>Today&rsquo;s date</Text>
+        <View style={s.agreementDateRow}>
+          <Icon name="calendar" size={16} color={MUTED} />
+          <Text style={s.agreementDateText}>{todayPretty}</Text>
+        </View>
+      </View>
+
+      <View style={s.sectionBlock}>
+        <Text style={s.sectionHeading}>Your name</Text>
+        <Text style={s.sectionBody}>
+          Enter your legal first and last name exactly as they should appear
+          on the signed record.
+        </Text>
+      </View>
+
+      <View style={s.agreementNameRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={s.agreementInputLabel}>First name</Text>
+          <TextInput
+            value={firstName}
+            onChangeText={setFirstName}
+            placeholder="First name"
+            placeholderTextColor="#4A5568"
+            style={s.agreementInput}
+            autoCapitalize="words"
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={s.agreementInputLabel}>Last name</Text>
+          <TextInput
+            value={lastName}
+            onChangeText={setLastName}
+            placeholder="Last name"
+            placeholderTextColor="#4A5568"
+            style={s.agreementInput}
+            autoCapitalize="words"
+          />
+        </View>
+      </View>
+
+      <View style={s.sectionBlock}>
+        <Text style={s.sectionHeading}>Signature</Text>
+        <Text style={s.sectionBody}>
+          Draw your signature in the box below using your finger, stylus, or
+          mouse. Tap Clear to try again.
+        </Text>
+      </View>
+
+      <CoachAgreementSignaturePad
+        value={signatureDataUrl}
+        onChange={setSignatureDataUrl}
+        disabled={submitting}
+      />
+
+      {submitError ? (
+        <View style={s.agreementError}>
+          <Icon name="alert-circle" size={16} color="#F87171" />
+          <Text style={s.agreementErrorText}>{submitError}</Text>
+        </View>
+      ) : null}
+
+      <Pressable
+        style={[
+          s.primaryBtn,
+          { marginTop: 14 },
+          (!canSubmit || submitting) && s.btnDisabled,
+        ]}
+        onPress={onSubmit}
+        disabled={!canSubmit || submitting}
+      >
+        <Text style={s.primaryBtnText}>
+          {submitting ? 'Submitting…' : 'Sign Coach Agreement'}
+        </Text>
+      </Pressable>
+
+      {!canSubmit && !submitting ? (
+        <Text style={s.helperText}>
+          Review every section, agree to the terms, consent to electronic
+          signing, enter your first and last name, and draw your signature to
+          submit.
+        </Text>
+      ) : null}
+    </>
+  );
+}
+
+function formatSignedAt(signedAt: any): string {
+  try {
+    if (!signedAt) return '';
+    // Firestore Timestamp
+    if (typeof signedAt?.toDate === 'function') {
+      return signedAt.toDate().toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+    }
+    if (signedAt instanceof Date) {
+      return signedAt.toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+    }
+    return '';
+  } catch {
+    return '';
+  }
 }
 
 function PillarPicker({
@@ -6121,5 +6537,188 @@ const s = StyleSheet.create({
     color: FG,
     fontFamily: FB,
     lineHeight: 19,
+  },
+
+  // ── Phase 10B — In-app Coach Agreement signing ─────────────────────────────
+  agreementAccordion: {
+    marginTop: 6,
+    gap: 8,
+  },
+  agreementAccordionCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: CARD,
+    overflow: 'hidden',
+  },
+  agreementAccordionCardReviewed: {
+    borderColor: 'rgba(110,187,122,0.45)',
+    backgroundColor: 'rgba(110,187,122,0.06)',
+  },
+  agreementAccordionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+  },
+  agreementSectionNumBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: BG,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  agreementSectionNumText: {
+    fontSize: 12,
+    color: GOLD,
+    fontFamily: FH,
+    letterSpacing: 0.6,
+  },
+  agreementSectionTitle: {
+    fontSize: 14,
+    color: FG,
+    fontFamily: FH,
+    marginBottom: 2,
+  },
+  agreementSectionSummary: {
+    fontSize: 12,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 17,
+  },
+  agreementAccordionRight: {
+    width: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  agreementAccordionChevron: {
+    fontSize: 22,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 22,
+  },
+  agreementAccordionBody: {
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    borderTopWidth: 1,
+    borderTopColor: BORDER,
+    gap: 8,
+  },
+  agreementBodyText: {
+    fontSize: 13,
+    color: FG,
+    fontFamily: FB,
+    lineHeight: 20,
+  },
+  agreementDateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: CARD,
+  },
+  agreementDateText: {
+    fontSize: 14,
+    color: FG,
+    fontFamily: FB,
+  },
+  agreementNameRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  agreementInputLabel: {
+    fontSize: 12,
+    color: MUTED,
+    fontFamily: FB,
+    marginBottom: 6,
+    letterSpacing: 0.5,
+  },
+  agreementInput: {
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 10,
+    backgroundColor: CARD,
+    color: FG,
+    fontFamily: FB,
+    fontSize: 15,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  agreementError: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.35)',
+    backgroundColor: 'rgba(248,113,113,0.08)',
+  },
+  agreementErrorText: {
+    flex: 1,
+    color: '#F87171',
+    fontSize: 13,
+    fontFamily: FB,
+    lineHeight: 18,
+  },
+  signedBadge: {
+    flexDirection: 'row',
+    gap: 12,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(110,187,122,0.4)',
+    backgroundColor: 'rgba(110,187,122,0.08)',
+    marginTop: 8,
+    marginBottom: 8,
+    alignItems: 'flex-start',
+  },
+  signedBadgeIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(110,187,122,0.14)',
+  },
+  signedBadgeLabel: {
+    fontSize: 10,
+    letterSpacing: 1.5,
+    fontFamily: FB,
+    fontWeight: '700',
+    color: GREEN,
+    marginBottom: 2,
+  },
+  signedBadgeName: {
+    fontSize: 16,
+    color: FG,
+    fontFamily: FH,
+    marginBottom: 4,
+  },
+  signedBadgeMeta: {
+    fontSize: 12,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 17,
+  },
+  signedSignatureWrap: {
+    marginTop: 4,
+    marginBottom: 8,
+    gap: 6,
+  },
+  signedSignatureLabel: {
+    fontSize: 12,
+    color: MUTED,
+    fontFamily: FB,
+    letterSpacing: 0.5,
   },
 });
