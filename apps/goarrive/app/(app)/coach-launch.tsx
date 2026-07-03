@@ -39,7 +39,7 @@ import {
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../lib/AuthContext';
 import { Icon } from '../../components/Icon';
-import { BG, BORDER, CARD, FB, FG, FH, GOLD, GREEN, MUTED } from '../../lib/theme';
+import { BG, BLUE, BORDER, CARD, FB, FG, FH, GOLD, GREEN, MUTED } from '../../lib/theme';
 
 // ── Modules (order matters — this is the journey sequence) ─────────────────────
 
@@ -510,6 +510,179 @@ const COACH_EXPERIENCE_HELPFUL_OPTIONS = [
   'Billing and growth visibility',
 ];
 
+// ── How We Coach content ──────────────────────────────────────────────────────
+
+interface CoachingPosture {
+  name: string;
+  definition: string;
+  soundsLike: string;
+}
+
+const COACHING_POSTURES: CoachingPosture[] = [
+  {
+    name: 'Be Present',
+    definition:
+      'Show up prepared, focused, and ready to serve the member in front of you.',
+    soundsLike:
+      '\u201CGood to see you. I looked over your check-in and I want to start with what you mentioned about your knee feeling tight.\u201D',
+  },
+  {
+    name: 'Be Clear',
+    definition: 'Make the next step simple and understandable.',
+    soundsLike:
+      '\u201CToday we\u2019re keeping the focus on control and range of motion. Don\u2019t chase speed here.\u201D',
+  },
+  {
+    name: 'Be Safe',
+    definition:
+      'Prioritize movement quality, appropriate progressions, and risk reduction.',
+    soundsLike:
+      '\u201CLet\u2019s adjust that setup before we add weight. I want this to feel strong, not forced.\u201D',
+  },
+  {
+    name: 'Be Personal',
+    definition: 'Coach the person, not just the workout.',
+    soundsLike:
+      '\u201CGiven your travel this week, let\u2019s simplify the plan and protect consistency.\u201D',
+  },
+  {
+    name: 'Be Responsive',
+    definition:
+      'Use feedback, check-ins, and observation to adjust the plan.',
+    soundsLike:
+      '\u201CThat pattern has shown up twice now, so I\u2019m going to adjust next week\u2019s work and give you a quick cue to focus on.\u201D',
+  },
+];
+
+const COACHING_POSTURE_OPTIONS = [
+  'Present',
+  'Clear',
+  'Safe',
+  'Personal',
+  'Responsive',
+];
+
+interface CoachingLoopStep {
+  name: string;
+  body: string;
+}
+
+const COACHING_LOOP: CoachingLoopStep[] = [
+  {
+    name: 'Notice',
+    body:
+      'Pay attention to what the member is saying, doing, and avoiding.',
+  },
+  {
+    name: 'Clarify',
+    body:
+      'Ask questions and make sure you understand what is really happening.',
+  },
+  {
+    name: 'Coach',
+    body:
+      'Give the right cue, plan adjustment, encouragement, or correction.',
+  },
+  {
+    name: 'Follow Through',
+    body:
+      'Check back in, review progress, and keep the next step clear.',
+  },
+];
+
+interface CoachingExample {
+  situation: string;
+  weak: string;
+  goa: string;
+}
+
+const COACHING_EXAMPLES: CoachingExample[] = [
+  {
+    situation: 'Member is late to a session.',
+    weak: '\u201CYou\u2019re late again.\u201D',
+    goa:
+      '\u201CGlad you made it. Let\u2019s make the most of the time we have today, and then we\u2019ll look at what\u2019s making this time hard to protect.\u201D',
+  },
+  {
+    situation: 'Member\u2019s form looks unsafe.',
+    weak: '\u201CKeep going.\u201D',
+    goa:
+      '\u201CPause right there. Let\u2019s clean this up first. I\u2019d rather protect your body and build it right.\u201D',
+  },
+  {
+    situation: 'Member feels discouraged.',
+    weak: '\u201CYou just need to be more disciplined.\u201D',
+    goa:
+      '\u201CI hear you. Let\u2019s zoom out, find the friction point, and make the next step smaller and clearer.\u201D',
+  },
+  {
+    situation: 'Member is progressing well.',
+    weak: '\u201CNice.\u201D',
+    goa:
+      '\u201CThat was solid. Your control was better today, especially on the way down. That\u2019s progress.\u201D',
+  },
+];
+
+const HOW_WE_COACH_SCENARIO_UNSAFE: MemberScenario = {
+  eyebrow: 'SCENARIO 1',
+  title: 'A member\u2019s form breaks down.',
+  prompt:
+    'During a session, a member starts moving in a way that looks unsafe. What response best reflects how we coach inside G\u27B2A?',
+  options: [
+    {
+      letter: 'A',
+      text: 'Let them finish the set so they do not feel interrupted.',
+    },
+    {
+      letter: 'B',
+      text:
+        'Stop them, adjust the movement, explain the cue clearly, and protect safety before intensity.',
+    },
+    {
+      letter: 'C',
+      text: 'Tell them they are doing it wrong and need to focus harder.',
+    },
+    {
+      letter: 'D',
+      text: 'Skip the movement permanently without explaining why.',
+    },
+  ],
+  correct: 'B',
+  correctFeedback:
+    'That is the G\u27B2A way. Safety comes before intensity. A strong coach corrects clearly without embarrassing the member.',
+  wrongFeedback:
+    'Close, but remember the priority: protect the member, keep the cue clear, and help them feel coached rather than criticized.',
+};
+
+const HOW_WE_COACH_SCENARIO_MISSED: MemberScenario = {
+  eyebrow: 'SCENARIO 2',
+  title: 'A member is discouraged after missing workouts.',
+  prompt:
+    'A member says, \u201CI blew it this week. I missed everything.\u201D What response best reflects how we coach inside G\u27B2A?',
+  options: [
+    {
+      letter: 'A',
+      text: '\u201CYeah, that was not good. You need to take this more seriously.\u201D',
+    },
+    { letter: 'B', text: '\u201CNo worries, it does not matter.\u201D' },
+    {
+      letter: 'C',
+      text:
+        '\u201CThanks for being honest. Let\u2019s reset without shame and choose the next step you can actually do today.\u201D',
+    },
+    {
+      letter: 'D',
+      text:
+        '\u201CWe should probably pause until you are more motivated.\u201D',
+    },
+  ],
+  correct: 'C',
+  correctFeedback:
+    'That is the G\u27B2A way. Accountability should not create shame. We help members tell the truth, reset, and move forward.',
+  wrongFeedback:
+    'Close, but think about care and accountability together. We do not ignore the miss, and we do not bury the member in shame.',
+};
+
 const COACH_EXPERIENCE_SCENARIO: MemberScenario = {
   eyebrow: 'SCENARIO',
   title: 'Your coaching day feels scattered.',
@@ -579,6 +752,10 @@ interface CoachLaunchDoc {
     coachExperienceMostHelpful?: string;
     coachCommandCenterHabit?: string;
     coachExperienceScenarioScattered?: string;
+    coachingPostureGoal?: string;
+    coachingCommunicationHabit?: string;
+    howWeCoachScenarioUnsafeForm?: string;
+    howWeCoachScenarioMissedWorkouts?: string;
   };
   startedAt?: any;
   updatedAt?: any;
@@ -637,6 +814,13 @@ export default function CoachLaunchScreen() {
     useState('');
   const [coachExperienceScenarioDraft, setCoachExperienceScenarioDraft] =
     useState('');
+  const [coachingPostureGoalDraft, setCoachingPostureGoalDraft] = useState('');
+  const [coachingCommunicationHabitDraft, setCoachingCommunicationHabitDraft] =
+    useState('');
+  const [howWeCoachScenarioUnsafeDraft, setHowWeCoachScenarioUnsafeDraft] =
+    useState('');
+  const [howWeCoachScenarioMissedDraft, setHowWeCoachScenarioMissedDraft] =
+    useState('');
 
   const agreementUrl = (process.env.EXPO_PUBLIC_COACH_AGREEMENT_URL || '').trim();
 
@@ -684,6 +868,18 @@ export default function CoachLaunchScreen() {
           );
           setCoachExperienceScenarioDraft(
             data.responses?.coachExperienceScenarioScattered ?? ''
+          );
+          setCoachingPostureGoalDraft(
+            data.responses?.coachingPostureGoal ?? ''
+          );
+          setCoachingCommunicationHabitDraft(
+            data.responses?.coachingCommunicationHabit ?? ''
+          );
+          setHowWeCoachScenarioUnsafeDraft(
+            data.responses?.howWeCoachScenarioUnsafeForm ?? ''
+          );
+          setHowWeCoachScenarioMissedDraft(
+            data.responses?.howWeCoachScenarioMissedWorkouts ?? ''
           );
         } else {
           setProgress(emptyDoc(coachId));
@@ -807,6 +1003,23 @@ export default function CoachLaunchScreen() {
           coachExperienceScenarioDraft;
       }
     }
+    if (moduleId === 'howWeCoach') {
+      if (coachingPostureGoalDraft) {
+        nextResponses.coachingPostureGoal = coachingPostureGoalDraft;
+      }
+      if (coachingCommunicationHabitDraft.trim()) {
+        nextResponses.coachingCommunicationHabit =
+          coachingCommunicationHabitDraft.trim();
+      }
+      if (howWeCoachScenarioUnsafeDraft) {
+        nextResponses.howWeCoachScenarioUnsafeForm =
+          howWeCoachScenarioUnsafeDraft;
+      }
+      if (howWeCoachScenarioMissedDraft) {
+        nextResponses.howWeCoachScenarioMissedWorkouts =
+          howWeCoachScenarioMissedDraft;
+      }
+    }
 
     const nextCompleted = alreadyComplete ? completed : [...completed, moduleId];
     // Point currentModuleId at the next un-completed module (or same if this was the last)
@@ -925,6 +1138,14 @@ export default function CoachLaunchScreen() {
             setCoachCommandCenterHabitDraft={setCoachCommandCenterHabitDraft}
             coachExperienceScenarioDraft={coachExperienceScenarioDraft}
             setCoachExperienceScenarioDraft={setCoachExperienceScenarioDraft}
+            coachingPostureGoalDraft={coachingPostureGoalDraft}
+            setCoachingPostureGoalDraft={setCoachingPostureGoalDraft}
+            coachingCommunicationHabitDraft={coachingCommunicationHabitDraft}
+            setCoachingCommunicationHabitDraft={setCoachingCommunicationHabitDraft}
+            howWeCoachScenarioUnsafeDraft={howWeCoachScenarioUnsafeDraft}
+            setHowWeCoachScenarioUnsafeDraft={setHowWeCoachScenarioUnsafeDraft}
+            howWeCoachScenarioMissedDraft={howWeCoachScenarioMissedDraft}
+            setHowWeCoachScenarioMissedDraft={setHowWeCoachScenarioMissedDraft}
             agreementUrl={agreementUrl}
             onComplete={() => completeModule(activeModule.id)}
             onBack={() => setActiveModuleId(null)}
@@ -1180,6 +1401,14 @@ interface ModuleDetailProps {
   setCoachCommandCenterHabitDraft: (v: string) => void;
   coachExperienceScenarioDraft: string;
   setCoachExperienceScenarioDraft: (v: string) => void;
+  coachingPostureGoalDraft: string;
+  setCoachingPostureGoalDraft: (v: string) => void;
+  coachingCommunicationHabitDraft: string;
+  setCoachingCommunicationHabitDraft: (v: string) => void;
+  howWeCoachScenarioUnsafeDraft: string;
+  setHowWeCoachScenarioUnsafeDraft: (v: string) => void;
+  howWeCoachScenarioMissedDraft: string;
+  setHowWeCoachScenarioMissedDraft: (v: string) => void;
   agreementUrl: string;
   onComplete: () => void;
   onBack: () => void;
@@ -1216,6 +1445,14 @@ function ModuleDetail({
   setCoachCommandCenterHabitDraft,
   coachExperienceScenarioDraft,
   setCoachExperienceScenarioDraft,
+  coachingPostureGoalDraft,
+  setCoachingPostureGoalDraft,
+  coachingCommunicationHabitDraft,
+  setCoachingCommunicationHabitDraft,
+  howWeCoachScenarioUnsafeDraft,
+  setHowWeCoachScenarioUnsafeDraft,
+  howWeCoachScenarioMissedDraft,
+  setHowWeCoachScenarioMissedDraft,
   agreementUrl,
   onComplete,
   onBack,
@@ -1277,6 +1514,14 @@ function ModuleDetail({
         !!coachExperienceMostHelpfulDraft &&
         coachCommandCenterHabitDraft.trim().length > 0 &&
         coachExperienceScenarioDraft === 'C'
+      );
+    }
+    if (module.id === 'howWeCoach') {
+      return (
+        !!coachingPostureGoalDraft &&
+        coachingCommunicationHabitDraft.trim().length > 0 &&
+        howWeCoachScenarioUnsafeDraft === 'B' &&
+        howWeCoachScenarioMissedDraft === 'C'
       );
     }
     return true;
@@ -2005,8 +2250,263 @@ function ModuleDetail({
           </>
         )}
 
+        {/* How We Coach — posture, coaching loop, examples, reflection, 2 scenarios */}
+        {module.id === 'howWeCoach' && (
+          <>
+            <View style={s.heroCard}>
+              <Text style={s.heroEyebrow}>HOW WE COACH</Text>
+              <Text style={s.heroHeading}>
+                Coaching is a posture, not a script.
+              </Text>
+              <Text style={s.heroBody}>
+                Inside G➲A, how you show up matters as much as what you
+                program. Members do not just remember the workout. They
+                remember how you made them feel while they did it.
+              </Text>
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>
+                Coaching, defined by how it feels.
+              </Text>
+              <Text style={s.sectionBody}>
+                A great coach knows the movement. A GoArrive coach also knows
+                the moment — when to push, when to protect, when to slow down,
+                and when to celebrate. This module is about that posture.
+              </Text>
+              <Text style={s.sectionBody}>
+                These five postures shape every conversation, cue, plan
+                adjustment, and message you send.
+              </Text>
+            </View>
+
+            <View style={{ gap: 10 }}>
+              {COACHING_POSTURES.map((p, i) => (
+                <View key={p.name} style={s.postureCard}>
+                  <Text style={s.postureCardNumber}>
+                    {String(i + 1).padStart(2, '0')}
+                  </Text>
+                  <Text style={s.postureCardName}>{p.name}</Text>
+                  <Text style={s.postureDefinition}>{p.definition}</Text>
+                  <View style={s.soundsLikeBox}>
+                    <Text style={s.soundsLikeLabel}>WHAT IT SOUNDS LIKE</Text>
+                    <Text style={s.soundsLikeQuote}>{p.soundsLike}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>
+                The coaching loop.
+              </Text>
+              <Text style={s.sectionBody}>
+                Every session, message, and check-in inside G➲A follows the
+                same four-step loop.
+              </Text>
+            </View>
+
+            <View style={s.rhythmGrid}>
+              {COACHING_LOOP.map((step, i) => (
+                <View key={step.name} style={s.rhythmCard}>
+                  <Text style={s.rhythmCardNumber}>
+                    {String(i + 1).padStart(2, '0')}
+                  </Text>
+                  <Text style={s.rhythmCardName}>{step.name}</Text>
+                  <Text style={s.rhythmCardBody}>{step.body}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={s.sectionBlock}>
+              <Text style={s.sectionHeading}>
+                What strong coaching looks like.
+              </Text>
+              <Text style={s.sectionBody}>
+                Four everyday situations, and how a G➲A coach responds
+                differently than the average.
+              </Text>
+            </View>
+
+            <View style={{ gap: 10 }}>
+              {COACHING_EXAMPLES.map((ex, i) => (
+                <View key={ex.situation} style={s.exampleCard}>
+                  <Text style={s.exampleNumber}>
+                    {String(i + 1).padStart(2, '0')}
+                  </Text>
+                  <Text style={s.exampleSituation}>{ex.situation}</Text>
+                  <View style={s.exampleWeakBox}>
+                    <Text style={s.exampleWeakLabel}>WEAK RESPONSE</Text>
+                    <Text style={s.exampleWeakText}>{ex.weak}</Text>
+                  </View>
+                  <View style={s.exampleGoaBox}>
+                    <Text style={s.exampleGoaLabel}>G➲A RESPONSE</Text>
+                    <Text style={s.exampleGoaText}>{ex.goa}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.responseLabel}>
+                Which coaching posture do you most want to strengthen as a
+                GoArrive coach?
+              </Text>
+              <View style={s.optionList}>
+                {COACHING_POSTURE_OPTIONS.map((opt) => {
+                  const picked = coachingPostureGoalDraft === opt;
+                  return (
+                    <Pressable
+                      key={opt}
+                      onPress={() => setCoachingPostureGoalDraft(opt)}
+                      style={[s.optionRow, picked && s.optionRowSelected]}
+                    >
+                      <View style={[s.radio, picked && s.radioSelected]}>
+                        {picked && <View style={s.radioDot} />}
+                      </View>
+                      <Text
+                        style={[
+                          s.optionText,
+                          picked && s.optionTextSelected,
+                        ]}
+                      >
+                        {opt}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.responseLabel}>
+                What is one communication habit you want to build with your
+                members?
+              </Text>
+              <TextInput
+                value={coachingCommunicationHabitDraft}
+                onChangeText={setCoachingCommunicationHabitDraft}
+                placeholder="A short reflection…"
+                placeholderTextColor="#4A5568"
+                multiline
+                style={s.textArea}
+              />
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.scenarioEyebrow}>
+                {HOW_WE_COACH_SCENARIO_UNSAFE.eyebrow}
+              </Text>
+              <Text style={s.responseLabel}>
+                {HOW_WE_COACH_SCENARIO_UNSAFE.title}
+              </Text>
+              <Text style={s.sectionBody}>
+                {HOW_WE_COACH_SCENARIO_UNSAFE.prompt}
+              </Text>
+              <View style={s.optionList}>
+                {HOW_WE_COACH_SCENARIO_UNSAFE.options.map((opt) => {
+                  const picked = howWeCoachScenarioUnsafeDraft === opt.letter;
+                  return (
+                    <Pressable
+                      key={opt.letter}
+                      onPress={() => setHowWeCoachScenarioUnsafeDraft(opt.letter)}
+                      style={[s.optionRow, picked && s.optionRowSelected]}
+                    >
+                      <View style={[s.radio, picked && s.radioSelected]}>
+                        {picked && <View style={s.radioDot} />}
+                      </View>
+                      <Text style={s.scenarioLetter}>{opt.letter}.</Text>
+                      <Text
+                        style={[
+                          s.optionText,
+                          picked && s.optionTextSelected,
+                        ]}
+                      >
+                        {opt.text}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {howWeCoachScenarioUnsafeDraft ===
+                HOW_WE_COACH_SCENARIO_UNSAFE.correct && (
+                <View style={s.scenarioFeedbackCorrect}>
+                  <Icon name="check-circle" size={16} color={GREEN} />
+                  <Text style={s.scenarioFeedbackCorrectText}>
+                    {HOW_WE_COACH_SCENARIO_UNSAFE.correctFeedback}
+                  </Text>
+                </View>
+              )}
+              {!!howWeCoachScenarioUnsafeDraft &&
+                howWeCoachScenarioUnsafeDraft !==
+                  HOW_WE_COACH_SCENARIO_UNSAFE.correct && (
+                  <View style={s.scenarioFeedbackTryAgain}>
+                    <Text style={s.scenarioFeedbackTryAgainText}>
+                      {HOW_WE_COACH_SCENARIO_UNSAFE.wrongFeedback}
+                    </Text>
+                  </View>
+                )}
+            </View>
+
+            <View style={s.responseBlock}>
+              <Text style={s.scenarioEyebrow}>
+                {HOW_WE_COACH_SCENARIO_MISSED.eyebrow}
+              </Text>
+              <Text style={s.responseLabel}>
+                {HOW_WE_COACH_SCENARIO_MISSED.title}
+              </Text>
+              <Text style={s.sectionBody}>
+                {HOW_WE_COACH_SCENARIO_MISSED.prompt}
+              </Text>
+              <View style={s.optionList}>
+                {HOW_WE_COACH_SCENARIO_MISSED.options.map((opt) => {
+                  const picked = howWeCoachScenarioMissedDraft === opt.letter;
+                  return (
+                    <Pressable
+                      key={opt.letter}
+                      onPress={() => setHowWeCoachScenarioMissedDraft(opt.letter)}
+                      style={[s.optionRow, picked && s.optionRowSelected]}
+                    >
+                      <View style={[s.radio, picked && s.radioSelected]}>
+                        {picked && <View style={s.radioDot} />}
+                      </View>
+                      <Text style={s.scenarioLetter}>{opt.letter}.</Text>
+                      <Text
+                        style={[
+                          s.optionText,
+                          picked && s.optionTextSelected,
+                        ]}
+                      >
+                        {opt.text}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {howWeCoachScenarioMissedDraft ===
+                HOW_WE_COACH_SCENARIO_MISSED.correct && (
+                <View style={s.scenarioFeedbackCorrect}>
+                  <Icon name="check-circle" size={16} color={GREEN} />
+                  <Text style={s.scenarioFeedbackCorrectText}>
+                    {HOW_WE_COACH_SCENARIO_MISSED.correctFeedback}
+                  </Text>
+                </View>
+              )}
+              {!!howWeCoachScenarioMissedDraft &&
+                howWeCoachScenarioMissedDraft !==
+                  HOW_WE_COACH_SCENARIO_MISSED.correct && (
+                  <View style={s.scenarioFeedbackTryAgain}>
+                    <Text style={s.scenarioFeedbackTryAgainText}>
+                      {HOW_WE_COACH_SCENARIO_MISSED.wrongFeedback}
+                    </Text>
+                  </View>
+                )}
+            </View>
+          </>
+        )}
+
         {/* Placeholder body for modules without dedicated content yet */}
-        {['howWeCoach', 'moneyGrowth', 'apprenticeshipPath', 'setupChecklist'].includes(module.id) && (
+        {['moneyGrowth', 'apprenticeshipPath', 'setupChecklist'].includes(module.id) && (
           <View style={s.placeholderBlock}>
             <Text style={s.placeholderText}>
               Deeper content for this module is coming soon. For now, read the intro above,
@@ -2929,5 +3429,129 @@ const s = StyleSheet.create({
     color: MUTED,
     fontFamily: FB,
     lineHeight: 19,
+  },
+
+  // How We Coach — posture cards
+  postureCard: {
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 14,
+    padding: 14,
+    gap: 6,
+  },
+  postureCardNumber: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: GOLD,
+    fontFamily: FH,
+    letterSpacing: 0.5,
+  },
+  postureCardName: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: FG,
+    fontFamily: FH,
+    lineHeight: 21,
+  },
+  postureDefinition: {
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 19,
+  },
+  soundsLikeBox: {
+    marginTop: 6,
+    backgroundColor: 'rgba(74,144,226,0.06)',
+    borderLeftWidth: 2,
+    borderLeftColor: 'rgba(74,144,226,0.55)',
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 3,
+  },
+  soundsLikeLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: BLUE,
+    fontFamily: FB,
+  },
+  soundsLikeQuote: {
+    fontSize: 13,
+    color: FG,
+    fontFamily: FB,
+    lineHeight: 18,
+    fontStyle: 'italic',
+  },
+
+  // How We Coach — practical example cards
+  exampleCard: {
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 14,
+    padding: 14,
+    gap: 8,
+  },
+  exampleNumber: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: GOLD,
+    fontFamily: FH,
+    letterSpacing: 0.5,
+  },
+  exampleSituation: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: FG,
+    fontFamily: FH,
+    lineHeight: 20,
+  },
+  exampleWeakBox: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderLeftWidth: 2,
+    borderLeftColor: 'rgba(255,255,255,0.25)',
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 3,
+  },
+  exampleWeakLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: MUTED,
+    fontFamily: FB,
+  },
+  exampleWeakText: {
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 18,
+    fontStyle: 'italic',
+  },
+  exampleGoaBox: {
+    backgroundColor: 'rgba(126,211,33,0.06)',
+    borderLeftWidth: 2,
+    borderLeftColor: 'rgba(126,211,33,0.55)',
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 3,
+  },
+  exampleGoaLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: GREEN,
+    fontFamily: FB,
+  },
+  exampleGoaText: {
+    fontSize: 13,
+    color: FG,
+    fontFamily: FB,
+    lineHeight: 18,
+    fontWeight: '500',
   },
 });
