@@ -133,6 +133,42 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
+    // COACH LAUNCH — Guided onboarding journey progress
+    // Keyed by coachId. Coaches read/write their own progress doc; admins can read/write any.
+    // ─────────────────────────────────────────────
+
+    match /coach_launch/{coachId} {
+      allow read: if isOwnDoc(coachId) || isPlatformAdmin() || isCoachByUid(coachId);
+      allow create: if isOwnDoc(coachId) || isPlatformAdmin();
+      allow update: if isOwnDoc(coachId) || isPlatformAdmin();
+      allow delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
+    // COACH AGREEMENTS — Signed Coach Program Terms + Contractual Agreements
+    // Keyed by coachId. A coach signs once from their own authenticated
+    // account; the doc is immutable thereafter (client updates + deletes
+    // are denied). platformAdmin may READ signed records but MUST NOT
+    // create/sign on behalf of a coach — signatures require the actual
+    // account owner. If a signed agreement needs to be superseded (e.g.
+    // version bump), a Cloud Function using the Admin SDK will write via
+    // bypass.
+    // ─────────────────────────────────────────────
+
+    match /coach_agreements/{coachId} {
+      allow read: if isOwnDoc(coachId) || isPlatformAdmin() || isCoachByUid(coachId);
+      // Actual authenticated user MUST equal the coachId being signed —
+      // admin impersonation cannot satisfy this because request.auth.uid
+      // is the admin's uid, not the impersonated coach. Payload coachId
+      // must also match the doc path AND request.auth.uid.
+      allow create: if request.auth.uid == coachId
+                    && request.resource.data.coachId == request.auth.uid
+                    && request.resource.data.status == 'signed';
+      allow update: if false; // client-immutable after signing
+      allow delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
     // MEMBER PLANS
     // ─────────────────────────────────────────────
 
