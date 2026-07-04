@@ -61,6 +61,8 @@ import {
   MUSCLE_GROUP_FILTER_OPTIONS,
   DIFFICULTY_FILTER_OPTIONS,
 } from '../../hooks/useMovementFilters';
+import { GestureDetector, Gesture } from 'react-native-gesture-handler';
+import Reanimated, { useSharedValue, useAnimatedStyle, withSpring, runOnJS } from 'react-native-reanimated';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -311,6 +313,36 @@ function BuildScreenInner() {
   const [selectedPlaybook, setSelectedPlaybook] = useState<any | null>(null);
 
   const tenantId = claims?.tenantId ?? '';
+
+  // ── Drag & Drop state ──────────────────────────────────────────────────
+  const ghostX = useSharedValue(0);
+  const ghostY = useSharedValue(0);
+  const ghostScale = useSharedValue(1);
+  const ghostOpacity = useSharedValue(0);
+  const rootOffX = useSharedValue(0);
+  const rootOffY = useSharedValue(0);
+  const [dragItem, setDragItem] = useState<BuildItem | null>(null);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [dropModal, setDropModal] = useState<{ drag: BuildItem; target: BuildItem } | null>(null);
+  const tileRefsMap = useRef(new Map<string, React.RefObject<View | null>>());
+  const tileLayoutSnap = useRef(new Map<string, { x: number; y: number; w: number; h: number; item: BuildItem }>());
+  const _dragItemRef = useRef<BuildItem | null>(null);
+  const rootViewRef = useRef<View>(null);
+
+  const ghostAnimStyle = useAnimatedStyle(() => ({
+    position: 'absolute' as const,
+    left: ghostX.value,
+    top: ghostY.value,
+    transform: [{ scale: ghostScale.value }],
+    opacity: ghostOpacity.value,
+    zIndex: 9999,
+    pointerEvents: 'none' as const,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    elevation: 12,
+  }));
 
   // ── Data Fetching ──────────────────────────────────────────────────────
   // NOTE: We intentionally do NOT filter isArchived in the Firestore query
@@ -580,7 +612,134 @@ function BuildScreenInner() {
       setNewPlaybookName(''); setNewPlaybookDesc('');
       setShowPlaybookCreate(false);
     } catch (e) { console.error('[Build] Create playbook error:', e); }
-  }, [coachId, tenantId, currentFolderId, newPlaybookName, newPlaybookDesc]);  // ── Enrich workout coverThumbs from loaded movements ──────────────────
+  }, [coachId, tenantId, currentFolderId, newPlaybookName, newPlaybookDesc]);
+
+  // ── Drag & Drop handlers (filteredItems-independent) ──────────────────
+  const findTarget = useCallback((ax: number, ay: number): BuildItem | null => {
+    let found: BuildItem | null = null;
+    tileLayoutSnap.current.forEach(({ x, y, w, h, item: candidate }) => {
+      if (ax >= x && ax <= x + w && ay >= y && ay <= y + h) found = candidate;
+    });
+    return found;
+  }, []);
+
+  const updateHovered = useCallback((ax: number, ay: number) => {
+    const target = findTarget(ax, ay);
+    const nextId = target?.id ?? null;
+    setHoveredId(prev => (prev === nextId ? prev : nextId));
+  }, [findTarget]);
+
+  const executeDrop = useCallback(async (ax: number, ay: number) => {
+    const dragged = _dragItemRef.current;
+    if (!dragged) return;
+    const target = findTarget(ax, ay);
+    if (!target || target.id === dragged.id) return;
+
+    if (target.type === 'Folder') {
+      try {
+        await updateDoc(doc(db, 'movements', dragged.id), {
+          parentId: target.id,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (e) { console.error('[Build] Drop into folder error:', e); }
+    } else if (target.type === 'Workouts') {
+      const blockMov = {
+        movementId: dragged.id,
+        movementName: dragged.name,
+        durationSec: 40,
+        restSec: 20,
+        sets: 1,
+        thumbnailUrl: (dragged.thumbnailUrl ?? dragged.mediaUrl) as string | undefined,
+      };
+      const existingBlocks: any[] = Array.isArray(target.blocks) ? target.blocks : [];
+      const updatedBlocks = existingBlocks.length > 0
+        ? existingBlocks.map((b: any, i: number) =>
+            i === 0 ? { ...b, movements: [...(b.movements ?? []), blockMov] } : b
+          )
+        : [{
+            type: 'circuit',
+            label: 'Block 1',
+            rounds: 3,
+            firstMovementPrepSec: 20,
+            showDemo: false,
+            demoDurationSec: 5,
+            showGrabEquipment: false,
+            movements: [blockMov],
+          }];
+      try {
+        await updateDoc(doc(db, 'workouts', target.id), {
+          blocks: updatedBlocks,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (e) { console.error('[Build] Drop into workout error:', e); }
+    } else if (target.type === 'Movements') {
+      setDropModal({ drag: dragged, target });
+    }
+  }, [findTarget]);
+
+  const clearDragState = useCallback(() => {
+    _dragItemRef.current = null;
+    setDragItem(null);
+    setHoveredId(null);
+    tileLayoutSnap.current.clear();
+  }, []);
+
+  const createFolderFromDrop = useCallback(async () => {
+    if (!dropModal) return;
+    const { drag, target } = dropModal;
+    setDropModal(null);
+    try {
+      const folderRef = await addDoc(collection(db, 'build_folders'), {
+        coachId,
+        tenantId,
+        name: `${drag.name} & ${target.name}`,
+        parentId: currentFolderId || null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      await Promise.all([
+        updateDoc(doc(db, 'movements', drag.id), { parentId: folderRef.id, updatedAt: serverTimestamp() }),
+        updateDoc(doc(db, 'movements', target.id), { parentId: folderRef.id, updatedAt: serverTimestamp() }),
+      ]);
+    } catch (e) { console.error('[Build] Create folder from drop error:', e); }
+  }, [dropModal, coachId, tenantId, currentFolderId]);
+
+  const createWorkoutFromDrop = useCallback(async () => {
+    if (!dropModal) return;
+    const { drag, target } = dropModal;
+    setDropModal(null);
+    const toBlockMov = (m: BuildItem) => ({
+      movementId: m.id,
+      movementName: m.name,
+      durationSec: 40,
+      restSec: 20,
+      sets: 1,
+      thumbnailUrl: (m.thumbnailUrl ?? m.mediaUrl) as string | undefined,
+    });
+    try {
+      await addDoc(collection(db, 'workouts'), {
+        coachId,
+        tenantId,
+        name: `${drag.name} & ${target.name}`,
+        blocks: [{
+          type: 'circuit',
+          label: 'Block 1',
+          rounds: 3,
+          firstMovementPrepSec: 20,
+          showDemo: false,
+          demoDurationSec: 5,
+          showGrabEquipment: false,
+          movements: [toBlockMov(drag), toBlockMov(target)],
+        }],
+        isArchived: false,
+        parentId: currentFolderId || null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) { console.error('[Build] Create workout from drop error:', e); }
+  }, [dropModal, coachId, tenantId, currentFolderId]);
+
+  // ── Enrich workout coverThumbs from loaded movements ──────────────────
   // Movements in workout blocks may only store movementId without thumbnailUrl.
   // After both collections load, cross-reference to build coverThumbs.
   // Phase 4: lightweight list passed to MovementForm so its duplicate-name
@@ -683,6 +842,25 @@ function BuildScreenInner() {
     return list;
   }, [enrichedItems, search, activeType, showArchived, currentFolderId, movEquipmentFilter, movMuscleGroupFilter, movDifficultyFilter]);
 
+  // ── Drag & Drop handlers (require filteredItems) ───────────────────────
+  const snapshotLayouts = useCallback(() => {
+    const snap = tileLayoutSnap.current;
+    snap.clear();
+    tileRefsMap.current.forEach((ref, id) => {
+      const candidate = filteredItems.find(i => i.id === id);
+      if (!candidate) return;
+      ref.current?.measure((_fx, _fy, width, height, px, py) => {
+        snap.set(id, { x: px, y: py, w: width, h: height, item: candidate });
+      });
+    });
+  }, [filteredItems]);
+
+  const _startDragById = useCallback((id: string) => {
+    const item = filteredItems.find(i => i.id === id) ?? null;
+    _dragItemRef.current = item;
+    setDragItem(item);
+  }, [filteredItems]);
+
   // ── Render Helpers ─────────────────────────────────────────────────────
   const renderItem = ({ item }: { item: BuildItem }) => {
     // Folder card
@@ -729,6 +907,9 @@ function BuildScreenInner() {
             <View style={styles.nameOverlay}>
               <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
             </View>
+            {hoveredId === item.id && dragItem && (
+              <View style={[StyleSheet.absoluteFill, { borderWidth: 2, borderColor: '#F5A623', borderRadius: 10 }]} pointerEvents="none" />
+            )}
           </Pressable>
         );
       }
@@ -769,25 +950,9 @@ function BuildScreenInner() {
       previewEngine.registerTile(item.id, tilePriority);
       const tileAnimating = previewEngine.animatingIds.has(item.id);
 
-      return (
-        <Pressable
-          style={{
-            width: cardWidth,
-            height: cardHeight,
-            borderRadius: 10,
-            overflow: 'hidden',
-            backgroundColor: (isWorkoutCard || hasMosaic) ? WORKOUT_CARD_BG : '#0E1117',
-            marginBottom: GRID_GAP,
-          }}
-          onPress={() => {
-            if (isMovement) setSelectedMovement(item);
-            else if (isPlan) setSelectedPlan(item);
-            else if (isPlaybook) setSelectedPlaybook(item);
-            else if (isFollowAlong) setSelectedFollowAlong(item);
-            else setOpenWorkoutId(item.id);
-          }}
-        >
-          {/* Media area — controlled by preview engine */}
+      // Shared tile content (media + overlays)
+      const tileMedia = (
+        <>
           {(isWorkoutCard || hasMosaic) ? (
             <WorkoutMosaic
               thumbs={item.coverThumbs ?? []}
@@ -830,7 +995,6 @@ function BuildScreenInner() {
               )}
             />
           )}
-
           {/* Name overlay — transparent gradient at bottom */}
           <View style={[styles.nameOverlay, isWorkoutCard && { backgroundColor: 'rgba(26, 35, 50, 0.92)' }]}>
             <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
@@ -840,6 +1004,92 @@ function BuildScreenInner() {
               <Text style={styles.videoNeededText}>Video needed</Text>
             </View>
           )}
+          {/* Drop target highlight ring */}
+          {hoveredId === item.id && dragItem && dragItem.id !== item.id && (
+            <View
+              style={[StyleSheet.absoluteFill, { borderWidth: 2, borderColor: '#F5A623', borderRadius: 10 }]}
+              pointerEvents="none"
+            />
+          )}
+        </>
+      );
+
+      // Movement tiles: wrap in GestureDetector for long-press drag
+      if (isMovement) {
+        if (!tileRefsMap.current.has(item.id)) {
+          tileRefsMap.current.set(item.id, React.createRef<View>());
+        }
+        const tileRef = tileRefsMap.current.get(item.id)!;
+
+        const dragGesture = Gesture.Pan()
+          .activateAfterLongPress(600)
+          .onStart((e) => {
+            ghostX.value = e.absoluteX - cardWidth / 2 - rootOffX.value;
+            ghostY.value = e.absoluteY - cardHeight / 2 - rootOffY.value;
+            ghostScale.value = withSpring(1.08, { damping: 15, stiffness: 200 });
+            ghostOpacity.value = withSpring(1);
+            runOnJS(snapshotLayouts)();
+            runOnJS(_startDragById)(item.id);
+          })
+          .onUpdate((e) => {
+            ghostX.value = e.absoluteX - cardWidth / 2 - rootOffX.value;
+            ghostY.value = e.absoluteY - cardHeight / 2 - rootOffY.value;
+            runOnJS(updateHovered)(e.absoluteX, e.absoluteY);
+          })
+          .onEnd((e) => {
+            runOnJS(executeDrop)(e.absoluteX, e.absoluteY);
+          })
+          .onFinalize(() => {
+            ghostScale.value = withSpring(1, { damping: 20 });
+            ghostOpacity.value = withSpring(0);
+            runOnJS(clearDragState)();
+          });
+
+        return (
+          <GestureDetector gesture={dragGesture}>
+            <View
+              ref={tileRef as any}
+              style={{
+                width: cardWidth,
+                height: cardHeight,
+                marginBottom: GRID_GAP,
+                opacity: dragItem?.id === item.id ? 0.35 : 1,
+              }}
+            >
+              <Pressable
+                style={[StyleSheet.absoluteFill, {
+                  borderRadius: 10,
+                  overflow: 'hidden',
+                  backgroundColor: '#0E1117',
+                }]}
+                onPress={() => setSelectedMovement(item)}
+              >
+                {tileMedia}
+              </Pressable>
+            </View>
+          </GestureDetector>
+        );
+      }
+
+      // Non-movement tiles: plain Pressable (workouts/folders/plans/etc. are drop targets)
+      return (
+        <Pressable
+          style={{
+            width: cardWidth,
+            height: cardHeight,
+            borderRadius: 10,
+            overflow: 'hidden',
+            backgroundColor: (isWorkoutCard || hasMosaic) ? WORKOUT_CARD_BG : '#0E1117',
+            marginBottom: GRID_GAP,
+          }}
+          onPress={() => {
+            if (isPlan) setSelectedPlan(item);
+            else if (isPlaybook) setSelectedPlaybook(item);
+            else if (isFollowAlong) setSelectedFollowAlong(item);
+            else setOpenWorkoutId(item.id);
+          }}
+        >
+          {tileMedia}
         </Pressable>
       );
     }
@@ -938,7 +1188,16 @@ function BuildScreenInner() {
   }
 
   return (
-    <View style={s.root}>
+    <View
+      ref={rootViewRef}
+      style={s.root}
+      onLayout={() => {
+        rootViewRef.current?.measure((_fx, _fy, _w, _h, px, py) => {
+          rootOffX.value = px;
+          rootOffY.value = py;
+        });
+      }}
+    >
       <AppHeader />
 
       {/* Folder breadcrumb */}
@@ -1468,6 +1727,54 @@ function BuildScreenInner() {
           </View>
         </View>
       </Modal>
+
+      {/* Drop action modal: Movement dropped on another Movement */}
+      <Modal transparent visible={!!dropModal} animationType="fade" onRequestClose={() => setDropModal(null)}>
+        <Pressable style={s.modalBackdrop} onPress={() => setDropModal(null)}>
+          <View style={s.plusMenu} onStartShouldSetResponder={() => true}>
+            <Text style={s.plusMenuTitle}>Combine Movements</Text>
+            <Text style={{ color: '#8A95A3', fontSize: 13, fontFamily: FB, marginBottom: 20, textAlign: 'center' }}>
+              {dropModal?.drag.name} + {dropModal?.target.name}
+            </Text>
+            <Pressable
+              style={[s.plusMenuItem, { backgroundColor: '#1E2A3A', borderRadius: 10, paddingVertical: 14, marginBottom: 10 }]}
+              onPress={createFolderFromDrop}
+            >
+              <Icon name="folder" size={22} color="#F5A623" />
+              <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>Create Folder</Text>
+            </Pressable>
+            <Pressable
+              style={[s.plusMenuItem, { backgroundColor: '#1E2A3A', borderRadius: 10, paddingVertical: 14 }]}
+              onPress={createWorkoutFromDrop}
+            >
+              <Icon name="workouts" size={22} color="#60A5FA" />
+              <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>Create Workout</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Drag ghost tile — floats above everything during drag */}
+      <Reanimated.View style={[ghostAnimStyle, { width: cardWidth, height: cardHeight, borderRadius: 10 }]} pointerEvents="none">
+        {dragItem && (
+          <View style={{ flex: 1, borderRadius: 10, overflow: 'hidden', backgroundColor: '#0E1117' }}>
+            {(dragItem.thumbnailUrl || dragItem.mediaUrl) ? (
+              <Image
+                source={{ uri: (dragItem.thumbnailUrl || dragItem.mediaUrl)! }}
+                style={{ width: cardWidth, height: cardHeight, borderRadius: 10 }}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                <Image source={require('../../assets/goarrive-icon.png')} style={styles.placeholderLogo} resizeMode="cover" />
+              </View>
+            )}
+            <View style={styles.nameOverlay}>
+              <Text style={styles.nameText} numberOfLines={1}>{dragItem.name}</Text>
+            </View>
+          </View>
+        )}
+      </Reanimated.View>
     </View>
   );
 }
