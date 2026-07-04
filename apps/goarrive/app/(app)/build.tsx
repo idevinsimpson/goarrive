@@ -90,7 +90,6 @@ const DEFAULT_DEMO_DURATION_SEC = 5;
 const NO_MOVEMENT_BLOCKS = ['Water Break', 'Rest', 'Follow-Along Video'];
 
 // ── Drag auto-scroll + drop tray constants ─────────────────────────────────
-const AUTO_SCROLL_BAND_PCT = 0.14;   // edge band = 14% of the list viewport height
 const AUTO_SCROLL_MAX_PX = 15;       // max px scrolled per frame at full proximity
 const AUTO_SCROLL_RIGHT_ZONE_PCT = 0.25; // auto-scroll only fires in the right 25% of the screen, so hovering drop targets in the grid never scrolls the list
 const TRAY_SHOW_DELAY_MS = 200;      // delay before tray slides up — avoids flashing on accidental long presses
@@ -736,8 +735,9 @@ function BuildScreenInner() {
       setPendingFolderDropItem(null);
       // New folder sorts to the top of the grid — bring the user there so
       // they see what they just created instead of it vanishing off-screen.
+      // animated:false — smooth scroll no-ops on iOS Safari.
       scrollOffsetRef.current = 0;
-      listRef.current?.scrollToOffset({ offset: 0, animated: true });
+      requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: false }));
     } catch (e) {
       console.error('[Build] Create folder error:', e);
     }
@@ -790,16 +790,28 @@ function BuildScreenInner() {
   // the list and vanishes from the user's viewport. Scroll them up so they
   // immediately see the result of the drop.
   const scrollListToTop = useCallback(() => {
-    scrollOffsetRef.current = 0;
-    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    // animated:true silently no-ops on iOS Safari (RN-web smooth scroll), and
+    // the drag teardown re-render can swallow an immediate call — jump
+    // unanimated on the next frame, then once more after the resort lands.
+    const jump = () => {
+      scrollOffsetRef.current = 0;
+      listRef.current?.scrollToOffset({ offset: 0, animated: false });
+    };
+    requestAnimationFrame(jump);
+    setTimeout(jump, 350);
   }, []);
 
   const dropMovementIntoFolder = useCallback(async (dragged: BuildItem, folderId: string) => {
     try {
-      await updateDoc(doc(db, 'movements', dragged.id), stripUndefined({
+      // Bump the folder's updatedAt too, so it resorts to the top of the
+      // grid where the user is scrolled to see the result.
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'movements', dragged.id), stripUndefined({
         parentId: folderId,
         updatedAt: serverTimestamp(),
       }));
+      batch.update(doc(db, 'build_folders', folderId), { updatedAt: serverTimestamp() });
+      await batch.commit();
       recordRecentDropFolder(folderId);
       scrollListToTop();
     } catch (e) { console.error('[Build] Drop into folder error:', e); }
@@ -861,8 +873,8 @@ function BuildScreenInner() {
     if (!target || target.id === dragged.id) return;
     if (!isDropTarget(target)) return;
 
-    // Don't open the modal if dropping a movement back into its current folder.
-    if (target.type === 'Movements' && target.parentId === dragged.parentId) return;
+    // No-op when dropping a movement onto the folder it already lives in.
+    if (target.type === 'Folder' && target.id === dragged.parentId) return;
 
     if (target.type === 'Folder') {
       await dropMovementIntoFolder(dragged, target.id);
@@ -942,27 +954,30 @@ function BuildScreenInner() {
     stopAutoScroll();
     const step = () => {
       const win = listWindowRef.current;
-      // Only auto-scroll while the drag point is in the right-side zone.
-      // Approaching a drop target in the grid used to keep scrolling the
-      // list under the user's finger, which was distracting — now scrolling
-      // is an explicit gesture: drag to the right edge, then up/down.
+      // Auto-scroll only fires in the right-side strip, so approaching a
+      // drop target in the grid never scrolls the list under the finger —
+      // scrolling is an explicit gesture: drag to the right edge, then
+      // hold below the vertical middle to scroll down, above it to scroll
+      // up. Speed ramps toward the top/bottom edges.
       const inRightZone =
         pointerXRef.current >= Dimensions.get('window').width * (1 - AUTO_SCROLL_RIGHT_ZONE_PCT);
       if (win && inRightZone) {
         const y = pointerYRef.current;
-        const band = win.height * AUTO_SCROLL_BAND_PCT;
         let listBottom = win.top + win.height;
-        // Keep the bottom band above the drop tray once it's visible, so
-        // hovering a tray item doesn't also auto-scroll the list.
+        // Keep the strip above the drop tray once it's visible, so hovering
+        // a tray item doesn't also auto-scroll the list.
         if (trayVisibleRef.current) {
           const windowH = Dimensions.get('window').height;
           listBottom = Math.min(listBottom, windowH - TRAY_HEIGHT - insets.bottom);
         }
+        const stripH = listBottom - win.top;
+        const center = win.top + stripH / 2;
+        const half = stripH / 2;
+        const deadZone = stripH * 0.08;
         let delta = 0;
-        if (y < win.top + band) {
-          delta = -Math.min(AUTO_SCROLL_MAX_PX, ((win.top + band - y) / band) * AUTO_SCROLL_MAX_PX);
-        } else if (y > listBottom - band) {
-          delta = Math.min(AUTO_SCROLL_MAX_PX, ((y - (listBottom - band)) / band) * AUTO_SCROLL_MAX_PX);
+        if (y >= win.top && y <= listBottom && Math.abs(y - center) > deadZone && half > deadZone) {
+          const t = (Math.abs(y - center) - deadZone) / (half - deadZone);
+          delta = Math.sign(y - center) * Math.min(1, t) * AUTO_SCROLL_MAX_PX;
         }
         if (delta !== 0) {
           const next = Math.max(0, scrollOffsetRef.current + delta);
