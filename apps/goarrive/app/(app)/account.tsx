@@ -5,8 +5,8 @@
  * Shows user info and provides a sign-out button.
  * Prompt 5: Adds coach personal Zoom connection panel.
  */
-import React, { useState, useEffect, useCallback } from 'react';
-import { router } from 'expo-router';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
 import {
   View,
   Text,
@@ -714,6 +714,7 @@ type GcalConflictAccount = {
 
 function GoogleCalendarSyncSection({ coachId }: { coachId: string }) {
   const fns = getFunctions(undefined, 'us-central1');
+  const { gcal: gcalParam, email: gcalEmail } = useLocalSearchParams<{ gcal?: string; email?: string }>();
 
   // ── Post account state ──────────────────────────────────────────────────────
   const [connected, setConnected] = useState(false);
@@ -734,6 +735,9 @@ function GoogleCalendarSyncSection({ coachId }: { coachId: string }) {
   const [removingAccount, setRemovingAccount] = useState<Record<string, boolean>>({});
   // Per-account selected calendar IDs (local UI state before save)
   const [selectedCalendarIds, setSelectedCalendarIds] = useState<Record<string, string[]>>({});
+  // Track which account was just connected so we can show a prompt and auto-expand
+  const [justConnectedAccountId, setJustConnectedAccountId] = useState<string | null>(null);
+  const autoExpandedRef = useRef<string | null>(null);
 
   // ── Firestore listener ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -760,6 +764,36 @@ function GoogleCalendarSyncSection({ coachId }: { coachId: string }) {
     });
     return unsub;
   }, [coachId]);
+
+  // ── Auto-expand newly connected conflict account ────────────────────────────
+  // When redirected back from gcalConflictCallback with gcal=conflict_connected,
+  // find the matching account, mark it as just-connected, and auto-load its calendars.
+  useEffect(() => {
+    if (gcalParam !== 'conflict_connected' || !gcalEmail) return;
+    const accountId = gcalEmail.replace(/[^a-zA-Z0-9]/g, '_');
+    if (autoExpandedRef.current === accountId) return; // only do this once
+    const account = conflictAccounts.find((a) => a.accountId === accountId);
+    if (!account) return; // Firestore not ready yet — will re-run when accounts update
+    autoExpandedRef.current = accountId;
+    setJustConnectedAccountId(accountId);
+    // Auto-load the calendar list so the coach can select immediately
+    setCalendarLists((prev) => ({ ...prev, [accountId]: { loading: true, calendars: [] } }));
+    getFunctions(undefined, 'us-central1'); // ensure fns is initialised
+    httpsCallable(fns, 'listGcalConflictCalendars')({ accountId })
+      .then((result: any) => {
+        const calendars: GcalCalendar[] = result.data?.calendars || [];
+        setCalendarLists((prev) => ({ ...prev, [accountId]: { loading: false, calendars } }));
+        // Default-select the primary calendar
+        setSelectedCalendarIds((prev) => {
+          if ((prev[accountId] || []).length > 0) return prev; // already has selections
+          const primary = calendars.find((c) => c.primary);
+          return { ...prev, [accountId]: primary ? [primary.id] : [] };
+        });
+      })
+      .catch((err: any) => {
+        setCalendarLists((prev) => ({ ...prev, [accountId]: { loading: false, calendars: [], error: err.message || 'Failed to load calendars' } }));
+      });
+  }, [gcalParam, gcalEmail, conflictAccounts, fns]);
 
   // ── Post account handlers ───────────────────────────────────────────────────
   const handleConnect = async () => {
@@ -953,6 +987,15 @@ function GoogleCalendarSyncSection({ coachId }: { coachId: string }) {
       <Text style={{ fontSize: 9, color: TEXT_MUTED, fontFamily: FONT_BODY, lineHeight: 13, marginBottom: 6 }}>
         These accounts are checked for busy times when members request sessions. Add multiple accounts and choose which sub-calendars to check.
       </Text>
+
+      {justConnectedAccountId && (
+        <View style={{ backgroundColor: '#1E3A1E', borderRadius: 6, padding: 8, marginBottom: 8, borderWidth: 1, borderColor: '#2D6A2D' }}>
+          <Text style={{ fontSize: 10, color: '#4CAF50', fontFamily: FONT_HEADING, marginBottom: 2 }}>Account connected</Text>
+          <Text style={{ fontSize: 9, color: '#A3C4A3', fontFamily: FONT_BODY, lineHeight: 13 }}>
+            Select which calendars to check for conflicts below, then tap Save.
+          </Text>
+        </View>
+      )}
 
       {conflictAccounts.map((account) => {
         const calState = calendarLists[account.accountId];
