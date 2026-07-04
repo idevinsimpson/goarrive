@@ -34,11 +34,17 @@ export default function CoachLaunchCard() {
           const arr: string[] = Array.isArray(data.completedModuleIds) ? data.completedModuleIds : [];
           setCompletedCount(arr.length);
           setCompletionDismissed(!!data.completionCardDismissed);
+        } else {
+          // Reset when the doc is missing — otherwise switching coachId (admin
+          // impersonation) leaves the previous coach's progress on screen.
+          setCompletedCount(0);
+          setCompletionDismissed(false);
         }
         setLoaded(true);
       },
       (err) => {
         console.error('[CoachLaunchCard] load error:', err);
+        setCompletedCount(0);
         setLoaded(true);
       }
     );
