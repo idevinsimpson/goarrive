@@ -41,6 +41,7 @@ import {
   updateDoc,
   addDoc,
   serverTimestamp,
+  writeBatch,
 } from 'firebase/firestore';
 import { useAuth } from '../../lib/AuthContext';
 import { db } from '../../lib/firebase';
@@ -76,6 +77,73 @@ const GRID_PADDING = 16;       // padding on left/right of the grid
 const GRID_GAP = 12;           // gap between cards
 const MAX_CARD_WIDTH = 240;    // max card width in px — gives 4 cols on iPad, 2 on phone
 const CARD_ASPECT = 4 / 5;     // 4:5 width:height ratio → height = width / (4/5) = width * 1.25
+
+// ── Workout default constants (mirrors WorkoutFolderPage) ──────────────────
+const DEFAULT_DURATION_SEC = 40;
+const DEFAULT_REST_SEC = 20;
+const DEFAULT_ROUNDS = 3;
+const DEFAULT_DEMO_DURATION_SEC = 5;
+const NO_MOVEMENT_BLOCKS = ['Water Break', 'Rest', 'Follow-Along Video'];
+
+// Firestore rejects `undefined` values. Mirror the stripUndefined pattern
+// from components/WorkoutFolderPage.tsx so writes from drag/drop never throw.
+function stripUndefined(obj: any): any {
+  if (Array.isArray(obj)) return obj.map(stripUndefined);
+  if (obj && typeof obj === 'object' && !(obj instanceof Date)) {
+    // Preserve Firestore FieldValue sentinels (serverTimestamp, etc.)
+    if (obj._methodName || obj.type === 'AggregateField') return obj;
+    const clean: any = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (v !== undefined) clean[k] = stripUndefined(v);
+    }
+    return clean;
+  }
+  return obj;
+}
+
+// Compute coverThumbs from a workout's blocks — mirrors WorkoutFolderPage.
+function computeCoverThumbs(blocks: any[]): string[] {
+  const thumbs: string[] = [];
+  for (const b of blocks ?? []) {
+    for (const m of b?.movements ?? []) {
+      if (m?.thumbnailUrl && thumbs.length < 16 && !thumbs.includes(m.thumbnailUrl)) {
+        thumbs.push(m.thumbnailUrl);
+      }
+    }
+  }
+  return thumbs;
+}
+
+// Estimated workout duration in minutes — mirrors WorkoutFolderPage.calcDurationMin.
+function calcDurationMin(blocks: any[]): number {
+  let totalSec = 0;
+  for (const block of blocks ?? []) {
+    if (NO_MOVEMENT_BLOCKS.includes(block?.type)) {
+      totalSec += block?.durationSec ?? 10;
+      continue;
+    }
+    const rounds = block?.rounds ?? DEFAULT_ROUNDS;
+    const prepSec = block?.firstMovementPrepSec ?? DEFAULT_REST_SEC;
+    const demoSec = block?.showDemo ? (block?.demoDurationSec ?? DEFAULT_DEMO_DURATION_SEC) : 0;
+    let blockSec = 0;
+    for (const m of block?.movements ?? []) {
+      const sets = m?.sets ?? 1;
+      const durPerSet = m?.durationSec ?? DEFAULT_DURATION_SEC;
+      const restPerSet = m?.restSec ?? DEFAULT_REST_SEC;
+      blockSec += sets * (durPerSet + restPerSet);
+    }
+    const restBetween = block?.restBetweenRoundsSec ?? 0;
+    totalSec += demoSec + rounds * (prepSec + blockSec) + (rounds > 1 ? (rounds - 1) * restBetween : 0);
+  }
+  return Math.ceil(totalSec / 60);
+}
+
+// Drop target eligibility: only Folders, Workouts, and Movements accept drops.
+// Plans, Playbooks, and Follow-Alongs are pass-through tiles.
+function isDropTarget(item: { type?: string } | null | undefined): boolean {
+  if (!item) return false;
+  return item.type === 'Folder' || item.type === 'Workouts' || item.type === 'Movements';
+}
 
 interface BuildItem {
   id: string;
@@ -618,6 +686,9 @@ function BuildScreenInner() {
   const findTarget = useCallback((ax: number, ay: number): BuildItem | null => {
     let found: BuildItem | null = null;
     tileLayoutSnap.current.forEach(({ x, y, w, h, item: candidate }) => {
+      // Only consider tiles that are actual drop targets. Plans / Playbooks /
+      // Follow-Alongs are ignored so their tiles never highlight or accept a drop.
+      if (!isDropTarget(candidate)) return;
       if (ax >= x && ax <= x + w && ay >= y && ay <= y + h) found = candidate;
     });
     return found;
@@ -634,23 +705,33 @@ function BuildScreenInner() {
     if (!dragged) return;
     const target = findTarget(ax, ay);
     if (!target || target.id === dragged.id) return;
+    if (!isDropTarget(target)) return;
 
     if (target.type === 'Folder') {
       try {
-        await updateDoc(doc(db, 'movements', dragged.id), {
+        await updateDoc(doc(db, 'movements', dragged.id), stripUndefined({
           parentId: target.id,
           updatedAt: serverTimestamp(),
-        });
+        }));
       } catch (e) { console.error('[Build] Drop into folder error:', e); }
     } else if (target.type === 'Workouts') {
-      const blockMov = {
+      // Build the block movement with the same shape addMovementToBlock uses
+      // in WorkoutFolderPage — including posterUrl and split-sided fields —
+      // so a dropped movement plays back identically to a picker-added one.
+      const blockMov: any = {
         movementId: dragged.id,
         movementName: dragged.name,
-        durationSec: 40,
-        restSec: 20,
+        durationSec: DEFAULT_DURATION_SEC,
+        restSec: DEFAULT_REST_SEC,
         sets: 1,
-        thumbnailUrl: (dragged.thumbnailUrl ?? dragged.mediaUrl) as string | undefined,
+        thumbnailUrl: dragged.thumbnailUrl ?? dragged.mediaUrl ?? undefined,
+        posterUrl: dragged.posterUrl ?? dragged.thumbnailImageUrl ?? undefined,
       };
+      if (dragged.swapSides) {
+        blockMov.swapSides = true;
+        blockMov.swapMode = dragged.swapMode ?? 'split';
+        blockMov.swapWindowSec = dragged.swapWindowSec ?? 5;
+      }
       const existingBlocks: any[] = Array.isArray(target.blocks) ? target.blocks : [];
       const updatedBlocks = existingBlocks.length > 0
         ? existingBlocks.map((b: any, i: number) =>
@@ -659,18 +740,20 @@ function BuildScreenInner() {
         : [{
             type: 'circuit',
             label: 'Block 1',
-            rounds: 3,
-            firstMovementPrepSec: 20,
+            rounds: DEFAULT_ROUNDS,
+            firstMovementPrepSec: DEFAULT_REST_SEC,
             showDemo: false,
-            demoDurationSec: 5,
+            demoDurationSec: DEFAULT_DEMO_DURATION_SEC,
             showGrabEquipment: false,
             movements: [blockMov],
           }];
       try {
-        await updateDoc(doc(db, 'workouts', target.id), {
+        await updateDoc(doc(db, 'workouts', target.id), stripUndefined({
           blocks: updatedBlocks,
+          coverThumbs: computeCoverThumbs(updatedBlocks),
+          estimatedDurationMin: calcDurationMin(updatedBlocks),
           updatedAt: serverTimestamp(),
-        });
+        }));
       } catch (e) { console.error('[Build] Drop into workout error:', e); }
     } else if (target.type === 'Movements') {
       setDropModal({ drag: dragged, target });
@@ -689,18 +772,28 @@ function BuildScreenInner() {
     const { drag, target } = dropModal;
     setDropModal(null);
     try {
-      const folderRef = await addDoc(collection(db, 'build_folders'), {
+      // Atomic: folder create + both movement moves commit together, or
+      // nothing does. Avoids the previous half-committed state where the
+      // folder existed but only one movement had been reparented.
+      const batch = writeBatch(db);
+      const folderRef = doc(collection(db, 'build_folders'));
+      batch.set(folderRef, stripUndefined({
         coachId,
         tenantId,
         name: `${drag.name} & ${target.name}`,
         parentId: currentFolderId || null,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      });
-      await Promise.all([
-        updateDoc(doc(db, 'movements', drag.id), { parentId: folderRef.id, updatedAt: serverTimestamp() }),
-        updateDoc(doc(db, 'movements', target.id), { parentId: folderRef.id, updatedAt: serverTimestamp() }),
-      ]);
+      }));
+      batch.update(doc(db, 'movements', drag.id), stripUndefined({
+        parentId: folderRef.id,
+        updatedAt: serverTimestamp(),
+      }));
+      batch.update(doc(db, 'movements', target.id), stripUndefined({
+        parentId: folderRef.id,
+        updatedAt: serverTimestamp(),
+      }));
+      await batch.commit();
     } catch (e) { console.error('[Build] Create folder from drop error:', e); }
   }, [dropModal, coachId, tenantId, currentFolderId]);
 
@@ -708,34 +801,49 @@ function BuildScreenInner() {
     if (!dropModal) return;
     const { drag, target } = dropModal;
     setDropModal(null);
-    const toBlockMov = (m: BuildItem) => ({
-      movementId: m.id,
-      movementName: m.name,
-      durationSec: 40,
-      restSec: 20,
-      sets: 1,
-      thumbnailUrl: (m.thumbnailUrl ?? m.mediaUrl) as string | undefined,
-    });
+    // Mirror addMovementToBlock in WorkoutFolderPage: posterUrl + split-sided
+    // fields carry through so a workout created via drag-drop behaves the
+    // same as one built with the picker.
+    const toBlockMov = (m: BuildItem) => {
+      const next: any = {
+        movementId: m.id,
+        movementName: m.name,
+        durationSec: DEFAULT_DURATION_SEC,
+        restSec: DEFAULT_REST_SEC,
+        sets: 1,
+        thumbnailUrl: m.thumbnailUrl ?? m.mediaUrl ?? undefined,
+        posterUrl: m.posterUrl ?? m.thumbnailImageUrl ?? undefined,
+      };
+      if (m.swapSides) {
+        next.swapSides = true;
+        next.swapMode = m.swapMode ?? 'split';
+        next.swapWindowSec = m.swapWindowSec ?? 5;
+      }
+      return next;
+    };
     try {
-      await addDoc(collection(db, 'workouts'), {
+      const blocks = [{
+        type: 'circuit',
+        label: 'Block 1',
+        rounds: DEFAULT_ROUNDS,
+        firstMovementPrepSec: DEFAULT_REST_SEC,
+        showDemo: false,
+        demoDurationSec: DEFAULT_DEMO_DURATION_SEC,
+        showGrabEquipment: false,
+        movements: [toBlockMov(drag), toBlockMov(target)],
+      }];
+      await addDoc(collection(db, 'workouts'), stripUndefined({
         coachId,
         tenantId,
         name: `${drag.name} & ${target.name}`,
-        blocks: [{
-          type: 'circuit',
-          label: 'Block 1',
-          rounds: 3,
-          firstMovementPrepSec: 20,
-          showDemo: false,
-          demoDurationSec: 5,
-          showGrabEquipment: false,
-          movements: [toBlockMov(drag), toBlockMov(target)],
-        }],
+        blocks,
+        coverThumbs: computeCoverThumbs(blocks),
+        estimatedDurationMin: calcDurationMin(blocks),
         isArchived: false,
         parentId: currentFolderId || null,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      });
+      }));
     } catch (e) { console.error('[Build] Create workout from drop error:', e); }
   }, [dropModal, coachId, tenantId, currentFolderId]);
 
@@ -869,48 +977,59 @@ function BuildScreenInner() {
       previewEngine.registerTile(item.id, 2);
       const folderAnimating = previewEngine.animatingIds.has(item.id);
       if (viewMode === 'grid') {
+        // Register tile ref so folders participate in drop-target hit-testing.
+        if (!tileRefsMap.current.has(item.id)) {
+          tileRefsMap.current.set(item.id, React.createRef<View>());
+        }
+        const folderTileRef = tileRefsMap.current.get(item.id)!;
         return (
-          <Pressable
+          <View
+            ref={folderTileRef as any}
             style={{
               width: cardWidth,
               height: cardHeight,
-              borderRadius: 10,
-              overflow: 'hidden',
-              backgroundColor: '#1A2332',
               marginBottom: GRID_GAP,
             }}
-            onPress={() => enterFolder(item)}
           >
-            {item.coverThumbs && item.coverThumbs.length > 0 ? (
-              <WorkoutMosaic
-                thumbs={item.coverThumbs}
-                width={cardWidth}
-                height={cardHeight}
-                isAnimating={folderAnimating}
-                scrollIdle={previewEngine.scrollState !== 'scrolling'}
-              />
-            ) : (
-              <AnimatedPreviewTile
-                itemId={item.id}
-                uri={null}
-                width={cardWidth}
-                height={cardHeight}
-                isAnimating={false}
-                scrollIdle={previewEngine.scrollState !== 'scrolling'}
-                priority={2}
-                registerTile={previewEngine.registerTile}
-                borderRadius={10}
-                fallbackIcon={<Icon name="folder" size={36} color="#F5A623" />}
-              />
-            )}
-            {/* Name overlay */}
-            <View style={styles.nameOverlay}>
-              <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
-            </View>
-            {hoveredId === item.id && dragItem && (
-              <View style={[StyleSheet.absoluteFill, { borderWidth: 2, borderColor: '#F5A623', borderRadius: 10 }]} pointerEvents="none" />
-            )}
-          </Pressable>
+            <Pressable
+              style={[StyleSheet.absoluteFill, {
+                borderRadius: 10,
+                overflow: 'hidden',
+                backgroundColor: '#1A2332',
+              }]}
+              onPress={() => enterFolder(item)}
+            >
+              {item.coverThumbs && item.coverThumbs.length > 0 ? (
+                <WorkoutMosaic
+                  thumbs={item.coverThumbs}
+                  width={cardWidth}
+                  height={cardHeight}
+                  isAnimating={folderAnimating}
+                  scrollIdle={previewEngine.scrollState !== 'scrolling'}
+                />
+              ) : (
+                <AnimatedPreviewTile
+                  itemId={item.id}
+                  uri={null}
+                  width={cardWidth}
+                  height={cardHeight}
+                  isAnimating={false}
+                  scrollIdle={previewEngine.scrollState !== 'scrolling'}
+                  priority={2}
+                  registerTile={previewEngine.registerTile}
+                  borderRadius={10}
+                  fallbackIcon={<Icon name="folder" size={36} color="#F5A623" />}
+                />
+              )}
+              {/* Name overlay */}
+              <View style={styles.nameOverlay}>
+                <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
+              </View>
+              {hoveredId === item.id && dragItem && dragItem.id !== item.id && (
+                <View style={[StyleSheet.absoluteFill, { borderWidth: 2, borderColor: '#F5A623', borderRadius: 10 }]} pointerEvents="none" />
+              )}
+            </Pressable>
+          </View>
         );
       }
       return (
@@ -1004,8 +1123,10 @@ function BuildScreenInner() {
               <Text style={styles.videoNeededText}>Video needed</Text>
             </View>
           )}
-          {/* Drop target highlight ring */}
-          {hoveredId === item.id && dragItem && dragItem.id !== item.id && (
+          {/* Drop target highlight ring — only for drop-eligible tiles
+              (Movements, Workouts, Folders). Plans / Playbooks / Follow-Alongs
+              are not drop targets, so no hover ring appears on them. */}
+          {hoveredId === item.id && dragItem && dragItem.id !== item.id && isDropTarget(item) && (
             <View
               style={[StyleSheet.absoluteFill, { borderWidth: 2, borderColor: '#F5A623', borderRadius: 10 }]}
               pointerEvents="none"
@@ -1071,26 +1192,39 @@ function BuildScreenInner() {
         );
       }
 
-      // Non-movement tiles: plain Pressable (workouts/folders/plans/etc. are drop targets)
+      // Non-movement tiles: workout tiles register refs so they participate in
+      // drop-target hit-testing. Plans / Playbooks / Follow-Alongs still render
+      // as Pressables but findTarget skips them (see isDropTarget).
+      const needsDropRef = isDropTarget(item);
+      if (needsDropRef && !tileRefsMap.current.has(item.id)) {
+        tileRefsMap.current.set(item.id, React.createRef<View>());
+      }
+      const nonMovTileRef = needsDropRef ? tileRefsMap.current.get(item.id) : null;
       return (
-        <Pressable
+        <View
+          ref={nonMovTileRef as any}
           style={{
             width: cardWidth,
             height: cardHeight,
-            borderRadius: 10,
-            overflow: 'hidden',
-            backgroundColor: (isWorkoutCard || hasMosaic) ? WORKOUT_CARD_BG : '#0E1117',
             marginBottom: GRID_GAP,
           }}
-          onPress={() => {
-            if (isPlan) setSelectedPlan(item);
-            else if (isPlaybook) setSelectedPlaybook(item);
-            else if (isFollowAlong) setSelectedFollowAlong(item);
-            else setOpenWorkoutId(item.id);
-          }}
         >
-          {tileMedia}
-        </Pressable>
+          <Pressable
+            style={[StyleSheet.absoluteFill, {
+              borderRadius: 10,
+              overflow: 'hidden',
+              backgroundColor: (isWorkoutCard || hasMosaic) ? WORKOUT_CARD_BG : '#0E1117',
+            }]}
+            onPress={() => {
+              if (isPlan) setSelectedPlan(item);
+              else if (isPlaybook) setSelectedPlaybook(item);
+              else if (isFollowAlong) setSelectedFollowAlong(item);
+              else setOpenWorkoutId(item.id);
+            }}
+          >
+            {tileMedia}
+          </Pressable>
+        </View>
       );
     }
 

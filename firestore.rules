@@ -314,6 +314,20 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
+    // BUILD FOLDERS (Build tab folder organization — coachId-scoped CRUD)
+    // Used by app/(app)/build.tsx to group Movements / Workouts / etc. under
+    // named folders. Mirrors the movements/workouts pattern: only the owning
+    // coach (or admin) can read/write; a coach can delete their own folder.
+    // ─────────────────────────────────────────────
+
+    match /build_folders/{folderId} {
+      allow read: if isAuthenticated() && isCoachOrBootstrap(resource.data.coachId);
+      allow create: if isCoachOrBootstrap(request.resource.data.coachId);
+      allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+      allow delete: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+    }
+
+    // ─────────────────────────────────────────────
     // WORKOUTS (Week 3 — coachId-scoped CRUD)
     // App uses 'workouts' collection (not 'workout_templates')
     // ─────────────────────────────────────────────
