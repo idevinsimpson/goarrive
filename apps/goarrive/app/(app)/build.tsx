@@ -439,6 +439,7 @@ function BuildScreenInner() {
   const listWindowRef = useRef<{ top: number; height: number } | null>(null);
   const pointerYRef = useRef(0);
   const pointerXRef = useRef(0);
+  const rightZoneThresholdRef = useRef(0);
   const autoScrollRafRef = useRef<number | null>(null);
   const scrollLockCleanupRef = useRef<(() => void) | null>(null);
 
@@ -790,12 +791,15 @@ function BuildScreenInner() {
   // the list and vanishes from the user's viewport. Scroll them up so they
   // immediately see the result of the drop.
   const scrollListToTop = useCallback(() => {
-    // animated:true silently no-ops on iOS Safari (RN-web smooth scroll), and
-    // the drag teardown re-render can swallow an immediate call — jump
-    // unanimated on the next frame, then once more after the resort lands.
+    // scrollToOffset silently no-ops if already at offset 0. Force a scroll
+    // to a tiny positive offset first, then jump to 0. Works on iOS Safari.
     const jump = () => {
       scrollOffsetRef.current = 0;
-      listRef.current?.scrollToOffset({ offset: 0, animated: false });
+      listRef.current?.scrollToOffset({ offset: 0.1, animated: false });
+      // Once the pixel scrolls (proves the list is interactive), jump to 0.
+      requestAnimationFrame(() => {
+        listRef.current?.scrollToOffset({ offset: 0, animated: false });
+      });
     };
     requestAnimationFrame(jump);
     setTimeout(jump, 350);
@@ -959,8 +963,7 @@ function BuildScreenInner() {
       // scrolling is an explicit gesture: drag to the right edge, then
       // hold below the vertical middle to scroll down, above it to scroll
       // up. Speed ramps toward the top/bottom edges.
-      const inRightZone =
-        pointerXRef.current >= Dimensions.get('window').width * (1 - AUTO_SCROLL_RIGHT_ZONE_PCT);
+      const inRightZone = pointerXRef.current >= rightZoneThresholdRef.current;
       if (win && inRightZone) {
         const y = pointerYRef.current;
         let listBottom = win.top + win.height;
@@ -1254,6 +1257,9 @@ function BuildScreenInner() {
   const beginDragSession = useCallback((id: string, ax: number, ay: number) => {
     pointerXRef.current = ax;
     pointerYRef.current = ay;
+    // Snapshot the window width at drag start so the right-zone threshold
+    // doesn't shift if the viewport resizes (e.g., URL bar on mobile Safari).
+    rightZoneThresholdRef.current = Dimensions.get('window').width * (1 - AUTO_SCROLL_RIGHT_ZONE_PCT);
     // Hide the tab bar for the drag's duration so the drop tray sits flush
     // at the bottom instead of behind/above the tabs.
     navigation.setOptions({ tabBarStyle: { ...TAB_BAR_STYLE, display: 'none' } });
