@@ -791,19 +791,17 @@ function BuildScreenInner() {
   // the list and vanishes from the user's viewport. Scroll them up so they
   // immediately see the result of the drop.
   const scrollListToTop = useCallback(() => {
-    // scrollToOffset silently no-ops if already at offset 0. Force a scroll
-    // to a visible offset first (2px), then to 0. Works on iOS Safari.
+    // The Firestore data takes time to arrive and re-render. Delay the scroll
+    // so it happens after the new items have landed and the list has resorted.
+    // Without the delay, the scroll fires to 0 before the data arrives, then
+    // the re-render pushes everything down and the user never sees the result.
     const jump = () => {
       scrollOffsetRef.current = 0;
-      listRef.current?.scrollToOffset({ offset: 2, animated: false });
-      // Once the pixel scrolls (proves the list is interactive), jump to 0.
-      requestAnimationFrame(() => {
-        scrollOffsetRef.current = 0;
-        listRef.current?.scrollToOffset({ offset: 0, animated: false });
-      });
+      // Jump to 0 directly — by this point the data should be there.
+      listRef.current?.scrollToOffset({ offset: 0, animated: false });
     };
-    requestAnimationFrame(jump);
-    setTimeout(jump, 400);
+    // Wait longer to ensure Firestore listener has fired and re-render is done.
+    setTimeout(jump, 600);
   }, []);
 
   const dropMovementIntoFolder = useCallback(async (dragged: BuildItem, folderId: string) => {
@@ -958,6 +956,11 @@ function BuildScreenInner() {
   const startAutoScroll = useCallback(() => {
     stopAutoScroll();
     const step = () => {
+      // Re-measure the list window on every frame — the initial measurement
+      // might be stale or fail if the list hasn't laid out yet.
+      listContainerRef.current?.measure((_fx, _fy, _w, h, _px, py) => {
+        listWindowRef.current = { top: py, height: h };
+      });
       const win = listWindowRef.current;
       // Auto-scroll only fires in the right-side strip, so approaching a
       // drop target in the grid never scrolls the list under the finger —
@@ -1270,9 +1273,6 @@ function BuildScreenInner() {
     // at the bottom instead of behind/above the tabs.
     navigation.setOptions({ tabBarStyle: { ...TAB_BAR_STYLE, display: 'none' } });
     snapshotLayouts();
-    listContainerRef.current?.measure((_fx, _fy, _w, h, _px, py) => {
-      listWindowRef.current = { top: py, height: h };
-    });
     _startDragById(id);
     lockPageScroll();
     startAutoScroll();
@@ -2317,6 +2317,22 @@ function BuildScreenInner() {
             </View>
           </View>
         </Reanimated.View>
+      )}
+
+      {/* Right-edge scroll indicator — shows during drag so user knows where to drag to scroll */}
+      {dragItem && (
+        <View
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: Dimensions.get('window').width * AUTO_SCROLL_RIGHT_ZONE_PCT,
+            opacity: 0.15,
+            backgroundColor: '#60A5FA',
+            pointerEvents: 'none',
+          }}
+        />
       )}
 
       {/* Drag ghost tile — floats above everything during drag */}
