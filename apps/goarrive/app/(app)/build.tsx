@@ -1167,7 +1167,10 @@ function BuildScreenInner() {
           });
 
         return (
-          <GestureDetector gesture={dragGesture}>
+          // touchAction: RNGH web defaults to 'none', which blocks touch
+          // scrolling on every tile; 'pan-y' restores vertical scroll while
+          // still allowing the long-press drag to activate.
+          <GestureDetector gesture={dragGesture} touchAction="pan-y">
             <View
               ref={tileRef as any}
               style={{
@@ -1511,6 +1514,7 @@ function BuildScreenInner() {
           }
           onScroll={previewEngine.onScroll}
           scrollEventThrottle={16}
+          scrollEnabled={!dragItem}
           onViewableItemsChanged={previewEngine.onViewableItemsChanged}
           viewabilityConfig={previewEngine.viewabilityConfig}
         />
