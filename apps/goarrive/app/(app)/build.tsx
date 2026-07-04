@@ -961,11 +961,6 @@ function BuildScreenInner() {
   const startAutoScroll = useCallback(() => {
     stopAutoScroll();
     const step = () => {
-      // Re-measure the list window on every frame — the initial measurement
-      // might be stale or fail if the list hasn't laid out yet.
-      listContainerRef.current?.measure((_fx, _fy, _w, h, _px, py) => {
-        listWindowRef.current = { top: py, height: h };
-      });
       const win = listWindowRef.current;
       // Auto-scroll only fires in the right-side strip, so approaching a
       // drop target in the grid never scrolls the list under the finger —
@@ -1854,7 +1849,16 @@ function BuildScreenInner() {
       ) : filteredItems.length > 0 ? (
         // Wrapper ref gives the drag session the list viewport's absolute
         // top/height for the edge auto-scroll bands.
-        <View ref={listContainerRef} style={{ flex: 1 }} collapsable={false}>
+        <View
+          ref={listContainerRef}
+          style={{ flex: 1 }}
+          collapsable={false}
+          onLayout={() => {
+            listContainerRef.current?.measure((_fx, _fy, _w, h, _px, py) => {
+              listWindowRef.current = { top: py, height: h };
+            });
+          }}
+        >
           <FlatList
             ref={listRef}
             data={filteredItems}
