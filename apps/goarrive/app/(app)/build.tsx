@@ -90,8 +90,8 @@ const DEFAULT_DEMO_DURATION_SEC = 5;
 const NO_MOVEMENT_BLOCKS = ['Water Break', 'Rest', 'Follow-Along Video'];
 
 // ── Drag auto-scroll + drop tray constants ─────────────────────────────────
-const AUTO_SCROLL_MAX_PX = 15;       // max px scrolled per frame at full proximity
-const AUTO_SCROLL_RIGHT_ZONE_PCT = 0.25; // auto-scroll only fires in the right 25% of the screen, so hovering drop targets in the grid never scrolls the list
+const AUTO_SCROLL_MAX_PX = 15;       // max px scrolled per frame at edge proximity
+const AUTO_SCROLL_BAND_PCT = 0.18;  // edge band = 18% of the list height (at top/bottom where scroll fires)
 const TRAY_SHOW_DELAY_MS = 200;      // delay before tray slides up — avoids flashing on accidental long presses
 const TRAY_HEIGHT = 96;              // content height of the drop tray (excl. safe-area inset)
 const TRAY_SLIDE_DISTANCE = 220;     // translateY when hidden — guaranteed offscreen incl. inset
@@ -439,7 +439,6 @@ function BuildScreenInner() {
   const listWindowRef = useRef<{ top: number; height: number } | null>(null);
   const pointerYRef = useRef(0);
   const pointerXRef = useRef(0);
-  const rightZoneThresholdRef = useRef(0);
   const autoScrollRafRef = useRef<number | null>(null);
   const scrollLockCleanupRef = useRef<(() => void) | null>(null);
 
@@ -801,8 +800,10 @@ function BuildScreenInner() {
         scrollOffsetRef.current = 0;
         listRef.current?.scrollToOffset({ offset: 0, animated: false });
         attempts++;
-        if (attempts < 10) {
-          setTimeout(tryScroll, 100);
+        // Firestore snapshot can take >1s; keep pinning to 0 for ~2.5s so a
+        // late re-render can't leave the list scrolled down.
+        if (attempts < 20) {
+          setTimeout(tryScroll, 125);
         }
       });
     };
@@ -958,46 +959,50 @@ function BuildScreenInner() {
     }
   }, []);
 
+  // measure() inside onLayout can report zeros on web; measureInWindow gives
+  // viewport-relative coords that match the gesture's absoluteY. Re-measured
+  // at every drag start so a stale/empty value can't disable the scroll bands.
+  const measureListWindow = useCallback(() => {
+    const node: any = listContainerRef.current;
+    if (node?.measureInWindow) {
+      node.measureInWindow((_x: number, y: number, _w: number, h: number) => {
+        if (h > 0) listWindowRef.current = { top: y, height: h };
+      });
+    }
+  }, []);
+
   const startAutoScroll = useCallback(() => {
     stopAutoScroll();
     const step = () => {
-      const win = listWindowRef.current;
-      // Auto-scroll only fires in the right-side strip, so approaching a
-      // drop target in the grid never scrolls the list under the finger —
-      // scrolling is an explicit gesture: drag to the right edge, then
-      // hold below the vertical middle to scroll down, above it to scroll
-      // up. Speed ramps toward the top/bottom edges.
-      // Use snapshotted threshold if available (set at drag start), otherwise
-      // calculate live. Threshold should always be set, but fallback is safe.
-      const threshold = rightZoneThresholdRef.current > 0
-        ? rightZoneThresholdRef.current
-        : Dimensions.get('window').width * (1 - AUTO_SCROLL_RIGHT_ZONE_PCT);
-      const inRightZone = pointerXRef.current >= threshold;
-      if (win && inRightZone) {
-        const y = pointerYRef.current;
-        let listBottom = win.top + win.height;
-        // Keep the strip above the drop tray once it's visible, so hovering
-        // a tray item doesn't also auto-scroll the list.
-        if (trayVisibleRef.current) {
-          const windowH = Dimensions.get('window').height;
-          listBottom = Math.min(listBottom, windowH - TRAY_HEIGHT - insets.bottom);
-        }
-        const stripH = listBottom - win.top;
-        const center = win.top + stripH / 2;
-        const half = stripH / 2;
-        const deadZone = stripH * 0.08;
-        let delta = 0;
-        if (y >= win.top && y <= listBottom && Math.abs(y - center) > deadZone && half > deadZone) {
-          const t = (Math.abs(y - center) - deadZone) / (half - deadZone);
-          delta = Math.sign(y - center) * Math.min(1, t) * AUTO_SCROLL_MAX_PX;
-        }
-        if (delta !== 0) {
-          const next = Math.max(0, scrollOffsetRef.current + delta);
-          // Update the ref immediately — the onScroll echo is async and the
-          // hit-test delta in findTarget must stay in step with each frame.
-          scrollOffsetRef.current = next;
-          listRef.current?.scrollToOffset({ offset: next, animated: false });
-        }
+      let win = listWindowRef.current;
+      if (!win || win.height <= 0) {
+        // Measurement unavailable — fall back to the full window so the
+        // edge bands still work rather than silently doing nothing.
+        win = { top: 0, height: Dimensions.get('window').height };
+      }
+      const y = pointerYRef.current;
+      let listBottom = win.top + win.height;
+      // Keep the scroll band above the drop tray once it's visible.
+      if (trayVisibleRef.current) {
+        const windowH = Dimensions.get('window').height;
+        listBottom = Math.min(listBottom, windowH - TRAY_HEIGHT - insets.bottom);
+      }
+      const band = (listBottom - win.top) * AUTO_SCROLL_BAND_PCT;
+      let delta = 0;
+      // Scroll up if dragging near the top
+      if (y < win.top + band) {
+        const proximity = (win.top + band - y) / band;
+        delta = -Math.min(1, proximity) * AUTO_SCROLL_MAX_PX;
+      }
+      // Scroll down if dragging near the bottom
+      else if (y > listBottom - band) {
+        const proximity = (y - (listBottom - band)) / band;
+        delta = Math.min(1, proximity) * AUTO_SCROLL_MAX_PX;
+      }
+      if (delta !== 0) {
+        const next = Math.max(0, scrollOffsetRef.current + delta);
+        scrollOffsetRef.current = next;
+        listRef.current?.scrollToOffset({ offset: next, animated: false });
       }
       autoScrollRafRef.current = requestAnimationFrame(step);
     };
@@ -1266,19 +1271,17 @@ function BuildScreenInner() {
   const beginDragSession = useCallback((id: string, ax: number, ay: number) => {
     pointerXRef.current = ax;
     pointerYRef.current = ay;
-    // Snapshot the window width at drag start so the right-zone threshold
-    // doesn't shift if the viewport resizes (e.g., URL bar on mobile Safari).
-    rightZoneThresholdRef.current = Dimensions.get('window').width * (1 - AUTO_SCROLL_RIGHT_ZONE_PCT);
     // Hide the tab bar for the drag's duration so the drop tray sits flush
     // at the bottom instead of behind/above the tabs.
     navigation.setOptions({ tabBarStyle: { ...TAB_BAR_STYLE, display: 'none' } });
     snapshotLayouts();
+    measureListWindow();
     _startDragById(id);
     lockPageScroll();
     startAutoScroll();
     if (trayTimerRef.current) clearTimeout(trayTimerRef.current);
     trayTimerRef.current = setTimeout(() => setTrayVisible(true), TRAY_SHOW_DELAY_MS);
-  }, [snapshotLayouts, _startDragById, lockPageScroll, startAutoScroll, navigation]);
+  }, [snapshotLayouts, measureListWindow, _startDragById, lockPageScroll, startAutoScroll, navigation]);
 
   // ALL teardown lives here — called from onFinalize, which fires on both
   // normal end and cancel (onEnd never fires when Safari cancels the pointer).
@@ -1291,7 +1294,6 @@ function BuildScreenInner() {
       trayTimerRef.current = null;
     }
     setTrayVisible(false);
-    listWindowRef.current = null;
     clearDragState();
   }, [stopAutoScroll, unlockPageScroll, clearDragState, navigation]);
 
@@ -1854,9 +1856,7 @@ function BuildScreenInner() {
           style={{ flex: 1 }}
           collapsable={false}
           onLayout={() => {
-            listContainerRef.current?.measure((_fx, _fy, _w, h, _px, py) => {
-              listWindowRef.current = { top: py, height: h };
-            });
+            requestAnimationFrame(measureListWindow);
           }}
         >
           <FlatList
