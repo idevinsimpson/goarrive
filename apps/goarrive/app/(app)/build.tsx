@@ -821,6 +821,9 @@ function BuildScreenInner() {
     if (!target || target.id === dragged.id) return;
     if (!isDropTarget(target)) return;
 
+    // Don't open the modal if dropping a movement back into its current folder.
+    if (target.type === 'Movements' && target.parentId === dragged.parentId) return;
+
     if (target.type === 'Folder') {
       await dropMovementIntoFolder(dragged, target.id);
     } else if (target.type === 'Workouts') {
@@ -2272,6 +2275,7 @@ const s = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#0E1117',
+    position: 'relative',
   },
   toolbar: {
     flexDirection: 'row',
