@@ -6616,7 +6616,7 @@ export const syncToGoogleCalendar = onCall(
         continue;
       }
       try {
-        const startDateTime = `${inst.scheduledDate}T${inst.scheduledTime || '09:00'}:00`;
+        const startDateTime = `${inst.scheduledDate}T${inst.scheduledStartTime || '09:00'}:00`;
         const durationMin = inst.durationMinutes || 30;
         const endDate = new Date(startDateTime);
         endDate.setMinutes(endDate.getMinutes() + durationMin);
@@ -6896,7 +6896,7 @@ export const removeGcalConflictAccount = onCall(
  * Returns { hasConflict: boolean, conflictingEvents: { calendarEmail, summary, start, end }[] }
  */
 export const checkGcalConflicts = onCall(
-  { secrets: [googleClientId, googleClientSecret] },
+  { secrets: [googleClientId, googleClientSecret], invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
