@@ -92,6 +92,7 @@ const NO_MOVEMENT_BLOCKS = ['Water Break', 'Rest', 'Follow-Along Video'];
 // ── Drag auto-scroll + drop tray constants ─────────────────────────────────
 const AUTO_SCROLL_MAX_PX = 15;       // max px scrolled per frame at edge proximity
 const AUTO_SCROLL_BAND_PCT = 0.18;  // edge band = 18% of the list height (at top/bottom where scroll fires)
+const AUTO_SCROLL_HOTSPOT_W = 90;    // down-scroll only fires within this many px of the right edge (over the chevron-down target)
 const TRAY_SHOW_DELAY_MS = 200;      // delay before tray slides up — avoids flashing on accidental long presses
 const TRAY_HEIGHT = 96;              // content height of the drop tray (excl. safe-area inset)
 const TRAY_SLIDE_DISTANCE = 220;     // translateY when hidden — guaranteed offscreen incl. inset
@@ -1023,10 +1024,14 @@ function BuildScreenInner() {
         const proximity = (win.top + band - y) / band;
         delta = -Math.min(1, proximity) * AUTO_SCROLL_MAX_PX;
       }
-      // Scroll down if dragging near the bottom
+      // Scroll down only when hovering the chevron-down hotspot at the
+      // bottom-right — dragging toward tray drop targets must not scroll.
       else if (y > listBottom - band) {
-        const proximity = (y - (listBottom - band)) / band;
-        delta = Math.min(1, proximity) * AUTO_SCROLL_MAX_PX;
+        const windowW = Dimensions.get('window').width;
+        if (pointerXRef.current > windowW - AUTO_SCROLL_HOTSPOT_W) {
+          const proximity = (y - (listBottom - band)) / band;
+          delta = Math.min(1, proximity) * AUTO_SCROLL_MAX_PX;
+        }
       }
       const node = getListScrollNode();
       if (delta !== 0) {
@@ -1041,7 +1046,7 @@ function BuildScreenInner() {
       }
       if (DRAG_DEBUG && tick % 15 === 0) {
         setDragDebugInfo(
-          `t${tick} y:${Math.round(y)} win:${Math.round(win.top)}-${Math.round(listBottom)} band:${Math.round(band)} d:${delta.toFixed(1)} st:${node ? Math.round(node.scrollTop) : 'noNode'}`
+          `t${tick} x:${Math.round(pointerXRef.current)} y:${Math.round(y)} win:${Math.round(win.top)}-${Math.round(listBottom)} band:${Math.round(band)} d:${delta.toFixed(1)} st:${node ? Math.round(node.scrollTop) : 'noNode'}`
         );
       }
       autoScrollRafRef.current = requestAnimationFrame(step);
