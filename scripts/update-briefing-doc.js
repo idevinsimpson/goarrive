@@ -10,6 +10,10 @@
  *       The service account (firebase-adminsdk-fbsvc@goarrive.iam.gserviceaccount.com) has
  *       been granted writer access to the doc by Manus/Devin.
  *
+ * Field locations are resolved at runtime by heading text and table row labels,
+ * so document growth/edits don't break the script (hardcoded character indices
+ * from the 2026-05-06 mapping went stale and caused deleteContentRange errors).
+ *
  * Usage:
  *   node scripts/update-briefing-doc.js \
  *     --staging-url "https://goarrive--staging-SUFFIX.web.app" \
@@ -22,10 +26,11 @@
  *     --what-not-to-retest "Billing, auth flows." \
  *     --known-gaps "Share link UI trigger not yet wired." \
  *     --slack-thread "https://goarriveworkspace.slack.com/archives/..." \
+ *     --key-messages "Summary of the key Slack messages." \
  *     --activity-entry "Deployed /share/[shareId] timing fix."
  *
  * All flags are optional — omit any you don't want to update.
- * The script only overwrites the cells you explicitly pass.
+ * The script only overwrites the fields you explicitly pass.
  */
 
 'use strict';
@@ -69,56 +74,105 @@ async function getDocsClient() {
   return google.docs({ version: 'v1', auth: authClient });
 }
 
-// ── Doc structure (character indices — stable as long as doc structure doesn't change) ──
-// These were mapped by Manus on 2026-05-06. If the doc is restructured, re-run the
-// parse_doc.py script in Manus's sandbox to get updated indices.
-const INDICES = {
-  // Section 1 — staging URL value cell
-  stagingUrl: { start: 183, end: 225 },          // "https://goarrive--staging-gurfzjak.web.app\n"
+// ── Structure resolution ─────────────────────────────────────────────────────
+function paraText(el) {
+  let t = '';
+  for (const e of el.paragraph?.elements || []) t += e.textRun?.content || '';
+  return t;
+}
 
-  // Section 2 table cells (value cells only)
-  date:               { start: 332, end: 342 },  // "2026-05-05"
-  commit:             { start: 352, end: 368 },  // "(Maia fills in)"
-  branchPr:           { start: 383, end: 399 },  // "(Maia fills in)"
-  deployClass:        { start: 415, end: 466 },  // "Hosting only / Functions / ..."
-  productionAffecting:{ start: 490, end: 499 },  // "yes / no"
-  stagingUrlConfirmed:{ start: 524, end: 533 },  // "yes / no"
-  // credentialsUsed is always Devin — don't overwrite
+function cellText(cell) {
+  let t = '';
+  for (const c of cell.content || []) {
+    if (c.paragraph) t += paraText(c);
+  }
+  return t;
+}
 
-  // Section 2 free-text paragraphs
-  whatChanged:        { start: 591, end: 717 },  // placeholder paragraph
-  whatToFocusOn:      { start: 735, end: 843 },  // placeholder paragraph
-  whatNotToRetest:    { start: 864, end: 955 },  // placeholder paragraph
-  knownGaps:          { start: 983, end: 1084 }, // placeholder paragraph
+function isHeading(el) {
+  const style = el.paragraph?.paragraphStyle?.namedStyleType || '';
+  return style.startsWith('HEADING') || style === 'TITLE';
+}
 
-  // Section 3 table cells
-  slackThread:        { start: 1155, end: 1209 }, // "(Maia pastes the Slack link...)"
-  keyMessages:        { start: 1235, end: 1401 }, // placeholder paragraph
+function findHeadingIdx(content, headingText) {
+  const want = headingText.trim().toLowerCase();
+  for (let i = 0; i < content.length; i++) {
+    const el = content[i];
+    if (el.paragraph && isHeading(el) && paraText(el).trim().toLowerCase() === want) {
+      return i;
+    }
+  }
+  throw new Error(`Heading not found in doc: "${headingText}"`);
+}
 
-  // Section 4 activity log — prepend a new row before the existing data row
-  // The table starts at 1606; header row ends at 1638; first data row starts at 1639.
-  // We insert a new row by inserting text at the start of the first data row.
-  activityLogTableStart: 1606,
-  activityLogFirstDataRowStart: 1639,
-};
+// Range of the free-text body under a heading: all paragraphs after the heading
+// up to the next heading or table, trimmed of trailing blank paragraphs.
+// Range excludes the last paragraph's terminal newline (the API rejects
+// deleting a segment's final newline).
+function sectionBodyRange(content, headingText) {
+  const hIdx = findHeadingIdx(content, headingText);
+  let first = null;
+  let lastNonEmpty = null;
+  for (let i = hIdx + 1; i < content.length; i++) {
+    const el = content[i];
+    if (el.table || (el.paragraph && isHeading(el))) break;
+    if (!el.paragraph) break;
+    if (first === null) first = el;
+    if (paraText(el).trim() !== '') lastNonEmpty = el;
+  }
+  if (!first || !lastNonEmpty) {
+    throw new Error(`No body paragraphs found under heading "${headingText}"`);
+  }
+  return { start: first.startIndex, end: lastNonEmpty.endIndex - 1 };
+}
+
+// First insertion point under a heading (start of first body paragraph).
+function sectionBodyStart(content, headingText) {
+  const hIdx = findHeadingIdx(content, headingText);
+  const el = content[hIdx + 1];
+  if (!el?.paragraph) throw new Error(`No paragraph after heading "${headingText}"`);
+  return el.startIndex;
+}
+
+// First table after a heading.
+function tableAfterHeading(content, headingText) {
+  const hIdx = findHeadingIdx(content, headingText);
+  for (let i = hIdx + 1; i < content.length; i++) {
+    if (content[i].table) return content[i];
+    if (content[i].paragraph && isHeading(content[i])) break;
+  }
+  throw new Error(`No table found under heading "${headingText}"`);
+}
+
+// Value-cell (column 1) text range for the row whose label cell (column 0)
+// matches `label`. Excludes the cell's terminal newline.
+function cellValueRange(tableEl, label) {
+  const want = label.trim().toLowerCase();
+  for (const row of tableEl.table.tableRows) {
+    const cells = row.tableCells || [];
+    if (cells.length < 2) continue;
+    if (cellText(cells[0]).trim().toLowerCase() === want) {
+      const paras = cells[1].content.filter((c) => c.paragraph);
+      if (!paras.length) throw new Error(`Value cell for "${label}" has no paragraphs`);
+      return { start: paras[0].startIndex, end: paras[paras.length - 1].endIndex - 1 };
+    }
+  }
+  throw new Error(`Table row not found: "${label}"`);
+}
 
 // ── Build batchUpdate requests ───────────────────────────────────────────────
-function makeReplaceRequest(start, end, newText) {
-  // Delete existing content in the range, then insert new text at start.
-  // We do delete-then-insert so the indices stay predictable.
-  return [
-    {
-      deleteContentRange: {
-        range: { startIndex: start, endIndex: end },
-      },
-    },
-    {
-      insertText: {
-        location: { index: start },
-        text: newText,
-      },
-    },
-  ];
+function makeReplaceRequest(range, newText) {
+  const reqs = [];
+  if (range.end > range.start) {
+    reqs.push({ deleteContentRange: { range: { startIndex: range.start, endIndex: range.end } } });
+  }
+  reqs.push({ insertText: { location: { index: range.start }, text: newText } });
+  return reqs;
+}
+
+function requestIndex(pair) {
+  const r = pair[0];
+  return r.deleteContentRange?.range?.startIndex ?? r.insertText?.location?.index ?? 0;
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -155,145 +209,67 @@ Flags (all optional — only provided flags are updated):
   console.log('🔐 Authenticating with service account...');
   const docs = await getDocsClient();
 
-  // We must apply requests in reverse index order so earlier deletions don't
-  // shift the indices of later operations. Collect all requests first, then sort.
-  const requests = [];
+  console.log('📖 Reading current doc structure...');
+  const doc = await docs.documents.get({ documentId: DOC_ID });
+  const content = doc.data.body.content;
 
+  const deploySummaryTable = tableAfterHeading(content, '2. Latest Deploy Summary');
+  const slackContextTable = tableAfterHeading(content, '3. Slack Thread Context');
+
+  const pairs = [];
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
   if (args['staging-url']) {
-    requests.push(...makeReplaceRequest(
-      INDICES.stagingUrl.start,
-      INDICES.stagingUrl.end,
-      args['staging-url'] + '\n'
-    ));
+    pairs.push(makeReplaceRequest(sectionBodyRange(content, '1. Current Staging URL'), args['staging-url']));
   }
-
   if (args['commit']) {
-    requests.push(...makeReplaceRequest(
-      INDICES.commit.start,
-      INDICES.commit.end,
-      args['commit'] + '\n'
-    ));
+    pairs.push(makeReplaceRequest(cellValueRange(deploySummaryTable, 'Commit'), args['commit']));
   }
-
   if (args['branch']) {
-    requests.push(...makeReplaceRequest(
-      INDICES.branchPr.start,
-      INDICES.branchPr.end,
-      args['branch'] + '\n'
-    ));
+    pairs.push(makeReplaceRequest(cellValueRange(deploySummaryTable, 'Branch / PR'), args['branch']));
   }
-
   if (args['deploy-class']) {
-    requests.push(...makeReplaceRequest(
-      INDICES.deployClass.start,
-      INDICES.deployClass.end,
-      args['deploy-class'] + '\n'
-    ));
+    pairs.push(makeReplaceRequest(cellValueRange(deploySummaryTable, 'Deploy class'), args['deploy-class']));
   }
-
   if (args['production-affecting']) {
-    requests.push(...makeReplaceRequest(
-      INDICES.productionAffecting.start,
-      INDICES.productionAffecting.end,
-      args['production-affecting'] + '\n'
-    ));
-    requests.push(...makeReplaceRequest(
-      INDICES.stagingUrlConfirmed.start,
-      INDICES.stagingUrlConfirmed.end,
-      'yes\n'
-    ));
-    // Update date too
-    requests.push(...makeReplaceRequest(
-      INDICES.date.start,
-      INDICES.date.end,
-      today + '\n'
-    ));
+    pairs.push(makeReplaceRequest(cellValueRange(deploySummaryTable, 'Production-affecting'), args['production-affecting']));
+    pairs.push(makeReplaceRequest(cellValueRange(deploySummaryTable, 'Staging URL confirmed'), 'yes'));
+    pairs.push(makeReplaceRequest(cellValueRange(deploySummaryTable, 'Date'), today));
   }
-
   if (args['what-changed']) {
-    requests.push(...makeReplaceRequest(
-      INDICES.whatChanged.start,
-      INDICES.whatChanged.end,
-      args['what-changed'] + '\n'
-    ));
+    pairs.push(makeReplaceRequest(sectionBodyRange(content, 'What changed'), args['what-changed']));
   }
-
   if (args['what-to-focus-on']) {
-    requests.push(...makeReplaceRequest(
-      INDICES.whatToFocusOn.start,
-      INDICES.whatToFocusOn.end,
-      args['what-to-focus-on'] + '\n'
-    ));
+    pairs.push(makeReplaceRequest(sectionBodyRange(content, 'What to focus on'), args['what-to-focus-on']));
   }
-
   if (args['what-not-to-retest']) {
-    requests.push(...makeReplaceRequest(
-      INDICES.whatNotToRetest.start,
-      INDICES.whatNotToRetest.end,
-      args['what-not-to-retest'] + '\n'
-    ));
+    pairs.push(makeReplaceRequest(sectionBodyRange(content, 'What NOT to re-test'), args['what-not-to-retest']));
   }
-
   if (args['known-gaps']) {
-    requests.push(...makeReplaceRequest(
-      INDICES.knownGaps.start,
-      INDICES.knownGaps.end,
-      args['known-gaps'] + '\n'
-    ));
+    pairs.push(makeReplaceRequest(sectionBodyRange(content, 'Known gaps / blocked flows'), args['known-gaps']));
   }
-
   if (args['slack-thread']) {
-    requests.push(...makeReplaceRequest(
-      INDICES.slackThread.start,
-      INDICES.slackThread.end,
-      args['slack-thread'] + '\n'
-    ));
+    pairs.push(makeReplaceRequest(cellValueRange(slackContextTable, 'Thread permalink'), args['slack-thread']));
   }
-
   if (args['key-messages']) {
-    requests.push(...makeReplaceRequest(
-      INDICES.keyMessages.start,
-      INDICES.keyMessages.end,
-      args['key-messages'] + '\n'
-    ));
+    pairs.push(makeReplaceRequest(sectionBodyRange(content, 'Key messages (summary)'), args['key-messages']));
   }
 
-  // Activity log: prepend a new row. We insert text at the start of the first
-  // data row. Format: "DATE | Maia | ENTRY | COMMIT\n"
+  // Activity log: prepend a new line at the top of Section 4's body.
   if (args['activity-entry']) {
-    const commit = args['commit'] ?? '(hash)';
-    const entry = `${today}\tMaia\t${args['activity-entry']}\t${commit}\n`;
-    requests.push({
-      insertText: {
-        location: { index: INDICES.activityLogFirstDataRowStart },
-        text: entry,
-      },
-    });
+    const commit = args['commit'] ? ` (commit ${args['commit']})` : '';
+    const entry = `${today} — ${args['activity-entry']}${commit}\n`;
+    const insertAt = sectionBodyStart(content, '4. Recent Activity Log');
+    pairs.push([{ insertText: { location: { index: insertAt }, text: entry } }]);
   }
 
-  if (requests.length === 0) {
+  if (pairs.length === 0) {
     console.log('No valid flags matched. Nothing to update.');
     process.exit(0);
   }
 
-  // Sort requests by descending index so earlier operations don't shift later ones.
-  // Each pair is [deleteContentRange, insertText] — we need to keep pairs together
-  // and sort pairs by their delete startIndex descending.
-  const pairs = [];
-  for (let i = 0; i < requests.length; i += 2) {
-    if (requests[i + 1]) {
-      pairs.push([requests[i], requests[i + 1]]);
-    } else {
-      pairs.push([requests[i]]);
-    }
-  }
-  pairs.sort((a, b) => {
-    const aIdx = a[0].deleteContentRange?.range?.startIndex ?? a[0].insertText?.location?.index ?? 0;
-    const bIdx = b[0].deleteContentRange?.range?.startIndex ?? b[0].insertText?.location?.index ?? 0;
-    return bIdx - aIdx; // descending
-  });
+  // Apply in descending index order so earlier edits don't shift later ranges.
+  pairs.sort((a, b) => requestIndex(b) - requestIndex(a));
   const sortedRequests = pairs.flat();
 
   console.log(`📝 Sending ${sortedRequests.length} update request(s) to Google Docs API...`);
