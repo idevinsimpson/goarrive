@@ -2535,7 +2535,7 @@ const s = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 0,
+    bottom: Platform.OS === 'web' ? 68 : 0, // web: sit above the 68px tab bar; native: bottom safe area handled by paddingBottom
     backgroundColor: '#0E1117',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
