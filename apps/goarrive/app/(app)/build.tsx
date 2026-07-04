@@ -791,17 +791,22 @@ function BuildScreenInner() {
   // the list and vanishes from the user's viewport. Scroll them up so they
   // immediately see the result of the drop.
   const scrollListToTop = useCallback(() => {
-    // The Firestore data takes time to arrive and re-render. Delay the scroll
-    // so it happens after the new items have landed and the list has resorted.
-    // Without the delay, the scroll fires to 0 before the data arrives, then
-    // the re-render pushes everything down and the user never sees the result.
-    const jump = () => {
-      scrollOffsetRef.current = 0;
-      // Jump to 0 directly — by this point the data should be there.
-      listRef.current?.scrollToOffset({ offset: 0, animated: false });
+    // After a drop, the Firestore listener fires and updates the items list.
+    // Watch that update and scroll once it lands.
+    let attempts = 0;
+    const tryScroll = () => {
+      // Give React time to commit the render. If the list is still scrolled
+      // down after 50ms, jump to 0. Retry up to 10 times.
+      requestAnimationFrame(() => {
+        scrollOffsetRef.current = 0;
+        listRef.current?.scrollToOffset({ offset: 0, animated: false });
+        attempts++;
+        if (attempts < 10) {
+          setTimeout(tryScroll, 100);
+        }
+      });
     };
-    // Wait longer to ensure Firestore listener has fired and re-render is done.
-    setTimeout(jump, 600);
+    tryScroll();
   }, []);
 
   const dropMovementIntoFolder = useCallback(async (dragged: BuildItem, folderId: string) => {
@@ -2315,25 +2320,18 @@ function BuildScreenInner() {
               <Icon name="plus" size={18} color="#F5A623" />
               <Text style={s.trayItemText} numberOfLines={1}>New…</Text>
             </View>
+            {/* Scroll-down target on bottom-right of tray: visible during drag,
+                scales and brightens as user approaches the right edge. */}
+            {dragItem && (
+              <View style={[s.trayItem, { position: 'absolute', right: 12, bottom: 12, backgroundColor: '#1E2A3A', borderWidth: 1, borderColor: '#60A5FA' }]}>
+                <Icon name="chevron-down" size={16} color="#60A5FA" />
+              </View>
+            )}
           </View>
         </Reanimated.View>
       )}
 
-      {/* Right-edge scroll indicator — shows during drag so user knows where to drag to scroll */}
-      {dragItem && (
-        <View
-          style={{
-            position: 'absolute',
-            right: 0,
-            top: 0,
-            bottom: 0,
-            width: Dimensions.get('window').width * AUTO_SCROLL_RIGHT_ZONE_PCT,
-            opacity: 0.15,
-            backgroundColor: '#60A5FA',
-            pointerEvents: 'none',
-          }}
-        />
-      )}
+      {/* Scroll indicator will be added to the tray itself when visible */}
 
       {/* Drag ghost tile — floats above everything during drag */}
       <Reanimated.View style={[ghostAnimStyle, { width: cardWidth, height: cardHeight, borderRadius: 10 }]} pointerEvents="none">
