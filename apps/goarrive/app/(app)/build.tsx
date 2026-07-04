@@ -792,17 +792,18 @@ function BuildScreenInner() {
   // immediately see the result of the drop.
   const scrollListToTop = useCallback(() => {
     // scrollToOffset silently no-ops if already at offset 0. Force a scroll
-    // to a tiny positive offset first, then jump to 0. Works on iOS Safari.
+    // to a visible offset first (2px), then to 0. Works on iOS Safari.
     const jump = () => {
       scrollOffsetRef.current = 0;
-      listRef.current?.scrollToOffset({ offset: 0.1, animated: false });
+      listRef.current?.scrollToOffset({ offset: 2, animated: false });
       // Once the pixel scrolls (proves the list is interactive), jump to 0.
       requestAnimationFrame(() => {
+        scrollOffsetRef.current = 0;
         listRef.current?.scrollToOffset({ offset: 0, animated: false });
       });
     };
     requestAnimationFrame(jump);
-    setTimeout(jump, 350);
+    setTimeout(jump, 400);
   }, []);
 
   const dropMovementIntoFolder = useCallback(async (dragged: BuildItem, folderId: string) => {
@@ -963,7 +964,12 @@ function BuildScreenInner() {
       // scrolling is an explicit gesture: drag to the right edge, then
       // hold below the vertical middle to scroll down, above it to scroll
       // up. Speed ramps toward the top/bottom edges.
-      const inRightZone = pointerXRef.current >= rightZoneThresholdRef.current;
+      // Use snapshotted threshold if available (set at drag start), otherwise
+      // calculate live. Threshold should always be set, but fallback is safe.
+      const threshold = rightZoneThresholdRef.current > 0
+        ? rightZoneThresholdRef.current
+        : Dimensions.get('window').width * (1 - AUTO_SCROLL_RIGHT_ZONE_PCT);
+      const inRightZone = pointerXRef.current >= threshold;
       if (win && inRightZone) {
         const y = pointerYRef.current;
         let listBottom = win.top + win.height;
