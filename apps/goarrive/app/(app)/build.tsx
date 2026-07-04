@@ -98,6 +98,17 @@ const TRAY_SLIDE_DISTANCE = 220;     // translateY when hidden — guaranteed of
 const TRAY_MAX_RECENTS = 5;
 const TRAY_NEW_FOLDER_KEY = 'tray:new';
 
+// On-screen drag diagnostics — enable with ?dragdebug=1 (persists via localStorage).
+const DRAG_DEBUG = Platform.OS === 'web' && typeof window !== 'undefined' && (() => {
+  try {
+    if (window.location.search.includes('dragdebug')) {
+      window.localStorage.setItem('dragdebug', '1');
+      return true;
+    }
+    return window.localStorage.getItem('dragdebug') === '1';
+  } catch { return false; }
+})();
+
 // Firestore rejects `undefined` values. Mirror the stripUndefined pattern
 // from components/WorkoutFolderPage.tsx so writes from drag/drop never throw.
 function stripUndefined(obj: any): any {
@@ -441,6 +452,7 @@ function BuildScreenInner() {
   const pointerXRef = useRef(0);
   const autoScrollRafRef = useRef<number | null>(null);
   const scrollLockCleanupRef = useRef<(() => void) | null>(null);
+  const [dragDebugInfo, setDragDebugInfo] = useState('');
 
   // ── Bottom drop tray ───────────────────────────────────────────────────
   const insets = useSafeAreaInsets();
@@ -798,6 +810,12 @@ function BuildScreenInner() {
       // down after 50ms, jump to 0. Retry up to 10 times.
       requestAnimationFrame(() => {
         scrollOffsetRef.current = 0;
+        // Direct DOM write first — RNW's scrollTo wrapper can be ignored by
+        // Safari/WebKit; scrollTop assignment is the lowest-level primitive.
+        try {
+          const node: any = (listRef.current as any)?.getScrollableNode?.();
+          if (node && typeof node.scrollTop === 'number') node.scrollTop = 0;
+        } catch {}
         listRef.current?.scrollToOffset({ offset: 0, animated: false });
         attempts++;
         // Firestore snapshot can take >1s; keep pinning to 0 for ~2.5s so a
@@ -971,9 +989,20 @@ function BuildScreenInner() {
     }
   }, []);
 
+  // Direct DOM scroll node — bypasses RNW's scrollTo wrapper, which some
+  // Safari/WebKit versions silently ignore during an active touch gesture.
+  const getListScrollNode = useCallback((): any => {
+    try {
+      const node: any = (listRef.current as any)?.getScrollableNode?.();
+      return node && typeof node.scrollTop === 'number' ? node : null;
+    } catch { return null; }
+  }, []);
+
   const startAutoScroll = useCallback(() => {
     stopAutoScroll();
+    let tick = 0;
     const step = () => {
+      tick++;
       let win = listWindowRef.current;
       if (!win || win.height <= 0) {
         // Measurement unavailable — fall back to the full window so the
@@ -999,15 +1028,26 @@ function BuildScreenInner() {
         const proximity = (y - (listBottom - band)) / band;
         delta = Math.min(1, proximity) * AUTO_SCROLL_MAX_PX;
       }
+      const node = getListScrollNode();
       if (delta !== 0) {
-        const next = Math.max(0, scrollOffsetRef.current + delta);
-        scrollOffsetRef.current = next;
-        listRef.current?.scrollToOffset({ offset: next, animated: false });
+        if (node) {
+          node.scrollTop = Math.max(0, node.scrollTop + delta);
+          scrollOffsetRef.current = node.scrollTop;
+        } else {
+          const next = Math.max(0, scrollOffsetRef.current + delta);
+          scrollOffsetRef.current = next;
+          listRef.current?.scrollToOffset({ offset: next, animated: false });
+        }
+      }
+      if (DRAG_DEBUG && tick % 15 === 0) {
+        setDragDebugInfo(
+          `t${tick} y:${Math.round(y)} win:${Math.round(win.top)}-${Math.round(listBottom)} band:${Math.round(band)} d:${delta.toFixed(1)} st:${node ? Math.round(node.scrollTop) : 'noNode'}`
+        );
       }
       autoScrollRafRef.current = requestAnimationFrame(step);
     };
     autoScrollRafRef.current = requestAnimationFrame(step);
-  }, [stopAutoScroll, insets.bottom]);
+  }, [stopAutoScroll, insets.bottom, getListScrollNode]);
 
   const createFolderFromDrop = useCallback(async () => {
     if (!dropModal) return;
@@ -2333,6 +2373,15 @@ function BuildScreenInner() {
             )}
           </View>
         </Reanimated.View>
+      )}
+
+      {DRAG_DEBUG && !!dragItem && (
+        <View
+          pointerEvents="none"
+          style={{ position: 'absolute', top: 64, left: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.85)', padding: 6, borderRadius: 6, zIndex: 3000 }}
+        >
+          <Text style={{ color: '#4ADE80', fontSize: 11 }}>{dragDebugInfo || 'dragdebug: waiting for RAF ticks…'}</Text>
+        </View>
       )}
 
       {/* Scroll indicator will be added to the tray itself when visible */}
