@@ -43,8 +43,10 @@ import {
   serverTimestamp,
   writeBatch,
 } from 'firebase/firestore';
+import { useNavigation } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { db } from '../../lib/firebase';
+import { TAB_BAR_STYLE } from '../../lib/tabBarStyle';
 import { AppHeader } from '../../components/AppHeader';
 import { Icon } from '../../components/Icon';
 import MovementDetail from '../../components/MovementDetail';
@@ -90,6 +92,7 @@ const NO_MOVEMENT_BLOCKS = ['Water Break', 'Rest', 'Follow-Along Video'];
 // ── Drag auto-scroll + drop tray constants ─────────────────────────────────
 const AUTO_SCROLL_BAND_PCT = 0.14;   // edge band = 14% of the list viewport height
 const AUTO_SCROLL_MAX_PX = 15;       // max px scrolled per frame at full proximity
+const AUTO_SCROLL_RIGHT_ZONE_PCT = 0.25; // auto-scroll only fires in the right 25% of the screen, so hovering drop targets in the grid never scrolls the list
 const TRAY_SHOW_DELAY_MS = 200;      // delay before tray slides up — avoids flashing on accidental long presses
 const TRAY_HEIGHT = 96;              // content height of the drop tray (excl. safe-area inset)
 const TRAY_SLIDE_DISTANCE = 220;     // translateY when hidden — guaranteed offscreen incl. inset
@@ -110,6 +113,27 @@ function stripUndefined(obj: any): any {
     return clean;
   }
   return obj;
+}
+
+// Mirror addMovementToBlock in WorkoutFolderPage: posterUrl + split-sided
+// fields carry through so drag/drop-created workouts play back identically
+// to picker-built ones.
+function toBlockMov(m: any) {
+  const next: any = {
+    movementId: m.id,
+    movementName: m.name,
+    durationSec: DEFAULT_DURATION_SEC,
+    restSec: DEFAULT_REST_SEC,
+    sets: 1,
+    thumbnailUrl: m.thumbnailUrl ?? m.mediaUrl ?? undefined,
+    posterUrl: m.posterUrl ?? m.thumbnailImageUrl ?? undefined,
+  };
+  if (m.swapSides) {
+    next.swapSides = true;
+    next.swapMode = m.swapMode ?? 'split';
+    next.swapWindowSec = m.swapWindowSec ?? 5;
+  }
+  return next;
 }
 
 // Compute coverThumbs from a workout's blocks — mirrors WorkoutFolderPage.
@@ -415,6 +439,7 @@ function BuildScreenInner() {
   const offsetAtSnapshotRef = useRef(0);        // offset when tile layouts were snapshotted
   const listWindowRef = useRef<{ top: number; height: number } | null>(null);
   const pointerYRef = useRef(0);
+  const pointerXRef = useRef(0);
   const autoScrollRafRef = useRef<number | null>(null);
   const scrollLockCleanupRef = useRef<(() => void) | null>(null);
 
@@ -429,6 +454,9 @@ function BuildScreenInner() {
   const trayLayoutSnap = useRef(new Map<string, { x: number; y: number; w: number; h: number; item: BuildItem | null }>());
   const [recentDropFolderIds, setRecentDropFolderIds] = useState<string[]>([]);
   const [pendingFolderDropItem, setPendingFolderDropItem] = useState<BuildItem | null>(null);
+  // Movement dropped on the tray "New" target — chooser asks Folder vs Workout.
+  const [trayDropChooserItem, setTrayDropChooserItem] = useState<BuildItem | null>(null);
+  const navigation = useNavigation();
 
   const ghostAnimStyle = useAnimatedStyle(() => ({
     position: 'absolute' as const,
@@ -706,6 +734,10 @@ function BuildScreenInner() {
       setNewFolderName('');
       setShowFolderCreate(false);
       setPendingFolderDropItem(null);
+      // New folder sorts to the top of the grid — bring the user there so
+      // they see what they just created instead of it vanishing off-screen.
+      scrollOffsetRef.current = 0;
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
     } catch (e) {
       console.error('[Build] Create folder error:', e);
     }
@@ -754,6 +786,14 @@ function BuildScreenInner() {
   }, [coachId, tenantId, currentFolderId, newPlaybookName, newPlaybookDesc]);
 
   // ── Drag & Drop handlers (filteredItems-independent) ──────────────────
+  // The grid sorts by updatedAt desc, so a drop target jumps to the top of
+  // the list and vanishes from the user's viewport. Scroll them up so they
+  // immediately see the result of the drop.
+  const scrollListToTop = useCallback(() => {
+    scrollOffsetRef.current = 0;
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+  }, []);
+
   const dropMovementIntoFolder = useCallback(async (dragged: BuildItem, folderId: string) => {
     try {
       await updateDoc(doc(db, 'movements', dragged.id), stripUndefined({
@@ -761,8 +801,9 @@ function BuildScreenInner() {
         updatedAt: serverTimestamp(),
       }));
       recordRecentDropFolder(folderId);
+      scrollListToTop();
     } catch (e) { console.error('[Build] Drop into folder error:', e); }
-  }, [recordRecentDropFolder]);
+  }, [recordRecentDropFolder, scrollListToTop]);
 
   // Tray targets live OUTSIDE the FlatList and don't move with scroll, so
   // they're hit-tested against their own (unadjusted) measured rects.
@@ -792,6 +833,7 @@ function BuildScreenInner() {
   }, []);
 
   const updateHovered = useCallback((ax: number, ay: number) => {
+    pointerXRef.current = ax;
     pointerYRef.current = ay;
     // Tray targets take precedence over tile snapshots.
     const tray = findTrayTarget(ax, ay);
@@ -809,10 +851,8 @@ function BuildScreenInner() {
       if (tray.item) {
         await dropMovementIntoFolder(dragged, tray.item.id);
       } else {
-        // "New Folder": open the existing create-folder flow; createFolder
-        // reparents the dragged movement into the new folder on create.
-        setPendingFolderDropItem(dragged);
-        setShowFolderCreate(true);
+        // Tray "New" target: ask Folder vs Workout, then run the matching flow.
+        setTrayDropChooserItem(dragged);
       }
       return;
     }
@@ -827,23 +867,7 @@ function BuildScreenInner() {
     if (target.type === 'Folder') {
       await dropMovementIntoFolder(dragged, target.id);
     } else if (target.type === 'Workouts') {
-      // Build the block movement with the same shape addMovementToBlock uses
-      // in WorkoutFolderPage — including posterUrl and split-sided fields —
-      // so a dropped movement plays back identically to a picker-added one.
-      const blockMov: any = {
-        movementId: dragged.id,
-        movementName: dragged.name,
-        durationSec: DEFAULT_DURATION_SEC,
-        restSec: DEFAULT_REST_SEC,
-        sets: 1,
-        thumbnailUrl: dragged.thumbnailUrl ?? dragged.mediaUrl ?? undefined,
-        posterUrl: dragged.posterUrl ?? dragged.thumbnailImageUrl ?? undefined,
-      };
-      if (dragged.swapSides) {
-        blockMov.swapSides = true;
-        blockMov.swapMode = dragged.swapMode ?? 'split';
-        blockMov.swapWindowSec = dragged.swapWindowSec ?? 5;
-      }
+      const blockMov = toBlockMov(dragged);
       const existingBlocks: any[] = Array.isArray(target.blocks) ? target.blocks : [];
       const updatedBlocks = existingBlocks.length > 0
         ? existingBlocks.map((b: any, i: number) =>
@@ -866,11 +890,12 @@ function BuildScreenInner() {
           estimatedDurationMin: calcDurationMin(updatedBlocks),
           updatedAt: serverTimestamp(),
         }));
+        scrollListToTop();
       } catch (e) { console.error('[Build] Drop into workout error:', e); }
     } else if (target.type === 'Movements') {
       setDropModal({ drag: dragged, target });
     }
-  }, [findTarget, findTrayTarget, dropMovementIntoFolder]);
+  }, [findTarget, findTrayTarget, dropMovementIntoFolder, scrollListToTop]);
 
   const clearDragState = useCallback(() => {
     _dragItemRef.current = null;
@@ -917,7 +942,13 @@ function BuildScreenInner() {
     stopAutoScroll();
     const step = () => {
       const win = listWindowRef.current;
-      if (win) {
+      // Only auto-scroll while the drag point is in the right-side zone.
+      // Approaching a drop target in the grid used to keep scrolling the
+      // list under the user's finger, which was distracting — now scrolling
+      // is an explicit gesture: drag to the right edge, then up/down.
+      const inRightZone =
+        pointerXRef.current >= Dimensions.get('window').width * (1 - AUTO_SCROLL_RIGHT_ZONE_PCT);
+      if (win && inRightZone) {
         const y = pointerYRef.current;
         const band = win.height * AUTO_SCROLL_BAND_PCT;
         let listBottom = win.top + win.height;
@@ -973,33 +1004,14 @@ function BuildScreenInner() {
         updatedAt: serverTimestamp(),
       }));
       await batch.commit();
+      scrollListToTop();
     } catch (e) { console.error('[Build] Create folder from drop error:', e); }
-  }, [dropModal, coachId, tenantId, currentFolderId]);
+  }, [dropModal, coachId, tenantId, currentFolderId, scrollListToTop]);
 
   const createWorkoutFromDrop = useCallback(async () => {
     if (!dropModal) return;
     const { drag, target } = dropModal;
     setDropModal(null);
-    // Mirror addMovementToBlock in WorkoutFolderPage: posterUrl + split-sided
-    // fields carry through so a workout created via drag-drop behaves the
-    // same as one built with the picker.
-    const toBlockMov = (m: BuildItem) => {
-      const next: any = {
-        movementId: m.id,
-        movementName: m.name,
-        durationSec: DEFAULT_DURATION_SEC,
-        restSec: DEFAULT_REST_SEC,
-        sets: 1,
-        thumbnailUrl: m.thumbnailUrl ?? m.mediaUrl ?? undefined,
-        posterUrl: m.posterUrl ?? m.thumbnailImageUrl ?? undefined,
-      };
-      if (m.swapSides) {
-        next.swapSides = true;
-        next.swapMode = m.swapMode ?? 'split';
-        next.swapWindowSec = m.swapWindowSec ?? 5;
-      }
-      return next;
-    };
     try {
       const blocks = [{
         type: 'circuit',
@@ -1023,8 +1035,41 @@ function BuildScreenInner() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       }));
+      scrollListToTop();
     } catch (e) { console.error('[Build] Create workout from drop error:', e); }
-  }, [dropModal, coachId, tenantId, currentFolderId]);
+  }, [dropModal, coachId, tenantId, currentFolderId, scrollListToTop]);
+
+  // Tray "New" drop → user chose Workout: create a one-movement workout.
+  const createWorkoutFromTrayDrop = useCallback(async () => {
+    const dragged = trayDropChooserItem;
+    if (!dragged) return;
+    setTrayDropChooserItem(null);
+    try {
+      const blocks = [{
+        type: 'circuit',
+        label: 'Block 1',
+        rounds: DEFAULT_ROUNDS,
+        firstMovementPrepSec: DEFAULT_REST_SEC,
+        showDemo: false,
+        demoDurationSec: DEFAULT_DEMO_DURATION_SEC,
+        showGrabEquipment: false,
+        movements: [toBlockMov(dragged)],
+      }];
+      await addDoc(collection(db, 'workouts'), stripUndefined({
+        coachId,
+        tenantId,
+        name: `${dragged.name} Workout`,
+        blocks,
+        coverThumbs: computeCoverThumbs(blocks),
+        estimatedDurationMin: calcDurationMin(blocks),
+        isArchived: false,
+        parentId: currentFolderId || null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }));
+      scrollListToTop();
+    } catch (e) { console.error('[Build] Create workout from tray drop error:', e); }
+  }, [trayDropChooserItem, coachId, tenantId, currentFolderId, scrollListToTop]);
 
   // ── Enrich workout coverThumbs from loaded movements ──────────────────
   // Movements in workout blocks may only store movementId without thumbnailUrl.
@@ -1192,7 +1237,11 @@ function BuildScreenInner() {
 
   // ── Drag session lifecycle ─────────────────────────────────────────────
   const beginDragSession = useCallback((id: string, ax: number, ay: number) => {
+    pointerXRef.current = ax;
     pointerYRef.current = ay;
+    // Hide the tab bar for the drag's duration so the drop tray sits flush
+    // at the bottom instead of behind/above the tabs.
+    navigation.setOptions({ tabBarStyle: { ...TAB_BAR_STYLE, display: 'none' } });
     snapshotLayouts();
     listContainerRef.current?.measure((_fx, _fy, _w, h, _px, py) => {
       listWindowRef.current = { top: py, height: h };
@@ -1202,13 +1251,14 @@ function BuildScreenInner() {
     startAutoScroll();
     if (trayTimerRef.current) clearTimeout(trayTimerRef.current);
     trayTimerRef.current = setTimeout(() => setTrayVisible(true), TRAY_SHOW_DELAY_MS);
-  }, [snapshotLayouts, _startDragById, lockPageScroll, startAutoScroll]);
+  }, [snapshotLayouts, _startDragById, lockPageScroll, startAutoScroll, navigation]);
 
   // ALL teardown lives here — called from onFinalize, which fires on both
   // normal end and cancel (onEnd never fires when Safari cancels the pointer).
   const endDragSession = useCallback(() => {
     stopAutoScroll();
     unlockPageScroll();
+    navigation.setOptions({ tabBarStyle: TAB_BAR_STYLE });
     if (trayTimerRef.current) {
       clearTimeout(trayTimerRef.current);
       trayTimerRef.current = null;
@@ -1216,15 +1266,16 @@ function BuildScreenInner() {
     setTrayVisible(false);
     listWindowRef.current = null;
     clearDragState();
-  }, [stopAutoScroll, unlockPageScroll, clearDragState]);
+  }, [stopAutoScroll, unlockPageScroll, clearDragState, navigation]);
 
   // Belt-and-suspenders: never leave page scroll locked or a rAF loop
   // running if the screen unmounts mid-drag.
   useEffect(() => () => {
     stopAutoScroll();
     unlockPageScroll();
+    navigation.setOptions({ tabBarStyle: TAB_BAR_STYLE });
     if (trayTimerRef.current) clearTimeout(trayTimerRef.current);
-  }, [stopAutoScroll, unlockPageScroll]);
+  }, [stopAutoScroll, unlockPageScroll, navigation]);
 
   // Compose with previewEngine.onScroll — it ignores the event payload, but
   // the auto-scroll hit-testing needs the live contentOffset.
@@ -2173,6 +2224,39 @@ function BuildScreenInner() {
         </Pressable>
       </Modal>
 
+      {/* Tray "New" drop chooser: Folder or Workout */}
+      <Modal transparent visible={!!trayDropChooserItem} animationType="fade" onRequestClose={() => setTrayDropChooserItem(null)}>
+        <Pressable style={s.modalBackdrop} onPress={() => setTrayDropChooserItem(null)}>
+          <View style={s.plusMenu} onStartShouldSetResponder={() => true}>
+            <Text style={s.plusMenuTitle}>Add to New</Text>
+            <Text style={{ color: '#8A95A3', fontSize: 13, fontFamily: FB, marginBottom: 20, textAlign: 'center' }}>
+              {trayDropChooserItem?.name}
+            </Text>
+            <Pressable
+              style={[s.plusMenuItem, { backgroundColor: '#1E2A3A', borderRadius: 10, paddingVertical: 14, marginBottom: 10 }]}
+              onPress={() => {
+                const item = trayDropChooserItem;
+                setTrayDropChooserItem(null);
+                if (item) {
+                  setPendingFolderDropItem(item);
+                  setShowFolderCreate(true);
+                }
+              }}
+            >
+              <Icon name="folder" size={22} color="#F5A623" />
+              <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>New Folder</Text>
+            </Pressable>
+            <Pressable
+              style={[s.plusMenuItem, { backgroundColor: '#1E2A3A', borderRadius: 10, paddingVertical: 14 }]}
+              onPress={createWorkoutFromTrayDrop}
+            >
+              <Icon name="workouts" size={22} color="#60A5FA" />
+              <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>New Workout</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
       {/* Bottom drop tray — Canva-style dock: recent drop folders + New Folder.
           pointerEvents none — the pan gesture owns the pointer; tray items are
           hit-tested by coordinates (findTrayTarget), not touch handlers. */}
@@ -2202,7 +2286,7 @@ function BuildScreenInner() {
               style={[s.trayItem, hoveredId === TRAY_NEW_FOLDER_KEY && s.trayItemHovered]}
             >
               <Icon name="plus" size={18} color="#F5A623" />
-              <Text style={s.trayItemText} numberOfLines={1}>New Folder</Text>
+              <Text style={s.trayItemText} numberOfLines={1}>New…</Text>
             </View>
           </View>
         </Reanimated.View>
@@ -2535,7 +2619,7 @@ const s = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: Platform.OS === 'web' ? 68 : 0, // web: sit above the 68px tab bar; native: bottom safe area handled by paddingBottom
+    bottom: 0, // tab bar is hidden for the drag's duration, so the tray owns the bottom edge on all platforms
     backgroundColor: '#0E1117',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
