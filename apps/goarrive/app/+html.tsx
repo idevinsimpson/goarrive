@@ -55,6 +55,19 @@ export default function Root({ children }: { children: React.ReactNode }) {
           input, textarea, select {
             font-size: 16px !important;
           }
+          /*
+            iOS Safari hijacks long-press on media: the Share/Save callout on
+            images and the text-selection magnifier both fire before our
+            600ms drag gesture activates. Suppressing them globally is safe
+            here — this is an app shell, not a document site, so users never
+            need to save/select tile media.
+          */
+          img, video {
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-user-drag: none;
+          }
         `}</style>
       </head>
       <body>{children}</body>

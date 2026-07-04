@@ -63,7 +63,9 @@ import {
   DIFFICULTY_FILTER_OPTIONS,
 } from '../../hooks/useMovementFilters';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
-import Reanimated, { useSharedValue, useAnimatedStyle, withSpring, runOnJS } from 'react-native-reanimated';
+import Reanimated, { useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS } from 'react-native-reanimated';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -84,6 +86,15 @@ const DEFAULT_REST_SEC = 20;
 const DEFAULT_ROUNDS = 3;
 const DEFAULT_DEMO_DURATION_SEC = 5;
 const NO_MOVEMENT_BLOCKS = ['Water Break', 'Rest', 'Follow-Along Video'];
+
+// ── Drag auto-scroll + drop tray constants ─────────────────────────────────
+const AUTO_SCROLL_BAND_PCT = 0.14;   // edge band = 14% of the list viewport height
+const AUTO_SCROLL_MAX_PX = 15;       // max px scrolled per frame at full proximity
+const TRAY_SHOW_DELAY_MS = 200;      // delay before tray slides up — avoids flashing on accidental long presses
+const TRAY_HEIGHT = 96;              // content height of the drop tray (excl. safe-area inset)
+const TRAY_SLIDE_DISTANCE = 220;     // translateY when hidden — guaranteed offscreen incl. inset
+const TRAY_MAX_RECENTS = 5;
+const TRAY_NEW_FOLDER_KEY = 'tray:new';
 
 // Firestore rejects `undefined` values. Mirror the stripUndefined pattern
 // from components/WorkoutFolderPage.tsx so writes from drag/drop never throw.
@@ -397,6 +408,28 @@ function BuildScreenInner() {
   const _dragItemRef = useRef<BuildItem | null>(null);
   const rootViewRef = useRef<View>(null);
 
+  // ── Drag scroll tracking + edge auto-scroll ────────────────────────────
+  const listRef = useRef<FlatList<BuildItem>>(null);
+  const listContainerRef = useRef<View>(null);
+  const scrollOffsetRef = useRef(0);            // live FlatList contentOffset.y
+  const offsetAtSnapshotRef = useRef(0);        // offset when tile layouts were snapshotted
+  const listWindowRef = useRef<{ top: number; height: number } | null>(null);
+  const pointerYRef = useRef(0);
+  const autoScrollRafRef = useRef<number | null>(null);
+  const scrollLockCleanupRef = useRef<(() => void) | null>(null);
+
+  // ── Bottom drop tray ───────────────────────────────────────────────────
+  const insets = useSafeAreaInsets();
+  const [trayVisible, setTrayVisible] = useState(false);
+  const [trayMounted, setTrayMounted] = useState(false);
+  const trayVisibleRef = useRef(false);
+  const trayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const trayTranslate = useSharedValue(TRAY_SLIDE_DISTANCE);
+  const trayItemRefsMap = useRef(new Map<string, React.RefObject<View | null>>());
+  const trayLayoutSnap = useRef(new Map<string, { x: number; y: number; w: number; h: number; item: BuildItem | null }>());
+  const [recentDropFolderIds, setRecentDropFolderIds] = useState<string[]>([]);
+  const [pendingFolderDropItem, setPendingFolderDropItem] = useState<BuildItem | null>(null);
+
   const ghostAnimStyle = useAnimatedStyle(() => ({
     position: 'absolute' as const,
     left: ghostX.value,
@@ -621,11 +654,40 @@ function BuildScreenInner() {
     });
   }, []);
 
+  // ── Recent drop folders (bottom tray) ──────────────────────────────────
+  // Persisted per-coach so the tray survives reloads. coachId here derives
+  // from claims.coachId (impersonation-safe) — see useAuth() above.
+  useEffect(() => {
+    if (!coachId) return;
+    AsyncStorage.getItem(`buildRecentDropFolders:${coachId}`)
+      .then(raw => {
+        if (!raw) return;
+        try {
+          const ids = JSON.parse(raw);
+          if (Array.isArray(ids)) {
+            setRecentDropFolderIds(ids.filter((x: any) => typeof x === 'string').slice(0, TRAY_MAX_RECENTS));
+          }
+        } catch {}
+      })
+      .catch(() => {});
+  }, [coachId]);
+
+  const recordRecentDropFolder = useCallback((folderId: string) => {
+    setRecentDropFolderIds(prev => {
+      const next = [folderId, ...prev.filter(id => id !== folderId)].slice(0, TRAY_MAX_RECENTS);
+      if (coachId) {
+        AsyncStorage.setItem(`buildRecentDropFolders:${coachId}`, JSON.stringify(next)).catch(() => {});
+      }
+      return next;
+    });
+  }, [coachId]);
+
   const createFolder = useCallback(async () => {
     const name = newFolderName.trim();
     if (!name) return;
+    const pendingDrop = pendingFolderDropItem;
     try {
-      await addDoc(collection(db, 'build_folders'), {
+      const folderRef = await addDoc(collection(db, 'build_folders'), {
         coachId,
         tenantId,
         name,
@@ -633,12 +695,21 @@ function BuildScreenInner() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+      // Tray "New Folder" drop: insert the dragged movement into the folder.
+      if (pendingDrop) {
+        await updateDoc(doc(db, 'movements', pendingDrop.id), stripUndefined({
+          parentId: folderRef.id,
+          updatedAt: serverTimestamp(),
+        }));
+        recordRecentDropFolder(folderRef.id);
+      }
       setNewFolderName('');
       setShowFolderCreate(false);
+      setPendingFolderDropItem(null);
     } catch (e) {
       console.error('[Build] Create folder error:', e);
     }
-  }, [coachId, tenantId, currentFolderId, newFolderName]);
+  }, [coachId, tenantId, currentFolderId, newFolderName, pendingFolderDropItem, recordRecentDropFolder]);
 
   // ── Plan & Playbook creation ─────────────────────────────────────────
   const createPlan = useCallback(async () => {
@@ -683,37 +754,75 @@ function BuildScreenInner() {
   }, [coachId, tenantId, currentFolderId, newPlaybookName, newPlaybookDesc]);
 
   // ── Drag & Drop handlers (filteredItems-independent) ──────────────────
+  const dropMovementIntoFolder = useCallback(async (dragged: BuildItem, folderId: string) => {
+    try {
+      await updateDoc(doc(db, 'movements', dragged.id), stripUndefined({
+        parentId: folderId,
+        updatedAt: serverTimestamp(),
+      }));
+      recordRecentDropFolder(folderId);
+    } catch (e) { console.error('[Build] Drop into folder error:', e); }
+  }, [recordRecentDropFolder]);
+
+  // Tray targets live OUTSIDE the FlatList and don't move with scroll, so
+  // they're hit-tested against their own (unadjusted) measured rects.
+  // item === null means the "New Folder" target.
+  const findTrayTarget = useCallback((ax: number, ay: number): { key: string; item: BuildItem | null } | null => {
+    let found: { key: string; item: BuildItem | null } | null = null;
+    trayLayoutSnap.current.forEach(({ x, y, w, h, item }, key) => {
+      if (ax >= x && ax <= x + w && ay >= y && ay <= y + h) found = { key, item };
+    });
+    return found;
+  }, []);
+
   const findTarget = useCallback((ax: number, ay: number): BuildItem | null => {
+    // snapshotLayouts captured absolute positions at drag start; edge
+    // auto-scroll moves tiles up/down after that. Shift the snapshot rects
+    // by the scroll delta instead of re-measuring every tile per frame.
+    const scrollDelta = scrollOffsetRef.current - offsetAtSnapshotRef.current;
     let found: BuildItem | null = null;
     tileLayoutSnap.current.forEach(({ x, y, w, h, item: candidate }) => {
       // Only consider tiles that are actual drop targets. Plans / Playbooks /
       // Follow-Alongs are ignored so their tiles never highlight or accept a drop.
       if (!isDropTarget(candidate)) return;
-      if (ax >= x && ax <= x + w && ay >= y && ay <= y + h) found = candidate;
+      const adjY = y - scrollDelta;
+      if (ax >= x && ax <= x + w && ay >= adjY && ay <= adjY + h) found = candidate;
     });
     return found;
   }, []);
 
   const updateHovered = useCallback((ax: number, ay: number) => {
-    const target = findTarget(ax, ay);
-    const nextId = target?.id ?? null;
+    pointerYRef.current = ay;
+    // Tray targets take precedence over tile snapshots.
+    const tray = findTrayTarget(ax, ay);
+    const nextId = tray ? tray.key : (findTarget(ax, ay)?.id ?? null);
     setHoveredId(prev => (prev === nextId ? prev : nextId));
-  }, [findTarget]);
+  }, [findTarget, findTrayTarget]);
 
   const executeDrop = useCallback(async (ax: number, ay: number) => {
     const dragged = _dragItemRef.current;
     if (!dragged) return;
+
+    // Tray targets first — they float above the list.
+    const tray = findTrayTarget(ax, ay);
+    if (tray) {
+      if (tray.item) {
+        await dropMovementIntoFolder(dragged, tray.item.id);
+      } else {
+        // "New Folder": open the existing create-folder flow; createFolder
+        // reparents the dragged movement into the new folder on create.
+        setPendingFolderDropItem(dragged);
+        setShowFolderCreate(true);
+      }
+      return;
+    }
+
     const target = findTarget(ax, ay);
     if (!target || target.id === dragged.id) return;
     if (!isDropTarget(target)) return;
 
     if (target.type === 'Folder') {
-      try {
-        await updateDoc(doc(db, 'movements', dragged.id), stripUndefined({
-          parentId: target.id,
-          updatedAt: serverTimestamp(),
-        }));
-      } catch (e) { console.error('[Build] Drop into folder error:', e); }
+      await dropMovementIntoFolder(dragged, target.id);
     } else if (target.type === 'Workouts') {
       // Build the block movement with the same shape addMovementToBlock uses
       // in WorkoutFolderPage — including posterUrl and split-sided fields —
@@ -758,7 +867,7 @@ function BuildScreenInner() {
     } else if (target.type === 'Movements') {
       setDropModal({ drag: dragged, target });
     }
-  }, [findTarget]);
+  }, [findTarget, findTrayTarget, dropMovementIntoFolder]);
 
   const clearDragState = useCallback(() => {
     _dragItemRef.current = null;
@@ -766,6 +875,73 @@ function BuildScreenInner() {
     setHoveredId(null);
     tileLayoutSnap.current.clear();
   }, []);
+
+  // ── Page scroll lock during drag (web) ─────────────────────────────────
+  // iOS Safari starts a native pan mid-drag and fires pointercancel, which
+  // cancels the RNGH gesture and strands the ghost. Locking document scroll
+  // for the drag's duration prevents the native pan from ever starting.
+  const lockPageScroll = useCallback(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    if (scrollLockCleanupRef.current) return;
+    const prevent = (e: TouchEvent) => e.preventDefault();
+    document.addEventListener('touchmove', prevent, { passive: false });
+    const body = document.body;
+    const prevTouchAction = body.style.touchAction;
+    const prevOverflow = body.style.overflow;
+    body.style.touchAction = 'none';
+    body.style.overflow = 'hidden';
+    scrollLockCleanupRef.current = () => {
+      document.removeEventListener('touchmove', prevent);
+      body.style.touchAction = prevTouchAction;
+      body.style.overflow = prevOverflow;
+    };
+  }, []);
+
+  const unlockPageScroll = useCallback(() => {
+    scrollLockCleanupRef.current?.();
+    scrollLockCleanupRef.current = null;
+  }, []);
+
+  // ── Edge auto-scroll while dragging ────────────────────────────────────
+  const stopAutoScroll = useCallback(() => {
+    if (autoScrollRafRef.current != null) {
+      cancelAnimationFrame(autoScrollRafRef.current);
+      autoScrollRafRef.current = null;
+    }
+  }, []);
+
+  const startAutoScroll = useCallback(() => {
+    stopAutoScroll();
+    const step = () => {
+      const win = listWindowRef.current;
+      if (win) {
+        const y = pointerYRef.current;
+        const band = win.height * AUTO_SCROLL_BAND_PCT;
+        let listBottom = win.top + win.height;
+        // Keep the bottom band above the drop tray once it's visible, so
+        // hovering a tray item doesn't also auto-scroll the list.
+        if (trayVisibleRef.current) {
+          const windowH = Dimensions.get('window').height;
+          listBottom = Math.min(listBottom, windowH - TRAY_HEIGHT - insets.bottom);
+        }
+        let delta = 0;
+        if (y < win.top + band) {
+          delta = -Math.min(AUTO_SCROLL_MAX_PX, ((win.top + band - y) / band) * AUTO_SCROLL_MAX_PX);
+        } else if (y > listBottom - band) {
+          delta = Math.min(AUTO_SCROLL_MAX_PX, ((y - (listBottom - band)) / band) * AUTO_SCROLL_MAX_PX);
+        }
+        if (delta !== 0) {
+          const next = Math.max(0, scrollOffsetRef.current + delta);
+          // Update the ref immediately — the onScroll echo is async and the
+          // hit-test delta in findTarget must stay in step with each frame.
+          scrollOffsetRef.current = next;
+          listRef.current?.scrollToOffset({ offset: next, animated: false });
+        }
+      }
+      autoScrollRafRef.current = requestAnimationFrame(step);
+    };
+    autoScrollRafRef.current = requestAnimationFrame(step);
+  }, [stopAutoScroll, insets.bottom]);
 
   const createFolderFromDrop = useCallback(async () => {
     if (!dropModal) return;
@@ -954,6 +1130,7 @@ function BuildScreenInner() {
   const snapshotLayouts = useCallback(() => {
     const snap = tileLayoutSnap.current;
     snap.clear();
+    offsetAtSnapshotRef.current = scrollOffsetRef.current;
     tileRefsMap.current.forEach((ref, id) => {
       const candidate = filteredItems.find(i => i.id === id);
       if (!candidate) return;
@@ -969,7 +1146,98 @@ function BuildScreenInner() {
     setDragItem(item);
   }, [filteredItems]);
 
+  // ── Drop tray data + measurement ───────────────────────────────────────
+  const trayFolders = useMemo(
+    () =>
+      recentDropFolderIds
+        .map(id => items.find(i => i.type === 'Folder' && i.id === id))
+        .filter(Boolean) as BuildItem[],
+    [recentDropFolderIds, items],
+  );
+
+  const measureTrayTargets = useCallback(() => {
+    trayLayoutSnap.current.clear();
+    trayItemRefsMap.current.forEach((ref, key) => {
+      const item = key === TRAY_NEW_FOLDER_KEY
+        ? null
+        : trayFolders.find(f => `tray:${f.id}` === key) ?? null;
+      if (key !== TRAY_NEW_FOLDER_KEY && !item) return;
+      ref.current?.measure((_fx, _fy, width, height, px, py) => {
+        trayLayoutSnap.current.set(key, { x: px, y: py, w: width, h: height, item });
+      });
+    });
+  }, [trayFolders]);
+
+  // Slide the tray up/down and (re)measure its drop targets once it lands.
+  useEffect(() => {
+    trayVisibleRef.current = trayVisible;
+    if (trayVisible) {
+      setTrayMounted(true);
+      trayTranslate.value = withTiming(0, { duration: 200 });
+      const t = setTimeout(measureTrayTargets, 260);
+      return () => clearTimeout(t);
+    }
+    trayTranslate.value = withTiming(TRAY_SLIDE_DISTANCE, { duration: 180 });
+    trayLayoutSnap.current.clear();
+    const t = setTimeout(() => setTrayMounted(false), 200);
+    return () => clearTimeout(t);
+  }, [trayVisible, measureTrayTargets, trayTranslate]);
+
+  const trayAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: trayTranslate.value }],
+  }));
+
+  // ── Drag session lifecycle ─────────────────────────────────────────────
+  const beginDragSession = useCallback((id: string, ax: number, ay: number) => {
+    pointerYRef.current = ay;
+    snapshotLayouts();
+    listContainerRef.current?.measure((_fx, _fy, _w, h, _px, py) => {
+      listWindowRef.current = { top: py, height: h };
+    });
+    _startDragById(id);
+    lockPageScroll();
+    startAutoScroll();
+    if (trayTimerRef.current) clearTimeout(trayTimerRef.current);
+    trayTimerRef.current = setTimeout(() => setTrayVisible(true), TRAY_SHOW_DELAY_MS);
+  }, [snapshotLayouts, _startDragById, lockPageScroll, startAutoScroll]);
+
+  // ALL teardown lives here — called from onFinalize, which fires on both
+  // normal end and cancel (onEnd never fires when Safari cancels the pointer).
+  const endDragSession = useCallback(() => {
+    stopAutoScroll();
+    unlockPageScroll();
+    if (trayTimerRef.current) {
+      clearTimeout(trayTimerRef.current);
+      trayTimerRef.current = null;
+    }
+    setTrayVisible(false);
+    listWindowRef.current = null;
+    clearDragState();
+  }, [stopAutoScroll, unlockPageScroll, clearDragState]);
+
+  // Belt-and-suspenders: never leave page scroll locked or a rAF loop
+  // running if the screen unmounts mid-drag.
+  useEffect(() => () => {
+    stopAutoScroll();
+    unlockPageScroll();
+    if (trayTimerRef.current) clearTimeout(trayTimerRef.current);
+  }, [stopAutoScroll, unlockPageScroll]);
+
+  // Compose with previewEngine.onScroll — it ignores the event payload, but
+  // the auto-scroll hit-testing needs the live contentOffset.
+  const handleListScroll = useCallback((e: any) => {
+    scrollOffsetRef.current = e?.nativeEvent?.contentOffset?.y ?? 0;
+    previewEngine.onScroll(e);
+  }, [previewEngine.onScroll]);
+
   // ── Render Helpers ─────────────────────────────────────────────────────
+  const getTrayRef = (key: string) => {
+    if (!trayItemRefsMap.current.has(key)) {
+      trayItemRefsMap.current.set(key, React.createRef<View>());
+    }
+    return trayItemRefsMap.current.get(key)!;
+  };
+
   const renderItem = ({ item }: { item: BuildItem }) => {
     // Folder card
     if (item.type === 'Folder') {
@@ -1149,8 +1417,7 @@ function BuildScreenInner() {
             ghostY.value = e.absoluteY - cardHeight / 2 - rootOffY.value;
             ghostScale.value = withSpring(1.08, { damping: 15, stiffness: 200 });
             ghostOpacity.value = withSpring(1);
-            runOnJS(snapshotLayouts)();
-            runOnJS(_startDragById)(item.id);
+            runOnJS(beginDragSession)(item.id, e.absoluteX, e.absoluteY);
           })
           .onUpdate((e) => {
             ghostX.value = e.absoluteX - cardWidth / 2 - rootOffX.value;
@@ -1161,16 +1428,22 @@ function BuildScreenInner() {
             runOnJS(executeDrop)(e.absoluteX, e.absoluteY);
           })
           .onFinalize(() => {
+            // Fires on both end AND cancel — the only reliable cleanup path
+            // on iOS Safari, where pointercancel skips onEnd entirely.
             ghostScale.value = withSpring(1, { damping: 20 });
             ghostOpacity.value = withSpring(0);
-            runOnJS(clearDragState)();
+            runOnJS(endDragSession)();
           });
 
         return (
           // touchAction: RNGH web defaults to 'none', which blocks touch
-          // scrolling on every tile; 'pan-y' restores vertical scroll while
-          // still allowing the long-press drag to activate.
-          <GestureDetector gesture={dragGesture} touchAction="pan-y">
+          // scrolling on every tile; 'manipulation' keeps scroll working
+          // before the long-press activates while blocking double-tap zoom.
+          // Once the drag activates, beginDragSession locks page scroll so
+          // Safari can't start a native pan and pointercancel the gesture.
+          // userSelect: web-only — stops the text-selection magnifier from
+          // hijacking the long press.
+          <GestureDetector gesture={dragGesture} touchAction="manipulation" userSelect="none">
             <View
               ref={tileRef as any}
               style={{
@@ -1493,31 +1766,36 @@ function BuildScreenInner() {
           <ActivityIndicator size="large" color="#F5A623" />
         </View>
       ) : filteredItems.length > 0 ? (
-        <FlatList
-          data={filteredItems}
-          keyExtractor={(item) => item.id}
-          renderItem={renderItem}
-          numColumns={viewMode === 'grid' ? cols : 1}
-          key={viewMode === 'grid' ? `grid-${cols}` : 'list'}
-          contentContainerStyle={{
-            paddingHorizontal: GRID_PADDING,
-            paddingTop: GRID_PADDING,
-            paddingBottom: 100,
-          }}
-          columnWrapperStyle={viewMode === 'grid' ? {
-            gap: GRID_GAP,
-            marginBottom: 0,
-          } : undefined}
-          extraData={previewEngine.animatingIds}
-          refreshControl={
-            <RefreshControl refreshing={loading} onRefresh={() => setLoading(true)} tintColor="#F5A623" />
-          }
-          onScroll={previewEngine.onScroll}
-          scrollEventThrottle={16}
-          scrollEnabled={!dragItem}
-          onViewableItemsChanged={previewEngine.onViewableItemsChanged}
-          viewabilityConfig={previewEngine.viewabilityConfig}
-        />
+        // Wrapper ref gives the drag session the list viewport's absolute
+        // top/height for the edge auto-scroll bands.
+        <View ref={listContainerRef} style={{ flex: 1 }} collapsable={false}>
+          <FlatList
+            ref={listRef}
+            data={filteredItems}
+            keyExtractor={(item) => item.id}
+            renderItem={renderItem}
+            numColumns={viewMode === 'grid' ? cols : 1}
+            key={viewMode === 'grid' ? `grid-${cols}` : 'list'}
+            contentContainerStyle={{
+              paddingHorizontal: GRID_PADDING,
+              paddingTop: GRID_PADDING,
+              paddingBottom: 100,
+            }}
+            columnWrapperStyle={viewMode === 'grid' ? {
+              gap: GRID_GAP,
+              marginBottom: 0,
+            } : undefined}
+            extraData={previewEngine.animatingIds}
+            refreshControl={
+              <RefreshControl refreshing={loading} onRefresh={() => setLoading(true)} tintColor="#F5A623" />
+            }
+            onScroll={handleListScroll}
+            scrollEventThrottle={16}
+            scrollEnabled={!dragItem}
+            onViewableItemsChanged={previewEngine.onViewableItemsChanged}
+            viewabilityConfig={previewEngine.viewabilityConfig}
+          />
+        </View>
       ) : (
         <View style={s.centered}>
           <Icon name="build" size={48} color="#1E2A3A" />
@@ -1692,8 +1970,8 @@ function BuildScreenInner() {
       </Modal>
 
       {/* Folder Create Modal */}
-      <Modal transparent visible={showFolderCreate} animationType="fade" onRequestClose={() => setShowFolderCreate(false)}>
-        <Pressable style={s.modalBackdrop} onPress={() => setShowFolderCreate(false)}>
+      <Modal transparent visible={showFolderCreate} animationType="fade" onRequestClose={() => { setShowFolderCreate(false); setPendingFolderDropItem(null); }}>
+        <Pressable style={s.modalBackdrop} onPress={() => { setShowFolderCreate(false); setPendingFolderDropItem(null); }}>
           <View style={s.plusMenu} onStartShouldSetResponder={() => true}>
             <Text style={s.plusMenuTitle}>New Folder</Text>
             <TextInput
@@ -1708,7 +1986,7 @@ function BuildScreenInner() {
             <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
               <Pressable
                 style={[s.folderBtn, { backgroundColor: '#1E2A3A' }]}
-                onPress={() => { setShowFolderCreate(false); setNewFolderName(''); }}
+                onPress={() => { setShowFolderCreate(false); setNewFolderName(''); setPendingFolderDropItem(null); }}
               >
                 <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
               </Pressable>
@@ -1891,6 +2169,41 @@ function BuildScreenInner() {
           </View>
         </Pressable>
       </Modal>
+
+      {/* Bottom drop tray — Canva-style dock: recent drop folders + New Folder.
+          pointerEvents none — the pan gesture owns the pointer; tray items are
+          hit-tested by coordinates (findTrayTarget), not touch handlers. */}
+      {trayMounted && (
+        <Reanimated.View
+          style={[s.tray, trayAnimStyle, { paddingBottom: insets.bottom + 12 }]}
+          pointerEvents="none"
+        >
+          <View style={s.trayRow}>
+            {trayFolders.map(f => {
+              const trayKey = `tray:${f.id}`;
+              return (
+                <View
+                  key={trayKey}
+                  ref={getTrayRef(trayKey) as any}
+                  collapsable={false}
+                  style={[s.trayItem, hoveredId === trayKey && s.trayItemHovered]}
+                >
+                  <Icon name="folder" size={18} color="#F5A623" />
+                  <Text style={s.trayItemText} numberOfLines={1}>{f.name}</Text>
+                </View>
+              );
+            })}
+            <View
+              ref={getTrayRef(TRAY_NEW_FOLDER_KEY) as any}
+              collapsable={false}
+              style={[s.trayItem, hoveredId === TRAY_NEW_FOLDER_KEY && s.trayItemHovered]}
+            >
+              <Icon name="plus" size={18} color="#F5A623" />
+              <Text style={s.trayItemText} numberOfLines={1}>New Folder</Text>
+            </View>
+          </View>
+        </Reanimated.View>
+      )}
 
       {/* Drag ghost tile — floats above everything during drag */}
       <Reanimated.View style={[ghostAnimStyle, { width: cardWidth, height: cardHeight, borderRadius: 10 }]} pointerEvents="none">
@@ -2213,5 +2526,52 @@ const s = StyleSheet.create({
     fontWeight: '600',
     color: '#F0F4F8',
     fontFamily: FB,
+  },
+  tray: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#0E1117',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: 1,
+    borderColor: '#1E2A3A',
+    paddingTop: 12,
+    paddingHorizontal: 12,
+    zIndex: 9000,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 10,
+  },
+  trayRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  trayItem: {
+    flex: 1,
+    maxWidth: 110,
+    height: TRAY_HEIGHT - 24,
+    backgroundColor: '#1A2332',
+    borderWidth: 1,
+    borderColor: '#1E2A3A',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 8,
+  },
+  trayItemHovered: {
+    borderWidth: 2,
+    borderColor: '#F5A623',
+  },
+  trayItemText: {
+    color: '#F0F4F8',
+    fontSize: 11,
+    fontWeight: '600',
+    fontFamily: FB,
+    textAlign: 'center',
   },
 });
