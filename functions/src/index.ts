@@ -254,6 +254,26 @@ export const cleanupReadNotifications = onSchedule(
   }
 );
 
+// ─── listPublicCoaches ───────────────────────────────────────────────────────
+/**
+ * Public coach directory for the unauthenticated intake page.
+ * Returns only uid + displayName so the coaches collection can require auth
+ * for direct Firestore list access.
+ */
+export const listPublicCoaches = onCall(
+  { invoker: 'public' },
+  async () => {
+    const snap = await db.collection('coaches').orderBy('createdAt', 'desc').limit(500).get();
+    const coaches = snap.docs
+      .map((d) => ({
+        uid: d.id,
+        displayName: (d.data().displayName || d.data().name || '') as string,
+      }))
+      .filter((c) => c.displayName.trim().length > 0);
+    return { coaches };
+  }
+);
+
 // ─── 3. createStripeConnectLink ───────────────────────────────────────────────
 /**
  * Creates or resumes a Stripe Connect Express account onboarding link for a coach.
@@ -270,6 +290,12 @@ export const createStripeConnectLink = onCall(
     // Verify caller is the coach or an admin
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const callerToken = request.auth?.token as Record<string, any> | undefined;
+    const callerIsAdmin = callerToken?.role === 'platformAdmin' || callerToken?.admin === true;
+    if (coachId !== callerUid && !callerIsAdmin) {
+      throw new HttpsError('permission-denied', 'You can only manage your own Stripe account');
+    }
 
     const stripe = getStripe(stripeSecretKey.value());
 
@@ -336,6 +362,12 @@ export const refreshStripeAccountStatus = onCall(
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
 
+    const callerToken = request.auth?.token as Record<string, any> | undefined;
+    const callerIsAdmin = callerToken?.role === 'platformAdmin' || callerToken?.admin === true;
+    if (coachId !== callerUid && !callerIsAdmin) {
+      throw new HttpsError('permission-denied', 'You can only manage your own Stripe account');
+    }
+
     const accountRef = db.collection('coachStripeAccounts').doc(coachId);
     const accountSnap = await accountRef.get();
     if (!accountSnap.exists) throw new HttpsError('not-found', 'No Stripe account found for this coach');
@@ -396,8 +428,8 @@ export const disconnectStripeAccount = onCall(
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
 
     // Only the coach themselves (or an admin) may disconnect
-    const callerDoc = await db.collection('users').doc(callerUid).get();
-    const isAdmin = callerDoc.exists && callerDoc.data()?.role === 'admin';
+    const callerToken = request.auth?.token as Record<string, any> | undefined;
+    const isAdmin = callerToken?.role === 'platformAdmin' || callerToken?.admin === true;
     if (callerUid !== coachId && !isAdmin) {
       throw new HttpsError('permission-denied', 'You can only disconnect your own Stripe account');
     }
@@ -1751,7 +1783,7 @@ export const addCoach = onCall(
       actionCodeSettings
     );
 
-    console.log('[addCoach] Created coach', newCoachId, email, 'by', callerUid);
+    console.log('[addCoach] Created coach', newCoachId, 'by', callerUid);
 
     return {
       success: true,
@@ -1826,7 +1858,7 @@ export const inviteCoach = onCall(
     const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
     const inviteUrl = `${appUrl}/coach-signup?token=${inviteToken}`;
 
-    console.log('[inviteCoach] Invite created for', email, 'by', callerUid);
+    console.log('[inviteCoach] Invite created by', callerUid);
     return { inviteUrl, token: inviteToken, expiresAt };
   }
 );
@@ -1901,7 +1933,7 @@ export const activateCoachInvite = onCall(
       usedBy: callerUid,
     });
 
-    console.log('[activateCoachInvite] Coach activated:', callerUid, userEmail);
+    console.log('[activateCoachInvite] Coach activated:', callerUid);
     return { success: true, coachId: callerUid };
   }
 );
@@ -4689,10 +4721,13 @@ export const updateMemberGuidancePhase = onCall(
 
     // Authorization: caller must be the member's coach or a platform admin
     const callerClaims = (request.auth?.token || {}) as Record<string, any>;
-    const isAdmin = callerClaims.role === 'admin' || callerClaims.platformAdmin === true;
+    const isAdmin = callerClaims.role === 'platformAdmin' || callerClaims.admin === true || callerClaims.platformAdmin === true;
     if (!isAdmin) {
-      // Verify caller is the coach for this member by checking a slot or the member doc
+      // Verify caller is the coach for this member by checking the member doc
       const memberDoc = await db.collection('members').doc(memberId).get();
+      if (!memberDoc.exists) {
+        throw new HttpsError('not-found', 'Member not found');
+      }
       const memberData = memberDoc.data();
       if (!memberData || (memberData.coachId !== callerUid && memberData.createdBy !== callerUid)) {
         throw new HttpsError('permission-denied', 'Only the member\'s coach or an admin can transition phases');
@@ -6099,6 +6134,12 @@ export const checkSlotConflicts = onCall(
 
     if (!coachId || dayOfWeek === undefined || !startTime || !durationMinutes) {
       throw new HttpsError('invalid-argument', 'coachId, dayOfWeek, startTime, and durationMinutes are required');
+    }
+
+    const callerToken = request.auth?.token as Record<string, any> | undefined;
+    const callerIsAdmin = callerToken?.role === 'platformAdmin' || callerToken?.admin === true;
+    if (coachId !== callerUid && !callerIsAdmin) {
+      throw new HttpsError('permission-denied', 'You can only check conflicts for your own slots');
     }
 
     // Self-guided sessions don't need coach presence — no conflict
