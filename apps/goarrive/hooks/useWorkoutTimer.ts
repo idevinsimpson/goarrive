@@ -192,6 +192,11 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
   // Set when Skip is pressed during a rep-based work phase; bypasses the
   // rep-guard in the hit-zero handler so the 3.5s skip countdown can transition.
   const [isSkippingRep, setIsSkippingRep] = useState(false);
+  // 1-based round counter within the current block. Canonical play history:
+  // the flatten pass's blockRound metadata can diverge from what actually
+  // played if the flat list shifts mid-workout (movement swap, block edit),
+  // so consumers (Tabata TTS suppression) read this instead.
+  const [roundNumber, setRoundNumber] = useState(1);
 
   // Mirrored ref so cue gating inside useCallback bodies always sees the
   // latest pause state without rebuilding the callback on every toggle.
@@ -234,6 +239,20 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
       const nextStep = flatMovements[nextIdx];
       const nextStepType = nextStep?.stepType;
 
+      // Round tracking: a new round starts when playback moves to an exercise
+      // step in the same block whose movementIndex wrapped back to (or before)
+      // the one just played. Entering a different block resets to round 1.
+      const prevStep = flatMovements[currentIndex];
+      if (!prevStep || nextStep?.blockIndex !== prevStep.blockIndex) {
+        setRoundNumber(1);
+      } else if (
+        (!prevStep.stepType || prevStep.stepType === 'exercise')
+        && (!nextStepType || nextStepType === 'exercise')
+        && nextStep.movementIndex <= prevStep.movementIndex
+      ) {
+        setRoundNumber((r) => r + 1);
+      }
+
       if (nextStepType && nextStepType !== 'exercise') {
         // Special block — go directly to its phase
         const specialPhase = stepTypeToPhase(nextStepType);
@@ -258,49 +277,75 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
   }, [currentIndex, total, flatMovements]);
 
   // ── Timer tick ──────────────────────────────────────────────────────
+  // Wall-clock anchored countdown. The old implementation decremented once
+  // per setInterval fire with timeLeft in the effect deps, so the interval
+  // was torn down and rebuilt every second — each tick took 1000ms PLUS
+  // render/effect latency and the drift accumulated over a workout. Each
+  // value is now an exact whole-second offset from the anchor set when the
+  // phase's clock started, so interval latency, render jank, and
+  // background-tab throttling self-correct instead of accumulating.
+  const anchorValueRef = useRef(0);
+  const anchorTimeRef = useRef(0);
+  const timeLeftRef = useRef(timeLeft);
+  const tickDrivenRef = useRef(false);
+
+  // Re-anchor whenever timeLeft is set from outside the tick (phase entry,
+  // Skip, seek). Tick-driven updates skip re-anchoring so the countdown
+  // stays locked to the wall-clock anchor. This effect must run before the
+  // hit-zero transition effect below so a tick-to-zero followed by a phase
+  // entry in the next commit anchors the new phase's duration correctly.
+  useEffect(() => {
+    timeLeftRef.current = timeLeft;
+    if (tickDrivenRef.current) {
+      tickDrivenRef.current = false;
+      return;
+    }
+    anchorValueRef.current = timeLeft;
+    anchorTimeRef.current = Date.now();
+  }, [timeLeft]);
+
+  // Pause freezes timeLeft; resume re-anchors from the frozen value.
+  useEffect(() => {
+    if (isPaused) return;
+    anchorValueRef.current = timeLeftRef.current;
+    anchorTimeRef.current = Date.now();
+  }, [isPaused]);
+
   useEffect(() => {
     if (isPaused) return;
     if (phase === 'ready' || phase === 'complete') return;
-    if (timeLeft <= 0) return;
 
     const interval = setInterval(() => {
-      setTimeLeft((prev) => {
-        const n = prev - 1;
+      const prev = timeLeftRef.current;
+      if (prev <= 0) return; // rep-based work idles at 0 until Done/Skip
 
-        // Audio/haptic cues. Use Math.ceil so a fractional Skip pre-entry
-        // (e.g. n=2.5 displayed as "3") still triggers the cue at the right
-        // perceived second. n<=0 catches both natural 0 and Skip overshoot.
-        const displayed = Math.max(0, Math.ceil(n));
-        if (phase === 'rest') {
-          // Audio for rest's last-3 countdown is owned by useWorkoutTTS
-          // (spoken "3, 2, 1" + "Go" replacing the beeps). Only the haptic
-          // pulse stays here so the wrist still confirms each tick.
-          if (displayed <= 3 && displayed > 0 && n > 0) hapticLight();
-          if (n <= 0) hapticMedium();
-        } else if (phase === 'swap') {
-          // Audio for swap's last-3 countdown + "Go" is owned by useWorkoutTTS
-          // (spoken `countdown_3` + `go`). The synth beeps used to fire here
-          // were a 880Hz square wave that masked the spoken cue (member heard
-          // "peeps" instead of "3, 2, 1, Go") and on iOS competed for the
-          // audio context with the TTS queue, dropping later movement-name
-          // announcements. Keep only haptics so the wrist still confirms each
-          // tick. Mirrors how `rest` already works.
-          if (displayed <= 3 && displayed > 0 && n > 0) hapticLight();
-          if (n <= 0) hapticMedium();
-        } else if (phase === 'work') {
-          if (displayed <= 3 && displayed > 0 && n > 0) hapticLight();
-          if (n <= 0) hapticMedium();
-        } else if (isSpecialPhase) {
-          if (displayed === 3) hapticLight();
-          if (n <= 0) hapticMedium();
-        }
+      const elapsedSec = Math.floor((Date.now() - anchorTimeRef.current) / 1000);
+      const n = anchorValueRef.current - elapsedSec;
+      if (n >= prev) return; // less than a full second since the last value
 
-        return n;
-      });
-    }, 1000);
+      // Audio/haptic cues. Use Math.ceil so a fractional Skip pre-entry
+      // (e.g. n=2.5 displayed as "3") still triggers the cue at the right
+      // perceived second. n<=0 catches both natural 0 and Skip overshoot.
+      const displayed = Math.max(0, Math.ceil(n));
+      if (phase === 'rest' || phase === 'swap' || phase === 'work') {
+        // Audio for the last-3 countdown + "Go" is owned by useWorkoutTTS
+        // (spoken cues replaced the old synth beeps, which masked the spoken
+        // audio and on iOS competed for the audio context with the TTS
+        // queue). Only the haptic pulse stays here so the wrist still
+        // confirms each tick.
+        if (displayed <= 3 && displayed > 0 && n > 0) hapticLight();
+        if (n <= 0) hapticMedium();
+      } else if (isSpecialPhase) {
+        if (displayed === 3) hapticLight();
+        if (n <= 0) hapticMedium();
+      }
+
+      tickDrivenRef.current = true;
+      setTimeLeft(n);
+    }, 250);
 
     return () => clearInterval(interval);
-  }, [phase, timeLeft, isPaused, isSpecialPhase]);
+  }, [phase, isPaused, isSpecialPhase]);
 
   // ── Timer hit zero → transition ─────────────────────────────────────
   useEffect(() => {
@@ -343,12 +388,14 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     } else if (phase === 'rest') {
       advanceToNext();
     }
-  }, [timeLeft, phase, isPaused]);
+  }, [timeLeft, phase, isPaused, current, swapSide, isSkippingRep, isRepBased, advanceToNext]);
 
   // ── Controls ────────────────────────────────────────────────────────
   const handleStart = useCallback(() => {
     if (total === 0) return;
     setIsSkippingRep(false);
+
+    setRoundNumber(1);
 
     const firstStep = flatMovements[0];
     const firstStepType = firstStep?.stepType;
@@ -480,6 +527,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     setSwapSide('L');
     setTimeLeft(0);
     setIsSkippingRep(false);
+    setRoundNumber(1);
   }, []);
 
   // Advance or rewind the workout's phase timeline by deltaSec real seconds,
@@ -581,6 +629,7 @@ export function useWorkoutTimer({ flatMovements, onComplete }: UseWorkoutTimerOp
     isRepBased,
     progressPct,
     isSpecialPhase,
+    roundNumber,
     handleStart,
     handlePauseResume,
     handleSkip,

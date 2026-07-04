@@ -109,7 +109,7 @@ export default function WorkoutPlayer({
 
   const {
     phase, currentIndex, timeLeft, swapSide, isPaused,
-    current, next, total, isRepBased, progressPct, isSpecialPhase,
+    current, next, total, isRepBased, progressPct, isSpecialPhase, roundNumber,
     handleStart, handlePauseResume, handleSkip, handleRepDone,
     seekRelative, advanceToNext,
   } = timer;
@@ -147,6 +147,7 @@ export default function WorkoutPlayer({
     timeLeft,
     currentDuration: current?.duration ?? 0,
     swapSide,
+    roundNumber,
   });
 
   // ── Movement swap ─────────────────────────────
