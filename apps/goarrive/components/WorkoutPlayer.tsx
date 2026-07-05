@@ -231,13 +231,33 @@ export default function WorkoutPlayer({
   // isPaused changes. The declarative `shouldPlay` prop alone doesn't reliably
   // pause an already-playing expo-av Video on web, so this imperative mirror
   // is what actually stops the movement loop when the user taps Pause.
-  const videosRef = useRef<Set<any>>(new Set());
+  // Keyed by a stable string (phase name or `layer:<url>`) so entries are
+  // deleted when the ref callback fires with null on unmount — the Set
+  // version grew unbounded over long workouts.
+  const videosRef = useRef<Map<string, any>>(new Map());
   const isPausedRef = useRef(isPaused);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
 
-  const registerVideo = useCallback((el: any | null) => {
-    if (!el) return;
-    videosRef.current.add(el);
+  const registerVideo = useCallback((key: string, el: any | null) => {
+    if (!el) {
+      videosRef.current.delete(key);
+      return;
+    }
+    videosRef.current.set(key, el);
+    // iOS Safari needs the legacy webkit-playsinline attribute (expo-av only
+    // sets the modern playsInline prop) or playback hijacks into fullscreen.
+    if (Platform.OS === 'web') {
+      try {
+        const node = typeof el._nativeRef?.current?.getVideoElement === 'function'
+          ? el._nativeRef.current.getVideoElement()
+          : null;
+        if (node?.setAttribute) {
+          node.playsInline = true;
+          node.setAttribute('playsinline', '');
+          node.setAttribute('webkit-playsinline', '');
+        }
+      } catch { /* best-effort */ }
+    }
     // Freshly-mounted Videos default to playing; if we're paused right now
     // (e.g. Skip while paused swapped in a new video), pause it immediately.
     if (isPausedRef.current) el.pauseAsync?.().catch(() => {});
@@ -249,7 +269,7 @@ export default function WorkoutPlayer({
   // reliably on web across every mounted Video (intro/outro/transition/
   // waterBreak/shared work-rest layers).
   useEffect(() => {
-    for (const el of videosRef.current) {
+    for (const el of videosRef.current.values()) {
       if (isPaused) el?.pauseAsync?.().catch(() => {});
       else el?.playAsync?.().catch(() => {});
     }
@@ -575,6 +595,33 @@ export default function WorkoutPlayer({
   const [videoLayers, setVideoLayers] = useState<Array<{ url: string; ready: boolean }>>([]);
   const [displayedUrl, setDisplayedUrl] = useState<string | null>(null);
 
+  // URLs whose <Video> reported a load/decode error. Failed layers are
+  // unmounted and never re-mounted, so the poster/thumbnail fallback renders
+  // instead of a frozen or blank video.
+  const [failedVideoUrls, setFailedVideoUrls] = useState<Set<string>>(new Set());
+  const markVideoFailed = useCallback((url: string) => {
+    setFailedVideoUrls((prev) => {
+      if (prev.has(url)) return prev;
+      const next = new Set(prev);
+      next.add(url);
+      return next;
+    });
+  }, []);
+
+  // Keep the imperative video registry and stall-watchdog map in sync with
+  // the mounted layers so neither grows unbounded over a long workout.
+  useEffect(() => {
+    const live = new Set(videoLayers.map((l) => l.url));
+    for (const key of Array.from(videosRef.current.keys())) {
+      if (key.startsWith('layer:') && !live.has(key.slice('layer:'.length))) {
+        videosRef.current.delete(key);
+      }
+    }
+    for (const url of Array.from(lastPositionUpdateAtRef.current.keys())) {
+      if (!live.has(url)) lastPositionUpdateAtRef.current.delete(url);
+    }
+  }, [videoLayers]);
+
   // Saved crop keyed by videoUrl so the videoLayers crossfade can look up
   // crop from a URL alone (layers only store {url, ready}).
   const cropByUrl = useMemo(() => {
@@ -628,21 +675,21 @@ export default function WorkoutPlayer({
 
   // Mount the active layer if not already in the stack.
   useEffect(() => {
-    if (!activeVideoUrl) return;
+    if (!activeVideoUrl || failedVideoUrls.has(activeVideoUrl)) return;
     setVideoLayers((prev) => {
       if (prev.some((l) => l.url === activeVideoUrl)) return prev;
       return [...prev, { url: activeVideoUrl, ready: false }];
     });
-  }, [activeVideoUrl]);
+  }, [activeVideoUrl, failedVideoUrls]);
 
   // Mount the preload layer ahead of time so it's decoded by reveal.
   useEffect(() => {
-    if (!preloadVideoUrl) return;
+    if (!preloadVideoUrl || failedVideoUrls.has(preloadVideoUrl)) return;
     setVideoLayers((prev) => {
       if (prev.some((l) => l.url === preloadVideoUrl)) return prev;
       return [...prev, { url: preloadVideoUrl, ready: false }];
     });
-  }, [preloadVideoUrl]);
+  }, [preloadVideoUrl, failedVideoUrls]);
 
   const handleLayerReady = useCallback((url: string) => {
     setVideoLayers((prev) => prev.map((l) => (l.url === url ? { ...l, ready: true } : l)));
@@ -670,10 +717,15 @@ export default function WorkoutPlayer({
       if (activeVideoUrl) keep.add(activeVideoUrl);
       if (preloadVideoUrl) keep.add(preloadVideoUrl);
       if (displayedUrl) keep.add(displayedUrl);
-      const next = prev.filter((l) => keep.has(l.url));
+      const next = prev.filter((l) => keep.has(l.url) && !failedVideoUrls.has(l.url));
       return next.length === prev.length ? prev : next;
     });
-  }, [activeVideoUrl, preloadVideoUrl, displayedUrl]);
+  }, [activeVideoUrl, preloadVideoUrl, displayedUrl, failedVideoUrls]);
+
+  // If the displayed layer failed, drop it so the thumbnail fallback shows.
+  useEffect(() => {
+    if (displayedUrl && failedVideoUrls.has(displayedUrl)) setDisplayedUrl(null);
+  }, [displayedUrl, failedVideoUrls]);
 
   // videoReady drives the poster fallback — true once anything is on screen.
   useEffect(() => { setVideoReady(displayedUrl !== null); }, [displayedUrl]);
@@ -967,7 +1019,7 @@ export default function WorkoutPlayer({
               <View style={st.introVideoPanel}>
                 {introVideoUrl ? (
                   <Video
-                    ref={registerVideo}
+                    ref={(el: any) => registerVideo('intro', el)}
                     source={{ uri: introVideoUrl }}
                     resizeMode={ResizeMode.COVER}
                     isLooping
@@ -1007,7 +1059,7 @@ export default function WorkoutPlayer({
           <View style={st.introOutroContainer}>
             {current.videoUrl ? (
               <Video
-                ref={registerVideo}
+                ref={(el: any) => registerVideo('outro', el)}
                 source={{ uri: current.videoUrl }}
                 resizeMode={ResizeMode.COVER}
                 isLooping
@@ -1092,7 +1144,7 @@ export default function WorkoutPlayer({
               <View style={[st.mediaInner, mediaInnerSize]}>
                 {activeVideoUrl ? (
                   <Video
-                    ref={registerVideo}
+                    ref={(el: any) => registerVideo('transition', el)}
                     key={activeVideoUrl}
                     source={{ uri: activeVideoUrl }}
                     resizeMode={ResizeMode.COVER}
@@ -1187,7 +1239,7 @@ export default function WorkoutPlayer({
                 <View style={[st.mediaInner, mediaInnerSize]}>
                   {followVideoUrl ? (
                     <Video
-                      ref={registerVideo}
+                      ref={(el: any) => registerVideo('followAlong', el)}
                       key={followVideoUrl}
                       source={{ uri: followVideoUrl }}
                       resizeMode={ResizeMode.COVER}
@@ -1232,7 +1284,7 @@ export default function WorkoutPlayer({
               <View style={[st.mediaInner, mediaInnerSize]}>
                 {activeVideoUrl ? (
                   <Video
-                    ref={registerVideo}
+                    ref={(el: any) => registerVideo('waterBreak', el)}
                     key={activeVideoUrl}
                     source={{ uri: activeVideoUrl }}
                     resizeMode={ResizeMode.COVER}
@@ -1363,7 +1415,7 @@ export default function WorkoutPlayer({
                         <Video
                           key={layer.url}
                           ref={(el: any) => {
-                            registerVideo(el);
+                            registerVideo(`layer:${layer.url}`, el);
                             if (isDisplayed) videoRef.current = el;
                           }}
                           source={getVideoSource(layer.url)}
@@ -1378,10 +1430,21 @@ export default function WorkoutPlayer({
                               : undefined
                           }
                           onReadyForDisplay={() => handleLayerReady(layer.url)}
+                          onError={() => {
+                            console.warn('[WorkoutPlayer] video load error', { url: layer.url });
+                            markVideoFailed(layer.url);
+                          }}
                           onPlaybackStatusUpdate={(status: any) => {
-                            if (!status?.isLoaded) return;
+                            if (!status?.isLoaded) {
+                              if (status?.error) {
+                                console.warn('[WorkoutPlayer] video error', { url: layer.url, error: status.error });
+                                markVideoFailed(layer.url);
+                              }
+                              return;
+                            }
                             if (status.error) {
                               console.warn('[WorkoutPlayer] video error', { url: layer.url });
+                              markVideoFailed(layer.url);
                               return;
                             }
                             const now = Date.now();

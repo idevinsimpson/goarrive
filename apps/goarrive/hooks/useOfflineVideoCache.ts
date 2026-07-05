@@ -19,6 +19,7 @@
  */
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Platform } from 'react-native';
+import { CACHE_STALE_MS, shouldRedownload } from './offlineVideoCache.helpers';
 
 // Lazy import for expo-file-system (not available on web)
 let FileSystem: any = null;
@@ -35,6 +36,7 @@ interface CacheEntry {
   status: 'pending' | 'downloading' | 'cached' | 'error';
   lastAccessed: number;
   sizeBytes: number;
+  downloadedAt: number;
 }
 
 // Max cache size: 500MB
@@ -160,9 +162,10 @@ export function useOfflineVideoCache() {
         return;
       }
 
-      // Filter to only valid URLs that aren't already cached
+      // Filter to URLs that need a (re-)download: not cached yet, previously
+      // failed, or cached longer ago than the staleness window.
       const toDownload = urls.filter(
-        (url) => url && !cache[url]?.localUri,
+        (url) => url && shouldRedownload(cache[url]),
       );
 
       if (toDownload.length === 0) return;
@@ -192,13 +195,22 @@ export function useOfflineVideoCache() {
         const localUri = cacheDir + filename;
 
         try {
-          // Check if already downloaded
+          // Check if already downloaded and still fresh (modificationTime is
+          // in seconds; the in-memory cache resets each mount, so file age is
+          // the durable staleness signal).
           const fileInfo = await FileSystem.getInfoAsync(localUri);
           if (fileInfo.exists && fileInfo.size > 0) {
-            newEntries[url] = { localUri, status: 'cached', lastAccessed: Date.now(), sizeBytes: fileInfo.size || 0 };
-            completed++;
-            setProgress({ total: toDownload.length, completed });
-            continue;
+            const downloadedAt = fileInfo.modificationTime
+              ? fileInfo.modificationTime * 1000
+              : Date.now();
+            if (Date.now() - downloadedAt <= CACHE_STALE_MS) {
+              newEntries[url] = { localUri, status: 'cached', lastAccessed: Date.now(), sizeBytes: fileInfo.size || 0, downloadedAt };
+              completed++;
+              setProgress({ total: toDownload.length, completed });
+              continue;
+            }
+            // Stale — delete and re-download below
+            await FileSystem.deleteAsync(localUri, { idempotent: true }).catch(() => {});
           }
 
           // Download the file
@@ -210,13 +222,13 @@ export function useOfflineVideoCache() {
               const info = await FileSystem.getInfoAsync(result.uri);
               sizeBytes = info.size || 0;
             } catch { /* ignore */ }
-            newEntries[url] = { localUri: result.uri, status: 'cached', lastAccessed: Date.now(), sizeBytes };
+            newEntries[url] = { localUri: result.uri, status: 'cached', lastAccessed: Date.now(), sizeBytes, downloadedAt: Date.now() };
           } else {
-            newEntries[url] = { localUri: url, status: 'error', lastAccessed: Date.now(), sizeBytes: 0 };
+            newEntries[url] = { localUri: url, status: 'error', lastAccessed: Date.now(), sizeBytes: 0, downloadedAt: 0 };
           }
         } catch (err) {
           console.warn('[useOfflineVideoCache] Download failed:', url, err);
-          newEntries[url] = { localUri: url, status: 'error', lastAccessed: Date.now(), sizeBytes: 0 };
+          newEntries[url] = { localUri: url, status: 'error', lastAccessed: Date.now(), sizeBytes: 0, downloadedAt: 0 };
         }
 
         completed++;
