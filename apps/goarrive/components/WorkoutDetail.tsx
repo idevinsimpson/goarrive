@@ -83,8 +83,8 @@ export default function WorkoutDetail({
   onArchive,
   onDuplicate,
 }: WorkoutDetailProps) {
-  const { user, claims } = useAuth();
-  const coachId = claims?.coachId ?? user?.uid ?? '';
+  const { claims, effectiveUid } = useAuth();
+  const coachId = effectiveUid || '';
   const tenantId = claims?.tenantId ?? '';
 
   const [currentWorkout, setCurrentWorkout] = useState<WorkoutDetailData>(workout as WorkoutDetailData);

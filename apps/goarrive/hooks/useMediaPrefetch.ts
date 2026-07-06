@@ -11,6 +11,7 @@
 import { useEffect, useRef } from 'react';
 import { Platform, Image } from 'react-native';
 import { getUpcomingMovements } from './mediaPrefetch.helpers';
+import { isImageUrl } from '../utils/mediaKind';
 
 interface PrefetchableMovement {
   videoUrl?: string;
@@ -119,7 +120,9 @@ export function useMediaPrefetch(
     const targetIndex = isReady ? 0 : currentIndex;
     const target = targetIndex < movements.length ? movements[targetIndex] : undefined;
     const videoUrl = target?.videoUrl;
-    if (!videoUrl || preloadedVideos.current.has(videoUrl)) return;
+    // Image media is covered by the standard prefetch above — a hidden
+    // <video> element can't decode it and would just error out.
+    if (!videoUrl || isImageUrl(videoUrl) || preloadedVideos.current.has(videoUrl)) return;
 
     preloadedVideos.current.add(videoUrl);
 
@@ -141,7 +144,7 @@ export function useMediaPrefetch(
 
     const nextMovement = currentIndex + 1 < movements.length ? movements[currentIndex + 1] : undefined;
     const videoUrl = nextMovement?.videoUrl;
-    if (!videoUrl || preloadedVideos.current.has(videoUrl)) return;
+    if (!videoUrl || isImageUrl(videoUrl) || preloadedVideos.current.has(videoUrl)) return;
 
     preloadedVideos.current.add(videoUrl);
 
