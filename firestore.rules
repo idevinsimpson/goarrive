@@ -303,6 +303,16 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
+    // MOVEMENT VARIATION JOBS — AI (Runway) variation generation jobs.
+    // Written exclusively by Cloud Functions (Admin SDK); clients read-only.
+    // ─────────────────────────────────────────────
+
+    match /movement_variation_jobs/{jobId} {
+      allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+      allow write: if false;
+    }
+
+    // ─────────────────────────────────────────────
     // FOLLOW-ALONG VIDEOS — coach-owned long-form video assets
     // Used as Build tab tiles + as workout block source. Mirrors movements.
     // ─────────────────────────────────────────────
