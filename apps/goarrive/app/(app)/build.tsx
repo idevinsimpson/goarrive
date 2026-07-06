@@ -375,8 +375,8 @@ function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle 
 }
 
 function BuildScreenInner() {
-  const { user, claims, effectiveUid } = useAuth();
-  const coachId = effectiveUid || claims?.coachId || user?.uid || '';
+  const { claims, effectiveUid } = useAuth();
+  const coachId = effectiveUid || '';
   const { cols, cardWidth, cardHeight } = useGridLayout();
 
   // ── Preview Engine (scroll-aware animation scheduling) ─────────────────
