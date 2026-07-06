@@ -29,7 +29,11 @@ interface QueuedWrite {
   docId?: string; // for updates
   data: Record<string, any>;
   createdAt: number;
+  attempts?: number;
+  lastAttemptAt?: number;
 }
+
+const MAX_BACKOFF_MS = 5 * 60 * 1000;
 
 let isProcessing = false;
 
@@ -57,6 +61,26 @@ export async function enqueueWrite(
     };
 
     const queue = await getQueue();
+
+    // Idempotency: never queue a second completion log for the same assignment
+    if (
+      type === 'add' &&
+      collectionPath === 'workout_logs' &&
+      entry.data.assignmentId &&
+      queue.some(
+        (q) =>
+          q.type === 'add' &&
+          q.collectionPath === 'workout_logs' &&
+          q.data?.assignmentId === entry.data.assignmentId,
+      )
+    ) {
+      console.log(
+        '[OfflineQueue] Skipped duplicate completion write for assignment:',
+        entry.data.assignmentId,
+      );
+      return false;
+    }
+
     queue.push(entry);
     await saveQueue(queue);
     console.log('[OfflineQueue] Queued write:', entry.id);
@@ -79,11 +103,19 @@ export async function processQueue(): Promise<number> {
     const remaining: QueuedWrite[] = [];
 
     for (const entry of queue) {
+      // Exponential backoff (capped) so a permanently failing entry can't hot-loop
+      const backoffMs = Math.min(1000 * 2 ** (entry.attempts ?? 0), MAX_BACKOFF_MS);
+      if (entry.lastAttemptAt && Date.now() - entry.lastAttemptAt < backoffMs) {
+        remaining.push(entry);
+        continue;
+      }
       try {
         await executeWrite(entry.type, entry.collectionPath, entry.data, entry.docId);
         processed++;
       } catch (err) {
-        // Still offline or failed — keep in queue
+        // Still offline or failed — keep in queue with backoff metadata
+        entry.attempts = (entry.attempts ?? 0) + 1;
+        entry.lastAttemptAt = Date.now();
         remaining.push(entry);
       }
     }
