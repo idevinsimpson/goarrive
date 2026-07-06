@@ -199,6 +199,9 @@ export default function DashboardScreen() {
       });
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
+      // Never leave a previous coach's stats on screen after a failed fetch
+      // (stale stats masked the View-as-Coach permission bug).
+      setStats({ members: 0, activeWorkouts: 0, movements: 0, recentCheckins: [], todayAssignments: 0, needsReview: 0 });
     } finally {
       setLoading(false);
       setRefreshing(false);

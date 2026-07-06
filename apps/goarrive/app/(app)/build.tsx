@@ -375,8 +375,8 @@ function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle 
 }
 
 function BuildScreenInner() {
-  const { user, claims } = useAuth();
-  const coachId = claims?.coachId ?? user?.uid ?? '';
+  const { user, claims, effectiveUid } = useAuth();
+  const coachId = effectiveUid || claims?.coachId || user?.uid || '';
   const { cols, cardWidth, cardHeight } = useGridLayout();
 
   // ── Preview Engine (scroll-aware animation scheduling) ─────────────────
@@ -494,6 +494,9 @@ function BuildScreenInner() {
     if (!coachId) return;
 
     setLoading(true);
+    // Clear stale items when the effective coach changes (e.g. admin View as Coach),
+    // so a denied/failed listener can never leave another coach's library on screen.
+    setItems([]);
     let movementsLoaded = false;
     let workoutsLoaded = false;
     
