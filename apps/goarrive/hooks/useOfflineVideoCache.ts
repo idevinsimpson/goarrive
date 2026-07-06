@@ -47,6 +47,9 @@ export function useOfflineVideoCache() {
   const [progress, setProgress] = useState({ total: 0, completed: 0 });
   const [isOffline, setIsOffline] = useState(false);
   const downloadingRef = useRef(false);
+  // LRU access times live in a ref so reads during render (getCachedUri)
+  // don't mutate React state; entry.lastAccessed is the fallback.
+  const lastAccessedRef = useRef<Map<string, number>>(new Map());
 
   // ── Network detection ─────────────────────────────────────────────
   useEffect(() => {
@@ -97,8 +100,7 @@ export function useOfflineVideoCache() {
       if (!remoteUrl || Platform.OS === 'web' || !FileSystem) return remoteUrl;
       const entry = cache[remoteUrl];
       if (entry?.status === 'cached') {
-        // Update last accessed time for LRU tracking
-        entry.lastAccessed = Date.now();
+        lastAccessedRef.current.set(remoteUrl, Date.now());
         return entry.localUri;
       }
       return remoteUrl; // Fallback to remote URL
@@ -122,9 +124,11 @@ export function useOfflineVideoCache() {
   const evictLRU = useCallback(async () => {
     if (Platform.OS === 'web' || !FileSystem) return;
 
+    const accessTime = ([url, v]: [string, CacheEntry]) =>
+      lastAccessedRef.current.get(url) ?? v.lastAccessed;
     const entries = Object.entries(cache)
       .filter(([, v]) => v.status === 'cached')
-      .sort(([, a], [, b]) => a.lastAccessed - b.lastAccessed); // oldest first
+      .sort((a, b) => accessTime(a) - accessTime(b)); // oldest first
 
     let totalSize = entries.reduce((sum, [, v]) => sum + v.sizeBytes, 0);
     const toRemove: string[] = [];
@@ -139,6 +143,7 @@ export function useOfflineVideoCache() {
     }
 
     if (toRemove.length > 0) {
+      toRemove.forEach((url) => lastAccessedRef.current.delete(url));
       setCache((prev) => {
         const next = { ...prev };
         toRemove.forEach((url) => delete next[url]);
@@ -246,7 +251,7 @@ export function useOfflineVideoCache() {
         evictLRU();
       }
     },
-    [cache],
+    [cache, isOffline, evictLRU],
   );
 
   /**

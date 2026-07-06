@@ -31,6 +31,9 @@ export function useMediaPrefetch(
   // remove them from the DOM and cancel timeouts if the player unmounts
   // before loadeddata / the 30s safety timeout fires.
   const pendingPreloadsRef = useRef<Set<{ el: HTMLVideoElement; timers: ReturnType<typeof setTimeout>[] }>>(new Set());
+  // <link rel=prefetch> elements appended to document.head, removed on unmount
+  // so they don't accumulate for the lifetime of a long web session.
+  const prefetchLinksRef = useRef<HTMLLinkElement[]>([]);
 
   const preloadHiddenVideo = (videoUrl: string) => {
     const video = document.createElement('video');
@@ -72,6 +75,10 @@ export function useMediaPrefetch(
       try { document.body.removeChild(el); } catch { /* already removed */ }
     });
     pendingPreloadsRef.current.clear();
+    prefetchLinksRef.current.forEach((link) => {
+      try { document.head.removeChild(link); } catch { /* already removed */ }
+    });
+    prefetchLinksRef.current = [];
   }, []);
 
   // ── Standard prefetch: link rel=prefetch for next 1-3 movements ──────
@@ -91,6 +98,7 @@ export function useMediaPrefetch(
             link.rel = 'prefetch';
             link.href = url;
             document.head.appendChild(link);
+            prefetchLinksRef.current.push(link);
           } else {
             Image.prefetch(url).catch(() => {});
           }
