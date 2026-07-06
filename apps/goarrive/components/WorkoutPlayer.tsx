@@ -242,6 +242,12 @@ export default function WorkoutPlayer({
     // Freshly-mounted Videos default to playing; if we're paused right now
     // (e.g. Skip while paused swapped in a new video), pause it immediately.
     if (isPausedRef.current) el.pauseAsync?.().catch(() => {});
+    if (Platform.OS === 'web') {
+      // expo-av's web <video> gets React's playsInline but not the legacy
+      // webkit-playsinline attribute older iOS Safari needs for inline play.
+      const domVideo = el._nativeRef?.current?.getVideoElement?.();
+      domVideo?.setAttribute?.('webkit-playsinline', '');
+    }
   }, []);
 
   // Detached from `phase` on purpose: the displayed video must not restart
