@@ -995,6 +995,12 @@ async function processStripeEvent(tag: string, event: Stripe.Event, res: any) {
       case 'charge.refunded':
         await handleChargeRefunded(event.data.object as Stripe.Charge, event.id);
         break;
+      case 'charge.dispute.created':
+        await handleChargeDisputeCreated(event.data.object as Stripe.Dispute, event.id);
+        break;
+      case 'payment_intent.payment_failed':
+        await handlePaymentIntentFailed(event.data.object as Stripe.PaymentIntent, event.id);
+        break;
       default:
         console.log(`[${tag}] Unhandled event type:`, event.type);
     }
@@ -1474,6 +1480,93 @@ async function handleChargeRefunded(charge: Stripe.Charge, eventId: string) {
   });
 
   console.log('[handleChargeRefunded] Refund ledger entry created for charge', charge.id);
+}
+
+async function handleChargeDisputeCreated(dispute: Stripe.Dispute, eventId: string) {
+  // A chargeback reverses funds out-of-band; record a negative ledger entry so
+  // coach earnings and the GoArrive ledger stay in sync with Stripe reality.
+  // Split math mirrors handleChargeRefunded.
+  const chargeId = typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
+  if (!chargeId) {
+    console.warn('[handleChargeDisputeCreated] Dispute', dispute.id, 'has no charge — skipping');
+    return;
+  }
+
+  const originalEntrySnap = await db.collection('ledgerEntries')
+    .where('stripeChargeId', '==', chargeId)
+    .limit(1)
+    .get();
+
+  if (originalEntrySnap.empty) {
+    console.warn('[handleChargeDisputeCreated] No ledger entry found for disputed charge', chargeId, '— dispute', dispute.id, 'not recorded in ledger');
+    return;
+  }
+
+  const original = originalEntrySnap.docs[0].data();
+  const disputedAmountCents = dispute.amount;
+  const tierSnapshot = original.tierSnapshot as 40 | 35 | 30;
+  const applicationFeePercent = tierSnapshot;
+  const goArriveShareCents = -Math.round(disputedAmountCents * applicationFeePercent / 100);
+  const coachShareCents = -(disputedAmountCents + goArriveShareCents); // negative
+
+  const ledgerRef = db.collection('ledgerEntries').doc();
+  await ledgerRef.set({
+    entryId: ledgerRef.id,
+    billingEventId: eventId,
+    memberId: original.memberId,
+    coachId: original.coachId,
+    planId: original.planId,
+    snapshotId: original.snapshotId,
+    phase: original.phase,
+    grossAmountCents: -disputedAmountCents,
+    coachShareCents,
+    goArriveShareCents,
+    tierSnapshot,
+    applicationFeePercent,
+    stripeInvoiceId: original.stripeInvoiceId ?? null,
+    stripeChargeId: chargeId,
+    stripeDisputeId: dispute.id,
+    disputeStatus: dispute.status,
+    disputeOf: originalEntrySnap.docs[0].id,
+    contractStartAt: original.contractStartAt ?? null,
+    contractEndAt: original.contractEndAt ?? null,
+    pricingSnapshotId: original.pricingSnapshotId ?? '',
+    ruleSnapshot: {
+      ...original.ruleSnapshot,
+      disputePolicy: 'Chargeback recorded as negative ledger entry. Stripe reverses funds and application fee out-of-band on direct charges.',
+    },
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
+  console.log('[handleChargeDisputeCreated] Dispute ledger entry created for charge', chargeId, 'dispute', dispute.id);
+}
+
+async function handlePaymentIntentFailed(pi: Stripe.PaymentIntent, eventId: string) {
+  // Invoice-tied PI failures are already handled by invoice.payment_failed.
+  // This covers orphaned PIs (e.g. pay-in-full checkout) so failures aren't silent.
+  const invoiceId = (pi as any).invoice as string | null;
+  if (invoiceId) {
+    console.log('[handlePaymentIntentFailed] PI', pi.id, 'is invoice-tied (', invoiceId, ') — handled by invoice.payment_failed, skipping');
+    return;
+  }
+
+  const planId = pi.metadata?.planId;
+  console.warn('[handlePaymentIntentFailed] Orphaned PI failed:', pi.id, 'planId:', planId ?? 'unknown', 'lastError:', pi.last_payment_error?.message ?? 'none');
+
+  if (!planId) return;
+
+  const planRef = db.collection('member_plans').doc(planId);
+  const planSnap = await planRef.get();
+  if (!planSnap.exists) {
+    console.warn('[handlePaymentIntentFailed] member_plan', planId, 'not found for failed PI', pi.id);
+    return;
+  }
+
+  await planRef.update({
+    checkoutStatus: 'failed',
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  console.log('[handlePaymentIntentFailed] Plan', planId, 'marked checkoutStatus failed');
 }
 
 // ─── 7. activateCtsOptIn ──────────────────────────────────────────────────────
@@ -6523,7 +6616,7 @@ export const syncToGoogleCalendar = onCall(
         continue;
       }
       try {
-        const startDateTime = `${inst.scheduledDate}T${inst.scheduledTime || '09:00'}:00`;
+        const startDateTime = `${inst.scheduledDate}T${inst.scheduledStartTime || '09:00'}:00`;
         const durationMin = inst.durationMinutes || 30;
         const endDate = new Date(startDateTime);
         endDate.setMinutes(endDate.getMinutes() + durationMin);
@@ -6803,7 +6896,7 @@ export const removeGcalConflictAccount = onCall(
  * Returns { hasConflict: boolean, conflictingEvents: { calendarEmail, summary, start, end }[] }
  */
 export const checkGcalConflicts = onCall(
-  { secrets: [googleClientId, googleClientSecret] },
+  { secrets: [googleClientId, googleClientSecret], invoker: 'public' },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');

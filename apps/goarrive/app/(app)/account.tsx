@@ -26,13 +26,15 @@ import StripeConnectPanel from '../../components/StripeConnectPanel';
 import {
   doc,
   getDoc,
+  getDocs,
   setDoc,
   onSnapshot,
-  Timestamp,
+  query,
+  collection,
+  where,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../../lib/firebase';
-import { CoachZoomConnection } from '../../lib/schedulingTypes';
 
 const FONT_HEADING =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -138,8 +140,14 @@ export default function AccountScreen({ onClose }: Props) {
 
 // ─── Coach Zoom Connection Panel ────────────────────────────────────────────
 
+interface PersonalZoomRoom {
+  roomId: string;
+  zoomEmail: string;
+  status: string;
+}
+
 function CoachZoomPanel({ coachId }: { coachId: string }) {
-  const [connection, setConnection] = useState<CoachZoomConnection | null>(null);
+  const [connection, setConnection] = useState<PersonalZoomRoom | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -148,11 +156,23 @@ function CoachZoomPanel({ coachId }: { coachId: string }) {
 
   const fetchConnection = useCallback(async () => {
     try {
-      const docRef = doc(db, 'coach_zoom_connections', coachId);
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        setConnection({ coachId, ...snap.data() } as CoachZoomConnection);
-        setEmailInput(snap.data().zoomEmail || '');
+      // Personal Zoom lives in zoom_rooms (isPersonal: true) — the collection
+      // the scheduling backend reads. coach_zoom_connections is legacy/unread.
+      const roomsQuery = query(
+        collection(db, 'zoom_rooms'),
+        where('coachId', '==', coachId),
+        where('isPersonal', '==', true),
+      );
+      const snap = await getDocs(roomsQuery);
+      if (!snap.empty) {
+        const d = snap.docs[0];
+        const data = d.data();
+        setConnection({
+          roomId: d.id,
+          zoomEmail: data.zoomAccountEmail || '',
+          status: data.status || 'inactive',
+        });
+        setEmailInput(data.zoomAccountEmail || '');
       } else {
         setConnection(null);
         setEmailInput('');
@@ -192,22 +212,23 @@ function CoachZoomPanel({ coachId }: { coachId: string }) {
       return;
     }
     // Skip if email unchanged and already connected
-    if (connection?.connected && connection?.zoomEmail === emailInput.trim()) {
+    if (connection?.status === 'active' && connection?.zoomEmail === emailInput.trim()) {
       setEditing(false);
       return;
     }
 
     setSaving(true);
     try {
-      const docRef = doc(db, 'coach_zoom_connections', coachId);
-      await setDoc(docRef, {
-        coachId,
-        zoomEmail: emailInput.trim(),
-        connected: true,
-        connectedAt: Timestamp.now(),
-        lastVerifiedAt: Timestamp.now(),
-        status: 'connected',
-      }, { merge: true });
+      // manageZoomRoom dedupes on isPersonal and writes the zoom_rooms shape
+      // the allocator expects (zoomAccountEmail, status: 'active').
+      const fns = getFunctions(undefined, 'us-central1');
+      const manageZoomRoom = httpsCallable(fns, 'manageZoomRoom');
+      await manageZoomRoom({
+        action: 'add',
+        label: 'Personal Zoom',
+        zoomAccountEmail: emailInput.trim(),
+        isPersonal: true,
+      });
       await fetchConnection();
       setEditing(false);
     } catch (err: any) {
@@ -227,15 +248,12 @@ function CoachZoomPanel({ coachId }: { coachId: string }) {
           text: 'Disconnect',
           style: 'destructive',
           onPress: async () => {
+            if (!connection?.roomId) return;
             setSaving(true);
             try {
-              const docRef = doc(db, 'coach_zoom_connections', coachId);
-              await setDoc(docRef, {
-                coachId,
-                connected: false,
-                status: 'disconnected',
-                zoomEmail: connection?.zoomEmail || '',
-              }, { merge: true });
+              const fns = getFunctions(undefined, 'us-central1');
+              const manageZoomRoom = httpsCallable(fns, 'manageZoomRoom');
+              await manageZoomRoom({ action: 'deactivate', roomId: connection.roomId });
               await fetchConnection();
               setEditing(false);
             } catch (err: any) {
@@ -257,7 +275,7 @@ function CoachZoomPanel({ coachId }: { coachId: string }) {
     );
   }
 
-  const isConnected = connection?.connected && connection?.status === 'connected';
+  const isConnected = connection?.status === 'active';
 
   return (
     <View style={zs.panel}>
