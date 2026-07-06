@@ -103,9 +103,9 @@ const STATUS_DISPLAY: Record<string, { label: string; color: string }> = {
 };
 
 export default function SchedulingScreen() {
-  const { user, claims } = useAuth();
+  const { user, claims, effectiveUid } = useAuth();
   const router = useRouter();
-  const coachId = claims?.coachId || user?.uid || '';
+  const coachId = effectiveUid || claims?.coachId || user?.uid || '';
 
   // ── State ────────────────────────────────────────────────────────────────
   const [slots, setSlots] = useState<RecurringSlot[]>([]);
