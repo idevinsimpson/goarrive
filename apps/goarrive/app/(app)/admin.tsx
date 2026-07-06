@@ -143,6 +143,7 @@ export default function AdminScreen() {
   // Coach member drill-down state
   const [expandedCoachId, setExpandedCoachId] = useState<string | null>(null);
   const [coachMembers, setCoachMembers] = useState<CoachMember[]>([]);
+  const [membersError, setMembersError] = useState<string | null>(null);
   const [loadingMembers, setLoadingMembers] = useState(false);
 
   // Pending invites state
@@ -207,6 +208,7 @@ export default function AdminScreen() {
   // ── Load coach members (drill-down) — uses server-side Cloud Function ──
   const fetchCoachMembers = useCallback(async (coachUid: string) => {
     setLoadingMembers(true);
+    setMembersError(null);
     try {
       const fn = httpsCallable(getFunctions(), 'adminGetCoachData');
       const result = await fn({ coachUid });
@@ -246,6 +248,7 @@ export default function AdminScreen() {
       } catch (fallbackErr) {
         console.warn('[admin] Fallback query also failed', fallbackErr);
         setCoachMembers([]);
+        setMembersError('Failed to load members. Pull to refresh or try again.');
       }
     } finally {
       setLoadingMembers(false);
@@ -1560,7 +1563,9 @@ export default function AdminScreen() {
                       {loadingMembers ? (
                         <ActivityIndicator color={GOLD} style={{ marginVertical: 12 }} />
                       ) : coachMembers.length === 0 ? (
-                        <Text style={[s.emptyText, { paddingHorizontal: 16, paddingVertical: 8 }]}>No members yet.</Text>
+                        <Text style={[s.emptyText, { paddingHorizontal: 16, paddingVertical: 8 }, membersError ? { color: RED } : null]}>
+                          {membersError || 'No members yet.'}
+                        </Text>
                       ) : (
                         coachMembers.map((m) => {
                           const statusColor = m.checkoutStatus === 'paid' ? GREEN

@@ -22,6 +22,8 @@ import {
   query,
   where,
   getDocs,
+  orderBy,
+  limit,
 } from 'firebase/firestore';
 import { AppHeader } from '../../components/AppHeader';
 import CheckInCard from '../../components/CheckInCard';
@@ -120,6 +122,7 @@ export default function DashboardScreen() {
   const fetchData = useCallback(async () => {
     if (!user) return;
     try {
+      const emptySnap = { docs: [] as any[], size: 0 };
       const [membersSnap, workoutsSnap, movementsSnap] = await Promise.all([
         getDocs(
           query(
@@ -128,13 +131,18 @@ export default function DashboardScreen() {
             // Note: no isArchived filter here — no composite index exists for coachId+isArchived.
             // We filter client-side below.
           ),
-        ),
+        ).catch(() => emptySnap),
         getDocs(
-          query(collection(db, 'workouts'), where('coachId', '==', coachId)),
-        ),
+          query(
+            collection(db, 'workouts'),
+            where('coachId', '==', coachId),
+            orderBy('updatedAt', 'desc'),
+            limit(50),
+          ),
+        ).catch(() => emptySnap),
         getDocs(
           query(collection(db, 'movements'), where('coachId', '==', coachId)),
-        ),
+        ).catch(() => emptySnap),
       ]);
 
       // Today's assignments
