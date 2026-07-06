@@ -170,10 +170,15 @@ function preloadCue(key: CueKey): void {
 // use and can arrive after the work phase has already started, making the
 // first rest-to-work transition silent while later rests (with `go` cached in
 // audioPool) play cleanly.
+// get_ready / water_break / switch_sides are here because early phases
+// (grabEquipment, transition, waterBreak, swap) can fire within seconds of
+// the Start tap — if the cue isn't pooled + blessed at gesture time, the
+// first fetch happens at play time (late/silent on LTE).
 const PRIORITY_CUES: CueKey[] = [
   'countdown_3', 'countdown_3_rest', 'rest', 'go', 'halfway',
   'workout_complete', 'next_up', 'you_got_this', 'keep_pushing',
   'almost_there', 'workout_starting', 'lets_get_started',
+  'get_ready', 'water_break', 'switch_sides',
 ];
 if (Platform.OS === 'web' && typeof window !== 'undefined') {
   // Defer preloading slightly to not block initial render
@@ -193,6 +198,15 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
 // through the pre-blessed generic players by swapping .src — a blessed
 // element stays blessed across src changes.
 const blessedElements = new WeakSet<HTMLAudioElement>();
+// Elements whose bless play() promise hasn't settled yet. They are muted
+// mid-bless, so pumpQueue must never play them directly — resolvePlayableElement
+// routes to a generic player instead. Without this, the grabEquipment entry
+// cue (fired milliseconds after the Start tap) could be played while still
+// muted mid-bless → silent first cue.
+const blessingInFlight = new Set<HTMLAudioElement>();
+// Elements the queue is actively playing. Bless settlement must not
+// pause/reset an element the queue has since taken over.
+const queueOwnedElements = new Set<HTMLAudioElement>();
 const blessedGenericPlayers: HTMLAudioElement[] = [];
 let genericPlayerCursor = 0;
 let audioUnlocked = false;
@@ -204,26 +218,36 @@ const SILENT_WAV =
 function blessElement(el: HTMLAudioElement, label: string): void {
   try {
     el.muted = true;
+    blessingInFlight.add(el);
     const p = el.play();
     if (p && typeof p.then === 'function') {
       p.then(
         () => {
-          try { el.pause(); el.currentTime = 0; } catch {}
+          blessingInFlight.delete(el);
           el.muted = false;
+          // If the queue took this element over mid-bless (shouldn't happen —
+          // resolvePlayableElement routes around in-flight elements — but
+          // belt-and-braces), don't yank its playback.
+          if (!queueOwnedElements.has(el)) {
+            try { el.pause(); el.currentTime = 0; } catch {}
+          }
           blessedElements.add(el);
           console.info('[VOICE-AUDIT] unlock bless OK', { label });
         },
         (err: unknown) => {
+          blessingInFlight.delete(el);
           el.muted = false;
           console.warn('[VOICE-AUDIT] unlock bless FAILED', { label, err: String(err) });
         },
       );
     } else {
+      blessingInFlight.delete(el);
       try { el.pause(); el.currentTime = 0; } catch {}
       el.muted = false;
       blessedElements.add(el);
     }
   } catch (err) {
+    blessingInFlight.delete(el);
     try { el.muted = false; } catch {}
     console.warn('[VOICE-AUDIT] unlock bless THREW', { label, err: String(err) });
   }
@@ -265,11 +289,17 @@ export function resolvePlayableElement(
   url: string,
 ): HTMLAudioElement {
   if (!audioUnlocked) return audio;
-  if (blessedElements.has(audio)) return audio;
+  // A mid-bless element is muted — playing it now would be silent, and the
+  // bless settlement would pause/unmute it out from under us. Route around it.
+  if (blessedElements.has(audio) && !blessingInFlight.has(audio)) return audio;
   if (blessedGenericPlayers.length === 0) return audio;
   const generic =
     blessedGenericPlayers[genericPlayerCursor++ % blessedGenericPlayers.length];
   try {
+    // The generic may itself still be mid-bless (settles within ms of the
+    // gesture) — force-unmute; the gesture's synchronous play() call is what
+    // blessed it, not the promise resolution.
+    generic.muted = false;
     if (generic.src !== url) {
       generic.src = url;
       generic.load();
@@ -315,6 +345,23 @@ export function calcQueueGapMs(
   return QUEUE_GAP_MS;
 }
 
+// Finds the next real exercise step after fromIndex, skipping special blocks
+// AND synthetic "Get Ready" bridge steps (stepType 'exercise' but
+// movementIndex === -1, inserted by useWorkoutFlatten to carry prep rest).
+// Used by the grabEquipment end announcement: the step directly after a
+// grabEquipment phase is often a bridge, not the movement being introduced.
+export function findUpcomingExercise<
+  T extends { stepType?: string; movementIndex?: number },
+>(steps: readonly T[], fromIndex: number): { step: T; index: number } | null {
+  for (let i = fromIndex + 1; i < steps.length; i++) {
+    const s = steps[i];
+    if ((!s.stepType || s.stepType === 'exercise') && s.movementIndex !== -1) {
+      return { step: s, index: i };
+    }
+  }
+  return null;
+}
+
 // Drops queue items whose runId doesn't match currentRunId.
 export function filterStaleQueueItems<T extends { runId: number }>(
   items: T[],
@@ -356,6 +403,19 @@ interface UseWorkoutTTSOptions {
    * back-to-back.
    */
   swapSide?: 'L' | 'R';
+  /**
+   * Full flattened step list. Needed to resolve the movement a grabEquipment
+   * phase introduces — the step directly after it may be a synthetic
+   * "Get Ready" bridge rather than the exercise itself.
+   */
+  steps?: readonly {
+    stepType?: StepType;
+    movementIndex?: number;
+    voiceUrl?: string;
+    prescriptionVoiceUrl?: string;
+    name?: string;
+    [key: string]: any;
+  }[];
 }
 
 export function useWorkoutTTS({
@@ -370,6 +430,7 @@ export function useWorkoutTTS({
   timeLeft,
   currentDuration,
   swapSide = 'L',
+  steps,
 }: UseWorkoutTTSOptions) {
   const lastSpokenRef = useRef<string>('');
   const [isTTSAvailable, setIsTTSAvailable] = useState(true);
@@ -489,9 +550,15 @@ export function useWorkoutTTS({
       return;
     }
 
-    // iOS: elements created after the unlock gesture would reject play();
-    // swap to a pre-blessed generic player when needed (no-op elsewhere).
+    // iOS: elements created after the unlock gesture would reject play(), and
+    // elements still mid-bless are muted; swap to a pre-blessed generic player
+    // when needed (no-op elsewhere).
     audio = resolvePlayableElement(audio, url);
+    // Safety net: nothing outside the bless flow ever mutes these elements,
+    // so force-unmute whatever we're about to play (mute UX is gated via
+    // isMuted in enqueue/pump, not element.muted).
+    try { audio.muted = false; } catch {}
+    queueOwnedElements.add(audio);
 
     // Use AbortController to remove ended/error/playing listeners on flush so
     // a pooled element can't accumulate stale listeners across rounds (an old
@@ -536,6 +603,7 @@ export function useWorkoutTTS({
         });
       }
       if (currentAudioRef.current === audio) currentAudioRef.current = null;
+      queueOwnedElements.delete(audio);
       isPlayingRef.current = false;
       // If a flush happened (runId bumped) while we were playing, don't pump —
       // the flush already cleared the queue and we should stay quiet until the
@@ -860,7 +928,14 @@ export function useWorkoutTTS({
           (current as any).blockMovCount === 1 &&
           next != null &&
           (next as any).blockIndex === (current as any).blockIndex;
-        if (nextName && !isTabataInterRound) {
+        // Duplicate suppression: a preceding grabEquipment phase may have
+        // already announced this same upcoming movement at its end ("Next
+        // up, X"). It records the announced flat index in
+        // restAnnouncedVoiceUrlForIndexRef — if that matches our upcoming
+        // index, skip the rest-entry announcement entirely.
+        const grabAlreadyAnnounced =
+          restAnnouncedVoiceUrlForIndexRef.current === currentIndex + 1;
+        if (nextName && !isTabataInterRound && !grabAlreadyAnnounced) {
           // Two reliably-cached pieces sequenced via the queue: the static
           // `next_up` MP3, then the next movement's OpenAI voiceUrl. Both
           // succeed or fail independently — a missing voiceUrl only mutes
@@ -996,9 +1071,13 @@ export function useWorkoutTTS({
   // ── Timed special-phase countdown (grabEquipment) ───────────────────
   // grabEquipment is a timed phase that rolls straight into the next step,
   // but the work/rest countdown effects are gated to their own phases, so
-  // the 3-2-1 into the next movement was silent here. Mirror the rest
-  // countdown: countdown_3 at displayed===3, `go` at 0 when the next step
-  // is a plain exercise (special blocks own their entry cue).
+  // the transition out of it was silent. Sequence: countdown_3 at
+  // displayed===3, then at 0 → "Next up, [movement]" — NOT "go", because
+  // grab equipment INTRODUCES the next movement rather than starting it
+  // (a Get Ready bridge / prep rest usually follows before the work phase).
+  // The announced movement is resolved by scanning forward past bridge
+  // steps; restAnnouncedVoiceUrlForIndexRef is set so the following rest
+  // bridge and work-start branches don't announce the same movement again.
   const specialCountdownSpokenRef = useRef<number>(-1);
   useEffect(() => {
     if (isPaused) return;
@@ -1014,13 +1093,29 @@ export function useWorkoutTTS({
       enqueueCue('countdown_3', `grabEquipment_countdown_${currentIndex}`);
     } else if (timeLeft <= 0 && specialCountdownSpokenRef.current !== 0) {
       specialCountdownSpokenRef.current = 0;
-      const nextIsExercise = next
+      // Only announce when what follows is the exercise flow (a plain
+      // exercise or a Get Ready bridge). If another special block follows
+      // (demo, water break…), it owns its entry cue — stay silent.
+      const nextIsExerciseFlow = next
         && (!(next as any).stepType || (next as any).stepType === 'exercise');
-      if (nextIsExercise) {
-        enqueueCue('go', `grabEquipment_end_${currentIndex}`);
+      if (nextIsExerciseFlow) {
+        const upcoming = findUpcomingExercise(steps ?? [], currentIndex);
+        if (upcoming) {
+          enqueueCue('next_up', `grabEquipment_end_next_up_${currentIndex}`);
+          const voiceUrl =
+            (upcoming.step as any).prescriptionVoiceUrl || (upcoming.step as any).voiceUrl;
+          if (voiceUrl) {
+            enqueueVoice(voiceUrl, `grabEquipment_end_voice_${currentIndex}`);
+            restAnnouncedVoiceUrlForIndexRef.current = upcoming.index;
+          } else {
+            console.warn('[VOICE-AUDIT] grabEquipment end — upcoming voiceUrl missing', {
+              currentIndex, upcomingIndex: upcoming.index, name: (upcoming.step as any).name,
+            });
+          }
+        }
       }
     }
-  }, [phase, timeLeft, current?.stepType, next, currentIndex, enqueueCue, isPaused]);
+  }, [phase, timeLeft, current?.stepType, next, currentIndex, steps, enqueueCue, enqueueVoice, isPaused]);
 
   // ── Rest countdown voice (rest → next exercise only) ───────────────
   // Spoken "3, 2, 1. Go." for the rest-exit transition, as two static cues:

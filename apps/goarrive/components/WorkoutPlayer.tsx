@@ -148,6 +148,7 @@ export default function WorkoutPlayer({
     timeLeft,
     currentDuration: current?.duration ?? 0,
     swapSide,
+    steps: flatMovements,
   });
 
   // ── Movement swap ─────────────────────────────
@@ -1160,34 +1161,24 @@ export default function WorkoutPlayer({
         {phase === 'grabEquipment' && current && (
           <View style={[st.workContainer, webSafeBottomStyle]}>
             {renderLogoSlot()}
-            {/* Compact header: no gold timer column — a small label + inline
-                timer pill row frees the full slot width for the instruction
-                text, which auto-fits up to 4 lines so long coach prose never
-                ellipsizes. Other phases keep the standard timer column. */}
+            {/* Standard fixed-slot layout (title in left column, gold timer
+                in its fixed right column) — same as every other phase. The
+                "less prominent" treatment is confined to the left column: a
+                smaller label + an instruction title that auto-fits up to 4
+                lines within a height budget so long prose never ellipsizes. */}
             {renderTitleTimerSlot(
               <>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: fs(8), marginBottom: fs(4) }}>
-                  <Text style={[st.restPhaseLabel, { color: '#FB923C', fontSize: fs(13), letterSpacing: fs(1.5) }]}>GRAB EQUIPMENT</Text>
-                  <View style={{
-                    backgroundColor: '#F5A623',
-                    borderRadius: fs(14),
-                    paddingHorizontal: fs(10),
-                    paddingVertical: fs(2),
-                    minWidth: fs(42),
-                    alignItems: 'center',
-                  }}>
-                    <Text style={[st.goldTimerText, { fontSize: fs(18), lineHeight: fs(22) }]}>{formatTime(timeLeft)}</Text>
-                  </View>
-                </View>
+                <Text style={[st.restPhaseLabel, { color: '#FB923C', fontSize: fs(13), letterSpacing: fs(1.5) }]}>GRAB EQUIPMENT</Text>
                 {renderAutoFitTitle(current.grabEquipmentText || current.name, {
-                  hasTimer: false,
+                  hasTimer: true,
                   maxLines: 4,
                   maxFontSize: 28,
-                  maxHeight: 78,
+                  maxHeight: 88,
                   color: '#F0F4F8',
+                  marginTop: 2,
                 })}
               </>,
-              null,
+              renderGoldTimer(formatTime(timeLeft)),
             )}
             <View style={st.mediaSlot}>
               <View style={[st.mediaInner, mediaInnerSize]}>
