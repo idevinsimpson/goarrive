@@ -48,6 +48,7 @@ import {
   generateMovementPrescriptionVoice,
   prescriptionCacheKey,
 } from '../utils/generateMovementPrescriptionVoice';
+import { isImageUrl, imageExtFromMime } from '../utils/mediaKind';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from './Icon';
@@ -314,13 +315,13 @@ export default function WorkoutFolderPage({
       if (Platform.OS !== 'web') {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
-          Alert.alert('Permission Needed', 'Please allow access to your photo library to upload videos.');
+          Alert.alert('Permission Needed', 'Please allow access to your photo library to upload videos or photos.');
           return;
         }
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['videos'],
+        mediaTypes: ['images', 'videos'],
         allowsEditing: false,
         quality: 0.8,
         videoMaxDuration: 30,
@@ -329,11 +330,13 @@ export default function WorkoutFolderPage({
       if (result.canceled || !result.assets?.[0]) return;
 
       const asset = result.assets[0];
+      const isImage = asset.type !== 'video';
       setIoUploading(target);
       setIoUploadProgress(0);
 
-      // Upload video to Firebase Storage
-      const fileName = `workouts/${coachId}/${target}/${workoutId}_${Date.now()}.mp4`;
+      // Upload media to Firebase Storage
+      const ext = isImage ? imageExtFromMime(asset.mimeType) : 'mp4';
+      const fileName = `workouts/${coachId}/${target}/${workoutId}_${Date.now()}.${ext}`;
 
       let blob: Blob;
       if (Platform.OS === 'web' && asset.uri.startsWith('blob:')) {
@@ -349,7 +352,7 @@ export default function WorkoutFolderPage({
         blob = await response.blob();
       }
 
-      const contentType = blob.type || 'video/mp4';
+      const contentType = blob.type || asset.mimeType || (isImage ? 'image/jpeg' : 'video/mp4');
       const storageRef = ref(storage, fileName);
       const uploadTask = uploadBytesResumable(storageRef, blob, { contentType });
 
@@ -372,10 +375,11 @@ export default function WorkoutFolderPage({
         );
       });
 
-      // Use video URL as thumbnail placeholder
+      // Use media URL as thumbnail placeholder
       const gifUrl = videoUrl;
 
-      // Save to Firestore
+      // Save to Firestore (images reuse the existing *VideoUrl fields;
+      // display code branches on the URL's file extension)
       const updates = target === 'intro'
         ? { introVideoUrl: videoUrl, introGifUrl: gifUrl }
         : { outroVideoUrl: videoUrl, outroGifUrl: gifUrl };
@@ -388,8 +392,9 @@ export default function WorkoutFolderPage({
         setOutroGifUrl(gifUrl);
       }
 
-      // Immediately open crop modal for the freshly uploaded video
-      setCropTarget({ target, videoUrl });
+      // Immediately open crop modal for freshly uploaded videos.
+      // Photos skip the crop step — the crop modal is video-only.
+      if (!isImage) setCropTarget({ target, videoUrl });
     } catch (err: any) {
       console.error(`[WorkoutFolder] ${target} upload error:`, err?.message ?? err);
       if (Platform.OS === 'web') {
@@ -1706,7 +1711,7 @@ export default function WorkoutFolderPage({
         >
           <Text style={st.ioSectionTitle}>Intro Video</Text>
           <Text style={st.ioSectionDesc}>
-            Plays full-screen for ~10 seconds at the start of the workout. Upload a video in iPhone Pro Max ratio.
+            Plays full-screen for ~10 seconds at the start of the workout. Upload a video or photo in iPhone Pro Max ratio.
           </Text>
           <View style={st.ioAssetRow}>
             {introGifUrl ? (
@@ -1721,13 +1726,15 @@ export default function WorkoutFolderPage({
                 >
                   <Icon name="close" size={14} color="#EF4444" />
                 </Pressable>
-                <Pressable
-                  style={st.ioCropBtn}
-                  onPress={() => setCropTarget({ target: 'intro', videoUrl: introVideoUrl! })}
-                >
-                  <Icon name="crop" size={14} color="#F5A623" />
-                  <Text style={st.ioCropBtnText}>Crop</Text>
-                </Pressable>
+                {!isImageUrl(introVideoUrl) && (
+                  <Pressable
+                    style={st.ioCropBtn}
+                    onPress={() => setCropTarget({ target: 'intro', videoUrl: introVideoUrl! })}
+                  >
+                    <Icon name="crop" size={14} color="#F5A623" />
+                    <Text style={st.ioCropBtnText}>Crop</Text>
+                  </Pressable>
+                )}
               </View>
             ) : (
               <Pressable style={st.ioUploadCard} onPress={() => pickAndUploadIntroOutro('intro')} disabled={ioUploading === 'intro'}>
@@ -1748,7 +1755,7 @@ export default function WorkoutFolderPage({
 
           <Text style={[st.ioSectionTitle, { marginTop: 32 }]}>Outro Video</Text>
           <Text style={st.ioSectionDesc}>
-            Plays full-screen for ~10 seconds at the end of the workout. Upload a video in iPhone Pro Max ratio.
+            Plays full-screen for ~10 seconds at the end of the workout. Upload a video or photo in iPhone Pro Max ratio.
           </Text>
           <View style={st.ioAssetRow}>
             {outroGifUrl ? (
@@ -1763,13 +1770,15 @@ export default function WorkoutFolderPage({
                 >
                   <Icon name="close" size={14} color="#EF4444" />
                 </Pressable>
-                <Pressable
-                  style={st.ioCropBtn}
-                  onPress={() => setCropTarget({ target: 'outro', videoUrl: outroVideoUrl! })}
-                >
-                  <Icon name="crop" size={14} color="#F5A623" />
-                  <Text style={st.ioCropBtnText}>Crop</Text>
-                </Pressable>
+                {!isImageUrl(outroVideoUrl) && (
+                  <Pressable
+                    style={st.ioCropBtn}
+                    onPress={() => setCropTarget({ target: 'outro', videoUrl: outroVideoUrl! })}
+                  >
+                    <Icon name="crop" size={14} color="#F5A623" />
+                    <Text style={st.ioCropBtnText}>Crop</Text>
+                  </Pressable>
+                )}
               </View>
             ) : (
               <Pressable style={st.ioUploadCard} onPress={() => pickAndUploadIntroOutro('outro')} disabled={ioUploading === 'outro'}>

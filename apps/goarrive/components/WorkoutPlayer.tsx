@@ -51,6 +51,7 @@ import VoiceAuditPanel from './VoiceAuditPanel';
 import { isStagingHost } from '../lib/runtimeEnv';
 import { installVoiceAuditCapture } from '../lib/voiceAuditLog';
 import PosterThumb from './PosterThumb';
+import { isImageUrl } from '../utils/mediaKind';
 
 // Install [VOICE-AUDIT] console capture at module load on staging only so the
 // in-app debug panel can mirror the forensic trace without DevTools. Has zero
@@ -503,6 +504,11 @@ export default function WorkoutPlayer({
     const pickAsset = (item: any, indexOfItem: number) => {
       if (!item) return { activeVideoUrl: null, activeThumbUrl: null };
       if (item.videoUrl || item.thumbnailUrl || item.posterUrl) {
+        // Still-image media renders through the Image fallback path,
+        // never through a <Video> layer — surface it as the thumb.
+        if (isImageUrl(item.videoUrl)) {
+          return { activeVideoUrl: null, activeThumbUrl: item.videoUrl };
+        }
         return {
           activeVideoUrl: item.videoUrl ?? null,
           activeThumbUrl: item.thumbnailUrl ?? item.posterUrl ?? null,
@@ -517,6 +523,9 @@ export default function WorkoutPlayer({
       for (let i = indexOfItem + 1; i < flatMovements.length; i++) {
         const m = flatMovements[i];
         if (m.stepType === 'exercise' && (m.videoUrl || m.thumbnailUrl || m.posterUrl)) {
+          if (isImageUrl(m.videoUrl)) {
+            return { activeVideoUrl: null, activeThumbUrl: m.videoUrl ?? null };
+          }
           return { activeVideoUrl: m.videoUrl ?? null, activeThumbUrl: m.thumbnailUrl ?? m.posterUrl ?? null };
         }
       }
@@ -567,7 +576,7 @@ export default function WorkoutPlayer({
     if (!activeVideoUrl) return null;
     for (let offset = 1; offset <= 3; offset++) {
       const url = flatMovements[currentIndex + offset]?.videoUrl;
-      if (url && url !== activeVideoUrl) return url;
+      if (url && url !== activeVideoUrl && !isImageUrl(url)) return url;
     }
     return null;
   }, [activeVideoUrl, currentIndex, flatMovements]);
@@ -961,11 +970,14 @@ export default function WorkoutPlayer({
           const firstExercise = flatMovements.find((f: any) => f.stepType === 'exercise');
           const introVideoUrl = current.videoUrl || firstExercise?.videoUrl;
           const introThumbUrl = firstExercise?.posterUrl || firstExercise?.thumbnailUrl;
+          const introIsImage = isImageUrl(introVideoUrl);
           return (
             <View style={st.introSplitContainer}>
               {/* Left: video panel */}
               <View style={st.introVideoPanel}>
-                {introVideoUrl ? (
+                {introVideoUrl && introIsImage ? (
+                  <Image source={{ uri: introVideoUrl }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+                ) : introVideoUrl ? (
                   <Video
                     ref={registerVideo}
                     source={{ uri: introVideoUrl }}
@@ -1005,7 +1017,13 @@ export default function WorkoutPlayer({
         {/* ── OUTRO — Cinematic completion ────────────────────── */}
         {phase === 'outro' && current && (
           <View style={st.introOutroContainer}>
-            {current.videoUrl ? (
+            {current.videoUrl && isImageUrl(current.videoUrl) ? (
+              <Image
+                source={{ uri: current.videoUrl }}
+                style={StyleSheet.absoluteFillObject}
+                resizeMode="cover"
+              />
+            ) : current.videoUrl ? (
               <Video
                 ref={registerVideo}
                 source={{ uri: current.videoUrl }}

@@ -60,6 +60,7 @@ import {
 import { generateMovementVoice } from '../utils/generateMovementVoice';
 import { analyzeMovementMedia, MovementAnalysis } from '../utils/analyzeMovementMedia';
 import { analyzeMovementReps } from '../utils/analyzeMovementReps';
+import { isImageUrl, imageExtFromMime, generateImageThumbnailBlob } from '../utils/mediaKind';
 import { FB, FH } from '../lib/theme';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -461,6 +462,9 @@ export default function MovementForm({
     }
     setSubmitting(true);
     try {
+      // The no-video-meta form is shared by two flows: create-without-media
+      // (videoUrl empty) and photo create (videoUrl holds an uploaded image).
+      const isImageCreate = !!videoUrl.trim() && isImageUrl(videoUrl);
       const data: Record<string, any> = {
         name: name.trim(),
         category,
@@ -474,9 +478,12 @@ export default function MovementForm({
         swapSides,
         swapMode,
         swapWindowSec,
-        videoUrl: '',
-        thumbnailUrl: '',
-        thumbnailImageUrl: '',
+        videoUrl: isImageCreate ? videoUrl.trim() : '',
+        ...(isImageCreate
+          ? { mediaType: 'image', posterUrl: thumbnailUrl || '' }
+          : {}),
+        thumbnailUrl: isImageCreate ? thumbnailUrl || '' : '',
+        thumbnailImageUrl: isImageCreate ? thumbnailUrl || '' : '',
         gifLowUrl: '',
         gifLoopUrl: '',
         cropScale: 1,
@@ -655,8 +662,8 @@ export default function MovementForm({
   // ── Media upload (shared by Library and Camera) ──────────────────────
   const uploadAsset = async (asset: ImagePicker.ImagePickerAsset) => {
     const isVideo = asset.type === 'video';
-    const ext = isVideo ? 'mp4' : 'jpg';
-    const folder = isVideo ? 'videos' : 'thumbnails';
+    const ext = isVideo ? 'mp4' : imageExtFromMime(asset.mimeType);
+    const folder = isVideo ? 'videos' : 'images';
     const fileName = `movements/${coachId}/${folder}/${Date.now()}.${ext}`;
 
     setUploading(true);
@@ -667,7 +674,7 @@ export default function MovementForm({
 
     const storageRef = ref(storage, fileName);
     const uploadTask = uploadBytesResumable(storageRef, blob, {
-      contentType: isVideo ? 'video/mp4' : 'image/jpeg',
+      contentType: isVideo ? 'video/mp4' : asset.mimeType || 'image/jpeg',
     });
 
     return new Promise<string>((resolve, reject) => {
@@ -693,17 +700,64 @@ export default function MovementForm({
     });
   };
 
+  // ── Image path — photos skip the crop/GIF/AI-video pipeline ─────────
+  // Upload the photo, cover-crop a 240×300 JPEG thumbnail (web), then:
+  //   create mode → open the metadata form so the coach names it
+  //   edit mode (add-media CTA) → patch the movement doc directly
+  const handlePickedImage = async (asset: ImagePicker.ImagePickerAsset) => {
+    const isAddMediaSession = isEdit && !!editMovement && addVideoSessionRef.current;
+
+    const imageUrl = await uploadAsset(asset);
+
+    let thumbUrl = imageUrl;
+    try {
+      const blob = await generateImageThumbnailBlob(imageUrl);
+      if (blob) thumbUrl = await uploadBlob(blob, 'thumbnails', 'jpg');
+    } catch (err) {
+      console.warn('[MovementForm] Image thumbnail failed, using original:', err);
+    }
+
+    setVideoUrl(imageUrl);
+    setThumbnailUrl(thumbUrl);
+    setCropScale(1);
+    setCropTranslateX(0);
+    setCropTranslateY(0);
+
+    if (isAddMediaSession && editMovement) {
+      addVideoSessionRef.current = false;
+      await updateDoc(doc(db, 'movements', editMovement.id), {
+        videoUrl: imageUrl,
+        mediaType: 'image',
+        thumbnailUrl: thumbUrl,
+        thumbnailImageUrl: thumbUrl,
+        posterUrl: thumbUrl,
+        gifLowUrl: '',
+        gifLoopUrl: '',
+        cropScale: 1,
+        cropTranslateX: 0,
+        cropTranslateY: 0,
+        cropFrameWidth: 0,
+        cropFrameHeight: 0,
+        updatedAt: serverTimestamp(),
+      });
+      return;
+    }
+
+    // Create mode: reuse the metadata form step (no AI analysis for photos)
+    setCreateStep('no-video-meta');
+  };
+
   // ── Pick from library ────────────────────────────────────────────────
   const pickFromLibrary = async () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Please grant media library access to upload videos.');
+        Alert.alert('Permission Required', 'Please grant media library access to upload videos or photos.');
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['videos'],
+        mediaTypes: ['images', 'videos'],
         allowsEditing: false,
         quality: 0.8,
         videoMaxDuration: 25,
@@ -712,7 +766,14 @@ export default function MovementForm({
 
       if (result.canceled || !result.assets?.[0]) return;
 
-      const downloadUrl = await uploadAsset(result.assets[0]);
+      const asset = result.assets[0];
+
+      if (asset.type !== 'video') {
+        await handlePickedImage(asset);
+        return;
+      }
+
+      const downloadUrl = await uploadAsset(asset);
       setVideoUrl(downloadUrl);
 
       // Go to crop step
@@ -1578,7 +1639,19 @@ export default function MovementForm({
 
                 {/* Media */}
                 <Text style={st.sectionTitle}>Media</Text>
-                {videoUrl ? (
+                {videoUrl && isImageUrl(videoUrl) ? (
+                  <View style={{ marginBottom: 8 }}>
+                    <Image
+                      source={{ uri: videoUrl }}
+                      style={{ width: '100%', aspectRatio: 4 / 5, borderRadius: 12, backgroundColor: '#0E1117' }}
+                      resizeMode="cover"
+                    />
+                    <View style={st.mediaAttached}>
+                      <Icon name="checkmark" size={14} color="#6EBB7A" />
+                      <Text style={st.mediaAttachedText}>Photo attached</Text>
+                    </View>
+                  </View>
+                ) : videoUrl ? (
                   <View style={{ marginBottom: 8 }}>
                     <MovementVideoControls
                       uri={videoUrl}
@@ -1626,9 +1699,9 @@ export default function MovementForm({
                       </View>
                     ) : (
                       <>
-                        <Text style={st.addVideoCtaTitle}>Add a video</Text>
+                        <Text style={st.addVideoCtaTitle}>Add a video or photo</Text>
                         <Text style={st.addVideoCtaHint}>
-                          This movement was created without a video. Add one now and AI will suggest fields.
+                          This movement was created without media. Add a video and AI will suggest fields, or add a photo.
                         </Text>
                         <View style={st.addVideoCtaRow}>
                           <Pressable
@@ -1838,7 +1911,7 @@ export default function MovementForm({
                 </View>
 
                 <Text style={st.uploadHint}>
-                  Upload or record a movement demo (up to 25 sec)
+                  Upload a photo or video, or record a demo (up to 25 sec)
                 </Text>
 
                 <Pressable style={st.noVideoBtn} onPress={startNoVideoCreate}>
@@ -1908,7 +1981,9 @@ export default function MovementForm({
             {createStep === 'no-video-meta' && (
               <>
                 <View style={st.header}>
-                  <Text style={st.headerTitle}>Create movement (no video yet)</Text>
+                  <Text style={st.headerTitle}>
+                    {isImageUrl(videoUrl) ? 'Create movement (photo)' : 'Create movement (no video yet)'}
+                  </Text>
                   <View style={{ width: 36 }} />
                 </View>
 
