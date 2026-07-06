@@ -294,9 +294,10 @@ service cloud.firestore {
     match /movements/{movementId} {
       allow read: if isAuthenticated() && (
         resource.data.isGlobal == true ||
-        isCoachOrBootstrap(resource.data.coachId)
+        isCoachOrBootstrap(resource.data.coachId) ||
+        isPlatformAdmin()
       );
-      allow create: if isCoachOrBootstrap(request.resource.data.coachId);
+      allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
       allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
       allow delete: if false; // archive only
     }
@@ -307,10 +308,44 @@ service cloud.firestore {
     // ─────────────────────────────────────────────
 
     match /followAlongVideos/{videoId} {
-      allow read: if isAuthenticated() && isCoachOrBootstrap(resource.data.coachId);
-      allow create: if isCoachOrBootstrap(request.resource.data.coachId);
+      allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+      allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
       allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
       allow delete: if false; // archive only
+    }
+
+    // ─────────────────────────────────────────────
+    // BUILD FOLDERS (Build tab folder organization — coachId-scoped CRUD)
+    // Used by app/(app)/build.tsx to group Movements / Workouts / etc. under
+    // named folders. Mirrors the movements/workouts pattern: only the owning
+    // coach (or admin) can read/write; a coach can delete their own folder.
+    // ─────────────────────────────────────────────
+
+    match /build_folders/{folderId} {
+      allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+      allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
+      allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+      allow delete: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+    }
+
+    // ─────────────────────────────────────────────
+    // PLANS + PLAYBOOKS (Build tab item types — coachId-scoped CRUD)
+    // Queried by app/(app)/build.tsx; previously had no rules at all,
+    // so every read/write was denied for everyone.
+    // ─────────────────────────────────────────────
+
+    match /plans/{planId} {
+      allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+      allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
+      allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+      allow delete: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+    }
+
+    match /playbooks/{playbookId} {
+      allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+      allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
+      allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+      allow delete: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
     }
 
     // ─────────────────────────────────────────────
@@ -322,9 +357,10 @@ service cloud.firestore {
       // Coaches can read their own workouts, OR any workout marked isShared (template marketplace)
       allow read: if isAuthenticated() && (
         isCoachOrBootstrap(resource.data.coachId)
-        || (resource.data.isShared == true && (isCoach() || isPlatformAdmin()))
+        || isPlatformAdmin()
+        || (resource.data.isShared == true && isCoach())
       );
-      allow create: if isCoachOrBootstrap(request.resource.data.coachId);
+      allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
       // Only the owning coach or admin can update (including toggling isShared)
       allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
       // R5: Owning coach or admin can delete any workout they own

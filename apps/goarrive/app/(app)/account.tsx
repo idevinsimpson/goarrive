@@ -57,7 +57,7 @@ interface Props {
 
 export default function AccountScreen({ onClose }: Props) {
   const insets = useSafeAreaInsets();
-  const { user, claims, signOut } = useAuth();
+  const { user, claims, signOut, effectiveUid } = useAuth();
 
   const displayName = user?.displayName ?? user?.email ?? 'User';
   const initials = displayName
@@ -72,7 +72,7 @@ export default function AccountScreen({ onClose }: Props) {
   }
 
   const isCoach = claims?.role === 'coach' || claims?.role === 'admin' || claims?.role === 'platformAdmin' || claims?.admin === true;
-  const coachId = claims?.coachId || user?.uid;
+  const coachId = effectiveUid || claims?.coachId || user?.uid;
 
   function handleBack() {
     if (onClose) {

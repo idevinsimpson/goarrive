@@ -191,11 +191,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // When admin override is active, produce modified claims with the overridden coachId
+  // When admin override is active, produce modified claims with the overridden coachId.
+  // Role/admin are masked to plain 'coach' so every role-gated surface (badges,
+  // admin-only buttons, marketplace controls) renders exactly what the coach sees.
+  // Firestore rules still see the real token (platformAdmin), which is what
+  // authorizes the cross-coach reads.
   const effectiveClaims = React.useMemo(() => {
     if (!claims || !adminCoachOverride) return claims;
     if (claims.role !== 'platformAdmin' && claims.admin !== true) return claims;
-    return { ...claims, coachId: adminCoachOverride.coachId };
+    return { ...claims, coachId: adminCoachOverride.coachId, role: 'coach', admin: false };
   }, [claims, adminCoachOverride]);
 
   // effectiveUid: when impersonating, use the override coachId; otherwise use user.uid
