@@ -44,8 +44,8 @@ import { useMovementSwap } from '../hooks/useMovementSwap';
 import { useMovementHydrate } from '../hooks/useMovementHydrate';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
-import { useWorkoutTTS } from '../hooks/useWorkoutTTS';
-import { setAudioMuted } from '../lib/audioCues';
+import { useWorkoutTTS, unlockAudioPlayback } from '../hooks/useWorkoutTTS';
+import { setAudioMuted, unlockAudioContext } from '../lib/audioCues';
 import { FB, FH } from '../lib/theme';
 import VoiceAuditPanel from './VoiceAuditPanel';
 import { isStagingHost } from '../lib/runtimeEnv';
@@ -79,6 +79,7 @@ export function composePrescriptionLabel(name: string, weight?: string, reps?: s
 
 // Pure helpers live in WorkoutPlayer.helpers.ts (no Firebase dep — safe to import in tests).
 export { computePreloadVideoUrl, handleVideoLayerPlaybackStatus } from './WorkoutPlayer.helpers';
+import { pickNameTier } from './WorkoutPlayer.helpers';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface WorkoutPlayerProps {
@@ -316,7 +317,20 @@ export default function WorkoutPlayer({
     extendControlsTimer();
   }, [handleSkip, extendControlsTimer, stopAllAudio]);
 
+  // iOS Safari autoplay policy: HTMLAudioElement.play() and AudioContext
+  // resume are only allowed from inside a user gesture. Every tap that can
+  // start audio-producing flows must unlock synchronously — Start is the
+  // primary unlock; pause/resume is belt-and-braces (e.g. after the tab was
+  // backgrounded and iOS re-suspended the context).
+  const handleStartWithUnlock = useCallback(() => {
+    unlockAudioPlayback();
+    unlockAudioContext();
+    handleStart();
+  }, [handleStart]);
+
   const handlePauseResumeFromOverlay = useCallback(() => {
+    unlockAudioPlayback();
+    unlockAudioContext();
     handlePauseResume();
     extendControlsTimer();
   }, [handlePauseResume, extendControlsTimer]);
@@ -365,54 +379,20 @@ export default function WorkoutPlayer({
   };
 
   // Auto-shrink the movement-name font so the name fits the fixed title
-  // module without mid-word breaks. Picks the largest tier where (a) the
-  // longest word fits on a single line at the available inner width and
-  // (b) greedy word-wrap produces ≤ NAME_MAX_LINES lines. Heuristic uses an
-  // estimated char-width factor for the FH bold headline font — deliberately
-  // a touch conservative so narrow characters aren't penalized. Scale-free:
-  // computed in BASE units (both font size and available width scale by the
-  // same factor), so the picked tier is identical on every screen size.
+  // module without mid-word breaks. Tier-picking algorithm lives in
+  // WorkoutPlayer.helpers.ts (pickNameTier) — scale-free: computed in BASE
+  // units (both font size and available width scale by the same factor), so
+  // the picked tier is identical on every screen size.
   const NAME_MAX_LINES = 3;
-  const NAME_CHAR_W_FACTOR = 0.62;
-  const NAME_TIERS: readonly { size: number; line: number }[] = [
-    { size: 40, line: 44 },
-    { size: 34, line: 38 },
-    { size: 28, line: 32 },
-    { size: 24, line: 28 },
-    { size: 20, line: 24 },
-    { size: 17, line: 21 },
-    { size: 14, line: 18 },
-  ];
   const getNameFontStyle = (
     text: string,
     baseAvailWidth: number,
     maxLines: number = NAME_MAX_LINES,
     maxFontSize?: number,
+    maxHeight?: number,
   ): { fontSize: number; lineHeight: number } => {
-    const words = (text || '').trim().split(/\s+/).filter(Boolean);
-    if (words.length === 0) {
-      const top = NAME_TIERS.find(t => maxFontSize == null || t.size <= maxFontSize) ?? NAME_TIERS[NAME_TIERS.length - 1];
-      return { fontSize: fs(top.size), lineHeight: fs(top.line) };
-    }
-    const longestWordLen = words.reduce((n, w) => (w.length > n ? w.length : n), 0);
-    for (const t of NAME_TIERS) {
-      if (maxFontSize != null && t.size > maxFontSize) continue;
-      const charW = t.size * NAME_CHAR_W_FACTOR;
-      if (longestWordLen * charW > baseAvailWidth) continue;
-      const maxCharsPerLine = Math.max(1, Math.floor(baseAvailWidth / charW));
-      let lines = 1;
-      let curr = 0;
-      for (const w of words) {
-        if (curr === 0) curr = w.length;
-        else if (curr + 1 + w.length <= maxCharsPerLine) curr += 1 + w.length;
-        else { lines += 1; curr = w.length; }
-      }
-      if (lines <= maxLines) {
-        return { fontSize: fs(t.size), lineHeight: fs(t.line) };
-      }
-    }
-    const last = NAME_TIERS[NAME_TIERS.length - 1];
-    return { fontSize: fs(last.size), lineHeight: fs(last.line) };
+    const t = pickNameTier(text, baseAvailWidth, maxLines, maxFontSize, maxHeight);
+    return { fontSize: fs(t.size), lineHeight: fs(t.line) };
   };
 
   // Inner content width of titleColumn in BASE units. titleColumn has
@@ -433,7 +413,7 @@ export default function WorkoutPlayer({
   // 112-unit title module; the work phase keeps the original 3-line budget.
   const renderAutoFitTitle = (
     text: string,
-    opts: { hasTimer?: boolean; maxLines?: number; color?: string; marginTop?: number; maxFontSize?: number } = {},
+    opts: { hasTimer?: boolean; maxLines?: number; color?: string; marginTop?: number; maxFontSize?: number; maxHeight?: number } = {},
   ): React.ReactNode => {
     const hasTimer = opts.hasTimer ?? true;
     const maxLines = opts.maxLines ?? NAME_MAX_LINES;
@@ -447,7 +427,7 @@ export default function WorkoutPlayer({
           st.workMovementName,
           { color },
           opts.marginTop != null ? { marginTop: fs(opts.marginTop) } : null,
-          getNameFontStyle(text, baseWidth, maxLines, opts.maxFontSize),
+          getNameFontStyle(text, baseWidth, maxLines, opts.maxFontSize, opts.maxHeight),
           Platform.OS === 'web'
             ? ({ wordBreak: 'normal', overflowWrap: 'break-word' } as any)
             : null,
@@ -999,7 +979,7 @@ export default function WorkoutPlayer({
                   style={{ width: 140, height: 46, marginBottom: 12 }}
                   resizeMode="contain"
                 />
-                <TouchableOpacity style={st.readyPlayBtn} onPress={handleStart}>
+                <TouchableOpacity style={st.readyPlayBtn} onPress={handleStartWithUnlock}>
                   <Icon name="play" size={32} color="#0E1117" />
                 </TouchableOpacity>
               </View>
@@ -1180,18 +1160,34 @@ export default function WorkoutPlayer({
         {phase === 'grabEquipment' && current && (
           <View style={[st.workContainer, webSafeBottomStyle]}>
             {renderLogoSlot()}
+            {/* Compact header: no gold timer column — a small label + inline
+                timer pill row frees the full slot width for the instruction
+                text, which auto-fits up to 4 lines so long coach prose never
+                ellipsizes. Other phases keep the standard timer column. */}
             {renderTitleTimerSlot(
               <>
-                <Text style={[st.restPhaseLabel, { color: '#FB923C', fontSize: scaledLabels.restPhase }]}>GRAB EQUIPMENT</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: fs(8), marginBottom: fs(4) }}>
+                  <Text style={[st.restPhaseLabel, { color: '#FB923C', fontSize: fs(13), letterSpacing: fs(1.5) }]}>GRAB EQUIPMENT</Text>
+                  <View style={{
+                    backgroundColor: '#F5A623',
+                    borderRadius: fs(14),
+                    paddingHorizontal: fs(10),
+                    paddingVertical: fs(2),
+                    minWidth: fs(42),
+                    alignItems: 'center',
+                  }}>
+                    <Text style={[st.goldTimerText, { fontSize: fs(18), lineHeight: fs(22) }]}>{formatTime(timeLeft)}</Text>
+                  </View>
+                </View>
                 {renderAutoFitTitle(current.grabEquipmentText || current.name, {
-                  hasTimer: true,
-                  maxLines: 2,
-                  maxFontSize: 34,
+                  hasTimer: false,
+                  maxLines: 4,
+                  maxFontSize: 28,
+                  maxHeight: 78,
                   color: '#F0F4F8',
-                  marginTop: 2,
                 })}
               </>,
-              renderGoldTimer(formatTime(timeLeft)),
+              null,
             )}
             <View style={st.mediaSlot}>
               <View style={[st.mediaInner, mediaInnerSize]}>
