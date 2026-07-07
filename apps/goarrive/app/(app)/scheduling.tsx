@@ -21,6 +21,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
+import { ModuleGate } from '../../lib/useCoachModules';
 import { AppHeader } from '../../components/AppHeader';
 import { Icon } from '../../components/Icon';
 import {
@@ -103,6 +104,14 @@ const STATUS_DISPLAY: Record<string, { label: string; color: string }> = {
 };
 
 export default function SchedulingScreen() {
+  return (
+    <ModuleGate module="scheduling">
+      <SchedulingScreenInner />
+    </ModuleGate>
+  );
+}
+
+function SchedulingScreenInner() {
   const { user, claims, effectiveUid } = useAuth();
   const router = useRouter();
   const coachId = effectiveUid || claims?.coachId || user?.uid || '';

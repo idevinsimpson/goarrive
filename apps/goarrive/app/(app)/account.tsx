@@ -22,6 +22,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../../components/Icon';
 import { useAuth } from '../../lib/AuthContext';
+import { ModuleGate } from '../../lib/useCoachModules';
 import StripeConnectPanel from '../../components/StripeConnectPanel';
 import {
   doc,
@@ -56,6 +57,14 @@ interface Props {
 }
 
 export default function AccountScreen({ onClose }: Props) {
+  return (
+    <ModuleGate module="account">
+      <AccountScreenInner onClose={onClose} />
+    </ModuleGate>
+  );
+}
+
+function AccountScreenInner({ onClose }: Props) {
   const insets = useSafeAreaInsets();
   const { user, claims, signOut, effectiveUid } = useAuth();
 

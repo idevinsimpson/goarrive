@@ -98,9 +98,13 @@ service cloud.firestore {
       allow list: if true;
       allow get: if isOwnDoc(coachId) || isPlatformAdmin();
       // Coaches can update their own scheduling settings
-      allow update: if isOwnDoc(coachId)
+      allow update: if (isOwnDoc(coachId)
                     && request.resource.data.diff(resource.data).affectedKeys()
-                        .hasOnly(['noShowGraceMinutes', 'autoApproveSkipCategories', 'autoApproveSkipLeadDays', 'icalToken']);
+                        .hasOnly(['noShowGraceMinutes', 'autoApproveSkipCategories', 'autoApproveSkipLeadDays', 'icalToken']))
+                    // Platform admin can toggle per-coach module visibility (only this key)
+                    || (isPlatformAdmin()
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['enabledModules']));
       allow create, delete: if false; // Cloud Functions only (Admin SDK)
 
       // Slot templates — coach manages their own templates
