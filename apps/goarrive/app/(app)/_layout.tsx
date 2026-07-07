@@ -21,6 +21,8 @@ export default function AppLayout() {
   const { modules } = useCoachModules();
   const insets = useSafeAreaInsets();
   const bannerTopPad = Platform.OS === 'web' ? Math.max(6, insets.top) : 6;
+  // When every gateable tab is off, only Dashboard would remain — hide the whole bar
+  const allTabsHidden = !modules.members && !modules.build && !modules.scheduling;
 
   if (loading) {
     return (
@@ -66,7 +68,7 @@ export default function AppLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: TAB_BAR_STYLE,
+        tabBarStyle: allTabsHidden ? { ...TAB_BAR_STYLE, display: 'none' } : TAB_BAR_STYLE,
         tabBarActiveTintColor: ACTIVE_COLOR,
         tabBarInactiveTintColor: INACTIVE_COLOR,
         tabBarLabelStyle: {
