@@ -144,6 +144,31 @@ type CueKey = keyof typeof CUES;
 // count + the static cue keys, so unbounded growth isn't a concern.
 const audioPool: Record<string, HTMLAudioElement> = {};
 
+// Drop every pooled element. Called when the player unmounts: pooled elements
+// frozen mid-clip survive unmount (module-level pool), and on the next player
+// session iOS Safari can resolve play() on a wedged element without actually
+// playing, leaving all audio silent. Pooling WITHIN a single player session
+// must stay — see the comment above. Also drops the blessed generic players
+// and re-arms unlockAudioPlayback so the next Start tap rebuilds everything
+// from scratch inside a fresh user gesture, exactly like a first session.
+export function resetAudioPool(): void {
+  for (const key of Object.keys(audioPool)) {
+    try {
+      audioPool[key].pause();
+      audioPool[key].removeAttribute('src');
+    } catch {}
+    delete audioPool[key];
+  }
+  for (const el of blessedGenericPlayers) {
+    try {
+      el.pause();
+      el.removeAttribute('src');
+    } catch {}
+  }
+  blessedGenericPlayers.length = 0;
+  audioUnlocked = false;
+}
+
 function poolKeyForCue(key: CueKey): string {
   return `cue:${key}`;
 }
@@ -1191,6 +1216,10 @@ export function useWorkoutTTS({
           Speech.stop();
         }
       } catch {}
+      // The player unmounts on close in every surface (preview, member play,
+      // share link), so this is the leave-player path: drop the pooled
+      // elements so the next session starts with fresh ones.
+      resetAudioPool();
     };
   }, []);
 
