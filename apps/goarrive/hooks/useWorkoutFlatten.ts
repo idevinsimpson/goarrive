@@ -13,6 +13,12 @@
  * Exercise movements become FlatStep objects with `stepType: 'exercise'`.
  *
  * The player reads `stepType` to decide which render screen to show.
+ *
+ * IMPORTANT: share-link viewers get workout data through the resolveShareToken
+ * cloud function, which strips fields via an explicit allowlist in
+ * functions/src/workoutPlayerSanitizer.ts. If you read a NEW block/movement/
+ * workout field here (or in WorkoutPlayer/useWorkoutTimer/useWorkoutTTS), add
+ * it to that allowlist too — otherwise share links silently lose it.
  */
 import { useMemo } from 'react';
 import { calculateAdjustedRest } from './useRestAutoAdjust';

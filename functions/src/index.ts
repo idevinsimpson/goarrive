@@ -79,6 +79,7 @@ import {
 } from './zoomRtms';
 import WebSocket from 'ws';
 import { CloudTasksClient } from '@google-cloud/tasks';
+import { sanitizePlayerWorkout } from './workoutPlayerSanitizer';
 
 // ── Slack Bot (ME-011, ME-012) ────────────────────────────────────────────────
 export { slackEvents } from './slack';
@@ -9711,71 +9712,12 @@ export const resolveShareToken = onRequest(
       }
     }
 
-    const sanitizedBlocks = (workout.blocks || []).map((block: any) => ({
-      type: block.type || 'Block',
-      name: block.name || '',
-      label: block.label || '',
-      movements: (block.movements || []).map((m: any) => {
-        const canonical = m.movementId ? movementCanonical[m.movementId] : undefined;
-        // Canonical voiceUrl + name win for audio/identity so a rename or
-        // re-recording in the library propagates to share-link viewers.
-        const resolvedName = (canonical?.name && canonical.name.trim())
-          || m.movementName
-          || m.name
-          || '';
-        const resolvedVoiceUrl = canonical?.voiceUrl || m.voiceUrl || null;
-        return ({
-        movementId: m.movementId || '',
-        movementName: resolvedName,
-        name: resolvedName,
-        category: m.category || '',
-        muscleGroup: m.muscleGroup || '',
-        videoUrl: m.videoUrl || null,
-        mediaUrl: m.mediaUrl || null,
-        thumbnailUrl: m.thumbnailUrl || null,
-        voiceUrl: resolvedVoiceUrl,
-        nextUpVoiceUrl: m.nextUpVoiceUrl || null,
-        sets: m.sets || 0,
-        reps: m.reps || '',
-        duration: m.duration || 0,
-        durationSec: m.durationSec || 0,
-        workSec: m.workSec || 0,
-        restSec: m.restSec || 0,
-        restSeconds: m.restSeconds || 0,
-        swapSides: m.swapSides ?? false,
-        swapMode: m.swapMode ?? 'split',
-        swapWindowSec: m.swapWindowSec ?? 5,
-        showOnPreview: m.showOnPreview ?? true,
-        description: m.description || '',
-        coachingCues: m.coachingCues || '',
-        notes: m.notes || '',
-        cropScale: m.cropScale ?? 1,
-        cropTranslateX: m.cropTranslateX ?? 0,
-        cropTranslateY: m.cropTranslateY ?? 0,
-      });
-      }),
-      restBetweenSets: block.restBetweenSets || 0,
-      restBetweenSec: block.restBetweenSec || 0,
-      restBetweenRoundsSec: block.restBetweenRoundsSec || 0,
-      restBetweenMovementsSec: block.restBetweenMovementsSec || 0,
-      circuitStartRestSec: block.circuitStartRestSec || 0,
-      rounds: block.rounds || 1,
-      showDemo: block.showDemo ?? false,
-      demoDurationSec: block.demoDurationSec || 0,
-    }));
-
     res.status(200).json({
       authenticated: isAuthenticated,
       teaser,
       workout: {
         id: tokenData.workoutId,
-        name: workout.name || 'Workout',
-        description: workout.description || '',
-        category: workout.category || null,
-        difficulty: workout.difficulty || null,
-        estimatedDurationMin: workout.estimatedDurationMin || null,
-        tags: workout.tags || [],
-        blocks: sanitizedBlocks,
+        ...sanitizePlayerWorkout(workout, movementCanonical),
       },
     });
   },
