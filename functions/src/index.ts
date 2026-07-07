@@ -9406,6 +9406,8 @@ export const getEmbeddedSessionJoinConfig = onCall(
 // ─── Workout Share Links ─────────────────────────────────────────────────────
 
 import * as crypto from 'crypto';
+import { generateWorkoutOgImage } from './ogImage';
+export { shareMeta } from './shareMeta';
 
 type ShareVisibility = 'restricted' | 'anyone_with_link' | 'anyone_with_link_signin_required';
 const VALID_VISIBILITIES: ShareVisibility[] = ['restricted', 'anyone_with_link', 'anyone_with_link_signin_required'];
@@ -9421,7 +9423,7 @@ function normalizeExpiresAt(input: unknown): admin.firestore.Timestamp | null {
   return admin.firestore.Timestamp.fromMillis(ms);
 }
 
-export const createShareToken = onCall(async (request) => {
+export const createShareToken = onCall({ memory: '512MiB' }, async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Must be signed in.');
   }
@@ -9461,6 +9463,14 @@ export const createShareToken = onCall(async (request) => {
   if (!existingTokens.empty) {
     const existing = existingTokens.docs[0];
     const data = existing.data();
+    if (!data.ogImageUrl) {
+      // Backfill OG image for tokens minted before OG images existed.
+      try {
+        await generateWorkoutOgImage(existing.id, workoutData);
+      } catch (err) {
+        console.warn('[createShareToken] OG image backfill failed:', err);
+      }
+    }
     return {
       shareId: existing.id,
       alreadyExists: true,
@@ -9487,6 +9497,14 @@ export const createShareToken = onCall(async (request) => {
     firstResolvedAt: null,
     lastResolvedAt: null,
   });
+
+  // Best-effort: a share link without an OG image still works — crawlers just
+  // get text-only meta until the lazy backfill in shareMeta fills it in.
+  try {
+    await generateWorkoutOgImage(shareId, workoutData);
+  } catch (err) {
+    console.warn('[createShareToken] OG image generation failed:', err);
+  }
 
   return {
     shareId,
