@@ -16,6 +16,7 @@ import {
   Platform,
 } from 'react-native';
 import { useAuth } from '../../lib/AuthContext';
+import { useCoachModules, ModuleKey } from '../../lib/useCoachModules';
 import { db } from '../../lib/firebase';
 import {
   collection,
@@ -46,6 +47,7 @@ interface FeatureCard {
   week: string;
   color: string;
   route: '/(app)/movements' | '/(app)/workouts' | '/(app)/members' | '/(app)/admin' | '/(app)/billing' | '/(app)/scheduling' | '/(app)/build';
+  module?: ModuleKey;
 }
 
 const FEATURE_CARDS: FeatureCard[] = [
@@ -55,6 +57,7 @@ const FEATURE_CARDS: FeatureCard[] = [
     week: '',
     color: '#C084FC',
     route: '/(app)/members',
+    module: 'members',
   },
   {
     title: 'Build',
@@ -62,6 +65,7 @@ const FEATURE_CARDS: FeatureCard[] = [
     week: '',
     color: '#86EFAC',
     route: '/(app)/build',
+    module: 'build',
   },
   {
     title: 'Member List',
@@ -69,6 +73,7 @@ const FEATURE_CARDS: FeatureCard[] = [
     week: '',
     color: '#F5A623',
     route: '/(app)/members',
+    module: 'members',
   },
   {
     title: 'Scheduling',
@@ -76,6 +81,7 @@ const FEATURE_CARDS: FeatureCard[] = [
     week: '',
     color: '#34D399',
     route: '/(app)/scheduling',
+    module: 'scheduling',
   },
   {
     title: 'Billing',
@@ -83,6 +89,7 @@ const FEATURE_CARDS: FeatureCard[] = [
     week: '',
     color: '#F5A623',
     route: '/(app)/billing',
+    module: 'billing',
   },
 ];
 
@@ -99,6 +106,7 @@ const ADMIN_CARDS: FeatureCard[] = [
 
 export default function DashboardScreen() {
   const { user, claims, effectiveUid, adminCoachOverride } = useAuth();
+  const { modules } = useCoachModules();
   // Use effectiveUid for all queries — when admin override is active, this is the impersonated coach's UID
   const coachId = effectiveUid || claims?.coachId || user?.uid || '';
   const isAdmin = claims?.role === 'admin' || claims?.role === 'platform_admin' || claims?.role === 'platformAdmin' || claims?.admin === true;
@@ -342,7 +350,7 @@ export default function DashboardScreen() {
         </View>
 
         {/* Coach Launch entry — guided journey */}
-        <CoachLaunchCard />
+        {modules.coachLaunch && <CoachLaunchCard />}
 
         {/* Onboarding checklist */}
         <OnboardingChecklist />
@@ -357,7 +365,9 @@ export default function DashboardScreen() {
         </View>
 
         <View style={s.featureList}>
-          {[...FEATURE_CARDS, ...(role === 'platformAdmin' ? ADMIN_CARDS : [])].map((card) => (
+          {[...FEATURE_CARDS, ...(role === 'platformAdmin' ? ADMIN_CARDS : [])]
+            .filter((card) => !card.module || modules[card.module])
+            .map((card) => (
             <Pressable
               key={card.title}
               style={({ pressed }) => [s.featureCard, pressed && s.featureCardPressed]}

@@ -35,6 +35,7 @@ import {
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../lib/AuthContext';
+import { ModuleGate } from '../../lib/useCoachModules';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const BG = '#0E1117';
@@ -197,6 +198,14 @@ interface Task {
 }
 
 export default function BillingDashboard() {
+  return (
+    <ModuleGate module="billing">
+      <BillingDashboardInner />
+    </ModuleGate>
+  );
+}
+
+function BillingDashboardInner() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { claims, effectiveUid } = useAuth();

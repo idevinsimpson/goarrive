@@ -45,6 +45,7 @@ import {
 } from 'firebase/firestore';
 import { useNavigation } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
+import { ModuleGate } from '../../lib/useCoachModules';
 import { db } from '../../lib/firebase';
 import { TAB_BAR_STYLE } from '../../lib/tabBarStyle';
 import { AppHeader } from '../../components/AppHeader';
@@ -237,9 +238,11 @@ class BuildErrorBoundary extends Component<{ children: React.ReactNode }, { hasE
 
 export default function BuildScreenWrapper() {
   return (
-    <BuildErrorBoundary>
-      <BuildScreenInner />
-    </BuildErrorBoundary>
+    <ModuleGate module="build">
+      <BuildErrorBoundary>
+        <BuildScreenInner />
+      </BuildErrorBoundary>
+    </ModuleGate>
   );
 }
 

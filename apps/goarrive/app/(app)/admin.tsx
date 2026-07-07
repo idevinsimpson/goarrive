@@ -14,7 +14,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TextInput, Pressable, ScrollView, TouchableOpacity,
-  StyleSheet, Platform, ActivityIndicator, Share, Linking, Alert,
+  StyleSheet, Platform, ActivityIndicator, Share, Linking, Alert, Switch,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../../components/Icon';
@@ -32,7 +32,10 @@ import {
   onSnapshot,
   limit,
   Timestamp,
+  doc,
+  updateDoc,
 } from 'firebase/firestore';
+import { MODULE_KEYS, MODULE_LABELS, resolveModules, type ModuleKey } from '../../lib/useCoachModules';
 import { db, functions } from '../../lib/firebase';
 import type {
   SessionInstance,
@@ -69,7 +72,7 @@ const PURPLE = '#A78BFA';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 const FH = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Medium';
 
-interface CoachRow { uid: string; name: string; email: string; createdAt?: number; stripeReady?: boolean; }
+interface CoachRow { uid: string; name: string; email: string; createdAt?: number; stripeReady?: boolean; enabledModules?: Record<string, boolean>; }
 
 interface PendingInvite { id: string; email: string; displayName: string; status: string; createdAt?: any; expiresAt?: number; }
 
@@ -183,7 +186,7 @@ export default function AdminScreen() {
       const rows: CoachRow[] = [];
       snap.forEach((doc) => {
         const d = doc.data();
-        rows.push({ uid: doc.id, name: d.name ?? '\u2014', email: d.email ?? '\u2014', createdAt: d.createdAt });
+        rows.push({ uid: doc.id, name: d.name ?? '\u2014', email: d.email ?? '\u2014', createdAt: d.createdAt, enabledModules: d.enabledModules });
       });
 
       // Fetch Stripe onboarding status for each coach
@@ -265,6 +268,27 @@ export default function AdminScreen() {
       setStripeData({ error: err.message });
     } finally {
       setLoadingStripe(false);
+    }
+  }, []);
+
+  // ── Toggle per-coach module visibility ───────────────────────────────────
+  const [togglingModule, setTogglingModule] = useState<string | null>(null);
+  const handleToggleModule = useCallback(async (coachUid: string, key: ModuleKey, value: boolean) => {
+    setTogglingModule(`${coachUid}:${key}`);
+    try {
+      const dbRef = getFirestore();
+      await updateDoc(doc(dbRef, 'coaches', coachUid), { [`enabledModules.${key}`]: value });
+      setCoaches(prev => prev.map(r =>
+        r.uid === coachUid
+          ? { ...r, enabledModules: { ...(r.enabledModules ?? {}), [key]: value } }
+          : r
+      ));
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to update module access';
+      if (Platform.OS === 'web') alert(msg);
+      else Alert.alert('Error', msg);
+    } finally {
+      setTogglingModule(null);
     }
   }, []);
 
@@ -1495,6 +1519,30 @@ export default function AdminScreen() {
                             {settingYearlyCap ? 'Setting...' : 'Set Yearly Cap'}
                           </Text>
                         </TouchableOpacity>
+                      </View>
+
+                      {/* Module Access — per-coach feature gating */}
+                      <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+                        <View style={{ backgroundColor: '#0E1117', borderRadius: 8, padding: 12 }}>
+                          <Text style={{ color: GOLD, fontSize: 13, fontWeight: '700', marginBottom: 2 }}>Module Access</Text>
+                          <Text style={{ color: MUTED, fontSize: 11, marginBottom: 8 }}>Dashboard is always visible. Toggles apply instantly.</Text>
+                          {MODULE_KEYS.map((key) => {
+                            const enabled = resolveModules(c.enabledModules)[key];
+                            const busy = togglingModule === `${c.uid}:${key}`;
+                            return (
+                              <View key={key} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 }}>
+                                <Text style={{ color: TEXT_CLR, fontSize: 12 }}>{MODULE_LABELS[key]}</Text>
+                                <Switch
+                                  value={enabled}
+                                  disabled={busy}
+                                  onValueChange={(v) => handleToggleModule(c.uid, key, v)}
+                                  trackColor={{ false: '#2A3347', true: GOLD }}
+                                  thumbColor="#FFF"
+                                />
+                              </View>
+                            );
+                          })}
+                        </View>
                       </View>
 
                       {/* Stripe Data Panel */}

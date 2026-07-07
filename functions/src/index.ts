@@ -1770,6 +1770,18 @@ export const activateCtsOptIn = onCall(
   }
 );
 
+// Default module visibility for newly created coaches — core loop on,
+// scheduling/billing off until a platform admin enables them.
+// Missing key = enabled, so existing coaches are unaffected.
+const NEW_COACH_DEFAULT_MODULES = {
+  members: true,
+  build: true,
+  scheduling: false,
+  billing: false,
+  account: true,
+  coachLaunch: true,
+};
+
 // ── 8. addCoach — Admin-only: create a new coach account ─────────────────────
 // Creates a Firebase Auth user, sets custom claims, and writes a coaches doc.
 // Only callers with admin: true in their custom claims may invoke this.
@@ -1831,6 +1843,7 @@ export const addCoach = onCall(
       role: 'coach',
       createdAt: Date.now(),
       createdBy: callerUid,
+      enabledModules: NEW_COACH_DEFAULT_MODULES,
     });
 
     // 6. Generate password reset link and send via Firebase's built-in email
@@ -1985,6 +1998,7 @@ export const activateCoachInvite = onCall(
       role: 'coach',
       createdAt: Date.now(),
       invitedBy: invite.createdBy,
+      enabledModules: NEW_COACH_DEFAULT_MODULES,
     });
 
     // Mark invite as used
