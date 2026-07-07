@@ -34,8 +34,11 @@ import {
   Timestamp,
   doc,
   updateDoc,
+  arrayUnion,
+  arrayRemove,
 } from 'firebase/firestore';
 import { MODULE_KEYS, MODULE_LABELS, resolveModules, type ModuleKey } from '../../lib/useCoachModules';
+import { HIDEABLE_SETTINGS, HIDEABLE_SETTING_LABELS, type HideableSettingKey } from '../../lib/useHiddenSettings';
 import { db, functions } from '../../lib/firebase';
 import type {
   SessionInstance,
@@ -72,7 +75,7 @@ const PURPLE = '#A78BFA';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 const FH = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Medium';
 
-interface CoachRow { uid: string; name: string; email: string; createdAt?: number; stripeReady?: boolean; enabledModules?: Record<string, boolean>; }
+interface CoachRow { uid: string; name: string; email: string; createdAt?: number; stripeReady?: boolean; enabledModules?: Record<string, boolean>; hiddenSettings?: string[]; }
 
 interface PendingInvite { id: string; email: string; displayName: string; status: string; createdAt?: any; expiresAt?: number; }
 
@@ -186,7 +189,7 @@ export default function AdminScreen() {
       const rows: CoachRow[] = [];
       snap.forEach((doc) => {
         const d = doc.data();
-        rows.push({ uid: doc.id, name: d.name ?? '\u2014', email: d.email ?? '\u2014', createdAt: d.createdAt, enabledModules: d.enabledModules });
+        rows.push({ uid: doc.id, name: d.name ?? '\u2014', email: d.email ?? '\u2014', createdAt: d.createdAt, enabledModules: d.enabledModules, hiddenSettings: Array.isArray(d.hiddenSettings) ? d.hiddenSettings : [] });
       });
 
       // Fetch Stripe onboarding status for each coach
@@ -289,6 +292,34 @@ export default function AdminScreen() {
       else Alert.alert('Error', msg);
     } finally {
       setTogglingModule(null);
+    }
+  }, []);
+
+  // ── Toggle per-coach hidden settings sections ─────────────────────────────
+  const [togglingSetting, setTogglingSetting] = useState<string | null>(null);
+  const handleToggleHiddenSetting = useCallback(async (coachUid: string, key: HideableSettingKey, visible: boolean) => {
+    setTogglingSetting(`${coachUid}:${key}`);
+    try {
+      const dbRef = getFirestore();
+      await updateDoc(doc(dbRef, 'coaches', coachUid), {
+        hiddenSettings: visible ? arrayRemove(key) : arrayUnion(key),
+      });
+      setCoaches(prev => prev.map(r =>
+        r.uid === coachUid
+          ? {
+              ...r,
+              hiddenSettings: visible
+                ? (r.hiddenSettings ?? []).filter(k => k !== key)
+                : [...(r.hiddenSettings ?? []), key],
+            }
+          : r
+      ));
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to update settings visibility';
+      if (Platform.OS === 'web') alert(msg);
+      else Alert.alert('Error', msg);
+    } finally {
+      setTogglingSetting(null);
     }
   }, []);
 
@@ -1536,6 +1567,32 @@ export default function AdminScreen() {
                                   value={enabled}
                                   disabled={busy}
                                   onValueChange={(v) => handleToggleModule(c.uid, key, v)}
+                                  trackColor={{ false: '#2A3347', true: GOLD }}
+                                  thumbColor="#FFF"
+                                />
+                              </View>
+                            );
+                          })}
+                        </View>
+                      </View>
+
+                      {/* Coach Settings Visibility — hide account settings sections from this coach */}
+                      <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+                        <View style={{ backgroundColor: '#0E1117', borderRadius: 8, padding: 12 }}>
+                          <Text style={{ color: GOLD, fontSize: 13, fontWeight: '700', marginBottom: 2 }}>Coach Settings Visibility</Text>
+                          <Text style={{ color: MUTED, fontSize: 11, marginBottom: 8 }}>
+                            Toggle off to hide a settings section from this coach. You still see hidden sections (tagged) while viewing as the coach.
+                          </Text>
+                          {HIDEABLE_SETTINGS.map((key) => {
+                            const visible = !(c.hiddenSettings ?? []).includes(key);
+                            const busy = togglingSetting === `${c.uid}:${key}`;
+                            return (
+                              <View key={key} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 }}>
+                                <Text style={{ color: TEXT_CLR, fontSize: 12 }}>{HIDEABLE_SETTING_LABELS[key]}</Text>
+                                <Switch
+                                  value={visible}
+                                  disabled={busy}
+                                  onValueChange={(v) => handleToggleHiddenSetting(c.uid, key, v)}
                                   trackColor={{ false: '#2A3347', true: GOLD }}
                                   thumbColor="#FFF"
                                 />

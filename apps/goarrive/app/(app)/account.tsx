@@ -18,11 +18,15 @@ import {
   TextInput,
   Alert,
   Linking,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../../components/Icon';
 import { useAuth } from '../../lib/AuthContext';
 import { ModuleGate } from '../../lib/useCoachModules';
+import { useEffectiveProfile } from '../../lib/useEffectiveProfile';
+import { useHiddenSettings, HideableSettingKey } from '../../lib/useHiddenSettings';
+import { HiddenFromCoachTag } from '../../components/HiddenFromCoachTag';
 import StripeConnectPanel from '../../components/StripeConnectPanel';
 import {
   doc,
@@ -67,14 +71,12 @@ export default function AccountScreen({ onClose }: Props) {
 function AccountScreenInner({ onClose }: Props) {
   const insets = useSafeAreaInsets();
   const { user, claims, signOut, effectiveUid } = useAuth();
+  const { displayName, initials, photoURL, email, impersonating } = useEffectiveProfile();
+  const { isHidden } = useHiddenSettings();
 
-  const displayName = user?.displayName ?? user?.email ?? 'User';
-  const initials = displayName
-    .split(' ')
-    .map((n: string) => n[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
+  // Hidden sections: skipped for the coach, rendered with a tag for an
+  // impersonating admin so the admin can see what is hidden.
+  const showSection = (key: HideableSettingKey) => !isHidden(key) || impersonating;
 
   async function handleSignOut() {
     await signOut();
@@ -106,35 +108,54 @@ function AccountScreenInner({ onClose }: Props) {
         {/* Avatar */}
         <View style={s.avatarWrap}>
           <View style={s.avatar}>
-            <Text style={s.avatarText}>{initials}</Text>
+            {photoURL ? (
+              <Image source={{ uri: photoURL }} style={s.avatarImage} />
+            ) : (
+              <Text style={s.avatarText}>{initials}</Text>
+            )}
           </View>
           <Text style={s.name}>{displayName}</Text>
-          <Text style={s.email}>{user?.email ?? '—'}</Text>
+          {!!email && <Text style={s.email}>{email}</Text>}
         </View>
 
         {/* Stripe Connect — coaches only */}
-        {coachId && (
-          <StripeConnectPanel coachId={coachId} />
+        {coachId && showSection('stripe') && (
+          <SectionWrap hidden={isHidden('stripe')}>
+            <StripeConnectPanel coachId={coachId} impersonating={impersonating} />
+          </SectionWrap>
         )}
 
         {/* Personal Zoom Connection — coaches only */}
-        {coachId && (
-          <CoachZoomPanel coachId={coachId} />
+        {coachId && showSection('zoom') && (
+          <SectionWrap hidden={isHidden('zoom')}>
+            <CoachZoomPanel coachId={coachId} impersonating={impersonating} />
+          </SectionWrap>
         )}
 
         {/* No-Show Grace Period — coaches only */}
-        {coachId && (
-          <NoShowGracePanel coachId={coachId} />
+        {coachId && showSection('noShowGrace') && (
+          <SectionWrap hidden={isHidden('noShowGrace')}>
+            <NoShowGracePanel coachId={coachId} />
+          </SectionWrap>
         )}
 
         {/* Skip Auto-Approval Rules — coaches only */}
-        {coachId && (
-          <SkipAutoApprovalPanel coachId={coachId} />
+        {coachId && showSection('skipAutoApproval') && (
+          <SectionWrap hidden={isHidden('skipAutoApproval')}>
+            <SkipAutoApprovalPanel coachId={coachId} />
+          </SectionWrap>
         )}
 
         {/* iCal Subscription URL — coaches only */}
-        {coachId && (
-          <ICalSyncPanel coachId={coachId} />
+        {coachId && showSection('icalSync') && (
+          <SectionWrap hidden={isHidden('icalSync')}>
+            <ICalSyncPanel
+              coachId={coachId}
+              impersonating={impersonating}
+              googleCalendarHidden={isHidden('googleCalendar')}
+              showGoogleCalendar={showSection('googleCalendar')}
+            />
+          </SectionWrap>
         )}
 
         {/* Sign out */}
@@ -147,6 +168,17 @@ function AccountScreenInner({ onClose }: Props) {
   );
 }
 
+// ─── Section wrapper — "Hidden from coach" tag for impersonating admins ─────
+
+function SectionWrap({ hidden, children }: { hidden: boolean; children: React.ReactNode }) {
+  return (
+    <View style={{ width: '100%', maxWidth: 400, gap: 4 }}>
+      {hidden && <HiddenFromCoachTag />}
+      {children}
+    </View>
+  );
+}
+
 // ─── Coach Zoom Connection Panel ────────────────────────────────────────────
 
 interface PersonalZoomRoom {
@@ -155,7 +187,7 @@ interface PersonalZoomRoom {
   status: string;
 }
 
-function CoachZoomPanel({ coachId }: { coachId: string }) {
+function CoachZoomPanel({ coachId, impersonating }: { coachId: string; impersonating?: boolean }) {
   const [connection, setConnection] = useState<PersonalZoomRoom | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -311,21 +343,30 @@ function CoachZoomPanel({ coachId }: { coachId: string }) {
             <Text style={zs.infoLabel}>Zoom Email</Text>
             <Text style={zs.infoValue}>{connection?.zoomEmail || '—'}</Text>
           </View>
-          <View style={zs.actionRow}>
-            <Pressable style={zs.editBtn} onPress={() => { setEditing(true); setEmailInput(connection?.zoomEmail || ''); }}>
-              <Icon name="edit" size={14} color={GOLD} />
-              <Text style={zs.editBtnText}>Update</Text>
-            </Pressable>
-            <Pressable style={zs.disconnectBtn} onPress={handleDisconnect}>
-              <Icon name="close" size={14} color={RED} />
-              <Text style={zs.disconnectBtnText}>Disconnect</Text>
-            </Pressable>
-          </View>
+          {impersonating ? (
+            // manageZoomRoom runs as the signed-in user (the admin), so these
+            // actions would modify the admin's own Zoom record, not the coach's.
+            <Text style={zs.hint}>Update and disconnect are available to the coach only.</Text>
+          ) : (
+            <View style={zs.actionRow}>
+              <Pressable style={zs.editBtn} onPress={() => { setEditing(true); setEmailInput(connection?.zoomEmail || ''); }}>
+                <Icon name="edit" size={14} color={GOLD} />
+                <Text style={zs.editBtnText}>Update</Text>
+              </Pressable>
+              <Pressable style={zs.disconnectBtn} onPress={handleDisconnect}>
+                <Icon name="close" size={14} color={RED} />
+                <Text style={zs.disconnectBtnText}>Disconnect</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
       )}
 
       {/* Edit / Connect form */}
-      {(!isConnected || editing) && (
+      {(!isConnected || editing) && impersonating && (
+        <Text style={zs.hint}>Connecting Zoom is available to the coach only.</Text>
+      )}
+      {(!isConnected || editing) && !impersonating && (
         <View style={zs.form}>
           <Text style={zs.inputLabel}>Zoom Account Email</Text>
           <TextInput
@@ -597,7 +638,17 @@ function SkipAutoApprovalPanel({ coachId }: { coachId: string }) {
 
 // ─── iCal Subscription URL Panel ──────────────────────────────────────────────
 
-function ICalSyncPanel({ coachId }: { coachId: string }) {
+function ICalSyncPanel({
+  coachId,
+  impersonating,
+  googleCalendarHidden,
+  showGoogleCalendar,
+}: {
+  coachId: string;
+  impersonating?: boolean;
+  googleCalendarHidden?: boolean;
+  showGoogleCalendar?: boolean;
+}) {
   const [copied, setCopied] = useState(false);
   const [icalToken, setIcalToken] = useState<string | null>(null);
   const [regenerating, setRegenerating] = useState(false);
@@ -709,22 +760,29 @@ function ICalSyncPanel({ coachId }: { coachId: string }) {
           <Icon name={copied ? 'check' : 'copy'} size={16} color="#FFF" />
           <Text style={zs.connectBtnText}>{copied ? 'Copied!' : 'Copy iCal URL'}</Text>
         </Pressable>
-        <Pressable
-          style={[zs.connectBtn, { backgroundColor: '#374151', paddingHorizontal: 12 }]}
-          onPress={handleRegenerate}
-          disabled={regenerating}
-        >
-          {regenerating
-            ? <ActivityIndicator size="small" color="#FFF" />
-            : <Icon name="refresh" size={16} color="#FFF" />
-          }
-        </Pressable>
+        {!impersonating && (
+          <Pressable
+            style={[zs.connectBtn, { backgroundColor: '#374151', paddingHorizontal: 12 }]}
+            onPress={handleRegenerate}
+            disabled={regenerating}
+          >
+            {regenerating
+              ? <ActivityIndicator size="small" color="#FFF" />
+              : <Icon name="refresh" size={16} color="#FFF" />
+            }
+          </Pressable>
+        )}
       </View>
       <Text style={[zs.hint, { marginTop: 6 }]}>
         Paste this URL as a calendar subscription (not a one-time import) so it stays updated. Use the refresh button to regenerate the token if compromised.
       </Text>
       {/* Google Calendar Bidirectional Sync */}
-      <GoogleCalendarSyncSection coachId={coachId} />
+      {showGoogleCalendar !== false && (
+        <>
+          {googleCalendarHidden && <HiddenFromCoachTag />}
+          <GoogleCalendarSyncSection coachId={coachId} impersonating={impersonating} />
+        </>
+      )}
     </View>
   );
 }
@@ -739,7 +797,7 @@ type GcalConflictAccount = {
   tokenExpired?: boolean;
 };
 
-function GoogleCalendarSyncSection({ coachId }: { coachId: string }) {
+function GoogleCalendarSyncSection({ coachId, impersonating }: { coachId: string; impersonating?: boolean }) {
   const fns = getFunctions(undefined, 'us-central1');
 
   // ── Post account state ──────────────────────────────────────────────────────
@@ -937,6 +995,7 @@ function GoogleCalendarSyncSection({ coachId }: { coachId: string }) {
               {postEmail || 'Connected'}
             </Text>
           </View>
+          {!impersonating && (
           <View style={{ flexDirection: 'row', gap: 6 }}>
             <Pressable
               style={[zs.connectBtn, { flex: 1, backgroundColor: '#1E40AF' }]}
@@ -957,10 +1016,13 @@ function GoogleCalendarSyncSection({ coachId }: { coachId: string }) {
               }
             </Pressable>
           </View>
+          )}
           {syncResult && (
             <Text style={{ fontSize: 9, color: '#4CAF50', fontFamily: FONT_BODY, marginTop: 4 }}>{syncResult}</Text>
           )}
         </>
+      ) : impersonating ? (
+        <Text style={{ fontSize: 9, color: TEXT_MUTED, fontFamily: FONT_BODY }}>Not connected.</Text>
       ) : (
         <Pressable
           style={[zs.connectBtn, { backgroundColor: '#1E40AF' }]}
@@ -970,6 +1032,14 @@ function GoogleCalendarSyncSection({ coachId }: { coachId: string }) {
           {connecting ? <ActivityIndicator size="small" color="#FFF" /> : <Icon name="calendar" size={14} color="#FFF" />}
           <Text style={zs.connectBtnText}>{connecting ? 'Connecting...' : 'Connect Google Calendar'}</Text>
         </Pressable>
+      )}
+
+      {impersonating && (
+        // Google Calendar callables run as the signed-in user (the admin),
+        // so connect/sync/disconnect actions are coach-only.
+        <Text style={{ fontSize: 9, color: TEXT_MUTED, fontFamily: FONT_BODY, marginTop: 4 }}>
+          Calendar connection actions are available to the coach only.
+        </Text>
       )}
 
       {/* ── Divider ── */}
@@ -993,6 +1063,8 @@ function GoogleCalendarSyncSection({ coachId }: { coachId: string }) {
               <Text style={{ fontSize: 10, color: TEXT_PRIMARY, fontFamily: FONT_BODY, flex: 1 }} numberOfLines={1}>
                 {account.email}{account.tokenExpired ? ' — Re-auth needed' : ''}
               </Text>
+              {!impersonating && (
+              <>
               <Pressable
                 onPress={() => isExpanded ? setCalendarLists((p) => { const n = { ...p }; delete n[account.accountId]; return n; }) : handleLoadCalendars(account.accountId)}
                 style={{ paddingHorizontal: 6, paddingVertical: 2, backgroundColor: '#1E40AF', borderRadius: 4 }}
@@ -1011,6 +1083,8 @@ function GoogleCalendarSyncSection({ coachId }: { coachId: string }) {
                   : <Text style={{ fontSize: 9, color: '#F87171', fontFamily: FONT_BODY }}>Remove</Text>
                 }
               </Pressable>
+              </>
+              )}
             </View>
 
             {/* Calendar list (expanded) */}
@@ -1067,14 +1141,16 @@ function GoogleCalendarSyncSection({ coachId }: { coachId: string }) {
         );
       })}
 
-      <Pressable
-        style={[zs.connectBtn, { backgroundColor: '#374151' }]}
-        onPress={handleAddConflictAccount}
-        disabled={addingConflict}
-      >
-        {addingConflict ? <ActivityIndicator size="small" color="#FFF" /> : <Icon name="add" size={13} color="#FFF" />}
-        <Text style={zs.connectBtnText}>{addingConflict ? 'Opening...' : 'Add Conflict-Check Account'}</Text>
-      </Pressable>
+      {!impersonating && (
+        <Pressable
+          style={[zs.connectBtn, { backgroundColor: '#374151' }]}
+          onPress={handleAddConflictAccount}
+          disabled={addingConflict}
+        >
+          {addingConflict ? <ActivityIndicator size="small" color="#FFF" /> : <Icon name="add" size={13} color="#FFF" />}
+          <Text style={zs.connectBtnText}>{addingConflict ? 'Opening...' : 'Add Conflict-Check Account'}</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -1124,6 +1200,12 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: '#F5A623',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 36,
   },
   avatarText: {
     fontSize: 24,

@@ -9,13 +9,13 @@
 import React, { useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Platform, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAuth } from '../lib/AuthContext';
+import { useEffectiveProfile } from '../lib/useEffectiveProfile';
 import { useRouter } from 'expo-router';
 import AccountPanel from './AccountPanel';
 import { FH } from '../lib/theme';
 
 export function AppHeader() {
-  const { user } = useAuth();
+  const { initials, photoURL } = useEffectiveProfile();
   const router = useRouter();
   const [showPanel, setShowPanel] = useState(false);
   const insets = useSafeAreaInsets();
@@ -25,15 +25,6 @@ export function AppHeader() {
       : Platform.OS === 'ios'
         ? 52
         : 16;
-
-  const initials = user?.displayName
-    ? user.displayName
-        .split(' ')
-        .map((n) => n[0])
-        .join('')
-        .toUpperCase()
-        .slice(0, 2)
-    : user?.email?.[0]?.toUpperCase() ?? '?';
 
   return (
     <>
@@ -62,7 +53,11 @@ export function AppHeader() {
           accessibilityLabel="Account"
           hitSlop={8}
         >
-          <Text style={s.avatarText}>{initials}</Text>
+          {photoURL ? (
+            <Image source={{ uri: photoURL }} style={s.avatarImage} />
+          ) : (
+            <Text style={s.avatarText}>{initials}</Text>
+          )}
         </Pressable>
       </View>
 
@@ -108,6 +103,12 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1.5,
     borderColor: '#F5A623',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 18,
   },
   avatarText: {
     fontSize: 13,
