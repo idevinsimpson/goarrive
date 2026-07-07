@@ -32,9 +32,12 @@ const CARD_BG = '#161B25';
 
 interface Props {
   coachId: string;
+  /** True when a platform admin is viewing as this coach — status is shown
+   *  but Stripe onboarding/disconnect actions must run as the coach. */
+  impersonating?: boolean;
 }
 
-export default function StripeConnectPanel({ coachId }: Props) {
+export default function StripeConnectPanel({ coachId, impersonating }: Props) {
   const [account, setAccount] = useState<CoachStripeAccount | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -247,6 +250,11 @@ export default function StripeConnectPanel({ coachId }: Props) {
       )}
 
       {/* Action buttons */}
+      {impersonating ? (
+        <Text style={{ color: MUTED, fontSize: 12 }}>
+          Stripe setup and disconnect are available to the coach only.
+        </Text>
+      ) : (
       <View style={{ gap: 8 }}>
         {!isConnected && (
           <ActionButton
@@ -285,6 +293,7 @@ export default function StripeConnectPanel({ coachId }: Props) {
           />
         )}
       </View>
+      )}
 
       {/* Web disconnect confirmation modal */}
       {Platform.OS === 'web' && showDisconnectConfirm && (
