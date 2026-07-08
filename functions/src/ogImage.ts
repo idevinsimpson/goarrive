@@ -275,8 +275,10 @@ export async function generateWorkoutOgImage(
   await file.save(jpeg, {
     metadata: { contentType: 'image/jpeg', cacheControl: 'public, max-age=86400' },
   });
-  await file.makePublic();
-  const url = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+  // The bucket has Uniform Bucket-Level Access — makePublic() throws. Public
+  // read is granted via storage.rules (og-images match block); the Firebase
+  // download URL respects rules and needs no object ACLs.
+  const url = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media`;
   await admin.firestore().collection('shareTokens').doc(shareId).update({ ogImageUrl: url });
   return url;
 }
