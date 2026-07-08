@@ -9770,7 +9770,7 @@ function slugify(text: string): string {
     .slice(0, 80);
 }
 
-async function extractEquipmentSlug(text: string, apiKey: string): Promise<string> {
+async function extractEquipmentSlug(text: string, apiKey: string): Promise<{ slug: string; label: string }> {
   try {
     const resp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -9780,21 +9780,26 @@ async function extractEquipmentSlug(text: string, apiKey: string): Promise<strin
         messages: [
           {
             role: 'system',
-            content: 'Extract only the fitness equipment item name(s) from the workout instruction. Return just the equipment name(s) in lowercase, comma-separated if multiple. No other words.',
+            content: 'Extract only the fitness equipment item name(s) from the workout instruction. Return just the equipment name(s) in lowercase, comma-separated if multiple (e.g. "straight bar, dumbbells"). Include weight/size descriptors. No other words.',
           },
           { role: 'user', content: text },
         ],
-        max_tokens: 30,
+        max_tokens: 40,
         temperature: 0,
       }),
     });
     if (resp.ok) {
       const json = await resp.json() as { choices?: Array<{ message?: { content?: string } }> };
       const extracted = json.choices?.[0]?.message?.content?.trim();
-      if (extracted) return slugify(extracted);
+      if (extracted) {
+        const items = extracted.split(',').map(s => s.trim()).filter(Boolean);
+        const label = items.join(' and ');
+        const slug = items.map(slugify).join('-and-');
+        return { slug, label };
+      }
     }
   } catch { /* fall through to full-text slug */ }
-  return slugify(text);
+  return { slug: slugify(text), label: text };
 }
 
 export const generateEquipmentImage = onCall(
@@ -9811,31 +9816,24 @@ export const generateEquipmentImage = onCall(
     const apiKey = openaiApiKey.value()?.trim();
     if (!apiKey) throw new HttpsError('internal', 'OpenAI API key not configured');
 
-    const equipmentSlug = await extractEquipmentSlug(grabEquipmentText.trim(), apiKey);
+    const { slug: equipmentSlug, label: equipmentLabel } = await extractEquipmentSlug(grabEquipmentText.trim(), apiKey);
     const bucket = admin.storage().bucket();
 
-    // Build a Firebase-style download URL with an embedded token so the client
-    // Image component can load it without auth headers.
-    function makeDownloadUrl(path: string, token: string): string {
-      return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
+    // Firebase Storage public URL (no token needed — public read via storage.rules).
+    // UBLA is enabled on this bucket so makePublic() / storage.googleapis.com don't work.
+    function storageUrl(path: string): string {
+      return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media`;
     }
 
-    // Save a buffer and return its download URL (with token stored in metadata).
     async function saveFile(path: string, buf: Buffer): Promise<string> {
-      const token = crypto.randomUUID();
-      await bucket.file(path).save(buf, {
-        contentType: 'image/png',
-        metadata: { metadata: { firebaseStorageDownloadTokens: token } },
-      });
-      return makeDownloadUrl(path, token);
+      await bucket.file(path).save(buf, { contentType: 'image/png' });
+      return storageUrl(path);
     }
 
-    // Get download URL for an existing file from its stored token.
     async function getExistingUrl(path: string): Promise<string | null> {
       try {
-        const [meta] = await bucket.file(path).getMetadata();
-        const token = (meta as any).metadata?.firebaseStorageDownloadTokens as string | undefined;
-        if (token) return makeDownloadUrl(path, token);
+        const [exists] = await bucket.file(path).exists();
+        if (exists) return storageUrl(path);
       } catch { /* fall through */ }
       return null;
     }
@@ -9870,8 +9868,7 @@ export const generateEquipmentImage = onCall(
     }
 
     // ── Generate 3 images in parallel via gpt-image-1 ─────────────────────
-    const equipmentLabel = equipmentSlug.replace(/-/g, ' ');
-    const prompt = `studio product photo of ${equipmentLabel}, pure white background, clean minimalist gym equipment, no text, no people, soft shadow`;
+    const prompt = `studio product photo of ${equipmentLabel} on a pure white background, all items shown together in the same scene, clean minimalist gym equipment, no text, no people, soft shadow`;
 
     async function generateOne(variantIndex: number): Promise<Buffer> {
       let lastApiError = 'no attempts made';
@@ -9919,14 +9916,9 @@ export const saveEquipmentImageChoice = onCall(
     const bucket = admin.storage().bucket();
     const srcPath = `equipment_images/${equipmentSlug}/v${choiceIndex + 1}.png`;
     const destPath = `equipment_images/${equipmentSlug}/default.png`;
-    // Download source bytes and re-save with a fresh token so the URL is loadable by the client.
     const [srcBuf] = await bucket.file(srcPath).download();
-    const token = crypto.randomUUID();
-    await bucket.file(destPath).save(srcBuf, {
-      contentType: 'image/png',
-      metadata: { metadata: { firebaseStorageDownloadTokens: token } },
-    });
-    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media&token=${token}`;
+    await bucket.file(destPath).save(srcBuf, { contentType: 'image/png' });
+    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media`;
     console.info('[saveEquipmentImageChoice] Saved default', { equipmentSlug, choiceIndex });
     return { imageUrl };
   },

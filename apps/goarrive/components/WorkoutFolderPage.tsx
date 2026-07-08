@@ -3149,7 +3149,7 @@ export default function WorkoutFolderPage({
                                   </Text>
                                 )}
                               </TouchableOpacity>
-                              {equipImgStatus[bi] === 'done' && block.grabEquipmentImageUrl ? (
+                              {block.grabEquipmentImageUrl && equipImgStatus[bi] !== 'generating' ? (
                                 <View style={{ flexDirection: 'row' as const, alignItems: 'center' as const, gap: 8, marginTop: 8 }}>
                                   <Image
                                     source={{ uri: block.grabEquipmentImageUrl }}

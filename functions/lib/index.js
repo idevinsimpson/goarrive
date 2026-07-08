@@ -89,7 +89,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = void 0;
-exports.generateEquipmentImage = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.onCoachCreated = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = void 0;
+exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.onCoachCreated = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -102,7 +102,6 @@ const zoom_1 = require("./zoom");
 const zoomRtms_1 = require("./zoomRtms");
 const ws_1 = __importDefault(require("ws"));
 const tasks_1 = require("@google-cloud/tasks");
-const workoutPlayerSanitizer_1 = require("./workoutPlayerSanitizer");
 // ── Slack Bot (ME-011, ME-012) ────────────────────────────────────────────────
 var slack_1 = require("./slack");
 Object.defineProperty(exports, "slackEvents", { enumerable: true, get: function () { return slack_1.slackEvents; } });
@@ -1520,17 +1519,6 @@ exports.activateCtsOptIn = (0, https_1.onCall)({ secrets: [stripeSecretKey], inv
     console.log('[activateCtsOptIn] CTS activated for member', memberId, 'plan', planId, 'subscription', stripeSubscriptionId, 'rate', ctsMonthlyRate);
     return { success: true };
 });
-// Default module visibility for newly created coaches — core loop on,
-// scheduling/billing off until a platform admin enables them.
-// Missing key = enabled, so existing coaches are unaffected.
-const NEW_COACH_DEFAULT_MODULES = {
-    members: true,
-    build: true,
-    scheduling: false,
-    billing: false,
-    account: true,
-    coachLaunch: true,
-};
 // ── 8. addCoach — Admin-only: create a new coach account ─────────────────────
 // Creates a Firebase Auth user, sets custom claims, and writes a coaches doc.
 // Only callers with admin: true in their custom claims may invoke this.
@@ -1588,7 +1576,6 @@ exports.addCoach = (0, https_1.onCall)({ region: 'us-central1' }, async (request
         role: 'coach',
         createdAt: Date.now(),
         createdBy: callerUid,
-        enabledModules: NEW_COACH_DEFAULT_MODULES,
     });
     // 6. Generate password reset link and send via Firebase's built-in email
     const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
@@ -1717,7 +1704,6 @@ exports.activateCoachInvite = (0, https_1.onCall)({ region: 'us-central1', invok
         role: 'coach',
         createdAt: Date.now(),
         invitedBy: invite.createdBy,
-        enabledModules: NEW_COACH_DEFAULT_MODULES,
     });
     // Mark invite as used
     await inviteRef.update({
@@ -8180,10 +8166,6 @@ exports.getEmbeddedSessionJoinConfig = (0, https_1.onCall)({
 });
 // ─── Workout Share Links ─────────────────────────────────────────────────────
 const crypto = __importStar(require("crypto"));
-const ogImage_1 = require("./ogImage");
-const ogVideo_1 = require("./ogVideo");
-var shareMeta_1 = require("./shareMeta");
-Object.defineProperty(exports, "shareMeta", { enumerable: true, get: function () { return shareMeta_1.shareMeta; } });
 const VALID_VISIBILITIES = ['restricted', 'anyone_with_link', 'anyone_with_link_signin_required'];
 function normalizeVisibility(v) {
     return VALID_VISIBILITIES.includes(v) ? v : 'anyone_with_link';
@@ -8196,7 +8178,7 @@ function normalizeExpiresAt(input) {
         return null;
     return admin.firestore.Timestamp.fromMillis(ms);
 }
-exports.createShareToken = (0, https_1.onCall)({ memory: '512MiB' }, async (request) => {
+exports.createShareToken = (0, https_1.onCall)(async (request) => {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j;
     if (!request.auth) {
         throw new https_1.HttpsError('unauthenticated', 'Must be signed in.');
@@ -8228,15 +8210,6 @@ exports.createShareToken = (0, https_1.onCall)({ memory: '512MiB' }, async (requ
     if (!existingTokens.empty) {
         const existing = existingTokens.docs[0];
         const data = existing.data();
-        if (!data.ogImageUrl) {
-            // Backfill OG image for tokens minted before OG images existed.
-            try {
-                await (0, ogImage_1.generateWorkoutOgImage)(existing.id, workoutData);
-            }
-            catch (err) {
-                console.warn('[createShareToken] OG image backfill failed:', err);
-            }
-        }
         return {
             shareId: existing.id,
             alreadyExists: true,
@@ -8262,17 +8235,6 @@ exports.createShareToken = (0, https_1.onCall)({ memory: '512MiB' }, async (requ
         firstResolvedAt: null,
         lastResolvedAt: null,
     });
-    // Best-effort: a share link without an OG image still works — crawlers just
-    // get text-only meta until the lazy backfill in shareMeta fills it in.
-    try {
-        await (0, ogImage_1.generateWorkoutOgImage)(shareId, workoutData);
-    }
-    catch (err) {
-        console.warn('[createShareToken] OG image generation failed:', err);
-    }
-    // Fire-and-forget video generation — does not block token creation.
-    // ogVideoUrl lands on the shareTokens doc ~1 min later; iMessage unfurls pick it up.
-    (0, ogVideo_1.generateWorkoutOgVideo)(shareId, workoutData).catch((err) => console.warn('[createShareToken] OG video generation failed:', err));
     return {
         shareId,
         alreadyExists: false,
@@ -8469,18 +8431,89 @@ exports.resolveShareToken = (0, https_1.onRequest)({ cors: true, region: 'us-cen
             console.warn('[resolveShareToken] movement enrichment failed:', err);
         }
     }
+    const sanitizedBlocks = (workout.blocks || []).map((block) => {
+        var _a;
+        return ({
+            type: block.type || 'Block',
+            name: block.name || '',
+            label: block.label || '',
+            movements: (block.movements || []).map((m) => {
+                var _a, _b, _c, _d, _e, _f, _g;
+                const canonical = m.movementId ? movementCanonical[m.movementId] : undefined;
+                // Canonical voiceUrl + name win for audio/identity so a rename or
+                // re-recording in the library propagates to share-link viewers.
+                const resolvedName = ((canonical === null || canonical === void 0 ? void 0 : canonical.name) && canonical.name.trim())
+                    || m.movementName
+                    || m.name
+                    || '';
+                const resolvedVoiceUrl = (canonical === null || canonical === void 0 ? void 0 : canonical.voiceUrl) || m.voiceUrl || null;
+                return ({
+                    movementId: m.movementId || '',
+                    movementName: resolvedName,
+                    name: resolvedName,
+                    category: m.category || '',
+                    muscleGroup: m.muscleGroup || '',
+                    videoUrl: m.videoUrl || null,
+                    mediaUrl: m.mediaUrl || null,
+                    thumbnailUrl: m.thumbnailUrl || null,
+                    voiceUrl: resolvedVoiceUrl,
+                    nextUpVoiceUrl: m.nextUpVoiceUrl || null,
+                    sets: m.sets || 0,
+                    reps: m.reps || '',
+                    duration: m.duration || 0,
+                    durationSec: m.durationSec || 0,
+                    workSec: m.workSec || 0,
+                    restSec: m.restSec || 0,
+                    restSeconds: m.restSeconds || 0,
+                    swapSides: (_a = m.swapSides) !== null && _a !== void 0 ? _a : false,
+                    swapMode: (_b = m.swapMode) !== null && _b !== void 0 ? _b : 'split',
+                    swapWindowSec: (_c = m.swapWindowSec) !== null && _c !== void 0 ? _c : 5,
+                    showOnPreview: (_d = m.showOnPreview) !== null && _d !== void 0 ? _d : true,
+                    description: m.description || '',
+                    coachingCues: m.coachingCues || '',
+                    notes: m.notes || '',
+                    cropScale: (_e = m.cropScale) !== null && _e !== void 0 ? _e : 1,
+                    cropTranslateX: (_f = m.cropTranslateX) !== null && _f !== void 0 ? _f : 0,
+                    cropTranslateY: (_g = m.cropTranslateY) !== null && _g !== void 0 ? _g : 0,
+                });
+            }),
+            restBetweenSets: block.restBetweenSets || 0,
+            restBetweenSec: block.restBetweenSec || 0,
+            restBetweenRoundsSec: block.restBetweenRoundsSec || 0,
+            restBetweenMovementsSec: block.restBetweenMovementsSec || 0,
+            circuitStartRestSec: block.circuitStartRestSec || 0,
+            rounds: block.rounds || 1,
+            showDemo: (_a = block.showDemo) !== null && _a !== void 0 ? _a : false,
+            demoDurationSec: block.demoDurationSec || 0,
+        });
+    });
     res.status(200).json({
         authenticated: isAuthenticated,
         teaser,
-        workout: Object.assign({ id: tokenData.workoutId }, (0, workoutPlayerSanitizer_1.sanitizePlayerWorkout)(workout, movementCanonical)),
+        workout: {
+            id: tokenData.workoutId,
+            name: workout.name || 'Workout',
+            description: workout.description || '',
+            category: workout.category || null,
+            difficulty: workout.difficulty || null,
+            estimatedDurationMin: workout.estimatedDurationMin || null,
+            tags: workout.tags || [],
+            blocks: sanitizedBlocks,
+        },
     });
 });
 // ─── generateEquipmentImage — AI image for grab-equipment phases ─────────────
-// Accepts grabEquipmentText, checks Storage cache, generates via OpenAI Images
-// if not cached, uploads and returns a download URL.
+// Accepts grabEquipmentText + optional forceRegenerate flag.
+// Extracts equipment keyword via GPT-4o-mini, then:
+//   1. Returns { imageUrl } if equipment_images/{slug}/default.png exists
+//   2. Returns { choices, equipmentSlug } if v1/v2/v3 all exist
+//   3. Generates 3 DALL-E 3 variants, uploads, returns { choices, equipmentSlug }
 //
-// Cache path: equipment_images/{slug}.png
-// Reuses OPENAI_API_KEY secret (already defined above).
+// Cache paths:
+//   equipment_images/{slug}/default.png  — coach-selected image
+//   equipment_images/{slug}/v1.png       — generated choice 1
+//   equipment_images/{slug}/v2.png       — generated choice 2
+//   equipment_images/{slug}/v3.png       — generated choice 3
 // ─────────────────────────────────────────────────────────────────────────────
 function slugify(text) {
     return text
@@ -8490,98 +8523,149 @@ function slugify(text) {
         .replace(/^-+|-+$/g, '')
         .slice(0, 80);
 }
-exports.generateEquipmentImage = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60, invoker: 'public' }, async (request) => {
+async function extractEquipmentSlug(text, apiKey) {
     var _a, _b, _c, _d;
-    if (!((_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid)) {
+    try {
+        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                messages: [
+                    {
+                        role: 'system',
+                        content: 'Extract only the fitness equipment item name(s) from the workout instruction. Return just the equipment name(s) in lowercase, comma-separated if multiple (e.g. "straight bar, dumbbells"). Include weight/size descriptors. No other words.',
+                    },
+                    { role: 'user', content: text },
+                ],
+                max_tokens: 40,
+                temperature: 0,
+            }),
+        });
+        if (resp.ok) {
+            const json = await resp.json();
+            const extracted = (_d = (_c = (_b = (_a = json.choices) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.message) === null || _c === void 0 ? void 0 : _c.content) === null || _d === void 0 ? void 0 : _d.trim();
+            if (extracted) {
+                const items = extracted.split(',').map(s => s.trim()).filter(Boolean);
+                const label = items.join(' and ');
+                const slug = items.map(slugify).join('-and-');
+                return { slug, label };
+            }
+        }
+    }
+    catch ( /* fall through to full-text slug */_e) { /* fall through to full-text slug */ }
+    return { slug: slugify(text), label: text };
+}
+exports.generateEquipmentImage = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 300, invoker: 'public' }, async (request) => {
+    var _a, _b;
+    if (!((_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid))
         throw new https_1.HttpsError('unauthenticated', 'Authentication required');
-    }
-    const { grabEquipmentText } = request.data;
-    if (!grabEquipmentText || !grabEquipmentText.trim()) {
+    const { grabEquipmentText, forceRegenerate } = request.data;
+    if (!(grabEquipmentText === null || grabEquipmentText === void 0 ? void 0 : grabEquipmentText.trim()))
         throw new https_1.HttpsError('invalid-argument', 'grabEquipmentText is required');
-    }
     const apiKey = (_b = openaiApiKey.value()) === null || _b === void 0 ? void 0 : _b.trim();
-    if (!apiKey) {
+    if (!apiKey)
         throw new https_1.HttpsError('internal', 'OpenAI API key not configured');
-    }
-    const slug = slugify(grabEquipmentText.trim());
-    const storagePath = `equipment_images/${slug}.png`;
+    const { slug: equipmentSlug, label: equipmentLabel } = await extractEquipmentSlug(grabEquipmentText.trim(), apiKey);
     const bucket = admin.storage().bucket();
-    const file = bucket.file(storagePath);
-    // ── Cache check ─────────────────────────────────────────────────────────
-    try {
-        const [exists] = await file.exists();
-        if (exists) {
-            const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media`;
-            console.info('[generateEquipmentImage] Cache hit', { slug, storagePath });
-            return { imageUrl };
-        }
+    // Firebase Storage public URL (no token needed — public read via storage.rules).
+    // UBLA is enabled on this bucket so makePublic() / storage.googleapis.com don't work.
+    function storageUrl(path) {
+        return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media`;
     }
-    catch (cacheErr) {
-        console.warn('[generateEquipmentImage] Cache check failed — regenerating', { message: String((cacheErr === null || cacheErr === void 0 ? void 0 : cacheErr.message) || cacheErr).slice(0, 200) });
+    async function saveFile(path, buf) {
+        await bucket.file(path).save(buf, { contentType: 'image/png' });
+        return storageUrl(path);
     }
-    // ── Generate via OpenAI Images API ──────────────────────────────────────
-    const prompt = `minimalist fitness equipment illustration of ${grabEquipmentText.trim()}, neutral background, gym-floor lighting, no text`;
-    let imageBuffer = null;
-    let lastError = null;
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    async function getExistingUrl(path) {
         try {
-            const response = await fetch('https://api.openai.com/v1/images/generations', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${apiKey}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    model: 'dall-e-3',
-                    prompt,
-                    n: 1,
-                    size: '1024x1024',
-                    quality: 'standard',
-                    response_format: 'url',
-                }),
-            });
-            if (!response.ok) {
-                const errorText = await response.text();
-                console.error('[generateEquipmentImage] OpenAI API error', { attempt, status: response.status, errorText });
-                lastError = new https_1.HttpsError('internal', `OpenAI API error: ${response.status}`, errorText.slice(0, 500));
-                continue;
-            }
-            const result = await response.json();
-            const imageUrl = (_d = (_c = result.data) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.url;
-            if (!imageUrl) {
-                lastError = new https_1.HttpsError('internal', 'No image URL in OpenAI response');
-                continue;
-            }
-            // Download the generated image
-            const imgResp = await fetch(imageUrl);
-            if (!imgResp.ok) {
-                lastError = new https_1.HttpsError('internal', `Failed to download generated image: ${imgResp.status}`);
-                continue;
-            }
-            imageBuffer = Buffer.from(await imgResp.arrayBuffer());
-            break;
+            const [exists] = await bucket.file(path).exists();
+            if (exists)
+                return storageUrl(path);
         }
-        catch (err) {
-            lastError = err;
-            console.warn('[generateEquipmentImage] Attempt failed', { attempt, message: String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 200) });
+        catch ( /* fall through */_a) { /* fall through */ }
+        return null;
+    }
+    const defaultPath = `equipment_images/${equipmentSlug}/default.png`;
+    const choicePaths = [1, 2, 3].map(i => `equipment_images/${equipmentSlug}/v${i}.png`);
+    if (!forceRegenerate) {
+        // ── Default cache ──────────────────────────────────────────────────────
+        try {
+            const [defaultExists] = await bucket.file(defaultPath).exists();
+            if (defaultExists) {
+                const imageUrl = await getExistingUrl(defaultPath);
+                if (imageUrl) {
+                    console.info('[generateEquipmentImage] Default cache hit', { equipmentSlug });
+                    return { imageUrl };
+                }
+            }
         }
+        catch ( /* continue */_c) { /* continue */ }
+        // ── Choices cache ──────────────────────────────────────────────────────
+        try {
+            const checks = await Promise.all(choicePaths.map(p => bucket.file(p).exists()));
+            if (checks.every(([e]) => e)) {
+                const choiceUrls = await Promise.all(choicePaths.map(getExistingUrl));
+                if (choiceUrls.every(Boolean)) {
+                    console.info('[generateEquipmentImage] Choices cache hit', { equipmentSlug });
+                    return { choices: choiceUrls, equipmentSlug };
+                }
+            }
+        }
+        catch ( /* continue */_d) { /* continue */ }
     }
-    if (!imageBuffer) {
-        if (lastError instanceof https_1.HttpsError)
-            throw lastError;
-        console.error('[generateEquipmentImage] All attempts failed', lastError);
-        throw new https_1.HttpsError('internal', 'Failed to generate equipment image');
+    // ── Generate 3 images in parallel via gpt-image-1 ─────────────────────
+    const prompt = `studio product photo of ${equipmentLabel} on a pure white background, all items shown together in the same scene, clean minimalist gym equipment, no text, no people, soft shadow`;
+    async function generateOne(variantIndex) {
+        var _a, _b;
+        let lastApiError = 'no attempts made';
+        for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+                const genResp = await fetch('https://api.openai.com/v1/images/generations', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model: 'gpt-image-1', prompt, n: 1, size: '1024x1024' }),
+                });
+                if (!genResp.ok) {
+                    const errText = await genResp.text();
+                    lastApiError = `gpt-image-1 ${genResp.status}: ${errText.slice(0, 300)}`;
+                    console.error('[generateEquipmentImage] API error', { variantIndex, attempt, status: genResp.status, errText });
+                    continue;
+                }
+                const json = await genResp.json();
+                const b64 = (_b = (_a = json.data) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.b64_json;
+                if (b64)
+                    return Buffer.from(b64, 'base64');
+                lastApiError = 'no b64_json in gpt-image-1 response';
+            }
+            catch (err) {
+                lastApiError = String(err).slice(0, 200);
+                console.warn('[generateEquipmentImage] attempt threw', { variantIndex, attempt, err: lastApiError });
+            }
+        }
+        throw new https_1.HttpsError('internal', `Image generation failed (variant ${variantIndex + 1}): ${lastApiError}`);
     }
-    // ── Upload to Storage ────────────────────────────────────────────────────
-    try {
-        await file.save(imageBuffer, { contentType: 'image/png' });
+    const buffers = await Promise.all([0, 1, 2].map(generateOne));
+    const choiceUrls = await Promise.all(buffers.map((buf, i) => saveFile(choicePaths[i], buf)));
+    console.info('[generateEquipmentImage] Generated 3 variants', { equipmentSlug });
+    return { choices: choiceUrls, equipmentSlug };
+});
+// ─── saveEquipmentImageChoice — persist coach's selection as default.png ──────
+exports.saveEquipmentImageChoice = (0, https_1.onCall)({ region: 'us-central1', timeoutSeconds: 30, invoker: 'public' }, async (request) => {
+    var _a;
+    if (!((_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid))
+        throw new https_1.HttpsError('unauthenticated', 'Authentication required');
+    const { equipmentSlug, choiceIndex } = request.data;
+    if (!equipmentSlug || choiceIndex < 0 || choiceIndex > 2) {
+        throw new https_1.HttpsError('invalid-argument', 'equipmentSlug and choiceIndex (0-2) required');
     }
-    catch (uploadErr) {
-        console.error('[generateEquipmentImage] Storage upload failed', { storagePath, message: String((uploadErr === null || uploadErr === void 0 ? void 0 : uploadErr.message) || uploadErr).slice(0, 300) });
-        throw new https_1.HttpsError('internal', 'Failed to upload equipment image');
-    }
-    const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media`;
-    console.info('[generateEquipmentImage] Generated and uploaded', { slug, storagePath });
-    return { imageUrl: downloadUrl };
+    const bucket = admin.storage().bucket();
+    const srcPath = `equipment_images/${equipmentSlug}/v${choiceIndex + 1}.png`;
+    const destPath = `equipment_images/${equipmentSlug}/default.png`;
+    const [srcBuf] = await bucket.file(srcPath).download();
+    await bucket.file(destPath).save(srcBuf, { contentType: 'image/png' });
+    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media`;
+    console.info('[saveEquipmentImageChoice] Saved default', { equipmentSlug, choiceIndex });
+    return { imageUrl };
 });
 //# sourceMappingURL=index.js.map
