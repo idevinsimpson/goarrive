@@ -1,9 +1,9 @@
 // ─── Workout share-link OG video ─────────────────────────────────────────────
-// Generates a 5-second looping mp4 preview for a shared workout: movement clips
-// tiled in a grid on a dark background, sized for og:video (1080x1350, 4:5).
-// Falls back gracefully — movements with no videoUrl use their static thumbnail
-// as a 5-second still. Uploaded to og-images/{shareId}-v1.mp4, URL written to
-// shareTokens/{shareId}.ogVideoUrl.
+// Generates a 5-second looping mp4 preview: uses the v4 static OG image as the
+// background (logo, group labels, badges all preserved) and overlays animated
+// movement clips at the exact tile positions. The result looks like the static
+// preview but with animated tiles where the still thumbnails were.
+// Uploaded to og-images/{shareId}-v1.mp4, URL written to shareTokens/{shareId}.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import * as admin from 'firebase-admin';
@@ -20,20 +20,71 @@ const execFileAsync = promisify(execFile);
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const ffmpegBin: string = require('ffmpeg-static');
 
-const OUT_W = 1080;
-const OUT_H = 1350; // 4:5 portrait
+// Canvas constants must match ogImage.ts exactly.
+const CANVAS_W = 1200;
+const CANVAS_H = 2000;
+const MARGIN_X = 60;
+const CONTENT_W = CANVAS_W - MARGIN_X * 2;
+const GRID_TOP = 300;
+const GRID_BOTTOM = CANVAS_H - 60;
+const TILE_GAP = 16;
+const GROUP_LABEL_H = 140;
+const TILE_H_PER_W = 1.25;
+const MAX_TILE_H = 700;
 const CLIP_DURATION = 5;
-const TILE_GAP = 10;
-const MAX_TILES = 9;
-const BG_HEX = '0F1117';
+const MAX_TILES = 16;
 
 const SPECIAL_BLOCK_TYPES = new Set([
   'Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment', 'Follow-Along Video',
 ]);
 
-function colsForCount(n: number): number {
-  if (n <= 4) return 2;
-  return 3;
+interface TilePos { x: number; y: number; w: number; h: number }
+interface Layout { cols: number; tileW: number; tileH: number; rowsPerGroup: number[]; tilePositions: TilePos[] }
+
+function computeLayout(groups: Array<{ tiles: any[] }>): Layout {
+  const availH = GRID_BOTTOM - GRID_TOP;
+  let best = { cols: 3, tileW: 0, tileH: 0, rowsPerGroup: groups.map(() => 0) };
+  for (const cols of [2, 3, 4]) {
+    const rowsPerGroup = groups.map((g) => Math.ceil(g.tiles.length / cols));
+    const totalRows = rowsPerGroup.reduce((a, b) => a + b, 0);
+    if (totalRows === 0) continue;
+    const fixedH = groups.length * GROUP_LABEL_H + totalRows * TILE_GAP;
+    const maxTileW = Math.floor((CONTENT_W - (cols - 1) * TILE_GAP) / cols);
+    let tileH = Math.min(
+      Math.floor((availH - fixedH) / totalRows),
+      Math.floor(maxTileW * TILE_H_PER_W),
+      MAX_TILE_H,
+    );
+    tileH = Math.max(120, tileH);
+    const tileW = Math.round(tileH / TILE_H_PER_W);
+    if (tileW > best.tileW) best = { cols, tileW, tileH, rowsPerGroup };
+  }
+
+  const { cols, tileW, tileH, rowsPerGroup } = best;
+  const totalRows = rowsPerGroup.reduce((a, b) => a + b, 0);
+  const gridW = cols * (tileW + TILE_GAP) - TILE_GAP;
+  const startX = Math.max(MARGIN_X, Math.round((CANVAS_W - gridW) / 2));
+  const usedH = groups.length * GROUP_LABEL_H + totalRows * TILE_GAP + totalRows * tileH;
+  let gridTop = GRID_TOP + Math.max(0, Math.floor((availH - usedH) / 2));
+
+  const tilePositions: TilePos[] = [];
+  for (let gi = 0; gi < groups.length; gi++) {
+    gridTop += GROUP_LABEL_H; // skip badge/label row
+    const tiles = groups[gi].tiles;
+    for (let ti = 0; ti < tiles.length; ti++) {
+      const col = ti % cols;
+      const row = Math.floor(ti / cols);
+      tilePositions.push({
+        x: startX + col * (tileW + TILE_GAP),
+        y: gridTop + row * (tileH + TILE_GAP),
+        w: tileW,
+        h: tileH,
+      });
+    }
+    gridTop += rowsPerGroup[gi] * (tileH + TILE_GAP);
+  }
+
+  return { cols, tileW, tileH, rowsPerGroup, tilePositions };
 }
 
 function download(url: string, dest: string): Promise<void> {
@@ -42,8 +93,7 @@ function download(url: string, dest: string): Promise<void> {
     const mod = url.startsWith('https') ? https : http;
     mod.get(url, (res) => {
       if (res.statusCode && res.statusCode >= 400) {
-        reject(new Error(`HTTP ${res.statusCode}`));
-        return;
+        reject(new Error(`HTTP ${res.statusCode}`)); return;
       }
       res.pipe(file);
       file.on('finish', () => file.close(() => resolve()));
@@ -51,14 +101,10 @@ function download(url: string, dest: string): Promise<void> {
   });
 }
 
-// isGif: ffmpeg treats animated GIFs as a video demuxer (not still image).
-// isImage: true only for static jpg/png — use -loop 1 -framerate 24 -t N.
-// isGif: use -stream_loop -1 -t N (no -loop/-framerate).
-// isVideo: use -ss 0 -t N (no looping flags).
-interface TileInput { filePath: string; type: 'video' | 'gif' | 'image' }
+type TileType = 'video' | 'gif' | 'image';
+interface TileInput { filePath: string; type: TileType }
 
 async function fetchTile(mv: any, idx: number, tmpDir: string): Promise<TileInput | null> {
-  // Prefer mp4 video, then animated gif, then static thumbnail
   const videoUrl: string | null = mv?.videoUrl || null;
   const gifUrl: string | null = mv?.gifUrl || null;
   const imgUrl: string | null = mv?.thumbnailUrl || mv?.posterUrl || null;
@@ -76,7 +122,6 @@ async function fetchTile(mv: any, idx: number, tmpDir: string): Promise<TileInpu
     const dest = path.join(tmpDir, `t${idx}.${ext}`);
     try {
       await download(imgUrl, dest);
-      // GIF URLs can land in thumbnailUrl too
       return { filePath: dest, type: ext === 'gif' ? 'gif' : 'image' };
     } catch { /* skip */ }
   }
@@ -90,7 +135,7 @@ export async function generateWorkoutOgVideo(
   const { groups } = collectOgGroups(workout);
   if (groups.length === 0) return null;
 
-  // Re-walk blocks to collect raw movement objects (need videoUrl/thumbnailUrl)
+  // Re-walk blocks to collect raw movement objects (need videoUrl/gifUrl/thumbnailUrl)
   const blocks: any[] = Array.isArray(workout.blocks) ? workout.blocks : [];
   const rawMovements: any[] = [];
   for (const block of blocks) {
@@ -102,64 +147,80 @@ export async function generateWorkoutOgVideo(
   const tileMvs = rawMovements.slice(0, MAX_TILES);
   if (tileMvs.length === 0) return null;
 
+  // Get the layout — tile positions match the v4 static image exactly.
+  const layout = computeLayout(groups);
+  const positions = layout.tilePositions.slice(0, tileMvs.length);
+
+  // Fetch the v4 static image to use as background.
+  const db = admin.firestore();
+  const tokenSnap = await db.collection('shareTokens').doc(shareId).get();
+  const bgUrl: string | null = tokenSnap.exists ? tokenSnap.data()?.ogImageUrl || null : null;
+
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `ogv-${shareId.slice(0, 8)}-`));
   try {
-    const tiles = (await Promise.all(tileMvs.map((mv, i) => fetchTile(mv, i, tmpDir))))
-      .filter((t): t is TileInput => t !== null);
-    if (tiles.length === 0) return null;
+    // Download background image
+    let bgPath: string | null = null;
+    if (bgUrl) {
+      const dest = path.join(tmpDir, 'bg.jpg');
+      try { await download(bgUrl, dest); bgPath = dest; } catch { /* no bg, use dark fill */ }
+    }
 
-    const cols = colsForCount(tiles.length);
-    const rows = Math.ceil(tiles.length / cols);
-    const tileW = Math.floor((OUT_W - TILE_GAP * (cols + 1)) / cols);
-    const tileH = Math.floor((OUT_H - TILE_GAP * (rows + 1)) / rows);
+    // Download movement tile inputs
+    const tiles = (await Promise.all(tileMvs.map((mv, i) => fetchTile(mv, i, tmpDir))))
+      .filter((t): t is TileInput => t !== null)
+      .slice(0, positions.length);
+
+    if (tiles.length === 0) return null;
 
     // Build ffmpeg args
     const args: string[] = ['-y'];
+
+    // Input 0: background (static image looped for CLIP_DURATION)
+    if (bgPath) {
+      args.push('-loop', '1', '-framerate', '24', '-t', String(CLIP_DURATION), '-i', bgPath);
+    } else {
+      // No background image — generate a plain dark canvas
+      args.push('-f', 'lavfi', '-i', `color=c=0x0F1117:s=${CANVAS_W}x${CANVAS_H}:r=24:d=${CLIP_DURATION}`);
+    }
+
+    // Inputs 1..N: movement clips
     for (const tile of tiles) {
       if (tile.type === 'image') {
-        // Static jpg/png: loop as still for CLIP_DURATION seconds
         args.push('-loop', '1', '-framerate', '24', '-t', String(CLIP_DURATION), '-i', tile.filePath);
       } else if (tile.type === 'gif') {
-        // Animated GIF: loop for CLIP_DURATION seconds
         args.push('-stream_loop', '-1', '-t', String(CLIP_DURATION), '-i', tile.filePath);
       } else {
-        // mp4: trim to CLIP_DURATION
         args.push('-ss', '0', '-t', String(CLIP_DURATION), '-i', tile.filePath);
       }
     }
 
-    // filter_complex: scale each input, then xstack into grid
-    const scaleParts: string[] = [];
-    const scaleOuts: string[] = [];
+    // Build filter_complex:
+    // - Scale background to CANVAS_W x CANVAS_H
+    // - Convert each tile to yuv420p and scale to exact tile dims
+    // - Chain overlays at computed positions
+    const filterParts: string[] = [];
+
+    // Scale background to canvas; force yuv420p (GIF inputs are bgra)
+    filterParts.push(`[0:v]format=yuv420p,scale=${CANVAS_W}:${CANVAS_H},setpts=PTS-STARTPTS,fps=24[bg0]`);
+
+    // Chain overlays: bg0 → overlay tile 1 → overlay tile 2 → ...
     for (let i = 0; i < tiles.length; i++) {
-      const out = `s${i}`;
-      scaleParts.push(
-        `[${i}:v]scale=${tileW}:${tileH}:force_original_aspect_ratio=decrease,` +
-        `pad=${tileW}:${tileH}:(ow-iw)/2:(oh-ih)/2:color=0x${BG_HEX},` +
-        `setpts=PTS-STARTPTS,fps=24[${out}]`
+      const pos = positions[i];
+      const scaleLabel = `[s${i}]`;
+      // format=yuv420p first — GIFs are bgra; scale to exact tile dims
+      filterParts.push(
+        `[${i + 1}:v]format=yuv420p,scale=${pos.w}:${pos.h},setpts=PTS-STARTPTS,fps=24${scaleLabel}`
       );
-      scaleOuts.push(`[${out}]`);
+      const prevLabel = i === 0 ? '[bg0]' : `[v${i - 1}]`;
+      filterParts.push(`${prevLabel}${scaleLabel}overlay=${pos.x}:${pos.y}:shortest=1[v${i}]`);
     }
 
-    const xstackLayout = tiles.map((_, i) => {
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      return `${TILE_GAP + col * (tileW + TILE_GAP)}_${TILE_GAP + row * (tileH + TILE_GAP)}`;
-    }).join('|');
-
-    const gridW = TILE_GAP + cols * (tileW + TILE_GAP);
-    const gridH = TILE_GAP + rows * (tileH + TILE_GAP);
-
-    scaleParts.push(
-      `${scaleOuts.join('')}xstack=inputs=${tiles.length}:layout=${xstackLayout}:fill=0x${BG_HEX}[grid]`,
-      `color=c=0x${BG_HEX}:s=${OUT_W}x${OUT_H}:r=24[bg]`,
-      `[bg][grid]overlay=${Math.floor((OUT_W - gridW) / 2)}:${Math.floor((OUT_H - gridH) / 2)}[out]`,
-    );
+    const finalLabel = tiles.length > 0 ? `[v${tiles.length - 1}]` : '[bg0]';
 
     const outPath = path.join(tmpDir, 'out.mp4');
     args.push(
-      '-filter_complex', scaleParts.join(';'),
-      '-map', '[out]',
+      '-filter_complex', filterParts.join(';'),
+      '-map', finalLabel,
       '-t', String(CLIP_DURATION),
       '-c:v', 'libx264',
       '-pix_fmt', 'yuv420p',
@@ -170,7 +231,7 @@ export async function generateWorkoutOgVideo(
 
     await execFileAsync(ffmpegBin, args, { timeout: 300_000 });
 
-    // Upload
+    // Upload to Storage
     const bucket = admin.storage().bucket();
     const storageDest = `og-images/${shareId}-v1.mp4`;
     await bucket.upload(outPath, {
@@ -179,7 +240,7 @@ export async function generateWorkoutOgVideo(
     });
     const [url] = await bucket.file(storageDest).getSignedUrl({ action: 'read', expires: '2035-01-01' });
 
-    await admin.firestore().collection('shareTokens').doc(shareId).update({ ogVideoUrl: url });
+    await db.collection('shareTokens').doc(shareId).update({ ogVideoUrl: url });
     return url;
   } finally {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best-effort */ }
