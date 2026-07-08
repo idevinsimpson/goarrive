@@ -291,8 +291,10 @@ export default function WorkoutFolderPage({
   const [originalData, setOriginalData] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
-  const [equipImgStatus, setEquipImgStatus] = useState<Record<number, 'generating' | 'done' | 'error'>>({});
+  const [equipImgStatus, setEquipImgStatus] = useState<Record<number, 'generating' | 'done' | 'error' | 'choosing' | 'saving'>>({});
   const [equipImgError, setEquipImgError] = useState<Record<number, string>>({});
+  const [equipImgChoices, setEquipImgChoices] = useState<Record<number, string[]>>({});
+  const [equipImgSlug, setEquipImgSlug] = useState<Record<number, string>>({});
   const [viewMode, setViewMode] = useState<'icon' | 'list'>('icon');
 
   // Intro / Outro — workout-level fields
@@ -1455,21 +1457,37 @@ export default function WorkoutFolderPage({
   }, [blocks, updateBlocks]);
 
   // ── Grab Equipment image generation ──────────────────────────────────────
-  const generateEquipImgFn = httpsCallable<{ grabEquipmentText: string }, { imageUrl: string }>(
-    functions, 'generateEquipmentImage',
-  );
+  const generateEquipImgFn = httpsCallable<
+    { grabEquipmentText: string; forceRegenerate?: boolean },
+    { imageUrl?: string; choices?: string[]; equipmentSlug?: string }
+  >(functions, 'generateEquipmentImage');
 
-  const triggerEquipmentImageGen = useCallback(async (blockIdx: number, text: string) => {
+  const saveEquipImgChoiceFn = httpsCallable<
+    { equipmentSlug: string; choiceIndex: number },
+    { imageUrl: string }
+  >(functions, 'saveEquipmentImageChoice');
+
+  const triggerEquipmentImageGen = useCallback(async (blockIdx: number, text: string, forceRegenerate = false) => {
     if (!text.trim()) return;
     setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'generating' }));
     setEquipImgError(prev => { const next = { ...prev }; delete next[blockIdx]; return next; });
+    setEquipImgChoices(prev => { const next = { ...prev }; delete next[blockIdx]; return next; });
     try {
-      const result = await generateEquipImgFn({ grabEquipmentText: text.trim() });
-      const imageUrl = result.data.imageUrl;
-      const newBlocks = [...blocks];
-      (newBlocks[blockIdx] as any).grabEquipmentImageUrl = imageUrl;
-      updateBlocks(newBlocks);
-      setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'done' }));
+      const result = await generateEquipImgFn({ grabEquipmentText: text.trim(), forceRegenerate });
+      if (result.data.imageUrl) {
+        // Default cached — apply directly
+        const newBlocks = [...blocks];
+        (newBlocks[blockIdx] as any).grabEquipmentImageUrl = result.data.imageUrl;
+        updateBlocks(newBlocks);
+        setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'done' }));
+      } else if (result.data.choices?.length) {
+        // 3 variants returned — show picker
+        setEquipImgChoices(prev => ({ ...prev, [blockIdx]: result.data.choices! }));
+        setEquipImgSlug(prev => ({ ...prev, [blockIdx]: result.data.equipmentSlug ?? '' }));
+        setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'choosing' }));
+      } else {
+        throw new Error('Unexpected response from generateEquipmentImage');
+      }
     } catch (err: any) {
       console.warn('[WorkoutFolder] generateEquipmentImage failed', err);
       const msg = err?.details ?? err?.message ?? 'Unknown error';
@@ -1477,6 +1495,25 @@ export default function WorkoutFolderPage({
       setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'error' }));
     }
   }, [blocks, generateEquipImgFn, updateBlocks]);
+
+  const selectEquipmentImageChoice = useCallback(async (blockIdx: number, choiceIndex: number) => {
+    const slug = equipImgSlug[blockIdx];
+    if (!slug) return;
+    setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'saving' }));
+    try {
+      const result = await saveEquipImgChoiceFn({ equipmentSlug: slug, choiceIndex });
+      const newBlocks = [...blocks];
+      (newBlocks[blockIdx] as any).grabEquipmentImageUrl = result.data.imageUrl;
+      updateBlocks(newBlocks);
+      setEquipImgChoices(prev => { const next = { ...prev }; delete next[blockIdx]; return next; });
+      setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'done' }));
+    } catch (err: any) {
+      console.warn('[WorkoutFolder] saveEquipmentImageChoice failed', err);
+      const msg = err?.details ?? err?.message ?? 'Unknown error';
+      setEquipImgError(prev => ({ ...prev, [blockIdx]: String(msg) }));
+      setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'choosing' }));
+    }
+  }, [blocks, equipImgSlug, saveEquipImgChoiceFn, updateBlocks]);
 
   // ── Movement operations ───────────────────────────────────────────────────
   const addMovementToBlock = useCallback((blockIdx: number, movement: MovementOption) => {
@@ -3031,52 +3068,105 @@ export default function WorkoutFolderPage({
                           placeholder="e.g. Grab a pair of dumbbells"
                           placeholderTextColor="#4A5568"
                         />
-                        {/* Generate AI background image for this grab-equipment screen */}
+                        {/* Generate AI equipment image — 3-choice picker */}
                         <View style={{ marginTop: 8 }}>
-                          <TouchableOpacity
-                            style={{
-                              backgroundColor: '#7C3AED',
-                              borderRadius: 10,
-                              paddingVertical: 13,
-                              paddingHorizontal: 16,
-                              flexDirection: 'row' as const,
-                              alignItems: 'center' as const,
-                              justifyContent: 'center' as const,
-                              gap: 8,
-                              opacity: (equipImgStatus[bi] === 'generating' || !block.grabEquipmentText?.trim()) ? 0.6 : 1,
-                            }}
-                            disabled={equipImgStatus[bi] === 'generating' || !block.grabEquipmentText?.trim()}
-                            onPress={() => triggerEquipmentImageGen(bi, block.grabEquipmentText ?? '')}
-                          >
-                            {equipImgStatus[bi] === 'generating' ? (
-                              <>
-                                <ActivityIndicator size="small" color="#F0F4F8" />
-                                <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8', fontFamily: FH }}>
-                                  Generating…
+                          {equipImgStatus[bi] === 'choosing' || equipImgStatus[bi] === 'saving' ? (
+                            <View>
+                              <Text style={{ color: '#A0AEC0', fontSize: 13, fontFamily: FB, marginBottom: 8 }}>
+                                Tap the best image for this equipment
+                              </Text>
+                              <View style={{ flexDirection: 'row' as const, gap: 8 }}>
+                                {(equipImgChoices[bi] ?? []).map((url, idx) => (
+                                  <TouchableOpacity
+                                    key={idx}
+                                    disabled={equipImgStatus[bi] === 'saving'}
+                                    onPress={() => selectEquipmentImageChoice(bi, idx)}
+                                    style={{
+                                      flex: 1,
+                                      borderRadius: 10,
+                                      borderWidth: 2,
+                                      borderColor: '#7C3AED',
+                                      overflow: 'hidden' as const,
+                                      opacity: equipImgStatus[bi] === 'saving' ? 0.6 : 1,
+                                    }}
+                                  >
+                                    <Image
+                                      source={{ uri: url }}
+                                      style={{ width: '100%' as any, aspectRatio: 1 }}
+                                      resizeMode="cover"
+                                    />
+                                  </TouchableOpacity>
+                                ))}
+                              </View>
+                              {equipImgStatus[bi] === 'saving' ? (
+                                <View style={{ flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, marginTop: 8 }}>
+                                  <ActivityIndicator size="small" color="#A0AEC0" />
+                                  <Text style={{ color: '#A0AEC0', fontSize: 12, fontFamily: FB }}>Saving…</Text>
+                                </View>
+                              ) : (
+                                <TouchableOpacity
+                                  style={{ marginTop: 10, alignSelf: 'center' as const }}
+                                  onPress={() => triggerEquipmentImageGen(bi, block.grabEquipmentText ?? '', true)}
+                                >
+                                  <Text style={{ color: '#A0AEC0', fontSize: 13, fontFamily: FB, textDecorationLine: 'underline' as const }}>
+                                    Regenerate
+                                  </Text>
+                                </TouchableOpacity>
+                              )}
+                              {equipImgError[bi] ? (
+                                <Text style={{ color: '#F87171', fontSize: 12, fontFamily: FB, marginTop: 6 }}>
+                                  {equipImgError[bi]}
                                 </Text>
-                              </>
-                            ) : (
-                              <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8', fontFamily: FH }}>
-                                {block.grabEquipmentImageUrl ? 'Regenerate image' : 'Generate AI image'}
-                              </Text>
-                            )}
-                          </TouchableOpacity>
-                          {equipImgStatus[bi] === 'done' && block.grabEquipmentImageUrl ? (
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                              <Image
-                                source={{ uri: block.grabEquipmentImageUrl }}
-                                style={{ width: 48, height: 48, borderRadius: 6 }}
-                              />
-                              <Text style={{ color: '#4ADE80', fontSize: 13, fontFamily: FB, flex: 1 }}>
-                                Image generated
-                              </Text>
+                              ) : null}
                             </View>
-                          ) : null}
-                          {equipImgStatus[bi] === 'error' && equipImgError[bi] ? (
-                            <Text style={{ color: '#F87171', fontSize: 12, fontFamily: FB, marginTop: 6 }}>
-                              {equipImgError[bi]}
-                            </Text>
-                          ) : null}
+                          ) : (
+                            <View>
+                              <TouchableOpacity
+                                style={{
+                                  backgroundColor: '#7C3AED',
+                                  borderRadius: 10,
+                                  paddingVertical: 13,
+                                  paddingHorizontal: 16,
+                                  flexDirection: 'row' as const,
+                                  alignItems: 'center' as const,
+                                  justifyContent: 'center' as const,
+                                  gap: 8,
+                                  opacity: (equipImgStatus[bi] === 'generating' || !block.grabEquipmentText?.trim()) ? 0.6 : 1,
+                                }}
+                                disabled={equipImgStatus[bi] === 'generating' || !block.grabEquipmentText?.trim()}
+                                onPress={() => triggerEquipmentImageGen(bi, block.grabEquipmentText ?? '')}
+                              >
+                                {equipImgStatus[bi] === 'generating' ? (
+                                  <>
+                                    <ActivityIndicator size="small" color="#F0F4F8" />
+                                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8', fontFamily: FH }}>
+                                      Generating…
+                                    </Text>
+                                  </>
+                                ) : (
+                                  <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8', fontFamily: FH }}>
+                                    {block.grabEquipmentImageUrl ? 'Regenerate image' : 'Generate AI image'}
+                                  </Text>
+                                )}
+                              </TouchableOpacity>
+                              {equipImgStatus[bi] === 'done' && block.grabEquipmentImageUrl ? (
+                                <View style={{ flexDirection: 'row' as const, alignItems: 'center' as const, gap: 8, marginTop: 8 }}>
+                                  <Image
+                                    source={{ uri: block.grabEquipmentImageUrl }}
+                                    style={{ width: 48, height: 48, borderRadius: 6 }}
+                                  />
+                                  <Text style={{ color: '#4ADE80', fontSize: 13, fontFamily: FB, flex: 1 }}>
+                                    Image saved
+                                  </Text>
+                                </View>
+                              ) : null}
+                              {equipImgStatus[bi] === 'error' && equipImgError[bi] ? (
+                                <Text style={{ color: '#F87171', fontSize: 12, fontFamily: FB, marginTop: 6 }}>
+                                  {equipImgError[bi]}
+                                </Text>
+                              ) : null}
+                            </View>
+                          )}
                         </View>
                       </View>
                     )}
