@@ -1,6 +1,12 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    // AI-generated equipment images — publicly readable (coach-selected, no PII)
+    match /equipment_images/{allPaths=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     // Platform voice cues — publicly readable (no auth required)
     match /voice_cache/platform/{fileName} {
       allow read: if true;

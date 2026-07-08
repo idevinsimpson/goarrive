@@ -8534,23 +8534,27 @@ async function extractEquipmentSlug(text, apiKey) {
                 messages: [
                     {
                         role: 'system',
-                        content: 'Extract only the fitness equipment item name(s) from the workout instruction. Return just the equipment name(s) in lowercase, comma-separated if multiple. No other words.',
+                        content: 'Extract only the fitness equipment item name(s) from the workout instruction. Return just the equipment name(s) in lowercase, comma-separated if multiple (e.g. "straight bar, dumbbells"). Include weight/size descriptors. No other words.',
                     },
                     { role: 'user', content: text },
                 ],
-                max_tokens: 30,
+                max_tokens: 40,
                 temperature: 0,
             }),
         });
         if (resp.ok) {
             const json = await resp.json();
             const extracted = (_d = (_c = (_b = (_a = json.choices) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.message) === null || _c === void 0 ? void 0 : _c.content) === null || _d === void 0 ? void 0 : _d.trim();
-            if (extracted)
-                return slugify(extracted);
+            if (extracted) {
+                const items = extracted.split(',').map(s => s.trim()).filter(Boolean);
+                const label = items.join(' and ');
+                const slug = items.map(slugify).join('-and-');
+                return { slug, label };
+            }
         }
     }
     catch ( /* fall through to full-text slug */_e) { /* fall through to full-text slug */ }
-    return slugify(text);
+    return { slug: slugify(text), label: text };
 }
 exports.generateEquipmentImage = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 300, invoker: 'public' }, async (request) => {
     var _a, _b;
@@ -8562,21 +8566,22 @@ exports.generateEquipmentImage = (0, https_1.onCall)({ region: 'us-central1', se
     const apiKey = (_b = openaiApiKey.value()) === null || _b === void 0 ? void 0 : _b.trim();
     if (!apiKey)
         throw new https_1.HttpsError('internal', 'OpenAI API key not configured');
-    const equipmentSlug = await extractEquipmentSlug(grabEquipmentText.trim(), apiKey);
+    const { slug: equipmentSlug, label: equipmentLabel } = await extractEquipmentSlug(grabEquipmentText.trim(), apiKey);
     const bucket = admin.storage().bucket();
-    // Save a buffer, make it publicly readable, return its GCS public URL.
-    async function saveFile(path, buf) {
-        const file = bucket.file(path);
-        await file.save(buf, { contentType: 'image/png' });
-        await file.makePublic();
-        return `https://storage.googleapis.com/${bucket.name}/${path}`;
+    // Firebase Storage public URL (no token needed — public read via storage.rules).
+    // UBLA is enabled on this bucket so makePublic() / storage.googleapis.com don't work.
+    function storageUrl(path) {
+        return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media`;
     }
-    // Get public URL for an existing file (assumes makePublic was already called).
+    async function saveFile(path, buf) {
+        await bucket.file(path).save(buf, { contentType: 'image/png' });
+        return storageUrl(path);
+    }
     async function getExistingUrl(path) {
         try {
             const [exists] = await bucket.file(path).exists();
             if (exists)
-                return `https://storage.googleapis.com/${bucket.name}/${path}`;
+                return storageUrl(path);
         }
         catch ( /* fall through */_a) { /* fall through */ }
         return null;
@@ -8610,8 +8615,7 @@ exports.generateEquipmentImage = (0, https_1.onCall)({ region: 'us-central1', se
         catch ( /* continue */_d) { /* continue */ }
     }
     // ── Generate 3 images in parallel via gpt-image-1 ─────────────────────
-    const equipmentLabel = equipmentSlug.replace(/-/g, ' ');
-    const prompt = `studio product photo of ${equipmentLabel}, pure white background, clean minimalist gym equipment, no text, no people, soft shadow`;
+    const prompt = `studio product photo of ${equipmentLabel} on a pure white background, all items shown together in the same scene, clean minimalist gym equipment, no text, no people, soft shadow`;
     async function generateOne(variantIndex) {
         var _a, _b;
         let lastApiError = 'no attempts made';
@@ -8659,10 +8663,8 @@ exports.saveEquipmentImageChoice = (0, https_1.onCall)({ region: 'us-central1', 
     const srcPath = `equipment_images/${equipmentSlug}/v${choiceIndex + 1}.png`;
     const destPath = `equipment_images/${equipmentSlug}/default.png`;
     const [srcBuf] = await bucket.file(srcPath).download();
-    const destFile = bucket.file(destPath);
-    await destFile.save(srcBuf, { contentType: 'image/png' });
-    await destFile.makePublic();
-    const imageUrl = `https://storage.googleapis.com/${bucket.name}/${destPath}`;
+    await bucket.file(destPath).save(srcBuf, { contentType: 'image/png' });
+    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media`;
     console.info('[saveEquipmentImageChoice] Saved default', { equipmentSlug, choiceIndex });
     return { imageUrl };
 });
