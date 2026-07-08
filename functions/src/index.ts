@@ -9832,8 +9832,32 @@ export const generateEquipmentImage = onCall(
 
     const equipmentSlug = await extractEquipmentSlug(grabEquipmentText.trim(), apiKey);
     const bucket = admin.storage().bucket();
-    const storageUrl = (path: string) =>
-      `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media`;
+
+    // Build a Firebase-style download URL with an embedded token so the client
+    // Image component can load it without auth headers.
+    function makeDownloadUrl(path: string, token: string): string {
+      return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
+    }
+
+    // Save a buffer and return its download URL (with token stored in metadata).
+    async function saveFile(path: string, buf: Buffer): Promise<string> {
+      const token = crypto.randomUUID();
+      await bucket.file(path).save(buf, {
+        contentType: 'image/png',
+        metadata: { metadata: { firebaseStorageDownloadTokens: token } },
+      });
+      return makeDownloadUrl(path, token);
+    }
+
+    // Get download URL for an existing file from its stored token.
+    async function getExistingUrl(path: string): Promise<string | null> {
+      try {
+        const [meta] = await bucket.file(path).getMetadata();
+        const token = (meta as any).metadata?.firebaseStorageDownloadTokens as string | undefined;
+        if (token) return makeDownloadUrl(path, token);
+      } catch { /* fall through */ }
+      return null;
+    }
 
     const defaultPath = `equipment_images/${equipmentSlug}/default.png`;
     const choicePaths = [1, 2, 3].map(i => `equipment_images/${equipmentSlug}/v${i}.png`);
@@ -9843,8 +9867,11 @@ export const generateEquipmentImage = onCall(
       try {
         const [defaultExists] = await bucket.file(defaultPath).exists();
         if (defaultExists) {
-          console.info('[generateEquipmentImage] Default cache hit', { equipmentSlug });
-          return { imageUrl: storageUrl(defaultPath) };
+          const imageUrl = await getExistingUrl(defaultPath);
+          if (imageUrl) {
+            console.info('[generateEquipmentImage] Default cache hit', { equipmentSlug });
+            return { imageUrl };
+          }
         }
       } catch { /* continue */ }
 
@@ -9852,13 +9879,16 @@ export const generateEquipmentImage = onCall(
       try {
         const checks = await Promise.all(choicePaths.map(p => bucket.file(p).exists()));
         if (checks.every(([e]) => e)) {
-          console.info('[generateEquipmentImage] Choices cache hit', { equipmentSlug });
-          return { choices: choicePaths.map(storageUrl), equipmentSlug };
+          const choiceUrls = await Promise.all(choicePaths.map(getExistingUrl));
+          if (choiceUrls.every(Boolean)) {
+            console.info('[generateEquipmentImage] Choices cache hit', { equipmentSlug });
+            return { choices: choiceUrls as string[], equipmentSlug };
+          }
         }
       } catch { /* continue */ }
     }
 
-    // ── Generate 3 images in parallel via dall-e-3 ────────────────────────
+    // ── Generate 3 images in parallel via gpt-image-1 ─────────────────────
     const equipmentLabel = equipmentSlug.replace(/-/g, ' ');
     const prompt = `studio product photo of ${equipmentLabel}, pure white background, clean minimalist gym equipment, no text, no people, soft shadow`;
 
@@ -9890,12 +9920,9 @@ export const generateEquipmentImage = onCall(
     }
 
     const buffers = await Promise.all([0, 1, 2].map(generateOne));
-
-    await Promise.all(buffers.map((buf, i) =>
-      bucket.file(choicePaths[i]).save(buf, { contentType: 'image/png' }),
-    ));
+    const choiceUrls = await Promise.all(buffers.map((buf, i) => saveFile(choicePaths[i], buf)));
     console.info('[generateEquipmentImage] Generated 3 variants', { equipmentSlug });
-    return { choices: choicePaths.map(storageUrl), equipmentSlug };
+    return { choices: choiceUrls, equipmentSlug };
   },
 );
 
@@ -9911,8 +9938,14 @@ export const saveEquipmentImageChoice = onCall(
     const bucket = admin.storage().bucket();
     const srcPath = `equipment_images/${equipmentSlug}/v${choiceIndex + 1}.png`;
     const destPath = `equipment_images/${equipmentSlug}/default.png`;
-    await bucket.file(srcPath).copy(bucket.file(destPath));
-    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media`;
+    // Download source bytes and re-save with a fresh token so the URL is loadable by the client.
+    const [srcBuf] = await bucket.file(srcPath).download();
+    const token = crypto.randomUUID();
+    await bucket.file(destPath).save(srcBuf, {
+      contentType: 'image/png',
+      metadata: { metadata: { firebaseStorageDownloadTokens: token } },
+    });
+    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media&token=${token}`;
     console.info('[saveEquipmentImageChoice] Saved default', { equipmentSlug, choiceIndex });
     return { imageUrl };
   },

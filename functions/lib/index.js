@@ -8564,7 +8564,32 @@ exports.generateEquipmentImage = (0, https_1.onCall)({ region: 'us-central1', se
         throw new https_1.HttpsError('internal', 'OpenAI API key not configured');
     const equipmentSlug = await extractEquipmentSlug(grabEquipmentText.trim(), apiKey);
     const bucket = admin.storage().bucket();
-    const storageUrl = (path) => `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media`;
+    // Build a Firebase-style download URL with an embedded token so the client
+    // Image component can load it without auth headers.
+    function makeDownloadUrl(path, token) {
+        return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
+    }
+    // Save a buffer and return its download URL (with token stored in metadata).
+    async function saveFile(path, buf) {
+        const token = crypto.randomUUID();
+        await bucket.file(path).save(buf, {
+            contentType: 'image/png',
+            metadata: { metadata: { firebaseStorageDownloadTokens: token } },
+        });
+        return makeDownloadUrl(path, token);
+    }
+    // Get download URL for an existing file from its stored token.
+    async function getExistingUrl(path) {
+        var _a;
+        try {
+            const [meta] = await bucket.file(path).getMetadata();
+            const token = (_a = meta.metadata) === null || _a === void 0 ? void 0 : _a.firebaseStorageDownloadTokens;
+            if (token)
+                return makeDownloadUrl(path, token);
+        }
+        catch ( /* fall through */_b) { /* fall through */ }
+        return null;
+    }
     const defaultPath = `equipment_images/${equipmentSlug}/default.png`;
     const choicePaths = [1, 2, 3].map(i => `equipment_images/${equipmentSlug}/v${i}.png`);
     if (!forceRegenerate) {
@@ -8572,8 +8597,11 @@ exports.generateEquipmentImage = (0, https_1.onCall)({ region: 'us-central1', se
         try {
             const [defaultExists] = await bucket.file(defaultPath).exists();
             if (defaultExists) {
-                console.info('[generateEquipmentImage] Default cache hit', { equipmentSlug });
-                return { imageUrl: storageUrl(defaultPath) };
+                const imageUrl = await getExistingUrl(defaultPath);
+                if (imageUrl) {
+                    console.info('[generateEquipmentImage] Default cache hit', { equipmentSlug });
+                    return { imageUrl };
+                }
             }
         }
         catch ( /* continue */_c) { /* continue */ }
@@ -8581,13 +8609,16 @@ exports.generateEquipmentImage = (0, https_1.onCall)({ region: 'us-central1', se
         try {
             const checks = await Promise.all(choicePaths.map(p => bucket.file(p).exists()));
             if (checks.every(([e]) => e)) {
-                console.info('[generateEquipmentImage] Choices cache hit', { equipmentSlug });
-                return { choices: choicePaths.map(storageUrl), equipmentSlug };
+                const choiceUrls = await Promise.all(choicePaths.map(getExistingUrl));
+                if (choiceUrls.every(Boolean)) {
+                    console.info('[generateEquipmentImage] Choices cache hit', { equipmentSlug });
+                    return { choices: choiceUrls, equipmentSlug };
+                }
             }
         }
         catch ( /* continue */_d) { /* continue */ }
     }
-    // ── Generate 3 images in parallel via dall-e-3 ────────────────────────
+    // ── Generate 3 images in parallel via gpt-image-1 ─────────────────────
     const equipmentLabel = equipmentSlug.replace(/-/g, ' ');
     const prompt = `studio product photo of ${equipmentLabel}, pure white background, clean minimalist gym equipment, no text, no people, soft shadow`;
     async function generateOne(variantIndex) {
@@ -8620,9 +8651,9 @@ exports.generateEquipmentImage = (0, https_1.onCall)({ region: 'us-central1', se
         throw new https_1.HttpsError('internal', `Image generation failed (variant ${variantIndex + 1}): ${lastApiError}`);
     }
     const buffers = await Promise.all([0, 1, 2].map(generateOne));
-    await Promise.all(buffers.map((buf, i) => bucket.file(choicePaths[i]).save(buf, { contentType: 'image/png' })));
+    const choiceUrls = await Promise.all(buffers.map((buf, i) => saveFile(choicePaths[i], buf)));
     console.info('[generateEquipmentImage] Generated 3 variants', { equipmentSlug });
-    return { choices: choicePaths.map(storageUrl), equipmentSlug };
+    return { choices: choiceUrls, equipmentSlug };
 });
 // ─── saveEquipmentImageChoice — persist coach's selection as default.png ──────
 exports.saveEquipmentImageChoice = (0, https_1.onCall)({ region: 'us-central1', timeoutSeconds: 30, invoker: 'public' }, async (request) => {
@@ -8636,8 +8667,14 @@ exports.saveEquipmentImageChoice = (0, https_1.onCall)({ region: 'us-central1', 
     const bucket = admin.storage().bucket();
     const srcPath = `equipment_images/${equipmentSlug}/v${choiceIndex + 1}.png`;
     const destPath = `equipment_images/${equipmentSlug}/default.png`;
-    await bucket.file(srcPath).copy(bucket.file(destPath));
-    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media`;
+    // Download source bytes and re-save with a fresh token so the URL is loadable by the client.
+    const [srcBuf] = await bucket.file(srcPath).download();
+    const token = crypto.randomUUID();
+    await bucket.file(destPath).save(srcBuf, {
+        contentType: 'image/png',
+        metadata: { metadata: { firebaseStorageDownloadTokens: token } },
+    });
+    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media&token=${token}`;
     console.info('[saveEquipmentImageChoice] Saved default', { equipmentSlug, choiceIndex });
     return { imageUrl };
 });
