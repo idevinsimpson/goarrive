@@ -34,7 +34,7 @@ function metaHtml(opts: { title: string; description: string; imageUrl?: string 
   const title = escapeHtml(opts.title);
   const description = escapeHtml(opts.description);
   const image = opts.imageUrl
-    ? `\n    <meta property="og:image" content="${escapeHtml(opts.imageUrl)}" />\n    <meta property="og:image:width" content="1200" />\n    <meta property="og:image:height" content="1600" />\n    <meta name="twitter:image" content="${escapeHtml(opts.imageUrl)}" />`
+    ? `\n    <meta property="og:image" content="${escapeHtml(opts.imageUrl)}" />\n    <meta property="og:image:width" content="1200" />\n    <meta property="og:image:height" content="1800" />\n    <meta name="twitter:image" content="${escapeHtml(opts.imageUrl)}" />`
     : '';
   return `<!DOCTYPE html>
 <html lang="en">

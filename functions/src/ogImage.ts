@@ -1,11 +1,12 @@
 // ─── Workout share-link OG images ────────────────────────────────────────────
-// Composes a 1200x1600 portrait Open Graph preview image for a shared workout,
+// Composes a 1200x1800 portrait Open Graph preview image for a shared workout,
 // mirroring the WorkoutPlayer "ready" phase: logo top, movement thumbnails
-// (4:5 portrait tiles) grouped by block with round badges. Consecutive
-// single-movement ("Tabata") blocks merge into one group, broken by special
-// blocks (Water Break etc.) exactly like the player. No title text — og:title
-// carries the workout name in the unfurl. Uploaded to Storage at
-// og-images/{shareId}-v2.jpg and recorded on the shareTokens doc as ogImageUrl.
+// (4:5 portrait tiles) in segment groups. All blocks between special blocks
+// (Water Break etc.) merge into ONE segment group whose label joins the block
+// kinds it contains ("Tabata + Superset"); rounds render as per-tile gold Nx
+// pills. Column count is chosen per workout to maximize tile size. No title
+// text — og:title carries the workout name in the unfurl. Uploaded to Storage
+// at og-images/{shareId}-v3.jpg and recorded on the shareTokens doc.
 //
 // Text is rendered via SVG layers composited by sharp (sharp has no native
 // text API). Fonts come from the runtime's fontconfig; we request generic
@@ -18,23 +19,23 @@ import * as path from 'path';
 
 // Mirrors apps/goarrive/hooks/useWorkoutFlatten.ts SPECIAL_BLOCK_TYPES —
 // blocks that carry no movements and are excluded from the preview grid.
-// Specials also break tabata runs: tabata blocks only merge when consecutive
-// in the original block order with no special block between them.
+// Specials delimit segments: every movement block between two specials
+// belongs to the same group.
 const SPECIAL_BLOCK_TYPES = new Set([
   'Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment', 'Follow-Along Video',
 ]);
 
 const CANVAS_W = 1200;
-const CANVAS_H = 1600;
+const CANVAS_H = 1800;
 const MARGIN_X = 60;
 const CONTENT_W = CANVAS_W - MARGIN_X * 2;
-const GRID_TOP = 170;
+const GRID_TOP = 150;
 const GRID_BOTTOM = CANVAS_H - 60;
-const TILE_GAP = 14;
+const TILE_GAP = 16;
 const GROUP_LABEL_H = 48;
-const COLUMNS = 4;
 const MAX_TILES = 16;
 const MAX_GROUPS = 5;
+const MAX_TILE_H = 700;
 // App-wide movement image aspect: 4:5 portrait (height = width * 1.25).
 const TILE_H_PER_W = 1.25;
 
@@ -50,13 +51,12 @@ const COLORS = {
 interface OgTile {
   imageUrl: string | null;
   extraCount?: number;
-  /** Per-tile rounds label (tabata tiles keep their own "8x"). */
+  /** Per-tile rounds pill — carries the source block's rounds ("8x"). */
   roundsLabel?: string;
 }
 
 interface OgGroup {
   label: string;
-  rounds: number;
   tiles: OgTile[];
 }
 
@@ -75,54 +75,49 @@ function tileImageUrl(mv: any): string | null {
   return null;
 }
 
-/** Extracts preview groups (block label + rounds + movement thumbnails) from a workout doc. */
+/**
+ * Extracts preview groups from a workout doc. One group per special-delimited
+ * segment: all movement blocks between Water Breaks (etc.) merge into a single
+ * group labelled by the unique block kinds it contains, in order —
+ * 1 movement = Tabata, 2 = Superset, 3+ = Circuit ("Tabata + Superset").
+ * Block rounds survive as per-tile roundsLabel pills.
+ */
 export function collectOgGroups(workout: Record<string, any>): { groups: OgGroup[]; movementCount: number } {
   const blocks: any[] = Array.isArray(workout.blocks) ? workout.blocks : [];
-  // Mirrors WorkoutPlayer ready phase: a "tabata" block has exactly one movement.
-  const isTabataBlock = (b: any) => Array.isArray(b?.movements) && b.movements.length === 1;
 
   let movementCount = 0;
   const allGroups: OgGroup[] = [];
-  let tabataRun: any[] = [];
+  let segKinds: string[] = [];
+  let segTiles: OgTile[] = [];
 
-  const flushTabataRun = () => {
-    if (tabataRun.length === 0) return;
-    const tiles: OgTile[] = [];
-    for (const blk of tabataRun) {
-      const mv = blk.movements[0];
-      if (!mv) continue;
-      const rounds = Number(blk.rounds ?? blk.sets ?? 1) || 1;
-      tiles.push({ imageUrl: tileImageUrl(mv), roundsLabel: rounds > 1 ? `${rounds}x` : undefined });
+  const flushSegment = () => {
+    if (segTiles.length > 0) {
+      const kinds: string[] = [];
+      for (const k of segKinds) if (!kinds.includes(k)) kinds.push(k);
+      allGroups.push({ label: kinds.join(' + ') || 'Block', tiles: segTiles });
     }
-    tabataRun = [];
-    if (tiles.length === 0) return;
-    movementCount += tiles.length;
-    allGroups.push({ label: 'Tabata', rounds: 1, tiles });
+    segKinds = [];
+    segTiles = [];
   };
 
   for (const block of blocks) {
     if (SPECIAL_BLOCK_TYPES.has(block?.type || '')) {
-      // Specials break tabata runs — blocks on opposite sides of a Water Break
-      // do not merge, even though the special itself renders nothing.
-      flushTabataRun();
+      flushSegment();
       continue;
     }
-    if (isTabataBlock(block)) {
-      tabataRun.push(block);
-      continue;
-    }
-    flushTabataRun();
     const movements = (Array.isArray(block.movements) ? block.movements : [])
       .filter((mv: any) => mv && mv.showOnPreview !== false);
     if (movements.length === 0) continue;
+    const kind = movements.length === 1 ? 'Tabata' : movements.length === 2 ? 'Superset' : 'Circuit';
+    const rounds = Number(block.rounds ?? block.sets ?? 1) || 1;
+    const roundsLabel = rounds > 1 ? `${rounds}x` : undefined;
     movementCount += movements.length;
-    allGroups.push({
-      label: String(block.label || block.name || block.type || 'Block'),
-      rounds: Number(block.rounds ?? block.sets ?? 1) || 1,
-      tiles: movements.map((mv: any) => ({ imageUrl: tileImageUrl(mv) })),
-    });
+    segKinds.push(kind);
+    for (const mv of movements) {
+      segTiles.push({ imageUrl: tileImageUrl(mv), roundsLabel });
+    }
   }
-  flushTabataRun();
+  flushSegment();
 
   // Cap groups and total tiles; fold the overflow into a trailing "+N" tile.
   const groups = allGroups.slice(0, MAX_GROUPS);
@@ -141,6 +136,32 @@ export function collectOgGroups(workout: Record<string, any>): { groups: OgGroup
     else last.tiles.push({ imageUrl: null, extraCount: hidden });
   }
   return { groups: groupsShown, movementCount };
+}
+
+/**
+ * Picks the column count (2–4) that maximizes tile size for this set of
+ * groups: fewer columns widen tiles but add rows (height-constrained);
+ * more columns shrink width. Evaluates each and keeps the biggest tile.
+ */
+function pickLayout(groups: OgGroup[]): { cols: number; tileW: number; tileH: number; rowsPerGroup: number[] } {
+  const availH = GRID_BOTTOM - GRID_TOP;
+  let best = { cols: 3, tileW: 0, tileH: 0, rowsPerGroup: groups.map(() => 0) };
+  for (const cols of [2, 3, 4]) {
+    const rowsPerGroup = groups.map((g) => Math.ceil(g.tiles.length / cols));
+    const totalRows = rowsPerGroup.reduce((a, b) => a + b, 0);
+    if (totalRows === 0) continue;
+    const fixedH = groups.length * GROUP_LABEL_H + totalRows * TILE_GAP;
+    const maxTileW = Math.floor((CONTENT_W - (cols - 1) * TILE_GAP) / cols);
+    let tileH = Math.min(
+      Math.floor((availH - fixedH) / totalRows),
+      Math.floor(maxTileW * TILE_H_PER_W),
+      MAX_TILE_H,
+    );
+    tileH = Math.max(120, tileH);
+    const tileW = Math.round(tileH / TILE_H_PER_W);
+    if (tileW > best.tileW) best = { cols, tileW, tileH, rowsPerGroup };
+  }
+  return best;
 }
 
 async function fetchImage(url: string): Promise<Buffer | null> {
@@ -170,7 +191,7 @@ function loadLogo(): Buffer | null {
 }
 
 /**
- * Composes the 1200x1600 portrait OG JPEG for a workout. Returns the buffer.
+ * Composes the 1200x1800 portrait OG JPEG for a workout. Returns the buffer.
  * Throws on composition failure — callers treat OG images as best-effort.
  */
 export async function composeWorkoutOgImage(workout: Record<string, any>): Promise<Buffer> {
@@ -180,23 +201,15 @@ export async function composeWorkoutOgImage(workout: Record<string, any>): Promi
 
   const { groups } = collectOgGroups(workout);
 
-  // ── Layout: fit every group (label row + 4:5 tile rows) into the grid band ─
-  const maxGroupTiles = groups.reduce((m, g) => Math.max(m, g.tiles.length), 0);
-  const effCols = Math.max(2, Math.min(COLUMNS, maxGroupTiles));
-  const rowsPerGroup = groups.map((g) => Math.ceil(g.tiles.length / effCols));
-  const totalRows = rowsPerGroup.reduce((a, b) => a + b, 0) || 0;
+  // ── Layout: shared left edge, full-width grid, best-fit column count ─────
+  const { cols, tileW, tileH, rowsPerGroup } = pickLayout(groups);
+  const totalRows = rowsPerGroup.reduce((a, b) => a + b, 0);
   const availH = GRID_BOTTOM - GRID_TOP;
   const fixedH = groups.length * GROUP_LABEL_H + totalRows * TILE_GAP;
-  const maxTileW = Math.floor((CONTENT_W - (effCols - 1) * TILE_GAP) / effCols);
-  let tileH = totalRows > 0
-    ? Math.min(
-        Math.floor((availH - fixedH) / totalRows),
-        Math.floor(maxTileW * TILE_H_PER_W),
-        560,
-      )
-    : 0;
-  tileH = totalRows > 0 ? Math.max(120, tileH) : 0;
-  const tileW = Math.round(tileH / TILE_H_PER_W);
+
+  // Every group starts at the same startX — no per-group indentation.
+  const gridW = cols * (tileW + TILE_GAP) - TILE_GAP;
+  const startX = Math.max(MARGIN_X, Math.round((CANVAS_W - gridW) / 2));
 
   // Center the whole grid band vertically when content is short.
   const usedH = fixedH + totalRows * tileH;
@@ -215,46 +228,37 @@ export async function composeWorkoutOgImage(workout: Record<string, any>): Promi
   const logoBuf = loadLogo();
   if (logoBuf) {
     const logo = await sharp(logoBuf)
-      .resize({ height: 72, width: 520, fit: 'inside', withoutEnlargement: true })
+      .resize({ height: 64, width: 480, fit: 'inside', withoutEnlargement: true })
       .png()
       .toBuffer();
     const meta = await sharp(logo).metadata();
     composites.push({
       input: logo,
-      top: Math.round((GRID_TOP - (meta.height || 72)) / 2),
-      left: Math.round((CANVAS_W - (meta.width || 520)) / 2),
+      top: Math.round((GRID_TOP - (meta.height || 64)) / 2),
+      left: Math.round((CANVAS_W - (meta.width || 480)) / 2),
     });
   } else {
     svgParts.push(
-      `<text x="${CANVAS_W / 2}" y="${Math.round(GRID_TOP / 2) + 16}" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="44" fill="${COLORS.text}">G<tspan fill="${COLORS.gold}">➲</tspan>A</text>`
+      `<text x="${CANVAS_W / 2}" y="${Math.round(GRID_TOP / 2) + 14}" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="40" fill="${COLORS.text}">G<tspan fill="${COLORS.gold}">➲</tspan>A</text>`
     );
   }
 
-  // ── Groups: badge + label row, then tile grid (rows centered) ────────────
+  // ── Groups: badge + label row, then full-width tile grid ─────────────────
   let y = gridTop;
   let tileIdx = 0;
   for (let gi = 0; gi < groups.length; gi++) {
     const g = groups[gi];
-    const firstRowCols = Math.min(g.tiles.length, effCols);
-    const rowW = firstRowCols * (tileW + TILE_GAP) - TILE_GAP;
-    const startX = Math.round((CANVAS_W - rowW) / 2);
     const badgeCy = y + GROUP_LABEL_H / 2 - 5;
     svgParts.push(
       `<circle cx="${startX + 16}" cy="${badgeCy}" r="16" fill="${COLORS.badge}"/>`,
       `<text x="${startX + 16}" y="${badgeCy + 6}" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="18" fill="${COLORS.background}">${gi + 1}</text>`,
       `<text x="${startX + 44}" y="${badgeCy + 8}" font-family="sans-serif" font-weight="600" font-size="24" fill="${COLORS.text}">${escapeXml(g.label.slice(0, 48))}</text>`
     );
-    if (g.rounds > 1) {
-      const labelWidthGuess = startX + 44 + Math.min(g.label.length, 48) * 13.5;
-      svgParts.push(
-        `<text x="${Math.round(labelWidthGuess) + 12}" y="${badgeCy + 8}" font-family="sans-serif" font-weight="600" font-size="21" fill="${COLORS.gold}">${g.rounds}x</text>`
-      );
-    }
     y += GROUP_LABEL_H;
 
     for (let mi = 0; mi < g.tiles.length; mi++) {
-      const col = mi % effCols;
-      const row = Math.floor(mi / effCols);
+      const col = mi % cols;
+      const row = Math.floor(mi / cols);
       const x = startX + col * (tileW + TILE_GAP);
       const ty = y + row * (tileH + TILE_GAP);
       const tile = g.tiles[mi];
@@ -321,9 +325,9 @@ export async function generateWorkoutOgImage(
 ): Promise<string | null> {
   const jpeg = await composeWorkoutOgImage(workout);
   const bucket = admin.storage().bucket();
-  // "-v2" versions the object name so crawler caches (Slack/iMessage) bust
+  // "-v3" versions the object name so crawler caches (Slack/iMessage) bust
   // cleanly when the composer layout changes.
-  const storagePath = `og-images/${shareId}-v2.jpg`;
+  const storagePath = `og-images/${shareId}-v3.jpg`;
   const file = bucket.file(storagePath);
   await file.save(jpeg, {
     metadata: { contentType: 'image/jpeg', cacheControl: 'public, max-age=86400' },
