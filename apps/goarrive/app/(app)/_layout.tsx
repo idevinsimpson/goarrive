@@ -8,6 +8,7 @@ import React from 'react';
 import { Tabs, Redirect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../lib/AuthContext';
+import { useCoachModules } from '../../lib/useCoachModules';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { Icon } from '../../components/Icon';
 import { TAB_BAR_STYLE } from '../../lib/tabBarStyle';
@@ -17,8 +18,11 @@ const INACTIVE_COLOR = '#4A5568';
 
 export default function AppLayout() {
   const { user, claims, loading, adminCoachOverride, setAdminCoachOverride } = useAuth();
+  const { modules } = useCoachModules();
   const insets = useSafeAreaInsets();
   const bannerTopPad = Platform.OS === 'web' ? Math.max(6, insets.top) : 6;
+  // When every gateable tab is off, only Dashboard would remain — hide the whole bar
+  const allTabsHidden = !modules.members && !modules.build && !modules.scheduling;
 
   if (loading) {
     return (
@@ -64,7 +68,7 @@ export default function AppLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: TAB_BAR_STYLE,
+        tabBarStyle: allTabsHidden ? { ...TAB_BAR_STYLE, display: 'none' } : TAB_BAR_STYLE,
         tabBarActiveTintColor: ACTIVE_COLOR,
         tabBarInactiveTintColor: INACTIVE_COLOR,
         tabBarLabelStyle: {
@@ -93,6 +97,7 @@ export default function AppLayout() {
       <Tabs.Screen
         name="members"
         options={{
+          href: modules.members ? undefined : null,
           title: 'Members',
           tabBarIcon: ({ color }) => (
             <Icon name="members" size={26} color={color} />
@@ -102,6 +107,7 @@ export default function AppLayout() {
       <Tabs.Screen
         name="build"
         options={{
+          href: modules.build ? undefined : null,
           title: 'Build',
           tabBarIcon: ({ color, focused }) => (
             <Icon name={focused ? 'build-filled' : 'build'} size={26} color={color} />
@@ -111,6 +117,7 @@ export default function AppLayout() {
       <Tabs.Screen
         name="scheduling"
         options={{
+          href: modules.scheduling ? undefined : null,
           title: 'Scheduling',
           tabBarIcon: ({ color }) => (
             <Icon name="calendar" size={26} color={color} />

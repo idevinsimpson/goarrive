@@ -79,6 +79,7 @@ import {
 } from './zoomRtms';
 import WebSocket from 'ws';
 import { CloudTasksClient } from '@google-cloud/tasks';
+import { sanitizePlayerWorkout } from './workoutPlayerSanitizer';
 
 // ── Slack Bot (ME-011, ME-012) ────────────────────────────────────────────────
 export { slackEvents } from './slack';
@@ -1770,6 +1771,18 @@ export const activateCtsOptIn = onCall(
   }
 );
 
+// Default module visibility for newly created coaches — core loop on,
+// scheduling/billing off until a platform admin enables them.
+// Missing key = enabled, so existing coaches are unaffected.
+const NEW_COACH_DEFAULT_MODULES = {
+  members: true,
+  build: true,
+  scheduling: false,
+  billing: false,
+  account: true,
+  coachLaunch: true,
+};
+
 // ── 8. addCoach — Admin-only: create a new coach account ─────────────────────
 // Creates a Firebase Auth user, sets custom claims, and writes a coaches doc.
 // Only callers with admin: true in their custom claims may invoke this.
@@ -1831,6 +1844,7 @@ export const addCoach = onCall(
       role: 'coach',
       createdAt: Date.now(),
       createdBy: callerUid,
+      enabledModules: NEW_COACH_DEFAULT_MODULES,
     });
 
     // 6. Generate password reset link and send via Firebase's built-in email
@@ -1985,6 +1999,7 @@ export const activateCoachInvite = onCall(
       role: 'coach',
       createdAt: Date.now(),
       invitedBy: invite.createdBy,
+      enabledModules: NEW_COACH_DEFAULT_MODULES,
     });
 
     // Mark invite as used
@@ -9391,6 +9406,9 @@ export const getEmbeddedSessionJoinConfig = onCall(
 // ─── Workout Share Links ─────────────────────────────────────────────────────
 
 import * as crypto from 'crypto';
+import { generateWorkoutOgImage } from './ogImage';
+import { generateWorkoutOgVideo } from './ogVideo';
+export { shareMeta } from './shareMeta';
 
 type ShareVisibility = 'restricted' | 'anyone_with_link' | 'anyone_with_link_signin_required';
 const VALID_VISIBILITIES: ShareVisibility[] = ['restricted', 'anyone_with_link', 'anyone_with_link_signin_required'];
@@ -9406,7 +9424,7 @@ function normalizeExpiresAt(input: unknown): admin.firestore.Timestamp | null {
   return admin.firestore.Timestamp.fromMillis(ms);
 }
 
-export const createShareToken = onCall(async (request) => {
+export const createShareToken = onCall({ memory: '512MiB' }, async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Must be signed in.');
   }
@@ -9446,6 +9464,14 @@ export const createShareToken = onCall(async (request) => {
   if (!existingTokens.empty) {
     const existing = existingTokens.docs[0];
     const data = existing.data();
+    if (!data.ogImageUrl) {
+      // Backfill OG image for tokens minted before OG images existed.
+      try {
+        await generateWorkoutOgImage(existing.id, workoutData);
+      } catch (err) {
+        console.warn('[createShareToken] OG image backfill failed:', err);
+      }
+    }
     return {
       shareId: existing.id,
       alreadyExists: true,
@@ -9472,6 +9498,20 @@ export const createShareToken = onCall(async (request) => {
     firstResolvedAt: null,
     lastResolvedAt: null,
   });
+
+  // Best-effort: a share link without an OG image still works — crawlers just
+  // get text-only meta until the lazy backfill in shareMeta fills it in.
+  try {
+    await generateWorkoutOgImage(shareId, workoutData);
+  } catch (err) {
+    console.warn('[createShareToken] OG image generation failed:', err);
+  }
+
+  // Fire-and-forget video generation — does not block token creation.
+  // ogVideoUrl lands on the shareTokens doc ~1 min later; iMessage unfurls pick it up.
+  generateWorkoutOgVideo(shareId, workoutData).catch((err) =>
+    console.warn('[createShareToken] OG video generation failed:', err)
+  );
 
   return {
     shareId,
@@ -9697,71 +9737,12 @@ export const resolveShareToken = onRequest(
       }
     }
 
-    const sanitizedBlocks = (workout.blocks || []).map((block: any) => ({
-      type: block.type || 'Block',
-      name: block.name || '',
-      label: block.label || '',
-      movements: (block.movements || []).map((m: any) => {
-        const canonical = m.movementId ? movementCanonical[m.movementId] : undefined;
-        // Canonical voiceUrl + name win for audio/identity so a rename or
-        // re-recording in the library propagates to share-link viewers.
-        const resolvedName = (canonical?.name && canonical.name.trim())
-          || m.movementName
-          || m.name
-          || '';
-        const resolvedVoiceUrl = canonical?.voiceUrl || m.voiceUrl || null;
-        return ({
-        movementId: m.movementId || '',
-        movementName: resolvedName,
-        name: resolvedName,
-        category: m.category || '',
-        muscleGroup: m.muscleGroup || '',
-        videoUrl: m.videoUrl || null,
-        mediaUrl: m.mediaUrl || null,
-        thumbnailUrl: m.thumbnailUrl || null,
-        voiceUrl: resolvedVoiceUrl,
-        nextUpVoiceUrl: m.nextUpVoiceUrl || null,
-        sets: m.sets || 0,
-        reps: m.reps || '',
-        duration: m.duration || 0,
-        durationSec: m.durationSec || 0,
-        workSec: m.workSec || 0,
-        restSec: m.restSec || 0,
-        restSeconds: m.restSeconds || 0,
-        swapSides: m.swapSides ?? false,
-        swapMode: m.swapMode ?? 'split',
-        swapWindowSec: m.swapWindowSec ?? 5,
-        showOnPreview: m.showOnPreview ?? true,
-        description: m.description || '',
-        coachingCues: m.coachingCues || '',
-        notes: m.notes || '',
-        cropScale: m.cropScale ?? 1,
-        cropTranslateX: m.cropTranslateX ?? 0,
-        cropTranslateY: m.cropTranslateY ?? 0,
-      });
-      }),
-      restBetweenSets: block.restBetweenSets || 0,
-      restBetweenSec: block.restBetweenSec || 0,
-      restBetweenRoundsSec: block.restBetweenRoundsSec || 0,
-      restBetweenMovementsSec: block.restBetweenMovementsSec || 0,
-      circuitStartRestSec: block.circuitStartRestSec || 0,
-      rounds: block.rounds || 1,
-      showDemo: block.showDemo ?? false,
-      demoDurationSec: block.demoDurationSec || 0,
-    }));
-
     res.status(200).json({
       authenticated: isAuthenticated,
       teaser,
       workout: {
         id: tokenData.workoutId,
-        name: workout.name || 'Workout',
-        description: workout.description || '',
-        category: workout.category || null,
-        difficulty: workout.difficulty || null,
-        estimatedDurationMin: workout.estimatedDurationMin || null,
-        tags: workout.tags || [],
-        blocks: sanitizedBlocks,
+        ...sanitizePlayerWorkout(workout, movementCanonical),
       },
     });
   },

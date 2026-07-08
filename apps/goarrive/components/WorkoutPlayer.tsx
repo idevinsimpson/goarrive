@@ -44,8 +44,8 @@ import { useMovementSwap } from '../hooks/useMovementSwap';
 import { useMovementHydrate } from '../hooks/useMovementHydrate';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
-import { useWorkoutTTS } from '../hooks/useWorkoutTTS';
-import { setAudioMuted } from '../lib/audioCues';
+import { useWorkoutTTS, unlockAudioPlayback } from '../hooks/useWorkoutTTS';
+import { setAudioMuted, unlockAudioContext } from '../lib/audioCues';
 import { FB, FH } from '../lib/theme';
 import VoiceAuditPanel from './VoiceAuditPanel';
 import { isStagingHost } from '../lib/runtimeEnv';
@@ -80,6 +80,7 @@ export function composePrescriptionLabel(name: string, weight?: string, reps?: s
 
 // Pure helpers live in WorkoutPlayer.helpers.ts (no Firebase dep — safe to import in tests).
 export { computePreloadVideoUrl, handleVideoLayerPlaybackStatus } from './WorkoutPlayer.helpers';
+import { pickNameTier } from './WorkoutPlayer.helpers';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface WorkoutPlayerProps {
@@ -148,6 +149,7 @@ export default function WorkoutPlayer({
     timeLeft,
     currentDuration: current?.duration ?? 0,
     swapSide,
+    steps: flatMovements,
   });
 
   // ── Movement swap ─────────────────────────────
@@ -232,13 +234,33 @@ export default function WorkoutPlayer({
   // isPaused changes. The declarative `shouldPlay` prop alone doesn't reliably
   // pause an already-playing expo-av Video on web, so this imperative mirror
   // is what actually stops the movement loop when the user taps Pause.
-  const videosRef = useRef<Set<any>>(new Set());
+  // Keyed by a stable string (phase name or `layer:<url>`) so entries are
+  // deleted when the ref callback fires with null on unmount — the Set
+  // version grew unbounded over long workouts.
+  const videosRef = useRef<Map<string, any>>(new Map());
   const isPausedRef = useRef(isPaused);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
 
-  const registerVideo = useCallback((el: any | null) => {
-    if (!el) return;
-    videosRef.current.add(el);
+  const registerVideo = useCallback((key: string, el: any | null) => {
+    if (!el) {
+      videosRef.current.delete(key);
+      return;
+    }
+    videosRef.current.set(key, el);
+    // iOS Safari needs the legacy webkit-playsinline attribute (expo-av only
+    // sets the modern playsInline prop) or playback hijacks into fullscreen.
+    if (Platform.OS === 'web') {
+      try {
+        const node = typeof el._nativeRef?.current?.getVideoElement === 'function'
+          ? el._nativeRef.current.getVideoElement()
+          : null;
+        if (node?.setAttribute) {
+          node.playsInline = true;
+          node.setAttribute('playsinline', '');
+          node.setAttribute('webkit-playsinline', '');
+        }
+      } catch { /* best-effort */ }
+    }
     // Freshly-mounted Videos default to playing; if we're paused right now
     // (e.g. Skip while paused swapped in a new video), pause it immediately.
     if (isPausedRef.current) el.pauseAsync?.().catch(() => {});
@@ -250,7 +272,7 @@ export default function WorkoutPlayer({
   // reliably on web across every mounted Video (intro/outro/transition/
   // waterBreak/shared work-rest layers).
   useEffect(() => {
-    for (const el of videosRef.current) {
+    for (const el of videosRef.current.values()) {
       if (isPaused) el?.pauseAsync?.().catch(() => {});
       else el?.playAsync?.().catch(() => {});
     }
@@ -297,7 +319,20 @@ export default function WorkoutPlayer({
     extendControlsTimer();
   }, [handleSkip, extendControlsTimer, stopAllAudio]);
 
+  // iOS Safari autoplay policy: HTMLAudioElement.play() and AudioContext
+  // resume are only allowed from inside a user gesture. Every tap that can
+  // start audio-producing flows must unlock synchronously — Start is the
+  // primary unlock; pause/resume is belt-and-braces (e.g. after the tab was
+  // backgrounded and iOS re-suspended the context).
+  const handleStartWithUnlock = useCallback(() => {
+    unlockAudioPlayback();
+    unlockAudioContext();
+    handleStart();
+  }, [handleStart]);
+
   const handlePauseResumeFromOverlay = useCallback(() => {
+    unlockAudioPlayback();
+    unlockAudioContext();
     handlePauseResume();
     extendControlsTimer();
   }, [handlePauseResume, extendControlsTimer]);
@@ -346,54 +381,20 @@ export default function WorkoutPlayer({
   };
 
   // Auto-shrink the movement-name font so the name fits the fixed title
-  // module without mid-word breaks. Picks the largest tier where (a) the
-  // longest word fits on a single line at the available inner width and
-  // (b) greedy word-wrap produces ≤ NAME_MAX_LINES lines. Heuristic uses an
-  // estimated char-width factor for the FH bold headline font — deliberately
-  // a touch conservative so narrow characters aren't penalized. Scale-free:
-  // computed in BASE units (both font size and available width scale by the
-  // same factor), so the picked tier is identical on every screen size.
+  // module without mid-word breaks. Tier-picking algorithm lives in
+  // WorkoutPlayer.helpers.ts (pickNameTier) — scale-free: computed in BASE
+  // units (both font size and available width scale by the same factor), so
+  // the picked tier is identical on every screen size.
   const NAME_MAX_LINES = 3;
-  const NAME_CHAR_W_FACTOR = 0.62;
-  const NAME_TIERS: readonly { size: number; line: number }[] = [
-    { size: 40, line: 44 },
-    { size: 34, line: 38 },
-    { size: 28, line: 32 },
-    { size: 24, line: 28 },
-    { size: 20, line: 24 },
-    { size: 17, line: 21 },
-    { size: 14, line: 18 },
-  ];
   const getNameFontStyle = (
     text: string,
     baseAvailWidth: number,
     maxLines: number = NAME_MAX_LINES,
     maxFontSize?: number,
+    maxHeight?: number,
   ): { fontSize: number; lineHeight: number } => {
-    const words = (text || '').trim().split(/\s+/).filter(Boolean);
-    if (words.length === 0) {
-      const top = NAME_TIERS.find(t => maxFontSize == null || t.size <= maxFontSize) ?? NAME_TIERS[NAME_TIERS.length - 1];
-      return { fontSize: fs(top.size), lineHeight: fs(top.line) };
-    }
-    const longestWordLen = words.reduce((n, w) => (w.length > n ? w.length : n), 0);
-    for (const t of NAME_TIERS) {
-      if (maxFontSize != null && t.size > maxFontSize) continue;
-      const charW = t.size * NAME_CHAR_W_FACTOR;
-      if (longestWordLen * charW > baseAvailWidth) continue;
-      const maxCharsPerLine = Math.max(1, Math.floor(baseAvailWidth / charW));
-      let lines = 1;
-      let curr = 0;
-      for (const w of words) {
-        if (curr === 0) curr = w.length;
-        else if (curr + 1 + w.length <= maxCharsPerLine) curr += 1 + w.length;
-        else { lines += 1; curr = w.length; }
-      }
-      if (lines <= maxLines) {
-        return { fontSize: fs(t.size), lineHeight: fs(t.line) };
-      }
-    }
-    const last = NAME_TIERS[NAME_TIERS.length - 1];
-    return { fontSize: fs(last.size), lineHeight: fs(last.line) };
+    const t = pickNameTier(text, baseAvailWidth, maxLines, maxFontSize, maxHeight);
+    return { fontSize: fs(t.size), lineHeight: fs(t.line) };
   };
 
   // Inner content width of titleColumn in BASE units. titleColumn has
@@ -414,7 +415,7 @@ export default function WorkoutPlayer({
   // 112-unit title module; the work phase keeps the original 3-line budget.
   const renderAutoFitTitle = (
     text: string,
-    opts: { hasTimer?: boolean; maxLines?: number; color?: string; marginTop?: number; maxFontSize?: number } = {},
+    opts: { hasTimer?: boolean; maxLines?: number; color?: string; marginTop?: number; maxFontSize?: number; maxHeight?: number } = {},
   ): React.ReactNode => {
     const hasTimer = opts.hasTimer ?? true;
     const maxLines = opts.maxLines ?? NAME_MAX_LINES;
@@ -428,7 +429,7 @@ export default function WorkoutPlayer({
           st.workMovementName,
           { color },
           opts.marginTop != null ? { marginTop: fs(opts.marginTop) } : null,
-          getNameFontStyle(text, baseWidth, maxLines, opts.maxFontSize),
+          getNameFontStyle(text, baseWidth, maxLines, opts.maxFontSize, opts.maxHeight),
           Platform.OS === 'web'
             ? ({ wordBreak: 'normal', overflowWrap: 'break-word' } as any)
             : null,
@@ -584,6 +585,33 @@ export default function WorkoutPlayer({
   const [videoLayers, setVideoLayers] = useState<Array<{ url: string; ready: boolean }>>([]);
   const [displayedUrl, setDisplayedUrl] = useState<string | null>(null);
 
+  // URLs whose <Video> reported a load/decode error. Failed layers are
+  // unmounted and never re-mounted, so the poster/thumbnail fallback renders
+  // instead of a frozen or blank video.
+  const [failedVideoUrls, setFailedVideoUrls] = useState<Set<string>>(new Set());
+  const markVideoFailed = useCallback((url: string) => {
+    setFailedVideoUrls((prev) => {
+      if (prev.has(url)) return prev;
+      const next = new Set(prev);
+      next.add(url);
+      return next;
+    });
+  }, []);
+
+  // Keep the imperative video registry and stall-watchdog map in sync with
+  // the mounted layers so neither grows unbounded over a long workout.
+  useEffect(() => {
+    const live = new Set(videoLayers.map((l) => l.url));
+    for (const key of Array.from(videosRef.current.keys())) {
+      if (key.startsWith('layer:') && !live.has(key.slice('layer:'.length))) {
+        videosRef.current.delete(key);
+      }
+    }
+    for (const url of Array.from(lastPositionUpdateAtRef.current.keys())) {
+      if (!live.has(url)) lastPositionUpdateAtRef.current.delete(url);
+    }
+  }, [videoLayers]);
+
   // Saved crop keyed by videoUrl so the videoLayers crossfade can look up
   // crop from a URL alone (layers only store {url, ready}).
   const cropByUrl = useMemo(() => {
@@ -637,21 +665,21 @@ export default function WorkoutPlayer({
 
   // Mount the active layer if not already in the stack.
   useEffect(() => {
-    if (!activeVideoUrl) return;
+    if (!activeVideoUrl || failedVideoUrls.has(activeVideoUrl)) return;
     setVideoLayers((prev) => {
       if (prev.some((l) => l.url === activeVideoUrl)) return prev;
       return [...prev, { url: activeVideoUrl, ready: false }];
     });
-  }, [activeVideoUrl]);
+  }, [activeVideoUrl, failedVideoUrls]);
 
   // Mount the preload layer ahead of time so it's decoded by reveal.
   useEffect(() => {
-    if (!preloadVideoUrl) return;
+    if (!preloadVideoUrl || failedVideoUrls.has(preloadVideoUrl)) return;
     setVideoLayers((prev) => {
       if (prev.some((l) => l.url === preloadVideoUrl)) return prev;
       return [...prev, { url: preloadVideoUrl, ready: false }];
     });
-  }, [preloadVideoUrl]);
+  }, [preloadVideoUrl, failedVideoUrls]);
 
   const handleLayerReady = useCallback((url: string) => {
     setVideoLayers((prev) => prev.map((l) => (l.url === url ? { ...l, ready: true } : l)));
@@ -679,10 +707,15 @@ export default function WorkoutPlayer({
       if (activeVideoUrl) keep.add(activeVideoUrl);
       if (preloadVideoUrl) keep.add(preloadVideoUrl);
       if (displayedUrl) keep.add(displayedUrl);
-      const next = prev.filter((l) => keep.has(l.url));
+      const next = prev.filter((l) => keep.has(l.url) && !failedVideoUrls.has(l.url));
       return next.length === prev.length ? prev : next;
     });
-  }, [activeVideoUrl, preloadVideoUrl, displayedUrl]);
+  }, [activeVideoUrl, preloadVideoUrl, displayedUrl, failedVideoUrls]);
+
+  // If the displayed layer failed, drop it so the thumbnail fallback shows.
+  useEffect(() => {
+    if (displayedUrl && failedVideoUrls.has(displayedUrl)) setDisplayedUrl(null);
+  }, [displayedUrl, failedVideoUrls]);
 
   // videoReady drives the poster fallback — true once anything is on screen.
   useEffect(() => { setVideoReady(displayedUrl !== null); }, [displayedUrl]);
@@ -956,7 +989,7 @@ export default function WorkoutPlayer({
                   style={{ width: 140, height: 46, marginBottom: 12 }}
                   resizeMode="contain"
                 />
-                <TouchableOpacity style={st.readyPlayBtn} onPress={handleStart}>
+                <TouchableOpacity style={st.readyPlayBtn} onPress={handleStartWithUnlock}>
                   <Icon name="play" size={32} color="#0E1117" />
                 </TouchableOpacity>
               </View>
@@ -979,7 +1012,7 @@ export default function WorkoutPlayer({
                   <Image source={{ uri: introVideoUrl }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
                 ) : introVideoUrl ? (
                   <Video
-                    ref={registerVideo}
+                    ref={(el: any) => registerVideo('intro', el)}
                     source={{ uri: introVideoUrl }}
                     resizeMode={ResizeMode.COVER}
                     isLooping
@@ -1025,7 +1058,7 @@ export default function WorkoutPlayer({
               />
             ) : current.videoUrl ? (
               <Video
-                ref={registerVideo}
+                ref={(el: any) => registerVideo('outro', el)}
                 source={{ uri: current.videoUrl }}
                 resizeMode={ResizeMode.COVER}
                 isLooping
@@ -1110,7 +1143,7 @@ export default function WorkoutPlayer({
               <View style={[st.mediaInner, mediaInnerSize]}>
                 {activeVideoUrl ? (
                   <Video
-                    ref={registerVideo}
+                    ref={(el: any) => registerVideo('transition', el)}
                     key={activeVideoUrl}
                     source={{ uri: activeVideoUrl }}
                     resizeMode={ResizeMode.COVER}
@@ -1146,13 +1179,19 @@ export default function WorkoutPlayer({
         {phase === 'grabEquipment' && current && (
           <View style={[st.workContainer, webSafeBottomStyle]}>
             {renderLogoSlot()}
+            {/* Standard fixed-slot layout (title in left column, gold timer
+                in its fixed right column) — same as every other phase. The
+                "less prominent" treatment is confined to the left column: a
+                smaller label + an instruction title that auto-fits up to 4
+                lines within a height budget so long prose never ellipsizes. */}
             {renderTitleTimerSlot(
               <>
-                <Text style={[st.restPhaseLabel, { color: '#FB923C', fontSize: scaledLabels.restPhase }]}>GRAB EQUIPMENT</Text>
+                <Text style={[st.restPhaseLabel, { color: '#FB923C', fontSize: fs(13), letterSpacing: fs(1.5) }]}>GRAB EQUIPMENT</Text>
                 {renderAutoFitTitle(current.grabEquipmentText || current.name, {
                   hasTimer: true,
-                  maxLines: 2,
-                  maxFontSize: 34,
+                  maxLines: 4,
+                  maxFontSize: 28,
+                  maxHeight: 88,
                   color: '#F0F4F8',
                   marginTop: 2,
                 })}
@@ -1205,7 +1244,7 @@ export default function WorkoutPlayer({
                 <View style={[st.mediaInner, mediaInnerSize]}>
                   {followVideoUrl ? (
                     <Video
-                      ref={registerVideo}
+                      ref={(el: any) => registerVideo('followAlong', el)}
                       key={followVideoUrl}
                       source={{ uri: followVideoUrl }}
                       resizeMode={ResizeMode.COVER}
@@ -1250,7 +1289,7 @@ export default function WorkoutPlayer({
               <View style={[st.mediaInner, mediaInnerSize]}>
                 {activeVideoUrl ? (
                   <Video
-                    ref={registerVideo}
+                    ref={(el: any) => registerVideo('waterBreak', el)}
                     key={activeVideoUrl}
                     source={{ uri: activeVideoUrl }}
                     resizeMode={ResizeMode.COVER}
@@ -1381,7 +1420,7 @@ export default function WorkoutPlayer({
                         <Video
                           key={layer.url}
                           ref={(el: any) => {
-                            registerVideo(el);
+                            registerVideo(`layer:${layer.url}`, el);
                             if (isDisplayed) videoRef.current = el;
                           }}
                           source={getVideoSource(layer.url)}
@@ -1396,10 +1435,21 @@ export default function WorkoutPlayer({
                               : undefined
                           }
                           onReadyForDisplay={() => handleLayerReady(layer.url)}
+                          onError={() => {
+                            console.warn('[WorkoutPlayer] video load error', { url: layer.url });
+                            markVideoFailed(layer.url);
+                          }}
                           onPlaybackStatusUpdate={(status: any) => {
-                            if (!status?.isLoaded) return;
+                            if (!status?.isLoaded) {
+                              if (status?.error) {
+                                console.warn('[WorkoutPlayer] video error', { url: layer.url, error: status.error });
+                                markVideoFailed(layer.url);
+                              }
+                              return;
+                            }
                             if (status.error) {
                               console.warn('[WorkoutPlayer] video error', { url: layer.url });
+                              markVideoFailed(layer.url);
                               return;
                             }
                             const now = Date.now();

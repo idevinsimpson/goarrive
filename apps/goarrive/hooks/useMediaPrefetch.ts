@@ -10,6 +10,7 @@
  */
 import { useEffect, useRef } from 'react';
 import { Platform, Image } from 'react-native';
+import { getUpcomingMovements } from './mediaPrefetch.helpers';
 import { isImageUrl } from '../utils/mediaKind';
 
 interface PrefetchableMovement {
@@ -27,11 +28,66 @@ export function useMediaPrefetch(
 ): void {
   const prefetchedUrls = useRef<Set<string>>(new Set());
   const preloadedVideos = useRef<Set<string>>(new Set());
+  // Pending hidden <video> preload elements (web) and their timers, so we can
+  // remove them from the DOM and cancel timeouts if the player unmounts
+  // before loadeddata / the 30s safety timeout fires.
+  const pendingPreloadsRef = useRef<Set<{ el: HTMLVideoElement; timers: ReturnType<typeof setTimeout>[] }>>(new Set());
+  // <link rel=prefetch> elements appended to document.head, removed on unmount
+  // so they don't accumulate for the lifetime of a long web session.
+  const prefetchLinksRef = useRef<HTMLLinkElement[]>([]);
+
+  const preloadHiddenVideo = (videoUrl: string) => {
+    const video = document.createElement('video');
+    video.preload = 'auto';
+    video.muted = true;
+    video.playsInline = true;
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
+    video.src = videoUrl;
+    video.style.position = 'absolute';
+    video.style.width = '0';
+    video.style.height = '0';
+    video.style.opacity = '0';
+    video.style.pointerEvents = 'none';
+    document.body.appendChild(video);
+
+    const pending = { el: video, timers: [] as ReturnType<typeof setTimeout>[] };
+    pendingPreloadsRef.current.add(pending);
+
+    const cleanup = () => {
+      pending.timers.forEach(clearTimeout);
+      pendingPreloadsRef.current.delete(pending);
+      try { document.body.removeChild(video); } catch { /* already removed */ }
+    };
+    video.addEventListener('loadeddata', () => {
+      // Keep element alive briefly so browser retains cache, then remove
+      if (!pendingPreloadsRef.current.has(pending)) return; // unmounted
+      pending.timers.push(setTimeout(cleanup, 5000));
+    });
+    // Safety timeout: remove after 30s regardless
+    pending.timers.push(setTimeout(cleanup, 30000));
+  };
+
+  // On unmount, remove any still-pending hidden preload elements and cancel
+  // their timers so nothing fires after the player is gone.
+  useEffect(() => () => {
+    pendingPreloadsRef.current.forEach(({ el, timers }) => {
+      timers.forEach(clearTimeout);
+      try { document.body.removeChild(el); } catch { /* already removed */ }
+    });
+    pendingPreloadsRef.current.clear();
+    prefetchLinksRef.current.forEach((link) => {
+      try { document.head.removeChild(link); } catch { /* already removed */ }
+    });
+    prefetchLinksRef.current = [];
+  }, []);
 
   // ── Standard prefetch: link rel=prefetch for next 1-3 movements ──────
   useEffect(() => {
     if (!isActive && !isResting) return;
-    const upcoming = movements.slice(currentIndex + 1, currentIndex + 4);
+    // Clamp against list length so we never touch sparse/undefined entries
+    // near the end of the workout.
+    const upcoming = getUpcomingMovements(movements, currentIndex, 3);
     upcoming.forEach((m) => {
       // Prefetch both videoUrl and thumbnailUrl separately
       const urls = [m.videoUrl, m.thumbnailUrl].filter(Boolean) as string[];
@@ -43,6 +99,7 @@ export function useMediaPrefetch(
             link.rel = 'prefetch';
             link.href = url;
             document.head.appendChild(link);
+            prefetchLinksRef.current.push(link);
           } else {
             Image.prefetch(url).catch(() => {});
           }
@@ -61,7 +118,7 @@ export function useMediaPrefetch(
 
     // During countdown, preload the current movement; during ready, preload the first
     const targetIndex = isReady ? 0 : currentIndex;
-    const target = movements[targetIndex];
+    const target = targetIndex < movements.length ? movements[targetIndex] : undefined;
     const videoUrl = target?.videoUrl;
     // Image media is covered by the standard prefetch above — a hidden
     // <video> element can't decode it and would just error out.
@@ -70,24 +127,7 @@ export function useMediaPrefetch(
     preloadedVideos.current.add(videoUrl);
 
     if (Platform.OS === 'web') {
-      const video = document.createElement('video');
-      video.preload = 'auto';
-      video.muted = true;
-      video.src = videoUrl;
-      video.style.position = 'absolute';
-      video.style.width = '0';
-      video.style.height = '0';
-      video.style.opacity = '0';
-      video.style.pointerEvents = 'none';
-      document.body.appendChild(video);
-
-      const cleanup = () => {
-        try { document.body.removeChild(video); } catch { /* already removed */ }
-      };
-      video.addEventListener('loadeddata', () => {
-        setTimeout(cleanup, 5000);
-      });
-      setTimeout(cleanup, 30000);
+      preloadHiddenVideo(videoUrl);
     } else {
       fetch(videoUrl, { method: 'GET' }).catch(() => {});
     }
@@ -102,7 +142,7 @@ export function useMediaPrefetch(
   useEffect(() => {
     if (!isResting && !isActive) return;
 
-    const nextMovement = movements[currentIndex + 1];
+    const nextMovement = currentIndex + 1 < movements.length ? movements[currentIndex + 1] : undefined;
     const videoUrl = nextMovement?.videoUrl;
     if (!videoUrl || isImageUrl(videoUrl) || preloadedVideos.current.has(videoUrl)) return;
 
@@ -110,27 +150,7 @@ export function useMediaPrefetch(
 
     if (Platform.OS === 'web') {
       // Create a hidden video element that forces full buffering
-      const video = document.createElement('video');
-      video.preload = 'auto';
-      video.muted = true;
-      video.src = videoUrl;
-      video.style.position = 'absolute';
-      video.style.width = '0';
-      video.style.height = '0';
-      video.style.opacity = '0';
-      video.style.pointerEvents = 'none';
-      document.body.appendChild(video);
-
-      // Clean up after 30 seconds or when loaded
-      const cleanup = () => {
-        try { document.body.removeChild(video); } catch { /* already removed */ }
-      };
-      video.addEventListener('loadeddata', () => {
-        // Keep element alive briefly so browser retains cache, then remove
-        setTimeout(cleanup, 5000);
-      });
-      // Safety timeout: remove after 30s regardless
-      setTimeout(cleanup, 30000);
+      preloadHiddenVideo(videoUrl);
     } else {
       // On native, use fetch to warm the HTTP cache
       // expo-av will benefit from the cached response

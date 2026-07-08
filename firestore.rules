@@ -97,10 +97,18 @@ service cloud.firestore {
       // Public list for coach selection on intake page; get requires auth
       allow list: if true;
       allow get: if isOwnDoc(coachId) || isPlatformAdmin();
-      // Coaches can update their own scheduling settings
-      allow update: if isOwnDoc(coachId)
+      // Coaches can update their own scheduling settings.
+      // NOTE: hiddenSettings is deliberately NOT in the coach's key list —
+      // only platformAdmin may modify it (coaches cannot un-hide themselves).
+      allow update: if (isOwnDoc(coachId)
                     && request.resource.data.diff(resource.data).affectedKeys()
-                        .hasOnly(['noShowGraceMinutes', 'autoApproveSkipCategories', 'autoApproveSkipLeadDays', 'icalToken']);
+                        .hasOnly(['noShowGraceMinutes', 'autoApproveSkipCategories', 'autoApproveSkipLeadDays', 'icalToken']))
+                    // Platform admin: module visibility, hidden settings sections,
+                    // plus the coach's own scheduling keys so "View as Coach"
+                    // impersonation can operate the settings panels.
+                    || (isPlatformAdmin()
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['enabledModules', 'hiddenSettings', 'noShowGraceMinutes', 'autoApproveSkipCategories', 'autoApproveSkipLeadDays']));
       allow create, delete: if false; // Cloud Functions only (Admin SDK)
 
       // Slot templates — coach manages their own templates

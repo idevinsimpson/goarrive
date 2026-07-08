@@ -89,7 +89,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = void 0;
-exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = void 0;
+exports.generateEquipmentImage = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.onCoachCreated = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -102,6 +102,7 @@ const zoom_1 = require("./zoom");
 const zoomRtms_1 = require("./zoomRtms");
 const ws_1 = __importDefault(require("ws"));
 const tasks_1 = require("@google-cloud/tasks");
+const workoutPlayerSanitizer_1 = require("./workoutPlayerSanitizer");
 // ── Slack Bot (ME-011, ME-012) ────────────────────────────────────────────────
 var slack_1 = require("./slack");
 Object.defineProperty(exports, "slackEvents", { enumerable: true, get: function () { return slack_1.slackEvents; } });
@@ -886,14 +887,20 @@ async function processStripeEvent(tag, event, res) {
             case 'charge.refunded':
                 await handleChargeRefunded(event.data.object, event.id);
                 break;
+            case 'charge.dispute.created':
+                await handleChargeDisputeCreated(event.data.object, event.id);
+                break;
+            case 'payment_intent.payment_failed':
+                await handlePaymentIntentFailed(event.data.object, event.id);
+                break;
             default:
                 console.log(`[${tag}] Unhandled event type:`, event.type);
         }
     }
     catch (err) {
         console.error(`[${tag}] Error processing event`, event.id, ':', err);
-        // Don't return 500 — Stripe will retry. Log and return 200 to avoid retry loops
-        // for non-transient errors. For transient errors, throw to trigger retry.
+        res.status(500).send('Internal error — Stripe will retry');
+        return;
     }
     res.status(200).send('OK');
 }
@@ -1288,6 +1295,82 @@ async function handleChargeRefunded(charge, eventId) {
     });
     console.log('[handleChargeRefunded] Refund ledger entry created for charge', charge.id);
 }
+async function handleChargeDisputeCreated(dispute, eventId) {
+    var _a, _b, _c, _d, _e;
+    // A chargeback reverses funds out-of-band; record a negative ledger entry so
+    // coach earnings and the GoArrive ledger stay in sync with Stripe reality.
+    // Split math mirrors handleChargeRefunded.
+    const chargeId = typeof dispute.charge === 'string' ? dispute.charge : (_a = dispute.charge) === null || _a === void 0 ? void 0 : _a.id;
+    if (!chargeId) {
+        console.warn('[handleChargeDisputeCreated] Dispute', dispute.id, 'has no charge — skipping');
+        return;
+    }
+    const originalEntrySnap = await db.collection('ledgerEntries')
+        .where('stripeChargeId', '==', chargeId)
+        .limit(1)
+        .get();
+    if (originalEntrySnap.empty) {
+        console.warn('[handleChargeDisputeCreated] No ledger entry found for disputed charge', chargeId, '— dispute', dispute.id, 'not recorded in ledger');
+        return;
+    }
+    const original = originalEntrySnap.docs[0].data();
+    const disputedAmountCents = dispute.amount;
+    const tierSnapshot = original.tierSnapshot;
+    const applicationFeePercent = tierSnapshot;
+    const goArriveShareCents = -Math.round(disputedAmountCents * applicationFeePercent / 100);
+    const coachShareCents = -(disputedAmountCents + goArriveShareCents); // negative
+    const ledgerRef = db.collection('ledgerEntries').doc();
+    await ledgerRef.set({
+        entryId: ledgerRef.id,
+        billingEventId: eventId,
+        memberId: original.memberId,
+        coachId: original.coachId,
+        planId: original.planId,
+        snapshotId: original.snapshotId,
+        phase: original.phase,
+        grossAmountCents: -disputedAmountCents,
+        coachShareCents,
+        goArriveShareCents,
+        tierSnapshot,
+        applicationFeePercent,
+        stripeInvoiceId: (_b = original.stripeInvoiceId) !== null && _b !== void 0 ? _b : null,
+        stripeChargeId: chargeId,
+        stripeDisputeId: dispute.id,
+        disputeStatus: dispute.status,
+        disputeOf: originalEntrySnap.docs[0].id,
+        contractStartAt: (_c = original.contractStartAt) !== null && _c !== void 0 ? _c : null,
+        contractEndAt: (_d = original.contractEndAt) !== null && _d !== void 0 ? _d : null,
+        pricingSnapshotId: (_e = original.pricingSnapshotId) !== null && _e !== void 0 ? _e : '',
+        ruleSnapshot: Object.assign(Object.assign({}, original.ruleSnapshot), { disputePolicy: 'Chargeback recorded as negative ledger entry. Stripe reverses funds and application fee out-of-band on direct charges.' }),
+        createdAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    console.log('[handleChargeDisputeCreated] Dispute ledger entry created for charge', chargeId, 'dispute', dispute.id);
+}
+async function handlePaymentIntentFailed(pi, eventId) {
+    var _a, _b, _c;
+    // Invoice-tied PI failures are already handled by invoice.payment_failed.
+    // This covers orphaned PIs (e.g. pay-in-full checkout) so failures aren't silent.
+    const invoiceId = pi.invoice;
+    if (invoiceId) {
+        console.log('[handlePaymentIntentFailed] PI', pi.id, 'is invoice-tied (', invoiceId, ') — handled by invoice.payment_failed, skipping');
+        return;
+    }
+    const planId = (_a = pi.metadata) === null || _a === void 0 ? void 0 : _a.planId;
+    console.warn('[handlePaymentIntentFailed] Orphaned PI failed:', pi.id, 'planId:', planId !== null && planId !== void 0 ? planId : 'unknown', 'lastError:', (_c = (_b = pi.last_payment_error) === null || _b === void 0 ? void 0 : _b.message) !== null && _c !== void 0 ? _c : 'none');
+    if (!planId)
+        return;
+    const planRef = db.collection('member_plans').doc(planId);
+    const planSnap = await planRef.get();
+    if (!planSnap.exists) {
+        console.warn('[handlePaymentIntentFailed] member_plan', planId, 'not found for failed PI', pi.id);
+        return;
+    }
+    await planRef.update({
+        checkoutStatus: 'failed',
+        updatedAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    console.log('[handlePaymentIntentFailed] Plan', planId, 'marked checkoutStatus failed');
+}
 // ─── 7. activateCtsOptIn ──────────────────────────────────────────────────────
 /**
  * Activates a Commit to Save opt-in for a member in the continuation phase.
@@ -1307,9 +1390,15 @@ async function handleChargeRefunded(charge, eventId) {
  */
 exports.activateCtsOptIn = (0, https_1.onCall)({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
     var _a, _b, _c;
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'Authentication required');
+    }
     const { consentId, planId, memberId } = request.data;
     if (!consentId || !planId || !memberId) {
-        throw new Error('Missing required parameters: consentId, planId, memberId');
+        throw new https_1.HttpsError('invalid-argument', 'Missing required parameters: consentId, planId, memberId');
+    }
+    if (request.auth.uid !== memberId) {
+        throw new https_1.HttpsError('permission-denied', 'Caller must match the target member');
     }
     // 1. Load and validate consent document
     const consentRef = db.collection('commitToSaveConsents').doc(consentId);
@@ -1431,6 +1520,17 @@ exports.activateCtsOptIn = (0, https_1.onCall)({ secrets: [stripeSecretKey], inv
     console.log('[activateCtsOptIn] CTS activated for member', memberId, 'plan', planId, 'subscription', stripeSubscriptionId, 'rate', ctsMonthlyRate);
     return { success: true };
 });
+// Default module visibility for newly created coaches — core loop on,
+// scheduling/billing off until a platform admin enables them.
+// Missing key = enabled, so existing coaches are unaffected.
+const NEW_COACH_DEFAULT_MODULES = {
+    members: true,
+    build: true,
+    scheduling: false,
+    billing: false,
+    account: true,
+    coachLaunch: true,
+};
 // ── 8. addCoach — Admin-only: create a new coach account ─────────────────────
 // Creates a Firebase Auth user, sets custom claims, and writes a coaches doc.
 // Only callers with admin: true in their custom claims may invoke this.
@@ -1488,6 +1588,7 @@ exports.addCoach = (0, https_1.onCall)({ region: 'us-central1' }, async (request
         role: 'coach',
         createdAt: Date.now(),
         createdBy: callerUid,
+        enabledModules: NEW_COACH_DEFAULT_MODULES,
     });
     // 6. Generate password reset link and send via Firebase's built-in email
     const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
@@ -1616,6 +1717,7 @@ exports.activateCoachInvite = (0, https_1.onCall)({ region: 'us-central1', invok
         role: 'coach',
         createdAt: Date.now(),
         invitedBy: invite.createdBy,
+        enabledModules: NEW_COACH_DEFAULT_MODULES,
     });
     // Mark invite as used
     await inviteRef.update({
@@ -3769,8 +3871,14 @@ const notifications_1 = require("./notifications");
 const reminders_1 = require("./reminders");
 const zoom_2 = require("./zoom");
 // ─── 22. getSystemHealth — Provider health check for admin dashboard ────────
-exports.getSystemHealth = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber], invoker: 'public' }, async () => {
-    var _a, _b, _c;
+exports.getSystemHealth = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber], invoker: 'public' }, async (request) => {
+    var _a, _b, _c, _d;
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'Authentication required');
+    }
+    if (!((_a = request.auth.token) === null || _a === void 0 ? void 0 : _a.platformAdmin)) {
+        throw new https_1.HttpsError('permission-denied', 'Platform admin access required');
+    }
     // Reset cached providers so health check reflects current secret availability
     (0, notifications_1.resetNotificationProviders)();
     const zoomProvider = (0, zoom_1.getZoomProvider)({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
@@ -3838,7 +3946,7 @@ exports.getSystemHealth = (0, https_1.onCall)({ region: 'us-central1', secrets: 
         }
         catch (err) {
             // A 404 or 400 means the API is reachable; only network errors mean unreachable
-            if (((_a = err.message) === null || _a === void 0 ? void 0 : _a.includes('404')) || ((_b = err.message) === null || _b === void 0 ? void 0 : _b.includes('400')) || ((_c = err.message) === null || _c === void 0 ? void 0 : _c.includes('not found'))) {
+            if (((_b = err.message) === null || _b === void 0 ? void 0 : _b.includes('404')) || ((_c = err.message) === null || _c === void 0 ? void 0 : _c.includes('400')) || ((_d = err.message) === null || _d === void 0 ? void 0 : _d.includes('not found'))) {
                 zoomApiReachable = true;
             }
             else {
@@ -5705,7 +5813,7 @@ exports.syncToGoogleCalendar = (0, https_1.onCall)({ secrets: [googleClientId, g
             continue;
         }
         try {
-            const startDateTime = `${inst.scheduledDate}T${inst.scheduledTime || '09:00'}:00`;
+            const startDateTime = `${inst.scheduledDate}T${inst.scheduledStartTime || '09:00'}:00`;
             const durationMin = inst.durationMinutes || 30;
             const endDate = new Date(startDateTime);
             endDate.setMinutes(endDate.getMinutes() + durationMin);
@@ -5954,7 +6062,7 @@ exports.removeGcalConflictAccount = (0, https_1.onCall)({ invoker: 'public' }, a
  * coach's selected conflict-check calendars across all connected Google accounts.
  * Returns { hasConflict: boolean, conflictingEvents: { calendarEmail, summary, start, end }[] }
  */
-exports.checkGcalConflicts = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret] }, async (request) => {
+exports.checkGcalConflicts = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret], invoker: 'public' }, async (request) => {
     var _a, _b, _c, _d, _e;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -6848,18 +6956,23 @@ exports.retryFailedGifGeneration = (0, scheduler_1.onSchedule)({ schedule: '0 */
 const openaiApiKey = (0, params_1.defineSecret)('OPENAI_API_KEY');
 const voicemakerApiKey = (0, params_1.defineSecret)('VOICEMAKER_API_KEY');
 exports.analyzeMovement = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60, maxInstances: 20, invoker: 'public' }, async (request) => {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f, _g;
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'Authentication required');
+    }
+    if (!((_a = request.auth.token) === null || _a === void 0 ? void 0 : _a.coach) && !((_b = request.auth.token) === null || _b === void 0 ? void 0 : _b.platformAdmin)) {
+        throw new https_1.HttpsError('permission-denied', 'Coach access required');
+    }
     const { gifUrl, contactSheet } = request.data;
     if (!gifUrl && !contactSheet) {
         throw new https_1.HttpsError('invalid-argument', 'Either contactSheet or gifUrl is required');
     }
     // Trim whitespace/newlines — secrets stored via CLI often have trailing \n
-    const apiKey = (_a = openaiApiKey.value()) === null || _a === void 0 ? void 0 : _a.trim();
+    const apiKey = (_c = openaiApiKey.value()) === null || _c === void 0 ? void 0 : _c.trim();
     if (!apiKey) {
         throw new https_1.HttpsError('internal', 'OpenAI API key not configured');
     }
     if (apiKey.length < 30) {
-        console.error('[analyzeMovement] API key appears truncated (length:', apiKey.length, ')');
         throw new https_1.HttpsError('internal', 'OpenAI API key appears invalid — check Firebase secrets');
     }
     const isContactSheet = !!contactSheet;
@@ -6917,7 +7030,7 @@ Return ONLY valid JSON, no markdown, no explanation.`;
             throw new https_1.HttpsError('internal', `OpenAI API error: ${response.status}`);
         }
         const result = await response.json();
-        const content = ((_e = (_d = (_c = (_b = result.choices) === null || _b === void 0 ? void 0 : _b[0]) === null || _c === void 0 ? void 0 : _c.message) === null || _d === void 0 ? void 0 : _d.content) === null || _e === void 0 ? void 0 : _e.trim()) || '';
+        const content = ((_g = (_f = (_e = (_d = result.choices) === null || _d === void 0 ? void 0 : _d[0]) === null || _e === void 0 ? void 0 : _e.message) === null || _f === void 0 ? void 0 : _f.content) === null || _g === void 0 ? void 0 : _g.trim()) || '';
         // Parse JSON from the response (strip markdown fences if present)
         let jsonStr = content;
         if (jsonStr.startsWith('```')) {
@@ -7827,6 +7940,55 @@ exports.generateVoice = (0, https_1.onCall)({
     return { url: cdnUrl, path, writeback, writebackError, provider: selectedProvider };
 });
 // ═══════════════════════════════════════════════════════════════════════════════
+// NEW COACH — Branded welcome email
+// Fires whenever a coaches/{coachId} doc is created, regardless of the path
+// (invite activation, admin add, script), so every new coach gets welcomed.
+// ═══════════════════════════════════════════════════════════════════════════════
+exports.onCoachCreated = (0, firestore_1.onDocumentCreated)({ document: 'coaches/{coachId}', region: 'us-central1', secrets: [emailApiKey] }, async (event) => {
+    var _a;
+    const snap = event.data;
+    if (!snap)
+        return;
+    const TAG = '[onCoachCreated]';
+    const data = snap.data();
+    if (data.welcomeEmailSentAt) {
+        console.log(TAG, 'Welcome email already sent — skipping', event.params.coachId);
+        return;
+    }
+    if (!data.email) {
+        console.log(TAG, 'No email on coach doc — skipping', event.params.coachId);
+        return;
+    }
+    const { sendNotification, resetNotificationProviders } = await Promise.resolve().then(() => __importStar(require('./notifications')));
+    resetNotificationProviders();
+    const { coachWelcomeEmail } = await Promise.resolve().then(() => __importStar(require('./templates')));
+    const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
+    const rendered = coachWelcomeEmail(data.name || '', appUrl);
+    const logId = await sendNotification({
+        messageType: 'coach_welcome',
+        channel: 'email',
+        recipient: {
+            uid: event.params.coachId,
+            email: data.email,
+            displayName: data.name,
+            role: 'coach',
+        },
+        subject: rendered.subject,
+        body: rendered.body,
+        htmlBody: rendered.htmlBody,
+        coachId: event.params.coachId,
+    });
+    const logSnap = await db.collection('notification_log').doc(logId).get();
+    const status = (_a = logSnap.data()) === null || _a === void 0 ? void 0 : _a.status;
+    if (status === 'sent') {
+        await snap.ref.update({ welcomeEmailSentAt: Date.now() });
+        console.log(TAG, 'Welcome email sent to', data.email, '(log', logId + ')');
+    }
+    else {
+        console.error(TAG, 'Welcome email not sent for', data.email, '— status:', status, '(log', logId + ')');
+    }
+});
+// ═══════════════════════════════════════════════════════════════════════════════
 // NEW MEMBER — Set custom claims + notify coach
 // Fires when a member self-signs up via the intake form. Sets role claims so
 // AuthContext picks up the correct role, and sends FCM push to the assigned coach.
@@ -8018,6 +8180,10 @@ exports.getEmbeddedSessionJoinConfig = (0, https_1.onCall)({
 });
 // ─── Workout Share Links ─────────────────────────────────────────────────────
 const crypto = __importStar(require("crypto"));
+const ogImage_1 = require("./ogImage");
+const ogVideo_1 = require("./ogVideo");
+var shareMeta_1 = require("./shareMeta");
+Object.defineProperty(exports, "shareMeta", { enumerable: true, get: function () { return shareMeta_1.shareMeta; } });
 const VALID_VISIBILITIES = ['restricted', 'anyone_with_link', 'anyone_with_link_signin_required'];
 function normalizeVisibility(v) {
     return VALID_VISIBILITIES.includes(v) ? v : 'anyone_with_link';
@@ -8030,7 +8196,7 @@ function normalizeExpiresAt(input) {
         return null;
     return admin.firestore.Timestamp.fromMillis(ms);
 }
-exports.createShareToken = (0, https_1.onCall)(async (request) => {
+exports.createShareToken = (0, https_1.onCall)({ memory: '512MiB' }, async (request) => {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j;
     if (!request.auth) {
         throw new https_1.HttpsError('unauthenticated', 'Must be signed in.');
@@ -8062,6 +8228,15 @@ exports.createShareToken = (0, https_1.onCall)(async (request) => {
     if (!existingTokens.empty) {
         const existing = existingTokens.docs[0];
         const data = existing.data();
+        if (!data.ogImageUrl) {
+            // Backfill OG image for tokens minted before OG images existed.
+            try {
+                await (0, ogImage_1.generateWorkoutOgImage)(existing.id, workoutData);
+            }
+            catch (err) {
+                console.warn('[createShareToken] OG image backfill failed:', err);
+            }
+        }
         return {
             shareId: existing.id,
             alreadyExists: true,
@@ -8087,6 +8262,17 @@ exports.createShareToken = (0, https_1.onCall)(async (request) => {
         firstResolvedAt: null,
         lastResolvedAt: null,
     });
+    // Best-effort: a share link without an OG image still works — crawlers just
+    // get text-only meta until the lazy backfill in shareMeta fills it in.
+    try {
+        await (0, ogImage_1.generateWorkoutOgImage)(shareId, workoutData);
+    }
+    catch (err) {
+        console.warn('[createShareToken] OG image generation failed:', err);
+    }
+    // Fire-and-forget video generation — does not block token creation.
+    // ogVideoUrl lands on the shareTokens doc ~1 min later; iMessage unfurls pick it up.
+    (0, ogVideo_1.generateWorkoutOgVideo)(shareId, workoutData).catch((err) => console.warn('[createShareToken] OG video generation failed:', err));
     return {
         shareId,
         alreadyExists: false,
@@ -8283,75 +8469,119 @@ exports.resolveShareToken = (0, https_1.onRequest)({ cors: true, region: 'us-cen
             console.warn('[resolveShareToken] movement enrichment failed:', err);
         }
     }
-    const sanitizedBlocks = (workout.blocks || []).map((block) => {
-        var _a;
-        return ({
-            type: block.type || 'Block',
-            name: block.name || '',
-            label: block.label || '',
-            movements: (block.movements || []).map((m) => {
-                var _a, _b, _c, _d, _e, _f, _g;
-                const canonical = m.movementId ? movementCanonical[m.movementId] : undefined;
-                // Canonical voiceUrl + name win for audio/identity so a rename or
-                // re-recording in the library propagates to share-link viewers.
-                const resolvedName = ((canonical === null || canonical === void 0 ? void 0 : canonical.name) && canonical.name.trim())
-                    || m.movementName
-                    || m.name
-                    || '';
-                const resolvedVoiceUrl = (canonical === null || canonical === void 0 ? void 0 : canonical.voiceUrl) || m.voiceUrl || null;
-                return ({
-                    movementId: m.movementId || '',
-                    movementName: resolvedName,
-                    name: resolvedName,
-                    category: m.category || '',
-                    muscleGroup: m.muscleGroup || '',
-                    videoUrl: m.videoUrl || null,
-                    mediaUrl: m.mediaUrl || null,
-                    thumbnailUrl: m.thumbnailUrl || null,
-                    voiceUrl: resolvedVoiceUrl,
-                    nextUpVoiceUrl: m.nextUpVoiceUrl || null,
-                    sets: m.sets || 0,
-                    reps: m.reps || '',
-                    duration: m.duration || 0,
-                    durationSec: m.durationSec || 0,
-                    workSec: m.workSec || 0,
-                    restSec: m.restSec || 0,
-                    restSeconds: m.restSeconds || 0,
-                    swapSides: (_a = m.swapSides) !== null && _a !== void 0 ? _a : false,
-                    swapMode: (_b = m.swapMode) !== null && _b !== void 0 ? _b : 'split',
-                    swapWindowSec: (_c = m.swapWindowSec) !== null && _c !== void 0 ? _c : 5,
-                    showOnPreview: (_d = m.showOnPreview) !== null && _d !== void 0 ? _d : true,
-                    description: m.description || '',
-                    coachingCues: m.coachingCues || '',
-                    notes: m.notes || '',
-                    cropScale: (_e = m.cropScale) !== null && _e !== void 0 ? _e : 1,
-                    cropTranslateX: (_f = m.cropTranslateX) !== null && _f !== void 0 ? _f : 0,
-                    cropTranslateY: (_g = m.cropTranslateY) !== null && _g !== void 0 ? _g : 0,
-                });
-            }),
-            restBetweenSets: block.restBetweenSets || 0,
-            restBetweenSec: block.restBetweenSec || 0,
-            restBetweenRoundsSec: block.restBetweenRoundsSec || 0,
-            restBetweenMovementsSec: block.restBetweenMovementsSec || 0,
-            circuitStartRestSec: block.circuitStartRestSec || 0,
-            rounds: block.rounds || 1,
-            showDemo: (_a = block.showDemo) !== null && _a !== void 0 ? _a : false,
-            demoDurationSec: block.demoDurationSec || 0,
-        });
-    });
     res.status(200).json({
         authenticated: isAuthenticated,
         teaser,
-        workout: {
-            id: tokenData.workoutId,
-            name: workout.name || 'Workout',
-            description: workout.description || '',
-            category: workout.category || null,
-            difficulty: workout.difficulty || null,
-            estimatedDurationMin: workout.estimatedDurationMin || null,
-            tags: workout.tags || [],
-            blocks: sanitizedBlocks,
-        },
+        workout: Object.assign({ id: tokenData.workoutId }, (0, workoutPlayerSanitizer_1.sanitizePlayerWorkout)(workout, movementCanonical)),
     });
+});
+// ─── generateEquipmentImage — AI image for grab-equipment phases ─────────────
+// Accepts grabEquipmentText, checks Storage cache, generates via OpenAI Images
+// if not cached, uploads and returns a download URL.
+//
+// Cache path: equipment_images/{slug}.png
+// Reuses OPENAI_API_KEY secret (already defined above).
+// ─────────────────────────────────────────────────────────────────────────────
+function slugify(text) {
+    return text
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80);
+}
+exports.generateEquipmentImage = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60, invoker: 'public' }, async (request) => {
+    var _a, _b, _c, _d;
+    if (!((_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid)) {
+        throw new https_1.HttpsError('unauthenticated', 'Authentication required');
+    }
+    const { grabEquipmentText } = request.data;
+    if (!grabEquipmentText || !grabEquipmentText.trim()) {
+        throw new https_1.HttpsError('invalid-argument', 'grabEquipmentText is required');
+    }
+    const apiKey = (_b = openaiApiKey.value()) === null || _b === void 0 ? void 0 : _b.trim();
+    if (!apiKey) {
+        throw new https_1.HttpsError('internal', 'OpenAI API key not configured');
+    }
+    const slug = slugify(grabEquipmentText.trim());
+    const storagePath = `equipment_images/${slug}.png`;
+    const bucket = admin.storage().bucket();
+    const file = bucket.file(storagePath);
+    // ── Cache check ─────────────────────────────────────────────────────────
+    try {
+        const [exists] = await file.exists();
+        if (exists) {
+            const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media`;
+            console.info('[generateEquipmentImage] Cache hit', { slug, storagePath });
+            return { imageUrl };
+        }
+    }
+    catch (cacheErr) {
+        console.warn('[generateEquipmentImage] Cache check failed — regenerating', { message: String((cacheErr === null || cacheErr === void 0 ? void 0 : cacheErr.message) || cacheErr).slice(0, 200) });
+    }
+    // ── Generate via OpenAI Images API ──────────────────────────────────────
+    const prompt = `minimalist fitness equipment illustration of ${grabEquipmentText.trim()}, neutral background, gym-floor lighting, no text`;
+    let imageBuffer = null;
+    let lastError = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+            const response = await fetch('https://api.openai.com/v1/images/generations', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    model: 'dall-e-3',
+                    prompt,
+                    n: 1,
+                    size: '1024x1024',
+                    quality: 'standard',
+                    response_format: 'url',
+                }),
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('[generateEquipmentImage] OpenAI API error', { attempt, status: response.status, errorText });
+                lastError = new https_1.HttpsError('internal', `OpenAI API error: ${response.status}`, errorText.slice(0, 500));
+                continue;
+            }
+            const result = await response.json();
+            const imageUrl = (_d = (_c = result.data) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.url;
+            if (!imageUrl) {
+                lastError = new https_1.HttpsError('internal', 'No image URL in OpenAI response');
+                continue;
+            }
+            // Download the generated image
+            const imgResp = await fetch(imageUrl);
+            if (!imgResp.ok) {
+                lastError = new https_1.HttpsError('internal', `Failed to download generated image: ${imgResp.status}`);
+                continue;
+            }
+            imageBuffer = Buffer.from(await imgResp.arrayBuffer());
+            break;
+        }
+        catch (err) {
+            lastError = err;
+            console.warn('[generateEquipmentImage] Attempt failed', { attempt, message: String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 200) });
+        }
+    }
+    if (!imageBuffer) {
+        if (lastError instanceof https_1.HttpsError)
+            throw lastError;
+        console.error('[generateEquipmentImage] All attempts failed', lastError);
+        throw new https_1.HttpsError('internal', 'Failed to generate equipment image');
+    }
+    // ── Upload to Storage ────────────────────────────────────────────────────
+    try {
+        await file.save(imageBuffer, { contentType: 'image/png' });
+    }
+    catch (uploadErr) {
+        console.error('[generateEquipmentImage] Storage upload failed', { storagePath, message: String((uploadErr === null || uploadErr === void 0 ? void 0 : uploadErr.message) || uploadErr).slice(0, 300) });
+        throw new https_1.HttpsError('internal', 'Failed to upload equipment image');
+    }
+    const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media`;
+    console.info('[generateEquipmentImage] Generated and uploaded', { slug, storagePath });
+    return { imageUrl: downloadUrl };
 });
 //# sourceMappingURL=index.js.map

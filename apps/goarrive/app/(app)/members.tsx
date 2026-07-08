@@ -43,6 +43,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { useAuth } from '../../lib/AuthContext';
+import { ModuleGate } from '../../lib/useCoachModules';
 import { db } from '../../lib/firebase';
 import MemberForm, {
   MemberFormData,
@@ -82,6 +83,14 @@ interface MemberAssignmentMeta {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function MembersScreen() {
+  return (
+    <ModuleGate module="members">
+      <MembersScreenInner />
+    </ModuleGate>
+  );
+}
+
+function MembersScreenInner() {
   const { user, claims, effectiveUid } = useAuth();
   // Use effectiveUid to respect admin override (View as Coach)
   const coachId = effectiveUid || claims?.coachId || user?.uid || '';

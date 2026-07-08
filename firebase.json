@@ -30,8 +30,15 @@
         "destination": "/join/[sessionInstanceId].html"
       },
       {
-        "source": "/share/**",
+        "source": "/share-shell",
         "destination": "/share/[shareId].html"
+      },
+      {
+        "source": "/share/**",
+        "function": {
+          "functionId": "shareMeta",
+          "region": "us-central1"
+        }
       },
       {
         "source": "/intake/*",

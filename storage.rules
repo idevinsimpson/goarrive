@@ -1,6 +1,11 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    // Share link OG preview images — publicly readable (teaser only, no PII)
+    match /og-images/{fileName} {
+      allow read: if true;
+      allow write: if false;
+    }
     // Platform voice cues — publicly readable (no auth required)
     match /voice_cache/platform/{fileName} {
       allow read: if true;

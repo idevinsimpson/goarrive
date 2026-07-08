@@ -45,6 +45,29 @@ function isAudioAvailable(): boolean {
   return ctx !== null && ctx.state === 'running';
 }
 
+/**
+ * Resume the shared AudioContext from inside a user gesture. iOS Safari
+ * creates AudioContexts in the 'suspended' state and only allows resume()
+ * during a gesture — calling this synchronously from a tap handler is what
+ * makes the oscillator cues audible on iOS.
+ */
+export function unlockAudioContext(): void {
+  if (typeof window === 'undefined') return;
+  const ctx = getAudioContext();
+  if (!ctx) {
+    console.warn('[VOICE-AUDIT] unlockAudioContext — no AudioContext available');
+    return;
+  }
+  if (ctx.state === 'suspended') {
+    ctx.resume().then(
+      () => console.info('[VOICE-AUDIT] unlockAudioContext resumed', { state: ctx.state }),
+      (err) => console.warn('[VOICE-AUDIT] unlockAudioContext resume FAILED', { err: String(err) }),
+    );
+  } else {
+    console.info('[VOICE-AUDIT] unlockAudioContext — already', { state: ctx.state });
+  }
+}
+
 // ── Haptic fallback patterns ───────────────────────────────────────────
 // Each cue type maps to a distinct haptic pattern so the member can
 // differentiate transitions by feel when audio is unavailable.
