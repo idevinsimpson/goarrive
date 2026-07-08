@@ -1,8 +1,11 @@
 // ─── Workout share-link OG images ────────────────────────────────────────────
-// Composes a 1200x630 Open Graph preview image for a shared workout, mirroring
-// the WorkoutPlayer "ready" phase: logo top, movement thumbnails grouped by
-// block with round badges, workout title at the bottom. Uploaded to Storage at
-// og-images/{shareId}.jpg and recorded on the shareTokens doc as ogImageUrl.
+// Composes a 1200x1600 portrait Open Graph preview image for a shared workout,
+// mirroring the WorkoutPlayer "ready" phase: logo top, movement thumbnails
+// (4:5 portrait tiles) grouped by block with round badges. Consecutive
+// single-movement ("Tabata") blocks merge into one group, broken by special
+// blocks (Water Break etc.) exactly like the player. No title text — og:title
+// carries the workout name in the unfurl. Uploaded to Storage at
+// og-images/{shareId}-v2.jpg and recorded on the shareTokens doc as ogImageUrl.
 //
 // Text is rendered via SVG layers composited by sharp (sharp has no native
 // text API). Fonts come from the runtime's fontconfig; we request generic
@@ -15,21 +18,25 @@ import * as path from 'path';
 
 // Mirrors apps/goarrive/hooks/useWorkoutFlatten.ts SPECIAL_BLOCK_TYPES —
 // blocks that carry no movements and are excluded from the preview grid.
+// Specials also break tabata runs: tabata blocks only merge when consecutive
+// in the original block order with no special block between them.
 const SPECIAL_BLOCK_TYPES = new Set([
   'Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment', 'Follow-Along Video',
 ]);
 
 const CANVAS_W = 1200;
-const CANVAS_H = 630;
-const MARGIN_X = 48;
+const CANVAS_H = 1600;
+const MARGIN_X = 60;
 const CONTENT_W = CANVAS_W - MARGIN_X * 2;
-const GRID_TOP = 118;
-const GRID_BOTTOM = 512;
-const TILE_GAP = 10;
-const GROUP_LABEL_H = 32;
-const COLUMNS = 6;
-const MAX_TILES = 12;
-const MAX_GROUPS = 4;
+const GRID_TOP = 170;
+const GRID_BOTTOM = CANVAS_H - 60;
+const TILE_GAP = 14;
+const GROUP_LABEL_H = 48;
+const COLUMNS = 4;
+const MAX_TILES = 16;
+const MAX_GROUPS = 5;
+// App-wide movement image aspect: 4:5 portrait (height = width * 1.25).
+const TILE_H_PER_W = 1.25;
 
 const COLORS = {
   background: '#0F1117',
@@ -43,6 +50,8 @@ const COLORS = {
 interface OgTile {
   imageUrl: string | null;
   extraCount?: number;
+  /** Per-tile rounds label (tabata tiles keep their own "8x"). */
+  roundsLabel?: string;
 }
 
 interface OgGroup {
@@ -60,14 +69,49 @@ function escapeXml(s: string): string {
     .replace(/'/g, '&apos;');
 }
 
+function tileImageUrl(mv: any): string | null {
+  if (mv && typeof mv.thumbnailUrl === 'string' && mv.thumbnailUrl) return mv.thumbnailUrl;
+  if (mv && typeof mv.posterUrl === 'string' && mv.posterUrl) return mv.posterUrl;
+  return null;
+}
+
 /** Extracts preview groups (block label + rounds + movement thumbnails) from a workout doc. */
 export function collectOgGroups(workout: Record<string, any>): { groups: OgGroup[]; movementCount: number } {
   const blocks: any[] = Array.isArray(workout.blocks) ? workout.blocks : [];
-  const exerciseBlocks = blocks.filter((b) => !SPECIAL_BLOCK_TYPES.has(b?.type || ''));
+  // Mirrors WorkoutPlayer ready phase: a "tabata" block has exactly one movement.
+  const isTabataBlock = (b: any) => Array.isArray(b?.movements) && b.movements.length === 1;
 
   let movementCount = 0;
   const allGroups: OgGroup[] = [];
-  for (const block of exerciseBlocks) {
+  let tabataRun: any[] = [];
+
+  const flushTabataRun = () => {
+    if (tabataRun.length === 0) return;
+    const tiles: OgTile[] = [];
+    for (const blk of tabataRun) {
+      const mv = blk.movements[0];
+      if (!mv) continue;
+      const rounds = Number(blk.rounds ?? blk.sets ?? 1) || 1;
+      tiles.push({ imageUrl: tileImageUrl(mv), roundsLabel: rounds > 1 ? `${rounds}x` : undefined });
+    }
+    tabataRun = [];
+    if (tiles.length === 0) return;
+    movementCount += tiles.length;
+    allGroups.push({ label: 'Tabata', rounds: 1, tiles });
+  };
+
+  for (const block of blocks) {
+    if (SPECIAL_BLOCK_TYPES.has(block?.type || '')) {
+      // Specials break tabata runs — blocks on opposite sides of a Water Break
+      // do not merge, even though the special itself renders nothing.
+      flushTabataRun();
+      continue;
+    }
+    if (isTabataBlock(block)) {
+      tabataRun.push(block);
+      continue;
+    }
+    flushTabataRun();
     const movements = (Array.isArray(block.movements) ? block.movements : [])
       .filter((mv: any) => mv && mv.showOnPreview !== false);
     if (movements.length === 0) continue;
@@ -75,13 +119,10 @@ export function collectOgGroups(workout: Record<string, any>): { groups: OgGroup
     allGroups.push({
       label: String(block.label || block.name || block.type || 'Block'),
       rounds: Number(block.rounds ?? block.sets ?? 1) || 1,
-      tiles: movements.map((mv: any) => ({
-        imageUrl: (typeof mv.thumbnailUrl === 'string' && mv.thumbnailUrl)
-          ? mv.thumbnailUrl
-          : (typeof mv.posterUrl === 'string' && mv.posterUrl) ? mv.posterUrl : null,
-      })),
+      tiles: movements.map((mv: any) => ({ imageUrl: tileImageUrl(mv) })),
     });
   }
+  flushTabataRun();
 
   // Cap groups and total tiles; fold the overflow into a trailing "+N" tile.
   const groups = allGroups.slice(0, MAX_GROUPS);
@@ -129,7 +170,7 @@ function loadLogo(): Buffer | null {
 }
 
 /**
- * Composes the 1200x630 OG JPEG for a workout. Returns the image buffer.
+ * Composes the 1200x1600 portrait OG JPEG for a workout. Returns the buffer.
  * Throws on composition failure — callers treat OG images as best-effort.
  */
 export async function composeWorkoutOgImage(workout: Record<string, any>): Promise<Buffer> {
@@ -138,20 +179,24 @@ export async function composeWorkoutOgImage(workout: Record<string, any>): Promi
   const sharp = require('sharp');
 
   const { groups } = collectOgGroups(workout);
-  const title = String(workout.name || 'Workout');
 
-  // ── Layout: fit every group (label row + tile rows) into the grid band ──
+  // ── Layout: fit every group (label row + 4:5 tile rows) into the grid band ─
   const maxGroupTiles = groups.reduce((m, g) => Math.max(m, g.tiles.length), 0);
-  const effCols = Math.max(3, Math.min(COLUMNS, maxGroupTiles));
+  const effCols = Math.max(2, Math.min(COLUMNS, maxGroupTiles));
   const rowsPerGroup = groups.map((g) => Math.ceil(g.tiles.length / effCols));
   const totalRows = rowsPerGroup.reduce((a, b) => a + b, 0) || 0;
   const availH = GRID_BOTTOM - GRID_TOP;
   const fixedH = groups.length * GROUP_LABEL_H + totalRows * TILE_GAP;
   const maxTileW = Math.floor((CONTENT_W - (effCols - 1) * TILE_GAP) / effCols);
-  const tileH = totalRows > 0
-    ? Math.max(56, Math.min(200, Math.floor((availH - fixedH) / totalRows)))
+  let tileH = totalRows > 0
+    ? Math.min(
+        Math.floor((availH - fixedH) / totalRows),
+        Math.floor(maxTileW * TILE_H_PER_W),
+        560,
+      )
     : 0;
-  const tileW = Math.min(maxTileW, Math.floor(tileH * 1.5));
+  tileH = totalRows > 0 ? Math.max(120, tileH) : 0;
+  const tileW = Math.round(tileH / TILE_H_PER_W);
 
   // Center the whole grid band vertically when content is short.
   const usedH = fixedH + totalRows * tileH;
@@ -170,18 +215,18 @@ export async function composeWorkoutOgImage(workout: Record<string, any>): Promi
   const logoBuf = loadLogo();
   if (logoBuf) {
     const logo = await sharp(logoBuf)
-      .resize({ height: 56, width: 420, fit: 'inside', withoutEnlargement: true })
+      .resize({ height: 72, width: 520, fit: 'inside', withoutEnlargement: true })
       .png()
       .toBuffer();
     const meta = await sharp(logo).metadata();
     composites.push({
       input: logo,
-      top: Math.round((GRID_TOP - 24 - (meta.height || 56)) / 2) + 12,
-      left: Math.round((CANVAS_W - (meta.width || 420)) / 2),
+      top: Math.round((GRID_TOP - (meta.height || 72)) / 2),
+      left: Math.round((CANVAS_W - (meta.width || 520)) / 2),
     });
   } else {
     svgParts.push(
-      `<text x="${CANVAS_W / 2}" y="66" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="34" fill="${COLORS.text}">G<tspan fill="${COLORS.gold}">➲</tspan>A</text>`
+      `<text x="${CANVAS_W / 2}" y="${Math.round(GRID_TOP / 2) + 16}" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="44" fill="${COLORS.text}">G<tspan fill="${COLORS.gold}">➲</tspan>A</text>`
     );
   }
 
@@ -193,16 +238,16 @@ export async function composeWorkoutOgImage(workout: Record<string, any>): Promi
     const firstRowCols = Math.min(g.tiles.length, effCols);
     const rowW = firstRowCols * (tileW + TILE_GAP) - TILE_GAP;
     const startX = Math.round((CANVAS_W - rowW) / 2);
-    const badgeCy = y + GROUP_LABEL_H / 2 - 4;
+    const badgeCy = y + GROUP_LABEL_H / 2 - 5;
     svgParts.push(
-      `<circle cx="${startX + 12}" cy="${badgeCy}" r="12" fill="${COLORS.badge}"/>`,
-      `<text x="${startX + 12}" y="${badgeCy + 5}" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="14" fill="${COLORS.background}">${gi + 1}</text>`,
-      `<text x="${startX + 34}" y="${badgeCy + 6}" font-family="sans-serif" font-weight="600" font-size="17" fill="${COLORS.text}">${escapeXml(g.label.slice(0, 48))}</text>`
+      `<circle cx="${startX + 16}" cy="${badgeCy}" r="16" fill="${COLORS.badge}"/>`,
+      `<text x="${startX + 16}" y="${badgeCy + 6}" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="18" fill="${COLORS.background}">${gi + 1}</text>`,
+      `<text x="${startX + 44}" y="${badgeCy + 8}" font-family="sans-serif" font-weight="600" font-size="24" fill="${COLORS.text}">${escapeXml(g.label.slice(0, 48))}</text>`
     );
     if (g.rounds > 1) {
-      const labelWidthGuess = startX + 34 + Math.min(g.label.length, 48) * 9.5;
+      const labelWidthGuess = startX + 44 + Math.min(g.label.length, 48) * 13.5;
       svgParts.push(
-        `<text x="${Math.round(labelWidthGuess) + 10}" y="${badgeCy + 6}" font-family="sans-serif" font-weight="600" font-size="15" fill="${COLORS.gold}">${g.rounds}x</text>`
+        `<text x="${Math.round(labelWidthGuess) + 12}" y="${badgeCy + 8}" font-family="sans-serif" font-weight="600" font-size="21" fill="${COLORS.gold}">${g.rounds}x</text>`
       );
     }
     y += GROUP_LABEL_H;
@@ -217,12 +262,13 @@ export async function composeWorkoutOgImage(workout: Record<string, any>): Promi
 
       if (tile.extraCount) {
         svgParts.push(
-          `<rect x="${x}" y="${ty}" width="${tileW}" height="${tileH}" rx="10" fill="${COLORS.surface}"/>`,
-          `<text x="${x + tileW / 2}" y="${ty + tileH / 2 + 8}" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="${Math.min(28, Math.round(tileH / 3))}" fill="${COLORS.muted}">+${tile.extraCount}</text>`
+          `<rect x="${x}" y="${ty}" width="${tileW}" height="${tileH}" rx="12" fill="${COLORS.surface}"/>`,
+          `<text x="${x + tileW / 2}" y="${ty + tileH / 2 + 12}" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="${Math.min(40, Math.round(tileH / 4))}" fill="${COLORS.muted}">+${tile.extraCount}</text>`
         );
         continue;
       }
 
+      let drewImage = false;
       if (buf) {
         try {
           const resized = await sharp(buf)
@@ -230,21 +276,26 @@ export async function composeWorkoutOgImage(workout: Record<string, any>): Promi
             .jpeg({ quality: 82 })
             .toBuffer();
           composites.push({ input: resized, top: ty, left: x });
-          continue;
+          drewImage = true;
         } catch { /* fall through to placeholder */ }
       }
-      svgParts.push(`<rect x="${x}" y="${ty}" width="${tileW}" height="${tileH}" rx="10" fill="${COLORS.surface}"/>`);
+      if (!drewImage) {
+        svgParts.push(`<rect x="${x}" y="${ty}" width="${tileW}" height="${tileH}" rx="12" fill="${COLORS.surface}"/>`);
+      }
+
+      if (tile.roundsLabel) {
+        const pillW = 24 + tile.roundsLabel.length * 13;
+        const pillH = 32;
+        const px = x + 10;
+        const py = ty + tileH - pillH - 10;
+        svgParts.push(
+          `<rect x="${px}" y="${py}" width="${pillW}" height="${pillH}" rx="8" fill="#0F1117" fill-opacity="0.78"/>`,
+          `<text x="${px + pillW / 2}" y="${py + 22}" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="19" fill="${COLORS.gold}">${escapeXml(tile.roundsLabel)}</text>`
+        );
+      }
     }
     y += rowsPerGroup[gi] * (tileH + TILE_GAP);
   }
-
-  // ── Title ─────────────────────────────────────────────────────────────────
-  const displayTitle = title.length > 42 ? `${title.slice(0, 41)}…` : title;
-  const titleSize = displayTitle.length > 28 ? 36 : 44;
-  svgParts.push(
-    `<rect x="${CANVAS_W / 2 - 40}" y="${CANVAS_H - 96}" width="80" height="4" rx="2" fill="${COLORS.gold}"/>`,
-    `<text x="${CANVAS_W / 2}" y="${CANVAS_H - 44}" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="${titleSize}" fill="${COLORS.text}">${escapeXml(displayTitle)}</text>`
-  );
 
   const svgOverlay = Buffer.from(
     `<svg width="${CANVAS_W}" height="${CANVAS_H}" xmlns="http://www.w3.org/2000/svg">${svgParts.join('')}</svg>`
@@ -270,7 +321,9 @@ export async function generateWorkoutOgImage(
 ): Promise<string | null> {
   const jpeg = await composeWorkoutOgImage(workout);
   const bucket = admin.storage().bucket();
-  const storagePath = `og-images/${shareId}.jpg`;
+  // "-v2" versions the object name so crawler caches (Slack/iMessage) bust
+  // cleanly when the composer layout changes.
+  const storagePath = `og-images/${shareId}-v2.jpg`;
   const file = bucket.file(storagePath);
   await file.save(jpeg, {
     metadata: { contentType: 'image/jpeg', cacheControl: 'public, max-age=86400' },
