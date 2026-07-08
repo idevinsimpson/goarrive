@@ -30,11 +30,14 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function metaHtml(opts: { title: string; description: string; imageUrl?: string | null; url: string }): string {
+function metaHtml(opts: { title: string; description: string; imageUrl?: string | null; videoUrl?: string | null; url: string }): string {
   const title = escapeHtml(opts.title);
   const description = escapeHtml(opts.description);
   const image = opts.imageUrl
     ? `\n    <meta property="og:image" content="${escapeHtml(opts.imageUrl)}" />\n    <meta property="og:image:width" content="1200" />\n    <meta property="og:image:height" content="2000" />\n    <meta name="twitter:image" content="${escapeHtml(opts.imageUrl)}" />`
+    : '';
+  const video = opts.videoUrl
+    ? `\n    <meta property="og:video" content="${escapeHtml(opts.videoUrl)}" />\n    <meta property="og:video:secure_url" content="${escapeHtml(opts.videoUrl)}" />\n    <meta property="og:video:type" content="video/mp4" />\n    <meta property="og:video:width" content="1080" />\n    <meta property="og:video:height" content="1350" />`
     : '';
   return `<!DOCTYPE html>
 <html lang="en">
@@ -49,7 +52,7 @@ function metaHtml(opts: { title: string; description: string; imageUrl?: string 
     <meta property="og:url" content="${escapeHtml(opts.url)}" />
     <meta name="twitter:card" content="${opts.imageUrl ? 'summary_large_image' : 'summary'}" />
     <meta name="twitter:title" content="${title}" />
-    <meta name="twitter:description" content="${description}" />${image}
+    <meta name="twitter:description" content="${description}" />${image}${video}
   </head>
   <body></body>
 </html>`;
@@ -154,6 +157,7 @@ export const shareMeta = onRequest(
         title: workout.name || 'Workout',
         description,
         imageUrl: ogImageUrl,
+        videoUrl: typeof tokenData.ogVideoUrl === 'string' ? tokenData.ogVideoUrl : null,
         url: pageUrl,
       }));
     } catch (err) {
