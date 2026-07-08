@@ -8553,7 +8553,7 @@ async function extractEquipmentSlug(text, apiKey) {
     return slugify(text);
 }
 exports.generateEquipmentImage = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 120, invoker: 'public' }, async (request) => {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e;
     if (!((_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid))
         throw new https_1.HttpsError('unauthenticated', 'Authentication required');
     const { grabEquipmentText, forceRegenerate } = request.data;
@@ -8576,7 +8576,7 @@ exports.generateEquipmentImage = (0, https_1.onCall)({ region: 'us-central1', se
                 return { imageUrl: storageUrl(defaultPath) };
             }
         }
-        catch ( /* continue */_d) { /* continue */ }
+        catch ( /* continue */_f) { /* continue */ }
         // ── Choices cache ──────────────────────────────────────────────────────
         try {
             const checks = await Promise.all(choicePaths.map(p => bucket.file(p).exists()));
@@ -8585,53 +8585,80 @@ exports.generateEquipmentImage = (0, https_1.onCall)({ region: 'us-central1', se
                 return { choices: choicePaths.map(storageUrl), equipmentSlug };
             }
         }
-        catch ( /* continue */_e) { /* continue */ }
+        catch ( /* continue */_g) { /* continue */ }
     }
-    // ── Generate 3 DALL-E 3 images sequentially ────────────────────────────
-    const prompt = `studio product photo of ${equipmentSlug.replace(/-/g, ' ')}, pure white background, clean minimalist gym equipment, no text, no people, soft shadow, high quality`;
+    // ── Generate 3 images sequentially ────────────────────────────────────
+    // Try gpt-image-1 first (always returns b64_json); fall back to dall-e-3.
+    const equipmentLabel = equipmentSlug.replace(/-/g, ' ');
+    const prompt = `studio product photo of ${equipmentLabel}, pure white background, clean minimalist gym equipment, no text, no people, soft shadow`;
     const buffers = [];
     for (let i = 0; i < 3; i++) {
         let buf = null;
+        let lastApiError = '';
         for (let attempt = 1; attempt <= 2; attempt++) {
             try {
-                const genResp = await fetch('https://api.openai.com/v1/images/generations', {
+                // Try gpt-image-1 first (simpler params, always b64_json)
+                const gptResp = await fetch('https://api.openai.com/v1/images/generations', {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        model: 'dall-e-3',
-                        prompt,
-                        n: 1,
-                        size: '1024x1024',
-                        quality: 'standard',
-                    }),
+                    body: JSON.stringify({ model: 'gpt-image-1', prompt, n: 1, size: '1024x1024' }),
                 });
-                if (!genResp.ok) {
-                    const errText = await genResp.text();
-                    console.error('[generateEquipmentImage] OpenAI error', { i, attempt, status: genResp.status, errText });
+                if (gptResp.ok) {
+                    const gptJson = await gptResp.json();
+                    const b64 = (_d = (_c = gptJson.data) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.b64_json;
+                    if (b64) {
+                        buf = Buffer.from(b64, 'base64');
+                        break;
+                    }
+                }
+                else {
+                    const gptErr = await gptResp.text();
+                    lastApiError = `gpt-image-1 ${gptResp.status}: ${gptErr.slice(0, 300)}`;
+                    console.warn('[generateEquipmentImage] gpt-image-1 error, trying dall-e-3', { i, attempt, status: gptResp.status, gptErr });
+                }
+                // Fall back to dall-e-3
+                const d3Resp = await fetch('https://api.openai.com/v1/images/generations', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model: 'dall-e-3', prompt, n: 1, size: '1024x1024' }),
+                });
+                if (!d3Resp.ok) {
+                    const d3Err = await d3Resp.text();
+                    lastApiError = `dall-e-3 ${d3Resp.status}: ${d3Err.slice(0, 300)}`;
+                    console.error('[generateEquipmentImage] dall-e-3 error', { i, attempt, status: d3Resp.status, d3Err });
                     continue;
                 }
-                const genJson = await genResp.json();
-                const item = (_c = genJson.data) === null || _c === void 0 ? void 0 : _c[0];
-                if (!item)
+                const d3Json = await d3Resp.json();
+                const item = (_e = d3Json.data) === null || _e === void 0 ? void 0 : _e[0];
+                if (!item) {
+                    lastApiError = 'empty data in dall-e-3 response';
                     continue;
+                }
                 if (item.b64_json) {
                     buf = Buffer.from(item.b64_json, 'base64');
+                    break;
                 }
                 else if (item.url) {
                     const imgResp = await fetch(item.url);
-                    if (!imgResp.ok)
+                    if (!imgResp.ok) {
+                        lastApiError = `image download ${imgResp.status}`;
                         continue;
+                    }
                     buf = Buffer.from(await imgResp.arrayBuffer());
-                }
-                if (buf)
                     break;
+                }
+                else {
+                    lastApiError = 'no url or b64_json in dall-e-3 response';
+                }
             }
             catch (err) {
-                console.warn('[generateEquipmentImage] Attempt failed', { i, attempt, err: String(err).slice(0, 200) });
+                lastApiError = String(err).slice(0, 200);
+                console.warn('[generateEquipmentImage] attempt threw', { i, attempt, err: lastApiError });
             }
         }
-        if (!buf)
-            throw new https_1.HttpsError('internal', `Failed to generate image variant ${i + 1}`);
+        if (!buf) {
+            throw new https_1.HttpsError('internal', `Image generation failed (variant ${i + 1}): ${lastApiError}`);
+        }
         buffers.push(buf);
     }
     await Promise.all(buffers.map((buf, i) => bucket.file(choicePaths[i]).save(buf, { contentType: 'image/png' })));
