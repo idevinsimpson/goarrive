@@ -9407,6 +9407,7 @@ export const getEmbeddedSessionJoinConfig = onCall(
 
 import * as crypto from 'crypto';
 import { generateWorkoutOgImage } from './ogImage';
+import { generateWorkoutOgVideo } from './ogVideo';
 export { shareMeta } from './shareMeta';
 
 type ShareVisibility = 'restricted' | 'anyone_with_link' | 'anyone_with_link_signin_required';
@@ -9505,6 +9506,12 @@ export const createShareToken = onCall({ memory: '512MiB' }, async (request) => 
   } catch (err) {
     console.warn('[createShareToken] OG image generation failed:', err);
   }
+
+  // Fire-and-forget video generation — does not block token creation.
+  // ogVideoUrl lands on the shareTokens doc ~1 min later; iMessage unfurls pick it up.
+  generateWorkoutOgVideo(shareId, workoutData).catch((err) =>
+    console.warn('[createShareToken] OG video generation failed:', err)
+  );
 
   return {
     shareId,
