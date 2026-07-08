@@ -694,7 +694,6 @@ export function useWorkoutTTS({
             }
           } else if (!grabEquipGeneratingRef.current.has(cacheKey)) {
             grabEquipGeneratingRef.current.add(cacheKey);
-            const capturedRunId = runIdRef.current;
             (async () => {
               try {
                 const textHash = hashTtsText(cacheKey);
@@ -725,7 +724,10 @@ export function useWorkoutTTS({
                 });
                 const url = result.data?.url || null;
                 grabEquipVoiceCacheRef.current[cacheKey] = url;
-                if (url && capturedRunId === runIdRef.current) {
+                // Only enqueue if still on this grab-equipment step (lastSpoken
+                // would have advanced if the phase transitioned away). runId
+                // alone doesn't catch phase transitions (only skip/pause bump it).
+                if (url && lastSpokenRef.current === key) {
                   enqueueVoice(url, key);
                 }
               } catch {
