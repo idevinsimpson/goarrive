@@ -1460,7 +1460,7 @@ export default function WorkoutFolderPage({
   const generateEquipImgFn = httpsCallable<
     { grabEquipmentText: string; forceRegenerate?: boolean },
     { imageUrl?: string; choices?: string[]; equipmentSlug?: string }
-  >(functions, 'generateEquipmentImage');
+  >(functions, 'generateEquipmentImage', { timeout: 270000 });
 
   const saveEquipImgChoiceFn = httpsCallable<
     { equipmentSlug: string; choiceIndex: number },
