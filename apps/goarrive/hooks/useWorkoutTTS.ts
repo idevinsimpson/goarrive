@@ -391,9 +391,22 @@ export function useWorkoutTTS({
     try {
       const pooled = audioPool[poolKey];
       if (pooled) {
-        audio = pooled;
-        pooledHit = true;
-        try { audio.currentTime = 0; } catch {}
+        if (pooled.readyState === 0) {
+          // Stale pooled element — src set but no data loaded (expired URL,
+          // CORS block, or iOS Safari cleared the buffer). Evict and recreate
+          // so the fresh element triggers a real network fetch rather than
+          // immediately firing MEDIA_ERR_SRC_NOT_SUPPORTED.
+          try { pooled.pause(); } catch {}
+          delete audioPool[poolKey];
+          audio = new (window as any).Audio(url);
+          audio.preload = 'auto';
+          audioPool[poolKey] = audio;
+          console.info('[VOICE-AUDIT] pumpQueue evicted stale pool entry (readyState=0)', { context: item.context, poolKey });
+        } else {
+          audio = pooled;
+          pooledHit = true;
+          try { audio.currentTime = 0; } catch {}
+        }
       } else {
         audio = new (window as any).Audio(url);
         audio.preload = 'auto';
@@ -702,7 +715,7 @@ export function useWorkoutTTS({
             (async () => {
               try {
                 const textHash = hashTtsText(cacheKey);
-                const storagePath = `voice_cache/grab_equipment/${TTS_VOICE_SLUG}-${textHash}.mp3`;
+                const storagePath = `voice_cache/movements/grab-equip-${TTS_VOICE_SLUG}-${textHash}.mp3`;
                 console.info('[VOICE-AUDIT] grab-equipment: calling generateVoice', { normalized: normalized.slice(0, 60), storagePath });
                 const fns = getFunctions(undefined, 'us-central1');
                 const generateVoiceFn = httpsCallable<
