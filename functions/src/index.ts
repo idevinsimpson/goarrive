@@ -9988,9 +9988,10 @@ async function transcodeVideoTo30fps(sourceUrl: string, jobId: string, coachId: 
     const buf = Buffer.from(await resp.arrayBuffer());
     fs.writeFileSync(inputPath, buf);
 
+    // -loglevel error keeps stderr tiny so the pipe buffer can't deadlock execSync.
     execSync(
-      `ffmpeg -y -i "${inputPath}" -r 30 -vf fps=fps=30 -c:v libx264 -preset fast -crf 23 -movflags +faststart "${outputPath}"`,
-      { stdio: 'pipe' },
+      `ffmpeg -y -loglevel error -i "${inputPath}" -r 30 -vf fps=fps=30 -c:v libx264 -preset fast -crf 23 -movflags +faststart "${outputPath}"`,
+      { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 1024 * 1024 },
     );
 
     const bucket = admin.storage().bucket();
@@ -10013,7 +10014,7 @@ async function transcodeVideoTo30fps(sourceUrl: string, jobId: string, coachId: 
 }
 
 export const startMovementVariation = onCall(
-  { region: 'us-central1', secrets: [runwayApiSecret], timeoutSeconds: 180, memory: '512MiB', maxInstances: 10, invoker: 'public' },
+  { region: 'us-central1', secrets: [runwayApiSecret], timeoutSeconds: 180, memory: '1GiB', maxInstances: 10, invoker: 'public' },
   async (request) => {
     const { isAdmin, callerCoachIds } = requireCoachOrAdmin(request);
 
@@ -10080,65 +10081,81 @@ export const startMovementVariation = onCall(
 
     const promptText = `${VARIATION_BASE_PROMPT} Requested change: ${trimmedInstruction}`;
 
-    // Runway requires ≤30fps. Transcode the source video first.
-    let videoUriForRunway: string;
+    // All post-doc-creation work is wrapped so ANY unhandled error marks the job failed
+    // rather than leaving it permanently stuck in 'queued'.
     try {
-      videoUriForRunway = await transcodeVideoTo30fps(movement.videoUrl, jobRef.id, movement.coachId);
-      console.info('[startMovementVariation] Transcoded to 30fps', { jobId: jobRef.id });
-    } catch (tcErr: any) {
-      const tcMsg = `Transcoding to 30fps failed: ${String(tcErr?.message || tcErr).slice(0, 300)}`;
-      console.error('[startMovementVariation] Transcoding error', { jobId: jobRef.id, error: tcMsg });
-      await jobRef.update({ status: 'failed', errorMessage: tcMsg, updatedAt: Timestamp.now() });
-      throw new HttpsError('internal', 'Failed to prepare video for generation');
-    }
-
-    const candidates: VariationCandidate[] = [];
-    let lastError: string | null = null;
-
-    for (let i = 0; i < candidateCount; i++) {
+      // Runway requires ≤30fps. Transcode the source video first.
+      let videoUriForRunway: string;
       try {
-        const resp = await fetch(`${RUNWAY_API_BASE}/v1/video_to_video`, {
-          method: 'POST',
-          headers: runwayHeaders(apiKey),
-          body: JSON.stringify({
-            model: VARIATION_MODEL,
-            videoUri: videoUriForRunway,
-            promptText,
-            seed: Math.floor(Math.random() * 4294967295),
-            contentModeration: { publicFigureThreshold: 'auto' },
-          }),
-        });
-        if (!resp.ok) {
-          const body = await resp.text().catch(() => '');
-          throw new Error(`Runway create failed (${resp.status}): ${body.slice(0, 300)}`);
-        }
-        const json: any = await resp.json();
-        if (!json.id) throw new Error('Runway create returned no task id');
-        candidates.push({ id: json.id, status: 'PENDING', progress: 0, videoUrl: null, error: null });
-      } catch (err: any) {
-        lastError = String(err?.message || err).slice(0, 300);
-        console.error('[startMovementVariation] Task creation failed', { jobId: jobRef.id, attempt: i, error: lastError });
+        console.info('[startMovementVariation] Starting transcode', { jobId: jobRef.id });
+        videoUriForRunway = await transcodeVideoTo30fps(movement.videoUrl, jobRef.id, movement.coachId);
+        console.info('[startMovementVariation] Transcoded to 30fps', { jobId: jobRef.id });
+      } catch (tcErr: any) {
+        const tcMsg = `Transcoding to 30fps failed: ${String(tcErr?.message || tcErr).slice(0, 300)}`;
+        console.error('[startMovementVariation] Transcoding error', { jobId: jobRef.id, error: tcMsg });
+        await jobRef.update({ status: 'failed', errorMessage: tcMsg, updatedAt: Timestamp.now() });
+        throw new HttpsError('internal', 'Failed to prepare video for generation');
       }
+
+      const candidates: VariationCandidate[] = [];
+      let lastError: string | null = null;
+
+      for (let i = 0; i < candidateCount; i++) {
+        try {
+          console.info('[startMovementVariation] Creating Runway task', { jobId: jobRef.id, attempt: i });
+          const resp = await fetch(`${RUNWAY_API_BASE}/v1/video_to_video`, {
+            method: 'POST',
+            headers: runwayHeaders(apiKey),
+            body: JSON.stringify({
+              model: VARIATION_MODEL,
+              videoUri: videoUriForRunway,
+              promptText,
+              seed: Math.floor(Math.random() * 4294967295),
+              contentModeration: { publicFigureThreshold: 'auto' },
+            }),
+          });
+          if (!resp.ok) {
+            const body = await resp.text().catch(() => '');
+            throw new Error(`Runway create failed (${resp.status}): ${body.slice(0, 300)}`);
+          }
+          const json: any = await resp.json();
+          if (!json.id) throw new Error('Runway create returned no task id');
+          console.info('[startMovementVariation] Runway task created', { jobId: jobRef.id, taskId: json.id });
+          candidates.push({ id: json.id, status: 'PENDING', progress: 0, videoUrl: null, error: null });
+        } catch (err: any) {
+          lastError = String(err?.message || err).slice(0, 300);
+          console.error('[startMovementVariation] Task creation failed', { jobId: jobRef.id, attempt: i, error: lastError });
+        }
+      }
+
+      if (candidates.length === 0) {
+        await jobRef.update({ status: 'failed', errorMessage: lastError || 'All Runway task creations failed', updatedAt: Timestamp.now() });
+        throw new HttpsError('internal', 'Failed to start video generation');
+      }
+
+      await jobRef.update({
+        status: 'running',
+        taskIds: candidates.map((c) => c.id),
+        candidates,
+        errorMessage: lastError,
+        updatedAt: Timestamp.now(),
+      });
+
+      console.info('[startMovementVariation] Started', {
+        jobId: jobRef.id, coachId: movement.coachId, sourceMovementId,
+        provider: VARIATION_PROVIDER, model: VARIATION_MODEL, candidateCount: candidates.length,
+      });
+      return { jobId: jobRef.id, candidateCount: candidates.length };
+    } catch (outerErr: any) {
+      // Safety net: ensure the job never stays permanently in 'queued'.
+      if (!(outerErr instanceof HttpsError)) {
+        const msg = `Unexpected error: ${String(outerErr?.message || outerErr).slice(0, 300)}`;
+        console.error('[startMovementVariation] Unhandled error', { jobId: jobRef.id, error: msg });
+        try { await jobRef.update({ status: 'failed', errorMessage: msg, updatedAt: Timestamp.now() }); } catch {}
+        throw new HttpsError('internal', 'Video generation failed unexpectedly');
+      }
+      throw outerErr;
     }
-
-    if (candidates.length === 0) {
-      await jobRef.update({ status: 'failed', errorMessage: lastError || 'All Runway task creations failed', updatedAt: Timestamp.now() });
-      throw new HttpsError('internal', 'Failed to start video generation');
-    }
-
-    await jobRef.update({
-      status: 'running',
-      taskIds: candidates.map((c) => c.id),
-      candidates,
-      errorMessage: lastError,
-      updatedAt: Timestamp.now(),
-    });
-
-    console.info('[startMovementVariation] Started', {
-      jobId: jobRef.id, coachId: movement.coachId, sourceMovementId,
-      provider: VARIATION_PROVIDER, model: VARIATION_MODEL, candidateCount: candidates.length,
-    });
-    return { jobId: jobRef.id, candidateCount: candidates.length };
   },
 );
 
