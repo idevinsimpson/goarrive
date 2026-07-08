@@ -613,6 +613,7 @@ export function useWorkoutTTS({
     if (isPaused) return;
     if (!current) return;
     const stepType = current.stepType;
+    console.info('[VOICE-AUDIT] special-block-effect fired', { phase, stepType, currentIndex, lastSpoken: lastSpokenRef.current });
 
     // Intro block
     if (phase === 'intro' || (phase === 'work' && stepType === 'intro')) {
