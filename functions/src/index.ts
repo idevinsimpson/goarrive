@@ -7930,9 +7930,10 @@ export const analyzeMovement = onCall(
       throw new HttpsError('permission-denied', 'Coach access required');
     }
 
-    const { gifUrl, contactSheet } = request.data as {
+    const { gifUrl, contactSheet, context } = request.data as {
       gifUrl?: string;
       contactSheet?: string; // base64 data URL (e.g. "data:image/jpeg;base64,...")
+      context?: string; // optional hint (e.g. for AI variations: source name + instruction)
     };
 
     if (!gifUrl && !contactSheet) {
@@ -7967,7 +7968,7 @@ export const analyzeMovement = onCall(
 
 Set confidence below 0.7 if: the movement is unclear, frames are too dark/blurry to identify, you are guessing between multiple possible movements, or the equipment/form cannot be determined.
 
-Return ONLY valid JSON, no markdown, no explanation.`;
+Return ONLY valid JSON, no markdown, no explanation.${context ? `\n\nAdditional context: ${context}` : ''}`;
 
     // Build the image content block
     const imageContent = contactSheet
@@ -9967,8 +9968,52 @@ async function fetchRunwayTask(apiKey: string, taskId: string): Promise<{
   };
 }
 
+/**
+ * Download a video from sourceUrl, transcode to ≤30fps (Runway's limit), upload to Storage,
+ * and return a public URL. Cleans up /tmp on both success and failure.
+ */
+async function transcodeVideoTo30fps(sourceUrl: string, jobId: string, coachId: string): Promise<string> {
+  const { execSync } = await import('child_process');
+  const os = await import('os');
+  const path = await import('path');
+  const fs = await import('fs');
+
+  const tmpDir = os.tmpdir();
+  const inputPath = path.join(tmpDir, `variation-src-${jobId}.mp4`);
+  const outputPath = path.join(tmpDir, `variation-30fps-${jobId}.mp4`);
+
+  try {
+    const resp = await fetch(sourceUrl);
+    if (!resp.ok) throw new Error(`Failed to download source video (${resp.status})`);
+    const buf = Buffer.from(await resp.arrayBuffer());
+    fs.writeFileSync(inputPath, buf);
+
+    execSync(
+      `ffmpeg -y -i "${inputPath}" -r 30 -vf fps=fps=30 -c:v libx264 -preset fast -crf 23 -movflags +faststart "${outputPath}"`,
+      { stdio: 'pipe' },
+    );
+
+    const bucket = admin.storage().bucket();
+    const storagePath = `movements/${coachId}/transcoded/${jobId}.mp4`;
+    // Embed a Firebase download token so the URL is publicly accessible without ACL or signBlob.
+    const downloadToken = `${jobId}-tc`;
+    await bucket.upload(outputPath, {
+      destination: storagePath,
+      metadata: {
+        contentType: 'video/mp4',
+        metadata: { firebaseStorageDownloadTokens: downloadToken },
+      },
+    });
+    const encodedPath = encodeURIComponent(storagePath);
+    return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodedPath}?alt=media&token=${downloadToken}`;
+  } finally {
+    try { const fs2 = require('fs'); fs2.unlinkSync(inputPath); } catch {}
+    try { const fs2 = require('fs'); fs2.unlinkSync(outputPath); } catch {}
+  }
+}
+
 export const startMovementVariation = onCall(
-  { region: 'us-central1', secrets: [runwayApiSecret], timeoutSeconds: 60, maxInstances: 10, invoker: 'public' },
+  { region: 'us-central1', secrets: [runwayApiSecret], timeoutSeconds: 180, memory: '512MiB', maxInstances: 10, invoker: 'public' },
   async (request) => {
     const { isAdmin, callerCoachIds } = requireCoachOrAdmin(request);
 
@@ -10034,6 +10079,19 @@ export const startMovementVariation = onCall(
     });
 
     const promptText = `${VARIATION_BASE_PROMPT} Requested change: ${trimmedInstruction}`;
+
+    // Runway requires ≤30fps. Transcode the source video first.
+    let videoUriForRunway: string;
+    try {
+      videoUriForRunway = await transcodeVideoTo30fps(movement.videoUrl, jobRef.id, movement.coachId);
+      console.info('[startMovementVariation] Transcoded to 30fps', { jobId: jobRef.id });
+    } catch (tcErr: any) {
+      const tcMsg = `Transcoding to 30fps failed: ${String(tcErr?.message || tcErr).slice(0, 300)}`;
+      console.error('[startMovementVariation] Transcoding error', { jobId: jobRef.id, error: tcMsg });
+      await jobRef.update({ status: 'failed', errorMessage: tcMsg, updatedAt: Timestamp.now() });
+      throw new HttpsError('internal', 'Failed to prepare video for generation');
+    }
+
     const candidates: VariationCandidate[] = [];
     let lastError: string | null = null;
 
@@ -10044,7 +10102,7 @@ export const startMovementVariation = onCall(
           headers: runwayHeaders(apiKey),
           body: JSON.stringify({
             model: VARIATION_MODEL,
-            videoUri: movement.videoUrl,
+            videoUri: videoUriForRunway,
             promptText,
             seed: Math.floor(Math.random() * 4294967295),
             contentModeration: { publicFigureThreshold: 'auto' },

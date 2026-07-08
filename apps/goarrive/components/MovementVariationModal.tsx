@@ -24,6 +24,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Icon } from './Icon';
 import MovementVideoControls from './MovementVideoControls';
+import VideoCropModal, { CropValues } from './VideoCropModal';
 import { MovementDetailData } from './MovementDetail';
 import { createMovementFromVideo } from '../utils/createMovementFromVideo';
 import { FB, FH } from '../lib/theme';
@@ -74,7 +75,7 @@ interface StatusResponse {
   candidates: VariationCandidate[];
 }
 
-type Phase = 'compose' | 'generating' | 'choose' | 'creating';
+type Phase = 'compose' | 'generating' | 'choose' | 'cropping' | 'creating';
 
 interface Props {
   visible: boolean;
@@ -96,13 +97,14 @@ export default function MovementVariationModal({
   onClose,
   onCreated,
 }: Props) {
-  const { height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-
   const [phase, setPhase] = useState<Phase>('compose');
   const [instruction, setInstruction] = useState('');
   const [jobId, setJobId] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<VariationCandidate[]>([]);
+  const [pendingCandidate, setPendingCandidate] = useState<VariationCandidate | null>(null);
+  const [showCropModal, setShowCropModal] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [creatingStatus, setCreatingStatus] = useState('');
   const [creatingProgress, setCreatingProgress] = useState(0);
@@ -208,8 +210,18 @@ export default function MovementVariationModal({
     }
   }, [sourceMovement, instruction, pollStatus, stopPolling]);
 
-  const handleSelect = useCallback(async (candidate: VariationCandidate) => {
-    if (!sourceMovement || !jobId) return;
+  // Called after the coach picks a candidate — shows crop modal first.
+  const handleSelectCandidate = useCallback((candidate: VariationCandidate) => {
+    setPendingCandidate(candidate);
+    setShowCropModal(true);
+    setPhase('cropping');
+  }, []);
+
+  // Called after crop is confirmed (or cancelled back to choose).
+  const handleCropDone = useCallback(async (crop: CropValues) => {
+    setShowCropModal(false);
+    const candidate = pendingCandidate;
+    if (!candidate || !sourceMovement || !jobId) return;
     setPhase('creating');
     setErrorMsg(null);
     setCreatingStatus('Saving your new video...');
@@ -227,7 +239,7 @@ export default function MovementVariationModal({
       // 2. Full movement processing pipeline — same as an uploaded video.
       const { movementId, movementData } = await createMovementFromVideo({
         videoUrl: finalized.data.videoUrl,
-        crop: DEFAULT_VARIATION_CROP,
+        crop,
         coachId,
         tenantId,
         metadata: {
@@ -251,9 +263,19 @@ export default function MovementVariationModal({
       setErrorMsg(ERR_GENERATION_FAILED);
       setPhase('choose');
     }
-  }, [sourceMovement, jobId, coachId, tenantId, onCreated, onClose]);
+  }, [pendingCandidate, sourceMovement, jobId, coachId, tenantId, onCreated, onClose]);
+
+  const handleCropCancel = useCallback(() => {
+    setShowCropModal(false);
+    setPendingCandidate(null);
+    setPhase('choose');
+  }, []);
 
   if (!sourceMovement) return null;
+
+  // Card width: two cards side-by-side with 16px horizontal padding + 8px gap
+  const cardWidth = (windowWidth - 32 - 8) / 2;
+  const cardVideoHeight = cardWidth * (5 / 4); // 4:5 aspect
 
   const trimmedLen = instruction.trim().length;
   const generateDisabled = trimmedLen === 0 || phase === 'generating' || phase === 'creating';
@@ -288,7 +310,7 @@ export default function MovementVariationModal({
               <MovementVideoControls
                 uri={sourceMovement.videoUrl}
                 posterUri={sourceMovement.thumbnailUrl || undefined}
-                aspectRatio={16 / 9}
+                aspectRatio={4 / 5}
                 autoPlay={phase === 'compose'}
                 showControls={true}
                 cropScale={sourceMovement.cropScale ?? 1}
@@ -362,28 +384,32 @@ export default function MovementVariationModal({
             </>
           )}
 
-          {phase === 'choose' && (
+          {(phase === 'choose' || phase === 'cropping') && (
             <>
               <Text style={s.sectionLabel}>Choose a version</Text>
-              <Text style={s.instructionRecap} numberOfLines={2}>“{instruction.trim()}”</Text>
+              <Text style={s.instructionRecap} numberOfLines={2}>"{instruction.trim()}"</Text>
               {succeededCandidates.length === 0 ? (
                 <Text style={s.errorText}>{ERR_GENERATION_FAILED}</Text>
               ) : (
-                succeededCandidates.map((c, idx) => (
-                  <View key={c.id} style={s.candidateCard}>
-                    <Text style={s.candidateLabel}>Option {idx + 1}</Text>
-                    <MovementVideoControls
-                      uri={c.videoUrl!}
-                      aspectRatio={16 / 9}
-                      autoPlay={true}
-                      showControls={true}
-                    />
-                    <Pressable style={s.selectBtn} onPress={() => handleSelect(c)}>
-                      <Icon name="check" size={16} color="#0E1117" />
-                      <Text style={s.selectText}>Select this version</Text>
-                    </Pressable>
-                  </View>
-                ))
+                <View style={s.candidatesRow}>
+                  {succeededCandidates.map((c, idx) => (
+                    <View key={c.id} style={[s.candidateCard, { width: cardWidth }]}>
+                      <Text style={s.candidateLabel}>Option {idx + 1}</Text>
+                      <View style={[s.candidateVideoWrap, { height: cardVideoHeight }]}>
+                        <MovementVideoControls
+                          uri={c.videoUrl!}
+                          aspectRatio={4 / 5}
+                          autoPlay={true}
+                          showControls={false}
+                        />
+                      </View>
+                      <Pressable style={s.selectBtn} onPress={() => handleSelectCandidate(c)}>
+                        <Icon name="check" size={14} color="#0E1117" />
+                        <Text style={s.selectText}>Select</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
               )}
               <Pressable style={s.tryAgainBtn} onPress={() => { setPhase('compose'); setCandidates([]); }}>
                 <Text style={s.tryAgainText}>Try a different instruction</Text>
@@ -406,6 +432,16 @@ export default function MovementVariationModal({
           <Text style={s.disclaimer}>AI variations should be reviewed before assigning to clients.</Text>
         </ScrollView>
       </View>
+
+      {/* Crop modal — shown after coach selects a variation candidate */}
+      {pendingCandidate?.videoUrl ? (
+        <VideoCropModal
+          visible={showCropModal}
+          videoUri={pendingCandidate.videoUrl}
+          onDone={handleCropDone}
+          onCancel={handleCropCancel}
+        />
+      ) : null}
     </Modal>
   );
 }
@@ -552,33 +588,43 @@ const s = StyleSheet.create({
     marginBottom: 12,
     fontFamily: FB,
   },
+  candidatesRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 14,
+  },
   candidateCard: {
     backgroundColor: '#141926',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#2A3347',
-    padding: 12,
-    marginBottom: 14,
+    padding: 8,
+    overflow: 'hidden',
+  },
+  candidateVideoWrap: {
+    borderRadius: 8,
+    overflow: 'hidden',
+    marginBottom: 8,
   },
   candidateLabel: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
     color: '#A78BFA',
-    marginBottom: 8,
+    marginBottom: 6,
     fontFamily: FB,
+    textAlign: 'center',
   },
   selectBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 5,
     backgroundColor: '#A78BFA',
-    paddingVertical: 12,
-    borderRadius: 10,
-    marginTop: 10,
+    paddingVertical: 10,
+    borderRadius: 8,
   },
   selectText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     color: '#0E1117',
     fontFamily: FB,

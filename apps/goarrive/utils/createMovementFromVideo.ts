@@ -165,7 +165,10 @@ export async function createMovementFromVideo(
     onStatus?.('Analyzing movement...');
     onProgress?.(0.5);
     try {
-      const aiAnalysis: MovementAnalysis | null = await analyzeMovementMedia(videoUrl, crop);
+      const aiContext = metadata?.aiVariationPrompt && metadata?.sourceMovementName
+        ? `This is an AI-generated variation of "${metadata.sourceMovementName}". The coach's instruction was: "${metadata.aiVariationPrompt}". Name the movement to reflect what it actually shows, accounting for the requested change.`
+        : undefined;
+      const aiAnalysis: MovementAnalysis | null = await analyzeMovementMedia(videoUrl, crop, aiContext);
       if (aiAnalysis) {
         aiData = {
           name: aiAnalysis.name || '',
