@@ -9749,11 +9749,17 @@ export const resolveShareToken = onRequest(
 );
 
 // ─── generateEquipmentImage — AI image for grab-equipment phases ─────────────
-// Accepts grabEquipmentText, checks Storage cache, generates via OpenAI Images
-// if not cached, uploads and returns a download URL.
+// Accepts grabEquipmentText + optional forceRegenerate flag.
+// Extracts equipment keyword via GPT-4o-mini, then:
+//   1. Returns { imageUrl } if equipment_images/{slug}/default.png exists
+//   2. Returns { choices, equipmentSlug } if v1/v2/v3 all exist
+//   3. Generates 3 DALL-E 3 variants, uploads, returns { choices, equipmentSlug }
 //
-// Cache path: equipment_images/{slug}.png
-// Reuses OPENAI_API_KEY secret (already defined above).
+// Cache paths:
+//   equipment_images/{slug}/default.png  — coach-selected image
+//   equipment_images/{slug}/v1.png       — generated choice 1
+//   equipment_images/{slug}/v2.png       — generated choice 2
+//   equipment_images/{slug}/v3.png       — generated choice 3
 // ─────────────────────────────────────────────────────────────────────────────
 function slugify(text: string): string {
   return text
@@ -9764,107 +9770,164 @@ function slugify(text: string): string {
     .slice(0, 80);
 }
 
-export const generateEquipmentImage = onCall(
-  { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60, invoker: 'public' },
-  async (request) => {
-    if (!request.auth?.uid) {
-      throw new HttpsError('unauthenticated', 'Authentication required');
+async function extractEquipmentSlug(text: string, apiKey: string): Promise<string> {
+  try {
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: 'Extract only the fitness equipment item name(s) from the workout instruction. Return just the equipment name(s) in lowercase, comma-separated if multiple. No other words.',
+          },
+          { role: 'user', content: text },
+        ],
+        max_tokens: 30,
+        temperature: 0,
+      }),
+    });
+    if (resp.ok) {
+      const json = await resp.json() as { choices?: Array<{ message?: { content?: string } }> };
+      const extracted = json.choices?.[0]?.message?.content?.trim();
+      if (extracted) return slugify(extracted);
     }
+  } catch { /* fall through to full-text slug */ }
+  return slugify(text);
+}
 
-    const { grabEquipmentText } = request.data as { grabEquipmentText?: string };
-    if (!grabEquipmentText || !grabEquipmentText.trim()) {
-      throw new HttpsError('invalid-argument', 'grabEquipmentText is required');
-    }
+export const generateEquipmentImage = onCall(
+  { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 300, invoker: 'public' },
+  async (request) => {
+    if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Authentication required');
+
+    const { grabEquipmentText, forceRegenerate } = request.data as {
+      grabEquipmentText?: string;
+      forceRegenerate?: boolean;
+    };
+    if (!grabEquipmentText?.trim()) throw new HttpsError('invalid-argument', 'grabEquipmentText is required');
 
     const apiKey = openaiApiKey.value()?.trim();
-    if (!apiKey) {
-      throw new HttpsError('internal', 'OpenAI API key not configured');
-    }
+    if (!apiKey) throw new HttpsError('internal', 'OpenAI API key not configured');
 
-    const slug = slugify(grabEquipmentText.trim());
-    const storagePath = `equipment_images/${slug}.png`;
+    const equipmentSlug = await extractEquipmentSlug(grabEquipmentText.trim(), apiKey);
     const bucket = admin.storage().bucket();
-    const file = bucket.file(storagePath);
 
-    // ── Cache check ─────────────────────────────────────────────────────────
-    try {
-      const [exists] = await file.exists();
-      if (exists) {
-        const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media`;
-        console.info('[generateEquipmentImage] Cache hit', { slug, storagePath });
-        return { imageUrl };
-      }
-    } catch (cacheErr: any) {
-      console.warn('[generateEquipmentImage] Cache check failed — regenerating', { message: String(cacheErr?.message || cacheErr).slice(0, 200) });
+    // Build a Firebase-style download URL with an embedded token so the client
+    // Image component can load it without auth headers.
+    function makeDownloadUrl(path: string, token: string): string {
+      return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
     }
 
-    // ── Generate via OpenAI Images API ──────────────────────────────────────
-    const prompt = `minimalist fitness equipment illustration of ${grabEquipmentText.trim()}, neutral background, gym-floor lighting, no text`;
-    let imageBuffer: Buffer | null = null;
-    let lastError: any = null;
+    // Save a buffer and return its download URL (with token stored in metadata).
+    async function saveFile(path: string, buf: Buffer): Promise<string> {
+      const token = crypto.randomUUID();
+      await bucket.file(path).save(buf, {
+        contentType: 'image/png',
+        metadata: { metadata: { firebaseStorageDownloadTokens: token } },
+      });
+      return makeDownloadUrl(path, token);
+    }
 
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    // Get download URL for an existing file from its stored token.
+    async function getExistingUrl(path: string): Promise<string | null> {
       try {
-        const response = await fetch('https://api.openai.com/v1/images/generations', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'dall-e-3',
-            prompt,
-            n: 1,
-            size: '1024x1024',
-            quality: 'standard',
-            response_format: 'url',
-          }),
-        });
+        const [meta] = await bucket.file(path).getMetadata();
+        const token = (meta as any).metadata?.firebaseStorageDownloadTokens as string | undefined;
+        if (token) return makeDownloadUrl(path, token);
+      } catch { /* fall through */ }
+      return null;
+    }
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('[generateEquipmentImage] OpenAI API error', { attempt, status: response.status, errorText });
-          lastError = new HttpsError('internal', `OpenAI API error: ${response.status}`, errorText.slice(0, 500));
-          continue;
-        }
+    const defaultPath = `equipment_images/${equipmentSlug}/default.png`;
+    const choicePaths = [1, 2, 3].map(i => `equipment_images/${equipmentSlug}/v${i}.png`);
 
-        const result = await response.json() as { data?: Array<{ url?: string }> };
-        const imageUrl = result.data?.[0]?.url;
-        if (!imageUrl) {
-          lastError = new HttpsError('internal', 'No image URL in OpenAI response');
-          continue;
+    if (!forceRegenerate) {
+      // ── Default cache ──────────────────────────────────────────────────────
+      try {
+        const [defaultExists] = await bucket.file(defaultPath).exists();
+        if (defaultExists) {
+          const imageUrl = await getExistingUrl(defaultPath);
+          if (imageUrl) {
+            console.info('[generateEquipmentImage] Default cache hit', { equipmentSlug });
+            return { imageUrl };
+          }
         }
+      } catch { /* continue */ }
 
-        // Download the generated image
-        const imgResp = await fetch(imageUrl);
-        if (!imgResp.ok) {
-          lastError = new HttpsError('internal', `Failed to download generated image: ${imgResp.status}`);
-          continue;
+      // ── Choices cache ──────────────────────────────────────────────────────
+      try {
+        const checks = await Promise.all(choicePaths.map(p => bucket.file(p).exists()));
+        if (checks.every(([e]) => e)) {
+          const choiceUrls = await Promise.all(choicePaths.map(getExistingUrl));
+          if (choiceUrls.every(Boolean)) {
+            console.info('[generateEquipmentImage] Choices cache hit', { equipmentSlug });
+            return { choices: choiceUrls as string[], equipmentSlug };
+          }
         }
-        imageBuffer = Buffer.from(await imgResp.arrayBuffer());
-        break;
-      } catch (err: any) {
-        lastError = err;
-        console.warn('[generateEquipmentImage] Attempt failed', { attempt, message: String(err?.message || err).slice(0, 200) });
+      } catch { /* continue */ }
+    }
+
+    // ── Generate 3 images in parallel via gpt-image-1 ─────────────────────
+    const equipmentLabel = equipmentSlug.replace(/-/g, ' ');
+    const prompt = `studio product photo of ${equipmentLabel}, pure white background, clean minimalist gym equipment, no text, no people, soft shadow`;
+
+    async function generateOne(variantIndex: number): Promise<Buffer> {
+      let lastApiError = 'no attempts made';
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const genResp = await fetch('https://api.openai.com/v1/images/generations', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'gpt-image-1', prompt, n: 1, size: '1024x1024' }),
+          });
+          if (!genResp.ok) {
+            const errText = await genResp.text();
+            lastApiError = `gpt-image-1 ${genResp.status}: ${errText.slice(0, 300)}`;
+            console.error('[generateEquipmentImage] API error', { variantIndex, attempt, status: genResp.status, errText });
+            continue;
+          }
+          const json = await genResp.json() as { data?: Array<{ b64_json?: string }> };
+          const b64 = json.data?.[0]?.b64_json;
+          if (b64) return Buffer.from(b64, 'base64');
+          lastApiError = 'no b64_json in gpt-image-1 response';
+        } catch (err) {
+          lastApiError = String(err).slice(0, 200);
+          console.warn('[generateEquipmentImage] attempt threw', { variantIndex, attempt, err: lastApiError });
+        }
       }
+      throw new HttpsError('internal', `Image generation failed (variant ${variantIndex + 1}): ${lastApiError}`);
     }
 
-    if (!imageBuffer) {
-      if (lastError instanceof HttpsError) throw lastError;
-      console.error('[generateEquipmentImage] All attempts failed', lastError);
-      throw new HttpsError('internal', 'Failed to generate equipment image');
-    }
+    const buffers = await Promise.all([0, 1, 2].map(generateOne));
+    const choiceUrls = await Promise.all(buffers.map((buf, i) => saveFile(choicePaths[i], buf)));
+    console.info('[generateEquipmentImage] Generated 3 variants', { equipmentSlug });
+    return { choices: choiceUrls, equipmentSlug };
+  },
+);
 
-    // ── Upload to Storage ────────────────────────────────────────────────────
-    try {
-      await file.save(imageBuffer, { contentType: 'image/png' });
-    } catch (uploadErr: any) {
-      console.error('[generateEquipmentImage] Storage upload failed', { storagePath, message: String(uploadErr?.message || uploadErr).slice(0, 300) });
-      throw new HttpsError('internal', 'Failed to upload equipment image');
+// ─── saveEquipmentImageChoice — persist coach's selection as default.png ──────
+export const saveEquipmentImageChoice = onCall(
+  { region: 'us-central1', timeoutSeconds: 30, invoker: 'public' },
+  async (request) => {
+    if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Authentication required');
+    const { equipmentSlug, choiceIndex } = request.data as { equipmentSlug: string; choiceIndex: number };
+    if (!equipmentSlug || choiceIndex < 0 || choiceIndex > 2) {
+      throw new HttpsError('invalid-argument', 'equipmentSlug and choiceIndex (0-2) required');
     }
-
-    const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media`;
-    console.info('[generateEquipmentImage] Generated and uploaded', { slug, storagePath });
-    return { imageUrl: downloadUrl };
+    const bucket = admin.storage().bucket();
+    const srcPath = `equipment_images/${equipmentSlug}/v${choiceIndex + 1}.png`;
+    const destPath = `equipment_images/${equipmentSlug}/default.png`;
+    // Download source bytes and re-save with a fresh token so the URL is loadable by the client.
+    const [srcBuf] = await bucket.file(srcPath).download();
+    const token = crypto.randomUUID();
+    await bucket.file(destPath).save(srcBuf, {
+      contentType: 'image/png',
+      metadata: { metadata: { firebaseStorageDownloadTokens: token } },
+    });
+    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media&token=${token}`;
+    console.info('[saveEquipmentImageChoice] Saved default', { equipmentSlug, choiceIndex });
+    return { imageUrl };
   },
 );
