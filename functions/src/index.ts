@@ -9869,24 +9869,18 @@ export const generateEquipmentImage = onCall(
           const genResp = await fetch('https://api.openai.com/v1/images/generations', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: 'dall-e-3', prompt, n: 1, size: '1024x1024' }),
+            body: JSON.stringify({ model: 'gpt-image-1', prompt, n: 1, size: '1024x1024' }),
           });
           if (!genResp.ok) {
             const errText = await genResp.text();
-            lastApiError = `dall-e-3 ${genResp.status}: ${errText.slice(0, 300)}`;
+            lastApiError = `gpt-image-1 ${genResp.status}: ${errText.slice(0, 300)}`;
             console.error('[generateEquipmentImage] API error', { variantIndex, attempt, status: genResp.status, errText });
             continue;
           }
-          const json = await genResp.json() as { data?: Array<{ url?: string; b64_json?: string }> };
-          const item = json.data?.[0];
-          if (!item) { lastApiError = 'empty data array'; continue; }
-          if (item.b64_json) return Buffer.from(item.b64_json, 'base64');
-          if (item.url) {
-            const imgResp = await fetch(item.url);
-            if (!imgResp.ok) { lastApiError = `image download ${imgResp.status}`; continue; }
-            return Buffer.from(await imgResp.arrayBuffer());
-          }
-          lastApiError = 'no url or b64_json in response';
+          const json = await genResp.json() as { data?: Array<{ b64_json?: string }> };
+          const b64 = json.data?.[0]?.b64_json;
+          if (b64) return Buffer.from(b64, 'base64');
+          lastApiError = 'no b64_json in gpt-image-1 response';
         } catch (err) {
           lastApiError = String(err).slice(0, 200);
           console.warn('[generateEquipmentImage] attempt threw', { variantIndex, attempt, err: lastApiError });

@@ -8591,38 +8591,26 @@ exports.generateEquipmentImage = (0, https_1.onCall)({ region: 'us-central1', se
     const equipmentLabel = equipmentSlug.replace(/-/g, ' ');
     const prompt = `studio product photo of ${equipmentLabel}, pure white background, clean minimalist gym equipment, no text, no people, soft shadow`;
     async function generateOne(variantIndex) {
-        var _a;
+        var _a, _b;
         let lastApiError = 'no attempts made';
         for (let attempt = 1; attempt <= 2; attempt++) {
             try {
                 const genResp = await fetch('https://api.openai.com/v1/images/generations', {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ model: 'dall-e-3', prompt, n: 1, size: '1024x1024' }),
+                    body: JSON.stringify({ model: 'gpt-image-1', prompt, n: 1, size: '1024x1024' }),
                 });
                 if (!genResp.ok) {
                     const errText = await genResp.text();
-                    lastApiError = `dall-e-3 ${genResp.status}: ${errText.slice(0, 300)}`;
+                    lastApiError = `gpt-image-1 ${genResp.status}: ${errText.slice(0, 300)}`;
                     console.error('[generateEquipmentImage] API error', { variantIndex, attempt, status: genResp.status, errText });
                     continue;
                 }
                 const json = await genResp.json();
-                const item = (_a = json.data) === null || _a === void 0 ? void 0 : _a[0];
-                if (!item) {
-                    lastApiError = 'empty data array';
-                    continue;
-                }
-                if (item.b64_json)
-                    return Buffer.from(item.b64_json, 'base64');
-                if (item.url) {
-                    const imgResp = await fetch(item.url);
-                    if (!imgResp.ok) {
-                        lastApiError = `image download ${imgResp.status}`;
-                        continue;
-                    }
-                    return Buffer.from(await imgResp.arrayBuffer());
-                }
-                lastApiError = 'no url or b64_json in response';
+                const b64 = (_b = (_a = json.data) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.b64_json;
+                if (b64)
+                    return Buffer.from(b64, 'base64');
+                lastApiError = 'no b64_json in gpt-image-1 response';
             }
             catch (err) {
                 lastApiError = String(err).slice(0, 200);
