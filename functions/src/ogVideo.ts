@@ -15,6 +15,8 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { collectOgGroups } from './ogImage';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const sharp = require('sharp');
 
 const execFileAsync = promisify(execFile);
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -33,6 +35,8 @@ const TILE_H_PER_W = 1.25;
 const MAX_TILE_H = 700;
 const CLIP_DURATION = 5;
 const MAX_TILES = 16;
+const PLAY_BTN_R = 160;
+const PLAY_BTN_OPACITY = 0.45; // slightly more transparent than the static image (was 0.6)
 
 const SPECIAL_BLOCK_TYPES = new Set([
   'Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment', 'Follow-Along Video',
@@ -172,6 +176,18 @@ export async function generateWorkoutOgVideo(
 
     if (tiles.length === 0) return null;
 
+    // Generate play button PNG (transparent RGBA, centered overlay)
+    const pbDiam = PLAY_BTN_R * 2 + 4;
+    const pcx = PLAY_BTN_R + 2;
+    const pcy = PLAY_BTN_R + 2;
+    const playSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${pbDiam}" height="${pbDiam}">` +
+      `<g opacity="${PLAY_BTN_OPACITY}">` +
+        `<circle cx="${pcx}" cy="${pcy}" r="${PLAY_BTN_R}" fill="#FFFFFF"/>` +
+        `<path d="M ${pcx - 44} ${pcy - 84} L ${pcx + 100} ${pcy} L ${pcx - 44} ${pcy + 84} Z" fill="#0F1117"/>` +
+      `</g></svg>`;
+    const playBtnPath = path.join(tmpDir, 'playbtn.png');
+    await sharp(Buffer.from(playSvg)).png().toFile(playBtnPath);
+
     // Build ffmpeg args
     const args: string[] = ['-y'];
 
@@ -194,6 +210,9 @@ export async function generateWorkoutOgVideo(
       }
     }
 
+    // Input N+1: play button PNG (static, looped)
+    args.push('-loop', '1', '-framerate', '24', '-t', String(CLIP_DURATION), '-i', playBtnPath);
+
     // Build filter_complex:
     // - Scale background to CANVAS_W x CANVAS_H
     // - Convert each tile to yuv420p and scale to exact tile dims
@@ -215,7 +234,12 @@ export async function generateWorkoutOgVideo(
       filterParts.push(`${prevLabel}${scaleLabel}overlay=${pos.x}:${pos.y}:shortest=1[v${i}]`);
     }
 
-    const finalLabel = tiles.length > 0 ? `[v${tiles.length - 1}]` : '[bg0]';
+    // Play button: keep RGBA so alpha blends correctly over tile composites
+    const pbInput = tiles.length + 1;
+    const preFinalLabel = tiles.length > 0 ? `[v${tiles.length - 1}]` : '[bg0]';
+    filterParts.push(`[${pbInput}:v]format=rgba[pb]`);
+    filterParts.push(`${preFinalLabel}[pb]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2:format=auto[vfinal]`);
+    const finalLabel = '[vfinal]';
 
     const outPath = path.join(tmpDir, 'out.mp4');
     args.push(
