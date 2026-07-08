@@ -680,24 +680,29 @@ export function useWorkoutTTS({
       if (lastSpokenRef.current !== key) {
         lastSpokenRef.current = key;
         const rawText = current.grabEquipmentText || '';
-        if (!rawText.trim()) {
+        const normalized = normalizeTtsText(rawText);
+        if (!normalized) {
+          console.info('[VOICE-AUDIT] grab-equipment: empty text → get_ready fallback', { currentIndex });
           enqueueCue('get_ready', key);
         } else {
-          const normalized = normalizeTtsText(rawText);
           const cacheKey = `${TTS_VOICE_SLUG}|${normalized}`;
           const cached = grabEquipVoiceCacheRef.current[cacheKey];
+          console.info('[VOICE-AUDIT] grab-equipment: text found', { currentIndex, normalized: normalized.slice(0, 60), cacheHit: cached !== undefined });
           if (cached !== undefined) {
             if (cached) {
               enqueueVoice(cached, key);
             } else {
+              // Prior generation failed — fall back to static cue
               enqueueCue('get_ready', key);
             }
           } else if (!grabEquipGeneratingRef.current.has(cacheKey)) {
             grabEquipGeneratingRef.current.add(cacheKey);
+            const capturedKey = key;
             (async () => {
               try {
                 const textHash = hashTtsText(cacheKey);
                 const storagePath = `voice_cache/grab_equipment/${TTS_VOICE_SLUG}-${textHash}.mp3`;
+                console.info('[VOICE-AUDIT] grab-equipment: calling generateVoice', { normalized: normalized.slice(0, 60), storagePath });
                 const fns = getFunctions(undefined, 'us-central1');
                 const generateVoiceFn = httpsCallable<
                   {
@@ -724,14 +729,29 @@ export function useWorkoutTTS({
                 });
                 const url = result.data?.url || null;
                 grabEquipVoiceCacheRef.current[cacheKey] = url;
+                console.info('[VOICE-AUDIT] grab-equipment: generateVoice resolved', {
+                  url: url ? url.slice(0, 80) : null,
+                  stillOnStep: lastSpokenRef.current === capturedKey,
+                });
                 // Only enqueue if still on this grab-equipment step (lastSpoken
-                // would have advanced if the phase transitioned away). runId
-                // alone doesn't catch phase transitions (only skip/pause bump it).
-                if (url && lastSpokenRef.current === key) {
-                  enqueueVoice(url, key);
+                // would have advanced if the phase transitioned away).
+                if (url && lastSpokenRef.current === capturedKey) {
+                  enqueueVoice(url, capturedKey);
+                } else if (!url) {
+                  // Generation returned empty URL — fall back to static cue
+                  if (lastSpokenRef.current === capturedKey) {
+                    enqueueCue('get_ready', capturedKey);
+                  }
                 }
-              } catch {
+              } catch (err: any) {
+                console.warn('[VOICE-AUDIT] grab-equipment: generateVoice THREW — falling back to get_ready', {
+                  code: err?.code, message: err?.message,
+                  details: err?.details ?? null,
+                });
                 grabEquipVoiceCacheRef.current[cacheKey] = null;
+                if (lastSpokenRef.current === capturedKey) {
+                  enqueueCue('get_ready', capturedKey);
+                }
               } finally {
                 grabEquipGeneratingRef.current.delete(cacheKey);
               }
