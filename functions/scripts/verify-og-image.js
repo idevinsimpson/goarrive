@@ -1,5 +1,5 @@
 // Local verification for the workout OG image composer.
-// Reads a real workout doc (read-only), composes the 1200x1800 image locally,
+// Reads a real workout doc (read-only), composes the 1200x2000 image locally,
 // and writes it to /tmp for visual inspection. No Storage upload, no writes.
 //
 // Usage:
@@ -39,7 +39,7 @@ async function pickWorkout(db, workoutId) {
   console.log(`Movement count: ${movementCount}`);
 
   const jpeg = await composeWorkoutOgImage(data);
-  const out = `/tmp/og-sample-v3-${id}.jpg`;
+  const out = `/tmp/og-sample-v4-${id}.jpg`;
   fs.writeFileSync(out, jpeg);
   console.log(`Wrote ${out} (${jpeg.length} bytes)`);
   process.exit(0);

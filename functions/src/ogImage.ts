@@ -1,12 +1,14 @@
 // ─── Workout share-link OG images ────────────────────────────────────────────
-// Composes a 1200x1800 portrait Open Graph preview image for a shared workout,
+// Composes a 1200x2000 portrait Open Graph preview image for a shared workout,
 // mirroring the WorkoutPlayer "ready" phase: logo top, movement thumbnails
 // (4:5 portrait tiles) in segment groups. All blocks between special blocks
 // (Water Break etc.) merge into ONE segment group whose label joins the block
 // kinds it contains ("Tabata + Superset"); rounds render as per-tile gold Nx
 // pills. Column count is chosen per workout to maximize tile size. No title
-// text — og:title carries the workout name in the unfurl. Uploaded to Storage
-// at og-images/{shareId}-v3.jpg and recorded on the shareTokens doc.
+// text — og:title carries the workout name in the unfurl. A Loom-style
+// semi-transparent play button is composited last, centered over everything.
+// Uploaded to Storage at og-images/{shareId}-v4.jpg and recorded on the
+// shareTokens doc.
 //
 // Text is rendered via SVG layers composited by sharp (sharp has no native
 // text API). Fonts come from the runtime's fontconfig; we request generic
@@ -26,13 +28,16 @@ const SPECIAL_BLOCK_TYPES = new Set([
 ]);
 
 const CANVAS_W = 1200;
-const CANVAS_H = 1800;
+const CANVAS_H = 2000;
 const MARGIN_X = 60;
 const CONTENT_W = CANVAS_W - MARGIN_X * 2;
-const GRID_TOP = 150;
+const GRID_TOP = 300;
 const GRID_BOTTOM = CANVAS_H - 60;
 const TILE_GAP = 16;
-const GROUP_LABEL_H = 48;
+const GROUP_LABEL_H = 140;
+// Loom-style play button: diameter/opacity of the centered overlay.
+const PLAY_BTN_R = 160;
+const PLAY_BTN_OPACITY = 0.6;
 const MAX_TILES = 16;
 const MAX_GROUPS = 5;
 const MAX_TILE_H = 700;
@@ -191,7 +196,7 @@ function loadLogo(): Buffer | null {
 }
 
 /**
- * Composes the 1200x1800 portrait OG JPEG for a workout. Returns the buffer.
+ * Composes the 1200x2000 portrait OG JPEG for a workout. Returns the buffer.
  * Throws on composition failure — callers treat OG images as best-effort.
  */
 export async function composeWorkoutOgImage(workout: Record<string, any>): Promise<Buffer> {
@@ -228,18 +233,18 @@ export async function composeWorkoutOgImage(workout: Record<string, any>): Promi
   const logoBuf = loadLogo();
   if (logoBuf) {
     const logo = await sharp(logoBuf)
-      .resize({ height: 64, width: 480, fit: 'inside', withoutEnlargement: true })
+      .resize({ height: 224, width: 1000, fit: 'inside' })
       .png()
       .toBuffer();
     const meta = await sharp(logo).metadata();
     composites.push({
       input: logo,
-      top: Math.round((GRID_TOP - (meta.height || 64)) / 2),
-      left: Math.round((CANVAS_W - (meta.width || 480)) / 2),
+      top: Math.round((GRID_TOP - (meta.height || 224)) / 2),
+      left: Math.round((CANVAS_W - (meta.width || 1000)) / 2),
     });
   } else {
     svgParts.push(
-      `<text x="${CANVAS_W / 2}" y="${Math.round(GRID_TOP / 2) + 14}" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="40" fill="${COLORS.text}">G<tspan fill="${COLORS.gold}">➲</tspan>A</text>`
+      `<text x="${CANVAS_W / 2}" y="${Math.round(GRID_TOP / 2) + 42}" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="120" fill="${COLORS.text}">G<tspan fill="${COLORS.gold}">➲</tspan>A</text>`
     );
   }
 
@@ -248,11 +253,11 @@ export async function composeWorkoutOgImage(workout: Record<string, any>): Promi
   let tileIdx = 0;
   for (let gi = 0; gi < groups.length; gi++) {
     const g = groups[gi];
-    const badgeCy = y + GROUP_LABEL_H / 2 - 5;
+    const badgeCy = y + GROUP_LABEL_H / 2 - 8;
     svgParts.push(
-      `<circle cx="${startX + 16}" cy="${badgeCy}" r="16" fill="${COLORS.badge}"/>`,
-      `<text x="${startX + 16}" y="${badgeCy + 6}" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="18" fill="${COLORS.background}">${gi + 1}</text>`,
-      `<text x="${startX + 44}" y="${badgeCy + 8}" font-family="sans-serif" font-weight="600" font-size="24" fill="${COLORS.text}">${escapeXml(g.label.slice(0, 48))}</text>`
+      `<circle cx="${startX + 48}" cy="${badgeCy}" r="48" fill="${COLORS.badge}"/>`,
+      `<text x="${startX + 48}" y="${badgeCy + 19}" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="54" fill="${COLORS.background}">${gi + 1}</text>`,
+      `<text x="${startX + 124}" y="${badgeCy + 26}" font-family="sans-serif" font-weight="600" font-size="72" fill="${COLORS.text}">${escapeXml(g.label.slice(0, 26))}</text>`
     );
     y += GROUP_LABEL_H;
 
@@ -301,6 +306,16 @@ export async function composeWorkoutOgImage(workout: Record<string, any>): Promi
     y += rowsPerGroup[gi] * (tileH + TILE_GAP);
   }
 
+  // ── Loom-style play button — pushed last so it sits on top of everything ─
+  const pcx = CANVAS_W / 2;
+  const pcy = CANVAS_H / 2;
+  svgParts.push(
+    `<g opacity="${PLAY_BTN_OPACITY}">` +
+      `<circle cx="${pcx}" cy="${pcy}" r="${PLAY_BTN_R}" fill="#FFFFFF"/>` +
+      `<path d="M ${pcx - 44} ${pcy - 84} L ${pcx + 100} ${pcy} L ${pcx - 44} ${pcy + 84} Z" fill="${COLORS.background}"/>` +
+    `</g>`
+  );
+
   const svgOverlay = Buffer.from(
     `<svg width="${CANVAS_W}" height="${CANVAS_H}" xmlns="http://www.w3.org/2000/svg">${svgParts.join('')}</svg>`
   );
@@ -325,9 +340,9 @@ export async function generateWorkoutOgImage(
 ): Promise<string | null> {
   const jpeg = await composeWorkoutOgImage(workout);
   const bucket = admin.storage().bucket();
-  // "-v3" versions the object name so crawler caches (Slack/iMessage) bust
+  // "-v4" versions the object name so crawler caches (Slack/iMessage) bust
   // cleanly when the composer layout changes.
-  const storagePath = `og-images/${shareId}-v3.jpg`;
+  const storagePath = `og-images/${shareId}-v4.jpg`;
   const file = bucket.file(storagePath);
   await file.save(jpeg, {
     metadata: { contentType: 'image/jpeg', cacheControl: 'public, max-age=86400' },
