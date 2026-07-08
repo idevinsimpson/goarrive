@@ -8564,30 +8564,21 @@ exports.generateEquipmentImage = (0, https_1.onCall)({ region: 'us-central1', se
         throw new https_1.HttpsError('internal', 'OpenAI API key not configured');
     const equipmentSlug = await extractEquipmentSlug(grabEquipmentText.trim(), apiKey);
     const bucket = admin.storage().bucket();
-    // Build a Firebase-style download URL with an embedded token so the client
-    // Image component can load it without auth headers.
-    function makeDownloadUrl(path, token) {
-        return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
-    }
-    // Save a buffer and return its download URL (with token stored in metadata).
+    // Save a buffer, make it publicly readable, return its GCS public URL.
     async function saveFile(path, buf) {
-        const token = crypto.randomUUID();
-        await bucket.file(path).save(buf, {
-            contentType: 'image/png',
-            metadata: { metadata: { firebaseStorageDownloadTokens: token } },
-        });
-        return makeDownloadUrl(path, token);
+        const file = bucket.file(path);
+        await file.save(buf, { contentType: 'image/png' });
+        await file.makePublic();
+        return `https://storage.googleapis.com/${bucket.name}/${path}`;
     }
-    // Get download URL for an existing file from its stored token.
+    // Get public URL for an existing file (assumes makePublic was already called).
     async function getExistingUrl(path) {
-        var _a;
         try {
-            const [meta] = await bucket.file(path).getMetadata();
-            const token = (_a = meta.metadata) === null || _a === void 0 ? void 0 : _a.firebaseStorageDownloadTokens;
-            if (token)
-                return makeDownloadUrl(path, token);
+            const [exists] = await bucket.file(path).exists();
+            if (exists)
+                return `https://storage.googleapis.com/${bucket.name}/${path}`;
         }
-        catch ( /* fall through */_b) { /* fall through */ }
+        catch ( /* fall through */_a) { /* fall through */ }
         return null;
     }
     const defaultPath = `equipment_images/${equipmentSlug}/default.png`;
@@ -8667,14 +8658,11 @@ exports.saveEquipmentImageChoice = (0, https_1.onCall)({ region: 'us-central1', 
     const bucket = admin.storage().bucket();
     const srcPath = `equipment_images/${equipmentSlug}/v${choiceIndex + 1}.png`;
     const destPath = `equipment_images/${equipmentSlug}/default.png`;
-    // Download source bytes and re-save with a fresh token so the URL is loadable by the client.
     const [srcBuf] = await bucket.file(srcPath).download();
-    const token = crypto.randomUUID();
-    await bucket.file(destPath).save(srcBuf, {
-        contentType: 'image/png',
-        metadata: { metadata: { firebaseStorageDownloadTokens: token } },
-    });
-    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media&token=${token}`;
+    const destFile = bucket.file(destPath);
+    await destFile.save(srcBuf, { contentType: 'image/png' });
+    await destFile.makePublic();
+    const imageUrl = `https://storage.googleapis.com/${bucket.name}/${destPath}`;
     console.info('[saveEquipmentImageChoice] Saved default', { equipmentSlug, choiceIndex });
     return { imageUrl };
 });
