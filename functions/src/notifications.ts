@@ -33,7 +33,9 @@ export type MessageType =
   | 'workout_assigned'
   | 'workout_reviewed'
   | 'workout_completed'
-  | 'coach_welcome';
+  | 'coach_welcome'
+  | 'platform_digest'
+  | 'feedback_ack';
 
 export interface NotificationRecipient {
   uid: string;
@@ -51,6 +53,8 @@ export interface NotificationPayload {
   body: string;
   htmlBody?: string;
   metadata?: Record<string, string>;
+  fromAddress?: string;
+  replyTo?: string;
   sessionInstanceId?: string;
   coachId?: string;
   memberId?: string;
@@ -186,11 +190,12 @@ export class RealEmailProvider implements NotificationProvider {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          from: this.fromAddress,
+          from: payload.fromAddress || this.fromAddress,
           to: [payload.recipient.email],
           subject: payload.subject || 'GoArrive Session Update',
           html: payload.htmlBody || payload.body,
           text: payload.body,
+          ...(payload.replyTo ? { reply_to: [payload.replyTo] } : {}),
         }),
       });
       if (!res.ok) {
