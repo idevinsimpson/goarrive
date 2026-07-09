@@ -311,7 +311,7 @@ export default function MovementVariationModal({
                 uri={sourceMovement.videoUrl}
                 posterUri={sourceMovement.thumbnailUrl || undefined}
                 aspectRatio={4 / 5}
-                autoPlay={phase === 'compose'}
+                autoPlay={phase !== 'creating'}
                 showControls={true}
                 cropScale={sourceMovement.cropScale ?? 1}
                 cropTranslateX={sourceMovement.cropTranslateX ?? 0}
