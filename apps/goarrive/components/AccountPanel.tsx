@@ -181,6 +181,11 @@ export default function AccountPanel({ visible, onClose }: Props) {
     onClose();
   }
 
+  function handleShareFeedback() {
+    onClose();
+    setTimeout(() => router.push('/feedback'), 240);
+  }
+
   function handleMyPage() {
     onClose();
     setTimeout(() => router.push('/(app)/my-page'), 240);
@@ -212,6 +217,15 @@ export default function AccountPanel({ visible, onClose }: Props) {
       sublabel: 'Get help or contact us',
       onPress: handleHelp,
     },
+    // Coach feedback channel — coaches and platform admins (not members)
+    ...(role !== 'member'
+      ? [{
+          icon: 'share',
+          label: 'Share Feedback',
+          sublabel: 'Ideas, improvements, bugs — tell the GoArrive team.',
+          onPress: handleShareFeedback,
+        }]
+      : []),
     {
       icon: 'edit',
       label: 'Report a Bug / Suggest',
