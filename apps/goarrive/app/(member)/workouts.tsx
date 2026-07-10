@@ -23,6 +23,7 @@ import {
   Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   collection,
   query,
@@ -59,6 +60,7 @@ const FB =
 // ── Types ──────────────────────────────────────────────────────────────────
 interface AssignedWorkout {
   id: string;
+  coachId: string;
   workoutId: string;
   workoutName: string;
   scheduledFor: string; // YYYY-MM-DD
@@ -102,6 +104,36 @@ function isToday(dateStr: string): boolean {
   return dateStr === todayString();
 }
 
+// Persisted in-progress session so a crash/relaunch resumes instead of double-logging
+const ACTIVE_SESSION_KEY = '@goarrive_active_workout_session';
+
+async function loadActiveSession(): Promise<{ assignmentId: string; workoutId: string } | null> {
+  try {
+    const raw =
+      Platform.OS === 'web'
+        ? localStorage.getItem(ACTIVE_SESSION_KEY)
+        : await AsyncStorage.getItem(ACTIVE_SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveActiveSession(assignmentId: string, workoutId: string): Promise<void> {
+  try {
+    const json = JSON.stringify({ assignmentId, workoutId });
+    if (Platform.OS === 'web') localStorage.setItem(ACTIVE_SESSION_KEY, json);
+    else await AsyncStorage.setItem(ACTIVE_SESSION_KEY, json);
+  } catch {}
+}
+
+async function clearActiveSession(): Promise<void> {
+  try {
+    if (Platform.OS === 'web') localStorage.removeItem(ACTIVE_SESSION_KEY);
+    else await AsyncStorage.removeItem(ACTIVE_SESSION_KEY);
+  } catch {}
+}
+
 function isPast(dateStr: string): boolean {
   return dateStr < todayString();
 }
@@ -109,7 +141,7 @@ function isPast(dateStr: string): boolean {
 // ── Component ──────────────────────────────────────────────────────────────
 export default function MemberWorkoutsScreen() {
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, claims } = useAuth();
   const memberId = user?.uid ?? '';
 
   const [assignments, setAssignments] = useState<AssignedWorkout[]>([]);
@@ -120,6 +152,10 @@ export default function MemberWorkoutsScreen() {
   const [playerVisible, setPlayerVisible] = useState(false);
   const [playerWorkout, setPlayerWorkout] = useState<any>(null);
   const [activeAssignmentId, setActiveAssignmentId] = useState<string | null>(null);
+  // coachId for the active session, taken from the assignment doc (coach-written)
+  // or the member's coach relationship — never from the raw workout doc
+  const [activeCoachId, setActiveCoachId] = useState<string>('');
+  const submittingRef = useRef(false);
   const [loadingWorkout, setLoadingWorkout] = useState<string | null>(null);
 
   // Preview state (Suggestion 1: WorkoutPreview before player launch)
@@ -165,6 +201,7 @@ export default function MemberWorkoutsScreen() {
           const data = d.data();
           return {
             id: d.id,
+            coachId: data.coachId ?? '',
             workoutId: data.workoutId ?? '',
             workoutName: data.workoutName ?? 'Workout',
             scheduledFor: data.scheduledFor ?? '',
@@ -220,6 +257,7 @@ export default function MemberWorkoutsScreen() {
         setPreviewWorkout(workoutData);
         setPreviewNote(assignment.assignmentNote ?? '');
         setActiveAssignmentId(assignment.id);
+        setActiveCoachId(assignment.coachId || claims?.coachId || '');
         setPreviewVisible(true);
       } catch (err) {
         console.error('[MemberWorkouts] Failed to load workout:', err);
@@ -228,7 +266,7 @@ export default function MemberWorkoutsScreen() {
         setLoadingWorkout(null);
       }
     },
-    [],
+    [claims?.coachId],
   );
 
   // ── Player complete → show session summary → journal ──────────────────
@@ -260,7 +298,12 @@ export default function MemberWorkoutsScreen() {
   // ── Journal submit → write log ────────────────────────────────────────
   const handleJournalSubmit = useCallback(
     async (journal: JournalEntry) => {
-      if (!activeAssignmentId || !memberId) return;
+      if (!activeAssignmentId || !memberId || submittingRef.current) return;
+
+      // Guard + clear synchronously so a rapid second tap (Submit/Skip) no-ops
+      submittingRef.current = true;
+      const assignmentId = activeAssignmentId;
+      setActiveAssignmentId(null);
 
       const durationSec = completedDuration;
 
@@ -270,16 +313,16 @@ export default function MemberWorkoutsScreen() {
           'update',
           'workout_assignments',
           { status: 'completed', completedAt: serverTimestamp() },
-          activeAssignmentId,
+          assignmentId,
         );
 
         // Write workout log with journal data (offline-tolerant)
         await enqueueWrite('add', 'workout_logs', {
           memberId,
-          assignmentId: activeAssignmentId,
+          assignmentId,
           workoutId: playerWorkout?.id ?? '',
           workoutName: playerWorkout?.name ?? '',
-          coachId: playerWorkout?.coachId ?? '',
+          coachId: activeCoachId,
           completedAt: serverTimestamp(),
           durationSec,
           journal: {
@@ -298,17 +341,23 @@ export default function MemberWorkoutsScreen() {
       }
 
       // Clean up
+      clearActiveSession();
       setJournalVisible(false);
       setPlayerWorkout(null);
-      setActiveAssignmentId(null);
       workoutStartTime.current = null;
+      submittingRef.current = false;
     },
-    [activeAssignmentId, memberId, playerWorkout, completedDuration],
+    [activeAssignmentId, memberId, playerWorkout, completedDuration, activeCoachId, sessionSwapLog],
   );
 
   // ── Journal skip → write log without journal ──────────────────────────
   const handleJournalSkip = useCallback(async () => {
-    if (!activeAssignmentId || !memberId) return;
+    if (!activeAssignmentId || !memberId || submittingRef.current) return;
+
+    // Guard + clear synchronously so a rapid second tap (Submit/Skip) no-ops
+    submittingRef.current = true;
+    const assignmentId = activeAssignmentId;
+    setActiveAssignmentId(null);
 
     const durationSec = completedDuration;
 
@@ -318,16 +367,16 @@ export default function MemberWorkoutsScreen() {
         'update',
         'workout_assignments',
         { status: 'completed', completedAt: serverTimestamp() },
-        activeAssignmentId,
+        assignmentId,
       );
 
       // Write workout log without journal (offline-tolerant)
       await enqueueWrite('add', 'workout_logs', {
         memberId,
-        assignmentId: activeAssignmentId,
+        assignmentId,
         workoutId: playerWorkout?.id ?? '',
         workoutName: playerWorkout?.name ?? '',
-        coachId: playerWorkout?.coachId ?? '',
+        coachId: activeCoachId,
         completedAt: serverTimestamp(),
         durationSec,
         journal: null,
@@ -339,14 +388,32 @@ export default function MemberWorkoutsScreen() {
       console.error('[MemberWorkouts] Failed to log skip:', err);
     }
 
+    clearActiveSession();
     setJournalVisible(false);
     setPlayerWorkout(null);
-    setActiveAssignmentId(null);
     workoutStartTime.current = null;
-  }, [activeAssignmentId, memberId, playerWorkout, completedDuration]);
+    submittingRef.current = false;
+  }, [activeAssignmentId, memberId, playerWorkout, completedDuration, activeCoachId]);
 
   // ── Offline resilience: auto-flush queue on mount + reconnect ────────
   const { isOffline: _isOffline } = useNetworkStatus();
+
+  // ── Crash recovery: restore a persisted in-progress session ──────────
+  const restoreAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (loading || restoreAttemptedRef.current) return;
+    restoreAttemptedRef.current = true;
+    (async () => {
+      const session = await loadActiveSession();
+      if (!session) return;
+      const assignment = assignments.find((a) => a.id === session.assignmentId);
+      if (assignment && assignment.status !== 'completed') {
+        handleStartWorkout(assignment);
+      } else {
+        clearActiveSession();
+      }
+    })();
+  }, [loading, assignments, handleStartWorkout]);
 
   // ── Listen for coach reactions on workout_logs ───────────────────────
   useEffect(() => {
@@ -683,6 +750,7 @@ export default function MemberWorkoutsScreen() {
           setPlayerVisible(true);
           // Mark assignment as in_progress
           if (activeAssignmentId) {
+            saveActiveSession(activeAssignmentId, previewWorkout?.id ?? '');
             enqueueWrite(
               'update',
               'workout_assignments',
@@ -705,6 +773,7 @@ export default function MemberWorkoutsScreen() {
           visible={playerVisible}
           workout={playerWorkout}
           onClose={() => {
+            clearActiveSession();
             setPlayerVisible(false);
             setPlayerWorkout(null);
             setActiveAssignmentId(null);

@@ -19,8 +19,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { collection, getDocs, orderBy, query } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../../lib/firebase';
 
 const FONT_H = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FONT_B = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
@@ -60,16 +60,10 @@ export default function IntakeIndex() {
   useEffect(() => {
     if (hasCoach !== true) return;
     setLoading(true);
-    const q = query(collection(db, 'coaches'), orderBy('createdAt', 'desc'));
-    getDocs(q)
-      .then((snap) => {
-        const list: CoachOption[] = snap.docs
-          .map((d) => ({
-            uid: d.id,
-            displayName: d.data().displayName || d.data().name || '',
-          }))
-          .filter((c) => c.displayName.trim().length > 0);
-        setCoaches(list);
+    const listPublicCoaches = httpsCallable<void, { coaches: CoachOption[] }>(functions, 'listPublicCoaches');
+    listPublicCoaches()
+      .then((res) => {
+        setCoaches(res.data.coaches || []);
       })
       .catch((err) => {
         console.warn('[intake] Failed to load coaches:', err);

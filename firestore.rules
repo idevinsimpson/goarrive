@@ -94,8 +94,8 @@ service cloud.firestore {
     // ─────────────────────────────────────────────
 
     match /coaches/{coachId} {
-      // Public list for coach selection on intake page; get requires auth
-      allow list: if true;
+      // Intake page uses the listPublicCoaches callable; direct list requires auth
+      allow list: if isAuthenticated();
       allow get: if isOwnDoc(coachId) || isPlatformAdmin();
       // Coaches can update their own scheduling settings.
       // NOTE: hiddenSettings is deliberately NOT in the coach's key list —

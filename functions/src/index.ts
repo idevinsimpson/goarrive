@@ -255,6 +255,26 @@ export const cleanupReadNotifications = onSchedule(
   }
 );
 
+// ─── listPublicCoaches ───────────────────────────────────────────────────────
+/**
+ * Public coach directory for the unauthenticated intake page.
+ * Returns only uid + displayName so the coaches collection can require auth
+ * for direct Firestore list access.
+ */
+export const listPublicCoaches = onCall(
+  { invoker: 'public' },
+  async () => {
+    const snap = await db.collection('coaches').orderBy('createdAt', 'desc').limit(500).get();
+    const coaches = snap.docs
+      .map((d) => ({
+        uid: d.id,
+        displayName: (d.data().displayName || d.data().name || '') as string,
+      }))
+      .filter((c) => c.displayName.trim().length > 0);
+    return { coaches };
+  }
+);
+
 // ─── 3. createStripeConnectLink ───────────────────────────────────────────────
 /**
  * Creates or resumes a Stripe Connect Express account onboarding link for a coach.
@@ -271,6 +291,12 @@ export const createStripeConnectLink = onCall(
     // Verify caller is the coach or an admin
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const callerToken = request.auth?.token as Record<string, any> | undefined;
+    const callerIsAdmin = callerToken?.role === 'platformAdmin' || callerToken?.admin === true;
+    if (coachId !== callerUid && !callerIsAdmin) {
+      throw new HttpsError('permission-denied', 'You can only manage your own Stripe account');
+    }
 
     const stripe = getStripe(stripeSecretKey.value());
 
@@ -337,6 +363,12 @@ export const refreshStripeAccountStatus = onCall(
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
 
+    const callerToken = request.auth?.token as Record<string, any> | undefined;
+    const callerIsAdmin = callerToken?.role === 'platformAdmin' || callerToken?.admin === true;
+    if (coachId !== callerUid && !callerIsAdmin) {
+      throw new HttpsError('permission-denied', 'You can only manage your own Stripe account');
+    }
+
     const accountRef = db.collection('coachStripeAccounts').doc(coachId);
     const accountSnap = await accountRef.get();
     if (!accountSnap.exists) throw new HttpsError('not-found', 'No Stripe account found for this coach');
@@ -397,8 +429,8 @@ export const disconnectStripeAccount = onCall(
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
 
     // Only the coach themselves (or an admin) may disconnect
-    const callerDoc = await db.collection('users').doc(callerUid).get();
-    const isAdmin = callerDoc.exists && callerDoc.data()?.role === 'admin';
+    const callerToken = request.auth?.token as Record<string, any> | undefined;
+    const isAdmin = callerToken?.role === 'platformAdmin' || callerToken?.admin === true;
     if (callerUid !== coachId && !isAdmin) {
       throw new HttpsError('permission-denied', 'You can only disconnect your own Stripe account');
     }
@@ -948,16 +980,8 @@ export const stripeConnectWebhook = onRequest(
  * Idempotent: uses stripeEventId as Firestore doc ID.
  */
 async function processStripeEvent(tag: string, event: Stripe.Event, res: any) {
-  // ── Idempotency: check if already processed ──
+  // ── Idempotency: transactional create() so concurrent retries fail fast ──
   const eventRef = db.collection('billingEvents').doc(event.id);
-  const existing = await eventRef.get();
-  if (existing.exists) {
-    console.log(`[${tag}] Already processed event`, event.id, '— skipping');
-    res.status(200).send('Already processed');
-    return;
-  }
-
-  // ── Store raw event (append-only) ──
   const billingEvent = {
     eventId: event.id,
     stripeEventId: event.id,
@@ -967,8 +991,25 @@ async function processStripeEvent(tag: string, event: Stripe.Event, res: any) {
   };
 
   try {
-    await eventRef.set(billingEvent);
+    const isDuplicate = await db.runTransaction(async (tx) => {
+      const existing = await tx.get(eventRef);
+      if (existing.exists) return true;
+      tx.create(eventRef, billingEvent);
+      return false;
+    });
+    if (isDuplicate) {
+      console.log(`[${tag}] Already processed event`, event.id, '— skipping');
+      res.status(200).send('Already processed');
+      return;
+    }
   } catch (err) {
+    const code = (err as { code?: number | string }).code;
+    // ALREADY_EXISTS from a concurrent create() race — also a duplicate
+    if (code === 6 || code === 'already-exists') {
+      console.log(`[${tag}] Duplicate concurrent event`, event.id, '— skipping');
+      res.status(200).send('Already processed');
+      return;
+    }
     console.error(`[${tag}] Failed to store billing event:`, err);
     res.status(500).send('Failed to store event');
     return;
@@ -1858,7 +1899,7 @@ export const addCoach = onCall(
       actionCodeSettings
     );
 
-    console.log('[addCoach] Created coach', newCoachId, email, 'by', callerUid);
+    console.log('[addCoach] Created coach', newCoachId, 'by', callerUid);
 
     return {
       success: true,
@@ -1933,7 +1974,7 @@ export const inviteCoach = onCall(
     const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
     const inviteUrl = `${appUrl}/coach-signup?token=${inviteToken}`;
 
-    console.log('[inviteCoach] Invite created for', email, 'by', callerUid);
+    console.log('[inviteCoach] Invite created by', callerUid);
     return { inviteUrl, token: inviteToken, expiresAt };
   }
 );
@@ -2009,7 +2050,7 @@ export const activateCoachInvite = onCall(
       usedBy: callerUid,
     });
 
-    console.log('[activateCoachInvite] Coach activated:', callerUid, userEmail);
+    console.log('[activateCoachInvite] Coach activated:', callerUid);
     return { success: true, coachId: callerUid };
   }
 );
@@ -4797,10 +4838,13 @@ export const updateMemberGuidancePhase = onCall(
 
     // Authorization: caller must be the member's coach or a platform admin
     const callerClaims = (request.auth?.token || {}) as Record<string, any>;
-    const isAdmin = callerClaims.role === 'admin' || callerClaims.platformAdmin === true;
+    const isAdmin = callerClaims.role === 'platformAdmin' || callerClaims.admin === true || callerClaims.platformAdmin === true;
     if (!isAdmin) {
-      // Verify caller is the coach for this member by checking a slot or the member doc
+      // Verify caller is the coach for this member by checking the member doc
       const memberDoc = await db.collection('members').doc(memberId).get();
+      if (!memberDoc.exists) {
+        throw new HttpsError('not-found', 'Member not found');
+      }
       const memberData = memberDoc.data();
       if (!memberData || (memberData.coachId !== callerUid && memberData.createdBy !== callerUid)) {
         throw new HttpsError('permission-denied', 'Only the member\'s coach or an admin can transition phases');
@@ -5078,7 +5122,7 @@ export const adminGetCoachData = onCall(
     if (!coachUid) throw new HttpsError('invalid-argument', 'coachUid is required');
 
     // Fetch members for this coach
-    const mSnap = await db.collection('members').where('coachId', '==', coachUid).get();
+    const mSnap = await db.collection('members').where('coachId', '==', coachUid).limit(500).get();
 
     // Fetch member plans for this coach
     const pSnap = await db.collection('member_plans').where('coachId', '==', coachUid).limit(200).get();
@@ -5195,15 +5239,23 @@ export const enforceCtsAccountability = onSchedule(
           //    where the member did NOT attend.
           const fortyEightHoursAgoDate = new Date(fortyEightHoursAgoMs).toISOString().split('T')[0];
           const sevenDaysAgoDate = new Date(sevenDaysAgoMs).toISOString().split('T')[0];
+          const todayDate = new Date(now.toMillis()).toISOString().split('T')[0];
 
-          const instancesSnap = await db.collection('session_instances')
+          // One bounded fetch covers both missed-session candidates (up to 48h ago)
+          // and make-up lookups (missed date + 48h, i.e. up to today).
+          const windowSnap = await db.collection('session_instances')
             .where('memberId', '==', memberId)
             .where('coachId', '==', coachId)
             .where('scheduledDate', '>=', sevenDaysAgoDate)
-            .where('scheduledDate', '<=', fortyEightHoursAgoDate)
+            .where('scheduledDate', '<=', todayDate)
+            .limit(500)
             .get();
 
-          for (const instanceDoc of instancesSnap.docs) {
+          const missedCandidates = windowSnap.docs.filter(
+            (d) => (d.data().scheduledDate as string) <= fortyEightHoursAgoDate
+          );
+
+          for (const instanceDoc of missedCandidates) {
             const instance = instanceDoc.data();
             totalProcessed++;
 
@@ -5237,16 +5289,15 @@ export const enforceCtsAccountability = onSchedule(
             const makeUpWindowEnd = missedMs + 48 * 60 * 60 * 1000;
             const makeUpWindowEndDate = new Date(makeUpWindowEnd).toISOString().split('T')[0];
 
-            // Look for any completed/attended session for this member within the make-up window
-            const makeUpSnap = await db.collection('session_instances')
-              .where('memberId', '==', memberId)
-              .where('coachId', '==', coachId)
-              .where('scheduledDate', '>=', missedDateStr)
-              .where('scheduledDate', '<=', makeUpWindowEndDate)
-              .get();
+            // Look for any completed/attended session for this member within the
+            // make-up window (filtered in memory from the hoisted window fetch)
+            const makeUpDocs = windowSnap.docs.filter((d) => {
+              const sd = d.data().scheduledDate as string;
+              return sd >= missedDateStr && sd <= makeUpWindowEndDate;
+            });
 
             let hasMakeUp = false;
-            for (const muDoc of makeUpSnap.docs) {
+            for (const muDoc of makeUpDocs) {
               if (muDoc.id === instanceDoc.id) continue; // Skip the missed session itself
               const muData = muDoc.data();
               // Check if this other session was actually attended
@@ -6209,6 +6260,12 @@ export const checkSlotConflicts = onCall(
       throw new HttpsError('invalid-argument', 'coachId, dayOfWeek, startTime, and durationMinutes are required');
     }
 
+    const callerToken = request.auth?.token as Record<string, any> | undefined;
+    const callerIsAdmin = callerToken?.role === 'platformAdmin' || callerToken?.admin === true;
+    if (coachId !== callerUid && !callerIsAdmin) {
+      throw new HttpsError('permission-denied', 'You can only check conflicts for your own slots');
+    }
+
     // Self-guided sessions don't need coach presence — no conflict
     if (guidancePhase === 'self_guided') {
       return { hasConflict: false, conflicts: [] };
@@ -6258,6 +6315,7 @@ export const checkSlotConflicts = onCall(
       .where('scheduledDate', '>=', todayStr)
       .where('scheduledDate', '<=', futureStr)
       .where('status', 'in', ['scheduled', 'allocated'])
+      .limit(500)
       .get();
 
     for (const instDoc of instancesSnap.docs) {

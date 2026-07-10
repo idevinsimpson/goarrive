@@ -98,9 +98,14 @@ export function InstanceList({ slot, state, handleRescheduleInstance, handleSkip
                         style={{ backgroundColor: BLUE + '20', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 }}
                         onPress={async () => {
                           if (!rescheduleDate || !rescheduleTime) return;
-                          await handleRescheduleInstance(inst.id, rescheduleDate, rescheduleTime);
-                          setRescheduleInstanceId(null);
-                          Alert.alert('Rescheduled', `Session moved to ${rescheduleDate} at ${formatTime(rescheduleTime)}`);
+                          try {
+                            await handleRescheduleInstance(inst.id, rescheduleDate, rescheduleTime);
+                            setRescheduleInstanceId(null);
+                            Alert.alert('Rescheduled', `Session moved to ${rescheduleDate} at ${formatTime(rescheduleTime)}`);
+                          } catch (err: any) {
+                            setRescheduleInstanceId(null);
+                            Alert.alert('Reschedule failed', err?.message || 'Could not reschedule this session. Please try again.');
+                          }
                         }}
                       >
                         <Text style={{ fontSize: 10, color: BLUE, fontFamily: FH }}>Confirm</Text>
@@ -137,7 +142,18 @@ export function InstanceList({ slot, state, handleRescheduleInstance, handleSkip
                           onChangeText={setSkipReason}
                         />
                         <View style={{ flexDirection: 'row', gap: 6 }}>
-                          <TouchableOpacity onPress={() => handleSkipInstance(slot.id, inst.id, skipReason)} style={{ backgroundColor: '#FFC000' + '20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 }}>
+                          <TouchableOpacity
+                            onPress={async () => {
+                              try {
+                                await handleSkipInstance(slot.id, inst.id, skipReason);
+                              } catch (err: any) {
+                                setSkippingInstanceId(null);
+                                setSkipReason('');
+                                Alert.alert('Skip failed', err?.message || 'Could not skip this session. Please try again.');
+                              }
+                            }}
+                            style={{ backgroundColor: '#FFC000' + '20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 }}
+                          >
                             <Text style={{ fontSize: 9, color: '#FFC000', fontFamily: FH }}>Confirm Skip</Text>
                           </TouchableOpacity>
                           <TouchableOpacity onPress={() => { setSkippingInstanceId(null); setSkipReason(''); }}>
