@@ -51,12 +51,13 @@ import { Icon } from './Icon';
 import MovementVideoControls from './MovementVideoControls';
 import VideoCropModal, { CropValues } from './VideoCropModal';
 import { MovementDetailData } from './MovementDetail';
-import { generateCroppedGif } from '../utils/generateCroppedGif';
+import { encodeOneRepLoopGif, CropTransform } from '../utils/generateMovementDerivatives';
 import {
-  generateMovementDerivatives,
-  encodeOneRepLoopGif,
-  CropTransform,
-} from '../utils/generateMovementDerivatives';
+  createMovementFromVideo,
+  uploadMovementBlob,
+  generateAndUploadMovementDerivatives,
+  MovementDerivativeUrls,
+} from '../utils/createMovementFromVideo';
 import { generateMovementVoice } from '../utils/generateMovementVoice';
 import { analyzeMovementMedia, MovementAnalysis } from '../utils/analyzeMovementMedia';
 import { analyzeMovementReps } from '../utils/analyzeMovementReps';
@@ -529,34 +530,18 @@ export default function MovementForm({
    * Upload a blob to Firebase Storage and return its download URL.
    */
   const uploadBlob = useCallback(
-    async (blob: Blob, subfolder: string, ext: string): Promise<string> => {
-      const fileName = `movements/${coachId}/${subfolder}/${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
-      const storageRef = ref(storage, fileName);
-      const uploadTask = uploadBytesResumable(storageRef, blob, {
-        contentType: ext === 'gif' ? 'image/gif' : 'image/jpeg',
-      });
-      return new Promise<string>((resolve, reject) => {
-        uploadTask.on('state_changed', null, reject, async () => {
-          const url = await getDownloadURL(uploadTask.snapshot.ref);
-          resolve(url);
-        });
-      });
-    },
+    (blob: Blob, subfolder: string, ext: string): Promise<string> =>
+      uploadMovementBlob(coachId, blob, subfolder, ext),
     [coachId],
   );
 
   /**
    * Generate all derivatives and upload them. Returns URLs for each asset.
-   * Uses the new multi-derivative pipeline (single frame capture pass).
+   * Delegates to the shared pipeline (utils/createMovementFromVideo) and
+   * layers on component UI state + saved-doc auto-patching.
    */
   const generateAndUploadDerivatives = useCallback(
-    (url: string, crop: CropTransform): Promise<{
-      gifHighUrl: string | null;
-      gifLowUrl: string | null;
-      thumbnailImageUrl: string | null;
-      posterUrl: string | null;
-      _loFrames: ImageData[];
-    }> => {
+    (url: string, crop: CropTransform): Promise<MovementDerivativeUrls> => {
       if (Platform.OS !== 'web' || !url) {
         return Promise.resolve({ gifHighUrl: null, gifLowUrl: null, thumbnailImageUrl: null, posterUrl: null, _loFrames: [] });
       }
@@ -565,85 +550,36 @@ export default function MovementForm({
       setGifProgress(0);
 
       const promise = (async () => {
-        try {
-          const result = await generateMovementDerivatives(url, crop, (p) => {
-            setGifProgress(p);
-          });
+        const result = await generateAndUploadMovementDerivatives(url, crop, coachId, (p) => {
+          setGifProgress(p);
+        });
+        const { gifHighUrl, gifLowUrl, posterUrl } = result;
 
-          // If new pipeline failed or produced no usable GIF, fall back to old proven pipeline
-          const needsFallback = !result || (!result.gifHigh && !result.firstFrame);
-          if (needsFallback) {
-            console.warn('[MovementForm] New pipeline failed, falling back to generateCroppedGif');
-            const legacyCrop = { cropScale: crop.cropScale, cropTranslateX: crop.cropTranslateX, cropTranslateY: crop.cropTranslateY };
-            const fallbackBlob = await generateCroppedGif(url, legacyCrop, (p) => setGifProgress(p));
-            if (fallbackBlob) {
-              const fallbackUrl = await uploadBlob(fallbackBlob, 'thumbnails', 'gif');
-              setThumbnailUrl(fallbackUrl);
-              setGeneratingGif(false);
-              setGifProgress(0);
-              if (savedDocIdRef.current) {
-                updateDoc(doc(db, 'movements', savedDocIdRef.current), {
-                  thumbnailUrl: fallbackUrl,
-                }).catch((err) => console.error('[MovementForm] Fallback auto-patch error:', err));
-              }
-              return { gifHighUrl: fallbackUrl, gifLowUrl: null, thumbnailImageUrl: null, posterUrl: null, _loFrames: [] };
-            }
-            // Both pipelines failed
-            setGeneratingGif(false);
-            setGifProgress(0);
-            return { gifHighUrl: null, gifLowUrl: null, thumbnailImageUrl: null, posterUrl: null, _loFrames: [] };
+        setThumbnailUrl(gifHighUrl || posterUrl || '');
+        setGeneratingGif(false);
+        setGifProgress(0);
+
+        // Auto-patch if doc was already saved. Only write fields the pipeline
+        // actually produced (legacy fallback returns gifHighUrl only — don't
+        // blank an existing poster/low-GIF in that case).
+        if (savedDocIdRef.current && (gifHighUrl || posterUrl)) {
+          const patch: Record<string, any> = { thumbnailUrl: gifHighUrl || posterUrl || '' };
+          if (gifLowUrl) patch.gifLowUrl = gifLowUrl;
+          if (posterUrl) {
+            patch.thumbnailImageUrl = posterUrl;
+            patch.posterUrl = posterUrl;
           }
-
-          // Upload available derivatives in parallel (some may be null if GIF encoding failed)
-          // firstFrame goes to posters/ (posterUrl) AND thumbnails-img/ (thumbnailImageUrl) for legacy compat
-          const [gifHighUrl, gifLowUrl, posterUrl] = await Promise.all([
-            result.gifHigh ? uploadBlob(result.gifHigh, 'thumbnails', 'gif') : Promise.resolve(null),
-            result.gifLow ? uploadBlob(result.gifLow, 'thumbnails-low', 'gif') : Promise.resolve(null),
-            result.firstFrame ? uploadBlob(result.firstFrame, 'posters', 'jpg') : Promise.resolve(null),
-          ]);
-          const thumbnailImageUrl = posterUrl;
-
-          setThumbnailUrl(gifHighUrl || posterUrl || '');
-          setGeneratingGif(false);
-          setGifProgress(0);
-
-          // Auto-patch if doc was already saved
-          if (savedDocIdRef.current) {
-            updateDoc(doc(db, 'movements', savedDocIdRef.current), {
-              thumbnailUrl: gifHighUrl || posterUrl || '',
-              gifLowUrl: gifLowUrl || '',
-              thumbnailImageUrl: posterUrl || '',
-              posterUrl: posterUrl || '',
-            }).catch((err) => console.error('[MovementForm] Auto-patch derivatives error:', err));
-          }
-
-          return { gifHighUrl, gifLowUrl, thumbnailImageUrl, posterUrl, _loFrames: result._loFrames };
-        } catch (err) {
-          console.error('[MovementForm] Derivative pipeline error:', err);
-          // Last-resort fallback to old pipeline
-          try {
-            const legacyCrop = { cropScale: crop.cropScale, cropTranslateX: crop.cropTranslateX, cropTranslateY: crop.cropTranslateY };
-            const fallbackBlob = await generateCroppedGif(url, legacyCrop);
-            if (fallbackBlob) {
-              const fallbackUrl = await uploadBlob(fallbackBlob, 'thumbnails', 'gif');
-              setThumbnailUrl(fallbackUrl);
-              setGeneratingGif(false);
-              setGifProgress(0);
-              return { gifHighUrl: fallbackUrl, gifLowUrl: null, thumbnailImageUrl: null, posterUrl: null, _loFrames: [] };
-            }
-          } catch (fallbackErr) {
-            console.error('[MovementForm] Fallback pipeline also failed:', fallbackErr);
-          }
-          setGeneratingGif(false);
-          setGifProgress(0);
-          return { gifHighUrl: null, gifLowUrl: null, thumbnailImageUrl: null, posterUrl: null, _loFrames: [] };
+          updateDoc(doc(db, 'movements', savedDocIdRef.current), patch)
+            .catch((err) => console.error('[MovementForm] Auto-patch derivatives error:', err));
         }
+
+        return result;
       })();
 
       gifPromiseRef.current = promise.then((r) => r.gifHighUrl || r.thumbnailImageUrl);
       return promise;
     },
-    [coachId, uploadBlob],
+    [coachId],
   );
 
   /** Legacy wrapper for edit-mode GIF regeneration (backwards compat). */
@@ -860,7 +796,30 @@ export default function MovementForm({
     };
 
     try {
-      // Step 1: Generate all derivatives (GIF high, GIF low, first-frame image)
+      // Create flow: run the shared end-to-end pipeline (derivatives, AI
+      // analysis, doc creation, voice, one-rep loop) — single source of
+      // truth shared with the AI variation flow.
+      if (!isAddVideoSession) {
+        const { movementId } = await createMovementFromVideo({
+          videoUrl,
+          crop: fullCrop,
+          coachId,
+          tenantId,
+          onStatus: setProcessingStatus,
+          onProgress: setProcessingProgress,
+        });
+        savedDocIdRef.current = movementId;
+
+        // Brief pause to show completion, then close
+        setTimeout(() => {
+          resetForm();
+          onClose();
+        }, 600);
+        return;
+      }
+
+      // Edit-mode add-video flow: generate derivatives + AI proposal, then
+      // open the confirm-merge modal (never auto-overwrite metadata).
       setProcessingStatus('Creating thumbnails...');
       setProcessingProgress(0.1);
 
@@ -978,102 +937,6 @@ export default function MovementForm({
         }
         return;
       }
-
-      if (!aiData.name) {
-        setProcessingStatus('AI analysis unavailable — saving with defaults...');
-      } else {
-        setProcessingStatus('Saving movement...');
-      }
-      setProcessingProgress(0.7);
-      setProcessingStatus('Saving movement...');
-
-      // Step 3: Save to Firestore with all derivative URLs
-      const data: Record<string, any> = {
-        name: aiData.name || 'New Movement',
-        category: aiData.category || '',
-        equipment: aiData.equipment || '',
-        difficulty: aiData.difficulty || '',
-        description: aiData.description || '',
-        muscleGroups: aiData.muscleGroups || [],
-        workSec: aiData.workSec || 30,
-        restSec: aiData.restSec || 15,
-        countdownSec: 3,
-        swapSides: false,
-        swapMode: 'split' as const, // initial — coach edits after creation
-        swapWindowSec: 5,
-        videoUrl: videoUrl.trim(),
-        thumbnailUrl: gifHighUrl || derivedPosterUrl || '',
-        thumbnailImageUrl: derivedPosterUrl || '',
-        posterUrl: derivedPosterUrl || '',
-        gifLowUrl: gifLowUrl || '',
-        gifLoopUrl: '', // populated by one-rep loop step below
-        regression: aiData.regression || '',
-        progression: aiData.progression || '',
-        contraindications: aiData.contraindications || '',
-        cropScale: crop.cropScale,
-        cropTranslateX: crop.cropTranslateX,
-        cropTranslateY: crop.cropTranslateY,
-        cropFrameWidth: crop.cropFrameWidth,
-        cropFrameHeight: crop.cropFrameHeight,
-        coachId,
-        tenantId,
-        isGlobal: false,
-        isArchived: false,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      };
-
-      const docRef = await addDoc(collection(db, 'movements'), data);
-      const docId = docRef.id;
-      savedDocIdRef.current = docId;
-
-      setProcessingProgress(0.85);
-
-      // Step 4: Voice generation (non-blocking)
-      // On failure, clear voiceUrl so the player falls back to Web Speech
-      // for the new name instead of speaking a stale clip's old name.
-      if (aiData.name) {
-        setProcessingStatus('Generating voice...');
-        generateMovementVoice(docId, aiData.name)
-          .then(({ url, text, voiceName }) => {
-            const update: Record<string, any> = url
-              ? { voiceUrl: url, voiceText: text, voiceName }
-              : { voiceUrl: '', voiceText: '', voiceName: '' };
-            updateDoc(doc(db, 'movements', docId), update).catch(() => {});
-          })
-          .catch(() => {});
-      }
-
-      // Step 5: AI one-rep loop detection (non-blocking, runs after save)
-      if (gifHighUrl && _loFrames.length > 0) {
-        (async () => {
-          try {
-            const repAnalysis = await analyzeMovementReps(gifHighUrl);
-            if (repAnalysis && repAnalysis.repCount >= 2) {
-              const loopBlob = await encodeOneRepLoopGif(
-                _loFrames,
-                repAnalysis.loopStartPct,
-                repAnalysis.loopEndPct,
-              );
-              if (loopBlob) {
-                const gifLoopUrl = await uploadBlob(loopBlob, 'thumbnails-loop', 'gif');
-                await updateDoc(doc(db, 'movements', docId), { gifLoopUrl });
-              }
-            }
-          } catch (err) {
-            console.warn('[MovementForm] One-rep loop generation failed:', err);
-          }
-        })();
-      }
-
-      setProcessingProgress(1);
-      setProcessingStatus('Done!');
-
-      // Brief pause to show completion, then close
-      setTimeout(() => {
-        resetForm();
-        onClose();
-      }, 600);
     } catch (err) {
       console.error('[MovementForm] Processing pipeline error:', err);
       Alert.alert('Error', 'Something went wrong while creating the movement. Please try again.');

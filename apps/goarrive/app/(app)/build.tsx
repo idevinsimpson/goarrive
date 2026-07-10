@@ -52,6 +52,7 @@ import { AppHeader } from '../../components/AppHeader';
 import { Icon } from '../../components/Icon';
 import MovementDetail from '../../components/MovementDetail';
 import MovementForm from '../../components/MovementForm';
+import MovementVariationModal from '../../components/MovementVariationModal';
 import WorkoutDetail from '../../components/WorkoutDetail';
 import WorkoutForm from '../../components/WorkoutForm';
 import WorkoutFolderPage from '../../components/WorkoutFolderPage';
@@ -408,6 +409,8 @@ function BuildScreenInner() {
   const [selectedMovement, setSelectedMovement] = useState<any | null>(null);
   const [editMovement, setEditMovement] = useState<any | null>(null);
   const [isMovementFormOpen, setIsMovementFormOpen] = useState(false);
+  // AI variation: source movement the coach is building a variation from
+  const [variationSource, setVariationSource] = useState<any | null>(null);
   const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
   const [isFollowAlongOpen, setIsFollowAlongOpen] = useState(false);
   const [selectedFollowAlong, setSelectedFollowAlong] = useState<any | null>(null);
@@ -1714,6 +1717,10 @@ function BuildScreenInner() {
               setSelectedMovement(null);
             } catch (e) { console.error('Archive movement error:', e); }
           }}
+          onBuildVariation={(m: any) => {
+            setSelectedMovement(null);
+            setVariationSource(m);
+          }}
           backLabel="Back to Workout"
         />
         <MovementForm
@@ -1726,6 +1733,17 @@ function BuildScreenInner() {
           tenantId={tenantId}
           editMovement={editMovement}
           existingMovements={existingMovementNames}
+        />
+        <MovementVariationModal
+          visible={!!variationSource}
+          sourceMovement={variationSource}
+          coachId={coachId}
+          tenantId={tenantId}
+          onClose={() => setVariationSource(null)}
+          onCreated={(movementId: string, movementData: Record<string, any>) => {
+            const { createdAt, updatedAt, ...rest } = movementData;
+            setSelectedMovement({ id: movementId, ...rest });
+          }}
         />
       </View>
     );
@@ -1962,9 +1980,13 @@ function BuildScreenInner() {
             setSelectedMovement(null);
           } catch (e) { console.error('Archive movement error:', e); }
         }}
+        onBuildVariation={(m: any) => {
+          setSelectedMovement(null);
+          setVariationSource(m);
+        }}
         backLabel={openWorkoutId ? 'Back to Workout' : undefined}
       />
-      
+
       <MovementForm
         visible={isMovementFormOpen}
         onClose={() => {
@@ -1975,6 +1997,18 @@ function BuildScreenInner() {
         tenantId={tenantId}
         editMovement={editMovement}
         existingMovements={existingMovementNames}
+      />
+
+      <MovementVariationModal
+        visible={!!variationSource}
+        sourceMovement={variationSource}
+        coachId={coachId}
+        tenantId={tenantId}
+        onClose={() => setVariationSource(null)}
+        onCreated={(movementId: string, movementData: Record<string, any>) => {
+          const { createdAt, updatedAt, ...rest } = movementData;
+          setSelectedMovement({ id: movementId, ...rest });
+        }}
       />
 
       <BulkMovementUpload

@@ -34,6 +34,7 @@ export interface MovementAnalysis {
 interface AnalyzeRequest {
   contactSheet?: string;
   gifUrl?: string;
+  context?: string;
 }
 
 /** Confidence threshold — below this triggers a denser re-analysis */
@@ -55,6 +56,7 @@ const CONFIDENCE_THRESHOLD = 0.7;
 export async function analyzeMovementMedia(
   videoUrl: string,
   crop: { cropScale: number; cropTranslateX: number; cropTranslateY: number },
+  context?: string,
 ): Promise<MovementAnalysis | null> {
   try {
     const functions = getFunctions();
@@ -71,7 +73,7 @@ export async function analyzeMovementMedia(
     }
 
     // Step 2: Send to Cloud Function for AI analysis
-    const result = await analyzeFn({ contactSheet });
+    const result = await analyzeFn({ contactSheet, context });
     const analysis = result.data;
 
     // Step 3: Check confidence — if too low, retry with denser sheet
@@ -82,7 +84,7 @@ export async function analyzeMovementMedia(
 
       const denseSheet = await generateDenseContactSheet(videoUrl, crop);
       if (denseSheet) {
-        const retryResult = await analyzeFn({ contactSheet: denseSheet });
+        const retryResult = await analyzeFn({ contactSheet: denseSheet, context });
         // Use the retry result if it's more confident, otherwise keep original
         if (retryResult.data.confidence > analysis.confidence) {
           return retryResult.data;
