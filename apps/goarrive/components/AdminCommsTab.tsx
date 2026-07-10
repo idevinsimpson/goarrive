@@ -62,6 +62,8 @@ interface FeedbackRow {
   message: string;
   status: FeedbackStatus;
   createdAt?: any;
+  shippedNote?: string;
+  relatedReleaseId?: string;
 }
 
 interface ReleaseFeature {
@@ -76,6 +78,7 @@ interface ReleaseRow {
   bodyMarkdown: string;
   features: ReleaseFeature[];
   status: string;
+  requestedByCoaches?: boolean;
   createdAt?: any;
   sentAt?: any;
 }
@@ -102,8 +105,15 @@ export default function AdminCommsTab() {
   const [formBody, setFormBody] = useState('');
   const [formStatus, setFormStatus] = useState<'draft' | 'queued'>('draft');
   const [formFeatures, setFormFeatures] = useState<ReleaseFeature[]>([{ ...EMPTY_FEATURE }]);
+  const [formRequested, setFormRequested] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ── Shipped-flip state (note + related release before flipping to shipped) ──
+  const [shipFlipId, setShipFlipId] = useState<string | null>(null);
+  const [shipNote, setShipNote] = useState('');
+  const [shipReleaseId, setShipReleaseId] = useState('');
+  const [shipSaving, setShipSaving] = useState(false);
 
   const fetchFeedback = useCallback(async () => {
     try {
@@ -123,6 +133,8 @@ export default function AdminCommsTab() {
               ? data.status
               : 'new',
             createdAt: data.createdAt,
+            shippedNote: data.shippedNote || '',
+            relatedReleaseId: data.relatedReleaseId || '',
           };
         }),
       );
@@ -146,6 +158,7 @@ export default function AdminCommsTab() {
               bodyMarkdown: data.bodyMarkdown || '',
               features: Array.isArray(data.features) ? data.features : [],
               status: data.status || 'draft',
+              requestedByCoaches: data.requestedByCoaches === true,
               createdAt: data.createdAt,
               sentAt: data.sentAt,
             };
@@ -177,6 +190,39 @@ export default function AdminCommsTab() {
     }
   }
 
+  function openShipFlip(row: FeedbackRow) {
+    setShipFlipId(row.id);
+    setShipNote(row.shippedNote || '');
+    setShipReleaseId(row.relatedReleaseId || '');
+  }
+
+  async function confirmShipFlip() {
+    if (!shipFlipId) return;
+    setShipSaving(true);
+    const prev = feedback;
+    const note = shipNote.trim();
+    setFeedback((rows) =>
+      rows.map((r) =>
+        r.id === shipFlipId
+          ? { ...r, status: 'shipped', shippedNote: note, relatedReleaseId: shipReleaseId }
+          : r,
+      ),
+    );
+    try {
+      await updateDoc(doc(db, 'coach_feedback', shipFlipId), {
+        status: 'shipped',
+        ...(note ? { shippedNote: note } : {}),
+        ...(shipReleaseId ? { relatedReleaseId: shipReleaseId } : {}),
+      });
+      setShipFlipId(null);
+    } catch (err) {
+      console.error('[AdminCommsTab] shipped flip error:', err);
+      setFeedback(prev);
+    } finally {
+      setShipSaving(false);
+    }
+  }
+
   function openEditor(release?: ReleaseRow) {
     setError(null);
     if (release) {
@@ -184,6 +230,7 @@ export default function AdminCommsTab() {
       setFormTitle(release.title);
       setFormBody(release.bodyMarkdown);
       setFormStatus(release.status === 'queued' ? 'queued' : 'draft');
+      setFormRequested(release.requestedByCoaches === true);
       setFormFeatures(
         release.features.length > 0
           ? release.features.map((f) => ({
@@ -198,6 +245,7 @@ export default function AdminCommsTab() {
       setFormTitle('');
       setFormBody('');
       setFormStatus('draft');
+      setFormRequested(false);
       setFormFeatures([{ ...EMPTY_FEATURE }]);
     }
   }
@@ -220,6 +268,7 @@ export default function AdminCommsTab() {
           ...(f.deepLink.trim() ? { deepLink: f.deepLink.trim() } : {}),
         })),
       status: formStatus,
+      requestedByCoaches: formRequested,
     };
     try {
       if (editingId === 'new') {
@@ -330,6 +379,19 @@ export default function AdminCommsTab() {
             >
               <Icon name="plus" size={13} color={GOLD} />
               <Text style={s.addFeatureText}>Add feature</Text>
+            </Pressable>
+
+            <Pressable
+              style={s.requestedToggle}
+              onPress={() => setFormRequested((v) => !v)}
+              hitSlop={4}
+            >
+              <View style={[s.requestedBox, formRequested && s.requestedBoxOn]}>
+                {formRequested && <Icon name="check" size={11} color="#0E1117" />}
+              </View>
+              <Text style={s.requestedToggleText}>
+                Requested by coaches (gold badge in the digest)
+              </Text>
             </Pressable>
 
             <Text style={s.inputLabel}>Status</Text>
@@ -449,12 +511,74 @@ export default function AdminCommsTab() {
                     <Pressable
                       key={st}
                       style={[s.chip, row.status === st && s.chipActive]}
-                      onPress={() => row.status !== st && setFeedbackStatus(row.id, st)}
+                      onPress={() => {
+                        if (row.status === st) return;
+                        if (st === 'shipped') {
+                          openShipFlip(row);
+                        } else {
+                          setShipFlipId((cur) => (cur === row.id ? null : cur));
+                          setFeedbackStatus(row.id, st);
+                        }
+                      }}
                     >
                       <Text style={[s.chipText, row.status === st && s.chipTextActive]}>{st}</Text>
                     </Pressable>
                   ))}
                 </View>
+                {shipFlipId === row.id && (
+                  <View style={s.shipFlipPanel}>
+                    <Text style={s.inputLabel}>{"What shipped (goes in the coach's email)"}</Text>
+                    <TextInput
+                      style={[s.input, s.multilineSmall]}
+                      placeholder="e.g. You can now duplicate a workout right from the Build tab"
+                      placeholderTextColor="#4A5568"
+                      value={shipNote}
+                      onChangeText={setShipNote}
+                      multiline
+                      numberOfLines={2}
+                      textAlignVertical="top"
+                    />
+                    {releases.length > 0 && (
+                      <>
+                        <Text style={s.inputLabel}>Related release (optional)</Text>
+                        <View style={s.chipRow}>
+                          {releases.slice(0, 8).map((r) => (
+                            <Pressable
+                              key={r.id}
+                              style={[s.chip, shipReleaseId === r.id && s.chipActive]}
+                              onPress={() =>
+                                setShipReleaseId((cur) => (cur === r.id ? '' : r.id))
+                              }
+                            >
+                              <Text
+                                style={[s.chipText, shipReleaseId === r.id && s.chipTextActive]}
+                                numberOfLines={1}
+                              >
+                                {r.title || '(untitled)'}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      </>
+                    )}
+                    <View style={s.editorActions}>
+                      <Pressable style={s.cancelBtn} onPress={() => setShipFlipId(null)}>
+                        <Text style={s.cancelBtnText}>Cancel</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[s.saveBtn, shipSaving && { opacity: 0.6 }]}
+                        onPress={confirmShipFlip}
+                        disabled={shipSaving}
+                      >
+                        {shipSaving ? (
+                          <ActivityIndicator size="small" color="#0E1117" />
+                        ) : (
+                          <Text style={s.saveBtnText}>Mark shipped + email coach</Text>
+                        )}
+                      </Pressable>
+                    </View>
+                  </View>
+                )}
               </View>
             ))}
             {feedback.length > feedbackShown && (
@@ -718,6 +842,38 @@ const s = StyleSheet.create({
     color: '#C8D0DA',
     fontFamily: FONT_BODY,
     lineHeight: 20,
+  },
+  shipFlipPanel: {
+    backgroundColor: '#0E1320',
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 10,
+    padding: 12,
+    gap: 8,
+  },
+  requestedToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  requestedBox: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: BORDER,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  requestedBoxOn: {
+    backgroundColor: GOLD,
+    borderColor: GOLD,
+  },
+  requestedToggleText: {
+    fontSize: 13,
+    color: FG,
+    fontFamily: FONT_BODY,
   },
   loadMoreBtn: {
     alignItems: 'center',

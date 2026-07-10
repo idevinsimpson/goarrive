@@ -9469,8 +9469,8 @@ import { generateWorkoutOgImage } from './ogImage';
 import { generateWorkoutOgVideo } from './ogVideo';
 export { shareMeta } from './shareMeta';
 
-// ─── Coach Comms Phase 1 — weekly What's New digest + feedback ack ───────────
-export { sendWeeklyDigest, onCoachFeedbackCreated } from './coachComms';
+// ─── Coach Comms — weekly digest, feedback ack, shipped/planned loop ─────────
+export { sendWeeklyDigest, onCoachFeedbackCreated, onCoachFeedbackStatusChanged } from './coachComms';
 
 type ShareVisibility = 'restricted' | 'anyone_with_link' | 'anyone_with_link_signin_required';
 const VALID_VISIBILITIES: ShareVisibility[] = ['restricted', 'anyone_with_link', 'anyone_with_link_signin_required'];

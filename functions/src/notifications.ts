@@ -35,7 +35,9 @@ export type MessageType =
   | 'workout_completed'
   | 'coach_welcome'
   | 'platform_digest'
-  | 'feedback_ack';
+  | 'feedback_ack'
+  | 'feedback_shipped'
+  | 'feedback_planned';
 
 export interface NotificationRecipient {
   uid: string;
