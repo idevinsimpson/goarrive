@@ -89,7 +89,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = void 0;
-exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = void 0;
+exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.onCoachCreated = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -886,14 +886,20 @@ async function processStripeEvent(tag, event, res) {
             case 'charge.refunded':
                 await handleChargeRefunded(event.data.object, event.id);
                 break;
+            case 'charge.dispute.created':
+                await handleChargeDisputeCreated(event.data.object, event.id);
+                break;
+            case 'payment_intent.payment_failed':
+                await handlePaymentIntentFailed(event.data.object, event.id);
+                break;
             default:
                 console.log(`[${tag}] Unhandled event type:`, event.type);
         }
     }
     catch (err) {
         console.error(`[${tag}] Error processing event`, event.id, ':', err);
-        // Don't return 500 — Stripe will retry. Log and return 200 to avoid retry loops
-        // for non-transient errors. For transient errors, throw to trigger retry.
+        res.status(500).send('Internal error — Stripe will retry');
+        return;
     }
     res.status(200).send('OK');
 }
@@ -1288,6 +1294,82 @@ async function handleChargeRefunded(charge, eventId) {
     });
     console.log('[handleChargeRefunded] Refund ledger entry created for charge', charge.id);
 }
+async function handleChargeDisputeCreated(dispute, eventId) {
+    var _a, _b, _c, _d, _e;
+    // A chargeback reverses funds out-of-band; record a negative ledger entry so
+    // coach earnings and the GoArrive ledger stay in sync with Stripe reality.
+    // Split math mirrors handleChargeRefunded.
+    const chargeId = typeof dispute.charge === 'string' ? dispute.charge : (_a = dispute.charge) === null || _a === void 0 ? void 0 : _a.id;
+    if (!chargeId) {
+        console.warn('[handleChargeDisputeCreated] Dispute', dispute.id, 'has no charge — skipping');
+        return;
+    }
+    const originalEntrySnap = await db.collection('ledgerEntries')
+        .where('stripeChargeId', '==', chargeId)
+        .limit(1)
+        .get();
+    if (originalEntrySnap.empty) {
+        console.warn('[handleChargeDisputeCreated] No ledger entry found for disputed charge', chargeId, '— dispute', dispute.id, 'not recorded in ledger');
+        return;
+    }
+    const original = originalEntrySnap.docs[0].data();
+    const disputedAmountCents = dispute.amount;
+    const tierSnapshot = original.tierSnapshot;
+    const applicationFeePercent = tierSnapshot;
+    const goArriveShareCents = -Math.round(disputedAmountCents * applicationFeePercent / 100);
+    const coachShareCents = -(disputedAmountCents + goArriveShareCents); // negative
+    const ledgerRef = db.collection('ledgerEntries').doc();
+    await ledgerRef.set({
+        entryId: ledgerRef.id,
+        billingEventId: eventId,
+        memberId: original.memberId,
+        coachId: original.coachId,
+        planId: original.planId,
+        snapshotId: original.snapshotId,
+        phase: original.phase,
+        grossAmountCents: -disputedAmountCents,
+        coachShareCents,
+        goArriveShareCents,
+        tierSnapshot,
+        applicationFeePercent,
+        stripeInvoiceId: (_b = original.stripeInvoiceId) !== null && _b !== void 0 ? _b : null,
+        stripeChargeId: chargeId,
+        stripeDisputeId: dispute.id,
+        disputeStatus: dispute.status,
+        disputeOf: originalEntrySnap.docs[0].id,
+        contractStartAt: (_c = original.contractStartAt) !== null && _c !== void 0 ? _c : null,
+        contractEndAt: (_d = original.contractEndAt) !== null && _d !== void 0 ? _d : null,
+        pricingSnapshotId: (_e = original.pricingSnapshotId) !== null && _e !== void 0 ? _e : '',
+        ruleSnapshot: Object.assign(Object.assign({}, original.ruleSnapshot), { disputePolicy: 'Chargeback recorded as negative ledger entry. Stripe reverses funds and application fee out-of-band on direct charges.' }),
+        createdAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    console.log('[handleChargeDisputeCreated] Dispute ledger entry created for charge', chargeId, 'dispute', dispute.id);
+}
+async function handlePaymentIntentFailed(pi, eventId) {
+    var _a, _b, _c;
+    // Invoice-tied PI failures are already handled by invoice.payment_failed.
+    // This covers orphaned PIs (e.g. pay-in-full checkout) so failures aren't silent.
+    const invoiceId = pi.invoice;
+    if (invoiceId) {
+        console.log('[handlePaymentIntentFailed] PI', pi.id, 'is invoice-tied (', invoiceId, ') — handled by invoice.payment_failed, skipping');
+        return;
+    }
+    const planId = (_a = pi.metadata) === null || _a === void 0 ? void 0 : _a.planId;
+    console.warn('[handlePaymentIntentFailed] Orphaned PI failed:', pi.id, 'planId:', planId !== null && planId !== void 0 ? planId : 'unknown', 'lastError:', (_c = (_b = pi.last_payment_error) === null || _b === void 0 ? void 0 : _b.message) !== null && _c !== void 0 ? _c : 'none');
+    if (!planId)
+        return;
+    const planRef = db.collection('member_plans').doc(planId);
+    const planSnap = await planRef.get();
+    if (!planSnap.exists) {
+        console.warn('[handlePaymentIntentFailed] member_plan', planId, 'not found for failed PI', pi.id);
+        return;
+    }
+    await planRef.update({
+        checkoutStatus: 'failed',
+        updatedAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    console.log('[handlePaymentIntentFailed] Plan', planId, 'marked checkoutStatus failed');
+}
 // ─── 7. activateCtsOptIn ──────────────────────────────────────────────────────
 /**
  * Activates a Commit to Save opt-in for a member in the continuation phase.
@@ -1307,9 +1389,15 @@ async function handleChargeRefunded(charge, eventId) {
  */
 exports.activateCtsOptIn = (0, https_1.onCall)({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
     var _a, _b, _c;
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'Authentication required');
+    }
     const { consentId, planId, memberId } = request.data;
     if (!consentId || !planId || !memberId) {
-        throw new Error('Missing required parameters: consentId, planId, memberId');
+        throw new https_1.HttpsError('invalid-argument', 'Missing required parameters: consentId, planId, memberId');
+    }
+    if (request.auth.uid !== memberId) {
+        throw new https_1.HttpsError('permission-denied', 'Caller must match the target member');
     }
     // 1. Load and validate consent document
     const consentRef = db.collection('commitToSaveConsents').doc(consentId);
@@ -3769,8 +3857,14 @@ const notifications_1 = require("./notifications");
 const reminders_1 = require("./reminders");
 const zoom_2 = require("./zoom");
 // ─── 22. getSystemHealth — Provider health check for admin dashboard ────────
-exports.getSystemHealth = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber], invoker: 'public' }, async () => {
-    var _a, _b, _c;
+exports.getSystemHealth = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber], invoker: 'public' }, async (request) => {
+    var _a, _b, _c, _d;
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'Authentication required');
+    }
+    if (!((_a = request.auth.token) === null || _a === void 0 ? void 0 : _a.platformAdmin)) {
+        throw new https_1.HttpsError('permission-denied', 'Platform admin access required');
+    }
     // Reset cached providers so health check reflects current secret availability
     (0, notifications_1.resetNotificationProviders)();
     const zoomProvider = (0, zoom_1.getZoomProvider)({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
@@ -3838,7 +3932,7 @@ exports.getSystemHealth = (0, https_1.onCall)({ region: 'us-central1', secrets: 
         }
         catch (err) {
             // A 404 or 400 means the API is reachable; only network errors mean unreachable
-            if (((_a = err.message) === null || _a === void 0 ? void 0 : _a.includes('404')) || ((_b = err.message) === null || _b === void 0 ? void 0 : _b.includes('400')) || ((_c = err.message) === null || _c === void 0 ? void 0 : _c.includes('not found'))) {
+            if (((_b = err.message) === null || _b === void 0 ? void 0 : _b.includes('404')) || ((_c = err.message) === null || _c === void 0 ? void 0 : _c.includes('400')) || ((_d = err.message) === null || _d === void 0 ? void 0 : _d.includes('not found'))) {
                 zoomApiReachable = true;
             }
             else {
@@ -5705,7 +5799,7 @@ exports.syncToGoogleCalendar = (0, https_1.onCall)({ secrets: [googleClientId, g
             continue;
         }
         try {
-            const startDateTime = `${inst.scheduledDate}T${inst.scheduledTime || '09:00'}:00`;
+            const startDateTime = `${inst.scheduledDate}T${inst.scheduledStartTime || '09:00'}:00`;
             const durationMin = inst.durationMinutes || 30;
             const endDate = new Date(startDateTime);
             endDate.setMinutes(endDate.getMinutes() + durationMin);
@@ -5954,7 +6048,7 @@ exports.removeGcalConflictAccount = (0, https_1.onCall)({ invoker: 'public' }, a
  * coach's selected conflict-check calendars across all connected Google accounts.
  * Returns { hasConflict: boolean, conflictingEvents: { calendarEmail, summary, start, end }[] }
  */
-exports.checkGcalConflicts = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret] }, async (request) => {
+exports.checkGcalConflicts = (0, https_1.onCall)({ secrets: [googleClientId, googleClientSecret], invoker: 'public' }, async (request) => {
     var _a, _b, _c, _d, _e;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -6848,18 +6942,23 @@ exports.retryFailedGifGeneration = (0, scheduler_1.onSchedule)({ schedule: '0 */
 const openaiApiKey = (0, params_1.defineSecret)('OPENAI_API_KEY');
 const voicemakerApiKey = (0, params_1.defineSecret)('VOICEMAKER_API_KEY');
 exports.analyzeMovement = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 60, maxInstances: 20, invoker: 'public' }, async (request) => {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f, _g;
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'Authentication required');
+    }
+    if (!((_a = request.auth.token) === null || _a === void 0 ? void 0 : _a.coach) && !((_b = request.auth.token) === null || _b === void 0 ? void 0 : _b.platformAdmin)) {
+        throw new https_1.HttpsError('permission-denied', 'Coach access required');
+    }
     const { gifUrl, contactSheet } = request.data;
     if (!gifUrl && !contactSheet) {
         throw new https_1.HttpsError('invalid-argument', 'Either contactSheet or gifUrl is required');
     }
     // Trim whitespace/newlines — secrets stored via CLI often have trailing \n
-    const apiKey = (_a = openaiApiKey.value()) === null || _a === void 0 ? void 0 : _a.trim();
+    const apiKey = (_c = openaiApiKey.value()) === null || _c === void 0 ? void 0 : _c.trim();
     if (!apiKey) {
         throw new https_1.HttpsError('internal', 'OpenAI API key not configured');
     }
     if (apiKey.length < 30) {
-        console.error('[analyzeMovement] API key appears truncated (length:', apiKey.length, ')');
         throw new https_1.HttpsError('internal', 'OpenAI API key appears invalid — check Firebase secrets');
     }
     const isContactSheet = !!contactSheet;
@@ -6917,7 +7016,7 @@ Return ONLY valid JSON, no markdown, no explanation.`;
             throw new https_1.HttpsError('internal', `OpenAI API error: ${response.status}`);
         }
         const result = await response.json();
-        const content = ((_e = (_d = (_c = (_b = result.choices) === null || _b === void 0 ? void 0 : _b[0]) === null || _c === void 0 ? void 0 : _c.message) === null || _d === void 0 ? void 0 : _d.content) === null || _e === void 0 ? void 0 : _e.trim()) || '';
+        const content = ((_g = (_f = (_e = (_d = result.choices) === null || _d === void 0 ? void 0 : _d[0]) === null || _e === void 0 ? void 0 : _e.message) === null || _f === void 0 ? void 0 : _f.content) === null || _g === void 0 ? void 0 : _g.trim()) || '';
         // Parse JSON from the response (strip markdown fences if present)
         let jsonStr = content;
         if (jsonStr.startsWith('```')) {
@@ -7827,6 +7926,55 @@ exports.generateVoice = (0, https_1.onCall)({
     return { url: cdnUrl, path, writeback, writebackError, provider: selectedProvider };
 });
 // ═══════════════════════════════════════════════════════════════════════════════
+// NEW COACH — Branded welcome email
+// Fires whenever a coaches/{coachId} doc is created, regardless of the path
+// (invite activation, admin add, script), so every new coach gets welcomed.
+// ═══════════════════════════════════════════════════════════════════════════════
+exports.onCoachCreated = (0, firestore_1.onDocumentCreated)({ document: 'coaches/{coachId}', region: 'us-central1', secrets: [emailApiKey] }, async (event) => {
+    var _a;
+    const snap = event.data;
+    if (!snap)
+        return;
+    const TAG = '[onCoachCreated]';
+    const data = snap.data();
+    if (data.welcomeEmailSentAt) {
+        console.log(TAG, 'Welcome email already sent — skipping', event.params.coachId);
+        return;
+    }
+    if (!data.email) {
+        console.log(TAG, 'No email on coach doc — skipping', event.params.coachId);
+        return;
+    }
+    const { sendNotification, resetNotificationProviders } = await Promise.resolve().then(() => __importStar(require('./notifications')));
+    resetNotificationProviders();
+    const { coachWelcomeEmail } = await Promise.resolve().then(() => __importStar(require('./templates')));
+    const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
+    const rendered = coachWelcomeEmail(data.name || '', appUrl);
+    const logId = await sendNotification({
+        messageType: 'coach_welcome',
+        channel: 'email',
+        recipient: {
+            uid: event.params.coachId,
+            email: data.email,
+            displayName: data.name,
+            role: 'coach',
+        },
+        subject: rendered.subject,
+        body: rendered.body,
+        htmlBody: rendered.htmlBody,
+        coachId: event.params.coachId,
+    });
+    const logSnap = await db.collection('notification_log').doc(logId).get();
+    const status = (_a = logSnap.data()) === null || _a === void 0 ? void 0 : _a.status;
+    if (status === 'sent') {
+        await snap.ref.update({ welcomeEmailSentAt: Date.now() });
+        console.log(TAG, 'Welcome email sent to', data.email, '(log', logId + ')');
+    }
+    else {
+        console.error(TAG, 'Welcome email not sent for', data.email, '— status:', status, '(log', logId + ')');
+    }
+});
+// ═══════════════════════════════════════════════════════════════════════════════
 // NEW MEMBER — Set custom claims + notify coach
 // Fires when a member self-signs up via the intake form. Sets role claims so
 // AuthContext picks up the correct role, and sends FCM push to the assigned coach.
@@ -8353,5 +8501,171 @@ exports.resolveShareToken = (0, https_1.onRequest)({ cors: true, region: 'us-cen
             blocks: sanitizedBlocks,
         },
     });
+});
+// ─── generateEquipmentImage — AI image for grab-equipment phases ─────────────
+// Accepts grabEquipmentText + optional forceRegenerate flag.
+// Extracts equipment keyword via GPT-4o-mini, then:
+//   1. Returns { imageUrl } if equipment_images/{slug}/default.png exists
+//   2. Returns { choices, equipmentSlug } if v1/v2/v3 all exist
+//   3. Generates 3 DALL-E 3 variants, uploads, returns { choices, equipmentSlug }
+//
+// Cache paths:
+//   equipment_images/{slug}/default.png  — coach-selected image
+//   equipment_images/{slug}/v1.png       — generated choice 1
+//   equipment_images/{slug}/v2.png       — generated choice 2
+//   equipment_images/{slug}/v3.png       — generated choice 3
+// ─────────────────────────────────────────────────────────────────────────────
+function slugify(text) {
+    return text
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80);
+}
+async function extractEquipmentSlug(text, apiKey) {
+    var _a, _b, _c, _d;
+    try {
+        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                messages: [
+                    {
+                        role: 'system',
+                        content: 'Extract only the fitness equipment item name(s) from the workout instruction. Return just the equipment name(s) in lowercase, comma-separated if multiple (e.g. "straight bar, dumbbells"). Include weight/size descriptors. No other words.',
+                    },
+                    { role: 'user', content: text },
+                ],
+                max_tokens: 40,
+                temperature: 0,
+            }),
+        });
+        if (resp.ok) {
+            const json = await resp.json();
+            const extracted = (_d = (_c = (_b = (_a = json.choices) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.message) === null || _c === void 0 ? void 0 : _c.content) === null || _d === void 0 ? void 0 : _d.trim();
+            if (extracted) {
+                const items = extracted.split(',').map(s => s.trim()).filter(Boolean);
+                const label = items.join(' and ');
+                const slug = items.map(slugify).join('-and-');
+                return { slug, label };
+            }
+        }
+    }
+    catch ( /* fall through to full-text slug */_e) { /* fall through to full-text slug */ }
+    return { slug: slugify(text), label: text };
+}
+exports.generateEquipmentImage = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 300, invoker: 'public' }, async (request) => {
+    var _a, _b;
+    if (!((_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid))
+        throw new https_1.HttpsError('unauthenticated', 'Authentication required');
+    const { grabEquipmentText, forceRegenerate } = request.data;
+    if (!(grabEquipmentText === null || grabEquipmentText === void 0 ? void 0 : grabEquipmentText.trim()))
+        throw new https_1.HttpsError('invalid-argument', 'grabEquipmentText is required');
+    const apiKey = (_b = openaiApiKey.value()) === null || _b === void 0 ? void 0 : _b.trim();
+    if (!apiKey)
+        throw new https_1.HttpsError('internal', 'OpenAI API key not configured');
+    const { slug: equipmentSlug, label: equipmentLabel } = await extractEquipmentSlug(grabEquipmentText.trim(), apiKey);
+    const bucket = admin.storage().bucket();
+    // Firebase Storage public URL (no token needed — public read via storage.rules).
+    // UBLA is enabled on this bucket so makePublic() / storage.googleapis.com don't work.
+    function storageUrl(path) {
+        return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media`;
+    }
+    async function saveFile(path, buf) {
+        await bucket.file(path).save(buf, { contentType: 'image/png' });
+        return storageUrl(path);
+    }
+    async function getExistingUrl(path) {
+        try {
+            const [exists] = await bucket.file(path).exists();
+            if (exists)
+                return storageUrl(path);
+        }
+        catch ( /* fall through */_a) { /* fall through */ }
+        return null;
+    }
+    const defaultPath = `equipment_images/${equipmentSlug}/default.png`;
+    const choicePaths = [1, 2, 3].map(i => `equipment_images/${equipmentSlug}/v${i}.png`);
+    if (!forceRegenerate) {
+        // ── Default cache ──────────────────────────────────────────────────────
+        try {
+            const [defaultExists] = await bucket.file(defaultPath).exists();
+            if (defaultExists) {
+                const imageUrl = await getExistingUrl(defaultPath);
+                if (imageUrl) {
+                    console.info('[generateEquipmentImage] Default cache hit', { equipmentSlug });
+                    return { imageUrl };
+                }
+            }
+        }
+        catch ( /* continue */_c) { /* continue */ }
+        // ── Choices cache ──────────────────────────────────────────────────────
+        try {
+            const checks = await Promise.all(choicePaths.map(p => bucket.file(p).exists()));
+            if (checks.every(([e]) => e)) {
+                const choiceUrls = await Promise.all(choicePaths.map(getExistingUrl));
+                if (choiceUrls.every(Boolean)) {
+                    console.info('[generateEquipmentImage] Choices cache hit', { equipmentSlug });
+                    return { choices: choiceUrls, equipmentSlug };
+                }
+            }
+        }
+        catch ( /* continue */_d) { /* continue */ }
+    }
+    // ── Generate 3 images in parallel via gpt-image-1 ─────────────────────
+    const prompt = `studio product photo of ${equipmentLabel} on a pure white background, all items shown together in the same scene, clean minimalist gym equipment, no text, no people, soft shadow`;
+    async function generateOne(variantIndex) {
+        var _a, _b;
+        let lastApiError = 'no attempts made';
+        for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+                const genResp = await fetch('https://api.openai.com/v1/images/generations', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model: 'gpt-image-1', prompt, n: 1, size: '1024x1024' }),
+                });
+                if (!genResp.ok) {
+                    const errText = await genResp.text();
+                    lastApiError = `gpt-image-1 ${genResp.status}: ${errText.slice(0, 300)}`;
+                    console.error('[generateEquipmentImage] API error', { variantIndex, attempt, status: genResp.status, errText });
+                    continue;
+                }
+                const json = await genResp.json();
+                const b64 = (_b = (_a = json.data) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.b64_json;
+                if (b64)
+                    return Buffer.from(b64, 'base64');
+                lastApiError = 'no b64_json in gpt-image-1 response';
+            }
+            catch (err) {
+                lastApiError = String(err).slice(0, 200);
+                console.warn('[generateEquipmentImage] attempt threw', { variantIndex, attempt, err: lastApiError });
+            }
+        }
+        throw new https_1.HttpsError('internal', `Image generation failed (variant ${variantIndex + 1}): ${lastApiError}`);
+    }
+    const buffers = await Promise.all([0, 1, 2].map(generateOne));
+    const choiceUrls = await Promise.all(buffers.map((buf, i) => saveFile(choicePaths[i], buf)));
+    console.info('[generateEquipmentImage] Generated 3 variants', { equipmentSlug });
+    return { choices: choiceUrls, equipmentSlug };
+});
+// ─── saveEquipmentImageChoice — persist coach's selection as default.png ──────
+exports.saveEquipmentImageChoice = (0, https_1.onCall)({ region: 'us-central1', timeoutSeconds: 30, invoker: 'public' }, async (request) => {
+    var _a;
+    if (!((_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid))
+        throw new https_1.HttpsError('unauthenticated', 'Authentication required');
+    const { equipmentSlug, choiceIndex } = request.data;
+    if (!equipmentSlug || choiceIndex < 0 || choiceIndex > 2) {
+        throw new https_1.HttpsError('invalid-argument', 'equipmentSlug and choiceIndex (0-2) required');
+    }
+    const bucket = admin.storage().bucket();
+    const srcPath = `equipment_images/${equipmentSlug}/v${choiceIndex + 1}.png`;
+    const destPath = `equipment_images/${equipmentSlug}/default.png`;
+    const [srcBuf] = await bucket.file(srcPath).download();
+    await bucket.file(destPath).save(srcBuf, { contentType: 'image/png' });
+    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media`;
+    console.info('[saveEquipmentImageChoice] Saved default', { equipmentSlug, choiceIndex });
+    return { imageUrl };
 });
 //# sourceMappingURL=index.js.map

@@ -8,18 +8,21 @@ import React from 'react';
 import { Tabs, Redirect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../lib/AuthContext';
+import { useCoachModules } from '../../lib/useCoachModules';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { Icon } from '../../components/Icon';
+import { TAB_BAR_STYLE } from '../../lib/tabBarStyle';
 
-const TAB_BG = '#0E1117';
-const TAB_BORDER = '#1E2A3A';
 const ACTIVE_COLOR = '#F5A623';
 const INACTIVE_COLOR = '#4A5568';
 
 export default function AppLayout() {
   const { user, claims, loading, adminCoachOverride, setAdminCoachOverride } = useAuth();
+  const { modules } = useCoachModules();
   const insets = useSafeAreaInsets();
   const bannerTopPad = Platform.OS === 'web' ? Math.max(6, insets.top) : 6;
+  // When every gateable tab is off, only Dashboard would remain — hide the whole bar
+  const allTabsHidden = !modules.members && !modules.build && !modules.scheduling;
 
   if (loading) {
     return (
@@ -65,27 +68,7 @@ export default function AppLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: {
-          backgroundColor: TAB_BG,
-          borderTopColor: TAB_BORDER,
-          borderTopWidth: 1,
-          // Native: give enough room for icon + label + home indicator
-          height: Platform.select({ ios: 84, android: 68, web: 68, default: 68 }),
-          paddingTop: 8,
-          paddingBottom: Platform.select({ ios: 24, android: 10, web: 10, default: 10 }),
-          ...(Platform.OS === 'web'
-            ? ({
-                position: 'fixed' as any,
-                bottom: 0,
-                left: 0,
-                right: 0,
-                zIndex: 1000,
-                // Full safe-area-inset-bottom so labels clear the home indicator zone
-                paddingBottom: 'max(10px, env(safe-area-inset-bottom, 0px))' as any,
-                height: 'calc(62px + max(10px, env(safe-area-inset-bottom, 0px)))' as any,
-              } as any)
-            : {}),
-        },
+        tabBarStyle: allTabsHidden ? { ...TAB_BAR_STYLE, display: 'none' } : TAB_BAR_STYLE,
         tabBarActiveTintColor: ACTIVE_COLOR,
         tabBarInactiveTintColor: INACTIVE_COLOR,
         tabBarLabelStyle: {
@@ -114,6 +97,7 @@ export default function AppLayout() {
       <Tabs.Screen
         name="members"
         options={{
+          href: modules.members ? undefined : null,
           title: 'Members',
           tabBarIcon: ({ color }) => (
             <Icon name="members" size={26} color={color} />
@@ -123,6 +107,7 @@ export default function AppLayout() {
       <Tabs.Screen
         name="build"
         options={{
+          href: modules.build ? undefined : null,
           title: 'Build',
           tabBarIcon: ({ color, focused }) => (
             <Icon name={focused ? 'build-filled' : 'build'} size={26} color={color} />
@@ -132,6 +117,7 @@ export default function AppLayout() {
       <Tabs.Screen
         name="scheduling"
         options={{
+          href: modules.scheduling ? undefined : null,
           title: 'Scheduling',
           tabBarIcon: ({ color }) => (
             <Icon name="calendar" size={26} color={color} />

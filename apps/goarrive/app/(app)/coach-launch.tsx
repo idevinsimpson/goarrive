@@ -37,6 +37,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../lib/AuthContext';
+import { ModuleGate } from '../../lib/useCoachModules';
 import { Icon } from '../../components/Icon';
 import { BG, BLUE, BORDER, CARD, FB, FG, FH, GOLD, GREEN, MUTED } from '../../lib/theme';
 import {
@@ -1372,6 +1373,14 @@ function emptyDoc(coachId: string): CoachLaunchDoc {
 // ── Screen ─────────────────────────────────────────────────────────────────────
 
 export default function CoachLaunchScreen() {
+  return (
+    <ModuleGate module="coachLaunch">
+      <CoachLaunchScreenInner />
+    </ModuleGate>
+  );
+}
+
+function CoachLaunchScreenInner() {
   const insets = useSafeAreaInsets();
   const { user, claims, effectiveUid } = useAuth();
   const coachId = effectiveUid || claims?.coachId || user?.uid || '';

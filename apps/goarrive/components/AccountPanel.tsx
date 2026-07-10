@@ -22,10 +22,14 @@ import {
   Dimensions,
   TextInput,
   ScrollView,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from './Icon';
+import { HiddenFromCoachTag } from './HiddenFromCoachTag';
 import { useAuth } from '../lib/AuthContext';
+import { useEffectiveProfile } from '../lib/useEffectiveProfile';
+import { useHiddenSettings } from '../lib/useHiddenSettings';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { getFunctions, httpsCallable } from 'firebase/functions';
@@ -46,10 +50,13 @@ interface MenuItem {
   sublabel?: string;
   onPress: () => void;
   danger?: boolean;
+  hiddenFromCoach?: boolean;
 }
 
 export default function AccountPanel({ visible, onClose }: Props) {
-  const { user, effectiveUid, claims, signOut } = useAuth();
+  const { effectiveUid, claims, signOut } = useAuth();
+  const { displayName, initials, photoURL, email, impersonating } = useEffectiveProfile();
+  const { isHidden } = useHiddenSettings();
   const slideAnim = useRef(new Animated.Value(PANEL_WIDTH)).current;
   const [toastMsg, setToastMsg] = useState('');
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -142,14 +149,6 @@ export default function AccountPanel({ visible, onClose }: Props) {
     }
   }
 
-  const displayName = user?.displayName ?? user?.email?.split('@')[0] ?? 'User';
-  const initials = displayName
-    .split(' ')
-    .map((n: string) => n[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
-
   const role = claims?.role ?? 'coach';
   const roleLabel = 
     role === 'platformAdmin' ? 'Platform Admin' : 
@@ -187,13 +186,20 @@ export default function AccountPanel({ visible, onClose }: Props) {
     setTimeout(() => router.push('/(app)/my-page'), 240);
   }
 
+  const myPageHidden = isHidden('myPage');
+  const myZoomHidden = isHidden('myZoomAccount');
+
   const menuItems: MenuItem[] = [
-    {
-      icon: 'link',
-      label: 'My Page',
-      sublabel: 'Your public landing page',
-      onPress: handleMyPage,
-    },
+    // Hidden sections: skipped for the coach, tagged for an impersonating admin
+    ...(!myPageHidden || impersonating
+      ? [{
+          icon: 'link',
+          label: 'My Page',
+          sublabel: 'Your public landing page',
+          onPress: handleMyPage,
+          hiddenFromCoach: myPageHidden,
+        }]
+      : []),
     {
       icon: 'settings',
       label: 'Settings',
@@ -233,16 +239,27 @@ export default function AccountPanel({ visible, onClose }: Props) {
         <View style={[s.profileSection, { paddingTop: profileTopPad }]}>
           <View style={s.avatarRow}>
             <View style={s.avatar}>
-              <Text style={s.avatarText}>{initials}</Text>
+              {photoURL ? (
+                <Image source={{ uri: photoURL }} style={s.avatarImage} />
+              ) : (
+                <Text style={s.avatarText}>{initials}</Text>
+              )}
             </View>
             <Pressable onPress={onClose} hitSlop={12} style={s.closeBtn}>
               <Icon name="x" size={20} color="#8A95A3" />
             </Pressable>
           </View>
           <Text style={s.name} numberOfLines={1}>{displayName}</Text>
-          <Text style={s.email} numberOfLines={1}>{user?.email ?? '—'}</Text>
-          <View style={s.roleBadge}>
-            <Text style={s.roleText}>{roleLabel}</Text>
+          {!!email && <Text style={s.email} numberOfLines={1}>{email}</Text>}
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            <View style={s.roleBadge}>
+              <Text style={s.roleText}>{roleLabel}</Text>
+            </View>
+            {impersonating && (
+              <View style={s.impersonationBadge}>
+                <Text style={s.impersonationText}>Viewing as coach</Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -262,9 +279,12 @@ export default function AccountPanel({ visible, onClose }: Props) {
                 <Icon name={item.icon} size={20} color="#8A95A3" />
               </View>
               <View style={s.menuTextWrap}>
-                <Text style={[s.menuLabel, item.danger && s.menuLabelDanger]}>
-                  {item.label}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={[s.menuLabel, item.danger && s.menuLabelDanger]}>
+                    {item.label}
+                  </Text>
+                  {item.hiddenFromCoach && <HiddenFromCoachTag />}
+                </View>
                 {item.sublabel && (
                   <Text style={s.menuSublabel}>{item.sublabel}</Text>
                 )}
@@ -278,6 +298,7 @@ export default function AccountPanel({ visible, onClose }: Props) {
         <View style={s.divider} />
 
         {/* My Zoom Account */}
+        {(!myZoomHidden || impersonating) && (
         <Pressable
           style={({ pressed }) => [s.menuItem, pressed && s.menuItemPressed]}
           onPress={() => setShowZoom(!showZoom)}
@@ -286,15 +307,19 @@ export default function AccountPanel({ visible, onClose }: Props) {
             <Icon name="video" size={20} color={zoomSaved ? '#6EBB7A' : '#8A95A3'} />
           </View>
           <View style={s.menuTextWrap}>
-            <Text style={s.menuLabel}>My Zoom Account</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={s.menuLabel}>My Zoom Account</Text>
+              {myZoomHidden && <HiddenFromCoachTag />}
+            </View>
             <Text style={s.menuSublabel}>
               {zoomSaved ? zoomEmail : 'Connect your personal Zoom'}
             </Text>
           </View>
           <Icon name={showZoom ? 'chevron-down' : 'chevron-right'} size={16} color="#4A5568" />
         </Pressable>
+        )}
 
-        {showZoom && (
+        {showZoom && (!myZoomHidden || impersonating) && (
           <View style={s.zoomSection}>
             <Text style={s.zoomHint}>
               This Zoom is used for Coach Guided sessions where you join live with your member.
@@ -315,15 +340,21 @@ export default function AccountPanel({ visible, onClose }: Props) {
               value={zoomLabel}
               onChangeText={setZoomLabel}
             />
-            <Pressable
-              style={[s.zoomSaveBtn, zoomLoading && { opacity: 0.5 }]}
-              onPress={handleSaveZoom}
-              disabled={zoomLoading || !zoomEmail.trim()}
-            >
-              <Text style={s.zoomSaveBtnText}>
-                {zoomLoading ? 'Saving...' : zoomSaved ? 'Update Zoom' : 'Connect Zoom'}
-              </Text>
-            </Pressable>
+            {impersonating ? (
+              // manageZoomRoom runs as the signed-in user (the admin), so
+              // saving here would write to the admin's own Zoom record.
+              <Text style={s.zoomHint}>Available to the coach only</Text>
+            ) : (
+              <Pressable
+                style={[s.zoomSaveBtn, zoomLoading && { opacity: 0.5 }]}
+                onPress={handleSaveZoom}
+                disabled={zoomLoading || !zoomEmail.trim()}
+              >
+                <Text style={s.zoomSaveBtnText}>
+                  {zoomLoading ? 'Saving...' : zoomSaved ? 'Update Zoom' : 'Connect Zoom'}
+                </Text>
+              </Pressable>
+            )}
           </View>
         )}
 
@@ -415,6 +446,12 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: '#F5A623',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 32,
   },
   avatarText: {
     fontSize: 22,
@@ -447,6 +484,23 @@ const s = StyleSheet.create({
     paddingVertical: 4,
     borderWidth: 1,
     borderColor: 'rgba(245,166,35,0.25)',
+  },
+  impersonationBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(91,155,213,0.12)',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(91,155,213,0.25)',
+  },
+  impersonationText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#5B9BD5',
+    fontFamily: FB,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   roleText: {
     fontSize: 12,

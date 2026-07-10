@@ -12,6 +12,7 @@ import {
   QUEUE_GAP_MS,
   calcQueueGapMs,
   filterStaleQueueItems,
+  findUpcomingExercise,
   type QueueItemKind,
 } from '../useWorkoutTTS';
 
@@ -108,5 +109,62 @@ describe('queue ordering invariant', () => {
     // Simulate skip (runId bumped to 2) — both items become stale.
     const remaining = filterStaleQueueItems(items, 2);
     expect(remaining).toHaveLength(0);
+  });
+});
+
+// ── findUpcomingExercise — grabEquipment end announcement target ──────────
+
+describe('findUpcomingExercise', () => {
+  const exercise = (name: string, extra: Record<string, unknown> = {}) => ({
+    stepType: 'exercise', movementIndex: 0, name, ...extra,
+  });
+  const bridge = () => ({
+    // Synthetic "Get Ready" prep-rest step from useWorkoutFlatten
+    stepType: 'exercise', movementIndex: -1, name: 'Get Ready', voiceUrl: '',
+  });
+  const grab = () => ({ stepType: 'grabEquipment', movementIndex: 0, name: 'Grab Equipment' });
+
+  test('skips the Get Ready bridge and returns the real movement', () => {
+    const steps = [grab(), bridge(), exercise('Goblet Squat', { voiceUrl: 'v.mp3' })];
+    const found = findUpcomingExercise(steps, 0);
+    expect(found?.index).toBe(2);
+    expect(found?.step.name).toBe('Goblet Squat');
+  });
+
+  test('returns the immediate next step when it is a plain exercise', () => {
+    const steps = [grab(), exercise('Push Up')];
+    const found = findUpcomingExercise(steps, 0);
+    expect(found?.index).toBe(1);
+    expect(found?.step.name).toBe('Push Up');
+  });
+
+  test('skips special blocks between grabEquipment and the movement', () => {
+    const steps = [
+      grab(),
+      { stepType: 'waterBreak', movementIndex: 0, name: 'Water Break' },
+      bridge(),
+      exercise('Deadlift'),
+    ];
+    expect(findUpcomingExercise(steps, 0)?.step.name).toBe('Deadlift');
+  });
+
+  test('treats missing stepType as exercise', () => {
+    const steps = [grab(), { movementIndex: 1, name: 'Legacy Movement' }];
+    expect(findUpcomingExercise(steps, 0)?.step.name).toBe('Legacy Movement');
+  });
+
+  test('returns null when nothing follows', () => {
+    const steps = [exercise('Row'), grab()];
+    expect(findUpcomingExercise(steps, 1)).toBeNull();
+  });
+
+  test('returns null when only bridges follow', () => {
+    const steps = [grab(), bridge()];
+    expect(findUpcomingExercise(steps, 0)).toBeNull();
+  });
+
+  test('scans from fromIndex, not from 0', () => {
+    const steps = [exercise('First'), grab(), bridge(), exercise('Second')];
+    expect(findUpcomingExercise(steps, 1)?.step.name).toBe('Second');
   });
 });

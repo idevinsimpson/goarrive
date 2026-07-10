@@ -48,6 +48,7 @@ import {
   generateMovementPrescriptionVoice,
   prescriptionCacheKey,
 } from '../utils/generateMovementPrescriptionVoice';
+import { isImageUrl, imageExtFromMime } from '../utils/mediaKind';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from './Icon';
@@ -290,8 +291,10 @@ export default function WorkoutFolderPage({
   const [originalData, setOriginalData] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
-  const [equipImgStatus, setEquipImgStatus] = useState<Record<number, 'generating' | 'done' | 'error'>>({});
+  const [equipImgStatus, setEquipImgStatus] = useState<Record<number, 'generating' | 'done' | 'error' | 'choosing' | 'saving'>>({});
   const [equipImgError, setEquipImgError] = useState<Record<number, string>>({});
+  const [equipImgChoices, setEquipImgChoices] = useState<Record<number, string[]>>({});
+  const [equipImgSlug, setEquipImgSlug] = useState<Record<number, string>>({});
   const [viewMode, setViewMode] = useState<'icon' | 'list'>('icon');
 
   // Intro / Outro — workout-level fields
@@ -314,13 +317,13 @@ export default function WorkoutFolderPage({
       if (Platform.OS !== 'web') {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
-          Alert.alert('Permission Needed', 'Please allow access to your photo library to upload videos.');
+          Alert.alert('Permission Needed', 'Please allow access to your photo library to upload videos or photos.');
           return;
         }
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['videos'],
+        mediaTypes: ['images', 'videos'],
         allowsEditing: false,
         quality: 0.8,
         videoMaxDuration: 30,
@@ -329,11 +332,13 @@ export default function WorkoutFolderPage({
       if (result.canceled || !result.assets?.[0]) return;
 
       const asset = result.assets[0];
+      const isImage = asset.type !== 'video';
       setIoUploading(target);
       setIoUploadProgress(0);
 
-      // Upload video to Firebase Storage
-      const fileName = `workouts/${coachId}/${target}/${workoutId}_${Date.now()}.mp4`;
+      // Upload media to Firebase Storage
+      const ext = isImage ? imageExtFromMime(asset.mimeType) : 'mp4';
+      const fileName = `workouts/${coachId}/${target}/${workoutId}_${Date.now()}.${ext}`;
 
       let blob: Blob;
       if (Platform.OS === 'web' && asset.uri.startsWith('blob:')) {
@@ -349,7 +354,7 @@ export default function WorkoutFolderPage({
         blob = await response.blob();
       }
 
-      const contentType = blob.type || 'video/mp4';
+      const contentType = blob.type || asset.mimeType || (isImage ? 'image/jpeg' : 'video/mp4');
       const storageRef = ref(storage, fileName);
       const uploadTask = uploadBytesResumable(storageRef, blob, { contentType });
 
@@ -372,10 +377,11 @@ export default function WorkoutFolderPage({
         );
       });
 
-      // Use video URL as thumbnail placeholder
+      // Use media URL as thumbnail placeholder
       const gifUrl = videoUrl;
 
-      // Save to Firestore
+      // Save to Firestore (images reuse the existing *VideoUrl fields;
+      // display code branches on the URL's file extension)
       const updates = target === 'intro'
         ? { introVideoUrl: videoUrl, introGifUrl: gifUrl }
         : { outroVideoUrl: videoUrl, outroGifUrl: gifUrl };
@@ -388,8 +394,9 @@ export default function WorkoutFolderPage({
         setOutroGifUrl(gifUrl);
       }
 
-      // Immediately open crop modal for the freshly uploaded video
-      setCropTarget({ target, videoUrl });
+      // Immediately open crop modal for freshly uploaded videos.
+      // Photos skip the crop step — the crop modal is video-only.
+      if (!isImage) setCropTarget({ target, videoUrl });
     } catch (err: any) {
       console.error(`[WorkoutFolder] ${target} upload error:`, err?.message ?? err);
       if (Platform.OS === 'web') {
@@ -1450,21 +1457,37 @@ export default function WorkoutFolderPage({
   }, [blocks, updateBlocks]);
 
   // ── Grab Equipment image generation ──────────────────────────────────────
-  const generateEquipImgFn = httpsCallable<{ grabEquipmentText: string }, { imageUrl: string }>(
-    functions, 'generateEquipmentImage',
-  );
+  const generateEquipImgFn = httpsCallable<
+    { grabEquipmentText: string; forceRegenerate?: boolean },
+    { imageUrl?: string; choices?: string[]; equipmentSlug?: string }
+  >(functions, 'generateEquipmentImage', { timeout: 270000 });
 
-  const triggerEquipmentImageGen = useCallback(async (blockIdx: number, text: string) => {
+  const saveEquipImgChoiceFn = httpsCallable<
+    { equipmentSlug: string; choiceIndex: number },
+    { imageUrl: string }
+  >(functions, 'saveEquipmentImageChoice');
+
+  const triggerEquipmentImageGen = useCallback(async (blockIdx: number, text: string, forceRegenerate = false) => {
     if (!text.trim()) return;
     setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'generating' }));
     setEquipImgError(prev => { const next = { ...prev }; delete next[blockIdx]; return next; });
+    setEquipImgChoices(prev => { const next = { ...prev }; delete next[blockIdx]; return next; });
     try {
-      const result = await generateEquipImgFn({ grabEquipmentText: text.trim() });
-      const imageUrl = result.data.imageUrl;
-      const newBlocks = [...blocks];
-      (newBlocks[blockIdx] as any).grabEquipmentImageUrl = imageUrl;
-      updateBlocks(newBlocks);
-      setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'done' }));
+      const result = await generateEquipImgFn({ grabEquipmentText: text.trim(), forceRegenerate });
+      if (result.data.imageUrl) {
+        // Default cached — apply directly
+        const newBlocks = [...blocks];
+        (newBlocks[blockIdx] as any).grabEquipmentImageUrl = result.data.imageUrl;
+        updateBlocks(newBlocks);
+        setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'done' }));
+      } else if (result.data.choices?.length) {
+        // 3 variants returned — show picker
+        setEquipImgChoices(prev => ({ ...prev, [blockIdx]: result.data.choices! }));
+        setEquipImgSlug(prev => ({ ...prev, [blockIdx]: result.data.equipmentSlug ?? '' }));
+        setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'choosing' }));
+      } else {
+        throw new Error('Unexpected response from generateEquipmentImage');
+      }
     } catch (err: any) {
       console.warn('[WorkoutFolder] generateEquipmentImage failed', err);
       const msg = err?.details ?? err?.message ?? 'Unknown error';
@@ -1472,6 +1495,25 @@ export default function WorkoutFolderPage({
       setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'error' }));
     }
   }, [blocks, generateEquipImgFn, updateBlocks]);
+
+  const selectEquipmentImageChoice = useCallback(async (blockIdx: number, choiceIndex: number) => {
+    const slug = equipImgSlug[blockIdx];
+    if (!slug) return;
+    setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'saving' }));
+    try {
+      const result = await saveEquipImgChoiceFn({ equipmentSlug: slug, choiceIndex });
+      const newBlocks = [...blocks];
+      (newBlocks[blockIdx] as any).grabEquipmentImageUrl = result.data.imageUrl;
+      updateBlocks(newBlocks);
+      setEquipImgChoices(prev => { const next = { ...prev }; delete next[blockIdx]; return next; });
+      setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'done' }));
+    } catch (err: any) {
+      console.warn('[WorkoutFolder] saveEquipmentImageChoice failed', err);
+      const msg = err?.details ?? err?.message ?? 'Unknown error';
+      setEquipImgError(prev => ({ ...prev, [blockIdx]: String(msg) }));
+      setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'choosing' }));
+    }
+  }, [blocks, equipImgSlug, saveEquipImgChoiceFn, updateBlocks]);
 
   // ── Movement operations ───────────────────────────────────────────────────
   const addMovementToBlock = useCallback((blockIdx: number, movement: MovementOption) => {
@@ -1706,7 +1748,7 @@ export default function WorkoutFolderPage({
         >
           <Text style={st.ioSectionTitle}>Intro Video</Text>
           <Text style={st.ioSectionDesc}>
-            Plays full-screen for ~10 seconds at the start of the workout. Upload a video in iPhone Pro Max ratio.
+            Plays full-screen for ~10 seconds at the start of the workout. Upload a video or photo in iPhone Pro Max ratio.
           </Text>
           <View style={st.ioAssetRow}>
             {introGifUrl ? (
@@ -1721,13 +1763,15 @@ export default function WorkoutFolderPage({
                 >
                   <Icon name="close" size={14} color="#EF4444" />
                 </Pressable>
-                <Pressable
-                  style={st.ioCropBtn}
-                  onPress={() => setCropTarget({ target: 'intro', videoUrl: introVideoUrl! })}
-                >
-                  <Icon name="crop" size={14} color="#F5A623" />
-                  <Text style={st.ioCropBtnText}>Crop</Text>
-                </Pressable>
+                {!isImageUrl(introVideoUrl) && (
+                  <Pressable
+                    style={st.ioCropBtn}
+                    onPress={() => setCropTarget({ target: 'intro', videoUrl: introVideoUrl! })}
+                  >
+                    <Icon name="crop" size={14} color="#F5A623" />
+                    <Text style={st.ioCropBtnText}>Crop</Text>
+                  </Pressable>
+                )}
               </View>
             ) : (
               <Pressable style={st.ioUploadCard} onPress={() => pickAndUploadIntroOutro('intro')} disabled={ioUploading === 'intro'}>
@@ -1748,7 +1792,7 @@ export default function WorkoutFolderPage({
 
           <Text style={[st.ioSectionTitle, { marginTop: 32 }]}>Outro Video</Text>
           <Text style={st.ioSectionDesc}>
-            Plays full-screen for ~10 seconds at the end of the workout. Upload a video in iPhone Pro Max ratio.
+            Plays full-screen for ~10 seconds at the end of the workout. Upload a video or photo in iPhone Pro Max ratio.
           </Text>
           <View style={st.ioAssetRow}>
             {outroGifUrl ? (
@@ -1763,13 +1807,15 @@ export default function WorkoutFolderPage({
                 >
                   <Icon name="close" size={14} color="#EF4444" />
                 </Pressable>
-                <Pressable
-                  style={st.ioCropBtn}
-                  onPress={() => setCropTarget({ target: 'outro', videoUrl: outroVideoUrl! })}
-                >
-                  <Icon name="crop" size={14} color="#F5A623" />
-                  <Text style={st.ioCropBtnText}>Crop</Text>
-                </Pressable>
+                {!isImageUrl(outroVideoUrl) && (
+                  <Pressable
+                    style={st.ioCropBtn}
+                    onPress={() => setCropTarget({ target: 'outro', videoUrl: outroVideoUrl! })}
+                  >
+                    <Icon name="crop" size={14} color="#F5A623" />
+                    <Text style={st.ioCropBtnText}>Crop</Text>
+                  </Pressable>
+                )}
               </View>
             ) : (
               <Pressable style={st.ioUploadCard} onPress={() => pickAndUploadIntroOutro('outro')} disabled={ioUploading === 'outro'}>
@@ -3022,52 +3068,105 @@ export default function WorkoutFolderPage({
                           placeholder="e.g. Grab a pair of dumbbells"
                           placeholderTextColor="#4A5568"
                         />
-                        {/* Generate AI background image for this grab-equipment screen */}
+                        {/* Generate AI equipment image — 3-choice picker */}
                         <View style={{ marginTop: 8 }}>
-                          <TouchableOpacity
-                            style={{
-                              backgroundColor: '#7C3AED',
-                              borderRadius: 10,
-                              paddingVertical: 13,
-                              paddingHorizontal: 16,
-                              flexDirection: 'row' as const,
-                              alignItems: 'center' as const,
-                              justifyContent: 'center' as const,
-                              gap: 8,
-                              opacity: (equipImgStatus[bi] === 'generating' || !block.grabEquipmentText?.trim()) ? 0.6 : 1,
-                            }}
-                            disabled={equipImgStatus[bi] === 'generating' || !block.grabEquipmentText?.trim()}
-                            onPress={() => triggerEquipmentImageGen(bi, block.grabEquipmentText ?? '')}
-                          >
-                            {equipImgStatus[bi] === 'generating' ? (
-                              <>
-                                <ActivityIndicator size="small" color="#F0F4F8" />
-                                <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8', fontFamily: FH }}>
-                                  Generating…
+                          {equipImgStatus[bi] === 'choosing' || equipImgStatus[bi] === 'saving' ? (
+                            <View>
+                              <Text style={{ color: '#A0AEC0', fontSize: 13, fontFamily: FB, marginBottom: 8 }}>
+                                Tap the best image for this equipment
+                              </Text>
+                              <View style={{ flexDirection: 'row' as const, gap: 8 }}>
+                                {(equipImgChoices[bi] ?? []).map((url, idx) => (
+                                  <TouchableOpacity
+                                    key={idx}
+                                    disabled={equipImgStatus[bi] === 'saving'}
+                                    onPress={() => selectEquipmentImageChoice(bi, idx)}
+                                    style={{
+                                      flex: 1,
+                                      borderRadius: 10,
+                                      borderWidth: 2,
+                                      borderColor: '#7C3AED',
+                                      overflow: 'hidden' as const,
+                                      opacity: equipImgStatus[bi] === 'saving' ? 0.6 : 1,
+                                    }}
+                                  >
+                                    <Image
+                                      source={{ uri: url }}
+                                      style={{ width: '100%' as any, aspectRatio: 1 }}
+                                      resizeMode="cover"
+                                    />
+                                  </TouchableOpacity>
+                                ))}
+                              </View>
+                              {equipImgStatus[bi] === 'saving' ? (
+                                <View style={{ flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, marginTop: 8 }}>
+                                  <ActivityIndicator size="small" color="#A0AEC0" />
+                                  <Text style={{ color: '#A0AEC0', fontSize: 12, fontFamily: FB }}>Saving…</Text>
+                                </View>
+                              ) : (
+                                <TouchableOpacity
+                                  style={{ marginTop: 10, alignSelf: 'center' as const }}
+                                  onPress={() => triggerEquipmentImageGen(bi, block.grabEquipmentText ?? '', true)}
+                                >
+                                  <Text style={{ color: '#A0AEC0', fontSize: 13, fontFamily: FB, textDecorationLine: 'underline' as const }}>
+                                    Regenerate
+                                  </Text>
+                                </TouchableOpacity>
+                              )}
+                              {equipImgError[bi] ? (
+                                <Text style={{ color: '#F87171', fontSize: 12, fontFamily: FB, marginTop: 6 }}>
+                                  {equipImgError[bi]}
                                 </Text>
-                              </>
-                            ) : (
-                              <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8', fontFamily: FH }}>
-                                {block.grabEquipmentImageUrl ? 'Regenerate image' : 'Generate AI image'}
-                              </Text>
-                            )}
-                          </TouchableOpacity>
-                          {equipImgStatus[bi] === 'done' && block.grabEquipmentImageUrl ? (
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                              <Image
-                                source={{ uri: block.grabEquipmentImageUrl }}
-                                style={{ width: 48, height: 48, borderRadius: 6 }}
-                              />
-                              <Text style={{ color: '#4ADE80', fontSize: 13, fontFamily: FB, flex: 1 }}>
-                                Image generated
-                              </Text>
+                              ) : null}
                             </View>
-                          ) : null}
-                          {equipImgStatus[bi] === 'error' && equipImgError[bi] ? (
-                            <Text style={{ color: '#F87171', fontSize: 12, fontFamily: FB, marginTop: 6 }}>
-                              {equipImgError[bi]}
-                            </Text>
-                          ) : null}
+                          ) : (
+                            <View>
+                              <TouchableOpacity
+                                style={{
+                                  backgroundColor: '#7C3AED',
+                                  borderRadius: 10,
+                                  paddingVertical: 13,
+                                  paddingHorizontal: 16,
+                                  flexDirection: 'row' as const,
+                                  alignItems: 'center' as const,
+                                  justifyContent: 'center' as const,
+                                  gap: 8,
+                                  opacity: (equipImgStatus[bi] === 'generating' || !block.grabEquipmentText?.trim()) ? 0.6 : 1,
+                                }}
+                                disabled={equipImgStatus[bi] === 'generating' || !block.grabEquipmentText?.trim()}
+                                onPress={() => triggerEquipmentImageGen(bi, block.grabEquipmentText ?? '')}
+                              >
+                                {equipImgStatus[bi] === 'generating' ? (
+                                  <>
+                                    <ActivityIndicator size="small" color="#F0F4F8" />
+                                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8', fontFamily: FH }}>
+                                      Generating…
+                                    </Text>
+                                  </>
+                                ) : (
+                                  <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8', fontFamily: FH }}>
+                                    {block.grabEquipmentImageUrl ? 'Regenerate image' : 'Generate AI image'}
+                                  </Text>
+                                )}
+                              </TouchableOpacity>
+                              {block.grabEquipmentImageUrl && equipImgStatus[bi] !== 'generating' ? (
+                                <View style={{ flexDirection: 'row' as const, alignItems: 'center' as const, gap: 8, marginTop: 8 }}>
+                                  <Image
+                                    source={{ uri: block.grabEquipmentImageUrl }}
+                                    style={{ width: 48, height: 48, borderRadius: 6 }}
+                                  />
+                                  <Text style={{ color: '#4ADE80', fontSize: 13, fontFamily: FB, flex: 1 }}>
+                                    Image saved
+                                  </Text>
+                                </View>
+                              ) : null}
+                              {equipImgStatus[bi] === 'error' && equipImgError[bi] ? (
+                                <Text style={{ color: '#F87171', fontSize: 12, fontFamily: FB, marginTop: 6 }}>
+                                  {equipImgError[bi]}
+                                </Text>
+                              ) : null}
+                            </View>
+                          )}
                         </View>
                       </View>
                     )}
