@@ -467,6 +467,26 @@ export function useWorkoutTTS({
       // next enqueue.
       if (myRunId !== runIdRef.current) return;
       if (gapTimerRef.current) clearTimeout(gapTimerRef.current);
+
+      // iOS Safari blocks autoplay after ~20s of silence (NotAllowedError).
+      // Instead of dropping the item, put it back and retry on next user tap.
+      if (
+        reason === 'play-rejected' &&
+        (detail as any)?.name === 'NotAllowedError' &&
+        typeof window !== 'undefined'
+      ) {
+        console.info('[VOICE-AUDIT] play-rejected NotAllowedError — requeueing for next gesture', { context: item.context });
+        queueRef.current.unshift(item);
+        const retry = () => {
+          document.removeEventListener('touchstart', retry);
+          document.removeEventListener('click', retry);
+          pumpQueue();
+        };
+        document.addEventListener('touchstart', retry, { once: true, passive: true });
+        document.addEventListener('click', retry, { once: true });
+        return;
+      }
+
       const nextItemKind = queueRef.current[0]?.kind;
       const gapMs = (item.kind === 'cue' && nextItemKind === 'voice') ? 0 : QUEUE_GAP_MS;
       gapTimerRef.current = setTimeout(() => {
