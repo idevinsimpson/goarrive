@@ -444,6 +444,13 @@ interface UseWorkoutTTSOptions {
    */
   swapSide?: 'L' | 'R';
   /**
+   * 1-based round counter within the current block, tracked by the timer
+   * state machine. Canonical play history — used instead of the flatten
+   * pass's blockRound metadata, which can diverge from what actually played
+   * if the flat list shifts mid-workout.
+   */
+  roundNumber?: number;
+  /**
    * Full flattened step list. Needed to resolve the movement a grabEquipment
    * phase introduces — the step directly after it may be a synthetic
    * "Get Ready" bridge rather than the exercise itself.
@@ -470,6 +477,7 @@ export function useWorkoutTTS({
   timeLeft,
   currentDuration,
   swapSide = 'L',
+  roundNumber = 1,
   steps,
 }: UseWorkoutTTSOptions) {
   const lastSpokenRef = useRef<string>('');
@@ -485,6 +493,10 @@ export function useWorkoutTTS({
   // (legacy/regenerating movement), the work branch announces the name then.
   const restAnnouncedVoiceUrlForIndexRef = useRef<number>(-1);
   const lastGoEnqueuedAtRef = useRef<number>(0);
+  // Index whose zero-window "Other side" cue was already enqueued early
+  // (during work-L's last 3s) — the hit-zero fallback checks this so the
+  // cue never double-plays for the same movement.
+  const zeroSwapCueIndexRef = useRef<number>(-1);
   // Cache for grab-equipment voice URLs: normalized-text-hash → Storage URL (or null on failure)
   const grabEquipVoiceCacheRef = useRef<Record<string, string | null>>({});
   const grabEquipGeneratingRef = useRef<Set<string>>(new Set());
@@ -875,23 +887,6 @@ export function useWorkoutTTS({
       return;
     }
 
-    // Grab Equipment block. The coach's grabEquipmentText prose has no
-    // per-block OpenAI clip yet — play the static `get_ready` cue on entry
-    // and log the uncovered instruction text so we can see which blocks
-    // need voice coverage (mirror of the transition branch below).
-    if (phase === 'grabEquipment' || (phase === 'work' && stepType === 'grabEquipment')) {
-      const key = `grabEquipment_${currentIndex}`;
-      if (lastSpokenRef.current !== key) {
-        lastSpokenRef.current = key;
-        enqueueCue('get_ready', key);
-        const instruction = current.grabEquipmentText || '';
-        if (instruction) {
-          logSpeechSuppressed(`grabEquipment_${currentIndex}`, instruction);
-        }
-      }
-      return;
-    }
-
     // Water Break block
     if (phase === 'waterBreak' || (phase === 'work' && stepType === 'waterBreak')) {
       const key = `waterBreak_${currentIndex}`;
@@ -1033,10 +1028,10 @@ export function useWorkoutTTS({
         // so the check is exact (no false negatives from the previous
         // movement's restAnnounced state).
         const restAnnouncedName = restAnnouncedVoiceUrlForIndexRef.current === currentIndex;
-        // Single-movement (Tabata) blocks: only announce on round 0. Subsequent
+        // Single-movement (Tabata) blocks: only announce on round 1. Later
         // rounds are silent — member already knows the movement.
         const isTabataRound2Plus =
-          (current as any).blockMovCount === 1 && ((current as any).blockRound ?? 0) > 0;
+          (current as any).blockMovCount === 1 && roundNumber >= 2;
         if (!restAnnouncedName && !returningFromSwap && !isTabataRound2Plus) {
           // Prescription clip ("Cable Curls. 75 pounds, 15 reps.") wins over the
           // base name-only clip when the coach has set weight or reps on this
@@ -1126,7 +1121,7 @@ export function useWorkoutTTS({
       halfwaySpokenRef.current = false;
       countdownSpokenRef.current = -1;
     }
-  }, [phase, current, current?.name, current?.stepType, current?.voiceUrl, currentIndex, swapSide, next, next?.name, enqueueCue, enqueueVoice, isPaused]);
+  }, [phase, current, current?.name, current?.stepType, current?.voiceUrl, currentIndex, swapSide, next, next?.name, roundNumber, enqueueCue, enqueueVoice, isPaused]);
 
   // ── Halfway announcement (exercise only) ───────────────────────────
   // Split-mode swap-sides movements: each side IS already a "half", so a
@@ -1166,6 +1161,16 @@ export function useWorkoutTTS({
     if (displayed === 3 && timeLeft > 0 && countdownSpokenRef.current !== 3) {
       countdownSpokenRef.current = 3;
       enqueueCue('countdown_3', `work_countdown_${currentIndex}`);
+      // Zero-window swap: enqueue "Other side" now, while still in work-L.
+      // Enqueuing from the timeLeft<=0 branch raced the timer's phase flip —
+      // the cue could land in the queue after work-R had begun and play late
+      // or overlap the next announcement. Queuing it behind countdown_3 here
+      // guarantees FIFO order: "3, 2, 1" then "Other side" right at the flip.
+      if (currentIndex < total - 1 && !!current?.swapSides && swapSide === 'L'
+          && swapWindowSeconds(current) <= 0) {
+        zeroSwapCueIndexRef.current = currentIndex;
+        enqueueCue('other_side', `work_end_swap_0_${currentIndex}`);
+      }
     } else if (timeLeft <= 0 && countdownSpokenRef.current !== 0) {
       countdownSpokenRef.current = 0;
       const isLastMovement = currentIndex >= total - 1;
@@ -1176,9 +1181,9 @@ export function useWorkoutTTS({
         enqueueCue('workout_complete', `work_end_${currentIndex}`);
       } else if (swapTransitionPending) {
         const window = swapWindowSeconds(current);
-        if (window <= 0) {
-          // No swap visual phase — sides flip the instant work-L hits zero.
-          // The static `other_side` cue marks the flip.
+        if (window <= 0 && zeroSwapCueIndexRef.current !== currentIndex) {
+          // Fallback for sides too short for the displayed===3 enqueue above
+          // (side duration < 3s): fire at the flip itself.
           enqueueCue('other_side', `work_end_swap_0_${currentIndex}`);
         }
         // swap window > 0: swap-entry effect plays switch_sides.
