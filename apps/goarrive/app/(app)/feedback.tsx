@@ -9,6 +9,7 @@ import { router } from 'expo-router';
 import {
   View,
   Text,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,11 +18,13 @@ import {
   TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '../../components/Icon';
 import { useAuth } from '../../lib/AuthContext';
 import { useEffectiveProfile } from '../../lib/useEffectiveProfile';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { db, storage } from '../../lib/firebase';
 
 const FONT_HEADING =
   Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -52,6 +55,7 @@ export default function FeedbackScreen() {
 
   const [category, setCategory] = useState<FeedbackCategory>('idea');
   const [message, setMessage] = useState('');
+  const [screenshots, setScreenshots] = useState<{ uri: string; mimeType?: string }[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,21 +64,72 @@ export default function FeedbackScreen() {
   // to the impersonated coach.
   const coachId = effectiveUid || claims?.coachId || user?.uid;
 
+  const MAX_SCREENSHOTS = 3;
+
+  async function handleAddScreenshot() {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        selectionLimit: MAX_SCREENSHOTS - screenshots.length,
+        quality: 0.8,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      setScreenshots((prev) =>
+        [...prev, ...result.assets.map((a) => ({ uri: a.uri, mimeType: a.mimeType }))]
+          .slice(0, MAX_SCREENSHOTS),
+      );
+    } catch (err) {
+      console.error('[Feedback] screenshot pick error:', err);
+      setError('Could not open your photo library. Please try again.');
+    }
+  }
+
+  function handleRemoveScreenshot(uri: string) {
+    setScreenshots((prev) => prev.filter((sIt) => sIt.uri !== uri));
+  }
+
+  async function uploadScreenshots(): Promise<string[]> {
+    // Storage rules scope writes to the authenticated uid — always the real
+    // signed-in user, even when an admin is impersonating a coach.
+    const uid = user?.uid;
+    if (!uid) return [];
+    const urls: string[] = [];
+    for (let i = 0; i < screenshots.length; i++) {
+      const shot = screenshots[i];
+      const blob = await (await fetch(shot.uri)).blob();
+      const ext = (shot.mimeType?.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+      const path = `feedback_screenshots/${uid}/${Date.now()}_${i}.${ext}`;
+      const storageRef = ref(storage, path);
+      const task = uploadBytesResumable(storageRef, blob, {
+        contentType: shot.mimeType || 'image/jpeg',
+      });
+      await new Promise<void>((resolve, reject) => {
+        task.on('state_changed', undefined, reject, () => resolve());
+      });
+      urls.push(await getDownloadURL(storageRef));
+    }
+    return urls;
+  }
+
   async function handleSubmit() {
     if (!message.trim() || !coachId) return;
     setSubmitting(true);
     setError(null);
     try {
+      const screenshotUrls = await uploadScreenshots();
       await addDoc(collection(db, 'coach_feedback'), {
         coachId,
         coachName: displayName || '',
         coachEmail: email || '',
         message: message.trim(),
         category,
+        screenshotUrls,
         status: 'new',
         createdAt: serverTimestamp(),
       });
       setSubmitted(true);
+      setScreenshots([]);
     } catch (err) {
       console.error('[Feedback] submit error:', err);
       setError('Something went wrong sending your feedback. Please try again.');
@@ -168,6 +223,28 @@ export default function FeedbackScreen() {
               numberOfLines={6}
               textAlignVertical="top"
             />
+
+            <Text style={s.inputLabel}>Screenshots (optional)</Text>
+            <View style={s.screenshotRow}>
+              {screenshots.map((shot) => (
+                <View key={shot.uri} style={s.screenshotThumbWrap}>
+                  <Image source={{ uri: shot.uri }} style={s.screenshotThumb} resizeMode="cover" />
+                  <Pressable
+                    style={s.screenshotRemove}
+                    onPress={() => handleRemoveScreenshot(shot.uri)}
+                    hitSlop={8}
+                  >
+                    <Icon name="x" size={12} color="#FFF" />
+                  </Pressable>
+                </View>
+              ))}
+              {screenshots.length < MAX_SCREENSHOTS && (
+                <Pressable style={s.screenshotAdd} onPress={handleAddScreenshot}>
+                  <Icon name="image" size={18} color={TEXT_MUTED} />
+                  <Text style={s.screenshotAddText}>Add</Text>
+                </Pressable>
+              )}
+            </View>
 
             {error && <Text style={s.errorText}>{error}</Text>}
 
@@ -294,6 +371,51 @@ const s = StyleSheet.create({
     color: TEXT_PRIMARY,
     fontFamily: FONT_BODY,
     minHeight: 120,
+  },
+  screenshotRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  screenshotThumbWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 8,
+    overflow: 'visible',
+  },
+  screenshotThumb: {
+    width: 72,
+    height: 72,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  screenshotRemove: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#E05252',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  screenshotAdd: {
+    width: 72,
+    height: 72,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: BORDER,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  screenshotAddText: {
+    fontSize: 11,
+    color: TEXT_MUTED,
+    fontFamily: FONT_BODY,
   },
   errorText: {
     fontSize: 13,

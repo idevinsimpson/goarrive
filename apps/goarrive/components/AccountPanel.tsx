@@ -170,17 +170,6 @@ export default function AccountPanel({ visible, onClose }: Props) {
     showToast('Need help? Email us at support@goarrive.com');
   }
 
-  function handleFeedback() {
-    // Open feedback/bug report form in a new tab (or in-app browser)
-    const url = 'https://forms.gle/GoArriveFeedback'; // placeholder — update with real form URL
-    if (Platform.OS === 'web') {
-      window.open('mailto:support@goa.fit?subject=GoArrive%20Beta%20Feedback&body=Page%3A%20%0A%0AWhat%20happened%3A%20%0A%0AExpected%3A%20%0A%0ADevice%3A%20', '_blank');
-    } else {
-      showToast('Send feedback to: support@goa.fit');
-    }
-    onClose();
-  }
-
   function handleShareFeedback() {
     onClose();
     setTimeout(() => router.push('/feedback'), 240);
@@ -226,12 +215,6 @@ export default function AccountPanel({ visible, onClose }: Props) {
           onPress: handleShareFeedback,
         }]
       : []),
-    {
-      icon: 'edit',
-      label: 'Report a Bug / Suggest',
-      sublabel: 'Share feedback or screenshots to support@goa.fit',
-      onPress: handleFeedback,
-    },
   ];
 
   return (
