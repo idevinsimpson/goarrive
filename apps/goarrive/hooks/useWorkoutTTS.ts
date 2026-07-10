@@ -887,23 +887,6 @@ export function useWorkoutTTS({
       return;
     }
 
-    // Grab Equipment block. The coach's grabEquipmentText prose has no
-    // per-block OpenAI clip yet — play the static `get_ready` cue on entry
-    // and log the uncovered instruction text so we can see which blocks
-    // need voice coverage (mirror of the transition branch below).
-    if (phase === 'grabEquipment' || (phase === 'work' && stepType === 'grabEquipment')) {
-      const key = `grabEquipment_${currentIndex}`;
-      if (lastSpokenRef.current !== key) {
-        lastSpokenRef.current = key;
-        enqueueCue('get_ready', key);
-        const instruction = current.grabEquipmentText || '';
-        if (instruction) {
-          logSpeechSuppressed(`grabEquipment_${currentIndex}`, instruction);
-        }
-      }
-      return;
-    }
-
     // Water Break block
     if (phase === 'waterBreak' || (phase === 'work' && stepType === 'waterBreak')) {
       const key = `waterBreak_${currentIndex}`;
