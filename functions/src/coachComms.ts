@@ -9,10 +9,16 @@
 
 import * as admin from 'firebase-admin';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
-import { onDocumentCreated } from 'firebase-functions/v2/firestore';
+import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { defineSecret } from 'firebase-functions/params';
 import { sendNotification, resetNotificationProviders } from './notifications';
-import { whatsNewDigestEmail, feedbackAckEmail, DigestRelease } from './templates';
+import {
+  whatsNewDigestEmail,
+  feedbackAckEmail,
+  feedbackShippedEmail,
+  feedbackPlannedEmail,
+  DigestRelease,
+} from './templates';
 
 const emailApiKey = defineSecret('EMAIL_API_KEY');
 
@@ -54,6 +60,7 @@ export const sendWeeklyDigest = onSchedule(
         title: data.title || 'Platform update',
         bodyMarkdown: data.bodyMarkdown || '',
         features: Array.isArray(data.features) ? data.features : [],
+        requestedByCoaches: data.requestedByCoaches === true,
       };
     });
     console.log(TAG, `Sending digest with ${releases.length} release(s)`);
@@ -154,5 +161,92 @@ export const onCoachFeedbackCreated = onDocumentCreated(
 
     await snap.ref.update({ acknowledgedAt: admin.firestore.Timestamp.now() });
     console.log(TAG, 'Ack email sent to', email, 'for feedback', event.params.feedbackId);
+  }
+);
+
+// ─── Close the loop: shipped / planned status emails (Phase 3) ───────────────
+
+export const onCoachFeedbackStatusChanged = onDocumentUpdated(
+  { document: 'coach_feedback/{feedbackId}', region: 'us-central1', secrets: [emailApiKey] },
+  async (event) => {
+    const TAG = '[onCoachFeedbackStatusChanged]';
+    const before = event.data?.before?.data();
+    const after = event.data?.after?.data();
+    if (!before || !after) return;
+
+    const beforeStatus = before.status as string | undefined;
+    const afterStatus = after.status as string | undefined;
+    // Only fire on a transition INTO shipped/planned — never on unrelated edits.
+    if (beforeStatus === afterStatus) return;
+    if (afterStatus !== 'shipped' && afterStatus !== 'planned') return;
+
+    const notifiedField = afterStatus === 'shipped' ? 'shippedNotifiedAt' : 'plannedNotifiedAt';
+    if (after[notifiedField]) {
+      console.log(TAG, `Already notified (${notifiedField}) — skipping`, event.params.feedbackId);
+      return;
+    }
+
+    resetNotificationProviders();
+
+    let email = after.coachEmail as string | undefined;
+    let name = after.coachName as string | undefined;
+    if ((!email || !name) && after.coachId) {
+      const coachSnap = await getDb().collection('coaches').doc(after.coachId).get();
+      email = email || coachSnap.data()?.email;
+      name = name || coachSnap.data()?.name;
+    }
+    if (!email) {
+      console.log(TAG, 'No coach email resolvable — skipping', event.params.feedbackId);
+      return;
+    }
+
+    const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
+    const originalMessage = (after.message as string) || '';
+
+    let rendered;
+    if (afterStatus === 'shipped') {
+      let releaseTitle: string | undefined;
+      if (after.relatedReleaseId) {
+        try {
+          const releaseSnap = await getDb()
+            .collection('platform_releases')
+            .doc(after.relatedReleaseId)
+            .get();
+          releaseTitle = releaseSnap.data()?.title;
+        } catch (err) {
+          console.warn(TAG, 'Failed to resolve relatedReleaseId', after.relatedReleaseId, err);
+        }
+      }
+      rendered = feedbackShippedEmail(
+        name || '',
+        originalMessage,
+        (after.shippedNote as string) || undefined,
+        releaseTitle,
+        appUrl
+      );
+    } else {
+      rendered = feedbackPlannedEmail(name || '', originalMessage);
+    }
+
+    await sendNotification({
+      messageType: afterStatus === 'shipped' ? 'feedback_shipped' : 'feedback_planned',
+      channel: 'email',
+      recipient: {
+        uid: after.coachId || event.params.feedbackId,
+        email,
+        displayName: name,
+        role: 'coach',
+      },
+      subject: rendered.subject,
+      body: rendered.body,
+      htmlBody: rendered.htmlBody,
+      fromAddress: DIGEST_FROM,
+      replyTo: DIGEST_REPLY_TO,
+      coachId: after.coachId,
+      metadata: { feedbackId: event.params.feedbackId, transition: `${beforeStatus}->${afterStatus}` },
+    });
+
+    await event.data!.after.ref.update({ [notifiedField]: admin.firestore.Timestamp.now() });
+    console.log(TAG, `${afterStatus} email sent to`, email, 'for feedback', event.params.feedbackId);
   }
 );
