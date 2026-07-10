@@ -17,10 +17,12 @@ import {
   feedbackAckEmail,
   feedbackShippedEmail,
   feedbackPlannedEmail,
+  adminFeedbackAlertEmail,
   DigestRelease,
 } from './templates';
 
 const emailApiKey = defineSecret('EMAIL_API_KEY');
+const slackBotToken = defineSecret('SLACK_BOT_TOKEN');
 
 // Lazy: index.ts calls admin.initializeApp() after some module imports,
 // so grabbing Firestore at module scope can race initialization.
@@ -30,6 +32,58 @@ function getDb() {
 
 const DIGEST_FROM = 'GoArrive <updates@goarrive.fit>';
 const DIGEST_REPLY_TO = 'devin.simpson@goa.fit';
+const ADMIN_EMAIL = 'devin.simpson@goa.fit';
+const FEEDBACK_SLACK_CHANNEL = 'C0AQQ3K48CE'; // #dev-goarrive
+
+// Posts a new-feedback alert to Slack with a link button into the admin Comms
+// tab. Buttons are link-only: no block_actions interactivity handler exists in
+// this codebase, so status changes stay in the admin UI.
+async function postFeedbackToSlack(
+  token: string,
+  coachName: string,
+  coachEmail: string,
+  category: string,
+  message: string
+): Promise<void> {
+  const header = `New coach feedback from ${coachName || 'Unknown coach'}`;
+  const res = await fetch('https://slack.com/api/chat.postMessage', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      channel: FEEDBACK_SLACK_CHANNEL,
+      text: `${header} (${category}): ${message}`,
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `*${header}*\n*Coach:* ${coachName || 'Unknown'}${coachEmail ? ` (${coachEmail})` : ''}\n*Category:* ${category}`,
+          },
+        },
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: `>${(message || '(no message)').replace(/\n/g, '\n>')}` },
+        },
+        {
+          type: 'actions',
+          elements: [
+            {
+              type: 'button',
+              text: { type: 'plain_text', text: 'Open Admin Comms', emoji: false },
+              url: 'https://goarrive.fit/admin',
+              style: 'primary',
+            },
+          ],
+        },
+      ],
+    }),
+  });
+  const json = (await res.json()) as { ok: boolean; error?: string };
+  if (!json.ok) throw new Error(`chat.postMessage failed: ${json.error}`);
+}
 
 // ─── Weekly What's New digest ────────────────────────────────────────────────
 
@@ -113,7 +167,7 @@ export const sendWeeklyDigest = onSchedule(
 // ─── Feedback acknowledgment ─────────────────────────────────────────────────
 
 export const onCoachFeedbackCreated = onDocumentCreated(
-  { document: 'coach_feedback/{feedbackId}', region: 'us-central1', secrets: [emailApiKey] },
+  { document: 'coach_feedback/{feedbackId}', region: 'us-central1', secrets: [emailApiKey, slackBotToken] },
   async (event) => {
     const snap = event.data;
     if (!snap) return;
@@ -135,32 +189,75 @@ export const onCoachFeedbackCreated = onDocumentCreated(
       email = email || coachSnap.data()?.email;
       name = name || coachSnap.data()?.name;
     }
-    if (!email) {
+
+    if (email) {
+      const rendered = feedbackAckEmail(name || '', data.message || '', data.category || 'idea');
+      await sendNotification({
+        messageType: 'feedback_ack',
+        channel: 'email',
+        recipient: {
+          uid: data.coachId || event.params.feedbackId,
+          email,
+          displayName: name,
+          role: 'coach',
+        },
+        subject: rendered.subject,
+        body: rendered.body,
+        htmlBody: rendered.htmlBody,
+        fromAddress: DIGEST_FROM,
+        replyTo: DIGEST_REPLY_TO,
+        coachId: data.coachId,
+        metadata: { feedbackId: event.params.feedbackId },
+      });
+      await snap.ref.update({ acknowledgedAt: admin.firestore.Timestamp.now() });
+      console.log(TAG, 'Ack email sent to', email, 'for feedback', event.params.feedbackId);
+    } else {
       console.log(TAG, 'No coach email resolvable — skipping ack', event.params.feedbackId);
-      return;
     }
 
-    const rendered = feedbackAckEmail(name || '', data.message || '', data.category || 'idea');
-    await sendNotification({
-      messageType: 'feedback_ack',
-      channel: 'email',
-      recipient: {
-        uid: data.coachId || event.params.feedbackId,
-        email,
-        displayName: name,
-        role: 'coach',
-      },
-      subject: rendered.subject,
-      body: rendered.body,
-      htmlBody: rendered.htmlBody,
-      fromAddress: DIGEST_FROM,
-      replyTo: DIGEST_REPLY_TO,
-      coachId: data.coachId,
-      metadata: { feedbackId: event.params.feedbackId },
-    });
+    // Admin alert email — independent of the coach ack.
+    try {
+      const adminRendered = adminFeedbackAlertEmail(
+        name || '',
+        email || '',
+        data.category || 'idea',
+        data.message || ''
+      );
+      await sendNotification({
+        messageType: 'feedback_admin_alert',
+        channel: 'email',
+        recipient: {
+          uid: 'platform-admin',
+          email: ADMIN_EMAIL,
+          displayName: 'Devin Simpson',
+          role: 'admin',
+        },
+        subject: adminRendered.subject,
+        body: adminRendered.body,
+        htmlBody: adminRendered.htmlBody,
+        fromAddress: DIGEST_FROM,
+        replyTo: email || DIGEST_REPLY_TO,
+        coachId: data.coachId,
+        metadata: { feedbackId: event.params.feedbackId },
+      });
+      console.log(TAG, 'Admin alert email sent for feedback', event.params.feedbackId);
+    } catch (err) {
+      console.error(TAG, 'Admin alert email failed (non-fatal):', err);
+    }
 
-    await snap.ref.update({ acknowledgedAt: admin.firestore.Timestamp.now() });
-    console.log(TAG, 'Ack email sent to', email, 'for feedback', event.params.feedbackId);
+    // Slack push — non-fatal.
+    try {
+      await postFeedbackToSlack(
+        slackBotToken.value(),
+        name || '',
+        email || '',
+        data.category || 'idea',
+        data.message || ''
+      );
+      console.log(TAG, 'Slack alert posted for feedback', event.params.feedbackId);
+    } catch (err) {
+      console.error(TAG, 'Slack alert failed (non-fatal):', err);
+    }
   }
 );
 

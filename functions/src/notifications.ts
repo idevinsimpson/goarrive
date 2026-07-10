@@ -37,7 +37,8 @@ export type MessageType =
   | 'platform_digest'
   | 'feedback_ack'
   | 'feedback_shipped'
-  | 'feedback_planned';
+  | 'feedback_planned'
+  | 'feedback_admin_alert';
 
 export interface NotificationRecipient {
   uid: string;
@@ -393,6 +394,15 @@ export async function sendNotification(payload: NotificationPayload): Promise<st
     retryCount: 0,
     metadata: payload.metadata,
   };
+
+  // Firestore rejects undefined values — drop optional fields that weren't
+  // provided (e.g. sessionInstanceId on feedback acks) or .add() throws.
+  const rec = record as unknown as Record<string, unknown>;
+  Object.keys(rec).forEach((k) => rec[k] === undefined && delete rec[k]);
+  const recip = record.recipient as unknown as Record<string, unknown> | undefined;
+  if (recip) {
+    Object.keys(recip).forEach((k) => recip[k] === undefined && delete recip[k]);
+  }
 
   // Persist pending record
   const ref = await db.collection('notification_log').add(record);
