@@ -88,8 +88,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = void 0;
-exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.onCoachCreated = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = void 0;
+exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.listPublicCoaches = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = void 0;
+exports.finalizeMovementVariation = exports.getMovementVariationStatus = exports.startMovementVariation = exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.onCoachFeedbackStatusChanged = exports.onCoachFeedbackCreated = exports.sendWeeklyDigest = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.onCoachCreated = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -102,6 +102,7 @@ const zoom_1 = require("./zoom");
 const zoomRtms_1 = require("./zoomRtms");
 const ws_1 = __importDefault(require("ws"));
 const tasks_1 = require("@google-cloud/tasks");
+const workoutPlayerSanitizer_1 = require("./workoutPlayerSanitizer");
 // ── Slack Bot (ME-011, ME-012) ────────────────────────────────────────────────
 var slack_1 = require("./slack");
 Object.defineProperty(exports, "slackEvents", { enumerable: true, get: function () { return slack_1.slackEvents; } });
@@ -249,6 +250,22 @@ exports.cleanupReadNotifications = (0, scheduler_1.onSchedule)({ schedule: '0 3 
     }
     console.log(`[cleanupReadNotifications] Deleted ${deletedCount} notification(s)`);
 });
+// ─── listPublicCoaches ───────────────────────────────────────────────────────
+/**
+ * Public coach directory for the unauthenticated intake page.
+ * Returns only uid + displayName so the coaches collection can require auth
+ * for direct Firestore list access.
+ */
+exports.listPublicCoaches = (0, https_1.onCall)({ invoker: 'public' }, async () => {
+    const snap = await db.collection('coaches').orderBy('createdAt', 'desc').limit(500).get();
+    const coaches = snap.docs
+        .map((d) => ({
+        uid: d.id,
+        displayName: (d.data().displayName || d.data().name || ''),
+    }))
+        .filter((c) => c.displayName.trim().length > 0);
+    return { coaches };
+});
 // ─── 3. createStripeConnectLink ───────────────────────────────────────────────
 /**
  * Creates or resumes a Stripe Connect Express account onboarding link for a coach.
@@ -257,7 +274,7 @@ exports.cleanupReadNotifications = (0, scheduler_1.onSchedule)({ schedule: '0 3 
  * ME-001: Requires STRIPE_SECRET_KEY secret.
  */
 exports.createStripeConnectLink = (0, https_1.onCall)({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     const coachId = (_a = request.data) === null || _a === void 0 ? void 0 : _a.coachId;
     if (!coachId)
         throw new https_1.HttpsError('invalid-argument', 'coachId is required');
@@ -265,12 +282,17 @@ exports.createStripeConnectLink = (0, https_1.onCall)({ secrets: [stripeSecretKe
     const callerUid = (_b = request.auth) === null || _b === void 0 ? void 0 : _b.uid;
     if (!callerUid)
         throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const callerToken = (_c = request.auth) === null || _c === void 0 ? void 0 : _c.token;
+    const callerIsAdmin = (callerToken === null || callerToken === void 0 ? void 0 : callerToken.role) === 'platformAdmin' || (callerToken === null || callerToken === void 0 ? void 0 : callerToken.admin) === true;
+    if (coachId !== callerUid && !callerIsAdmin) {
+        throw new https_1.HttpsError('permission-denied', 'You can only manage your own Stripe account');
+    }
     const stripe = getStripe(stripeSecretKey.value());
     // Check if account already exists
     const accountRef = db.collection('coachStripeAccounts').doc(coachId);
     const accountSnap = await accountRef.get();
     let stripeAccountId;
-    if (accountSnap.exists && ((_c = accountSnap.data()) === null || _c === void 0 ? void 0 : _c.stripeAccountId)) {
+    if (accountSnap.exists && ((_d = accountSnap.data()) === null || _d === void 0 ? void 0 : _d.stripeAccountId)) {
         stripeAccountId = accountSnap.data().stripeAccountId;
     }
     else {
@@ -314,13 +336,18 @@ exports.createStripeConnectLink = (0, https_1.onCall)({ secrets: [stripeSecretKe
  * ME-001: Requires STRIPE_SECRET_KEY secret.
  */
 exports.refreshStripeAccountStatus = (0, https_1.onCall)({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e;
     const coachId = (_a = request.data) === null || _a === void 0 ? void 0 : _a.coachId;
     if (!coachId)
         throw new https_1.HttpsError('invalid-argument', 'coachId is required');
     const callerUid = (_b = request.auth) === null || _b === void 0 ? void 0 : _b.uid;
     if (!callerUid)
         throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const callerToken = (_c = request.auth) === null || _c === void 0 ? void 0 : _c.token;
+    const callerIsAdmin = (callerToken === null || callerToken === void 0 ? void 0 : callerToken.role) === 'platformAdmin' || (callerToken === null || callerToken === void 0 ? void 0 : callerToken.admin) === true;
+    if (coachId !== callerUid && !callerIsAdmin) {
+        throw new https_1.HttpsError('permission-denied', 'You can only manage your own Stripe account');
+    }
     const accountRef = db.collection('coachStripeAccounts').doc(coachId);
     const accountSnap = await accountRef.get();
     if (!accountSnap.exists)
@@ -337,7 +364,7 @@ exports.refreshStripeAccountStatus = (0, https_1.onCall)({ secrets: [stripeSecre
         onboardingStatus,
         chargesEnabled: account.charges_enabled,
         payoutsEnabled: account.payouts_enabled,
-        requirementsDue: (_d = (_c = account.requirements) === null || _c === void 0 ? void 0 : _c.currently_due) !== null && _d !== void 0 ? _d : [],
+        requirementsDue: (_e = (_d = account.requirements) === null || _d === void 0 ? void 0 : _d.currently_due) !== null && _e !== void 0 ? _e : [],
         updatedAt: firestore_2.FieldValue.serverTimestamp(),
         lastStatusSyncAt: firestore_2.FieldValue.serverTimestamp(),
     });
@@ -373,8 +400,8 @@ exports.disconnectStripeAccount = (0, https_1.onCall)({ secrets: [stripeSecretKe
     if (!callerUid)
         throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
     // Only the coach themselves (or an admin) may disconnect
-    const callerDoc = await db.collection('users').doc(callerUid).get();
-    const isAdmin = callerDoc.exists && ((_c = callerDoc.data()) === null || _c === void 0 ? void 0 : _c.role) === 'admin';
+    const callerToken = (_c = request.auth) === null || _c === void 0 ? void 0 : _c.token;
+    const isAdmin = (callerToken === null || callerToken === void 0 ? void 0 : callerToken.role) === 'platformAdmin' || (callerToken === null || callerToken === void 0 ? void 0 : callerToken.admin) === true;
     if (callerUid !== coachId && !isAdmin) {
         throw new https_1.HttpsError('permission-denied', 'You can only disconnect your own Stripe account');
     }
@@ -840,15 +867,8 @@ exports.stripeConnectWebhook = (0, https_1.onRequest)({ secrets: [stripeSecretKe
  * Idempotent: uses stripeEventId as Firestore doc ID.
  */
 async function processStripeEvent(tag, event, res) {
-    // ── Idempotency: check if already processed ──
+    // ── Idempotency: transactional create() so concurrent retries fail fast ──
     const eventRef = db.collection('billingEvents').doc(event.id);
-    const existing = await eventRef.get();
-    if (existing.exists) {
-        console.log(`[${tag}] Already processed event`, event.id, '— skipping');
-        res.status(200).send('Already processed');
-        return;
-    }
-    // ── Store raw event (append-only) ──
     const billingEvent = {
         eventId: event.id,
         stripeEventId: event.id,
@@ -857,9 +877,27 @@ async function processStripeEvent(tag, event, res) {
         processedAt: firestore_2.FieldValue.serverTimestamp(),
     };
     try {
-        await eventRef.set(billingEvent);
+        const isDuplicate = await db.runTransaction(async (tx) => {
+            const existing = await tx.get(eventRef);
+            if (existing.exists)
+                return true;
+            tx.create(eventRef, billingEvent);
+            return false;
+        });
+        if (isDuplicate) {
+            console.log(`[${tag}] Already processed event`, event.id, '— skipping');
+            res.status(200).send('Already processed');
+            return;
+        }
     }
     catch (err) {
+        const code = err.code;
+        // ALREADY_EXISTS from a concurrent create() race — also a duplicate
+        if (code === 6 || code === 'already-exists') {
+            console.log(`[${tag}] Duplicate concurrent event`, event.id, '— skipping');
+            res.status(200).send('Already processed');
+            return;
+        }
         console.error(`[${tag}] Failed to store billing event:`, err);
         res.status(500).send('Failed to store event');
         return;
@@ -1519,6 +1557,17 @@ exports.activateCtsOptIn = (0, https_1.onCall)({ secrets: [stripeSecretKey], inv
     console.log('[activateCtsOptIn] CTS activated for member', memberId, 'plan', planId, 'subscription', stripeSubscriptionId, 'rate', ctsMonthlyRate);
     return { success: true };
 });
+// Default module visibility for newly created coaches — core loop on,
+// scheduling/billing off until a platform admin enables them.
+// Missing key = enabled, so existing coaches are unaffected.
+const NEW_COACH_DEFAULT_MODULES = {
+    members: true,
+    build: true,
+    scheduling: false,
+    billing: false,
+    account: true,
+    coachLaunch: true,
+};
 // ── 8. addCoach — Admin-only: create a new coach account ─────────────────────
 // Creates a Firebase Auth user, sets custom claims, and writes a coaches doc.
 // Only callers with admin: true in their custom claims may invoke this.
@@ -1576,6 +1625,7 @@ exports.addCoach = (0, https_1.onCall)({ region: 'us-central1' }, async (request
         role: 'coach',
         createdAt: Date.now(),
         createdBy: callerUid,
+        enabledModules: NEW_COACH_DEFAULT_MODULES,
     });
     // 6. Generate password reset link and send via Firebase's built-in email
     const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
@@ -1584,7 +1634,7 @@ exports.addCoach = (0, https_1.onCall)({ region: 'us-central1' }, async (request
         handleCodeInApp: false,
     };
     const resetLink = await admin.auth().generatePasswordResetLink(email, actionCodeSettings);
-    console.log('[addCoach] Created coach', newCoachId, email, 'by', callerUid);
+    console.log('[addCoach] Created coach', newCoachId, 'by', callerUid);
     return {
         success: true,
         coachId: newCoachId,
@@ -1651,7 +1701,7 @@ exports.inviteCoach = (0, https_1.onCall)({ region: 'us-central1', invoker: 'pub
     });
     const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
     const inviteUrl = `${appUrl}/coach-signup?token=${inviteToken}`;
-    console.log('[inviteCoach] Invite created for', email, 'by', callerUid);
+    console.log('[inviteCoach] Invite created by', callerUid);
     return { inviteUrl, token: inviteToken, expiresAt };
 });
 // ── 10. activateCoachInvite — Called after signup to apply coach role ──────────
@@ -1704,6 +1754,7 @@ exports.activateCoachInvite = (0, https_1.onCall)({ region: 'us-central1', invok
         role: 'coach',
         createdAt: Date.now(),
         invitedBy: invite.createdBy,
+        enabledModules: NEW_COACH_DEFAULT_MODULES,
     });
     // Mark invite as used
     await inviteRef.update({
@@ -1711,7 +1762,7 @@ exports.activateCoachInvite = (0, https_1.onCall)({ region: 'us-central1', invok
         usedAt: firestore_2.FieldValue.serverTimestamp(),
         usedBy: callerUid,
     });
-    console.log('[activateCoachInvite] Coach activated:', callerUid, userEmail);
+    console.log('[activateCoachInvite] Coach activated:', callerUid);
     return { success: true, coachId: callerUid };
 });
 /**
@@ -4193,10 +4244,13 @@ exports.updateMemberGuidancePhase = (0, https_1.onCall)({ region: 'us-central1',
     }
     // Authorization: caller must be the member's coach or a platform admin
     const callerClaims = (((_b = request.auth) === null || _b === void 0 ? void 0 : _b.token) || {});
-    const isAdmin = callerClaims.role === 'admin' || callerClaims.platformAdmin === true;
+    const isAdmin = callerClaims.role === 'platformAdmin' || callerClaims.admin === true || callerClaims.platformAdmin === true;
     if (!isAdmin) {
-        // Verify caller is the coach for this member by checking a slot or the member doc
+        // Verify caller is the coach for this member by checking the member doc
         const memberDoc = await db.collection('members').doc(memberId).get();
+        if (!memberDoc.exists) {
+            throw new https_1.HttpsError('not-found', 'Member not found');
+        }
         const memberData = memberDoc.data();
         if (!memberData || (memberData.coachId !== callerUid && memberData.createdBy !== callerUid)) {
             throw new https_1.HttpsError('permission-denied', 'Only the member\'s coach or an admin can transition phases');
@@ -4445,7 +4499,7 @@ exports.adminGetCoachData = (0, https_1.onCall)({ region: 'us-central1', invoker
     if (!coachUid)
         throw new https_1.HttpsError('invalid-argument', 'coachUid is required');
     // Fetch members for this coach
-    const mSnap = await db.collection('members').where('coachId', '==', coachUid).get();
+    const mSnap = await db.collection('members').where('coachId', '==', coachUid).limit(500).get();
     // Fetch member plans for this coach
     const pSnap = await db.collection('member_plans').where('coachId', '==', coachUid).limit(200).get();
     const planMap = {};
@@ -4548,13 +4602,18 @@ exports.enforceCtsAccountability = (0, scheduler_1.onSchedule)({ schedule: 'ever
                 //    where the member did NOT attend.
                 const fortyEightHoursAgoDate = new Date(fortyEightHoursAgoMs).toISOString().split('T')[0];
                 const sevenDaysAgoDate = new Date(sevenDaysAgoMs).toISOString().split('T')[0];
-                const instancesSnap = await db.collection('session_instances')
+                const todayDate = new Date(now.toMillis()).toISOString().split('T')[0];
+                // One bounded fetch covers both missed-session candidates (up to 48h ago)
+                // and make-up lookups (missed date + 48h, i.e. up to today).
+                const windowSnap = await db.collection('session_instances')
                     .where('memberId', '==', memberId)
                     .where('coachId', '==', coachId)
                     .where('scheduledDate', '>=', sevenDaysAgoDate)
-                    .where('scheduledDate', '<=', fortyEightHoursAgoDate)
+                    .where('scheduledDate', '<=', todayDate)
+                    .limit(500)
                     .get();
-                for (const instanceDoc of instancesSnap.docs) {
+                const missedCandidates = windowSnap.docs.filter((d) => d.data().scheduledDate <= fortyEightHoursAgoDate);
+                for (const instanceDoc of missedCandidates) {
                     const instance = instanceDoc.data();
                     totalProcessed++;
                     // Skip if session was cancelled, rescheduled, or completed
@@ -4583,15 +4642,14 @@ exports.enforceCtsAccountability = (0, scheduler_1.onSchedule)({ schedule: 'ever
                     const missedMs = new Date(`${missedDateStr}T${missedTimeStr}:00`).getTime();
                     const makeUpWindowEnd = missedMs + 48 * 60 * 60 * 1000;
                     const makeUpWindowEndDate = new Date(makeUpWindowEnd).toISOString().split('T')[0];
-                    // Look for any completed/attended session for this member within the make-up window
-                    const makeUpSnap = await db.collection('session_instances')
-                        .where('memberId', '==', memberId)
-                        .where('coachId', '==', coachId)
-                        .where('scheduledDate', '>=', missedDateStr)
-                        .where('scheduledDate', '<=', makeUpWindowEndDate)
-                        .get();
+                    // Look for any completed/attended session for this member within the
+                    // make-up window (filtered in memory from the hoisted window fetch)
+                    const makeUpDocs = windowSnap.docs.filter((d) => {
+                        const sd = d.data().scheduledDate;
+                        return sd >= missedDateStr && sd <= makeUpWindowEndDate;
+                    });
                     let hasMakeUp = false;
-                    for (const muDoc of makeUpSnap.docs) {
+                    for (const muDoc of makeUpDocs) {
                         if (muDoc.id === instanceDoc.id)
                             continue; // Skip the missed session itself
                         const muData = muDoc.data();
@@ -5429,13 +5487,18 @@ exports.requestSkipInstance = (0, https_1.onCall)({ region: 'us-central1', invok
 // Called during slot creation to catch race conditions where two coaches
 // create overlapping slots simultaneously.
 exports.checkSlotConflicts = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
-    var _a;
+    var _a, _b;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
         throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
     const { coachId, dayOfWeek, startTime, durationMinutes, guidancePhase, excludeSlotId } = request.data;
     if (!coachId || dayOfWeek === undefined || !startTime || !durationMinutes) {
         throw new https_1.HttpsError('invalid-argument', 'coachId, dayOfWeek, startTime, and durationMinutes are required');
+    }
+    const callerToken = (_b = request.auth) === null || _b === void 0 ? void 0 : _b.token;
+    const callerIsAdmin = (callerToken === null || callerToken === void 0 ? void 0 : callerToken.role) === 'platformAdmin' || (callerToken === null || callerToken === void 0 ? void 0 : callerToken.admin) === true;
+    if (coachId !== callerUid && !callerIsAdmin) {
+        throw new https_1.HttpsError('permission-denied', 'You can only check conflicts for your own slots');
     }
     // Self-guided sessions don't need coach presence — no conflict
     if (guidancePhase === 'self_guided') {
@@ -5480,6 +5543,7 @@ exports.checkSlotConflicts = (0, https_1.onCall)({ region: 'us-central1', invoke
         .where('scheduledDate', '>=', todayStr)
         .where('scheduledDate', '<=', futureStr)
         .where('status', 'in', ['scheduled', 'allocated'])
+        .limit(500)
         .get();
     for (const instDoc of instancesSnap.docs) {
         const inst = instDoc.data();
@@ -6949,7 +7013,7 @@ exports.analyzeMovement = (0, https_1.onCall)({ region: 'us-central1', secrets: 
     if (!((_a = request.auth.token) === null || _a === void 0 ? void 0 : _a.coach) && !((_b = request.auth.token) === null || _b === void 0 ? void 0 : _b.platformAdmin)) {
         throw new https_1.HttpsError('permission-denied', 'Coach access required');
     }
-    const { gifUrl, contactSheet } = request.data;
+    const { gifUrl, contactSheet, context } = request.data;
     if (!gifUrl && !contactSheet) {
         throw new https_1.HttpsError('invalid-argument', 'Either contactSheet or gifUrl is required');
     }
@@ -6979,7 +7043,7 @@ exports.analyzeMovement = (0, https_1.onCall)({ region: 'us-central1', secrets: 
 
 Set confidence below 0.7 if: the movement is unclear, frames are too dark/blurry to identify, you are guessing between multiple possible movements, or the equipment/form cannot be determined.
 
-Return ONLY valid JSON, no markdown, no explanation.`;
+Return ONLY valid JSON, no markdown, no explanation.${context ? `\n\nAdditional context: ${context}` : ''}`;
     // Build the image content block
     const imageContent = contactSheet
         ? { type: 'image_url', image_url: { url: contactSheet, detail: 'high' } }
@@ -8166,6 +8230,15 @@ exports.getEmbeddedSessionJoinConfig = (0, https_1.onCall)({
 });
 // ─── Workout Share Links ─────────────────────────────────────────────────────
 const crypto = __importStar(require("crypto"));
+const ogImage_1 = require("./ogImage");
+const ogVideo_1 = require("./ogVideo");
+var shareMeta_1 = require("./shareMeta");
+Object.defineProperty(exports, "shareMeta", { enumerable: true, get: function () { return shareMeta_1.shareMeta; } });
+// ─── Coach Comms — weekly digest, feedback ack, shipped/planned loop ─────────
+var coachComms_1 = require("./coachComms");
+Object.defineProperty(exports, "sendWeeklyDigest", { enumerable: true, get: function () { return coachComms_1.sendWeeklyDigest; } });
+Object.defineProperty(exports, "onCoachFeedbackCreated", { enumerable: true, get: function () { return coachComms_1.onCoachFeedbackCreated; } });
+Object.defineProperty(exports, "onCoachFeedbackStatusChanged", { enumerable: true, get: function () { return coachComms_1.onCoachFeedbackStatusChanged; } });
 const VALID_VISIBILITIES = ['restricted', 'anyone_with_link', 'anyone_with_link_signin_required'];
 function normalizeVisibility(v) {
     return VALID_VISIBILITIES.includes(v) ? v : 'anyone_with_link';
@@ -8178,7 +8251,7 @@ function normalizeExpiresAt(input) {
         return null;
     return admin.firestore.Timestamp.fromMillis(ms);
 }
-exports.createShareToken = (0, https_1.onCall)(async (request) => {
+exports.createShareToken = (0, https_1.onCall)({ memory: '512MiB' }, async (request) => {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j;
     if (!request.auth) {
         throw new https_1.HttpsError('unauthenticated', 'Must be signed in.');
@@ -8210,6 +8283,15 @@ exports.createShareToken = (0, https_1.onCall)(async (request) => {
     if (!existingTokens.empty) {
         const existing = existingTokens.docs[0];
         const data = existing.data();
+        if (!data.ogImageUrl) {
+            // Backfill OG image for tokens minted before OG images existed.
+            try {
+                await (0, ogImage_1.generateWorkoutOgImage)(existing.id, workoutData);
+            }
+            catch (err) {
+                console.warn('[createShareToken] OG image backfill failed:', err);
+            }
+        }
         return {
             shareId: existing.id,
             alreadyExists: true,
@@ -8235,6 +8317,17 @@ exports.createShareToken = (0, https_1.onCall)(async (request) => {
         firstResolvedAt: null,
         lastResolvedAt: null,
     });
+    // Best-effort: a share link without an OG image still works — crawlers just
+    // get text-only meta until the lazy backfill in shareMeta fills it in.
+    try {
+        await (0, ogImage_1.generateWorkoutOgImage)(shareId, workoutData);
+    }
+    catch (err) {
+        console.warn('[createShareToken] OG image generation failed:', err);
+    }
+    // Fire-and-forget video generation — does not block token creation.
+    // ogVideoUrl lands on the shareTokens doc ~1 min later; iMessage unfurls pick it up.
+    (0, ogVideo_1.generateWorkoutOgVideo)(shareId, workoutData).catch((err) => console.warn('[createShareToken] OG video generation failed:', err));
     return {
         shareId,
         alreadyExists: false,
@@ -8431,75 +8524,10 @@ exports.resolveShareToken = (0, https_1.onRequest)({ cors: true, region: 'us-cen
             console.warn('[resolveShareToken] movement enrichment failed:', err);
         }
     }
-    const sanitizedBlocks = (workout.blocks || []).map((block) => {
-        var _a;
-        return ({
-            type: block.type || 'Block',
-            name: block.name || '',
-            label: block.label || '',
-            movements: (block.movements || []).map((m) => {
-                var _a, _b, _c, _d, _e, _f, _g;
-                const canonical = m.movementId ? movementCanonical[m.movementId] : undefined;
-                // Canonical voiceUrl + name win for audio/identity so a rename or
-                // re-recording in the library propagates to share-link viewers.
-                const resolvedName = ((canonical === null || canonical === void 0 ? void 0 : canonical.name) && canonical.name.trim())
-                    || m.movementName
-                    || m.name
-                    || '';
-                const resolvedVoiceUrl = (canonical === null || canonical === void 0 ? void 0 : canonical.voiceUrl) || m.voiceUrl || null;
-                return ({
-                    movementId: m.movementId || '',
-                    movementName: resolvedName,
-                    name: resolvedName,
-                    category: m.category || '',
-                    muscleGroup: m.muscleGroup || '',
-                    videoUrl: m.videoUrl || null,
-                    mediaUrl: m.mediaUrl || null,
-                    thumbnailUrl: m.thumbnailUrl || null,
-                    voiceUrl: resolvedVoiceUrl,
-                    nextUpVoiceUrl: m.nextUpVoiceUrl || null,
-                    sets: m.sets || 0,
-                    reps: m.reps || '',
-                    duration: m.duration || 0,
-                    durationSec: m.durationSec || 0,
-                    workSec: m.workSec || 0,
-                    restSec: m.restSec || 0,
-                    restSeconds: m.restSeconds || 0,
-                    swapSides: (_a = m.swapSides) !== null && _a !== void 0 ? _a : false,
-                    swapMode: (_b = m.swapMode) !== null && _b !== void 0 ? _b : 'split',
-                    swapWindowSec: (_c = m.swapWindowSec) !== null && _c !== void 0 ? _c : 5,
-                    showOnPreview: (_d = m.showOnPreview) !== null && _d !== void 0 ? _d : true,
-                    description: m.description || '',
-                    coachingCues: m.coachingCues || '',
-                    notes: m.notes || '',
-                    cropScale: (_e = m.cropScale) !== null && _e !== void 0 ? _e : 1,
-                    cropTranslateX: (_f = m.cropTranslateX) !== null && _f !== void 0 ? _f : 0,
-                    cropTranslateY: (_g = m.cropTranslateY) !== null && _g !== void 0 ? _g : 0,
-                });
-            }),
-            restBetweenSets: block.restBetweenSets || 0,
-            restBetweenSec: block.restBetweenSec || 0,
-            restBetweenRoundsSec: block.restBetweenRoundsSec || 0,
-            restBetweenMovementsSec: block.restBetweenMovementsSec || 0,
-            circuitStartRestSec: block.circuitStartRestSec || 0,
-            rounds: block.rounds || 1,
-            showDemo: (_a = block.showDemo) !== null && _a !== void 0 ? _a : false,
-            demoDurationSec: block.demoDurationSec || 0,
-        });
-    });
     res.status(200).json({
         authenticated: isAuthenticated,
         teaser,
-        workout: {
-            id: tokenData.workoutId,
-            name: workout.name || 'Workout',
-            description: workout.description || '',
-            category: workout.category || null,
-            difficulty: workout.difficulty || null,
-            estimatedDurationMin: workout.estimatedDurationMin || null,
-            tags: workout.tags || [],
-            blocks: sanitizedBlocks,
-        },
+        workout: Object.assign({ id: tokenData.workoutId }, (0, workoutPlayerSanitizer_1.sanitizePlayerWorkout)(workout, movementCanonical)),
     });
 });
 // ─── generateEquipmentImage — AI image for grab-equipment phases ─────────────
@@ -8667,5 +8695,383 @@ exports.saveEquipmentImageChoice = (0, https_1.onCall)({ region: 'us-central1', 
     const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media`;
     console.info('[saveEquipmentImageChoice] Saved default', { equipmentSlug, choiceIndex });
     return { imageUrl };
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// AI Movement Variation (Runway video-to-video)
+//
+// startMovementVariation     — kick off Runway aleph2 tasks from a source movement video
+// getMovementVariationStatus — poll Runway tasks, sync movement_variation_jobs doc
+// finalizeMovementVariation  — download chosen output, persist to Storage, return videoUrl
+//
+// ME-014: RUNWAYML_API_SECRET must be set before these functions operate.
+//         firebase functions:secrets:set RUNWAYML_API_SECRET
+// ─────────────────────────────────────────────────────────────────────────────
+const runwayApiSecret = (0, params_1.defineSecret)('RUNWAYML_API_SECRET');
+const RUNWAY_API_BASE = 'https://api.dev.runwayml.com';
+const RUNWAY_API_VERSION = '2024-11-06';
+const VARIATION_PROVIDER = 'runway';
+const VARIATION_MODEL = 'aleph2';
+const VARIATION_MAX_CANDIDATES = 3;
+const VARIATION_DEFAULT_CANDIDATES = 2;
+const VARIATION_MAX_INSTRUCTION_CHARS = 600;
+const VARIATION_BASE_PROMPT = "Use the source workout video as the visual reference. Keep the same coach, body type, outfit, background, camera angle, framing, and lighting. Create a safe fitness demonstration variation. Do not add extra people. Do not change the coach's face. Do not add text overlays. Do not add logos. Keep it realistic, controlled, and instructional. Do not add barbells, heavy weights, or any equipment not explicitly requested. Avoid unsafe, overloaded, or high-risk positions.";
+/** Coach/admin gate + resolve caller's coach scope for ownership checks. */
+function requireCoachOrAdmin(request) {
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'Authentication required');
+    }
+    const token = request.auth.token || {};
+    const isAdmin = token.platformAdmin === true || token.admin === true;
+    if (!token.coach && !isAdmin) {
+        throw new https_1.HttpsError('permission-denied', 'Coach access required');
+    }
+    const callerCoachIds = [request.auth.uid, token.coachId].filter(Boolean);
+    return { isAdmin, callerCoachIds };
+}
+function assertVariationJobOwnership(jobData, isAdmin, callerCoachIds) {
+    if (!isAdmin && !callerCoachIds.includes(jobData.coachId)) {
+        throw new https_1.HttpsError('permission-denied', 'You do not own this variation job');
+    }
+}
+function runwayHeaders(apiKey) {
+    return {
+        Authorization: `Bearer ${apiKey}`,
+        'X-Runway-Version': RUNWAY_API_VERSION,
+        'Content-Type': 'application/json',
+    };
+}
+async function fetchRunwayTask(apiKey, taskId) {
+    const resp = await fetch(`${RUNWAY_API_BASE}/v1/tasks/${taskId}`, { headers: runwayHeaders(apiKey) });
+    if (!resp.ok) {
+        const body = await resp.text().catch(() => '');
+        throw new Error(`Runway task fetch failed (${resp.status}): ${body.slice(0, 200)}`);
+    }
+    const json = await resp.json();
+    return {
+        status: json.status,
+        progress: typeof json.progress === 'number' ? json.progress : 0,
+        outputUrl: Array.isArray(json.output) && json.output.length > 0 ? json.output[0] : null,
+        failure: json.failure ? String(json.failure) : null,
+    };
+}
+/**
+ * Download a video from sourceUrl, transcode to ≤30fps (Runway's limit), upload to Storage,
+ * and return a public URL. Cleans up /tmp on both success and failure.
+ */
+async function transcodeVideoTo30fps(sourceUrl, jobId, coachId) {
+    const { execSync } = await Promise.resolve().then(() => __importStar(require('child_process')));
+    const os = await Promise.resolve().then(() => __importStar(require('os')));
+    const path = await Promise.resolve().then(() => __importStar(require('path')));
+    const fs = await Promise.resolve().then(() => __importStar(require('fs')));
+    const tmpDir = os.tmpdir();
+    const inputPath = path.join(tmpDir, `variation-src-${jobId}.mp4`);
+    const outputPath = path.join(tmpDir, `variation-30fps-${jobId}.mp4`);
+    try {
+        const resp = await fetch(sourceUrl);
+        if (!resp.ok)
+            throw new Error(`Failed to download source video (${resp.status})`);
+        const buf = Buffer.from(await resp.arrayBuffer());
+        fs.writeFileSync(inputPath, buf);
+        // -loglevel error keeps stderr tiny so the pipe buffer can't deadlock execSync.
+        execSync(`ffmpeg -y -loglevel error -i "${inputPath}" -r 30 -vf fps=fps=30 -c:v libx264 -preset fast -crf 23 -movflags +faststart "${outputPath}"`, { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 1024 * 1024 });
+        const bucket = admin.storage().bucket();
+        const storagePath = `movements/${coachId}/transcoded/${jobId}.mp4`;
+        // Embed a Firebase download token so the URL is publicly accessible without ACL or signBlob.
+        const downloadToken = `${jobId}-tc`;
+        await bucket.upload(outputPath, {
+            destination: storagePath,
+            metadata: {
+                contentType: 'video/mp4',
+                metadata: { firebaseStorageDownloadTokens: downloadToken },
+            },
+        });
+        const encodedPath = encodeURIComponent(storagePath);
+        return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodedPath}?alt=media&token=${downloadToken}`;
+    }
+    finally {
+        try {
+            const fs2 = require('fs');
+            fs2.unlinkSync(inputPath);
+        }
+        catch (_a) { }
+        try {
+            const fs2 = require('fs');
+            fs2.unlinkSync(outputPath);
+        }
+        catch (_b) { }
+    }
+}
+exports.startMovementVariation = (0, https_1.onCall)({ region: 'us-central1', secrets: [runwayApiSecret], timeoutSeconds: 180, memory: '1GiB', maxInstances: 10, invoker: 'public' }, async (request) => {
+    var _a;
+    const { isAdmin, callerCoachIds } = requireCoachOrAdmin(request);
+    const { sourceMovementId, instruction, outputCount } = request.data;
+    if (!sourceMovementId || typeof sourceMovementId !== 'string') {
+        throw new https_1.HttpsError('invalid-argument', 'sourceMovementId is required');
+    }
+    const trimmedInstruction = typeof instruction === 'string' ? instruction.trim() : '';
+    if (!trimmedInstruction) {
+        throw new https_1.HttpsError('invalid-argument', 'instruction is required');
+    }
+    if (trimmedInstruction.length > VARIATION_MAX_INSTRUCTION_CHARS) {
+        throw new https_1.HttpsError('invalid-argument', `instruction must be ${VARIATION_MAX_INSTRUCTION_CHARS} characters or fewer`);
+    }
+    const candidateCount = Math.min(Math.max(Math.round(Number(outputCount) || VARIATION_DEFAULT_CANDIDATES), 1), VARIATION_MAX_CANDIDATES);
+    const apiKey = (_a = runwayApiSecret.value()) === null || _a === void 0 ? void 0 : _a.trim();
+    if (!apiKey) {
+        throw new https_1.HttpsError('internal', 'Runway API key not configured');
+    }
+    const movementSnap = await db.doc(`movements/${sourceMovementId}`).get();
+    if (!movementSnap.exists) {
+        throw new https_1.HttpsError('not-found', 'Source movement not found');
+    }
+    const movement = movementSnap.data();
+    if (!isAdmin && !callerCoachIds.includes(movement.coachId)) {
+        throw new https_1.HttpsError('permission-denied', 'You do not own this movement');
+    }
+    if (!movement.videoUrl || typeof movement.videoUrl !== 'string') {
+        throw new https_1.HttpsError('failed-precondition', 'Source movement has no video');
+    }
+    const jobRef = db.collection('movement_variation_jobs').doc();
+    const now = firestore_2.Timestamp.now();
+    await jobRef.set({
+        coachId: movement.coachId,
+        tenantId: movement.tenantId || '',
+        requestedByUid: request.auth.uid,
+        sourceMovementId,
+        sourceMovementName: movement.name || '',
+        instruction: trimmedInstruction,
+        status: 'queued',
+        provider: VARIATION_PROVIDER,
+        model: VARIATION_MODEL,
+        candidateCount,
+        taskIds: [],
+        candidates: [],
+        errorMessage: null,
+        selectedCandidateId: null,
+        finalizedVideoUrl: null,
+        finalizedAt: null,
+        createdAt: now,
+        updatedAt: now,
+    });
+    const promptText = `${VARIATION_BASE_PROMPT} Requested change: ${trimmedInstruction}`;
+    // All post-doc-creation work is wrapped so ANY unhandled error marks the job failed
+    // rather than leaving it permanently stuck in 'queued'.
+    try {
+        // Runway requires ≤30fps. Transcode the source video first.
+        let videoUriForRunway;
+        try {
+            console.info('[startMovementVariation] Starting transcode', { jobId: jobRef.id });
+            videoUriForRunway = await transcodeVideoTo30fps(movement.videoUrl, jobRef.id, movement.coachId);
+            console.info('[startMovementVariation] Transcoded to 30fps', { jobId: jobRef.id });
+        }
+        catch (tcErr) {
+            const tcMsg = `Transcoding to 30fps failed: ${String((tcErr === null || tcErr === void 0 ? void 0 : tcErr.message) || tcErr).slice(0, 300)}`;
+            console.error('[startMovementVariation] Transcoding error', { jobId: jobRef.id, error: tcMsg });
+            await jobRef.update({ status: 'failed', errorMessage: tcMsg, updatedAt: firestore_2.Timestamp.now() });
+            throw new https_1.HttpsError('internal', 'Failed to prepare video for generation');
+        }
+        const candidates = [];
+        let lastError = null;
+        for (let i = 0; i < candidateCount; i++) {
+            try {
+                console.info('[startMovementVariation] Creating Runway task', { jobId: jobRef.id, attempt: i });
+                const resp = await fetch(`${RUNWAY_API_BASE}/v1/video_to_video`, {
+                    method: 'POST',
+                    headers: runwayHeaders(apiKey),
+                    body: JSON.stringify({
+                        model: VARIATION_MODEL,
+                        videoUri: videoUriForRunway,
+                        promptText,
+                        seed: Math.floor(Math.random() * 4294967295),
+                        contentModeration: { publicFigureThreshold: 'auto' },
+                    }),
+                });
+                if (!resp.ok) {
+                    const body = await resp.text().catch(() => '');
+                    throw new Error(`Runway create failed (${resp.status}): ${body.slice(0, 300)}`);
+                }
+                const json = await resp.json();
+                if (!json.id)
+                    throw new Error('Runway create returned no task id');
+                console.info('[startMovementVariation] Runway task created', { jobId: jobRef.id, taskId: json.id });
+                candidates.push({ id: json.id, status: 'PENDING', progress: 0, videoUrl: null, error: null });
+            }
+            catch (err) {
+                lastError = String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 300);
+                console.error('[startMovementVariation] Task creation failed', { jobId: jobRef.id, attempt: i, error: lastError });
+            }
+        }
+        if (candidates.length === 0) {
+            await jobRef.update({ status: 'failed', errorMessage: lastError || 'All Runway task creations failed', updatedAt: firestore_2.Timestamp.now() });
+            throw new https_1.HttpsError('internal', 'Failed to start video generation');
+        }
+        await jobRef.update({
+            status: 'running',
+            taskIds: candidates.map((c) => c.id),
+            candidates,
+            errorMessage: lastError,
+            updatedAt: firestore_2.Timestamp.now(),
+        });
+        console.info('[startMovementVariation] Started', {
+            jobId: jobRef.id, coachId: movement.coachId, sourceMovementId,
+            provider: VARIATION_PROVIDER, model: VARIATION_MODEL, candidateCount: candidates.length,
+        });
+        return { jobId: jobRef.id, candidateCount: candidates.length };
+    }
+    catch (outerErr) {
+        // Safety net: ensure the job never stays permanently in 'queued'.
+        if (!(outerErr instanceof https_1.HttpsError)) {
+            const msg = `Unexpected error: ${String((outerErr === null || outerErr === void 0 ? void 0 : outerErr.message) || outerErr).slice(0, 300)}`;
+            console.error('[startMovementVariation] Unhandled error', { jobId: jobRef.id, error: msg });
+            try {
+                await jobRef.update({ status: 'failed', errorMessage: msg, updatedAt: firestore_2.Timestamp.now() });
+            }
+            catch (_b) { }
+            throw new https_1.HttpsError('internal', 'Video generation failed unexpectedly');
+        }
+        throw outerErr;
+    }
+});
+exports.getMovementVariationStatus = (0, https_1.onCall)({ region: 'us-central1', secrets: [runwayApiSecret], timeoutSeconds: 30, maxInstances: 20, invoker: 'public' }, async (request) => {
+    var _a, _b;
+    const { isAdmin, callerCoachIds } = requireCoachOrAdmin(request);
+    const { jobId } = request.data;
+    if (!jobId || typeof jobId !== 'string') {
+        throw new https_1.HttpsError('invalid-argument', 'jobId is required');
+    }
+    const jobRef = db.doc(`movement_variation_jobs/${jobId}`);
+    const jobSnap = await jobRef.get();
+    if (!jobSnap.exists) {
+        throw new https_1.HttpsError('not-found', 'Variation job not found');
+    }
+    const job = jobSnap.data();
+    assertVariationJobOwnership(job, isAdmin, callerCoachIds);
+    let candidates = Array.isArray(job.candidates) ? job.candidates : [];
+    let status = job.status;
+    let errorMessage = job.errorMessage || null;
+    const needsPoll = (status === 'running' || status === 'queued') &&
+        candidates.some((c) => c.status !== 'SUCCEEDED' && c.status !== 'FAILED' && c.status !== 'CANCELLED');
+    if (needsPoll) {
+        const apiKey = (_a = runwayApiSecret.value()) === null || _a === void 0 ? void 0 : _a.trim();
+        if (!apiKey) {
+            throw new https_1.HttpsError('internal', 'Runway API key not configured');
+        }
+        candidates = await Promise.all(candidates.map(async (c) => {
+            if (c.status === 'SUCCEEDED' || c.status === 'FAILED' || c.status === 'CANCELLED')
+                return c;
+            try {
+                const task = await fetchRunwayTask(apiKey, c.id);
+                return Object.assign(Object.assign({}, c), { status: task.status, progress: task.status === 'SUCCEEDED' ? 1 : task.progress, videoUrl: task.outputUrl, error: task.failure });
+            }
+            catch (err) {
+                console.warn('[getMovementVariationStatus] Poll failed', { jobId, taskId: c.id, error: String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 200) });
+                return c; // transient — keep previous state
+            }
+        }));
+        const terminal = candidates.every((c) => c.status === 'SUCCEEDED' || c.status === 'FAILED' || c.status === 'CANCELLED');
+        const anySucceeded = candidates.some((c) => c.status === 'SUCCEEDED');
+        if (terminal) {
+            status = anySucceeded ? 'succeeded' : 'failed';
+            if (!anySucceeded) {
+                errorMessage = ((_b = candidates.find((c) => c.error)) === null || _b === void 0 ? void 0 : _b.error) || 'Generation failed';
+            }
+        }
+        else {
+            status = 'running';
+        }
+        await jobRef.update({ candidates, status, errorMessage, updatedAt: firestore_2.Timestamp.now() });
+    }
+    return {
+        jobId,
+        status,
+        errorMessage,
+        sourceMovementId: job.sourceMovementId,
+        sourceMovementName: job.sourceMovementName,
+        instruction: job.instruction,
+        candidates: candidates.map((c) => ({
+            id: c.id,
+            status: c.status,
+            progress: c.progress,
+            videoUrl: c.videoUrl,
+            error: c.error,
+        })),
+    };
+});
+exports.finalizeMovementVariation = (0, https_1.onCall)({ region: 'us-central1', secrets: [runwayApiSecret], timeoutSeconds: 300, memory: '1GiB', maxInstances: 10, invoker: 'public' }, async (request) => {
+    var _a, _b, _c, _d, _e;
+    const { isAdmin, callerCoachIds } = requireCoachOrAdmin(request);
+    const { jobId, candidateId } = request.data;
+    if (!jobId || typeof jobId !== 'string' || !candidateId || typeof candidateId !== 'string') {
+        throw new https_1.HttpsError('invalid-argument', 'jobId and candidateId are required');
+    }
+    const jobRef = db.doc(`movement_variation_jobs/${jobId}`);
+    const jobSnap = await jobRef.get();
+    if (!jobSnap.exists) {
+        throw new https_1.HttpsError('not-found', 'Variation job not found');
+    }
+    const job = jobSnap.data();
+    assertVariationJobOwnership(job, isAdmin, callerCoachIds);
+    const candidates = Array.isArray(job.candidates) ? job.candidates : [];
+    const candidate = candidates.find((c) => c.id === candidateId);
+    if (!candidate) {
+        throw new https_1.HttpsError('not-found', 'Candidate not found on this job');
+    }
+    const apiKey = (_a = runwayApiSecret.value()) === null || _a === void 0 ? void 0 : _a.trim();
+    if (!apiKey) {
+        throw new https_1.HttpsError('internal', 'Runway API key not configured');
+    }
+    // Runway output URLs expire within 24-48h — always re-fetch for a fresh URL.
+    let outputUrl = candidate.videoUrl;
+    try {
+        const task = await fetchRunwayTask(apiKey, candidateId);
+        if (task.status !== 'SUCCEEDED' || !task.outputUrl) {
+            throw new https_1.HttpsError('failed-precondition', 'Selected candidate has no completed output');
+        }
+        outputUrl = task.outputUrl;
+    }
+    catch (err) {
+        if (err instanceof https_1.HttpsError)
+            throw err;
+        if (!outputUrl) {
+            throw new https_1.HttpsError('internal', 'Could not retrieve generated video from provider');
+        }
+    }
+    const videoResp = await fetch(outputUrl);
+    if (!videoResp.ok) {
+        throw new https_1.HttpsError('internal', `Failed to download generated video (${videoResp.status})`);
+    }
+    const videoBuffer = Buffer.from(await videoResp.arrayBuffer());
+    const storagePath = `movements/${job.coachId}/ai-generated-videos/${jobId}-${candidateId}.mp4`;
+    const bucket = admin.storage().bucket();
+    const file = bucket.file(storagePath);
+    // Download token so the client can play the file under authenticated-read storage rules.
+    const downloadToken = require('crypto').randomUUID();
+    await file.save(videoBuffer, {
+        contentType: 'video/mp4',
+        metadata: { metadata: { firebaseStorageDownloadTokens: downloadToken } },
+    });
+    const videoUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
+    const finalizedAt = firestore_2.Timestamp.now();
+    await jobRef.update({
+        selectedCandidateId: candidateId,
+        finalizedVideoUrl: videoUrl,
+        finalizedAt,
+        updatedAt: finalizedAt,
+    });
+    console.info('[finalizeMovementVariation] Finalized', {
+        jobId, candidateId, coachId: job.coachId,
+        provider: job.provider, model: job.model,
+        candidateCount: job.candidateCount,
+        bytes: videoBuffer.length,
+        createdAt: ((_e = (_d = (_c = (_b = job.createdAt) === null || _b === void 0 ? void 0 : _b.toDate) === null || _c === void 0 ? void 0 : _c.call(_b)) === null || _d === void 0 ? void 0 : _d.toISOString) === null || _e === void 0 ? void 0 : _e.call(_d)) || null,
+        finalizedAt: finalizedAt.toDate().toISOString(),
+    });
+    return {
+        videoUrl,
+        sourceMovementId: job.sourceMovementId,
+        sourceMovementName: job.sourceMovementName,
+        instruction: job.instruction,
+        jobId,
+    };
 });
 //# sourceMappingURL=index.js.map
