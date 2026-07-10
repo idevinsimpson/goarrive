@@ -605,6 +605,28 @@ export default function WorkoutPlayer({
     });
   }, []);
 
+  // Thumbnail URLs that failed to load (e.g. offline — thumbs are remote
+  // URLs too). Without this the fallback Image paints nothing and the media
+  // slot goes black; instead we drop to the bundled logo placeholder.
+  const [failedThumbUrls, setFailedThumbUrls] = useState<Set<string>>(new Set());
+  const markThumbFailed = useCallback((url: string) => {
+    setFailedThumbUrls((prev) => {
+      if (prev.has(url)) return prev;
+      const next = new Set(prev);
+      next.add(url);
+      return next;
+    });
+  }, []);
+
+  // When connectivity comes back, forget offline load failures so videos
+  // and thumbnails get a fresh attempt instead of staying blank forever.
+  useEffect(() => {
+    if (!isOffline) {
+      setFailedVideoUrls((prev) => (prev.size === 0 ? prev : new Set()));
+      setFailedThumbUrls((prev) => (prev.size === 0 ? prev : new Set()));
+    }
+  }, [isOffline]);
+
   // Keep the imperative video registry and stall-watchdog map in sync with
   // the mounted layers so neither grows unbounded over a long workout.
   useEffect(() => {
@@ -1486,19 +1508,30 @@ export default function WorkoutPlayer({
                         />
                       );
                     })}
-                    {!displayedUrl && activeThumbUrl && (
+                    {!displayedUrl && activeThumbUrl && !failedThumbUrls.has(activeThumbUrl) && (
                       <Image
                         source={{ uri: activeThumbUrl }}
                         style={[st.posterFallback, mirrorStyle]}
                         resizeMode="cover"
+                        onError={() => markThumbFailed(activeThumbUrl)}
                       />
                     )}
+                    {!displayedUrl && (!activeThumbUrl || failedThumbUrls.has(activeThumbUrl)) && (
+                      <View style={[st.posterFallback, st.placeholderLogoFrame]}>
+                        <Image
+                          source={require('../assets/goarrive-icon.png')}
+                          style={st.placeholderLogo}
+                          resizeMode="cover"
+                        />
+                      </View>
+                    )}
                   </>
-                ) : activeThumbUrl ? (
+                ) : activeThumbUrl && !failedThumbUrls.has(activeThumbUrl) ? (
                   <Image
                     source={{ uri: activeThumbUrl }}
                     style={[st.videoPlayer, mirrorStyle]}
                     resizeMode="cover"
+                    onError={() => markThumbFailed(activeThumbUrl)}
                   />
                 ) : (
                   <View style={[st.videoPlayer, st.placeholderLogoFrame]}>
