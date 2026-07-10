@@ -32,6 +32,7 @@ import WorkoutLogReview from '../../components/WorkoutLogReview';
 import CoachWorkoutStatsWidget from '../../components/CoachWorkoutStatsWidget';
 import OnboardingChecklist from '../../components/OnboardingChecklist';
 import CoachLaunchCard from '../../components/CoachLaunchCard';
+import WhatsNewCard from '../../components/WhatsNewCard';
 import { router } from 'expo-router';
 import AdminWorkoutMetrics from '../../components/AdminWorkoutMetrics';
 import AssignWorkoutModal from '../../components/AssignWorkoutModal';
@@ -348,6 +349,9 @@ export default function DashboardScreen() {
             <Text style={s.statLabel}>Movements</Text>
           </Pressable>
         </View>
+
+        {/* What's New — latest platform release notes */}
+        <WhatsNewCard />
 
         {/* Coach Launch entry — guided journey */}
         {modules.coachLaunch && <CoachLaunchCard />}
