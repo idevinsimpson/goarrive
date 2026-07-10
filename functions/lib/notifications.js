@@ -132,13 +132,7 @@ class RealEmailProvider {
                     'Authorization': `Bearer ${this.apiKey}`,
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    from: this.fromAddress,
-                    to: [payload.recipient.email],
-                    subject: payload.subject || 'GoArrive Session Update',
-                    html: payload.htmlBody || payload.body,
-                    text: payload.body,
-                }),
+                body: JSON.stringify(Object.assign({ from: payload.fromAddress || this.fromAddress, to: [payload.recipient.email], subject: payload.subject || 'GoArrive Session Update', html: payload.htmlBody || payload.body, text: payload.body }, (payload.replyTo ? { reply_to: [payload.replyTo] } : {}))),
             });
             if (!res.ok) {
                 const err = await res.text();
@@ -319,6 +313,14 @@ async function sendNotification(payload) {
         retryCount: 0,
         metadata: payload.metadata,
     };
+    // Firestore rejects undefined values — drop optional fields that weren't
+    // provided (e.g. sessionInstanceId on feedback acks) or .add() throws.
+    const rec = record;
+    Object.keys(rec).forEach((k) => rec[k] === undefined && delete rec[k]);
+    const recip = record.recipient;
+    if (recip) {
+        Object.keys(recip).forEach((k) => recip[k] === undefined && delete recip[k]);
+    }
     // Persist pending record
     const ref = await db.collection('notification_log').add(record);
     try {
