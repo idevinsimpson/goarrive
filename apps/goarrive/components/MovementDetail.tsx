@@ -75,6 +75,8 @@ interface Props {
   onClose: () => void;
   onEdit: (m: MovementDetailData) => void;
   onArchive: (m: MovementDetailData) => void;
+  /** AI "Build variation" flow — only shown when the movement has a video */
+  onBuildVariation?: (m: MovementDetailData) => void;
   /** Platform admin only: toggle isGlobal flag */
   onToggleGlobal?: (m: MovementDetailData) => void;
   /** Whether the current user is a platform admin */
@@ -98,6 +100,7 @@ export default function MovementDetail({
   onClose,
   onEdit,
   onArchive,
+  onBuildVariation,
   onToggleGlobal,
   isAdmin = false,
   backLabel,
@@ -304,8 +307,17 @@ export default function MovementDetail({
           )}
         </ScrollView>
 
-        {/* Action buttons — Edit + Archive only */}
+        {/* Action buttons */}
         <View style={s.actions}>
+          {onBuildVariation && movement.videoUrl ? (
+            <Pressable
+              style={s.variationBtn}
+              onPress={() => onBuildVariation(movement)}
+            >
+              <Icon name="sparkle" size={18} color="#A78BFA" />
+              <Text style={s.variationText}>Build variation</Text>
+            </Pressable>
+          ) : null}
           <Pressable
             style={s.editBtn}
             onPress={() => onEdit(movement)}
@@ -603,6 +615,24 @@ const s = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#E05252',
+    fontFamily: FB,
+  },
+  variationBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(167,139,250,0.1)',
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(167,139,250,0.2)',
+  },
+  variationText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#A78BFA',
     fontFamily: FB,
   },
 });

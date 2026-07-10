@@ -261,6 +261,343 @@ export function coachWelcomeEmail(coachName: string, appUrl: string = 'https://g
   return { subject, body, htmlBody };
 }
 
+// ─── What's New Weekly Digest ────────────────────────────────────────────────
+
+export interface DigestFeature {
+  name: string;
+  blurb: string;
+  deepLink?: string;
+}
+
+export interface DigestRelease {
+  title: string;
+  bodyMarkdown: string;
+  features: DigestFeature[];
+  requestedByCoaches?: boolean;
+}
+
+const EMAIL_LOGO_URL = 'https://firebasestorage.googleapis.com/v0/b/goarrive.firebasestorage.app/o/email-assets%2Fgoarrive-email-logo.png?alt=media&token=849e59ce-a58a-40b4-acce-af0089c0358a';
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// Minimal markdown → HTML: paragraphs, **bold**, single line breaks.
+function simpleMarkdownToHtml(md: string): string {
+  return escapeHtml(md.trim())
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .split(/\n{2,}/)
+    .map((p) => `<p class="txt" style="margin: 0 0 12px 0; line-height: 1.5; color: #E8EAF0;">${p.replace(/\n/g, '<br>')}</p>`)
+    .join('');
+}
+
+export function whatsNewDigestEmail(
+  coachName: string,
+  releases: DigestRelease[],
+  appUrl: string = 'https://goarrive.fit'
+): RenderedMessage {
+  const firstName = (coachName || '').split(' ')[0] || 'Coach';
+  const feedbackUrl = `${appUrl}/feedback`;
+
+  const subject = `What's New in GoArrive`;
+
+  const bodyParts: string[] = [`Hey ${firstName}, here's what's new in GoArrive this week.`];
+  for (const release of releases) {
+    bodyParts.push(`\n${release.title}\n${release.bodyMarkdown}`);
+    for (const f of release.features || []) {
+      bodyParts.push(`- ${f.name}: ${f.blurb}${f.deepLink ? ` Try it: ${f.deepLink}` : ''}`);
+    }
+  }
+  bodyParts.push(`\nGot an idea for GoArrive? Share it here: ${feedbackUrl}`);
+  bodyParts.push(`\n— Devin, Founder`);
+  const body = bodyParts.join('\n');
+
+  const releaseSections = releases
+    .map((release) => {
+      const featureBlocks = (release.features || [])
+        .map(
+          (f) => `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg-steps" bgcolor="#252830" style="background-color: #252830; border-radius: 8px; margin: 12px 0 0 0;">
+      <tr><td style="padding: 14px 16px;">
+        <p style="margin: 0 0 6px 0; color: #F5A623; font-weight: 700;">${escapeHtml(f.name)}</p>
+        <p class="txt" style="margin: 0; line-height: 1.5; color: #E8EAF0;">${escapeHtml(f.blurb)}</p>
+        ${f.deepLink ? `<a href="${escapeHtml(f.deepLink)}" style="display: inline-block; margin-top: 10px; background-color: transparent; color: #F5A623; border: 1px solid #F5A623; padding: 8px 16px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 13px;">Try it now</a>` : ''}
+      </td></tr>
+      </table>`
+        )
+        .join('');
+      const requestedBadge = release.requestedByCoaches
+        ? `<span style="display: inline-block; vertical-align: middle; margin-left: 8px; background-color: rgba(255,192,0,0.15); color: #FFC000; border: 1px solid #FFC000; border-radius: 10px; padding: 2px 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;">Requested by coaches</span>`
+        : '';
+      return `
+    <h3 style="color: #4ADE80; margin: 20px 0 10px 0; font-size: 17px;">${escapeHtml(release.title)}${requestedBadge}</h3>
+    ${simpleMarkdownToHtml(release.bodyMarkdown || '')}
+    ${featureBlocks}`;
+    })
+    .join('');
+
+  const htmlBody = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="dark">
+<meta name="supported-color-schemes" content="dark">
+<style>
+  :root { color-scheme: dark; supported-color-schemes: dark; }
+  body { background-color: #0F1117 !important; }
+  @media (prefers-color-scheme: dark) {
+    body, .bg-page { background-color: #0F1117 !important; }
+    .bg-card { background-color: #1A1D27 !important; }
+    .bg-steps { background-color: #252830 !important; }
+    .txt { color: #E8EAF0 !important; }
+    .txt-muted { color: #9CA3AF !important; }
+  }
+</style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #0F1117;" bgcolor="#0F1117">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg-page" bgcolor="#0F1117" style="background-color: #0F1117;">
+<tr><td align="center" style="padding: 24px 12px;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0" style="max-width: 480px; width: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+  <tr><td align="center" style="padding: 8px 0 20px 0;">
+    <img src="${EMAIL_LOGO_URL}" alt="GoArrive" width="220" style="display: block; width: 220px; max-width: 80%; height: auto;">
+  </td></tr>
+  <tr><td class="bg-card" bgcolor="#1A1D27" style="background-color: #1A1D27; border-radius: 12px; padding: 24px;">
+    <h2 style="color: #FFC000; margin: 0 0 16px 0; font-size: 22px;">What's New in GoArrive</h2>
+    <p class="txt" style="margin: 0 0 4px 0; line-height: 1.5; color: #E8EAF0;">Hey ${escapeHtml(firstName)}, here's what shipped for you and your members this week.</p>
+    ${releaseSections}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="padding: 24px 0 4px 0;">
+      <a href="${feedbackUrl}" style="display: inline-block; background-color: #FFC000; color: #0F1117; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700;">Share an idea</a>
+    </td></tr></table>
+    <p class="txt-muted" style="margin: 8px 0 0 0; color: #9CA3AF; text-align: center; font-size: 13px;">Your ideas shape what we build next.</p>
+    <p class="txt-muted" style="margin: 20px 0 0 0; color: #9CA3AF;">— Devin, Founder</p>
+  </td></tr>
+  <tr><td align="center" style="padding: 20px 0 0 0;">
+    <p style="color: #7A7F94; font-size: 12px; margin: 0;">GoArrive · Coaching, arrived.</p>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+
+  return { subject, body, htmlBody };
+}
+
+// ─── Feedback Acknowledgment ─────────────────────────────────────────────────
+
+export function feedbackAckEmail(
+  coachName: string,
+  message: string,
+  category: string
+): RenderedMessage {
+  const firstName = (coachName || '').split(' ')[0] || 'Coach';
+  const categoryLabel = category === 'bug' ? 'bug report' : category === 'improvement' ? 'improvement' : category === 'other' ? 'note' : 'idea';
+
+  const subject = `We got your ${categoryLabel} — we're taking a look`;
+  const body = `Hey ${firstName}, thanks for sharing this with us:\n\n"${message}"\n\nWe read every piece of coach feedback — we're taking a look now. If it ships, you'll hear about it in the weekly What's New digest.\n\n— Devin, Founder`;
+
+  const htmlBody = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="dark">
+<meta name="supported-color-schemes" content="dark">
+<style>
+  :root { color-scheme: dark; supported-color-schemes: dark; }
+  body { background-color: #0F1117 !important; }
+  @media (prefers-color-scheme: dark) {
+    body, .bg-page { background-color: #0F1117 !important; }
+    .bg-card { background-color: #1A1D27 !important; }
+    .bg-steps { background-color: #252830 !important; }
+    .txt { color: #E8EAF0 !important; }
+    .txt-muted { color: #9CA3AF !important; }
+  }
+</style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #0F1117;" bgcolor="#0F1117">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg-page" bgcolor="#0F1117" style="background-color: #0F1117;">
+<tr><td align="center" style="padding: 24px 12px;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0" style="max-width: 480px; width: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+  <tr><td align="center" style="padding: 8px 0 20px 0;">
+    <img src="${EMAIL_LOGO_URL}" alt="GoArrive" width="220" style="display: block; width: 220px; max-width: 80%; height: auto;">
+  </td></tr>
+  <tr><td class="bg-card" bgcolor="#1A1D27" style="background-color: #1A1D27; border-radius: 12px; padding: 24px;">
+    <h2 style="color: #FFC000; margin: 0 0 16px 0; font-size: 22px;">Got it — we're taking a look</h2>
+    <p class="txt" style="margin: 0 0 12px 0; line-height: 1.5; color: #E8EAF0;">Hey ${escapeHtml(firstName)}, thanks for sharing your ${categoryLabel} with us:</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg-steps" bgcolor="#252830" style="background-color: #252830; border-radius: 8px; margin: 4px 0 16px 0;">
+    <tr><td style="padding: 16px; border-left: 3px solid #FFC000;">
+      <p class="txt" style="margin: 0; line-height: 1.5; color: #E8EAF0; font-style: italic;">"${escapeHtml(message)}"</p>
+    </td></tr>
+    </table>
+    <p class="txt" style="margin: 0 0 12px 0; line-height: 1.5; color: #E8EAF0;">We read every piece of coach feedback. If it ships, you'll hear about it in the weekly <strong>What's New</strong> digest.</p>
+    <p class="txt-muted" style="margin: 16px 0 0 0; color: #9CA3AF;">— Devin, Founder</p>
+  </td></tr>
+  <tr><td align="center" style="padding: 20px 0 0 0;">
+    <p style="color: #7A7F94; font-size: 12px; margin: 0;">GoArrive · Coaching, arrived.</p>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+
+  return { subject, body, htmlBody };
+}
+
+// ─── Feedback Shipped ("You asked for this — it's live") ────────────────────
+
+export function feedbackShippedEmail(
+  coachName: string,
+  originalMessage: string,
+  shippedNote?: string,
+  releaseTitle?: string,
+  appUrl: string = 'https://goarrive.fit'
+): RenderedMessage {
+  const firstName = (coachName || '').split(' ')[0] || 'Coach';
+
+  const subject = `You asked for this — it's live`;
+  const bodyParts = [
+    `Hey ${firstName}, remember this?`,
+    `"${originalMessage}"`,
+    `It's live. You asked, we built it.`,
+  ];
+  if (shippedNote) bodyParts.push(`Here's what shipped: ${shippedNote}`);
+  if (releaseTitle) bodyParts.push(`It went out as part of "${releaseTitle}".`);
+  bodyParts.push(`Go take it for a spin: ${appUrl}`);
+  bodyParts.push(
+    `This is exactly how GoArrive gets better — coaches like you telling us what you need. Keep the ideas coming.`,
+    `— Devin, Founder`
+  );
+  const body = bodyParts.join('\n\n');
+
+  const shippedNoteHtml = shippedNote
+    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg-steps" bgcolor="#252830" style="background-color: #252830; border-radius: 8px; margin: 4px 0 16px 0;">
+    <tr><td style="padding: 16px; border-left: 3px solid #4ADE80;">
+      <p style="margin: 0 0 6px 0; color: #4ADE80; font-weight: 700; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase;">What shipped</p>
+      <p class="txt" style="margin: 0; line-height: 1.5; color: #E8EAF0;">${escapeHtml(shippedNote)}</p>
+      ${releaseTitle ? `<p class="txt-muted" style="margin: 8px 0 0 0; color: #9CA3AF; font-size: 13px;">Part of: <strong style="color: #FFC000;">${escapeHtml(releaseTitle)}</strong></p>` : ''}
+    </td></tr>
+    </table>`
+    : releaseTitle
+      ? `<p class="txt" style="margin: 0 0 12px 0; line-height: 1.5; color: #E8EAF0;">It went out as part of <strong style="color: #FFC000;">${escapeHtml(releaseTitle)}</strong>.</p>`
+      : '';
+
+  const htmlBody = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="dark">
+<meta name="supported-color-schemes" content="dark">
+<style>
+  :root { color-scheme: dark; supported-color-schemes: dark; }
+  body { background-color: #0F1117 !important; }
+  @media (prefers-color-scheme: dark) {
+    body, .bg-page { background-color: #0F1117 !important; }
+    .bg-card { background-color: #1A1D27 !important; }
+    .bg-steps { background-color: #252830 !important; }
+    .txt { color: #E8EAF0 !important; }
+    .txt-muted { color: #9CA3AF !important; }
+  }
+</style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #0F1117;" bgcolor="#0F1117">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg-page" bgcolor="#0F1117" style="background-color: #0F1117;">
+<tr><td align="center" style="padding: 24px 12px;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0" style="max-width: 480px; width: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+  <tr><td align="center" style="padding: 8px 0 20px 0;">
+    <img src="${EMAIL_LOGO_URL}" alt="GoArrive" width="220" style="display: block; width: 220px; max-width: 80%; height: auto;">
+  </td></tr>
+  <tr><td class="bg-card" bgcolor="#1A1D27" style="background-color: #1A1D27; border-radius: 12px; padding: 24px;">
+    <h2 style="color: #FFC000; margin: 0 0 16px 0; font-size: 22px;">You asked for this — it's live</h2>
+    <p class="txt" style="margin: 0 0 12px 0; line-height: 1.5; color: #E8EAF0;">Hey ${escapeHtml(firstName)}, remember this?</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg-steps" bgcolor="#252830" style="background-color: #252830; border-radius: 8px; margin: 4px 0 16px 0;">
+    <tr><td style="padding: 16px; border-left: 3px solid #FFC000;">
+      <p class="txt" style="margin: 0; line-height: 1.5; color: #E8EAF0; font-style: italic;">"${escapeHtml(originalMessage)}"</p>
+    </td></tr>
+    </table>
+    <p class="txt" style="margin: 0 0 12px 0; line-height: 1.5; color: #E8EAF0;"><strong style="color: #4ADE80;">It's live.</strong> You asked, we built it.</p>
+    ${shippedNoteHtml}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="padding: 12px 0 4px 0;">
+      <a href="${appUrl}" style="display: inline-block; background-color: #FFC000; color: #0F1117; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700;">Take it for a spin</a>
+    </td></tr></table>
+    <p class="txt-muted" style="margin: 16px 0 0 0; color: #9CA3AF; line-height: 1.5;">This is exactly how GoArrive gets better — coaches like you telling us what you need. Keep the ideas coming.</p>
+    <p class="txt-muted" style="margin: 16px 0 0 0; color: #9CA3AF;">— Devin, Founder</p>
+  </td></tr>
+  <tr><td align="center" style="padding: 20px 0 0 0;">
+    <p style="color: #7A7F94; font-size: 12px; margin: 0;">GoArrive · Coaching, arrived.</p>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+
+  return { subject, body, htmlBody };
+}
+
+// ─── Feedback Planned ("It's on the roadmap") ────────────────────────────────
+
+export function feedbackPlannedEmail(
+  coachName: string,
+  originalMessage: string
+): RenderedMessage {
+  const firstName = (coachName || '').split(' ')[0] || 'Coach';
+
+  const subject = `Your idea made the roadmap`;
+  const body = `Hey ${firstName}, quick update on this:\n\n"${originalMessage}"\n\nIt's officially on the roadmap. We can't promise exact timing, but it's coming — and you'll get a note from me the moment it ships.\n\n— Devin, Founder`;
+
+  const htmlBody = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="dark">
+<meta name="supported-color-schemes" content="dark">
+<style>
+  :root { color-scheme: dark; supported-color-schemes: dark; }
+  body { background-color: #0F1117 !important; }
+  @media (prefers-color-scheme: dark) {
+    body, .bg-page { background-color: #0F1117 !important; }
+    .bg-card { background-color: #1A1D27 !important; }
+    .bg-steps { background-color: #252830 !important; }
+    .txt { color: #E8EAF0 !important; }
+    .txt-muted { color: #9CA3AF !important; }
+  }
+</style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #0F1117;" bgcolor="#0F1117">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg-page" bgcolor="#0F1117" style="background-color: #0F1117;">
+<tr><td align="center" style="padding: 24px 12px;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0" style="max-width: 480px; width: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+  <tr><td align="center" style="padding: 8px 0 20px 0;">
+    <img src="${EMAIL_LOGO_URL}" alt="GoArrive" width="220" style="display: block; width: 220px; max-width: 80%; height: auto;">
+  </td></tr>
+  <tr><td class="bg-card" bgcolor="#1A1D27" style="background-color: #1A1D27; border-radius: 12px; padding: 24px;">
+    <h2 style="color: #A78BFA; margin: 0 0 16px 0; font-size: 22px;">Your idea made the roadmap</h2>
+    <p class="txt" style="margin: 0 0 12px 0; line-height: 1.5; color: #E8EAF0;">Hey ${escapeHtml(firstName)}, quick update on this:</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg-steps" bgcolor="#252830" style="background-color: #252830; border-radius: 8px; margin: 4px 0 16px 0;">
+    <tr><td style="padding: 16px; border-left: 3px solid #A78BFA;">
+      <p class="txt" style="margin: 0; line-height: 1.5; color: #E8EAF0; font-style: italic;">"${escapeHtml(originalMessage)}"</p>
+    </td></tr>
+    </table>
+    <p class="txt" style="margin: 0 0 12px 0; line-height: 1.5; color: #E8EAF0;">It's officially <strong style="color: #A78BFA;">on the roadmap</strong>. We can't promise exact timing, but it's coming — and you'll get a note from me the moment it ships.</p>
+    <p class="txt-muted" style="margin: 16px 0 0 0; color: #9CA3AF;">— Devin, Founder</p>
+  </td></tr>
+  <tr><td align="center" style="padding: 20px 0 0 0;">
+    <p style="color: #7A7F94; font-size: 12px; margin: 0;">GoArrive · Coaching, arrived.</p>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+
+  return { subject, body, htmlBody };
+}
+
 // ─── Formatting Helpers ──────────────────────────────────────────────────────
 
 function formatSessionType(type: string): string {

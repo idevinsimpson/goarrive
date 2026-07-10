@@ -311,6 +311,16 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
+    // MOVEMENT VARIATION JOBS — AI (Runway) variation generation jobs.
+    // Written exclusively by Cloud Functions (Admin SDK); clients read-only.
+    // ─────────────────────────────────────────────
+
+    match /movement_variation_jobs/{jobId} {
+      allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+      allow write: if false;
+    }
+
+    // ─────────────────────────────────────────────
     // FOLLOW-ALONG VIDEOS — coach-owned long-form video assets
     // Used as Build tab tiles + as workout block source. Mirrors movements.
     // ─────────────────────────────────────────────
@@ -892,6 +902,31 @@ service cloud.firestore {
       );
       // No client writes — only Cloud Functions (Admin SDK) can create
       allow create, update, delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
+    // PLATFORM RELEASES (What's New digest content)
+    // Authored by platformAdmin; weekly digest function reads 'queued'
+    // releases via Admin SDK. Coaches can read for the in-app What's New.
+    // ─────────────────────────────────────────────
+    match /platform_releases/{releaseId} {
+      allow read: if isCoach() || isPlatformAdmin();
+      allow create, update, delete: if isPlatformAdmin();
+    }
+
+    // ─────────────────────────────────────────────
+    // COACH FEEDBACK (ideas / improvements / bugs from coaches)
+    // Coach creates own docs (coachId enforced) and reads own.
+    // platformAdmin has full access. Status transitions are admin-only.
+    // ─────────────────────────────────────────────
+    match /coach_feedback/{feedbackId} {
+      allow read: if isPlatformAdmin() || isCoachOrBootstrap(resource.data.coachId);
+      allow create: if isPlatformAdmin()
+                    || (isAuthenticated()
+                        && (request.resource.data.coachId == request.auth.uid
+                            || isCoachOfTenant(request.resource.data.coachId))
+                        && request.resource.data.status == 'new');
+      allow update, delete: if isPlatformAdmin();
     }
 
     match /{document=**} {

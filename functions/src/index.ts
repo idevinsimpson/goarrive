@@ -8003,9 +8003,10 @@ export const analyzeMovement = onCall(
       throw new HttpsError('permission-denied', 'Coach access required');
     }
 
-    const { gifUrl, contactSheet } = request.data as {
+    const { gifUrl, contactSheet, context } = request.data as {
       gifUrl?: string;
       contactSheet?: string; // base64 data URL (e.g. "data:image/jpeg;base64,...")
+      context?: string; // optional hint (e.g. for AI variations: source name + instruction)
     };
 
     if (!gifUrl && !contactSheet) {
@@ -8040,7 +8041,7 @@ export const analyzeMovement = onCall(
 
 Set confidence below 0.7 if: the movement is unclear, frames are too dark/blurry to identify, you are guessing between multiple possible movements, or the equipment/form cannot be determined.
 
-Return ONLY valid JSON, no markdown, no explanation.`;
+Return ONLY valid JSON, no markdown, no explanation.${context ? `\n\nAdditional context: ${context}` : ''}`;
 
     // Build the image content block
     const imageContent = contactSheet
@@ -9468,6 +9469,9 @@ import { generateWorkoutOgImage } from './ogImage';
 import { generateWorkoutOgVideo } from './ogVideo';
 export { shareMeta } from './shareMeta';
 
+// ─── Coach Comms — weekly digest, feedback ack, shipped/planned loop ─────────
+export { sendWeeklyDigest, onCoachFeedbackCreated, onCoachFeedbackStatusChanged } from './coachComms';
+
 type ShareVisibility = 'restricted' | 'anyone_with_link' | 'anyone_with_link_signin_required';
 const VALID_VISIBILITIES: ShareVisibility[] = ['restricted', 'anyone_with_link', 'anyone_with_link_signin_required'];
 
@@ -9979,5 +9983,444 @@ export const saveEquipmentImageChoice = onCall(
     const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media`;
     console.info('[saveEquipmentImageChoice] Saved default', { equipmentSlug, choiceIndex });
     return { imageUrl };
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI Movement Variation (Runway video-to-video)
+//
+// startMovementVariation     — kick off Runway aleph2 tasks from a source movement video
+// getMovementVariationStatus — poll Runway tasks, sync movement_variation_jobs doc
+// finalizeMovementVariation  — download chosen output, persist to Storage, return videoUrl
+//
+// ME-014: RUNWAYML_API_SECRET must be set before these functions operate.
+//         firebase functions:secrets:set RUNWAYML_API_SECRET
+// ─────────────────────────────────────────────────────────────────────────────
+const runwayApiSecret = defineSecret('RUNWAYML_API_SECRET');
+
+const RUNWAY_API_BASE = 'https://api.dev.runwayml.com';
+const RUNWAY_API_VERSION = '2024-11-06';
+const VARIATION_PROVIDER = 'runway';
+const VARIATION_MODEL = 'aleph2';
+const VARIATION_MAX_CANDIDATES = 3;
+const VARIATION_DEFAULT_CANDIDATES = 2;
+const VARIATION_MAX_INSTRUCTION_CHARS = 600;
+
+const VARIATION_BASE_PROMPT =
+  "Use the source workout video as the visual reference. Keep the same coach, body type, outfit, background, camera angle, framing, and lighting. Create a safe fitness demonstration variation. Do not add extra people. Do not change the coach's face. Do not add text overlays. Do not add logos. Keep it realistic, controlled, and instructional. Do not add barbells, heavy weights, or any equipment not explicitly requested. Avoid unsafe, overloaded, or high-risk positions.";
+
+interface VariationCandidate {
+  id: string; // Runway task id
+  status: 'PENDING' | 'THROTTLED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+  progress: number;
+  videoUrl: string | null; // ephemeral Runway output URL (expires 24-48h)
+  error: string | null;
+}
+
+/** Coach/admin gate + resolve caller's coach scope for ownership checks. */
+function requireCoachOrAdmin(request: { auth?: any }): { isAdmin: boolean; callerCoachIds: string[] } {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Authentication required');
+  }
+  const token = request.auth.token || {};
+  const isAdmin = token.platformAdmin === true || token.admin === true;
+  if (!token.coach && !isAdmin) {
+    throw new HttpsError('permission-denied', 'Coach access required');
+  }
+  const callerCoachIds = [request.auth.uid, token.coachId].filter(Boolean) as string[];
+  return { isAdmin, callerCoachIds };
+}
+
+function assertVariationJobOwnership(jobData: FirebaseFirestore.DocumentData, isAdmin: boolean, callerCoachIds: string[]) {
+  if (!isAdmin && !callerCoachIds.includes(jobData.coachId)) {
+    throw new HttpsError('permission-denied', 'You do not own this variation job');
+  }
+}
+
+function runwayHeaders(apiKey: string): Record<string, string> {
+  return {
+    Authorization: `Bearer ${apiKey}`,
+    'X-Runway-Version': RUNWAY_API_VERSION,
+    'Content-Type': 'application/json',
+  };
+}
+
+async function fetchRunwayTask(apiKey: string, taskId: string): Promise<{
+  status: VariationCandidate['status'];
+  progress: number;
+  outputUrl: string | null;
+  failure: string | null;
+}> {
+  const resp = await fetch(`${RUNWAY_API_BASE}/v1/tasks/${taskId}`, { headers: runwayHeaders(apiKey) });
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`Runway task fetch failed (${resp.status}): ${body.slice(0, 200)}`);
+  }
+  const json: any = await resp.json();
+  return {
+    status: json.status,
+    progress: typeof json.progress === 'number' ? json.progress : 0,
+    outputUrl: Array.isArray(json.output) && json.output.length > 0 ? json.output[0] : null,
+    failure: json.failure ? String(json.failure) : null,
+  };
+}
+
+/**
+ * Download a video from sourceUrl, transcode to ≤30fps (Runway's limit), upload to Storage,
+ * and return a public URL. Cleans up /tmp on both success and failure.
+ */
+async function transcodeVideoTo30fps(sourceUrl: string, jobId: string, coachId: string): Promise<string> {
+  const { execSync } = await import('child_process');
+  const os = await import('os');
+  const path = await import('path');
+  const fs = await import('fs');
+
+  const tmpDir = os.tmpdir();
+  const inputPath = path.join(tmpDir, `variation-src-${jobId}.mp4`);
+  const outputPath = path.join(tmpDir, `variation-30fps-${jobId}.mp4`);
+
+  try {
+    const resp = await fetch(sourceUrl);
+    if (!resp.ok) throw new Error(`Failed to download source video (${resp.status})`);
+    const buf = Buffer.from(await resp.arrayBuffer());
+    fs.writeFileSync(inputPath, buf);
+
+    // -loglevel error keeps stderr tiny so the pipe buffer can't deadlock execSync.
+    execSync(
+      `ffmpeg -y -loglevel error -i "${inputPath}" -r 30 -vf fps=fps=30 -c:v libx264 -preset fast -crf 23 -movflags +faststart "${outputPath}"`,
+      { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 1024 * 1024 },
+    );
+
+    const bucket = admin.storage().bucket();
+    const storagePath = `movements/${coachId}/transcoded/${jobId}.mp4`;
+    // Embed a Firebase download token so the URL is publicly accessible without ACL or signBlob.
+    const downloadToken = `${jobId}-tc`;
+    await bucket.upload(outputPath, {
+      destination: storagePath,
+      metadata: {
+        contentType: 'video/mp4',
+        metadata: { firebaseStorageDownloadTokens: downloadToken },
+      },
+    });
+    const encodedPath = encodeURIComponent(storagePath);
+    return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodedPath}?alt=media&token=${downloadToken}`;
+  } finally {
+    try { const fs2 = require('fs'); fs2.unlinkSync(inputPath); } catch {}
+    try { const fs2 = require('fs'); fs2.unlinkSync(outputPath); } catch {}
+  }
+}
+
+export const startMovementVariation = onCall(
+  { region: 'us-central1', secrets: [runwayApiSecret], timeoutSeconds: 180, memory: '1GiB', maxInstances: 10, invoker: 'public' },
+  async (request) => {
+    const { isAdmin, callerCoachIds } = requireCoachOrAdmin(request);
+
+    const { sourceMovementId, instruction, outputCount } = request.data as {
+      sourceMovementId?: string;
+      instruction?: string;
+      outputCount?: number;
+    };
+
+    if (!sourceMovementId || typeof sourceMovementId !== 'string') {
+      throw new HttpsError('invalid-argument', 'sourceMovementId is required');
+    }
+    const trimmedInstruction = typeof instruction === 'string' ? instruction.trim() : '';
+    if (!trimmedInstruction) {
+      throw new HttpsError('invalid-argument', 'instruction is required');
+    }
+    if (trimmedInstruction.length > VARIATION_MAX_INSTRUCTION_CHARS) {
+      throw new HttpsError('invalid-argument', `instruction must be ${VARIATION_MAX_INSTRUCTION_CHARS} characters or fewer`);
+    }
+    const candidateCount = Math.min(
+      Math.max(Math.round(Number(outputCount) || VARIATION_DEFAULT_CANDIDATES), 1),
+      VARIATION_MAX_CANDIDATES,
+    );
+
+    const apiKey = runwayApiSecret.value()?.trim();
+    if (!apiKey) {
+      throw new HttpsError('internal', 'Runway API key not configured');
+    }
+
+    const movementSnap = await db.doc(`movements/${sourceMovementId}`).get();
+    if (!movementSnap.exists) {
+      throw new HttpsError('not-found', 'Source movement not found');
+    }
+    const movement = movementSnap.data() as FirebaseFirestore.DocumentData;
+    if (!isAdmin && !callerCoachIds.includes(movement.coachId)) {
+      throw new HttpsError('permission-denied', 'You do not own this movement');
+    }
+    if (!movement.videoUrl || typeof movement.videoUrl !== 'string') {
+      throw new HttpsError('failed-precondition', 'Source movement has no video');
+    }
+
+    const jobRef = db.collection('movement_variation_jobs').doc();
+    const now = Timestamp.now();
+    await jobRef.set({
+      coachId: movement.coachId,
+      tenantId: movement.tenantId || '',
+      requestedByUid: request.auth!.uid,
+      sourceMovementId,
+      sourceMovementName: movement.name || '',
+      instruction: trimmedInstruction,
+      status: 'queued',
+      provider: VARIATION_PROVIDER,
+      model: VARIATION_MODEL,
+      candidateCount,
+      taskIds: [],
+      candidates: [],
+      errorMessage: null,
+      selectedCandidateId: null,
+      finalizedVideoUrl: null,
+      finalizedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const promptText = `${VARIATION_BASE_PROMPT} Requested change: ${trimmedInstruction}`;
+
+    // All post-doc-creation work is wrapped so ANY unhandled error marks the job failed
+    // rather than leaving it permanently stuck in 'queued'.
+    try {
+      // Runway requires ≤30fps. Transcode the source video first.
+      let videoUriForRunway: string;
+      try {
+        console.info('[startMovementVariation] Starting transcode', { jobId: jobRef.id });
+        videoUriForRunway = await transcodeVideoTo30fps(movement.videoUrl, jobRef.id, movement.coachId);
+        console.info('[startMovementVariation] Transcoded to 30fps', { jobId: jobRef.id });
+      } catch (tcErr: any) {
+        const tcMsg = `Transcoding to 30fps failed: ${String(tcErr?.message || tcErr).slice(0, 300)}`;
+        console.error('[startMovementVariation] Transcoding error', { jobId: jobRef.id, error: tcMsg });
+        await jobRef.update({ status: 'failed', errorMessage: tcMsg, updatedAt: Timestamp.now() });
+        throw new HttpsError('internal', 'Failed to prepare video for generation');
+      }
+
+      const candidates: VariationCandidate[] = [];
+      let lastError: string | null = null;
+
+      for (let i = 0; i < candidateCount; i++) {
+        try {
+          console.info('[startMovementVariation] Creating Runway task', { jobId: jobRef.id, attempt: i });
+          const resp = await fetch(`${RUNWAY_API_BASE}/v1/video_to_video`, {
+            method: 'POST',
+            headers: runwayHeaders(apiKey),
+            body: JSON.stringify({
+              model: VARIATION_MODEL,
+              videoUri: videoUriForRunway,
+              promptText,
+              seed: Math.floor(Math.random() * 4294967295),
+              contentModeration: { publicFigureThreshold: 'auto' },
+            }),
+          });
+          if (!resp.ok) {
+            const body = await resp.text().catch(() => '');
+            throw new Error(`Runway create failed (${resp.status}): ${body.slice(0, 300)}`);
+          }
+          const json: any = await resp.json();
+          if (!json.id) throw new Error('Runway create returned no task id');
+          console.info('[startMovementVariation] Runway task created', { jobId: jobRef.id, taskId: json.id });
+          candidates.push({ id: json.id, status: 'PENDING', progress: 0, videoUrl: null, error: null });
+        } catch (err: any) {
+          lastError = String(err?.message || err).slice(0, 300);
+          console.error('[startMovementVariation] Task creation failed', { jobId: jobRef.id, attempt: i, error: lastError });
+        }
+      }
+
+      if (candidates.length === 0) {
+        await jobRef.update({ status: 'failed', errorMessage: lastError || 'All Runway task creations failed', updatedAt: Timestamp.now() });
+        throw new HttpsError('internal', 'Failed to start video generation');
+      }
+
+      await jobRef.update({
+        status: 'running',
+        taskIds: candidates.map((c) => c.id),
+        candidates,
+        errorMessage: lastError,
+        updatedAt: Timestamp.now(),
+      });
+
+      console.info('[startMovementVariation] Started', {
+        jobId: jobRef.id, coachId: movement.coachId, sourceMovementId,
+        provider: VARIATION_PROVIDER, model: VARIATION_MODEL, candidateCount: candidates.length,
+      });
+      return { jobId: jobRef.id, candidateCount: candidates.length };
+    } catch (outerErr: any) {
+      // Safety net: ensure the job never stays permanently in 'queued'.
+      if (!(outerErr instanceof HttpsError)) {
+        const msg = `Unexpected error: ${String(outerErr?.message || outerErr).slice(0, 300)}`;
+        console.error('[startMovementVariation] Unhandled error', { jobId: jobRef.id, error: msg });
+        try { await jobRef.update({ status: 'failed', errorMessage: msg, updatedAt: Timestamp.now() }); } catch {}
+        throw new HttpsError('internal', 'Video generation failed unexpectedly');
+      }
+      throw outerErr;
+    }
+  },
+);
+
+export const getMovementVariationStatus = onCall(
+  { region: 'us-central1', secrets: [runwayApiSecret], timeoutSeconds: 30, maxInstances: 20, invoker: 'public' },
+  async (request) => {
+    const { isAdmin, callerCoachIds } = requireCoachOrAdmin(request);
+
+    const { jobId } = request.data as { jobId?: string };
+    if (!jobId || typeof jobId !== 'string') {
+      throw new HttpsError('invalid-argument', 'jobId is required');
+    }
+
+    const jobRef = db.doc(`movement_variation_jobs/${jobId}`);
+    const jobSnap = await jobRef.get();
+    if (!jobSnap.exists) {
+      throw new HttpsError('not-found', 'Variation job not found');
+    }
+    const job = jobSnap.data() as FirebaseFirestore.DocumentData;
+    assertVariationJobOwnership(job, isAdmin, callerCoachIds);
+
+    let candidates: VariationCandidate[] = Array.isArray(job.candidates) ? job.candidates : [];
+    let status: string = job.status;
+    let errorMessage: string | null = job.errorMessage || null;
+
+    const needsPoll = (status === 'running' || status === 'queued') &&
+      candidates.some((c) => c.status !== 'SUCCEEDED' && c.status !== 'FAILED' && c.status !== 'CANCELLED');
+
+    if (needsPoll) {
+      const apiKey = runwayApiSecret.value()?.trim();
+      if (!apiKey) {
+        throw new HttpsError('internal', 'Runway API key not configured');
+      }
+      candidates = await Promise.all(
+        candidates.map(async (c) => {
+          if (c.status === 'SUCCEEDED' || c.status === 'FAILED' || c.status === 'CANCELLED') return c;
+          try {
+            const task = await fetchRunwayTask(apiKey, c.id);
+            return {
+              ...c,
+              status: task.status,
+              progress: task.status === 'SUCCEEDED' ? 1 : task.progress,
+              videoUrl: task.outputUrl,
+              error: task.failure,
+            };
+          } catch (err: any) {
+            console.warn('[getMovementVariationStatus] Poll failed', { jobId, taskId: c.id, error: String(err?.message || err).slice(0, 200) });
+            return c; // transient — keep previous state
+          }
+        }),
+      );
+
+      const terminal = candidates.every((c) => c.status === 'SUCCEEDED' || c.status === 'FAILED' || c.status === 'CANCELLED');
+      const anySucceeded = candidates.some((c) => c.status === 'SUCCEEDED');
+      if (terminal) {
+        status = anySucceeded ? 'succeeded' : 'failed';
+        if (!anySucceeded) {
+          errorMessage = candidates.find((c) => c.error)?.error || 'Generation failed';
+        }
+      } else {
+        status = 'running';
+      }
+
+      await jobRef.update({ candidates, status, errorMessage, updatedAt: Timestamp.now() });
+    }
+
+    return {
+      jobId,
+      status,
+      errorMessage,
+      sourceMovementId: job.sourceMovementId,
+      sourceMovementName: job.sourceMovementName,
+      instruction: job.instruction,
+      candidates: candidates.map((c) => ({
+        id: c.id,
+        status: c.status,
+        progress: c.progress,
+        videoUrl: c.videoUrl,
+        error: c.error,
+      })),
+    };
+  },
+);
+
+export const finalizeMovementVariation = onCall(
+  { region: 'us-central1', secrets: [runwayApiSecret], timeoutSeconds: 300, memory: '1GiB', maxInstances: 10, invoker: 'public' },
+  async (request) => {
+    const { isAdmin, callerCoachIds } = requireCoachOrAdmin(request);
+
+    const { jobId, candidateId } = request.data as { jobId?: string; candidateId?: string };
+    if (!jobId || typeof jobId !== 'string' || !candidateId || typeof candidateId !== 'string') {
+      throw new HttpsError('invalid-argument', 'jobId and candidateId are required');
+    }
+
+    const jobRef = db.doc(`movement_variation_jobs/${jobId}`);
+    const jobSnap = await jobRef.get();
+    if (!jobSnap.exists) {
+      throw new HttpsError('not-found', 'Variation job not found');
+    }
+    const job = jobSnap.data() as FirebaseFirestore.DocumentData;
+    assertVariationJobOwnership(job, isAdmin, callerCoachIds);
+
+    const candidates: VariationCandidate[] = Array.isArray(job.candidates) ? job.candidates : [];
+    const candidate = candidates.find((c) => c.id === candidateId);
+    if (!candidate) {
+      throw new HttpsError('not-found', 'Candidate not found on this job');
+    }
+
+    const apiKey = runwayApiSecret.value()?.trim();
+    if (!apiKey) {
+      throw new HttpsError('internal', 'Runway API key not configured');
+    }
+
+    // Runway output URLs expire within 24-48h — always re-fetch for a fresh URL.
+    let outputUrl = candidate.videoUrl;
+    try {
+      const task = await fetchRunwayTask(apiKey, candidateId);
+      if (task.status !== 'SUCCEEDED' || !task.outputUrl) {
+        throw new HttpsError('failed-precondition', 'Selected candidate has no completed output');
+      }
+      outputUrl = task.outputUrl;
+    } catch (err: any) {
+      if (err instanceof HttpsError) throw err;
+      if (!outputUrl) {
+        throw new HttpsError('internal', 'Could not retrieve generated video from provider');
+      }
+    }
+
+    const videoResp = await fetch(outputUrl!);
+    if (!videoResp.ok) {
+      throw new HttpsError('internal', `Failed to download generated video (${videoResp.status})`);
+    }
+    const videoBuffer = Buffer.from(await videoResp.arrayBuffer());
+
+    const storagePath = `movements/${job.coachId}/ai-generated-videos/${jobId}-${candidateId}.mp4`;
+    const bucket = admin.storage().bucket();
+    const file = bucket.file(storagePath);
+    // Download token so the client can play the file under authenticated-read storage rules.
+    const downloadToken = require('crypto').randomUUID();
+    await file.save(videoBuffer, {
+      contentType: 'video/mp4',
+      metadata: { metadata: { firebaseStorageDownloadTokens: downloadToken } },
+    });
+    const videoUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
+
+    const finalizedAt = Timestamp.now();
+    await jobRef.update({
+      selectedCandidateId: candidateId,
+      finalizedVideoUrl: videoUrl,
+      finalizedAt,
+      updatedAt: finalizedAt,
+    });
+
+    console.info('[finalizeMovementVariation] Finalized', {
+      jobId, candidateId, coachId: job.coachId,
+      provider: job.provider, model: job.model,
+      candidateCount: job.candidateCount,
+      bytes: videoBuffer.length,
+      createdAt: job.createdAt?.toDate?.()?.toISOString?.() || null,
+      finalizedAt: finalizedAt.toDate().toISOString(),
+    });
+
+    return {
+      videoUrl,
+      sourceMovementId: job.sourceMovementId,
+      sourceMovementName: job.sourceMovementName,
+      instruction: job.instruction,
+      jobId,
+    };
   },
 );

@@ -129,6 +129,7 @@ export default function AppLayout() {
       {/* Hidden screens — accessible via navigation but not shown in tab bar */}
       <Tabs.Screen name="admin" options={{ href: null }} />
       <Tabs.Screen name="account" options={{ href: null }} />
+      <Tabs.Screen name="feedback" options={{ href: null }} />
       <Tabs.Screen name="my-page" options={{ href: null }} />
       <Tabs.Screen name="billing" options={{ href: null }} />
       <Tabs.Screen name="coach-launch" options={{ href: null }} />
