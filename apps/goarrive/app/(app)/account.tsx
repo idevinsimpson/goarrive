@@ -158,6 +158,20 @@ function AccountScreenInner({ onClose }: Props) {
           </SectionWrap>
         )}
 
+        {/* Share feedback — coaches only */}
+        {isCoach && (
+          <Pressable style={s.feedbackBtn} onPress={() => router.push('/feedback')}>
+            <Icon name="share" size={18} color={GOLD} />
+            <View style={{ flex: 1 }}>
+              <Text style={s.feedbackTitle}>Share Feedback</Text>
+              <Text style={s.feedbackSubtitle}>
+                Ideas, improvements, bugs — tell the GoArrive team.
+              </Text>
+            </View>
+            <Icon name="chevron-right" size={18} color={TEXT_MUTED} />
+          </Pressable>
+        )}
+
         {/* Sign out */}
         <Pressable style={s.signOutBtn} onPress={handleSignOut}>
           <Icon name="logout" size={18} color="#E05252" />
@@ -1246,6 +1260,30 @@ const s = StyleSheet.create({
     fontWeight: '600',
     color: '#F0F4F8',
     fontFamily: FONT_HEADING,
+  },
+  feedbackBtn: {
+    width: '100%',
+    maxWidth: 400,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: CARD_BG,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  feedbackTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: TEXT_PRIMARY,
+    fontFamily: FONT_HEADING,
+  },
+  feedbackSubtitle: {
+    fontSize: 12,
+    color: TEXT_MUTED,
+    fontFamily: FONT_BODY,
+    marginTop: 2,
   },
   signOutBtn: {
     flexDirection: 'row',
