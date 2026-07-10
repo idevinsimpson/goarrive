@@ -705,6 +705,22 @@ export default function WorkoutPlayer({
     if (activeLayer?.ready) setDisplayedUrl(activeVideoUrl);
   }, [activeVideoUrl, displayedUrl, videoLayers]);
 
+  // If the incoming active layer failed to load (e.g. offline), don't keep
+  // looping the previous movement's video — drop to the thumbnail fallback.
+  useEffect(() => {
+    if (activeVideoUrl && failedVideoUrls.has(activeVideoUrl)) setDisplayedUrl(null);
+  }, [activeVideoUrl, failedVideoUrls]);
+
+  // Safety net for loads that hang without ever firing ready or error
+  // (offline fetches on some browsers): if the active layer hasn't taken
+  // over within a grace period, stop showing the stale previous video.
+  // The layer stays mounted, so it still promotes if it loads later.
+  useEffect(() => {
+    if (!activeVideoUrl || displayedUrl === null || displayedUrl === activeVideoUrl) return;
+    const t = setTimeout(() => setDisplayedUrl(null), 4000);
+    return () => clearTimeout(t);
+  }, [activeVideoUrl, displayedUrl]);
+
   // Prune layers we no longer need: keep only active, preload, and the
   // currently displayed (in case displayed is briefly different from active
   // during a transition that's about to complete).
