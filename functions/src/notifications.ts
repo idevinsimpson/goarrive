@@ -37,7 +37,8 @@ export type MessageType =
   | 'platform_digest'
   | 'feedback_ack'
   | 'feedback_shipped'
-  | 'feedback_planned';
+  | 'feedback_planned'
+  | 'feedback_admin_alert';
 
 export interface NotificationRecipient {
   uid: string;

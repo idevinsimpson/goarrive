@@ -114,6 +114,9 @@ export default function AdminCommsTab() {
   const [shipNote, setShipNote] = useState('');
   const [shipReleaseId, setShipReleaseId] = useState('');
   const [shipSaving, setShipSaving] = useState(false);
+  // Last auto-generated note — lets release-chip taps regenerate the note only
+  // while the admin hasn't hand-edited it.
+  const [shipAutoNote, setShipAutoNote] = useState('');
 
   const fetchFeedback = useCallback(async () => {
     try {
@@ -190,10 +193,30 @@ export default function AdminCommsTab() {
     }
   }
 
+  function generateShipNote(row: FeedbackRow, release?: ReleaseRow): string {
+    if (release) {
+      const blurb = (release.features[0]?.blurb || '').trim();
+      return blurb ? `${release.title}: ${blurb}` : release.title;
+    }
+    const raw = (row.message || '').trim();
+    const snippet = raw.length > 100 ? `${raw.slice(0, 100).trimEnd()}...` : raw;
+    if (row.category === 'bug') return `We fixed the issue you reported: ${snippet}`;
+    return `We shipped your idea: ${snippet}`;
+  }
+
   function openShipFlip(row: FeedbackRow) {
     setShipFlipId(row.id);
-    setShipNote(row.shippedNote || '');
     setShipReleaseId(row.relatedReleaseId || '');
+    const existing = (row.shippedNote || '').trim();
+    if (existing) {
+      setShipNote(existing);
+      setShipAutoNote('');
+      return;
+    }
+    const related = releases.find((r) => r.id === row.relatedReleaseId);
+    const auto = generateShipNote(row, related);
+    setShipNote(auto);
+    setShipAutoNote(auto);
   }
 
   async function confirmShipFlip() {
@@ -546,9 +569,18 @@ export default function AdminCommsTab() {
                             <Pressable
                               key={r.id}
                               style={[s.chip, shipReleaseId === r.id && s.chipActive]}
-                              onPress={() =>
-                                setShipReleaseId((cur) => (cur === r.id ? '' : r.id))
-                              }
+                              onPress={() => {
+                                const nextId = shipReleaseId === r.id ? '' : r.id;
+                                setShipReleaseId(nextId);
+                                if (shipNote === shipAutoNote) {
+                                  const auto = generateShipNote(
+                                    row,
+                                    nextId ? r : undefined,
+                                  );
+                                  setShipNote(auto);
+                                  setShipAutoNote(auto);
+                                }
+                              }}
                             >
                               <Text
                                 style={[s.chipText, shipReleaseId === r.id && s.chipTextActive]}
