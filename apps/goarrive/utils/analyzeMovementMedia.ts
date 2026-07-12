@@ -21,6 +21,8 @@ export interface MovementAnalysis {
   category: string;
   equipment: string;
   difficulty: string;
+  primaryMuscles: string[];
+  secondaryMuscles: string[];
   muscleGroups: string[];
   description: string;
   regression: string;
