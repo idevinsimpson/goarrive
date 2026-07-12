@@ -62,6 +62,7 @@ import { generateMovementVoice } from '../utils/generateMovementVoice';
 import { analyzeMovementMedia, MovementAnalysis } from '../utils/analyzeMovementMedia';
 import { analyzeMovementReps } from '../utils/analyzeMovementReps';
 import { isImageUrl, imageExtFromMime, generateImageThumbnailBlob } from '../utils/mediaKind';
+import { reconcileMuscleFields } from '../utils/muscleClassification';
 import { FB, FH } from '../lib/theme';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -213,6 +214,8 @@ export default function MovementForm({
   const [difficulty, setDifficulty] = useState('');
   const [description, setDescription] = useState('');
   const [muscleGroups, setMuscleGroups] = useState<string[]>([]);
+  const [primaryMuscles, setPrimaryMuscles] = useState<string[]>([]);
+  const [secondaryMuscles, setSecondaryMuscles] = useState<string[]>([]);
   const [workSec, setWorkSec] = useState('30');
   const [restSec, setRestSec] = useState('15');
   const [countdownSec, setCountdownSec] = useState('3');
@@ -359,6 +362,8 @@ export default function MovementForm({
       setDifficulty(editMovement.difficulty || '');
       setDescription(editMovement.description || '');
       setMuscleGroups(editMovement.muscleGroups || []);
+      setPrimaryMuscles((editMovement as any).primaryMuscles || []);
+      setSecondaryMuscles((editMovement as any).secondaryMuscles || []);
       setWorkSec(String(editMovement.workSec ?? 30));
       setRestSec(String(editMovement.restSec ?? 15));
       setCountdownSec(String(editMovement.countdownSec ?? 3));
@@ -390,6 +395,8 @@ export default function MovementForm({
     setDifficulty('');
     setDescription('');
     setMuscleGroups([]);
+    setPrimaryMuscles([]);
+    setSecondaryMuscles([]);
     setWorkSec('30');
     setRestSec('15');
     setCountdownSec('3');
@@ -472,7 +479,7 @@ export default function MovementForm({
         equipment,
         difficulty,
         description: description.trim(),
-        muscleGroups,
+        ...reconcileMuscleFields(muscleGroups, primaryMuscles, secondaryMuscles),
         workSec: parseInt(workSec, 10) || 30,
         restSec: parseInt(restSec, 10) || 15,
         countdownSec: parseInt(countdownSec, 10) || 3,
@@ -867,6 +874,8 @@ export default function MovementForm({
           category: '',
           equipment: '',
           difficulty: '',
+          primaryMuscles: [],
+          secondaryMuscles: [],
           muscleGroups: [],
           description: '',
           regression: '',
@@ -991,7 +1000,15 @@ export default function MovementForm({
     if (checked.equipment && p.equipment) { updates.equipment = p.equipment; setEquipment(p.equipment); }
     if (checked.difficulty && p.difficulty) { updates.difficulty = p.difficulty; setDifficulty(p.difficulty); }
     if (checked.description && p.description) { updates.description = p.description; setDescription(p.description); }
-    if (checked.muscleGroups && p.muscleGroups?.length) { updates.muscleGroups = p.muscleGroups; setMuscleGroups(p.muscleGroups); }
+    if (checked.muscleGroups && p.muscleGroups?.length) {
+      const mf = reconcileMuscleFields(p.muscleGroups, p.primaryMuscles, p.secondaryMuscles);
+      updates.muscleGroups = mf.muscleGroups;
+      updates.primaryMuscles = mf.primaryMuscles;
+      updates.secondaryMuscles = mf.secondaryMuscles;
+      setMuscleGroups(mf.muscleGroups);
+      setPrimaryMuscles(mf.primaryMuscles);
+      setSecondaryMuscles(mf.secondaryMuscles);
+    }
     if (checked.workSec && p.workSec) { updates.workSec = p.workSec; setWorkSec(String(p.workSec)); }
     if (checked.restSec && p.restSec) { updates.restSec = p.restSec; setRestSec(String(p.restSec)); }
     if (checked.regression && p.regression) { updates.regression = p.regression; setRegression(p.regression); }
@@ -1069,7 +1086,7 @@ export default function MovementForm({
     equipment,
     difficulty,
     description: description.trim(),
-    muscleGroups,
+    ...reconcileMuscleFields(muscleGroups, primaryMuscles, secondaryMuscles),
     workSec: parseInt(workSec, 10) || 30,
     restSec: parseInt(restSec, 10) || 15,
     countdownSec: parseInt(countdownSec, 10) || 3,
@@ -1087,7 +1104,7 @@ export default function MovementForm({
     cropFrameWidth,
     cropFrameHeight,
     updatedAt: serverTimestamp(),
-  }), [name, category, equipment, difficulty, description, muscleGroups, workSec, restSec, countdownSec, swapSides, swapMode, swapWindowSec, videoUrl, thumbnailUrl, regression, progression, contraindications, cropScale, cropTranslateX, cropTranslateY, cropFrameWidth, cropFrameHeight]);
+  }), [name, category, equipment, difficulty, description, muscleGroups, primaryMuscles, secondaryMuscles, workSec, restSec, countdownSec, swapSides, swapMode, swapWindowSec, videoUrl, thumbnailUrl, regression, progression, contraindications, cropScale, cropTranslateX, cropTranslateY, cropFrameWidth, cropFrameHeight]);
 
   // Regenerate the OpenAI movement voice clip whenever the spoken name
   // changes. Clears voiceUrl synchronously so the player can't speak the old
@@ -1185,7 +1202,7 @@ export default function MovementForm({
   useEffect(() => {
     if (!isEdit || !initializedRef.current) return;
     autoSave();
-  }, [name, category, equipment, difficulty, description, muscleGroups, workSec, restSec, countdownSec, swapSides, swapMode, swapWindowSec, videoUrl, thumbnailUrl, regression, progression, contraindications, cropScale, cropTranslateX, cropTranslateY, cropFrameWidth, cropFrameHeight]);
+  }, [name, category, equipment, difficulty, description, muscleGroups, primaryMuscles, secondaryMuscles, workSec, restSec, countdownSec, swapSides, swapMode, swapWindowSec, videoUrl, thumbnailUrl, regression, progression, contraindications, cropScale, cropTranslateX, cropTranslateY, cropFrameWidth, cropFrameHeight]);
 
   // Clean up timers on unmount
   useEffect(() => {
@@ -1239,7 +1256,7 @@ export default function MovementForm({
         equipment,
         difficulty,
         description: description.trim(),
-        muscleGroups,
+        ...reconcileMuscleFields(muscleGroups, primaryMuscles, secondaryMuscles),
         workSec: parseInt(workSec, 10) || 30,
         restSec: parseInt(restSec, 10) || 15,
         countdownSec: parseInt(countdownSec, 10) || 3,

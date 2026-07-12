@@ -58,6 +58,7 @@ import { FB, FH } from '../lib/theme';
 import PosterThumb from './PosterThumb';
 import {
   filterMovements,
+  rankByPrimaryMuscle,
   EQUIPMENT_FILTER_OPTIONS,
   MUSCLE_GROUP_FILTER_OPTIONS,
   DIFFICULTY_FILTER_OPTIONS,
@@ -177,6 +178,8 @@ interface MovementOption {
   category: string;
   equipment?: string;
   muscleGroups?: string[];
+  primaryMuscles?: string[];
+  secondaryMuscles?: string[];
   difficulty?: string;
   thumbnailUrl?: string | null;
   posterUrl?: string | null;
@@ -754,6 +757,8 @@ export default function WorkoutFolderPage({
       category: d.category ?? '',
       equipment: d.equipment ?? undefined,
       muscleGroups: d.muscleGroups ?? undefined,
+      primaryMuscles: d.primaryMuscles ?? undefined,
+      secondaryMuscles: d.secondaryMuscles ?? undefined,
       difficulty: d.difficulty ?? undefined,
       thumbnailUrl: d.thumbnailUrl ?? null,
       posterUrl: d.posterUrl ?? d.thumbnailImageUrl ?? null,
@@ -1662,12 +1667,13 @@ export default function WorkoutFolderPage({
 
   // ── Filtered movements for picker ─────────────────────────────────────────
   const filteredMovements = useMemo((): MovementOption[] => {
-    return filterMovements(availableMovements as any[], {
+    const f = filterMovements(availableMovements as any[], {
       search: movementSearch,
       equipment: pickerEquipmentFilter,
       muscleGroup: pickerMuscleGroupFilter,
       difficulty: pickerDifficultyFilter,
-    }) as MovementOption[];
+    });
+    return rankByPrimaryMuscle(f, pickerMuscleGroupFilter) as MovementOption[];
   }, [availableMovements, movementSearch, pickerEquipmentFilter, pickerMuscleGroupFilter, pickerDifficultyFilter]);
 
   // ── Filtered follow-alongs for picker ─────────────────────────────────────

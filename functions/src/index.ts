@@ -8030,7 +8030,9 @@ export const analyzeMovement = onCall(
 - "category": string — one of: "Upper Body Push", "Upper Body Pull", "Lower Body Push", "Lower Body Pull", "Core", "Cardio", "Mobility"
 - "equipment": string — one of: "Bodyweight", "Dumbbell", "Barbell", "Kettlebell", "Band", "Cable", "Machine", or "" if unclear
 - "difficulty": string — one of: "Beginner", "Intermediate", "Advanced"
-- "muscleGroups": string[] — array from: "Chest", "Back", "Shoulders", "Biceps", "Triceps", "Quads", "Hamstrings", "Glutes", "Calves", "Core", "Full Body"
+- "primaryMuscles": string[] — the 1-3 muscle groups doing the main work (more than 3 only if the movement is truly full-body/dynamic), from: "Chest", "Back", "Shoulders", "Biceps", "Triceps", "Quads", "Hamstrings", "Glutes", "Calves", "Core", "Full Body"
+- "secondaryMuscles": string[] — muscle groups assisting or stabilizing (same allowed values, no overlap with primaryMuscles)
+- "muscleGroups": string[] — the union of primaryMuscles and secondaryMuscles (same allowed values)
 - "description": string — 1-2 sentence coaching cue (form tips, what to focus on)
 - "regression": string — an easier alternative exercise name
 - "progression": string — a harder alternative exercise name
@@ -8094,12 +8096,20 @@ Return ONLY valid JSON, no markdown, no explanation.${context ? `\n\nAdditional 
 
       const analysis = JSON.parse(jsonStr);
 
+      const primaryMuscles: string[] = Array.isArray(analysis.primaryMuscles) ? analysis.primaryMuscles : [];
+      const secondaryMuscles: string[] = (Array.isArray(analysis.secondaryMuscles) ? analysis.secondaryMuscles : [])
+        .filter((m: string) => !primaryMuscles.includes(m));
+      const rawUnion: string[] = Array.isArray(analysis.muscleGroups) ? analysis.muscleGroups : [];
+      const muscleGroups = Array.from(new Set([...primaryMuscles, ...secondaryMuscles, ...rawUnion]));
+
       return {
         name: analysis.name || '',
         category: analysis.category || '',
         equipment: analysis.equipment || '',
         difficulty: analysis.difficulty || '',
-        muscleGroups: Array.isArray(analysis.muscleGroups) ? analysis.muscleGroups : [],
+        primaryMuscles,
+        secondaryMuscles,
+        muscleGroups,
         description: analysis.description || '',
         regression: analysis.regression || '',
         progression: analysis.progression || '',
