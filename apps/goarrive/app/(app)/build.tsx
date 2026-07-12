@@ -65,6 +65,7 @@ import {
   EQUIPMENT_FILTER_OPTIONS,
   MUSCLE_GROUP_FILTER_OPTIONS,
   DIFFICULTY_FILTER_OPTIONS,
+  rankByPrimaryMuscle,
 } from '../../hooks/useMovementFilters';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Reanimated, { useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS } from 'react-native-reanimated';
@@ -1239,10 +1240,13 @@ function BuildScreenInner() {
         list = list.filter(i => i.equipment === movEquipmentFilter);
       }
       if (movMuscleGroupFilter !== 'All') {
+        const target = movMuscleGroupFilter.toLowerCase();
         list = list.filter(i =>
-          (i.muscleGroups as string[] | undefined || []).some(
-            (mg: string) => mg.toLowerCase() === movMuscleGroupFilter.toLowerCase(),
-          ),
+          [
+            ...((i.muscleGroups as string[] | undefined) || []),
+            ...((i as any).primaryMuscles || []),
+            ...((i as any).secondaryMuscles || []),
+          ].some((mg: string) => mg.toLowerCase() === target),
         );
       }
       if (movDifficultyFilter !== 'All') {
@@ -1257,6 +1261,10 @@ function BuildScreenInner() {
       if (a.type !== 'Folder' && b.type === 'Folder') return 1;
       return (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0);
     });
+    // Primary-muscle matches rank first; secondary-only matches sink
+    if (activeType === 'Movements' && movMuscleGroupFilter !== 'All') {
+      list = rankByPrimaryMuscle(list as any[], movMuscleGroupFilter) as typeof list;
+    }
     return list;
   }, [enrichedItems, search, activeType, showArchived, currentFolderId, movEquipmentFilter, movMuscleGroupFilter, movDifficultyFilter]);
 

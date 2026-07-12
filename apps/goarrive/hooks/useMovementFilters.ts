@@ -21,6 +21,8 @@ export interface MovementFilterable {
   category?: string;
   equipment?: string;
   muscleGroups?: string[];
+  primaryMuscles?: string[];
+  secondaryMuscles?: string[];
   difficulty?: string;
   coachId?: string;
   isGlobal?: boolean;
@@ -115,10 +117,13 @@ export function filterMovements(
     list = list.filter((m) => m.equipment === opts.equipment);
   }
   if (opts.muscleGroup && opts.muscleGroup !== 'All') {
+    const target = opts.muscleGroup.toLowerCase();
     list = list.filter((m) =>
-      (m.muscleGroups || []).some(
-        (mg) => mg.toLowerCase() === opts.muscleGroup!.toLowerCase(),
-      ),
+      [
+        ...(m.muscleGroups || []),
+        ...(m.primaryMuscles || []),
+        ...(m.secondaryMuscles || []),
+      ].some((mg) => mg.toLowerCase() === target),
     );
   }
   if (opts.difficulty && opts.difficulty !== 'All') {
@@ -128,6 +133,31 @@ export function filterMovements(
     );
   }
   return list;
+}
+
+/**
+ * Stable-partition a muscle-group-filtered list so primary-muscle matches
+ * rank first and secondary-only matches sink to the bottom. Legacy docs
+ * without primaryMuscles/secondaryMuscles treat muscleGroups as primary.
+ */
+export function rankByPrimaryMuscle<T extends MovementFilterable>(
+  movements: T[],
+  muscleGroup?: string,
+): T[] {
+  if (!muscleGroup || muscleGroup === 'All') return movements;
+  const target = muscleGroup.toLowerCase();
+  const isPrimaryMatch = (m: MovementFilterable) => {
+    const hasNewFields =
+      (m.primaryMuscles?.length ?? 0) > 0 || (m.secondaryMuscles?.length ?? 0) > 0;
+    const primary = hasNewFields ? m.primaryMuscles || [] : m.muscleGroups || [];
+    return primary.some((mg) => mg.toLowerCase() === target);
+  };
+  const primaryFirst: T[] = [];
+  const secondaryOnly: T[] = [];
+  for (const m of movements) {
+    (isPrimaryMatch(m) ? primaryFirst : secondaryOnly).push(m);
+  }
+  return [...primaryFirst, ...secondaryOnly];
 }
 
 /** Sort movements by the given option */
@@ -180,7 +210,7 @@ export function useMovementFilters(movements: MovementFilterable[]) {
       muscleGroup: muscleGroupFilter,
       difficulty: difficultyFilter,
     });
-    return sortMovements(f, sortBy);
+    return rankByPrimaryMuscle(sortMovements(f, sortBy), muscleGroupFilter);
   }, [
     movements,
     searchText,
