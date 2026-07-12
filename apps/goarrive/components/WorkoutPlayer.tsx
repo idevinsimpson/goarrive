@@ -45,6 +45,10 @@ import { useMovementHydrate } from '../hooks/useMovementHydrate';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useWorkoutTTS, unlockAudioPlayback } from '../hooks/useWorkoutTTS';
+import { useHeartRate, HeartRateSessionStats } from '../hooks/useHeartRate';
+import { useAuth } from '../lib/AuthContext';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { setAudioMuted, unlockAudioContext } from '../lib/audioCues';
 import { FB, FH } from '../lib/theme';
 import VoiceAuditPanel from './VoiceAuditPanel';
@@ -89,7 +93,35 @@ interface WorkoutPlayerProps {
   onClose: () => void;
   onComplete: () => void;
   onSwapLog?: (swaps: any[]) => void;
+  onHeartRateSummary?: (stats: HeartRateSessionStats | null) => void;
   isPreview?: boolean;
+}
+
+// ── Heart-rate zone color ───────────────────────────────────────────────────
+// Percent of estimated max HR → zone color. Est max = 220 - age when the
+// member's age is known, else a fixed 190.
+function hrZoneColor(bpm: number, estMaxHR: number): string {
+  const pct = bpm / estMaxHR;
+  if (pct < 0.5) return '#8A95A3';   // grey — very light
+  if (pct < 0.6) return '#5B9BD5';   // blue — light
+  if (pct < 0.7) return '#6EBB7A';   // green — moderate
+  if (pct < 0.85) return '#F5A623';  // orange — hard
+  return '#E05252';                  // red — max effort
+}
+
+function ageFromDateOfBirth(dob: unknown): number | null {
+  if (typeof dob !== 'string' || !dob.trim()) return null;
+  // Accepts MM/DD/YYYY or YYYY-MM-DD.
+  let d: Date | null = null;
+  const us = dob.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const iso = dob.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (us) d = new Date(Number(us[3]), Number(us[1]) - 1, Number(us[2]));
+  else if (iso) d = new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  if (!d || isNaN(d.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  if (now.getMonth() < d.getMonth() || (now.getMonth() === d.getMonth() && now.getDate() < d.getDate())) age--;
+  return age > 0 && age < 120 ? age : null;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -99,6 +131,7 @@ export default function WorkoutPlayer({
   onClose,
   onComplete,
   onSwapLog,
+  onHeartRateSummary,
   isPreview = false,
 }: WorkoutPlayerProps) {
   // ── Hooks ────────────────────────────────────────────────────────────
@@ -159,6 +192,56 @@ export default function WorkoutPlayer({
     closeSwap, swapMovement, getSwapLog,
   } = useMovementSwap(flatMovements, currentIndex, setFlatOverride);
   const [swapReason, setSwapReason] = useState('');
+
+  // ── Live heart rate (Web Bluetooth) ───────────────────────────────────
+  const hr = useHeartRate();
+  const { user, claims } = useAuth();
+  const isMember = !!user && claims?.role === 'member';
+  const [savedHrDeviceName, setSavedHrDeviceName] = useState<string | null>(null);
+  const [hrEnabled, setHrEnabled] = useState(true);
+  const [memberAge, setMemberAge] = useState<number | null>(null);
+
+  // Load the member's saved HR device + preference once per open. Guests
+  // (user null — e.g. /share links) never touch Firestore.
+  useEffect(() => {
+    if (!visible || !hr.supported || !isMember) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'members', user!.uid));
+        if (cancelled || !snap.exists()) return;
+        const data = snap.data();
+        if (typeof data.hrDeviceName === 'string' && data.hrDeviceName) {
+          setSavedHrDeviceName(data.hrDeviceName);
+        }
+        if (data.hrEnabled === false) setHrEnabled(false);
+        setMemberAge(ageFromDateOfBirth(data.dateOfBirth));
+      } catch {
+        // No member doc / no permission — HR still works, just no saved device.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [visible, hr.supported, isMember, user]);
+
+  // After a successful connect, remember the device on the member doc so the
+  // next session offers one-tap reconnect. Best-effort — never blocks the UI.
+  const lastSavedDeviceRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isMember || hr.status !== 'connected' || !hr.deviceName) return;
+    if (lastSavedDeviceRef.current === hr.deviceName) return;
+    lastSavedDeviceRef.current = hr.deviceName;
+    setSavedHrDeviceName(hr.deviceName);
+    updateDoc(doc(db, 'members', user!.uid), {
+      hrDeviceName: hr.deviceName,
+      hrEnabled: true,
+    }).catch(() => {});
+  }, [isMember, hr.status, hr.deviceName, user]);
+
+  const estMaxHR = memberAge != null ? 220 - memberAge : 190;
+  const hrSessionRef = useRef<HeartRateSessionStats | null>(null);
+  hrSessionRef.current = hr.sessionStats;
+  const hrDisconnectRef = useRef(hr.disconnect);
+  hrDisconnectRef.current = hr.disconnect;
 
   // ── 9:16 artboard scaling ─────────────────────────────────────────────
   // The whole player is one composition designed at a fixed BASE_W × BASE_H
@@ -483,8 +566,14 @@ export default function WorkoutPlayer({
       const swaps = getSwapLog();
       if (swaps.length > 0) onSwapLog(swaps);
     }
+    if (onHeartRateSummary) onHeartRateSummary(hrSessionRef.current);
     onComplete();
   };
+
+  // Release the strap when the player closes (component may stay mounted).
+  useEffect(() => {
+    if (!visible) hrDisconnectRef.current();
+  }, [visible]);
 
   // ── Count exercise steps for progress display ─────────────────────
   const exerciseSteps = flatMovements.filter(f => f.stepType === 'exercise');
@@ -991,6 +1080,34 @@ export default function WorkoutPlayer({
 
               {/* Bottom: logo + play button */}
               <View style={st.readyFooter}>
+                {hr.supported && hrEnabled && (
+                  hr.status === 'connected' ? (
+                    <View style={st.hrLinkRow}>
+                      <Icon name="heart" size={14} color="#E05252" />
+                      <Text style={st.hrLinkedText} numberOfLines={1}>
+                        {hr.deviceName}{hr.bpm != null ? ` · ${hr.bpm} bpm` : ' · linked'}
+                      </Text>
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      style={st.hrLinkBtn}
+                      onPress={hr.connect}
+                      disabled={hr.status === 'connecting'}
+                    >
+                      <Icon name="heart" size={14} color="#E05252" />
+                      <Text style={st.hrLinkBtnText} numberOfLines={1}>
+                        {hr.status === 'connecting'
+                          ? 'Connecting...'
+                          : savedHrDeviceName
+                            ? `Reconnect ${savedHrDeviceName}`
+                            : 'Link wearable'}
+                      </Text>
+                    </TouchableOpacity>
+                  )
+                )}
+                {!hr.supported && Platform.OS === 'web' && (
+                  <Text style={st.hrUnsupportedNote}>Heart rate needs Chrome or the app</Text>
+                )}
                 <Image
                   source={require('../assets/logo.png')}
                   style={{ width: 140, height: 46, marginBottom: 12 }}
@@ -1493,6 +1610,14 @@ export default function WorkoutPlayer({
                     />
                   </View>
                 )}
+                {hr.status === 'connected' && hr.bpm != null && (
+                  <View style={[st.hrBadge, { borderColor: hrZoneColor(hr.bpm, estMaxHR) }]} pointerEvents="none">
+                    <Icon name="heart" size={Math.round(fs(12))} color={hrZoneColor(hr.bpm, estMaxHR)} />
+                    <Text style={[st.hrBadgeText, { fontSize: fs(14), color: hrZoneColor(hr.bpm, estMaxHR) }]}>
+                      {hr.bpm}
+                    </Text>
+                  </View>
+                )}
               </View>
             </View>
 
@@ -1521,6 +1646,14 @@ export default function WorkoutPlayer({
               <Text style={st.completeMeta}>
                 {exerciseTotal} movement{exerciseTotal !== 1 ? 's' : ''} finished
               </Text>
+              {hr.sessionStats && (
+                <View style={st.hrSummaryRow}>
+                  <Icon name="heart" size={16} color="#E05252" />
+                  <Text style={st.hrSummaryText}>
+                    Avg {hr.sessionStats.avgHR} bpm · Max {hr.sessionStats.maxHR} bpm
+                  </Text>
+                </View>
+              )}
               <TouchableOpacity style={st.bigStartBtn} onPress={isPreview ? onClose : handleFinish}>
                 <Text style={st.bigStartText}>{isPreview ? 'End Preview' : 'Continue'}</Text>
               </TouchableOpacity>
@@ -1762,6 +1895,43 @@ const st = StyleSheet.create({
   readyPlayBtn: {
     width: 64, height: 64, borderRadius: 32,
     backgroundColor: '#F5A623', justifyContent: 'center', alignItems: 'center',
+  },
+
+  // ── Heart rate ─────────────────────────────────────────────────────
+  hrLinkBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 14, paddingVertical: 8, marginBottom: 10,
+    borderRadius: 20, borderWidth: 1, borderColor: '#1E2A3A',
+    backgroundColor: '#151B28', maxWidth: 280,
+  },
+  hrLinkBtnText: {
+    color: '#F0F4F8', fontSize: 13, fontWeight: '600', fontFamily: FB,
+  },
+  hrLinkRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10,
+    maxWidth: 280,
+  },
+  hrLinkedText: {
+    color: '#8A95A3', fontSize: 13, fontFamily: FB,
+  },
+  hrUnsupportedNote: {
+    color: '#8A95A3', fontSize: 11, fontFamily: FB, marginBottom: 10,
+  },
+  hrBadge: {
+    position: 'absolute', top: 8, right: 8,
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 8, paddingVertical: 4,
+    borderRadius: 14, borderWidth: 1,
+    backgroundColor: 'rgba(14,17,23,0.72)',
+  },
+  hrBadgeText: {
+    fontWeight: '700', fontFamily: FH,
+  },
+  hrSummaryRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4,
+  },
+  hrSummaryText: {
+    color: '#8A95A3', fontSize: 14, fontFamily: FB,
   },
 
   // ── Intro / Outro ──────────────────────────────────────────────────
