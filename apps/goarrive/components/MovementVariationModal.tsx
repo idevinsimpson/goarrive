@@ -185,10 +185,12 @@ export default function MovementVariationModal({
     setCandidates([]);
     try {
       const functions = getFunctions(undefined, 'us-central1');
+      // Server transcodes + trims the source video before responding, which can
+      // exceed the SDK's default 70s callable timeout — match the function's 180s.
       const start = httpsCallable<
         { sourceMovementId: string; instruction: string; outputCount?: number },
         { jobId: string; candidateCount: number }
-      >(functions, 'startMovementVariation');
+      >(functions, 'startMovementVariation', { timeout: 180000 });
       const result = await start({
         sourceMovementId: sourceMovement.id,
         instruction: trimmed,
@@ -232,7 +234,7 @@ export default function MovementVariationModal({
       const finalize = httpsCallable<
         { jobId: string; candidateId: string },
         { videoUrl: string; sourceMovementId: string; sourceMovementName: string; instruction: string; jobId: string }
-      >(functions, 'finalizeMovementVariation');
+      >(functions, 'finalizeMovementVariation', { timeout: 300000 });
       const finalized = await finalize({ jobId, candidateId: candidate.id });
       if (closedRef.current) return;
 
