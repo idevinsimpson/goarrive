@@ -10066,8 +10066,9 @@ async function fetchRunwayTask(apiKey: string, taskId: string): Promise<{
 }
 
 /**
- * Download a video from sourceUrl, transcode to ≤30fps (Runway's limit), upload to Storage,
- * and return a public URL. Cleans up /tmp on both success and failure.
+ * Download a video from sourceUrl, transcode to ≤30fps and trim to ≤29.5s (Runway rejects
+ * assets over 30s), upload to Storage, and return a public URL. Cleans up /tmp on both
+ * success and failure.
  */
 async function transcodeVideoTo30fps(sourceUrl: string, jobId: string, coachId: string): Promise<string> {
   const { execSync } = await import('child_process');
@@ -10087,7 +10088,7 @@ async function transcodeVideoTo30fps(sourceUrl: string, jobId: string, coachId: 
 
     // -loglevel error keeps stderr tiny so the pipe buffer can't deadlock execSync.
     execSync(
-      `ffmpeg -y -loglevel error -i "${inputPath}" -r 30 -vf fps=fps=30 -c:v libx264 -preset fast -crf 23 -movflags +faststart "${outputPath}"`,
+      `ffmpeg -y -loglevel error -i "${inputPath}" -t 29.5 -r 30 -vf fps=fps=30 -c:v libx264 -preset fast -crf 23 -movflags +faststart "${outputPath}"`,
       { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 1024 * 1024 },
     );
 
