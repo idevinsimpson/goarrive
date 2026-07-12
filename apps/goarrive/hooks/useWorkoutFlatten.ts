@@ -103,22 +103,19 @@ export function resolveBlockType(blockType: string | undefined): 'linear' | 'sup
   return 'linear';
 }
 
-export function makeLabel(blockIndex: number, movementIndex: number): string {
+function makeLabel(blockIndex: number, movementIndex: number): string {
   const letter = String.fromCharCode(65 + blockIndex);
   return `${letter}${movementIndex + 1}`;
 }
 
 /**
- * Display-only helper for pre-play previews. Mirrors the flatten reorder
- * (Intro first, Outro last, synthesized intro/outro included) so `bi` feeds
- * makeLabel with the same letters shown during playback, then groups
- * adjacent exercise blocks into visual sections. A Water Break or
- * Transition block splits sections; other special blocks don't.
- * Does not affect playback timing or step ordering.
+ * Display-only helper for pre-play previews. Groups adjacent exercise
+ * blocks into visual sections; a Water Break or Transition block splits
+ * sections. Does not affect playback timing or step ordering.
  */
 export interface PreviewSectionBlock {
   block: any;
-  /** Index in the flatten-ordered block list — pass to makeLabel */
+  /** Index in the flatten-ordered block list */
   bi: number;
 }
 export function buildPreviewSections(workout: any): PreviewSectionBlock[][] {
@@ -147,6 +144,34 @@ export function buildPreviewSections(workout: any): PreviewSectionBlock[][] {
     current.push({ block: b, bi });
   });
   return sections;
+}
+
+const MEANINGFUL_SECTION_TYPES = ['Tabata', 'Interval', 'Timed', 'AMRAP', 'EMOM', 'For Time', 'Cardio'];
+const GENERIC_BLOCK_LABELS = new Set(['', 'circuit', 'strength', 'block', 'exercise', 'work']);
+
+// Single-movement work blocks default to "Tabata" — matches the ready
+// screen's long-standing heuristic and how coaches author tabata-style
+// blocks (real data uses type "Circuit" with one movement per block).
+function sectionDescriptor(block: any): string {
+  if ((block.movements || []).length >= 2) return 'Superset';
+  const t = String(block.type || '').trim();
+  const meaningful = MEANINGFUL_SECTION_TYPES.find((m) => m.toLowerCase() === t.toLowerCase());
+  if (meaningful) return meaningful;
+  const label = String(block.name || block.label || '').trim();
+  if (label && !GENERIC_BLOCK_LABELS.has(label.toLowerCase()) && !/^block\s*\d*$/i.test(label)) {
+    return label;
+  }
+  return 'Tabata';
+}
+
+/** Composite preview-section title, e.g. "Superset + Tabata". */
+export function sectionTitle(section: PreviewSectionBlock[]): string {
+  const descriptors: string[] = [];
+  section.forEach(({ block }) => {
+    const d = sectionDescriptor(block);
+    if (!descriptors.includes(d)) descriptors.push(d);
+  });
+  return descriptors.join(' + ') || 'Workout';
 }
 
 /** Map block type string to StepType */
