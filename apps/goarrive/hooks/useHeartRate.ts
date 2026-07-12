@@ -32,7 +32,7 @@ const BUCKET_SECONDS = 5;
 // ~2h of 5s buckets — keeps the persisted series far under Firestore's 1MB doc cap.
 const MAX_SERIES_POINTS = 1440;
 
-function isWebBluetoothAvailable(): boolean {
+export function isWebBluetoothAvailable(): boolean {
   return (
     Platform.OS === 'web'
     && typeof navigator !== 'undefined'
