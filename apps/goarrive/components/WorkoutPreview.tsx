@@ -30,6 +30,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Icon } from './Icon';
 import { useOfflineVideoCache } from '../hooks/useOfflineVideoCache';
+import { makeLabel, buildPreviewSections } from '../hooks/useWorkoutFlatten';
 import { FB, FH } from '../lib/theme';
 
 interface WorkoutPreviewProps {
@@ -267,41 +268,59 @@ export default function WorkoutPreview({
             </View>
           )}
 
-          {/* Block breakdown */}
+          {/* Block breakdown — grouped into sections split on Water Break / Transition;
+              superset letters (A1/A2…) mirror the flattener so they match playback */}
           <View style={st.section}>
             <Text style={st.sectionTitle}>Block Breakdown</Text>
-            {blocks.map((block: any, bi: number) => (
-              <View key={bi} style={st.blockCard}>
-                <View style={st.blockHeader}>
-                  <Text style={st.blockName}>
-                    {block.name || block.label || `Block ${bi + 1}`}
-                  </Text>
-                  <Text style={st.blockType}>
-                    {block.type || 'Strength'}
-                    {(block.rounds ?? block.sets ?? 1) > 1
-                      ? ` · ${block.rounds ?? block.sets} rounds`
-                      : ''}
-                  </Text>
-                </View>
-                {block.grabEquipmentText ? (
-                  <View style={st.grabEquipmentRow}>
-                    <Icon name="package" size={13} color="#F5A623" />
-                    <Text style={st.grabEquipmentText}>{block.grabEquipmentText}</Text>
-                  </View>
-                ) : null}
-                {(block.movements || [])
-                  .filter((mv: any) => mv.showOnPreview !== false)
-                  .map((mv: any, mi: number) => (
-                  <View key={mi} style={st.movementRow}>
-                    <View style={st.movementDot} />
-                    <Text style={st.movementName}>{mv.name || mv.movementName || 'Movement'}</Text>
-                    <Text style={st.movementMeta}>
-                      {mv.reps
-                        ? `${mv.sets ?? 1}×${mv.reps}`
-                        : `${mv.durationSec ?? mv.duration ?? mv.workSec ?? 40}s`}
-                    </Text>
-                  </View>
-                ))}
+            {buildPreviewSections(workout).map((section, si) => (
+              <View key={si} style={st.sectionGroup}>
+                {section.map(({ block, bi }) => {
+                  const isSuperset = (block.movements || []).length >= 2;
+                  const blockLabel = block.name || block.label || `Block ${bi + 1}`;
+                  return (
+                    <View key={bi} style={st.blockCard}>
+                      <View style={st.blockHeader}>
+                        <View style={st.blockNameRow}>
+                          <Text style={st.blockName}>{blockLabel}</Text>
+                          {isSuperset && !/superset/i.test(String(blockLabel)) && (
+                            <View style={st.supersetTag}>
+                              <Text style={st.supersetTagText}>Superset</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={st.blockType}>
+                          {block.type || 'Strength'}
+                          {(block.rounds ?? block.sets ?? 1) > 1
+                            ? ` · ${block.rounds ?? block.sets} rounds`
+                            : ''}
+                        </Text>
+                      </View>
+                      {block.grabEquipmentText ? (
+                        <View style={st.grabEquipmentRow}>
+                          <Icon name="package" size={13} color="#F5A623" />
+                          <Text style={st.grabEquipmentText}>{block.grabEquipmentText}</Text>
+                        </View>
+                      ) : null}
+                      {(block.movements || [])
+                        .map((mv: any, idx: number) => ({ mv, idx }))
+                        .filter(({ mv }: { mv: any }) => mv.showOnPreview !== false)
+                        .map(({ mv, idx }: { mv: any; idx: number }) => (
+                        <View key={idx} style={st.movementRow}>
+                          <View style={st.movementDot} />
+                          <Text style={st.movementName}>
+                            {isSuperset ? `${makeLabel(bi, idx)} · ` : ''}
+                            {mv.name || mv.movementName || 'Movement'}
+                          </Text>
+                          <Text style={st.movementMeta}>
+                            {mv.reps
+                              ? `${mv.sets ?? 1}×${mv.reps}`
+                              : `${mv.durationSec ?? mv.duration ?? mv.workSec ?? 40}s`}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  );
+                })}
               </View>
             ))}
           </View>
@@ -509,6 +528,14 @@ const st = StyleSheet.create({
     color: '#8A95A3',
     textDecorationLine: 'line-through',
   },
+  sectionGroup: {
+    borderWidth: 1,
+    borderColor: '#232B36',
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    padding: 8,
+    marginBottom: 14,
+  },
   blockCard: {
     backgroundColor: '#111827',
     borderRadius: 12,
@@ -516,6 +543,24 @@ const st = StyleSheet.create({
     borderColor: '#1E2A3A',
     padding: 14,
     marginBottom: 12,
+  },
+  blockNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 1,
+  },
+  supersetTag: {
+    backgroundColor: 'rgba(245,166,35,0.15)',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  supersetTagText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#F5A623',
+    fontFamily: FH,
   },
   blockHeader: {
     flexDirection: 'row',

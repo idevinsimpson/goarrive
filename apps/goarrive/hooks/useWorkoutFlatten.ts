@@ -103,9 +103,50 @@ export function resolveBlockType(blockType: string | undefined): 'linear' | 'sup
   return 'linear';
 }
 
-function makeLabel(blockIndex: number, movementIndex: number): string {
+export function makeLabel(blockIndex: number, movementIndex: number): string {
   const letter = String.fromCharCode(65 + blockIndex);
   return `${letter}${movementIndex + 1}`;
+}
+
+/**
+ * Display-only helper for pre-play previews. Mirrors the flatten reorder
+ * (Intro first, Outro last, synthesized intro/outro included) so `bi` feeds
+ * makeLabel with the same letters shown during playback, then groups
+ * adjacent exercise blocks into visual sections. A Water Break or
+ * Transition block splits sections; other special blocks don't.
+ * Does not affect playback timing or step ordering.
+ */
+export interface PreviewSectionBlock {
+  block: any;
+  /** Index in the flatten-ordered block list — pass to makeLabel */
+  bi: number;
+}
+export function buildPreviewSections(workout: any): PreviewSectionBlock[][] {
+  const rawBlocks = workout?.blocks || [];
+  const introBlocks = rawBlocks.filter((b: any) => (b.type || '') === 'Intro');
+  const outroBlocks = rawBlocks.filter((b: any) => (b.type || '') === 'Outro');
+  const middleBlocks = rawBlocks.filter((b: any) => (b.type || '') !== 'Intro' && (b.type || '') !== 'Outro');
+  if (introBlocks.length === 0 && workout?.introVideoUrl) introBlocks.push({ type: 'Intro' });
+  if (outroBlocks.length === 0 && workout?.outroVideoUrl) outroBlocks.push({ type: 'Outro' });
+  const ordered = [...introBlocks, ...middleBlocks, ...outroBlocks];
+
+  const sections: PreviewSectionBlock[][] = [];
+  let current: PreviewSectionBlock[] | null = null;
+  ordered.forEach((b: any, bi: number) => {
+    const t = b.type || '';
+    if (t === 'Water Break' || t === 'Transition') {
+      current = null;
+      return;
+    }
+    if (['Intro', 'Outro', 'Demo', 'Grab Equipment', 'Follow-Along Video'].includes(t)) return;
+    if ((b.movements || []).length === 0) return;
+    if (!current) {
+      current = [];
+      sections.push(current);
+    }
+    current.push({ block: b, bi });
+  });
+  return sections;
 }
 
 /** Map block type string to StepType */
