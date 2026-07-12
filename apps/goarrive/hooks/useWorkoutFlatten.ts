@@ -68,6 +68,8 @@ export interface FlatMovement {
   voiceUrl?: string;
   /** Prescription voice clip URL — generated per-workout-build when weight/reps are set. Preferred over voiceUrl when present. */
   prescriptionVoiceUrl?: string;
+  /** Primary muscles from the canonical movement doc (merged in by useMovementHydrate — block snapshots don't store muscles). */
+  primaryMuscles?: string[];
 
   // ── Phase 3: Special block fields ───────────────────────────────
   /** What kind of step this is — determines which player screen renders */
