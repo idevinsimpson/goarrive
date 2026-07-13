@@ -31,6 +31,12 @@ service firebase.storage {
       allow read: if true;
       allow write: if false;
     }
+    // Workout intro announcements — publicly readable (generated audio, no
+    // PII; share-link guests play them without auth)
+    match /voice_cache/workouts/{fileName} {
+      allow read: if true;
+      allow write: if false;
+    }
     // Coach voice clones — readable by authenticated users only
     match /voice_cache/coaches/{coachId}/{fileName} {
       allow read: if request.auth != null;
