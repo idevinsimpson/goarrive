@@ -447,6 +447,7 @@ export default function WorkoutFolderPage({
   const [showMusicModal, setShowMusicModal] = useState(false);
   const [musicEnabled, setMusicEnabled] = useState(false);
   const [musicStyle, setMusicStyle] = useState('workout');
+  const [musicVolume, setMusicVolume] = useState(0.35);
   // Intro announcement (spoken welcome) — workout-level fields
   const [showIntroAnnouncement, setShowIntroAnnouncement] = useState(false);
   const [introAnnouncementEnabled, setIntroAnnouncementEnabled] = useState(true);
@@ -754,6 +755,7 @@ export default function WorkoutFolderPage({
         setOutroGifUrl(data.outroGifUrl ?? null);
         setMusicEnabled(data.workoutMusicEnabled ?? false);
         setMusicStyle(data.workoutMusicStyle ?? 'workout');
+        setMusicVolume(typeof data.workoutMusicVolume === 'number' ? data.workoutMusicVolume : 0.35);
         setIntroCrop({
           cropScale: data.introCropScale ?? 1,
           cropTranslateX: data.introCropTranslateX ?? 0,
@@ -1683,9 +1685,11 @@ export default function WorkoutFolderPage({
   const saveWorkoutMusic = useCallback(async (updates: {
     workoutMusicEnabled?: boolean;
     workoutMusicStyle?: string;
+    workoutMusicVolume?: number;
   }) => {
     if (updates.workoutMusicEnabled !== undefined) setMusicEnabled(updates.workoutMusicEnabled);
     if (updates.workoutMusicStyle !== undefined) setMusicStyle(updates.workoutMusicStyle);
+    if (updates.workoutMusicVolume !== undefined) setMusicVolume(updates.workoutMusicVolume);
     try {
       setSaving(true);
       await updateDoc(doc(db, 'workouts', workoutId), {
@@ -3615,6 +3619,31 @@ export default function WorkoutFolderPage({
                 );
               })}
             </View>
+
+            <Text style={st.shareModalSectionLabel}>Music volume</Text>
+            <View style={st.shareModalChipRow}>
+              {MUSIC_VOLUME_OPTIONS.map((opt) => {
+                const active = Math.abs(musicVolume - opt.value) < 0.01;
+                return (
+                  <TouchableOpacity
+                    key={opt.label}
+                    style={[st.shareModalChip, active && st.shareModalChipActive]}
+                    onPress={() => saveWorkoutMusic({ workoutMusicVolume: opt.value })}
+                    disabled={!musicEnabled}
+                  >
+                    <Text
+                      style={[
+                        st.shareModalChipText,
+                        active && st.shareModalChipTextActive,
+                        !musicEnabled && { opacity: 0.4 },
+                      ]}
+                    >
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
         </View>
       </Modal>
@@ -3623,6 +3652,13 @@ export default function WorkoutFolderPage({
 }
 
 // ── Workout Music constants ──────────────────────────────────────────────────
+const MUSIC_VOLUME_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: 0.2, label: 'Quiet' },
+  { value: 0.35, label: 'Soft' },
+  { value: 0.55, label: 'Medium' },
+  { value: 0.8, label: 'Loud' },
+];
+
 const MUSIC_STYLE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'workout', label: 'Workout' },
   { value: 'edm', label: 'EDM' },

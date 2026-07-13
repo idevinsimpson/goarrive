@@ -151,8 +151,11 @@ export default function WorkoutPlayer({
   // gesture (iOS Safari only allows play() from a user gesture); src attaches
   // when the prefetch resolves. Per the e49f0a0 rule, an element is always
   // paused + released before being abandoned so it can never resurrect.
-  const MUSIC_VOLUME = 0.35;
+  const musicVolume =
+    typeof workout?.workoutMusicVolume === 'number' ? workout.workoutMusicVolume : 0.35;
   const musicEnabled = Platform.OS === 'web' && !!workout?.workoutMusicEnabled;
+  // Member can mute music independently of the main workout audio.
+  const [musicMuted, setMusicMuted] = useState(false);
   const musicStyle =
     typeof workout?.workoutMusicStyle === 'string' && workout.workoutMusicStyle
       ? workout.workoutMusicStyle
@@ -199,8 +202,8 @@ export default function WorkoutPlayer({
     if (!musicEnabled || musicElRef.current) return;
     const el: HTMLAudioElement = new (window as any).Audio();
     el.loop = true;
-    el.volume = MUSIC_VOLUME;
-    el.muted = isMuted;
+    el.volume = musicVolume;
+    el.muted = isMuted || musicMuted;
     musicElRef.current = el;
     const attach = (url: string | null) => {
       if (!url || musicElRef.current !== el) return;
@@ -214,7 +217,7 @@ export default function WorkoutPlayer({
       el.play().catch(() => {});
       (musicFetchRef.current || Promise.resolve(null)).then(attach);
     }
-  }, [musicEnabled, isMuted]);
+  }, [musicEnabled, isMuted, musicMuted, musicVolume]);
 
   // Pause/resume with the workout; respect mute; stop on finish/close/unmount.
   useEffect(() => {
@@ -225,8 +228,8 @@ export default function WorkoutPlayer({
     else el.play().catch(() => {});
   }, [isPaused]);
   useEffect(() => {
-    if (musicElRef.current) musicElRef.current.muted = isMuted;
-  }, [isMuted]);
+    if (musicElRef.current) musicElRef.current.muted = isMuted || musicMuted;
+  }, [isMuted, musicMuted]);
   useEffect(() => {
     if (phase === 'complete') stopMusic();
   }, [phase, stopMusic]);
@@ -959,6 +962,14 @@ export default function WorkoutPlayer({
               <Icon name="wifi-off" size={12} color="#F59E0B" />
               <Text style={st.offlineBadgeText}>Offline{queueSize > 0 ? ` (${queueSize})` : ''}</Text>
             </View>
+          )}
+          {musicEnabled && (
+            <TouchableOpacity
+              onPress={() => setMusicMuted(m => !m)}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Icon name="music" size={22} color={musicMuted ? '#F59E0B' : '#8A95A3'} />
+            </TouchableOpacity>
           )}
           <TouchableOpacity
             onPress={() => setIsMuted(m => !m)}
