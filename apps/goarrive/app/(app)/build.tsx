@@ -79,6 +79,16 @@ const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 type BuildType = 'Plans' | 'Movements' | 'Workouts' | 'Follow-Alongs' | 'Playbooks';
 const TYPES: BuildType[] = ['Plans', 'Movements', 'Workouts', 'Follow-Alongs', 'Playbooks'];
 
+// Firestore collection backing each asset type — used by drag-and-drop
+// reparenting so any asset can be dropped into a folder.
+const COLLECTION_BY_TYPE: Record<BuildType, string> = {
+  Plans: 'plans',
+  Movements: 'movements',
+  Workouts: 'workouts',
+  'Follow-Alongs': 'followAlongVideos',
+  Playbooks: 'playbooks',
+};
+
 // ── Grid layout constants ──────────────────────────────────────────────────
 const GRID_PADDING = 16;       // padding on left/right of the grid
 const GRID_GAP = 12;           // gap between cards
@@ -187,11 +197,16 @@ function calcDurationMin(blocks: any[]): number {
   return Math.ceil(totalSec / 60);
 }
 
-// Drop target eligibility: only Folders, Workouts, and Movements accept drops.
-// Plans, Playbooks, and Follow-Alongs are pass-through tiles.
-function isDropTarget(item: { type?: string } | null | undefined): boolean {
-  if (!item) return false;
-  return item.type === 'Folder' || item.type === 'Workouts' || item.type === 'Movements';
+// Drop target eligibility. Folders accept every asset type. Workouts and
+// Movements are drop targets only for a dragged Movement (append-to-workout
+// and combine-into-folder/workout flows are movement-specific).
+function isDropTarget(
+  item: { type?: string } | null | undefined,
+  dragged: { type?: string } | null | undefined,
+): boolean {
+  if (!item || !dragged) return false;
+  if (item.type === 'Folder') return true;
+  return dragged.type === 'Movements' && (item.type === 'Workouts' || item.type === 'Movements');
 }
 
 interface BuildItem {
@@ -745,9 +760,9 @@ function BuildScreenInner() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      // Tray "New Folder" drop: insert the dragged movement into the folder.
-      if (pendingDrop) {
-        await updateDoc(doc(db, 'movements', pendingDrop.id), stripUndefined({
+      // Tray "New Folder" drop: insert the dragged asset into the folder.
+      if (pendingDrop && pendingDrop.type !== 'Folder') {
+        await updateDoc(doc(db, COLLECTION_BY_TYPE[pendingDrop.type], pendingDrop.id), stripUndefined({
           parentId: folderRef.id,
           updatedAt: serverTimestamp(),
         }));
@@ -839,12 +854,13 @@ function BuildScreenInner() {
     tryScroll();
   }, []);
 
-  const dropMovementIntoFolder = useCallback(async (dragged: BuildItem, folderId: string) => {
+  const dropItemIntoFolder = useCallback(async (dragged: BuildItem, folderId: string) => {
+    if (dragged.type === 'Folder') return;
     try {
       // Bump the folder's updatedAt too, so it resorts to the top of the
       // grid where the user is scrolled to see the result.
       const batch = writeBatch(db);
-      batch.update(doc(db, 'movements', dragged.id), stripUndefined({
+      batch.update(doc(db, COLLECTION_BY_TYPE[dragged.type], dragged.id), stripUndefined({
         parentId: folderId,
         updatedAt: serverTimestamp(),
       }));
@@ -873,9 +889,9 @@ function BuildScreenInner() {
     const scrollDelta = scrollOffsetRef.current - offsetAtSnapshotRef.current;
     let found: BuildItem | null = null;
     tileLayoutSnap.current.forEach(({ x, y, w, h, item: candidate }) => {
-      // Only consider tiles that are actual drop targets. Plans / Playbooks /
-      // Follow-Alongs are ignored so their tiles never highlight or accept a drop.
-      if (!isDropTarget(candidate)) return;
+      // Only consider tiles that are actual drop targets for the item
+      // currently being dragged (see isDropTarget).
+      if (!isDropTarget(candidate, _dragItemRef.current)) return;
       const adjY = y - scrollDelta;
       if (ax >= x && ax <= x + w && ay >= adjY && ay <= adjY + h) found = candidate;
     });
@@ -899,7 +915,7 @@ function BuildScreenInner() {
     const tray = findTrayTarget(ax, ay);
     if (tray) {
       if (tray.item) {
-        await dropMovementIntoFolder(dragged, tray.item.id);
+        await dropItemIntoFolder(dragged, tray.item.id);
       } else {
         // Tray "New" target: ask Folder vs Workout, then run the matching flow.
         setTrayDropChooserItem(dragged);
@@ -909,13 +925,13 @@ function BuildScreenInner() {
 
     const target = findTarget(ax, ay);
     if (!target || target.id === dragged.id) return;
-    if (!isDropTarget(target)) return;
+    if (!isDropTarget(target, dragged)) return;
 
-    // No-op when dropping a movement onto the folder it already lives in.
+    // No-op when dropping an item onto the folder it already lives in.
     if (target.type === 'Folder' && target.id === dragged.parentId) return;
 
     if (target.type === 'Folder') {
-      await dropMovementIntoFolder(dragged, target.id);
+      await dropItemIntoFolder(dragged, target.id);
     } else if (target.type === 'Workouts') {
       const blockMov = toBlockMov(dragged);
       const existingBlocks: any[] = Array.isArray(target.blocks) ? target.blocks : [];
@@ -945,7 +961,7 @@ function BuildScreenInner() {
     } else if (target.type === 'Movements') {
       setDropModal({ drag: dragged, target });
     }
-  }, [findTarget, findTrayTarget, dropMovementIntoFolder, scrollListToTop]);
+  }, [findTarget, findTrayTarget, dropItemIntoFolder, scrollListToTop]);
 
   const clearDragState = useCallback(() => {
     _dragItemRef.current = null;
@@ -1536,10 +1552,9 @@ function BuildScreenInner() {
               <Text style={styles.videoNeededText}>Video needed</Text>
             </View>
           )}
-          {/* Drop target highlight ring — only for drop-eligible tiles
-              (Movements, Workouts, Folders). Plans / Playbooks / Follow-Alongs
-              are not drop targets, so no hover ring appears on them. */}
-          {hoveredId === item.id && dragItem && dragItem.id !== item.id && isDropTarget(item) && (
+          {/* Drop target highlight ring — only for tiles that can accept the
+              currently dragged item (see isDropTarget). */}
+          {hoveredId === item.id && dragItem && dragItem.id !== item.id && isDropTarget(item, dragItem) && (
             <View
               style={[StyleSheet.absoluteFill, { borderWidth: 2, borderColor: '#F5A623', borderRadius: 10 }]}
               pointerEvents="none"
@@ -1548,14 +1563,15 @@ function BuildScreenInner() {
         </>
       );
 
-      // Movement tiles: wrap in GestureDetector for long-press drag
-      if (isMovement) {
-        if (!tileRefsMap.current.has(item.id)) {
-          tileRefsMap.current.set(item.id, React.createRef<View>());
-        }
-        const tileRef = tileRefsMap.current.get(item.id)!;
+      // ALL asset tiles (movements, workouts, plans, playbooks, follow-alongs)
+      // are draggable via long-press, and all register refs so drop-target
+      // hit-testing (workouts/movements as targets of a movement drag) works.
+      if (!tileRefsMap.current.has(item.id)) {
+        tileRefsMap.current.set(item.id, React.createRef<View>());
+      }
+      const tileRef = tileRefsMap.current.get(item.id)!;
 
-        const dragGesture = Gesture.Pan()
+      const dragGesture = Gesture.Pan()
           .activateAfterLongPress(600)
           .onStart((e) => {
             ghostX.value = e.absoluteX - cardWidth / 2 - rootOffX.value;
@@ -1580,72 +1596,42 @@ function BuildScreenInner() {
             runOnJS(endDragSession)();
           });
 
-        return (
-          // touchAction: RNGH web defaults to 'none', which blocks touch
-          // scrolling on every tile; 'manipulation' keeps scroll working
-          // before the long-press activates while blocking double-tap zoom.
-          // Once the drag activates, beginDragSession locks page scroll so
-          // Safari can't start a native pan and pointercancel the gesture.
-          // userSelect: web-only — stops the text-selection magnifier from
-          // hijacking the long press.
-          <GestureDetector gesture={dragGesture} touchAction="manipulation" userSelect="none">
-            <View
-              ref={tileRef as any}
-              style={{
-                width: cardWidth,
-                height: cardHeight,
-                marginBottom: GRID_GAP,
-                opacity: dragItem?.id === item.id ? 0.35 : 1,
-              }}
-            >
-              <Pressable
-                style={[StyleSheet.absoluteFill, {
-                  borderRadius: 10,
-                  overflow: 'hidden',
-                  backgroundColor: '#0E1117',
-                }]}
-                onPress={() => setSelectedMovement(item)}
-              >
-                {tileMedia}
-              </Pressable>
-            </View>
-          </GestureDetector>
-        );
-      }
-
-      // Non-movement tiles: workout tiles register refs so they participate in
-      // drop-target hit-testing. Plans / Playbooks / Follow-Alongs still render
-      // as Pressables but findTarget skips them (see isDropTarget).
-      const needsDropRef = isDropTarget(item);
-      if (needsDropRef && !tileRefsMap.current.has(item.id)) {
-        tileRefsMap.current.set(item.id, React.createRef<View>());
-      }
-      const nonMovTileRef = needsDropRef ? tileRefsMap.current.get(item.id) : null;
       return (
-        <View
-          ref={nonMovTileRef as any}
-          style={{
-            width: cardWidth,
-            height: cardHeight,
-            marginBottom: GRID_GAP,
-          }}
-        >
-          <Pressable
-            style={[StyleSheet.absoluteFill, {
-              borderRadius: 10,
-              overflow: 'hidden',
-              backgroundColor: (isWorkoutCard || hasMosaic) ? WORKOUT_CARD_BG : '#0E1117',
-            }]}
-            onPress={() => {
-              if (isPlan) setSelectedPlan(item);
-              else if (isPlaybook) setSelectedPlaybook(item);
-              else if (isFollowAlong) setSelectedFollowAlong(item);
-              else setOpenWorkoutId(item.id);
+        // touchAction: RNGH web defaults to 'none', which blocks touch
+        // scrolling on every tile; 'manipulation' keeps scroll working
+        // before the long-press activates while blocking double-tap zoom.
+        // Once the drag activates, beginDragSession locks page scroll so
+        // Safari can't start a native pan and pointercancel the gesture.
+        // userSelect: web-only — stops the text-selection magnifier from
+        // hijacking the long press.
+        <GestureDetector gesture={dragGesture} touchAction="manipulation" userSelect="none">
+          <View
+            ref={tileRef as any}
+            style={{
+              width: cardWidth,
+              height: cardHeight,
+              marginBottom: GRID_GAP,
+              opacity: dragItem?.id === item.id ? 0.35 : 1,
             }}
           >
-            {tileMedia}
-          </Pressable>
-        </View>
+            <Pressable
+              style={[StyleSheet.absoluteFill, {
+                borderRadius: 10,
+                overflow: 'hidden',
+                backgroundColor: (isWorkoutCard || hasMosaic) ? WORKOUT_CARD_BG : '#0E1117',
+              }]}
+              onPress={() => {
+                if (isMovement) setSelectedMovement(item);
+                else if (isPlan) setSelectedPlan(item);
+                else if (isPlaybook) setSelectedPlaybook(item);
+                else if (isFollowAlong) setSelectedFollowAlong(item);
+                else setOpenWorkoutId(item.id);
+              }}
+            >
+              {tileMedia}
+            </Pressable>
+          </View>
+        </GestureDetector>
       );
     }
 
@@ -2030,6 +2016,7 @@ function BuildScreenInner() {
         visible={isFollowAlongOpen}
         coachId={coachId}
         tenantId={tenantId}
+        parentId={currentFolderId || null}
         onClose={() => setIsFollowAlongOpen(false)}
         onUploaded={(_payload: FollowAlongVideoPayload) => {
           // Sheet writes the followAlongVideos asset doc itself.
@@ -2375,13 +2362,17 @@ function BuildScreenInner() {
               <Icon name="folder" size={22} color="#F5A623" />
               <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>New Folder</Text>
             </Pressable>
-            <Pressable
-              style={[s.plusMenuItem, { backgroundColor: '#1E2A3A', borderRadius: 10, paddingVertical: 14 }]}
-              onPress={createWorkoutFromTrayDrop}
-            >
-              <Icon name="workouts" size={22} color="#60A5FA" />
-              <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>New Workout</Text>
-            </Pressable>
+            {/* New Workout only applies to a dragged movement — other asset
+                types can't become a workout block. */}
+            {trayDropChooserItem?.type === 'Movements' && (
+              <Pressable
+                style={[s.plusMenuItem, { backgroundColor: '#1E2A3A', borderRadius: 10, paddingVertical: 14 }]}
+                onPress={createWorkoutFromTrayDrop}
+              >
+                <Icon name="workouts" size={22} color="#60A5FA" />
+                <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>New Workout</Text>
+              </Pressable>
+            )}
           </View>
         </Pressable>
       </Modal>
