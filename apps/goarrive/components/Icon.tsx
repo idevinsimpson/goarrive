@@ -274,6 +274,13 @@ const ICONS: Record<string, IconDef> = {
     paths: [],
     fill: ['M6 19h4V5H6v14zm8-14v14h4V5h-4z'],
   },
+  'music': {
+    paths: [
+      'M9 18V5l12-2v13',
+      'M6 21a3 3 0 100-6 3 3 0 000 6z',
+      'M18 19a3 3 0 100-6 3 3 0 000 6z',
+    ],
+  },
   'skip-forward': {
     paths: [],
     fill: ['M6 18l8.5-6L6 6v12zm2-8.14L11.03 12 8 14.14V9.86zM16 6h2v12h-2z'],
