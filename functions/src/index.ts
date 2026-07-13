@@ -9820,6 +9820,92 @@ export const resolveShareToken = onRequest(
   },
 );
 
+// ─── submitGuestReflection — guest glow/grow after shared-workout play ───────
+// Unauthenticated guests can't write Firestore directly (rules deny), so this
+// endpoint validates the share token server-side and writes via Admin SDK.
+export const submitGuestReflection = onRequest(
+  { cors: true, region: 'us-central1' },
+  async (req, res) => {
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed.' });
+      return;
+    }
+
+    const body = (req.body || {}) as Record<string, any>;
+    const shareId = body.shareId;
+    if (!shareId || typeof shareId !== 'string' || shareId.length !== 32) {
+      res.status(400).json({ error: 'Invalid share link.' });
+      return;
+    }
+
+    const tokenSnap = await db.collection('shareTokens').doc(shareId).get();
+    if (!tokenSnap.exists) {
+      res.status(404).json({ error: 'This share link is no longer available.' });
+      return;
+    }
+    const tokenData = tokenSnap.data()!;
+    if (tokenData.revokedAt) {
+      res.status(410).json({ error: 'This share link has been revoked.' });
+      return;
+    }
+    const expiresAt = tokenData.expiresAt as admin.firestore.Timestamp | null | undefined;
+    if (expiresAt && expiresAt.toMillis() < Date.now()) {
+      res.status(410).json({ error: 'This share link has expired.' });
+      return;
+    }
+    const visibility: ShareVisibility = normalizeVisibility(tokenData.visibility);
+    if (visibility === 'restricted') {
+      res.status(403).json({ error: 'This workout is no longer shared via link.' });
+      return;
+    }
+    if (visibility === 'anyone_with_link_signin_required') {
+      const authHeader = req.headers.authorization;
+      let ok = false;
+      if (authHeader?.startsWith('Bearer ')) {
+        try {
+          await admin.auth().verifyIdToken(authHeader.slice(7));
+          ok = true;
+        } catch { /* invalid token */ }
+      }
+      if (!ok) {
+        res.status(403).json({ error: 'Sign in required for this link.' });
+        return;
+      }
+    }
+
+    const cleanText = (v: any) =>
+      typeof v === 'string' ? v.trim().slice(0, 500) : '';
+    const cleanRating = (v: any) =>
+      Number.isInteger(v) && v >= 1 && v <= 5 ? v : null;
+    const durationSec =
+      typeof body.durationSec === 'number' && body.durationSec >= 0 && body.durationSec <= 86400
+        ? Math.round(body.durationSec)
+        : null;
+
+    const workoutSnap = await db.collection('workouts').doc(tokenData.workoutId).get();
+    const workoutName = workoutSnap.exists ? (workoutSnap.data()!.name || 'Workout') : 'Workout';
+
+    const docRef = await db.collection('guest_reflections').add({
+      coachId: tokenData.createdBy,
+      workoutId: tokenData.workoutId,
+      workoutName,
+      shareId,
+      journal: {
+        glow: cleanText(body.glow),
+        grow: cleanText(body.grow),
+        energyRating: cleanRating(body.energyRating),
+        moodRating: cleanRating(body.moodRating),
+      },
+      durationSec,
+      source: 'shareLink',
+      reviewStatus: 'pending',
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    res.status(200).json({ ok: true, id: docRef.id });
+  },
+);
+
 // ─── generateEquipmentImage — AI image for grab-equipment phases ─────────────
 // Accepts grabEquipmentText + optional forceRegenerate flag.
 // Extracts equipment keyword via GPT-4o-mini, then:

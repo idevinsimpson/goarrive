@@ -894,6 +894,23 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // ─────────────────────────────────────────────
+    // GUEST REFLECTIONS (glow/grow from share-link guests)
+    // Created by submitGuestReflection Cloud Function (Admin SDK) after
+    // validating the share token. No client writes — guests are
+    // unauthenticated. Sharing coach can read and mark reviewed.
+    // ─────────────────────────────────────────────
+    match /guest_reflections/{reflectionId} {
+      allow read: if isAuthenticated() && (
+        isCoachOrBootstrap(resource.data.coachId)
+        || isPlatformAdmin()
+      );
+      allow update: if (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin())
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['reviewStatus', 'updatedAt']);
+      allow create, delete: if false;
+    }
+
     match /acceptedPlanSnapshots/{snapshotId} {
       // Coaches and admins can read their own snapshots for auditing
       allow read: if isAuthenticated() && (
