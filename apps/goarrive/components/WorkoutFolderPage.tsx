@@ -54,6 +54,8 @@ import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from './Icon';
 import WorkoutPlayer from './WorkoutPlayer';
+import WorkoutIntroAnnouncementModal, { type IntroAnnouncementSaveFields } from './WorkoutIntroAnnouncementModal';
+import { buildDefaultIntroScript } from '../utils/workoutIntroAnnouncement';
 import VideoCropModal, { CropValues } from './VideoCropModal';
 import { FB, FH } from '../lib/theme';
 import PosterThumb from './PosterThumb';
@@ -445,6 +447,10 @@ export default function WorkoutFolderPage({
   const [showMusicModal, setShowMusicModal] = useState(false);
   const [musicEnabled, setMusicEnabled] = useState(false);
   const [musicStyle, setMusicStyle] = useState('workout');
+  // Intro announcement (spoken welcome) — workout-level fields
+  const [showIntroAnnouncement, setShowIntroAnnouncement] = useState(false);
+  const [introAnnouncementEnabled, setIntroAnnouncementEnabled] = useState(true);
+  const [introAnnouncementText, setIntroAnnouncementText] = useState('');
   const [showMoveTo, setShowMoveTo] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -486,6 +492,26 @@ export default function WorkoutFolderPage({
     blocks,
   }), [originalData, workoutId, workoutName, workoutDescription, blocks]);
   const closePreview = useCallback(() => setShowPreview(false), []);
+
+  // ── Intro announcement (spoken welcome) ───────────────────────────────────
+  // Default script mirrors what the player generates for members — same
+  // builder function, muscles sourced from the movement library.
+  const introAnnouncementDefaultScript = useMemo(() => {
+    const musclesByMovementId: Record<string, string[]> = {};
+    for (const m of availableMovements) {
+      if (m.primaryMuscles && m.primaryMuscles.length > 0) musclesByMovementId[m.id] = m.primaryMuscles;
+    }
+    return buildDefaultIntroScript({ name: workoutName, blocks }, musclesByMovementId);
+  }, [availableMovements, workoutName, blocks]);
+
+  const saveIntroAnnouncement = useCallback(async (fields: IntroAnnouncementSaveFields) => {
+    await updateDoc(doc(db, 'workouts', workoutId), {
+      ...fields,
+      updatedAt: serverTimestamp(),
+    });
+    setIntroAnnouncementEnabled(fields.introAnnouncementEnabled);
+    setIntroAnnouncementText(fields.introAnnouncementText);
+  }, [workoutId]);
 
   // ── Dismiss all overlays ─────────────────────────────────────────────────
   const dismissAll = useCallback(() => {
@@ -722,6 +748,8 @@ export default function WorkoutFolderPage({
         setRestDurationSeconds(data.restDurationSeconds ?? 30);
         setIntroVideoUrl(data.introVideoUrl ?? null);
         setIntroGifUrl(data.introGifUrl ?? null);
+        setIntroAnnouncementEnabled(data.introAnnouncementEnabled ?? true);
+        setIntroAnnouncementText(data.introAnnouncementText ?? '');
         setOutroVideoUrl(data.outroVideoUrl ?? null);
         setOutroGifUrl(data.outroGifUrl ?? null);
         setMusicEnabled(data.workoutMusicEnabled ?? false);
@@ -2093,6 +2121,13 @@ export default function WorkoutFolderPage({
               <Icon name="music" size={16} color="#A78BFA" />
               <Text style={st.menuItemText}>Workout Music</Text>
             </Pressable>
+            <Pressable
+              style={st.menuItem}
+              onPress={() => { setShowTitleMenu(false); setShowIntroAnnouncement(true); }}
+            >
+              <Icon name="sparkle" size={16} color="#FBBF24" />
+              <Text style={st.menuItemText}>Intro Announcement</Text>
+            </Pressable>
             <View style={st.menuDivider} />
             <Pressable
               style={st.menuItem}
@@ -3363,6 +3398,17 @@ export default function WorkoutFolderPage({
           isPreview
         />
       )}
+
+      {/* ── Intro Announcement settings ── */}
+      <WorkoutIntroAnnouncementModal
+        visible={showIntroAnnouncement}
+        onClose={() => setShowIntroAnnouncement(false)}
+        workoutId={workoutId}
+        defaultScript={introAnnouncementDefaultScript}
+        enabled={introAnnouncementEnabled}
+        text={introAnnouncementText}
+        onSave={saveIntroAnnouncement}
+      />
 
       {/* ── Delete Workout Confirmation — uses <Modal> portal like description edit ── */}
       <Modal transparent visible={showDeleteConfirm} animationType="fade" onRequestClose={() => setShowDeleteConfirm(false)}>

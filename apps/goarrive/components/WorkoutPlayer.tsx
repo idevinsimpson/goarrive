@@ -32,6 +32,7 @@ import {
   TextInput,
   useWindowDimensions,
   ScrollView,
+  Pressable,
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
 import MovementVideoControls from './MovementVideoControls';
@@ -54,6 +55,11 @@ import { isStagingHost } from '../lib/runtimeEnv';
 import { installVoiceAuditCapture } from '../lib/voiceAuditLog';
 import PosterThumb from './PosterThumb';
 import { isImageUrl } from '../utils/mediaKind';
+import {
+  buildDefaultIntroScript,
+  generateIntroAnnouncementVoice,
+  introAnnouncementHash,
+} from '../utils/workoutIntroAnnouncement';
 
 // Install [VOICE-AUDIT] console capture at module load on staging only so the
 // in-app debug panel can mirror the forensic trace without DevTools. Has zero
@@ -418,6 +424,91 @@ export default function WorkoutPlayer({
     extendControlsTimer();
   }, [handleSkip, extendControlsTimer, stopAllAudio]);
 
+  // ── Intro announcement (spoken welcome before the first movement) ─────
+  // Plays a coach-editable AI-generated TTS welcome when Play is tapped,
+  // BEFORE handleStart() kicks the timer. Skippable via tap. Web-only, like
+  // the rest of the voice pipeline. The audio element is owned by a ref and
+  // is paused + reset + released on finish/skip/unmount so an abandoned
+  // element can never resurrect mid-workout (see commit e49f0a0).
+  const [announcementUrl, setAnnouncementUrl] = useState<string | null>(null);
+  const [announcementActive, setAnnouncementActive] = useState(false);
+  const announcementAudioRef = useRef<HTMLAudioElement | null>(null);
+  const announcementFetchedTextRef = useRef<string | null>(null);
+  const announcementDoneRef = useRef(false);
+
+  const announcementEnabled = workout?.introAnnouncementEnabled !== false;
+  const announcementText = useMemo(() => {
+    if (!announcementEnabled) return '';
+    const coachText = typeof workout?.introAnnouncementText === 'string'
+      ? workout.introAnnouncementText.trim()
+      : '';
+    if (coachText) return coachText;
+    const musclesByMovementId: Record<string, string[]> = {};
+    for (const fm of flatMovements) {
+      if (fm.movementId && Array.isArray(fm.primaryMuscles) && fm.primaryMuscles.length > 0) {
+        musclesByMovementId[fm.movementId] = fm.primaryMuscles;
+      }
+    }
+    return buildDefaultIntroScript(workout, musclesByMovementId);
+  }, [announcementEnabled, workout, flatMovements]);
+
+  // Prefetch the intro MP3 while the ready screen shows so Play never waits
+  // on the TTS round trip. Coach-saved URL is used directly when its hash
+  // still matches the effective script; otherwise generate lazily (Storage
+  // cache makes repeats cheap). Debounced so movement hydration can deliver
+  // primaryMuscles before the default script's hash is locked in. If the
+  // clip isn't ready at Play-tap time, the workout just starts without it.
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    if (!announcementEnabled || !announcementText || phase !== 'ready') return;
+    if (
+      workout?.introAnnouncementVoiceUrl
+      && workout?.introAnnouncementVoiceHash === introAnnouncementHash(announcementText)
+    ) {
+      setAnnouncementUrl(workout.introAnnouncementVoiceUrl);
+      return;
+    }
+    if (announcementFetchedTextRef.current === announcementText) return;
+    const timer = setTimeout(() => {
+      announcementFetchedTextRef.current = announcementText;
+      const requestedText = announcementText;
+      generateIntroAnnouncementVoice(workout?.id || workout?.workoutId || '', requestedText)
+        .then(({ url }) => {
+          // Ignore stale responses from a script that has since changed.
+          if (url && announcementFetchedTextRef.current === requestedText) {
+            setAnnouncementUrl(url);
+          }
+        });
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [announcementEnabled, announcementText, phase, workout]);
+
+  const finishAnnouncement = useCallback(() => {
+    if (announcementDoneRef.current) return;
+    announcementDoneRef.current = true;
+    const el = announcementAudioRef.current;
+    if (el) {
+      try {
+        el.onended = null;
+        el.onerror = null;
+        el.pause();
+        el.currentTime = 0;
+      } catch { /* best-effort */ }
+      announcementAudioRef.current = null;
+    }
+    setAnnouncementActive(false);
+    handleStart();
+  }, [handleStart]);
+
+  // Unmount cleanup — never leave a live element behind.
+  useEffect(() => () => {
+    const el = announcementAudioRef.current;
+    if (el) {
+      try { el.pause(); el.currentTime = 0; } catch { /* best-effort */ }
+      announcementAudioRef.current = null;
+    }
+  }, []);
+
   // iOS Safari autoplay policy: HTMLAudioElement.play() and AudioContext
   // resume are only allowed from inside a user gesture. Every tap that can
   // start audio-producing flows must unlock synchronously — Start is the
@@ -427,8 +518,28 @@ export default function WorkoutPlayer({
     unlockAudioPlayback();
     unlockAudioContext();
     startMusic();
+    // Intro announcement gate: play the welcome clip before the timer starts.
+    // .play() is called synchronously inside this tap gesture so iOS allows it.
+    if (
+      Platform.OS === 'web'
+      && announcementEnabled
+      && announcementUrl
+      && !isMuted
+      && !announcementDoneRef.current
+    ) {
+      try {
+        const el = new window.Audio(announcementUrl);
+        announcementAudioRef.current = el;
+        el.onended = () => finishAnnouncement();
+        el.onerror = () => finishAnnouncement();
+        const p = el.play();
+        if (p && typeof p.catch === 'function') p.catch(() => finishAnnouncement());
+        setAnnouncementActive(true);
+        return;
+      } catch { /* fall through to normal start */ }
+    }
     handleStart();
-  }, [handleStart, startMusic]);
+  }, [handleStart, startMusic, announcementEnabled, announcementUrl, isMuted, finishAnnouncement]);
 
   const handlePauseResumeFromOverlay = useCallback(() => {
     unlockAudioPlayback();
@@ -1039,6 +1150,62 @@ export default function WorkoutPlayer({
             </>
           );
         })()}
+
+        {/* ── INTRO ANNOUNCEMENT — spoken welcome, tap to skip ──── */}
+        {announcementActive && (
+          <Pressable
+            onPress={finishAnnouncement}
+            style={[
+              StyleSheet.absoluteFillObject,
+              {
+                backgroundColor: '#0E1117',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 100,
+                paddingHorizontal: fs(28),
+              },
+            ]}
+          >
+            <Image
+              source={require('../assets/logo.png')}
+              style={{ width: fs(160), height: fs(52), marginBottom: fs(28) }}
+              resizeMode="contain"
+            />
+            <Text
+              style={{
+                color: '#F0F4F8',
+                fontSize: fs(24),
+                fontFamily: FH,
+                fontWeight: '700',
+                textAlign: 'center',
+              }}
+            >
+              {workout?.name || 'Workout'}
+            </Text>
+            <Text
+              style={{
+                color: '#FBBF24',
+                fontSize: fs(14),
+                fontFamily: FB,
+                marginTop: fs(16),
+                textAlign: 'center',
+              }}
+            >
+              Your coach's intro is playing…
+            </Text>
+            <Text
+              style={{
+                color: '#8A95A3',
+                fontSize: fs(12),
+                fontFamily: FB,
+                marginTop: fs(40),
+                textAlign: 'center',
+              }}
+            >
+              Tap anywhere to skip
+            </Text>
+          </Pressable>
+        )}
 
         {/* ── INTRO — Full-screen cinematic welcome ────────────── */}
         {phase === 'intro' && current && (() => {
