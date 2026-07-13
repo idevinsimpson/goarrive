@@ -94,16 +94,27 @@ export default function WorkoutIntroAnnouncementModal({
       return;
     }
     setBusy('preview');
+    // iOS Safari only allows .play() from inside a user gesture. Create and
+    // start the element synchronously in this tap, so it's "unlocked"; then
+    // swap in the real src once the TTS URL arrives.
+    let el: HTMLAudioElement | null = null;
+    try {
+      el = new window.Audio();
+      previewAudioRef.current = el;
+      el.play()?.catch?.(() => { /* empty-src play just unlocks the element */ });
+    } catch { el = null; }
     const { url } = await generateIntroAnnouncementVoice(workoutId, effectiveText);
     setBusy(null);
     if (!url) {
+      stopPreview();
       setError('Could not generate the audio preview. Please try again.');
       return;
     }
+    // A newer tap may have replaced the element while we awaited.
+    if (!el || previewAudioRef.current !== el) return;
     try {
-      const el = new window.Audio(url);
-      previewAudioRef.current = el;
       el.onended = () => { previewAudioRef.current = null; };
+      el.src = url;
       el.play()?.catch?.(() => setError('Could not play the audio preview.'));
     } catch {
       setError('Could not play the audio preview.');
