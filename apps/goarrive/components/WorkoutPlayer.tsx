@@ -46,6 +46,8 @@ import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useWorkoutTTS, unlockAudioPlayback } from '../hooks/useWorkoutTTS';
 import { setAudioMuted, unlockAudioContext } from '../lib/audioCues';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../lib/firebase';
 import { FB, FH } from '../lib/theme';
 import VoiceAuditPanel from './VoiceAuditPanel';
 import { isStagingHost } from '../lib/runtimeEnv';
@@ -136,6 +138,96 @@ export default function WorkoutPlayer({
   // <Video> elements are always `isMuted` so video has no audio layer to gate.
   const [isMuted, setIsMuted] = useState(false);
   useEffect(() => { setAudioMuted(isMuted); }, [isMuted]);
+
+  // ── Workout background music (Mubert) ─────────────────────────────────
+  // Coach-enabled looped track played softly under coach audio/TTS. Web-only
+  // (HTMLAudioElement). The element is created + primed inside the Play tap
+  // gesture (iOS Safari only allows play() from a user gesture); src attaches
+  // when the prefetch resolves. Per the e49f0a0 rule, an element is always
+  // paused + released before being abandoned so it can never resurrect.
+  const MUSIC_VOLUME = 0.35;
+  const musicEnabled = Platform.OS === 'web' && !!workout?.workoutMusicEnabled;
+  const musicStyle =
+    typeof workout?.workoutMusicStyle === 'string' && workout.workoutMusicStyle
+      ? workout.workoutMusicStyle
+      : 'workout';
+  const musicElRef = useRef<HTMLAudioElement | null>(null);
+  const musicUrlRef = useRef<string | null>(null);
+  const musicFetchRef = useRef<Promise<string | null> | null>(null);
+  const musicPausedRef = useRef(false);
+
+  // Prefetch the track URL during the ready screen so Play starts instantly.
+  useEffect(() => {
+    if (!musicEnabled || phase !== 'ready' || musicFetchRef.current) return;
+    const getWorkoutMusic = httpsCallable<
+      { style: string; duration: number },
+      { url: string }
+    >(functions, 'getWorkoutMusic');
+    musicFetchRef.current = getWorkoutMusic({ style: musicStyle, duration: 300 })
+      .then((res) => {
+        musicUrlRef.current = res.data?.url ?? null;
+        return musicUrlRef.current;
+      })
+      .catch((err: any) => {
+        console.warn('[MUSIC] prefetch failed:', err?.message ?? err);
+        return null;
+      });
+  }, [musicEnabled, musicStyle, phase]);
+
+  const stopMusic = useCallback(() => {
+    const el = musicElRef.current;
+    musicElRef.current = null;
+    if (!el) return;
+    // Pause BEFORE releasing — abandoning a still-loading element without
+    // pausing lets it start playing on its own once data arrives (e49f0a0).
+    try {
+      el.pause();
+      el.currentTime = 0;
+      el.removeAttribute('src');
+      el.load();
+    } catch {}
+  }, []);
+
+  // Must run synchronously inside the Play tap gesture.
+  const startMusic = useCallback(() => {
+    if (!musicEnabled || musicElRef.current) return;
+    const el: HTMLAudioElement = new (window as any).Audio();
+    el.loop = true;
+    el.volume = MUSIC_VOLUME;
+    el.muted = isMuted;
+    musicElRef.current = el;
+    const attach = (url: string | null) => {
+      if (!url || musicElRef.current !== el) return;
+      el.src = url;
+      if (!musicPausedRef.current) el.play().catch(() => {});
+    };
+    if (musicUrlRef.current) {
+      attach(musicUrlRef.current);
+    } else {
+      // Prime inside the gesture so the later src-attach play() is allowed.
+      el.play().catch(() => {});
+      (musicFetchRef.current || Promise.resolve(null)).then(attach);
+    }
+  }, [musicEnabled, isMuted]);
+
+  // Pause/resume with the workout; respect mute; stop on finish/close/unmount.
+  useEffect(() => {
+    musicPausedRef.current = isPaused;
+    const el = musicElRef.current;
+    if (!el || !el.src) return;
+    if (isPaused) el.pause();
+    else el.play().catch(() => {});
+  }, [isPaused]);
+  useEffect(() => {
+    if (musicElRef.current) musicElRef.current.muted = isMuted;
+  }, [isMuted]);
+  useEffect(() => {
+    if (phase === 'complete') stopMusic();
+  }, [phase, stopMusic]);
+  useEffect(() => {
+    if (!visible) stopMusic();
+  }, [visible, stopMusic]);
+  useEffect(() => () => stopMusic(), [stopMusic]);
 
   // ── Voice coaching ────────────────────────────────────
   const { stopAllAudio } = useWorkoutTTS({
@@ -334,8 +426,9 @@ export default function WorkoutPlayer({
   const handleStartWithUnlock = useCallback(() => {
     unlockAudioPlayback();
     unlockAudioContext();
+    startMusic();
     handleStart();
-  }, [handleStart]);
+  }, [handleStart, startMusic]);
 
   const handlePauseResumeFromOverlay = useCallback(() => {
     unlockAudioPlayback();

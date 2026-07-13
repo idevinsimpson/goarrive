@@ -27,6 +27,7 @@ import {
   TouchableOpacity,
   Alert,
   Share,
+  Switch,
 } from 'react-native';
 import ModalSheet from './ModalSheet';
 import {
@@ -441,6 +442,9 @@ export default function WorkoutFolderPage({
   const [showDescriptionEdit, setShowDescriptionEdit] = useState(false);
   const [restDurationSeconds, setRestDurationSeconds] = useState(30);
   const [showIntroOutroPage, setShowIntroOutroPage] = useState(false);
+  const [showMusicModal, setShowMusicModal] = useState(false);
+  const [musicEnabled, setMusicEnabled] = useState(false);
+  const [musicStyle, setMusicStyle] = useState('workout');
   const [showMoveTo, setShowMoveTo] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -720,6 +724,8 @@ export default function WorkoutFolderPage({
         setIntroGifUrl(data.introGifUrl ?? null);
         setOutroVideoUrl(data.outroVideoUrl ?? null);
         setOutroGifUrl(data.outroGifUrl ?? null);
+        setMusicEnabled(data.workoutMusicEnabled ?? false);
+        setMusicStyle(data.workoutMusicStyle ?? 'workout');
         setIntroCrop({
           cropScale: data.introCropScale ?? 1,
           cropTranslateX: data.introCropTranslateX ?? 0,
@@ -1645,6 +1651,26 @@ export default function WorkoutFolderPage({
     }
   }, [workoutId]);
 
+  // ── Workout music save ───────────────────────────────────────────────────
+  const saveWorkoutMusic = useCallback(async (updates: {
+    workoutMusicEnabled?: boolean;
+    workoutMusicStyle?: string;
+  }) => {
+    if (updates.workoutMusicEnabled !== undefined) setMusicEnabled(updates.workoutMusicEnabled);
+    if (updates.workoutMusicStyle !== undefined) setMusicStyle(updates.workoutMusicStyle);
+    try {
+      setSaving(true);
+      await updateDoc(doc(db, 'workouts', workoutId), {
+        ...updates,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err: any) {
+      console.error('[WorkoutFolder] Save workout music error:', err?.message ?? err);
+    } finally {
+      setSaving(false);
+    }
+  }, [workoutId]);
+
   // ── Crop done handler — saves crop values to Firestore ─────────────────
   const handleCropDone = useCallback(async (crop: CropValues) => {
     if (!cropTarget) return;
@@ -2059,6 +2085,13 @@ export default function WorkoutFolderPage({
             >
               <Icon name="play" size={16} color="#F472B6" />
               <Text style={st.menuItemText}>Edit Intro / Outro</Text>
+            </Pressable>
+            <Pressable
+              style={st.menuItem}
+              onPress={() => { setShowTitleMenu(false); setShowMusicModal(true); }}
+            >
+              <Icon name="music" size={16} color="#A78BFA" />
+              <Text style={st.menuItemText}>Workout Music</Text>
             </Pressable>
             <View style={st.menuDivider} />
             <Pressable
@@ -3480,9 +3513,78 @@ export default function WorkoutFolderPage({
           </View>
         </View>
       </Modal>
+
+      {/* ── Workout Music Modal ─────────────────────────────────────────── */}
+      <Modal
+        visible={showMusicModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMusicModal(false)}
+      >
+        <View style={st.shareModalOverlay}>
+          <View style={st.shareModalCard}>
+            <View style={st.shareModalHeader}>
+              <Text style={st.shareModalTitle}>Workout Music</Text>
+              <TouchableOpacity onPress={() => setShowMusicModal(false)}>
+                <Icon name="x" size={20} color="#8A95A3" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={st.shareModalOptionTitle}>Background music</Text>
+                <Text style={st.shareModalOptionDesc}>
+                  AI-generated music plays softly under coach audio during playback
+                </Text>
+              </View>
+              <Switch
+                value={musicEnabled}
+                onValueChange={(v) => saveWorkoutMusic({ workoutMusicEnabled: v })}
+                trackColor={{ false: '#2A3441', true: '#6EBB7A' }}
+                thumbColor="#F5F7FA"
+              />
+            </View>
+
+            <Text style={st.shareModalSectionLabel}>Music style</Text>
+            <View style={st.shareModalChipRow}>
+              {MUSIC_STYLE_OPTIONS.map((opt) => {
+                const active = musicStyle === opt.value;
+                return (
+                  <TouchableOpacity
+                    key={opt.value}
+                    style={[st.shareModalChip, active && st.shareModalChipActive]}
+                    onPress={() => saveWorkoutMusic({ workoutMusicStyle: opt.value })}
+                    disabled={!musicEnabled}
+                  >
+                    <Text
+                      style={[
+                        st.shareModalChipText,
+                        active && st.shareModalChipTextActive,
+                        !musicEnabled && { opacity: 0.4 },
+                      ]}
+                    >
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
+
+// ── Workout Music constants ──────────────────────────────────────────────────
+const MUSIC_STYLE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'workout', label: 'Workout' },
+  { value: 'edm', label: 'EDM' },
+  { value: 'hiphop', label: 'Hip-Hop' },
+  { value: 'chill', label: 'Chill' },
+  { value: 'rock', label: 'Rock' },
+  { value: 'focus', label: 'Focus' },
+];
 
 // ── Share Settings constants & helpers ──────────────────────────────────────
 const VISIBILITY_OPTIONS: Array<{ value: ShareVisibility; label: string; description: string }> = [
