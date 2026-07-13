@@ -37,6 +37,11 @@ export interface IntroAnnouncementSaveFields {
   introAnnouncementVoiceHash?: string;
 }
 
+// ~50ms of silence — used to user-activate the audio element inside the tap
+// gesture on iOS Safari before the real TTS URL arrives.
+const SILENT_WAV =
+  'data:audio/wav;base64,UklGRuQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
 interface Props {
   visible: boolean;
   onClose: () => void;
@@ -61,6 +66,9 @@ export default function WorkoutIntroAnnouncementModal({
   const [localText, setLocalText] = useState(text);
   const [busy, setBusy] = useState<'preview' | 'save' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // When iOS blocks autoplay after the TTS wait, we hold the ready URL here
+  // and the button becomes "Play preview" — the next tap plays synchronously.
+  const [readyUrl, setReadyUrl] = useState<string | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Re-seed local state each time the modal opens.
@@ -70,6 +78,7 @@ export default function WorkoutIntroAnnouncementModal({
       setLocalText(text);
       setError(null);
       setBusy(null);
+      setReadyUrl(null);
     }
   }, [visible, enabled, text]);
 
@@ -93,15 +102,30 @@ export default function WorkoutIntroAnnouncementModal({
       setError('Audio preview is available on web.');
       return;
     }
+    // Second tap after iOS blocked autoplay: the URL is ready, play it
+    // synchronously inside this gesture — guaranteed to be allowed.
+    if (readyUrl) {
+      const url = readyUrl;
+      setReadyUrl(null);
+      try {
+        const el = new window.Audio(url);
+        previewAudioRef.current = el;
+        el.onended = () => { previewAudioRef.current = null; };
+        el.play()?.catch?.(() => setError('Could not play the audio preview.'));
+      } catch {
+        setError('Could not play the audio preview.');
+      }
+      return;
+    }
     setBusy('preview');
-    // iOS Safari only allows .play() from inside a user gesture. Create and
-    // start the element synchronously in this tap, so it's "unlocked"; then
-    // swap in the real src once the TTS URL arrives.
+    // iOS Safari only allows .play() from inside a user gesture. Prime an
+    // element with a tiny silent clip synchronously in this tap so it's
+    // user-activated, then swap in the real src once the TTS URL arrives.
     let el: HTMLAudioElement | null = null;
     try {
-      el = new window.Audio();
+      el = new window.Audio(SILENT_WAV);
       previewAudioRef.current = el;
-      el.play()?.catch?.(() => { /* empty-src play just unlocks the element */ });
+      el.play()?.catch?.(() => { /* priming only */ });
     } catch { el = null; }
     const { url } = await generateIntroAnnouncementVoice(workoutId, effectiveText);
     setBusy(null);
@@ -111,15 +135,22 @@ export default function WorkoutIntroAnnouncementModal({
       return;
     }
     // A newer tap may have replaced the element while we awaited.
-    if (!el || previewAudioRef.current !== el) return;
+    if (el && previewAudioRef.current !== el) return;
+    const onBlocked = () => {
+      // Autoplay refused — hand the ready clip to the next tap instead.
+      previewAudioRef.current = null;
+      setReadyUrl(url);
+    };
+    if (!el) { onBlocked(); return; }
     try {
       el.onended = () => { previewAudioRef.current = null; };
       el.src = url;
-      el.play()?.catch?.(() => setError('Could not play the audio preview.'));
+      const p = el.play();
+      if (p && typeof p.catch === 'function') p.catch(onBlocked);
     } catch {
-      setError('Could not play the audio preview.');
+      onBlocked();
     }
-  }, [busy, effectiveText, workoutId, stopPreview]);
+  }, [busy, effectiveText, workoutId, stopPreview, readyUrl]);
 
   const handleSave = useCallback(async () => {
     if (busy) return;
@@ -184,7 +215,7 @@ export default function WorkoutIntroAnnouncementModal({
               </View>
               <TextInput
                 value={isCustomText ? localText : ''}
-                onChangeText={setLocalText}
+                onChangeText={(t) => { setLocalText(t); setReadyUrl(null); }}
                 onFocus={() => {
                   // Seed the default so the coach edits it instead of retyping.
                   if (!localText.trim()) setLocalText(defaultScript);
@@ -211,7 +242,11 @@ export default function WorkoutIntroAnnouncementModal({
                   <Icon name="play" size={16} color="#FBBF24" />
                 )}
                 <Text style={st.previewBtnText}>
-                  {busy === 'preview' ? 'Generating…' : 'Preview audio'}
+                  {busy === 'preview'
+                    ? 'Generating…'
+                    : readyUrl
+                      ? 'Tap to play preview'
+                      : 'Preview audio'}
                 </Text>
               </Pressable>
             </>
