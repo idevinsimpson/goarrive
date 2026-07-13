@@ -89,7 +89,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.listPublicCoaches = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = void 0;
+<<<<<<< HEAD
 exports.finalizeMovementVariation = exports.getMovementVariationStatus = exports.startMovementVariation = exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.onCoachFeedbackStatusChanged = exports.onCoachFeedbackCreated = exports.sendWeeklyDigest = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.onCoachCreated = exports.getWorkoutMusic = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = void 0;
+=======
+exports.finalizeMovementVariation = exports.getMovementVariationStatus = exports.startMovementVariation = exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.submitGuestReflection = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.onCoachFeedbackStatusChanged = exports.onCoachFeedbackCreated = exports.sendWeeklyDigest = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.onCoachCreated = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = void 0;
+>>>>>>> origin/feat/guest-glow-grow
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -8768,6 +8772,80 @@ exports.resolveShareToken = (0, https_1.onRequest)({ cors: true, region: 'us-cen
         teaser,
         workout: Object.assign({ id: tokenData.workoutId }, (0, workoutPlayerSanitizer_1.sanitizePlayerWorkout)(workout, movementCanonical)),
     });
+});
+// ─── submitGuestReflection — guest glow/grow after shared-workout play ───────
+// Unauthenticated guests can't write Firestore directly (rules deny), so this
+// endpoint validates the share token server-side and writes via Admin SDK.
+exports.submitGuestReflection = (0, https_1.onRequest)({ cors: true, region: 'us-central1' }, async (req, res) => {
+    if (req.method !== 'POST') {
+        res.status(405).json({ error: 'Method not allowed.' });
+        return;
+    }
+    const body = (req.body || {});
+    const shareId = body.shareId;
+    if (!shareId || typeof shareId !== 'string' || shareId.length !== 32) {
+        res.status(400).json({ error: 'Invalid share link.' });
+        return;
+    }
+    const tokenSnap = await db.collection('shareTokens').doc(shareId).get();
+    if (!tokenSnap.exists) {
+        res.status(404).json({ error: 'This share link is no longer available.' });
+        return;
+    }
+    const tokenData = tokenSnap.data();
+    if (tokenData.revokedAt) {
+        res.status(410).json({ error: 'This share link has been revoked.' });
+        return;
+    }
+    const expiresAt = tokenData.expiresAt;
+    if (expiresAt && expiresAt.toMillis() < Date.now()) {
+        res.status(410).json({ error: 'This share link has expired.' });
+        return;
+    }
+    const visibility = normalizeVisibility(tokenData.visibility);
+    if (visibility === 'restricted') {
+        res.status(403).json({ error: 'This workout is no longer shared via link.' });
+        return;
+    }
+    if (visibility === 'anyone_with_link_signin_required') {
+        const authHeader = req.headers.authorization;
+        let ok = false;
+        if (authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith('Bearer ')) {
+            try {
+                await admin.auth().verifyIdToken(authHeader.slice(7));
+                ok = true;
+            }
+            catch ( /* invalid token */_a) { /* invalid token */ }
+        }
+        if (!ok) {
+            res.status(403).json({ error: 'Sign in required for this link.' });
+            return;
+        }
+    }
+    const cleanText = (v) => typeof v === 'string' ? v.trim().slice(0, 500) : '';
+    const cleanRating = (v) => Number.isInteger(v) && v >= 1 && v <= 5 ? v : null;
+    const durationSec = typeof body.durationSec === 'number' && body.durationSec >= 0 && body.durationSec <= 86400
+        ? Math.round(body.durationSec)
+        : null;
+    const workoutSnap = await db.collection('workouts').doc(tokenData.workoutId).get();
+    const workoutName = workoutSnap.exists ? (workoutSnap.data().name || 'Workout') : 'Workout';
+    const docRef = await db.collection('guest_reflections').add({
+        coachId: tokenData.createdBy,
+        workoutId: tokenData.workoutId,
+        workoutName,
+        shareId,
+        journal: {
+            glow: cleanText(body.glow),
+            grow: cleanText(body.grow),
+            energyRating: cleanRating(body.energyRating),
+            moodRating: cleanRating(body.moodRating),
+        },
+        durationSec,
+        source: 'shareLink',
+        reviewStatus: 'pending',
+        createdAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    res.status(200).json({ ok: true, id: docRef.id });
 });
 // ─── generateEquipmentImage — AI image for grab-equipment phases ─────────────
 // Accepts grabEquipmentText + optional forceRegenerate flag.
