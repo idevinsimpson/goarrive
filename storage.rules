@@ -31,6 +31,11 @@ service firebase.storage {
       allow read: if true;
       allow write: if false;
     }
+    // AI workout background music (Mubert) — publicly readable (generated audio, no PII)
+    match /music_cache/{style}/{fileName} {
+      allow read: if true;
+      allow write: if false;
+    }
     // Coach voice clones — readable by authenticated users only
     match /voice_cache/coaches/{coachId}/{fileName} {
       allow read: if request.auth != null;

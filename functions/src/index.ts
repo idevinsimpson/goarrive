@@ -119,6 +119,10 @@ const twilioFromNumber = defineSecret('TWILIO_FROM_NUMBER');
 const googleClientId = defineSecret('GOOGLE_CLIENT_ID');
 const googleClientSecret = defineSecret('GOOGLE_CLIENT_SECRET');
 
+// ── Mubert Secrets (workout background music) ─────────────────────────────────
+const mubertCompanyId = defineSecret('MUBERT_COMPANY_ID');
+const mubertLicenseToken = defineSecret('MUBERT_LICENSE_TOKEN');
+
 // ── Tier split config (GoArrive share percent) ────────────────────────────────
 // 40% for coaches with < 5 active paying members
 // 35% for coaches with 5–9 active paying members
@@ -9176,6 +9180,265 @@ export const generateVoice = onCall(
     }
 
     return { url: cdnUrl, path, writeback, writebackError, provider: selectedProvider };
+  }
+);
+
+// ─── getWorkoutMusic — AI background music for workout playback (Mubert v3) ──
+// Auth-required callable. Mints per-user Mubert customer credentials via
+// service/customers (cached in Firestore), generates a text-to-music track for
+// the requested style+duration, and caches the MP3 in Firebase Storage at
+// music_cache/<style>/<duration>.mp3. Trial plan allows only 100 tracks total,
+// so an existing style+duration combo is NEVER regenerated — Storage is the
+// source of truth, and a Firestore lock (musicCache/{style_duration}) prevents
+// two concurrent callers from both spending a generation on the same combo.
+// ─────────────────────────────────────────────────────────────────────────────
+const MUBERT_API_BASE = 'https://music-api.mubert.com/api/v3';
+
+const MUSIC_STYLES: Record<string, { prompt: string; intensity: 'low' | 'medium' | 'high' }> = {
+  workout: { prompt: 'High energy gym workout music, driving beat, motivating and powerful', intensity: 'high' },
+  edm: { prompt: 'Energetic EDM electronic dance music, festival drops, pumping bass', intensity: 'high' },
+  hiphop: { prompt: 'Upbeat hip-hop beat, confident groove, punchy drums', intensity: 'medium' },
+  chill: { prompt: 'Chill relaxed lo-fi beats, calm steady rhythm, smooth and warm', intensity: 'low' },
+  rock: { prompt: 'Energetic rock music, electric guitars, driving drums, anthemic', intensity: 'high' },
+  focus: { prompt: 'Ambient focus music, minimal steady pulse, deep concentration', intensity: 'low' },
+};
+
+export const getWorkoutMusic = onCall(
+  {
+    region: 'us-central1',
+    secrets: [mubertCompanyId, mubertLicenseToken],
+    timeoutSeconds: 120,
+    invoker: 'public',
+  },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError('unauthenticated', 'Sign in required');
+    }
+    const uid = request.auth.uid;
+
+    const { style, duration } = request.data as { style?: string; duration?: number };
+
+    const styleKey = String(style || '').toLowerCase();
+    const styleConfig = MUSIC_STYLES[styleKey];
+    if (!styleConfig) {
+      throw new HttpsError(
+        'invalid-argument',
+        `style must be one of: ${Object.keys(MUSIC_STYLES).join(', ')}`
+      );
+    }
+
+    // Bucket duration to whole minutes (60s–600s) so near-identical requests
+    // share one cached track instead of burning trial quota per second value.
+    const requestedSecs = typeof duration === 'number' && isFinite(duration) ? duration : 300;
+    const durationSecs = Math.min(600, Math.max(60, Math.round(requestedSecs / 60) * 60));
+
+    const path = `music_cache/${styleKey}/${durationSecs}.mp3`;
+    const bucket = admin.storage().bucket();
+    const file = bucket.file(path);
+    const cdnUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media`;
+
+    // ── Layer 0: Storage cache hit — never regenerate an existing combo ────
+    try {
+      const [exists] = await file.exists();
+      if (exists) {
+        console.info('[MUSIC] getWorkoutMusic: cache hit', { path, styleKey, durationSecs });
+        return { url: cdnUrl, path, cached: true, style: styleKey, duration: durationSecs };
+      }
+    } catch (err: any) {
+      console.warn('[MUSIC] getWorkoutMusic: cache check failed', {
+        path, message: String(err?.message || err).slice(0, 200),
+      });
+    }
+
+    // ── Layer 1: generation lock — only one caller spends quota per combo ──
+    const lockRef = db.doc(`musicCache/${styleKey}_${durationSecs}`);
+    const LOCK_TTL_MS = 3 * 60 * 1000;
+    const acquiredLock = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(lockRef);
+      if (snap.exists) {
+        const data = snap.data() as { status?: string; createdAt?: number };
+        const fresh = typeof data.createdAt === 'number' && Date.now() - data.createdAt < LOCK_TTL_MS;
+        if (data.status === 'generating' && fresh) return false;
+      }
+      tx.set(lockRef, { status: 'generating', createdAt: Date.now(), uid, path });
+      return true;
+    });
+
+    if (!acquiredLock) {
+      // Another caller is generating this combo — wait for the file to land.
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const [exists] = await file.exists();
+        if (exists) {
+          return { url: cdnUrl, path, cached: true, style: styleKey, duration: durationSecs };
+        }
+      }
+      throw new HttpsError('unavailable', 'music:generation_in_progress', {
+        reason: 'Another request is generating this track. Retry shortly.',
+      });
+    }
+
+    const companyId = mubertCompanyId.value()?.trim();
+    const licenseToken = mubertLicenseToken.value()?.trim();
+    const releaseLock = () => lockRef.delete().catch(() => {});
+
+    if (!companyId || !licenseToken) {
+      await releaseLock();
+      console.error('[MUSIC] getWorkoutMusic: Mubert secrets empty');
+      throw new HttpsError('failed-precondition', 'music:apikey:missing', {
+        reason: 'MUBERT_COMPANY_ID / MUBERT_LICENSE_TOKEN secret is unset or empty',
+      });
+    }
+
+    try {
+      // ── Layer 2: per-user Mubert customer credentials ───────────────────
+      // Cached in Firestore; re-minted when missing or expired. custom_id is
+      // the Firebase uid, so re-minting is idempotent from Mubert's side.
+      const credsRef = db.doc(`mubertCustomers/${uid}`);
+      let customerId: string | null = null;
+      let accessToken: string | null = null;
+      try {
+        const credsSnap = await credsRef.get();
+        if (credsSnap.exists) {
+          const c = credsSnap.data() as {
+            customerId?: string; accessToken?: string; expiredAt?: string;
+          };
+          const stillValid = !c.expiredAt || new Date(c.expiredAt).getTime() > Date.now() + 60_000;
+          if (c.customerId && c.accessToken && stillValid) {
+            customerId = c.customerId;
+            accessToken = c.accessToken;
+          }
+        }
+      } catch {
+        // fall through to mint
+      }
+
+      if (!customerId || !accessToken) {
+        const custResp = await fetch(`${MUBERT_API_BASE}/service/customers`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'company-id': companyId,
+            'license-token': licenseToken,
+          },
+          body: JSON.stringify({ custom_id: uid }),
+        });
+        if (!custResp.ok) {
+          const errBody = (await custResp.text()).slice(0, 500);
+          console.error('[MUSIC] getWorkoutMusic: customer mint FAILED', {
+            status: custResp.status, body: errBody,
+          });
+          throw new HttpsError('internal', `music:customer:${custResp.status}`, {
+            layer: 'customer', status: custResp.status, body: errBody,
+          });
+        }
+        const custJson = (await custResp.json()) as {
+          data?: {
+            id?: string;
+            access?: { customer_id?: string; token?: string; access_token?: string; expired_at?: string };
+          };
+        };
+        customerId = custJson.data?.access?.customer_id || custJson.data?.id || null;
+        accessToken = custJson.data?.access?.token || custJson.data?.access?.access_token || null;
+        if (!customerId || !accessToken) {
+          console.error('[MUSIC] getWorkoutMusic: customer mint — bad response', {
+            body: JSON.stringify(custJson).slice(0, 400),
+          });
+          throw new HttpsError('internal', 'music:customer:bad_response');
+        }
+        await credsRef.set({
+          customerId,
+          accessToken,
+          expiredAt: custJson.data?.access?.expired_at || null,
+          updatedAt: Date.now(),
+        }).catch(() => {});
+      }
+
+      // ── Layer 3: text-to-music generation ───────────────────────────────
+      const genResp = await fetch(`${MUBERT_API_BASE}/public/tracks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'customer-id': customerId,
+          'access-token': accessToken,
+        },
+        body: JSON.stringify({
+          prompt: styleConfig.prompt,
+          duration: durationSecs,
+          bitrate: 128,
+          mode: 'track',
+          intensity: styleConfig.intensity,
+          format: 'mp3',
+        }),
+      });
+      if (!genResp.ok) {
+        const errBody = (await genResp.text()).slice(0, 500);
+        console.error('[MUSIC] getWorkoutMusic: generation FAILED', {
+          status: genResp.status, body: errBody, styleKey, durationSecs,
+        });
+        throw new HttpsError('internal', `music:generate:${genResp.status}`, {
+          layer: 'generate', status: genResp.status, body: errBody,
+        });
+      }
+
+      type MubertTrack = {
+        data?: {
+          id?: string;
+          generations?: Array<{ status?: string; url?: string | null }>;
+        };
+      };
+      const findReadyUrl = (t: MubertTrack): string | null => {
+        const gen = (t.data?.generations || []).find((g) => g.status === 'done' && g.url);
+        return gen?.url || null;
+      };
+
+      const genJson = (await genResp.json()) as MubertTrack;
+      const trackId = genJson.data?.id;
+      let trackUrl = findReadyUrl(genJson);
+
+      // Poll until the generation is done (~10s typical for 60s of audio).
+      if (!trackUrl && trackId) {
+        for (let i = 0; i < 25 && !trackUrl; i++) {
+          await new Promise((r) => setTimeout(r, 3000));
+          const pollResp = await fetch(`${MUBERT_API_BASE}/public/tracks/${trackId}`, {
+            headers: { 'customer-id': customerId, 'access-token': accessToken },
+          });
+          if (!pollResp.ok) continue;
+          trackUrl = findReadyUrl((await pollResp.json()) as MubertTrack);
+        }
+      }
+      if (!trackUrl) {
+        console.error('[MUSIC] getWorkoutMusic: generation timed out', { trackId, styleKey, durationSecs });
+        throw new HttpsError('deadline-exceeded', 'music:generate:timeout', { trackId });
+      }
+
+      // ── Layer 4: download + Storage upload (cache forever) ──────────────
+      const dlResp = await fetch(trackUrl);
+      if (!dlResp.ok) {
+        console.error('[MUSIC] getWorkoutMusic: download FAILED', { status: dlResp.status, trackUrl });
+        throw new HttpsError('internal', `music:download:${dlResp.status}`, {
+          layer: 'download', status: dlResp.status,
+        });
+      }
+      const audioBuffer = Buffer.from(await dlResp.arrayBuffer());
+      await file.save(audioBuffer, { contentType: 'audio/mpeg' });
+
+      await lockRef.set({
+        status: 'ready', url: cdnUrl, path, style: styleKey, duration: durationSecs,
+        trackId: trackId || null, createdAt: Date.now(), uid,
+      }).catch(() => {});
+
+      console.info('[MUSIC] getWorkoutMusic: generated + cached', {
+        path, styleKey, durationSecs, bytes: audioBuffer.length, trackId,
+      });
+      return { url: cdnUrl, path, cached: false, style: styleKey, duration: durationSecs };
+    } catch (err: any) {
+      await releaseLock();
+      if (err instanceof HttpsError) throw err;
+      const detail = String(err?.message || err).slice(0, 300);
+      console.error('[MUSIC] getWorkoutMusic: THREW', { styleKey, durationSecs, detail }, err);
+      throw new HttpsError('internal', 'music:failed', { message: detail });
+    }
   }
 );
 
