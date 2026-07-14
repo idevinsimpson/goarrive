@@ -2064,7 +2064,13 @@ function CoachLaunchScreenInner() {
 
       <ScrollView
         ref={scrollRef}
-        contentContainerStyle={s.scrollContent}
+        contentContainerStyle={[
+          s.scrollContent,
+          // Web tab bar is position:fixed and overlays the scroll content;
+          // its height is 62px + safe-area-inset-bottom (~34px on iPhone),
+          // so the footer actions need clearance beyond the static 100px.
+          { paddingBottom: 140 + insets.bottom },
+        ]}
         showsVerticalScrollIndicator={false}
       >
         {activeModule ? (
