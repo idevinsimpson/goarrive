@@ -453,6 +453,11 @@ function BuildScreenInner() {
   const tileRefsMap = useRef(new Map<string, React.RefObject<View | null>>());
   const tileLayoutSnap = useRef(new Map<string, { x: number; y: number; w: number; h: number; item: BuildItem }>());
   const _dragItemRef = useRef<BuildItem | null>(null);
+  // Web: after a drag release, the browser synthesizes a click on the drag
+  // source, which fires the tile's Pressable onPress (workouts then navigate
+  // away via setOpenWorkoutId, making the drop look broken). Suppress presses
+  // briefly after any real drag ends.
+  const suppressPressUntilRef = useRef(0);
   const rootViewRef = useRef<View>(null);
 
   // ── Drag scroll tracking + edge auto-scroll ────────────────────────────
@@ -1402,6 +1407,9 @@ function BuildScreenInner() {
   // ALL teardown lives here — called from onFinalize, which fires on both
   // normal end and cancel (onEnd never fires when Safari cancels the pointer).
   const endDragSession = useCallback(() => {
+    // Only suppress when a drag actually activated — onFinalize also fires on
+    // plain taps (failed long-press), which must still open the item.
+    if (_dragItemRef.current) suppressPressUntilRef.current = Date.now() + 500;
     stopAutoScroll();
     unlockPageScroll();
     navigation.setOptions({ tabBarStyle: TAB_BAR_STYLE });
@@ -1465,7 +1473,10 @@ function BuildScreenInner() {
                 overflow: 'hidden',
                 backgroundColor: '#1A2332',
               }]}
-              onPress={() => enterFolder(item)}
+              onPress={() => {
+                if (Date.now() < suppressPressUntilRef.current) return;
+                enterFolder(item);
+              }}
             >
               {item.coverThumbs && item.coverThumbs.length > 0 ? (
                 <WorkoutMosaic
@@ -1665,6 +1676,7 @@ function BuildScreenInner() {
                 backgroundColor: (isWorkoutCard || hasMosaic) ? WORKOUT_CARD_BG : '#0E1117',
               }]}
               onPress={() => {
+                if (Date.now() < suppressPressUntilRef.current) return;
                 if (isMovement) setSelectedMovement(item);
                 else if (isPlan) setSelectedPlan(item);
                 else if (isPlaybook) setSelectedPlaybook(item);
