@@ -76,6 +76,19 @@ function candidatePlaybackUrl(c: VariationCandidate): string | null {
   return c.storedVideoUrl || c.videoUrl || null;
 }
 
+function remixModeLabel(mode: 'edit' | 'motion'): string {
+  return mode === 'motion' ? 'Change movement' : 'Edit look';
+}
+
+function formatGeneratedAt(d: Date): string {
+  const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+}
+
 interface StatusResponse {
   jobId: string;
   status: string;
@@ -111,6 +124,11 @@ export default function MovementVariationModal({
   const [remixMode, setRemixMode] = useState<'edit' | 'motion'>('edit');
   const [instruction, setInstruction] = useState('');
   const [jobId, setJobId] = useState<string | null>(null);
+  // Mode + start time of the ACTIVE job (fresh or resumed) — display truth,
+  // independent of the compose-screen toggle state.
+  const [jobRemixMode, setJobRemixMode] = useState<'edit' | 'motion' | null>(null);
+  const [jobCreatedAt, setJobCreatedAt] = useState<Date | null>(null);
+  const [dismissing, setDismissing] = useState(false);
   const [candidates, setCandidates] = useState<VariationCandidate[]>([]);
   const [pendingCandidate, setPendingCandidate] = useState<VariationCandidate | null>(null);
   const [showCropModal, setShowCropModal] = useState(false);
@@ -125,6 +143,9 @@ export default function MovementVariationModal({
     setRemixMode('edit');
     setInstruction('');
     setJobId(null);
+    setJobRemixMode(null);
+    setJobCreatedAt(null);
+    setDismissing(false);
     setCandidates([]);
     setErrorMsg(null);
     setCreatingStatus('');
@@ -188,6 +209,10 @@ export default function MovementVariationModal({
       if (!job) return;
       setJobId(job.id);
       setInstruction(job.instruction || '');
+      const resumedMode: 'edit' | 'motion' = job.remixMode === 'motion' ? 'motion' : 'edit';
+      setRemixMode(resumedMode);
+      setJobRemixMode(resumedMode);
+      setJobCreatedAt(job.createdAt?.toDate?.() ?? (job.createdAt?.seconds ? new Date(job.createdAt.seconds * 1000) : null));
       setCandidates(Array.isArray(job.candidates) ? job.candidates : []);
       if (job.status === 'succeeded') {
         setPhase('choose');
@@ -228,6 +253,8 @@ export default function MovementVariationModal({
     setErrorMsg(null);
     setPhase('generating');
     setCandidates([]);
+    setJobRemixMode(remixMode);
+    setJobCreatedAt(new Date());
     try {
       const functions = getFunctions(undefined, 'us-central1');
       // Server transcodes + trims the source video before responding, which can
@@ -319,6 +346,27 @@ export default function MovementVariationModal({
     setPhase('choose');
   }, []);
 
+  // Discard the current job server-side (clients can't write jobs directly) so
+  // it stops resuming on every modal open and the Build-card badge clears.
+  const handleDismiss = useCallback(async () => {
+    if (!jobId || dismissing) return;
+    setDismissing(true);
+    try {
+      const functions = getFunctions(undefined, 'us-central1');
+      const dismiss = httpsCallable<{ jobId: string }, { jobId: string; status: string }>(
+        functions,
+        'dismissMovementVariation',
+      );
+      await dismiss({ jobId });
+      if (closedRef.current) return;
+      stopPolling();
+      resetState();
+    } catch (err) {
+      console.warn('[MovementVariationModal] Dismiss failed:', err);
+      if (!closedRef.current) setDismissing(false);
+    }
+  }, [jobId, dismissing, stopPolling, resetState]);
+
   if (!sourceMovement) return null;
 
   // Card width: two cards side-by-side with 16px horizontal padding + 8px gap
@@ -380,27 +428,30 @@ export default function MovementVariationModal({
 
           {(phase === 'compose' || phase === 'generating') && (
             <>
-              {/* Remix mode toggle */}
+              {/* Remix mode — two-card choice */}
               <Text style={s.sectionLabel}>Remix type</Text>
               <View style={s.modeRow}>
                 <Pressable
-                  style={[s.modeBtn, remixMode === 'edit' && s.modeBtnActive]}
+                  style={[s.modeCard, remixMode === 'edit' && s.modeCardActive]}
                   onPress={() => phase === 'compose' && setRemixMode('edit')}
                 >
-                  <Text style={[s.modeBtnText, remixMode === 'edit' && s.modeBtnTextActive]}>Edit look</Text>
+                  <View style={s.modeCardHeader}>
+                    <Icon name="sparkle" size={16} color={remixMode === 'edit' ? '#A78BFA' : '#8A95A3'} />
+                    <Text style={[s.modeCardTitle, remixMode === 'edit' && s.modeCardTitleActive]}>Edit look</Text>
+                  </View>
+                  <Text style={s.modeCardDesc}>Keeps the motion, changes appearance or equipment.</Text>
                 </Pressable>
                 <Pressable
-                  style={[s.modeBtn, remixMode === 'motion' && s.modeBtnActive]}
+                  style={[s.modeCard, remixMode === 'motion' && s.modeCardActive]}
                   onPress={() => phase === 'compose' && setRemixMode('motion')}
                 >
-                  <Text style={[s.modeBtnText, remixMode === 'motion' && s.modeBtnTextActive]}>Change movement</Text>
+                  <View style={s.modeCardHeader}>
+                    <Icon name="video" size={16} color={remixMode === 'motion' ? '#A78BFA' : '#8A95A3'} />
+                    <Text style={[s.modeCardTitle, remixMode === 'motion' && s.modeCardTitleActive]}>Change movement</Text>
+                  </View>
+                  <Text style={s.modeCardDesc}>Regenerates the movement from a still frame — more creative drift.</Text>
                 </Pressable>
               </View>
-              <Text style={s.modeHelper}>
-                {remixMode === 'edit'
-                  ? 'Keeps the motion, changes appearance (outfit, setting, equipment).'
-                  : 'Regenerates the motion from a still frame — more creative drift.'}
-              </Text>
 
               {/* Instruction input */}
               <Text style={s.sectionLabel}>What should change?</Text>
@@ -446,10 +497,22 @@ export default function MovementVariationModal({
               </Pressable>
 
               {phase === 'generating' && (
-                <View style={s.progressNote}>
-                  <ActivityIndicator size="small" color="#A78BFA" />
-                  <Text style={s.progressNoteText}>{MSG_PATIENCE}</Text>
-                </View>
+                <>
+                  {jobRemixMode ? (
+                    <View style={s.jobMetaRow}>
+                      <View style={s.jobMetaBadge}>
+                        <Text style={s.jobMetaBadgeText}>{remixModeLabel(jobRemixMode)}</Text>
+                      </View>
+                      {jobCreatedAt ? (
+                        <Text style={s.jobMetaTime}>Started {formatGeneratedAt(jobCreatedAt)}</Text>
+                      ) : null}
+                    </View>
+                  ) : null}
+                  <View style={s.progressNote}>
+                    <ActivityIndicator size="small" color="#A78BFA" />
+                    <Text style={s.progressNoteText}>{MSG_PATIENCE}</Text>
+                  </View>
+                </>
               )}
             </>
           )}
@@ -457,6 +520,16 @@ export default function MovementVariationModal({
           {(phase === 'choose' || phase === 'cropping') && (
             <>
               <Text style={s.sectionLabel}>Choose a version</Text>
+              {jobRemixMode ? (
+                <View style={s.jobMetaRow}>
+                  <View style={s.jobMetaBadge}>
+                    <Text style={s.jobMetaBadgeText}>{remixModeLabel(jobRemixMode)}</Text>
+                  </View>
+                  {jobCreatedAt ? (
+                    <Text style={s.jobMetaTime}>Generated {formatGeneratedAt(jobCreatedAt)}</Text>
+                  ) : null}
+                </View>
+              ) : null}
               <Text style={s.instructionRecap} numberOfLines={2}>"{instruction.trim()}"</Text>
               {succeededCandidates.length === 0 ? (
                 <Text style={s.errorText}>{ERR_GENERATION_FAILED}</Text>
@@ -483,6 +556,14 @@ export default function MovementVariationModal({
               )}
               <Pressable style={s.tryAgainBtn} onPress={() => { setPhase('compose'); setCandidates([]); }}>
                 <Text style={s.tryAgainText}>Try a different instruction</Text>
+              </Pressable>
+              <Pressable style={s.discardBtn} onPress={handleDismiss} disabled={dismissing}>
+                {dismissing ? (
+                  <ActivityIndicator size="small" color="#E05252" />
+                ) : (
+                  <Icon name="trash" size={14} color="#E05252" />
+                )}
+                <Text style={s.discardText}>{dismissing ? 'Discarding…' : 'Discard remix'}</Text>
               </Pressable>
             </>
           )}
@@ -576,34 +657,78 @@ const s = StyleSheet.create({
   modeRow: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 8,
+    marginBottom: 16,
   },
-  modeBtn: {
+  modeCard: {
     flex: 1,
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 12,
     backgroundColor: '#1A2130',
-    borderWidth: 1,
+    borderWidth: 2,
     borderColor: '#2A3347',
   },
-  modeBtnActive: {
-    backgroundColor: 'rgba(167,139,250,0.15)',
+  modeCardActive: {
+    backgroundColor: 'rgba(167,139,250,0.12)',
     borderColor: '#A78BFA',
   },
-  modeBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
+  modeCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  modeCardTitle: {
+    fontSize: 14,
+    fontWeight: '700',
     color: '#B8C0CC',
     fontFamily: FB,
   },
-  modeBtnTextActive: {
+  modeCardTitleActive: {
     color: '#A78BFA',
   },
-  modeHelper: {
+  modeCardDesc: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#8A95A3',
+    fontFamily: FB,
+  },
+  jobMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  jobMetaBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: 'rgba(167,139,250,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(167,139,250,0.4)',
+  },
+  jobMetaBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#A78BFA',
+    fontFamily: FB,
+  },
+  jobMetaTime: {
     fontSize: 12,
     color: '#8A95A3',
-    marginBottom: 16,
+    fontFamily: FB,
+  },
+  discardBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+  },
+  discardText: {
+    fontSize: 13,
+    color: '#E05252',
     fontFamily: FB,
   },
   input: {

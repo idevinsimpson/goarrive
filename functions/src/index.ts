@@ -10546,6 +10546,34 @@ export const finalizeMovementVariation = onCall(
   },
 );
 
+export const dismissMovementVariation = onCall(
+  { region: 'us-central1', timeoutSeconds: 30, maxInstances: 10, invoker: 'public' },
+  async (request) => {
+    const { isAdmin, callerCoachIds } = requireCoachOrAdmin(request);
+
+    const { jobId } = request.data as { jobId?: string };
+    if (!jobId || typeof jobId !== 'string') {
+      throw new HttpsError('invalid-argument', 'jobId is required');
+    }
+
+    const jobRef = db.doc(`movement_variation_jobs/${jobId}`);
+    const jobSnap = await jobRef.get();
+    if (!jobSnap.exists) {
+      throw new HttpsError('not-found', 'Variation job not found');
+    }
+    const job = jobSnap.data() as FirebaseFirestore.DocumentData;
+    assertVariationJobOwnership(job, isAdmin, callerCoachIds);
+
+    if (job.finalizedVideoUrl) {
+      throw new HttpsError('failed-precondition', 'Job is already finalized');
+    }
+
+    await jobRef.update({ status: 'dismissed', updatedAt: Timestamp.now() });
+    console.info('[dismissMovementVariation] Dismissed', { jobId, coachId: job.coachId });
+    return { jobId, status: 'dismissed' };
+  },
+);
+
 /**
  * Download a completed Runway output and persist it to Storage before the
  * ephemeral URL expires. Returns a durable token URL.
