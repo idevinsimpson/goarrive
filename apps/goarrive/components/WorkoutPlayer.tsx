@@ -448,7 +448,15 @@ export default function WorkoutPlayer({
     }
     // Freshly-mounted Videos default to playing; if we're paused right now
     // (e.g. Skip while paused swapped in a new video), pause it immediately.
-    if (isPausedRef.current) el.pauseAsync?.().catch(() => {});
+    if (isPausedRef.current) {
+      el.pauseAsync?.().catch(() => {});
+    } else {
+      // Explicitly start via programmatic play() rather than relying on the
+      // HTML autoPlay attribute. Chrome blocks unmuted video autoPlay on
+      // first-visit sessions with low MEI, but allows programmatic play()
+      // when the page has user activation (set by the "Start" button tap).
+      el.playAsync?.().catch(() => {});
+    }
     if (Platform.OS === 'web') {
       // expo-av's web <video> gets React's playsInline but not the legacy
       // webkit-playsinline attribute older iOS Safari needs for inline play.
