@@ -1568,11 +1568,9 @@ export default function WorkoutFolderPage({
       thumbnailUrl: movement.thumbnailUrl ?? movement.mediaUrl ?? undefined,
       posterUrl: movement.posterUrl ?? undefined,
     };
-    if (movement.swapSides) {
-      next.swapSides = true;
-      next.swapMode = movement.swapMode ?? 'split';
-      next.swapWindowSec = movement.swapWindowSec ?? 5;
-    }
+    next.swapSides = movement.swapSides ?? false;
+    next.swapMode = movement.swapMode ?? 'split';
+    next.swapWindowSec = movement.swapWindowSec ?? 5;
     newBlocks[blockIdx].movements.push(next);
     updateBlocks(newBlocks);
   }, [blocks, updateBlocks]);
