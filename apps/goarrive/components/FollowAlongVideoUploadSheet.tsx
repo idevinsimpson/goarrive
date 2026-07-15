@@ -135,6 +135,8 @@ interface Props {
   visible: boolean;
   coachId: string;
   tenantId?: string;
+  /** Build-folder id the new asset lands in; null/omitted = library root. */
+  parentId?: string | null;
   onClose: () => void;
   onUploaded: (payload: FollowAlongVideoPayload) => void;
 }
@@ -164,6 +166,7 @@ export default function FollowAlongVideoUploadSheet({
   visible,
   coachId,
   tenantId,
+  parentId,
   onClose,
   onUploaded,
 }: Props) {
@@ -384,6 +387,7 @@ export default function FollowAlongVideoUploadSheet({
         cropFrameWidth: crop.cropFrameWidth,
         cropFrameHeight: crop.cropFrameHeight,
         isArchived: false,
+        parentId: parentId ?? null,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -399,7 +403,7 @@ export default function FollowAlongVideoUploadSheet({
       showAlert('Upload Failed', 'Please check your connection and try again.');
       setStage('crop');
     }
-  }, [pickedUri, duration, coachId, tenantId, soundEnabled, onUploaded, onClose]);
+  }, [pickedUri, duration, coachId, tenantId, parentId, soundEnabled, onUploaded, onClose]);
 
   const onCropCancel = useCallback(() => {
     setStage('pick');
