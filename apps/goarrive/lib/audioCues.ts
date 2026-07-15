@@ -39,6 +39,20 @@ function getAudioContext(): AudioContext | null {
   return sharedCtx;
 }
 
+/**
+ * Unlock the shared AudioContext from a user gesture handler.
+ * Must be called in response to a real user interaction (touch/click)
+ * for Safari/iOS to allow audio playback.
+ */
+export function unlockSharedAudioContext(): void {
+  const ctx = getAudioContext();
+  if (ctx) {
+    ctx.resume().then(() => {
+      console.log('[audioCues] SharedAudioContext resumed:', ctx.state);
+    }).catch(() => {});
+  }
+}
+
 /** Returns true if audio context is available and running */
 function isAudioAvailable(): boolean {
   const ctx = getAudioContext();
