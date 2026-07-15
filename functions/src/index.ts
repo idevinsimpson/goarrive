@@ -6640,7 +6640,7 @@ export const googleCalendarCallback = onRequest(
         details: 'Google Calendar OAuth2 connected successfully',
       });
       // Redirect to the app's account page
-      res.redirect('https://goarrive.web.app/account?gcal=connected');
+      res.redirect('https://goarrive.fit/account?gcal=connected');
     } catch (err: any) {
       console.error('[googleCalendarCallback] Error:', err);
       res.status(500).send('Failed to connect Google Calendar: ' + (err.message || 'Unknown error'));
@@ -6693,11 +6693,19 @@ export const syncToGoogleCalendar = onCall(
         continue;
       }
       try {
-        const startDateTime = `${inst.scheduledDate}T${inst.scheduledStartTime || '09:00'}:00`;
-        const durationMin = inst.durationMinutes || 30;
-        const endDate = new Date(startDateTime);
-        endDate.setMinutes(endDate.getMinutes() + durationMin);
-        const endDateTime = endDate.toISOString();
+        const timeStr = (inst.scheduledStartTime as string) || '09:00';
+        const startDateTime = `${inst.scheduledDate}T${timeStr}:00`;
+        const durationMin = (inst.durationMinutes as number) || 30;
+        // Compute end time using local integer arithmetic to avoid UTC timezone shift
+        const [startH, startM] = timeStr.split(':').map(Number);
+        const endTotalMin = startH * 60 + startM + durationMin;
+        const endH = Math.floor(endTotalMin / 60) % 24;
+        const endM = endTotalMin % 60;
+        // Handle sessions that run past midnight
+        const endDateStr = endTotalMin >= 24 * 60
+          ? new Date(new Date(inst.scheduledDate + 'T00:00:00Z').getTime() + 86400000).toISOString().slice(0, 10)
+          : inst.scheduledDate as string;
+        const endDateTime = `${endDateStr}T${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}:00`;
 
         const event = await calendar.events.insert({
           calendarId: 'primary',
@@ -6863,7 +6871,7 @@ export const gcalConflictCallback = onRequest(
         details: `Conflict-check Google account connected: ${email}`,
       });
 
-      res.redirect(`https://goarrive.web.app/account?gcal=conflict_connected&email=${encodeURIComponent(email)}`);
+      res.redirect(`https://goarrive.fit/account?gcal=conflict_connected&email=${encodeURIComponent(email)}`);
     } catch (err: any) {
       console.error('[gcalConflictCallback] Error:', err);
       res.status(500).send('Failed to connect conflict-check Google Calendar: ' + (err.message || 'Unknown error'));
