@@ -22,6 +22,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { Icon } from './Icon';
 import MovementVideoControls from './MovementVideoControls';
 import VideoCropModal, { CropValues } from './VideoCropModal';
@@ -56,7 +58,7 @@ const QUICK_PROMPTS = [
 
 const ERR_NO_VIDEO = 'This movement needs a video before AI can build a variation.';
 const ERR_GENERATION_FAILED = 'Generation failed. Try a simpler instruction or record a short version manually.';
-const MSG_PATIENCE = 'This can take a bit. You can leave this modal open while we build the preview.';
+const MSG_PATIENCE = 'This can take a bit. Feel free to close this — we keep building in the background and the movement card will show "Remix ready" when previews are done.';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -65,7 +67,13 @@ interface VariationCandidate {
   status: 'PENDING' | 'THROTTLED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
   progress: number;
   videoUrl: string | null;
+  /** Durable Storage copy written by the background poller — outlives the Runway URL. */
+  storedVideoUrl?: string | null;
   error: string | null;
+}
+
+function candidatePlaybackUrl(c: VariationCandidate): string | null {
+  return c.storedVideoUrl || c.videoUrl || null;
 }
 
 interface StatusResponse {
@@ -121,19 +129,6 @@ export default function MovementVariationModal({
     setCreatingProgress(0);
   }, []);
 
-  useEffect(() => {
-    if (visible) {
-      closedRef.current = false;
-      resetState();
-    } else {
-      closedRef.current = true;
-      if (pollTimerRef.current) {
-        clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
-    }
-  }, [visible, resetState]);
-
   useEffect(() => () => {
     closedRef.current = true;
     if (pollTimerRef.current) clearInterval(pollTimerRef.current);
@@ -170,6 +165,54 @@ export default function MovementVariationModal({
       console.warn('[MovementVariationModal] Status poll failed:', err);
     }
   }, [stopPolling]);
+
+  // On open, look for the newest unfinalized job for this movement (running or
+  // ready to review) and resume it — closing the modal no longer orphans a job.
+  const resumeExistingJob = useCallback(async () => {
+    if (!sourceMovement || !coachId) return;
+    try {
+      const snap = await getDocs(query(
+        collection(db, 'movement_variation_jobs'),
+        where('coachId', '==', coachId),
+        where('sourceMovementId', '==', sourceMovement.id),
+        where('status', 'in', ['running', 'succeeded']),
+      ));
+      if (closedRef.current) return;
+      const jobs = snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as any) }))
+        .filter((j) => !j.finalizedVideoUrl)
+        .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+      const job = jobs[0];
+      if (!job) return;
+      setJobId(job.id);
+      setInstruction(job.instruction || '');
+      setCandidates(Array.isArray(job.candidates) ? job.candidates : []);
+      if (job.status === 'succeeded') {
+        setPhase('choose');
+      } else {
+        setPhase('generating');
+        stopPolling();
+        pollTimerRef.current = setInterval(() => pollStatus(job.id), POLL_INTERVAL_MS);
+      }
+    } catch (err) {
+      console.warn('[MovementVariationModal] Resume check failed:', err);
+    }
+  }, [sourceMovement, coachId, pollStatus, stopPolling]);
+
+  useEffect(() => {
+    if (visible) {
+      closedRef.current = false;
+      resetState();
+      resumeExistingJob();
+    } else {
+      closedRef.current = true;
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, resetState]);
 
   const handleGenerate = useCallback(async () => {
     if (!sourceMovement) return;
@@ -281,7 +324,7 @@ export default function MovementVariationModal({
 
   const trimmedLen = instruction.trim().length;
   const generateDisabled = trimmedLen === 0 || phase === 'generating' || phase === 'creating';
-  const succeededCandidates = candidates.filter((c) => c.status === 'SUCCEEDED' && c.videoUrl);
+  const succeededCandidates = candidates.filter((c) => c.status === 'SUCCEEDED' && candidatePlaybackUrl(c));
 
   return (
     <Modal
@@ -399,7 +442,7 @@ export default function MovementVariationModal({
                       <Text style={s.candidateLabel}>Option {idx + 1}</Text>
                       <View style={[s.candidateVideoWrap, { height: cardVideoHeight }]}>
                         <MovementVideoControls
-                          uri={c.videoUrl!}
+                          uri={candidatePlaybackUrl(c)!}
                           aspectRatio={4 / 5}
                           autoPlay={true}
                           showControls={false}
@@ -436,10 +479,10 @@ export default function MovementVariationModal({
       </View>
 
       {/* Crop modal — shown after coach selects a variation candidate */}
-      {pendingCandidate?.videoUrl ? (
+      {pendingCandidate && candidatePlaybackUrl(pendingCandidate) ? (
         <VideoCropModal
           visible={showCropModal}
-          videoUri={pendingCandidate.videoUrl}
+          videoUri={candidatePlaybackUrl(pendingCandidate)!}
           onDone={handleCropDone}
           onCancel={handleCropCancel}
         />
