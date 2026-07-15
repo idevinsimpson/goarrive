@@ -421,7 +421,7 @@ service cloud.firestore {
                     || isPlatformAdmin()
                     || (isAuthenticated() && isOwnDoc(resource.data.uid)
                         && request.resource.data.diff(resource.data).affectedKeys()
-                            .hasOnly(['displayName', 'phone', 'photoURL', 'updatedAt']))
+                            .hasOnly(['displayName', 'phone', 'photoURL', 'updatedAt', 'hrDeviceName', 'hrEnabled']))
                     || (isAuthenticated() && request.auth.uid == request.resource.data.coachId
                         && request.resource.data.diff(resource.data).affectedKeys()
                             .hasOnly(['coachId', 'updatedAt']));
