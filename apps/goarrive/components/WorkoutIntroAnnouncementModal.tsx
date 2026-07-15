@@ -184,7 +184,10 @@ export default function WorkoutIntroAnnouncementModal({
   return (
     <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
       <Pressable style={st.backdrop} onPress={onClose}>
-        <View style={st.sheet} onStartShouldSetResponder={() => true}>
+        {/* Pressable + stopPropagation: on web, taps on inner inputs bubble to
+            the backdrop and close the modal; the responder trick doesn't stop
+            DOM click bubbling. */}
+        <Pressable style={st.sheet} onPress={(e) => e.stopPropagation()}>
           <Text style={st.title}>Intro Announcement</Text>
           <Text style={st.subtitle}>
             A spoken welcome plays right after a member taps play — covering the
@@ -266,7 +269,7 @@ export default function WorkoutIntroAnnouncementModal({
               )}
             </Pressable>
           </View>
-        </View>
+        </Pressable>
       </Pressable>
     </Modal>
   );
