@@ -108,6 +108,7 @@ export default function MovementVariationModal({
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [phase, setPhase] = useState<Phase>('compose');
+  const [remixMode, setRemixMode] = useState<'edit' | 'motion'>('edit');
   const [instruction, setInstruction] = useState('');
   const [jobId, setJobId] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<VariationCandidate[]>([]);
@@ -121,6 +122,7 @@ export default function MovementVariationModal({
 
   const resetState = useCallback(() => {
     setPhase('compose');
+    setRemixMode('edit');
     setInstruction('');
     setJobId(null);
     setCandidates([]);
@@ -231,13 +233,14 @@ export default function MovementVariationModal({
       // Server transcodes + trims the source video before responding, which can
       // exceed the SDK's default 70s callable timeout — match the function's 180s.
       const start = httpsCallable<
-        { sourceMovementId: string; instruction: string; outputCount?: number },
+        { sourceMovementId: string; instruction: string; outputCount?: number; remixMode?: 'edit' | 'motion' },
         { jobId: string; candidateCount: number }
       >(functions, 'startMovementVariation', { timeout: 180000 });
       const result = await start({
         sourceMovementId: sourceMovement.id,
         instruction: trimmed,
         outputCount: 2,
+        remixMode,
       });
       if (closedRef.current) return;
       const newJobId = result.data.jobId;
@@ -253,7 +256,7 @@ export default function MovementVariationModal({
       );
       setPhase('compose');
     }
-  }, [sourceMovement, instruction, pollStatus, stopPolling]);
+  }, [sourceMovement, instruction, remixMode, pollStatus, stopPolling]);
 
   // Called after the coach picks a candidate — shows crop modal first.
   const handleSelectCandidate = useCallback((candidate: VariationCandidate) => {
@@ -377,6 +380,28 @@ export default function MovementVariationModal({
 
           {(phase === 'compose' || phase === 'generating') && (
             <>
+              {/* Remix mode toggle */}
+              <Text style={s.sectionLabel}>Remix type</Text>
+              <View style={s.modeRow}>
+                <Pressable
+                  style={[s.modeBtn, remixMode === 'edit' && s.modeBtnActive]}
+                  onPress={() => phase === 'compose' && setRemixMode('edit')}
+                >
+                  <Text style={[s.modeBtnText, remixMode === 'edit' && s.modeBtnTextActive]}>Edit look</Text>
+                </Pressable>
+                <Pressable
+                  style={[s.modeBtn, remixMode === 'motion' && s.modeBtnActive]}
+                  onPress={() => phase === 'compose' && setRemixMode('motion')}
+                >
+                  <Text style={[s.modeBtnText, remixMode === 'motion' && s.modeBtnTextActive]}>Change movement</Text>
+                </Pressable>
+              </View>
+              <Text style={s.modeHelper}>
+                {remixMode === 'edit'
+                  ? 'Keeps the motion, changes appearance (outfit, setting, equipment).'
+                  : 'Regenerates the motion from a still frame — more creative drift.'}
+              </Text>
+
               {/* Instruction input */}
               <Text style={s.sectionLabel}>What should change?</Text>
               <TextInput
@@ -546,6 +571,39 @@ const s = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 8,
+    fontFamily: FB,
+  },
+  modeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  modeBtn: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#1A2130',
+    borderWidth: 1,
+    borderColor: '#2A3347',
+  },
+  modeBtnActive: {
+    backgroundColor: 'rgba(167,139,250,0.15)',
+    borderColor: '#A78BFA',
+  },
+  modeBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#B8C0CC',
+    fontFamily: FB,
+  },
+  modeBtnTextActive: {
+    color: '#A78BFA',
+  },
+  modeHelper: {
+    fontSize: 12,
+    color: '#8A95A3',
+    marginBottom: 16,
     fontFamily: FB,
   },
   input: {
