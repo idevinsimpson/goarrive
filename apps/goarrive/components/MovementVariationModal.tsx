@@ -22,6 +22,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { Icon } from './Icon';
 import MovementVideoControls from './MovementVideoControls';
 import VideoCropModal, { CropValues } from './VideoCropModal';
@@ -56,7 +58,7 @@ const QUICK_PROMPTS = [
 
 const ERR_NO_VIDEO = 'This movement needs a video before AI can build a variation.';
 const ERR_GENERATION_FAILED = 'Generation failed. Try a simpler instruction or record a short version manually.';
-const MSG_PATIENCE = 'This can take a bit. You can leave this modal open while we build the preview.';
+const MSG_PATIENCE = 'This can take a bit. Feel free to close this — we keep building in the background and the movement card will show "Remix ready" when previews are done.';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -65,7 +67,13 @@ interface VariationCandidate {
   status: 'PENDING' | 'THROTTLED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
   progress: number;
   videoUrl: string | null;
+  /** Durable Storage copy written by the background poller — outlives the Runway URL. */
+  storedVideoUrl?: string | null;
   error: string | null;
+}
+
+function candidatePlaybackUrl(c: VariationCandidate): string | null {
+  return c.storedVideoUrl || c.videoUrl || null;
 }
 
 interface StatusResponse {
@@ -100,6 +108,7 @@ export default function MovementVariationModal({
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [phase, setPhase] = useState<Phase>('compose');
+  const [remixMode, setRemixMode] = useState<'edit' | 'motion'>('edit');
   const [instruction, setInstruction] = useState('');
   const [jobId, setJobId] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<VariationCandidate[]>([]);
@@ -113,6 +122,7 @@ export default function MovementVariationModal({
 
   const resetState = useCallback(() => {
     setPhase('compose');
+    setRemixMode('edit');
     setInstruction('');
     setJobId(null);
     setCandidates([]);
@@ -120,19 +130,6 @@ export default function MovementVariationModal({
     setCreatingStatus('');
     setCreatingProgress(0);
   }, []);
-
-  useEffect(() => {
-    if (visible) {
-      closedRef.current = false;
-      resetState();
-    } else {
-      closedRef.current = true;
-      if (pollTimerRef.current) {
-        clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
-    }
-  }, [visible, resetState]);
 
   useEffect(() => () => {
     closedRef.current = true;
@@ -171,6 +168,54 @@ export default function MovementVariationModal({
     }
   }, [stopPolling]);
 
+  // On open, look for the newest unfinalized job for this movement (running or
+  // ready to review) and resume it — closing the modal no longer orphans a job.
+  const resumeExistingJob = useCallback(async () => {
+    if (!sourceMovement || !coachId) return;
+    try {
+      const snap = await getDocs(query(
+        collection(db, 'movement_variation_jobs'),
+        where('coachId', '==', coachId),
+        where('sourceMovementId', '==', sourceMovement.id),
+        where('status', 'in', ['running', 'succeeded']),
+      ));
+      if (closedRef.current) return;
+      const jobs = snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as any) }))
+        .filter((j) => !j.finalizedVideoUrl)
+        .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+      const job = jobs[0];
+      if (!job) return;
+      setJobId(job.id);
+      setInstruction(job.instruction || '');
+      setCandidates(Array.isArray(job.candidates) ? job.candidates : []);
+      if (job.status === 'succeeded') {
+        setPhase('choose');
+      } else {
+        setPhase('generating');
+        stopPolling();
+        pollTimerRef.current = setInterval(() => pollStatus(job.id), POLL_INTERVAL_MS);
+      }
+    } catch (err) {
+      console.warn('[MovementVariationModal] Resume check failed:', err);
+    }
+  }, [sourceMovement, coachId, pollStatus, stopPolling]);
+
+  useEffect(() => {
+    if (visible) {
+      closedRef.current = false;
+      resetState();
+      resumeExistingJob();
+    } else {
+      closedRef.current = true;
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, resetState]);
+
   const handleGenerate = useCallback(async () => {
     if (!sourceMovement) return;
     if (!sourceMovement.videoUrl) {
@@ -185,14 +230,17 @@ export default function MovementVariationModal({
     setCandidates([]);
     try {
       const functions = getFunctions(undefined, 'us-central1');
+      // Server transcodes + trims the source video before responding, which can
+      // exceed the SDK's default 70s callable timeout — match the function's 180s.
       const start = httpsCallable<
-        { sourceMovementId: string; instruction: string; outputCount?: number },
+        { sourceMovementId: string; instruction: string; outputCount?: number; remixMode?: 'edit' | 'motion' },
         { jobId: string; candidateCount: number }
-      >(functions, 'startMovementVariation');
+      >(functions, 'startMovementVariation', { timeout: 180000 });
       const result = await start({
         sourceMovementId: sourceMovement.id,
         instruction: trimmed,
         outputCount: 2,
+        remixMode,
       });
       if (closedRef.current) return;
       const newJobId = result.data.jobId;
@@ -208,7 +256,7 @@ export default function MovementVariationModal({
       );
       setPhase('compose');
     }
-  }, [sourceMovement, instruction, pollStatus, stopPolling]);
+  }, [sourceMovement, instruction, remixMode, pollStatus, stopPolling]);
 
   // Called after the coach picks a candidate — shows crop modal first.
   const handleSelectCandidate = useCallback((candidate: VariationCandidate) => {
@@ -232,7 +280,7 @@ export default function MovementVariationModal({
       const finalize = httpsCallable<
         { jobId: string; candidateId: string },
         { videoUrl: string; sourceMovementId: string; sourceMovementName: string; instruction: string; jobId: string }
-      >(functions, 'finalizeMovementVariation');
+      >(functions, 'finalizeMovementVariation', { timeout: 300000 });
       const finalized = await finalize({ jobId, candidateId: candidate.id });
       if (closedRef.current) return;
 
@@ -279,7 +327,7 @@ export default function MovementVariationModal({
 
   const trimmedLen = instruction.trim().length;
   const generateDisabled = trimmedLen === 0 || phase === 'generating' || phase === 'creating';
-  const succeededCandidates = candidates.filter((c) => c.status === 'SUCCEEDED' && c.videoUrl);
+  const succeededCandidates = candidates.filter((c) => c.status === 'SUCCEEDED' && candidatePlaybackUrl(c));
 
   return (
     <Modal
@@ -332,6 +380,28 @@ export default function MovementVariationModal({
 
           {(phase === 'compose' || phase === 'generating') && (
             <>
+              {/* Remix mode toggle */}
+              <Text style={s.sectionLabel}>Remix type</Text>
+              <View style={s.modeRow}>
+                <Pressable
+                  style={[s.modeBtn, remixMode === 'edit' && s.modeBtnActive]}
+                  onPress={() => phase === 'compose' && setRemixMode('edit')}
+                >
+                  <Text style={[s.modeBtnText, remixMode === 'edit' && s.modeBtnTextActive]}>Edit look</Text>
+                </Pressable>
+                <Pressable
+                  style={[s.modeBtn, remixMode === 'motion' && s.modeBtnActive]}
+                  onPress={() => phase === 'compose' && setRemixMode('motion')}
+                >
+                  <Text style={[s.modeBtnText, remixMode === 'motion' && s.modeBtnTextActive]}>Change movement</Text>
+                </Pressable>
+              </View>
+              <Text style={s.modeHelper}>
+                {remixMode === 'edit'
+                  ? 'Keeps the motion, changes appearance (outfit, setting, equipment).'
+                  : 'Regenerates the motion from a still frame — more creative drift.'}
+              </Text>
+
               {/* Instruction input */}
               <Text style={s.sectionLabel}>What should change?</Text>
               <TextInput
@@ -397,7 +467,7 @@ export default function MovementVariationModal({
                       <Text style={s.candidateLabel}>Option {idx + 1}</Text>
                       <View style={[s.candidateVideoWrap, { height: cardVideoHeight }]}>
                         <MovementVideoControls
-                          uri={c.videoUrl!}
+                          uri={candidatePlaybackUrl(c)!}
                           aspectRatio={4 / 5}
                           autoPlay={true}
                           showControls={false}
@@ -434,10 +504,10 @@ export default function MovementVariationModal({
       </View>
 
       {/* Crop modal — shown after coach selects a variation candidate */}
-      {pendingCandidate?.videoUrl ? (
+      {pendingCandidate && candidatePlaybackUrl(pendingCandidate) ? (
         <VideoCropModal
           visible={showCropModal}
-          videoUri={pendingCandidate.videoUrl}
+          videoUri={candidatePlaybackUrl(pendingCandidate)!}
           onDone={handleCropDone}
           onCancel={handleCropCancel}
         />
@@ -501,6 +571,39 @@ const s = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 8,
+    fontFamily: FB,
+  },
+  modeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  modeBtn: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#1A2130',
+    borderWidth: 1,
+    borderColor: '#2A3347',
+  },
+  modeBtnActive: {
+    backgroundColor: 'rgba(167,139,250,0.15)',
+    borderColor: '#A78BFA',
+  },
+  modeBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#B8C0CC',
+    fontFamily: FB,
+  },
+  modeBtnTextActive: {
+    color: '#A78BFA',
+  },
+  modeHelper: {
+    fontSize: 12,
+    color: '#8A95A3',
+    marginBottom: 16,
     fontFamily: FB,
   },
   input: {

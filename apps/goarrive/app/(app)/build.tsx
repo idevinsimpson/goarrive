@@ -404,6 +404,7 @@ function BuildScreenInner() {
 
   // ── State ──────────────────────────────────────────────────────────────
   const [items, setItems] = useState<BuildItem[]>([]);
+  const [variationBadges, setVariationBadges] = useState<Record<string, 'running' | 'ready'>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [activeType, setActiveType] = useState<BuildType | 'All'>('All');
@@ -703,6 +704,44 @@ function BuildScreenInner() {
       unsubPlaybooks();
       unsubFollowAlongs();
     };
+  }, [coachId]);
+
+  // ── AI remix job badges ────────────────────────────────────────────────
+  // Background poller (pollMovementVariationJobs) keeps these jobs moving even
+  // when the modal is closed; this listener surfaces their state on the cards.
+  useEffect(() => {
+    if (!coachId) return;
+    setVariationBadges({});
+    const jobsQuery = query(
+      collection(db, 'movement_variation_jobs'),
+      where('coachId', '==', coachId),
+      where('status', 'in', ['running', 'succeeded']),
+    );
+    const unsub = onSnapshot(
+      jobsQuery,
+      (snap) => {
+        const newest: Record<string, { state: 'running' | 'ready'; createdAt: number }> = {};
+        snap.docs.forEach((d) => {
+          const job = d.data() as any;
+          const movId = job.sourceMovementId;
+          if (!movId) return;
+          const state: 'running' | 'ready' | null =
+            job.status === 'running' ? 'running'
+            : job.status === 'succeeded' && !job.finalizedVideoUrl ? 'ready'
+            : null;
+          if (!state) return;
+          const createdAt = job.createdAt?.seconds ?? 0;
+          if (!newest[movId] || createdAt > newest[movId].createdAt) {
+            newest[movId] = { state, createdAt };
+          }
+        });
+        const badges: Record<string, 'running' | 'ready'> = {};
+        Object.entries(newest).forEach(([movId, v]) => { badges[movId] = v.state; });
+        setVariationBadges(badges);
+      },
+      (err) => console.error('[Build] Variation jobs listener error:', err),
+    );
+    return unsub;
   }, [coachId]);
 
   // ── Folder helpers ─────────────────────────────────────────────────────
@@ -1550,6 +1589,13 @@ function BuildScreenInner() {
           {isMovement && !item.videoUrl && (
             <View style={styles.videoNeededPill}>
               <Text style={styles.videoNeededText}>Video needed</Text>
+            </View>
+          )}
+          {isMovement && variationBadges[item.id] && (
+            <View style={[styles.remixPill, variationBadges[item.id] === 'ready' && styles.remixPillReady]}>
+              <Text style={[styles.remixPillText, variationBadges[item.id] === 'ready' && styles.remixPillTextReady]}>
+                {variationBadges[item.id] === 'ready' ? 'Remix ready' : 'Remix in progress'}
+              </Text>
             </View>
           )}
           {/* Drop target highlight ring — only for tiles that can accept the
@@ -2486,6 +2532,27 @@ const styles = StyleSheet.create({
     color: '#8A95A3',
     fontWeight: '600',
     fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-SemiBold',
+  },
+  remixPill: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: 'rgba(167,139,250,0.25)',
+  },
+  remixPillReady: {
+    backgroundColor: 'rgba(52,211,153,0.25)',
+  },
+  remixPillText: {
+    fontSize: 8,
+    color: '#A78BFA',
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-SemiBold',
+  },
+  remixPillTextReady: {
+    color: '#34D399',
   },
   placeholderLogo: {
     width: '100%',

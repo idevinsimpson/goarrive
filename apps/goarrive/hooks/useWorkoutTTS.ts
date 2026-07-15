@@ -270,13 +270,17 @@ function blessElement(el: HTMLAudioElement, label: string): void {
       p.then(
         () => {
           blessingInFlight.delete(el);
-          el.muted = false;
+          // Pause BEFORE unmuting. The old order (unmute → pause) let every
+          // blessed cue play audibly for the gap between the two statements —
+          // ~40ms of up to 15 overlapping voices right at the Start tap, and
+          // much longer on a busy main thread (player mount + video loads).
           // If the queue took this element over mid-bless (shouldn't happen —
           // resolvePlayableElement routes around in-flight elements — but
           // belt-and-braces), don't yank its playback.
           if (!queueOwnedElements.has(el)) {
             try { el.pause(); el.currentTime = 0; } catch {}
           }
+          el.muted = false;
           blessedElements.add(el);
           console.info('[VOICE-AUDIT] unlock bless OK', { label });
         },
@@ -675,6 +679,17 @@ export function useWorkoutTTS({
           mediaError: (audio as any).error?.code,
           detail,
         });
+        // Abandoning a still-loading element without pausing it lets it start
+        // playing on its own once data arrives — over the top of whatever the
+        // queue plays next. Seen every workout start: the cold-cache welcome
+        // clip stalls past the watchdog, the queue moves on to the movement
+        // name, then the welcome clip wakes up and both play at once. pause()
+        // also rejects the element's pending play() promise so it can't
+        // resurrect itself later.
+        try {
+          audio.pause();
+          audio.currentTime = 0;
+        } catch {}
       }
       if (currentAudioRef.current === audio) currentAudioRef.current = null;
       queueOwnedElements.delete(audio);
