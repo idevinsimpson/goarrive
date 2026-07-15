@@ -14,6 +14,7 @@ import { useAuth } from '../../lib/AuthContext';
 import { auth } from '../../lib/firebase';
 import { Icon } from '../../components/Icon';
 import WorkoutPlayer from '../../components/WorkoutPlayer';
+import { isWebBluetoothAvailable } from '../../hooks/useHeartRate';
 import { BG, CARD, BORDER, FG, GOLD, MUTED, FH, FB } from '../../lib/theme';
 
 const RESOLVE_URL = 'https://us-central1-goarrive.cloudfunctions.net/resolveShareToken';
@@ -183,6 +184,15 @@ export default function SharePage() {
                 <Icon name="play" size={20} color={BG} />
                 <Text style={styles.playBtnText}>Start Workout</Text>
               </Pressable>
+
+              {Platform.OS === 'web' && !isWebBluetoothAvailable() ? (
+                <View style={styles.hrNoteRow}>
+                  <Icon name="heart" size={12} color={MUTED} />
+                  <Text style={styles.hrNoteText}>
+                    Heart rate tracking is available on Chrome (desktop or Android)
+                  </Text>
+                </View>
+              ) : null}
 
               {!user ? (
                 <Pressable style={styles.signUpBtnSubtle} onPress={handleSignUp}>
@@ -452,6 +462,19 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   guestBannerText: {
+    color: MUTED,
+    fontSize: 12,
+    fontFamily: FB,
+    flexShrink: 1,
+  },
+  hrNoteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 10,
+  },
+  hrNoteText: {
     color: MUTED,
     fontSize: 12,
     fontFamily: FB,
