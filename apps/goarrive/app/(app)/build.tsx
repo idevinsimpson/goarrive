@@ -1075,9 +1075,29 @@ function BuildScreenInner() {
     } catch { return null; }
   }, []);
 
+  // On-device diagnostics for the auto-scroll loop: open /build?dragdebug=1
+  // and a fixed overlay shows live pointer/band/scroll numbers during a drag.
+  // DOM-only (web) so it can't disturb React state mid-gesture.
+  const dragDebugEl = useCallback((): any => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return null;
+    if (!/[?&]dragdebug=1/.test(window.location.search)) return null;
+    let el = document.getElementById('drag-debug-overlay');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'drag-debug-overlay';
+      el.style.cssText =
+        'position:fixed;top:70px;left:4px;right:4px;z-index:99999;pointer-events:none;' +
+        'background:rgba(0,0,0,0.75);color:#0f0;font:10px monospace;padding:4px;white-space:pre;';
+      document.body.appendChild(el);
+    }
+    return el;
+  }, []);
+
   const startAutoScroll = useCallback(() => {
     stopAutoScroll();
+    let frame = 0;
     const step = () => {
+      frame++;
       let win = listWindowRef.current;
       if (!win || win.height <= 0) {
         // Measurement unavailable — fall back to the full window so the
@@ -1092,42 +1112,59 @@ function BuildScreenInner() {
         listBottom = Math.min(listBottom, windowH - TRAY_HEIGHT - insets.bottom);
       }
       const band = (listBottom - win.top) * AUTO_SCROLL_BAND_PCT;
+      const x = pointerXRef.current;
       let delta = 0;
       // Scroll up if dragging near the top
       if (y < win.top + band) {
         const proximity = (win.top + band - y) / band;
         delta = -Math.min(1, proximity) * AUTO_SCROLL_MAX_PX;
       }
-      // Scroll down when dragging near the bottom edge of the list. Tray
-      // drop targets sit BELOW listBottom (which is clamped above the tray),
-      // so hovering them doesn't fall in this band.
-      else if (y > listBottom - band && y <= listBottom) {
-        const proximity = (y - (listBottom - band)) / band;
-        delta = Math.min(1, proximity) * AUTO_SCROLL_MAX_PX;
-      }
-      // Chevron-down hotspot: pointer over the tray zone at the bottom-right
-      // keeps scrolling at full speed without hovering any drop target.
-      else if (trayVisibleRef.current && y > listBottom) {
+      // Scroll down anywhere in the bottom zone — including past listBottom
+      // over the tray area — full width. The old version only scrolled inside
+      // a narrow band above the tray plus a 90px right-corner hotspot, which
+      // left most of the bottom (and the bottom-right on phones) dead.
+      else if (y > listBottom - band) {
+        // Exception: hovering an actual tray drop target means the user is
+        // aiming a drop, not scrolling — hold still so the target stays put.
+        // The right-edge chevron column always scrolls, even over a target.
         const windowW = Dimensions.get('window').width;
-        if (pointerXRef.current > windowW - AUTO_SCROLL_HOTSPOT_W) {
-          delta = AUTO_SCROLL_MAX_PX;
+        const inChevronColumn = x > windowW - AUTO_SCROLL_HOTSPOT_W;
+        if (inChevronColumn || !findTrayTarget(x, y)) {
+          const proximity = Math.min(1, (y - (listBottom - band)) / band);
+          delta = proximity * AUTO_SCROLL_MAX_PX;
         }
       }
       const node = getListScrollNode();
       if (delta !== 0) {
         if (node) {
-          node.scrollTop = Math.max(0, node.scrollTop + delta);
-          scrollOffsetRef.current = node.scrollTop;
+          const before = node.scrollTop;
+          const max = Math.max(0, node.scrollHeight - node.clientHeight);
+          const next = Math.min(max, Math.max(0, before + delta));
+          node.scrollTop = next;
+          // iOS WebKit can silently ignore scrollTop writes while a touch
+          // gesture is active — fall back to RNW's scrollTo in that case.
+          if (node.scrollTop === before && next !== before) {
+            listRef.current?.scrollToOffset({ offset: next, animated: false });
+          }
+          scrollOffsetRef.current = next;
         } else {
           const next = Math.max(0, scrollOffsetRef.current + delta);
           scrollOffsetRef.current = next;
           listRef.current?.scrollToOffset({ offset: next, animated: false });
         }
       }
+      const dbg = dragDebugEl();
+      if (dbg) {
+        dbg.textContent =
+          `f=${frame} x=${Math.round(x)} y=${Math.round(y)}\n` +
+          `winTop=${Math.round(win.top)} winH=${Math.round(win.height)} listBottom=${Math.round(listBottom)} band=${Math.round(band)}\n` +
+          `tray=${trayVisibleRef.current ? 1 : 0} overTarget=${findTrayTarget(x, y) ? 1 : 0} delta=${delta.toFixed(1)}\n` +
+          `node=${node ? 1 : 0} scrollTop=${node ? Math.round(node.scrollTop) : -1} off=${Math.round(scrollOffsetRef.current)}`;
+      }
       autoScrollRafRef.current = requestAnimationFrame(step);
     };
     autoScrollRafRef.current = requestAnimationFrame(step);
-  }, [stopAutoScroll, insets.bottom, getListScrollNode]);
+  }, [stopAutoScroll, insets.bottom, getListScrollNode, findTrayTarget, dragDebugEl]);
 
   const createFolderFromDrop = useCallback(async () => {
     if (!dropModal) return;

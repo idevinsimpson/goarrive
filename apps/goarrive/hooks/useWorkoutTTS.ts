@@ -263,36 +263,53 @@ const SILENT_WAV =
 
 function blessElement(el: HTMLAudioElement, label: string): void {
   try {
+    // Bless by playing the 4-byte silent WAV, NOT the element's real clip.
+    // iOS doesn't reliably honor `.muted` on programmatic Audio elements, so
+    // muted-playing every pooled cue at the Start tap was briefly AUDIBLE —
+    // several voices firing at once for ~0.5s. The silent WAV is inaudible
+    // by construction; a blessed element stays blessed across src changes,
+    // so we restore the real clip src once the bless settles.
+    const originalSrc = el.src;
+    const restore = () => {
+      // If the queue took this element over mid-bless (shouldn't happen —
+      // resolvePlayableElement routes around in-flight elements — but
+      // belt-and-braces), don't yank its playback.
+      if (queueOwnedElements.has(el)) return;
+      try {
+        el.pause();
+        if (originalSrc && el.src !== originalSrc) {
+          el.src = originalSrc;
+          el.load();
+        } else {
+          el.currentTime = 0;
+        }
+      } catch {}
+    };
     el.muted = true;
+    if (originalSrc && originalSrc !== SILENT_WAV) {
+      el.src = SILENT_WAV;
+    }
     blessingInFlight.add(el);
     const p = el.play();
     if (p && typeof p.then === 'function') {
       p.then(
         () => {
           blessingInFlight.delete(el);
-          // Pause BEFORE unmuting. The old order (unmute → pause) let every
-          // blessed cue play audibly for the gap between the two statements —
-          // ~40ms of up to 15 overlapping voices right at the Start tap, and
-          // much longer on a busy main thread (player mount + video loads).
-          // If the queue took this element over mid-bless (shouldn't happen —
-          // resolvePlayableElement routes around in-flight elements — but
-          // belt-and-braces), don't yank its playback.
-          if (!queueOwnedElements.has(el)) {
-            try { el.pause(); el.currentTime = 0; } catch {}
-          }
+          restore();
           el.muted = false;
           blessedElements.add(el);
           console.info('[VOICE-AUDIT] unlock bless OK', { label });
         },
         (err: unknown) => {
           blessingInFlight.delete(el);
+          restore();
           el.muted = false;
           console.warn('[VOICE-AUDIT] unlock bless FAILED', { label, err: String(err) });
         },
       );
     } else {
       blessingInFlight.delete(el);
-      try { el.pause(); el.currentTime = 0; } catch {}
+      restore();
       el.muted = false;
       blessedElements.add(el);
     }
@@ -679,17 +696,13 @@ export function useWorkoutTTS({
           mediaError: (audio as any).error?.code,
           detail,
         });
-        // Abandoning a still-loading element without pausing it lets it start
-        // playing on its own once data arrives — over the top of whatever the
-        // queue plays next. Seen every workout start: the cold-cache welcome
-        // clip stalls past the watchdog, the queue moves on to the movement
-        // name, then the welcome clip wakes up and both play at once. pause()
-        // also rejects the element's pending play() promise so it can't
-        // resurrect itself later.
-        try {
-          audio.pause();
-          audio.currentTime = 0;
-        } catch {}
+        // Hard-stop the element on any early exit. A stalled clip (watchdog
+        // fired while it was still buffering) would otherwise start playing
+        // once its data arrives — on top of the next queue item. Overlapping
+        // "workout starting" / "here's what's coming up" at cold start was
+        // exactly this. pause() also rejects a still-pending play() promise
+        // (AbortError), which onDone ignores because settled=true.
+        try { audio.pause(); audio.currentTime = 0; } catch {}
       }
       if (currentAudioRef.current === audio) currentAudioRef.current = null;
       queueOwnedElements.delete(audio);
