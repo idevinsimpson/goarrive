@@ -89,7 +89,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.listPublicCoaches = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = void 0;
-exports.finalizeMovementVariation = exports.getMovementVariationStatus = exports.startMovementVariation = exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.onCoachFeedbackStatusChanged = exports.onCoachFeedbackCreated = exports.sendWeeklyDigest = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.onCoachCreated = exports.getWorkoutMusic = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = void 0;
+exports.pollMovementVariationJobs = exports.finalizeMovementVariation = exports.getMovementVariationStatus = exports.startMovementVariation = exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.submitGuestReflection = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.onCoachFeedbackStatusChanged = exports.onCoachFeedbackCreated = exports.sendWeeklyDigest = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.onCoachCreated = exports.getWorkoutMusic = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -8769,6 +8769,80 @@ exports.resolveShareToken = (0, https_1.onRequest)({ cors: true, region: 'us-cen
         workout: Object.assign({ id: tokenData.workoutId }, (0, workoutPlayerSanitizer_1.sanitizePlayerWorkout)(workout, movementCanonical)),
     });
 });
+// ─── submitGuestReflection — guest glow/grow after shared-workout play ───────
+// Unauthenticated guests can't write Firestore directly (rules deny), so this
+// endpoint validates the share token server-side and writes via Admin SDK.
+exports.submitGuestReflection = (0, https_1.onRequest)({ cors: true, region: 'us-central1' }, async (req, res) => {
+    if (req.method !== 'POST') {
+        res.status(405).json({ error: 'Method not allowed.' });
+        return;
+    }
+    const body = (req.body || {});
+    const shareId = body.shareId;
+    if (!shareId || typeof shareId !== 'string' || shareId.length !== 32) {
+        res.status(400).json({ error: 'Invalid share link.' });
+        return;
+    }
+    const tokenSnap = await db.collection('shareTokens').doc(shareId).get();
+    if (!tokenSnap.exists) {
+        res.status(404).json({ error: 'This share link is no longer available.' });
+        return;
+    }
+    const tokenData = tokenSnap.data();
+    if (tokenData.revokedAt) {
+        res.status(410).json({ error: 'This share link has been revoked.' });
+        return;
+    }
+    const expiresAt = tokenData.expiresAt;
+    if (expiresAt && expiresAt.toMillis() < Date.now()) {
+        res.status(410).json({ error: 'This share link has expired.' });
+        return;
+    }
+    const visibility = normalizeVisibility(tokenData.visibility);
+    if (visibility === 'restricted') {
+        res.status(403).json({ error: 'This workout is no longer shared via link.' });
+        return;
+    }
+    if (visibility === 'anyone_with_link_signin_required') {
+        const authHeader = req.headers.authorization;
+        let ok = false;
+        if (authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith('Bearer ')) {
+            try {
+                await admin.auth().verifyIdToken(authHeader.slice(7));
+                ok = true;
+            }
+            catch ( /* invalid token */_a) { /* invalid token */ }
+        }
+        if (!ok) {
+            res.status(403).json({ error: 'Sign in required for this link.' });
+            return;
+        }
+    }
+    const cleanText = (v) => typeof v === 'string' ? v.trim().slice(0, 500) : '';
+    const cleanRating = (v) => Number.isInteger(v) && v >= 1 && v <= 5 ? v : null;
+    const durationSec = typeof body.durationSec === 'number' && body.durationSec >= 0 && body.durationSec <= 86400
+        ? Math.round(body.durationSec)
+        : null;
+    const workoutSnap = await db.collection('workouts').doc(tokenData.workoutId).get();
+    const workoutName = workoutSnap.exists ? (workoutSnap.data().name || 'Workout') : 'Workout';
+    const docRef = await db.collection('guest_reflections').add({
+        coachId: tokenData.createdBy,
+        workoutId: tokenData.workoutId,
+        workoutName,
+        shareId,
+        journal: {
+            glow: cleanText(body.glow),
+            grow: cleanText(body.grow),
+            energyRating: cleanRating(body.energyRating),
+            moodRating: cleanRating(body.moodRating),
+        },
+        durationSec,
+        source: 'shareLink',
+        reviewStatus: 'pending',
+        createdAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    res.status(200).json({ ok: true, id: docRef.id });
+});
 // ─── generateEquipmentImage — AI image for grab-equipment phases ─────────────
 // Accepts grabEquipmentText + optional forceRegenerate flag.
 // Extracts equipment keyword via GPT-4o-mini, then:
@@ -8954,6 +9028,13 @@ const VARIATION_MAX_CANDIDATES = 3;
 const VARIATION_DEFAULT_CANDIDATES = 2;
 const VARIATION_MAX_INSTRUCTION_CHARS = 600;
 const VARIATION_BASE_PROMPT = "Use the source workout video as the visual reference. Keep the same coach, body type, outfit, background, camera angle, framing, and lighting. Create a safe fitness demonstration variation. Do not add extra people. Do not change the coach's face. Do not add text overlays. Do not add logos. Keep it realistic, controlled, and instructional. Do not add barbells, heavy weights, or any equipment not explicitly requested. Avoid unsafe, overloaded, or high-risk positions.";
+const VARIATION_JOB_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const VARIATION_MOTION_MODEL = 'gen4_turbo';
+const VARIATION_MOTION_DURATION_SEC = 10;
+const VARIATION_MOTION_BASE_PROMPT = 'Keep the same person, body type, outfit, equipment, background, camera angle, framing, and lighting as the image. The coach performs this movement as a safe, realistic, controlled, instructional fitness demonstration. Do not add extra people. Do not change the face. Do not add text overlays or logos. Do not add barbells, heavy weights, or any equipment not explicitly requested. Avoid unsafe, overloaded, or high-risk positions.';
+function isTerminalCandidate(c) {
+    return c.status === 'SUCCEEDED' || c.status === 'FAILED' || c.status === 'CANCELLED';
+}
 /** Coach/admin gate + resolve caller's coach scope for ownership checks. */
 function requireCoachOrAdmin(request) {
     if (!request.auth) {
@@ -8994,8 +9075,9 @@ async function fetchRunwayTask(apiKey, taskId) {
     };
 }
 /**
- * Download a video from sourceUrl, transcode to ≤30fps (Runway's limit), upload to Storage,
- * and return a public URL. Cleans up /tmp on both success and failure.
+ * Download a video from sourceUrl, transcode to ≤30fps and trim to ≤29.5s (Runway rejects
+ * assets over 30s), upload to Storage, and return a public URL. Cleans up /tmp on both
+ * success and failure.
  */
 async function transcodeVideoTo30fps(sourceUrl, jobId, coachId) {
     const { execSync } = await Promise.resolve().then(() => __importStar(require('child_process')));
@@ -9012,7 +9094,7 @@ async function transcodeVideoTo30fps(sourceUrl, jobId, coachId) {
         const buf = Buffer.from(await resp.arrayBuffer());
         fs.writeFileSync(inputPath, buf);
         // -loglevel error keeps stderr tiny so the pipe buffer can't deadlock execSync.
-        execSync(`ffmpeg -y -loglevel error -i "${inputPath}" -r 30 -vf fps=fps=30 -c:v libx264 -preset fast -crf 23 -movflags +faststart "${outputPath}"`, { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 1024 * 1024 });
+        execSync(`ffmpeg -y -loglevel error -i "${inputPath}" -t 29.5 -r 30 -vf fps=fps=30 -c:v libx264 -preset fast -crf 23 -movflags +faststart "${outputPath}"`, { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 1024 * 1024 });
         const bucket = admin.storage().bucket();
         const storagePath = `movements/${coachId}/transcoded/${jobId}.mp4`;
         // Embed a Firebase download token so the URL is publicly accessible without ACL or signBlob.
@@ -9040,10 +9122,57 @@ async function transcodeVideoTo30fps(sourceUrl, jobId, coachId) {
         catch (_b) { }
     }
 }
+/**
+ * Extract the first frame of a video for the "motion" remix path, upload it to
+ * Storage with a download token, and return the frame URL plus the gen4_turbo
+ * ratio matching the source orientation.
+ */
+async function extractFirstFrameForMotion(videoUrl, jobId, coachId) {
+    const { execSync } = await Promise.resolve().then(() => __importStar(require('child_process')));
+    const os = await Promise.resolve().then(() => __importStar(require('os')));
+    const path = await Promise.resolve().then(() => __importStar(require('path')));
+    const fs = await Promise.resolve().then(() => __importStar(require('fs')));
+    const tmpDir = os.tmpdir();
+    const inputPath = path.join(tmpDir, `variation-motion-src-${jobId}.mp4`);
+    const framePath = path.join(tmpDir, `variation-frame-${jobId}.jpg`);
+    try {
+        const resp = await fetch(videoUrl);
+        if (!resp.ok)
+            throw new Error(`Failed to download video for frame extraction (${resp.status})`);
+        fs.writeFileSync(inputPath, Buffer.from(await resp.arrayBuffer()));
+        execSync(`ffmpeg -y -loglevel error -i "${inputPath}" -frames:v 1 -q:v 2 "${framePath}"`, { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 1024 * 1024 });
+        const dims = execSync(`ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${inputPath}"`, { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1024 * 1024 }).toString().trim();
+        const [w, h] = dims.split('x').map((n) => parseInt(n, 10));
+        const ratio = h > w ? '720:1280' : w > h ? '1280:720' : '960:960';
+        const bucket = admin.storage().bucket();
+        const storagePath = `movements/${coachId}/variations/${jobId}/first-frame.jpg`;
+        const downloadToken = `${jobId}-ff`;
+        await bucket.upload(framePath, {
+            destination: storagePath,
+            metadata: {
+                contentType: 'image/jpeg',
+                metadata: { firebaseStorageDownloadTokens: downloadToken },
+            },
+        });
+        const frameUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
+        return { frameUrl, ratio };
+    }
+    finally {
+        try {
+            fs.unlinkSync(inputPath);
+        }
+        catch (_a) { }
+        try {
+            fs.unlinkSync(framePath);
+        }
+        catch (_b) { }
+    }
+}
 exports.startMovementVariation = (0, https_1.onCall)({ region: 'us-central1', secrets: [runwayApiSecret], timeoutSeconds: 180, memory: '1GiB', maxInstances: 10, invoker: 'public' }, async (request) => {
     var _a;
     const { isAdmin, callerCoachIds } = requireCoachOrAdmin(request);
-    const { sourceMovementId, instruction, outputCount } = request.data;
+    const { sourceMovementId, instruction, outputCount, remixMode: remixModeRaw } = request.data;
+    const remixMode = remixModeRaw === 'motion' ? 'motion' : 'edit';
     if (!sourceMovementId || typeof sourceMovementId !== 'string') {
         throw new https_1.HttpsError('invalid-argument', 'sourceMovementId is required');
     }
@@ -9081,7 +9210,8 @@ exports.startMovementVariation = (0, https_1.onCall)({ region: 'us-central1', se
         instruction: trimmedInstruction,
         status: 'queued',
         provider: VARIATION_PROVIDER,
-        model: VARIATION_MODEL,
+        model: remixMode === 'motion' ? VARIATION_MOTION_MODEL : VARIATION_MODEL,
+        remixMode,
         candidateCount,
         taskIds: [],
         candidates: [],
@@ -9109,21 +9239,50 @@ exports.startMovementVariation = (0, https_1.onCall)({ region: 'us-central1', se
             await jobRef.update({ status: 'failed', errorMessage: tcMsg, updatedAt: firestore_2.Timestamp.now() });
             throw new https_1.HttpsError('internal', 'Failed to prepare video for generation');
         }
+        // Motion mode: aleph2 video-to-video preserves the source motion, so
+        // motion-change instructions produce near-identical output. Instead,
+        // regenerate motion from a still first frame via image_to_video.
+        let motionParams = null;
+        if (remixMode === 'motion') {
+            try {
+                console.info('[startMovementVariation] Extracting first frame for motion remix', { jobId: jobRef.id });
+                motionParams = await extractFirstFrameForMotion(videoUriForRunway, jobRef.id, movement.coachId);
+            }
+            catch (ffErr) {
+                const ffMsg = `First-frame extraction failed: ${String((ffErr === null || ffErr === void 0 ? void 0 : ffErr.message) || ffErr).slice(0, 300)}`;
+                console.error('[startMovementVariation] Frame extraction error', { jobId: jobRef.id, error: ffMsg });
+                await jobRef.update({ status: 'failed', errorMessage: ffMsg, updatedAt: firestore_2.Timestamp.now() });
+                throw new https_1.HttpsError('internal', 'Failed to prepare image for motion generation');
+            }
+        }
+        const motionPromptText = `${VARIATION_MOTION_BASE_PROMPT} The coach performs: ${trimmedInstruction}`;
         const candidates = [];
         let lastError = null;
         for (let i = 0; i < candidateCount; i++) {
             try {
-                console.info('[startMovementVariation] Creating Runway task', { jobId: jobRef.id, attempt: i });
-                const resp = await fetch(`${RUNWAY_API_BASE}/v1/video_to_video`, {
-                    method: 'POST',
-                    headers: runwayHeaders(apiKey),
-                    body: JSON.stringify({
+                console.info('[startMovementVariation] Creating Runway task', { jobId: jobRef.id, attempt: i, remixMode });
+                const endpoint = motionParams ? 'image_to_video' : 'video_to_video';
+                const body = motionParams
+                    ? {
+                        model: VARIATION_MOTION_MODEL,
+                        promptImage: motionParams.frameUrl,
+                        promptText: motionPromptText,
+                        ratio: motionParams.ratio,
+                        duration: VARIATION_MOTION_DURATION_SEC,
+                        seed: Math.floor(Math.random() * 4294967295),
+                        contentModeration: { publicFigureThreshold: 'auto' },
+                    }
+                    : {
                         model: VARIATION_MODEL,
                         videoUri: videoUriForRunway,
                         promptText,
                         seed: Math.floor(Math.random() * 4294967295),
                         contentModeration: { publicFigureThreshold: 'auto' },
-                    }),
+                    };
+                const resp = await fetch(`${RUNWAY_API_BASE}/v1/${endpoint}`, {
+                    method: 'POST',
+                    headers: runwayHeaders(apiKey),
+                    body: JSON.stringify(body),
                 });
                 if (!resp.ok) {
                     const body = await resp.text().catch(() => '');
@@ -9227,13 +9386,17 @@ exports.getMovementVariationStatus = (0, https_1.onCall)({ region: 'us-central1'
         sourceMovementId: job.sourceMovementId,
         sourceMovementName: job.sourceMovementName,
         instruction: job.instruction,
-        candidates: candidates.map((c) => ({
-            id: c.id,
-            status: c.status,
-            progress: c.progress,
-            videoUrl: c.videoUrl,
-            error: c.error,
-        })),
+        candidates: candidates.map((c) => {
+            var _a;
+            return ({
+                id: c.id,
+                status: c.status,
+                progress: c.progress,
+                videoUrl: c.videoUrl,
+                storedVideoUrl: (_a = c.storedVideoUrl) !== null && _a !== void 0 ? _a : null,
+                error: c.error,
+            });
+        }),
     };
 });
 exports.finalizeMovementVariation = (0, https_1.onCall)({ region: 'us-central1', secrets: [runwayApiSecret], timeoutSeconds: 300, memory: '1GiB', maxInstances: 10, invoker: 'public' }, async (request) => {
@@ -9259,36 +9422,57 @@ exports.finalizeMovementVariation = (0, https_1.onCall)({ region: 'us-central1',
     if (!apiKey) {
         throw new https_1.HttpsError('internal', 'Runway API key not configured');
     }
-    // Runway output URLs expire within 24-48h — always re-fetch for a fresh URL.
-    let outputUrl = candidate.videoUrl;
-    try {
-        const task = await fetchRunwayTask(apiKey, candidateId);
-        if (task.status !== 'SUCCEEDED' || !task.outputUrl) {
-            throw new https_1.HttpsError('failed-precondition', 'Selected candidate has no completed output');
-        }
-        outputUrl = task.outputUrl;
-    }
-    catch (err) {
-        if (err instanceof https_1.HttpsError)
-            throw err;
-        if (!outputUrl) {
-            throw new https_1.HttpsError('internal', 'Could not retrieve generated video from provider');
-        }
-    }
-    const videoResp = await fetch(outputUrl);
-    if (!videoResp.ok) {
-        throw new https_1.HttpsError('internal', `Failed to download generated video (${videoResp.status})`);
-    }
-    const videoBuffer = Buffer.from(await videoResp.arrayBuffer());
     const storagePath = `movements/${job.coachId}/ai-generated-videos/${jobId}-${candidateId}.mp4`;
     const bucket = admin.storage().bucket();
     const file = bucket.file(storagePath);
     // Download token so the client can play the file under authenticated-read storage rules.
     const downloadToken = require('crypto').randomUUID();
-    await file.save(videoBuffer, {
-        contentType: 'video/mp4',
-        metadata: { metadata: { firebaseStorageDownloadTokens: downloadToken } },
-    });
+    let persisted = false;
+    // Prefer the durable copy written by the background poller — the Runway URL
+    // may already be expired by the time the coach comes back to finalize.
+    if (candidate.storedVideoUrl) {
+        try {
+            const storedPath = `movements/${job.coachId}/variations/${jobId}/${candidateId}.mp4`;
+            await bucket.file(storedPath).copy(file);
+            await file.setMetadata({
+                contentType: 'video/mp4',
+                metadata: { firebaseStorageDownloadTokens: downloadToken },
+            });
+            persisted = true;
+        }
+        catch (err) {
+            console.warn('[finalizeMovementVariation] Stored copy failed, falling back to Runway URL', {
+                jobId, candidateId, error: String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 200),
+            });
+        }
+    }
+    if (!persisted) {
+        // Fall back to the ephemeral Runway URL (re-fetch for freshness).
+        let outputUrl = candidate.videoUrl;
+        try {
+            const task = await fetchRunwayTask(apiKey, candidateId);
+            if (task.status !== 'SUCCEEDED' || !task.outputUrl) {
+                throw new https_1.HttpsError('failed-precondition', 'Selected candidate has no completed output');
+            }
+            outputUrl = task.outputUrl;
+        }
+        catch (err) {
+            if (err instanceof https_1.HttpsError)
+                throw err;
+            if (!outputUrl) {
+                throw new https_1.HttpsError('internal', 'Could not retrieve generated video from provider');
+            }
+        }
+        const videoResp = await fetch(outputUrl);
+        if (!videoResp.ok) {
+            throw new https_1.HttpsError('internal', `Failed to download generated video (${videoResp.status})`);
+        }
+        const videoBuffer = Buffer.from(await videoResp.arrayBuffer());
+        await file.save(videoBuffer, {
+            contentType: 'video/mp4',
+            metadata: { metadata: { firebaseStorageDownloadTokens: downloadToken } },
+        });
+    }
     const videoUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
     const finalizedAt = firestore_2.Timestamp.now();
     await jobRef.update({
@@ -9301,7 +9485,7 @@ exports.finalizeMovementVariation = (0, https_1.onCall)({ region: 'us-central1',
         jobId, candidateId, coachId: job.coachId,
         provider: job.provider, model: job.model,
         candidateCount: job.candidateCount,
-        bytes: videoBuffer.length,
+        fromStoredCopy: persisted,
         createdAt: ((_e = (_d = (_c = (_b = job.createdAt) === null || _b === void 0 ? void 0 : _b.toDate) === null || _c === void 0 ? void 0 : _c.call(_b)) === null || _d === void 0 ? void 0 : _d.toISOString) === null || _e === void 0 ? void 0 : _e.call(_d)) || null,
         finalizedAt: finalizedAt.toDate().toISOString(),
     });
@@ -9312,5 +9496,105 @@ exports.finalizeMovementVariation = (0, https_1.onCall)({ region: 'us-central1',
         instruction: job.instruction,
         jobId,
     };
+});
+/**
+ * Download a completed Runway output and persist it to Storage before the
+ * ephemeral URL expires. Returns a durable token URL.
+ */
+async function persistVariationCandidateOutput(coachId, jobId, candidateId, outputUrl) {
+    const resp = await fetch(outputUrl);
+    if (!resp.ok)
+        throw new Error(`Failed to download Runway output (${resp.status})`);
+    const buf = Buffer.from(await resp.arrayBuffer());
+    const storagePath = `movements/${coachId}/variations/${jobId}/${candidateId}.mp4`;
+    const bucket = admin.storage().bucket();
+    const downloadToken = require('crypto').randomUUID();
+    await bucket.file(storagePath).save(buf, {
+        contentType: 'video/mp4',
+        metadata: { metadata: { firebaseStorageDownloadTokens: downloadToken } },
+    });
+    return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
+}
+// ─── pollMovementVariationJobs — background sweep so closed modals don't orphan jobs ──
+exports.pollMovementVariationJobs = (0, scheduler_1.onSchedule)({
+    schedule: 'every 1 minutes',
+    region: 'us-central1',
+    secrets: [runwayApiSecret],
+    timeoutSeconds: 300,
+    memory: '1GiB',
+}, async () => {
+    var _a, _b, _c, _d, _e;
+    const apiKey = (_a = runwayApiSecret.value()) === null || _a === void 0 ? void 0 : _a.trim();
+    if (!apiKey) {
+        console.error('[pollMovementVariationJobs] Runway API key not configured — skipping sweep');
+        return;
+    }
+    const snap = await db.collection('movement_variation_jobs').where('status', '==', 'running').get();
+    if (snap.empty)
+        return;
+    const nowMs = Date.now();
+    for (const jobDoc of snap.docs) {
+        // Per-job isolation: one bad job must never kill the whole sweep.
+        try {
+            const job = jobDoc.data();
+            const createdMs = (_d = (_c = (_b = job.createdAt) === null || _b === void 0 ? void 0 : _b.toMillis) === null || _c === void 0 ? void 0 : _c.call(_b)) !== null && _d !== void 0 ? _d : 0;
+            if (createdMs && nowMs - createdMs > VARIATION_JOB_MAX_AGE_MS) {
+                await jobDoc.ref.update({
+                    status: 'failed',
+                    errorMessage: 'Generation timed out after 24 hours',
+                    updatedAt: firestore_2.Timestamp.now(),
+                });
+                console.warn('[pollMovementVariationJobs] Job timed out', { jobId: jobDoc.id });
+                continue;
+            }
+            let candidates = Array.isArray(job.candidates) ? job.candidates : [];
+            let changed = false;
+            candidates = await Promise.all(candidates.map(async (c) => {
+                var _a;
+                // Already terminal + persisted (or unpersistable) — nothing to do.
+                if (isTerminalCandidate(c) && (c.status !== 'SUCCEEDED' || c.storedVideoUrl))
+                    return c;
+                try {
+                    let next = c;
+                    if (!isTerminalCandidate(c)) {
+                        const task = await fetchRunwayTask(apiKey, c.id);
+                        next = Object.assign(Object.assign({}, c), { status: task.status, progress: task.status === 'SUCCEEDED' ? 1 : task.progress, videoUrl: (_a = task.outputUrl) !== null && _a !== void 0 ? _a : c.videoUrl, error: task.failure });
+                        changed = true;
+                    }
+                    if (next.status === 'SUCCEEDED' && !next.storedVideoUrl && next.videoUrl) {
+                        const storedVideoUrl = await persistVariationCandidateOutput(job.coachId, jobDoc.id, c.id, next.videoUrl);
+                        next = Object.assign(Object.assign({}, next), { storedVideoUrl });
+                        changed = true;
+                        console.info('[pollMovementVariationJobs] Persisted candidate output', { jobId: jobDoc.id, candidateId: c.id });
+                    }
+                    return next;
+                }
+                catch (err) {
+                    console.warn('[pollMovementVariationJobs] Candidate poll/persist failed', {
+                        jobId: jobDoc.id, candidateId: c.id, error: String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 200),
+                    });
+                    return c; // transient — retry next sweep
+                }
+            }));
+            const terminal = candidates.length > 0 && candidates.every(isTerminalCandidate);
+            const anySucceeded = candidates.some((c) => c.status === 'SUCCEEDED');
+            let status = job.status;
+            let errorMessage = job.errorMessage || null;
+            if (terminal) {
+                status = anySucceeded ? 'succeeded' : 'failed';
+                if (!anySucceeded)
+                    errorMessage = ((_e = candidates.find((c) => c.error)) === null || _e === void 0 ? void 0 : _e.error) || 'Generation failed';
+                changed = true;
+            }
+            if (changed) {
+                await jobDoc.ref.update({ candidates, status, errorMessage, updatedAt: firestore_2.Timestamp.now() });
+            }
+        }
+        catch (err) {
+            console.error('[pollMovementVariationJobs] Job sweep failed', {
+                jobId: jobDoc.id, error: String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 300),
+            });
+        }
+    }
 });
 //# sourceMappingURL=index.js.map

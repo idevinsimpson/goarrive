@@ -78,6 +78,7 @@ const CUES = [
   { key: 'start_now',             text: 'Start now.' },
   { key: 'next_up',               text: 'Next up.' },
   { key: 'get_ready',             text: 'Get ready.' },
+  { key: 'demo_intro',            text: "Here's what's coming up." },
   { key: 'switch_sides',          text: 'Swap sides.' },
   { key: 'other_side',            text: 'Other side.' },
   { key: 'water_break',           text: 'Grab some water.' },

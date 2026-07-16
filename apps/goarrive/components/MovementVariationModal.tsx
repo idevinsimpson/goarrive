@@ -22,6 +22,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { Icon } from './Icon';
 import MovementVideoControls from './MovementVideoControls';
 import VideoCropModal, { CropValues } from './VideoCropModal';
@@ -56,7 +58,7 @@ const QUICK_PROMPTS = [
 
 const ERR_NO_VIDEO = 'This movement needs a video before AI can build a variation.';
 const ERR_GENERATION_FAILED = 'Generation failed. Try a simpler instruction or record a short version manually.';
-const MSG_PATIENCE = 'This can take a bit. You can leave this modal open while we build the preview.';
+const MSG_PATIENCE = 'This can take a bit. Feel free to close this — we keep building in the background and the movement card will show "Remix ready" when previews are done.';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -65,7 +67,26 @@ interface VariationCandidate {
   status: 'PENDING' | 'THROTTLED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
   progress: number;
   videoUrl: string | null;
+  /** Durable Storage copy written by the background poller — outlives the Runway URL. */
+  storedVideoUrl?: string | null;
   error: string | null;
+}
+
+function candidatePlaybackUrl(c: VariationCandidate): string | null {
+  return c.storedVideoUrl || c.videoUrl || null;
+}
+
+function remixModeLabel(mode: 'edit' | 'motion'): string {
+  return mode === 'motion' ? 'Change movement' : 'Edit look';
+}
+
+function formatGeneratedAt(d: Date): string {
+  const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
 }
 
 interface StatusResponse {
@@ -100,8 +121,14 @@ export default function MovementVariationModal({
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [phase, setPhase] = useState<Phase>('compose');
+  const [remixMode, setRemixMode] = useState<'edit' | 'motion'>('edit');
   const [instruction, setInstruction] = useState('');
   const [jobId, setJobId] = useState<string | null>(null);
+  // Mode + start time of the ACTIVE job (fresh or resumed) — display truth,
+  // independent of the compose-screen toggle state.
+  const [jobRemixMode, setJobRemixMode] = useState<'edit' | 'motion' | null>(null);
+  const [jobCreatedAt, setJobCreatedAt] = useState<Date | null>(null);
+  const [dismissing, setDismissing] = useState(false);
   const [candidates, setCandidates] = useState<VariationCandidate[]>([]);
   const [pendingCandidate, setPendingCandidate] = useState<VariationCandidate | null>(null);
   const [showCropModal, setShowCropModal] = useState(false);
@@ -113,26 +140,17 @@ export default function MovementVariationModal({
 
   const resetState = useCallback(() => {
     setPhase('compose');
+    setRemixMode('edit');
     setInstruction('');
     setJobId(null);
+    setJobRemixMode(null);
+    setJobCreatedAt(null);
+    setDismissing(false);
     setCandidates([]);
     setErrorMsg(null);
     setCreatingStatus('');
     setCreatingProgress(0);
   }, []);
-
-  useEffect(() => {
-    if (visible) {
-      closedRef.current = false;
-      resetState();
-    } else {
-      closedRef.current = true;
-      if (pollTimerRef.current) {
-        clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
-    }
-  }, [visible, resetState]);
 
   useEffect(() => () => {
     closedRef.current = true;
@@ -171,6 +189,58 @@ export default function MovementVariationModal({
     }
   }, [stopPolling]);
 
+  // On open, look for the newest unfinalized job for this movement (running or
+  // ready to review) and resume it — closing the modal no longer orphans a job.
+  const resumeExistingJob = useCallback(async () => {
+    if (!sourceMovement || !coachId) return;
+    try {
+      const snap = await getDocs(query(
+        collection(db, 'movement_variation_jobs'),
+        where('coachId', '==', coachId),
+        where('sourceMovementId', '==', sourceMovement.id),
+        where('status', 'in', ['running', 'succeeded']),
+      ));
+      if (closedRef.current) return;
+      const jobs = snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as any) }))
+        .filter((j) => !j.finalizedVideoUrl)
+        .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+      const job = jobs[0];
+      if (!job) return;
+      setJobId(job.id);
+      setInstruction(job.instruction || '');
+      const resumedMode: 'edit' | 'motion' = job.remixMode === 'motion' ? 'motion' : 'edit';
+      setRemixMode(resumedMode);
+      setJobRemixMode(resumedMode);
+      setJobCreatedAt(job.createdAt?.toDate?.() ?? (job.createdAt?.seconds ? new Date(job.createdAt.seconds * 1000) : null));
+      setCandidates(Array.isArray(job.candidates) ? job.candidates : []);
+      if (job.status === 'succeeded') {
+        setPhase('choose');
+      } else {
+        setPhase('generating');
+        stopPolling();
+        pollTimerRef.current = setInterval(() => pollStatus(job.id), POLL_INTERVAL_MS);
+      }
+    } catch (err) {
+      console.warn('[MovementVariationModal] Resume check failed:', err);
+    }
+  }, [sourceMovement, coachId, pollStatus, stopPolling]);
+
+  useEffect(() => {
+    if (visible) {
+      closedRef.current = false;
+      resetState();
+      resumeExistingJob();
+    } else {
+      closedRef.current = true;
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, resetState]);
+
   const handleGenerate = useCallback(async () => {
     if (!sourceMovement) return;
     if (!sourceMovement.videoUrl) {
@@ -183,16 +253,21 @@ export default function MovementVariationModal({
     setErrorMsg(null);
     setPhase('generating');
     setCandidates([]);
+    setJobRemixMode(remixMode);
+    setJobCreatedAt(new Date());
     try {
       const functions = getFunctions(undefined, 'us-central1');
+      // Server transcodes + trims the source video before responding, which can
+      // exceed the SDK's default 70s callable timeout — match the function's 180s.
       const start = httpsCallable<
-        { sourceMovementId: string; instruction: string; outputCount?: number },
+        { sourceMovementId: string; instruction: string; outputCount?: number; remixMode?: 'edit' | 'motion' },
         { jobId: string; candidateCount: number }
-      >(functions, 'startMovementVariation');
+      >(functions, 'startMovementVariation', { timeout: 180000 });
       const result = await start({
         sourceMovementId: sourceMovement.id,
         instruction: trimmed,
         outputCount: 2,
+        remixMode,
       });
       if (closedRef.current) return;
       const newJobId = result.data.jobId;
@@ -208,7 +283,7 @@ export default function MovementVariationModal({
       );
       setPhase('compose');
     }
-  }, [sourceMovement, instruction, pollStatus, stopPolling]);
+  }, [sourceMovement, instruction, remixMode, pollStatus, stopPolling]);
 
   // Called after the coach picks a candidate — shows crop modal first.
   const handleSelectCandidate = useCallback((candidate: VariationCandidate) => {
@@ -232,7 +307,7 @@ export default function MovementVariationModal({
       const finalize = httpsCallable<
         { jobId: string; candidateId: string },
         { videoUrl: string; sourceMovementId: string; sourceMovementName: string; instruction: string; jobId: string }
-      >(functions, 'finalizeMovementVariation');
+      >(functions, 'finalizeMovementVariation', { timeout: 300000 });
       const finalized = await finalize({ jobId, candidateId: candidate.id });
       if (closedRef.current) return;
 
@@ -271,6 +346,27 @@ export default function MovementVariationModal({
     setPhase('choose');
   }, []);
 
+  // Discard the current job server-side (clients can't write jobs directly) so
+  // it stops resuming on every modal open and the Build-card badge clears.
+  const handleDismiss = useCallback(async () => {
+    if (!jobId || dismissing) return;
+    setDismissing(true);
+    try {
+      const functions = getFunctions(undefined, 'us-central1');
+      const dismiss = httpsCallable<{ jobId: string }, { jobId: string; status: string }>(
+        functions,
+        'dismissMovementVariation',
+      );
+      await dismiss({ jobId });
+      if (closedRef.current) return;
+      stopPolling();
+      resetState();
+    } catch (err) {
+      console.warn('[MovementVariationModal] Dismiss failed:', err);
+      if (!closedRef.current) setDismissing(false);
+    }
+  }, [jobId, dismissing, stopPolling, resetState]);
+
   if (!sourceMovement) return null;
 
   // Card width: two cards side-by-side with 16px horizontal padding + 8px gap
@@ -279,7 +375,7 @@ export default function MovementVariationModal({
 
   const trimmedLen = instruction.trim().length;
   const generateDisabled = trimmedLen === 0 || phase === 'generating' || phase === 'creating';
-  const succeededCandidates = candidates.filter((c) => c.status === 'SUCCEEDED' && c.videoUrl);
+  const succeededCandidates = candidates.filter((c) => c.status === 'SUCCEEDED' && candidatePlaybackUrl(c));
 
   return (
     <Modal
@@ -332,6 +428,31 @@ export default function MovementVariationModal({
 
           {(phase === 'compose' || phase === 'generating') && (
             <>
+              {/* Remix mode — two-card choice */}
+              <Text style={s.sectionLabel}>Remix type</Text>
+              <View style={s.modeRow}>
+                <Pressable
+                  style={[s.modeCard, remixMode === 'edit' && s.modeCardActive]}
+                  onPress={() => phase === 'compose' && setRemixMode('edit')}
+                >
+                  <View style={s.modeCardHeader}>
+                    <Icon name="sparkle" size={16} color={remixMode === 'edit' ? '#A78BFA' : '#8A95A3'} />
+                    <Text style={[s.modeCardTitle, remixMode === 'edit' && s.modeCardTitleActive]}>Edit look</Text>
+                  </View>
+                  <Text style={s.modeCardDesc}>Keeps the motion, changes appearance or equipment.</Text>
+                </Pressable>
+                <Pressable
+                  style={[s.modeCard, remixMode === 'motion' && s.modeCardActive]}
+                  onPress={() => phase === 'compose' && setRemixMode('motion')}
+                >
+                  <View style={s.modeCardHeader}>
+                    <Icon name="video" size={16} color={remixMode === 'motion' ? '#A78BFA' : '#8A95A3'} />
+                    <Text style={[s.modeCardTitle, remixMode === 'motion' && s.modeCardTitleActive]}>Change movement</Text>
+                  </View>
+                  <Text style={s.modeCardDesc}>Regenerates the movement from a still frame — more creative drift.</Text>
+                </Pressable>
+              </View>
+
               {/* Instruction input */}
               <Text style={s.sectionLabel}>What should change?</Text>
               <TextInput
@@ -376,10 +497,22 @@ export default function MovementVariationModal({
               </Pressable>
 
               {phase === 'generating' && (
-                <View style={s.progressNote}>
-                  <ActivityIndicator size="small" color="#A78BFA" />
-                  <Text style={s.progressNoteText}>{MSG_PATIENCE}</Text>
-                </View>
+                <>
+                  {jobRemixMode ? (
+                    <View style={s.jobMetaRow}>
+                      <View style={s.jobMetaBadge}>
+                        <Text style={s.jobMetaBadgeText}>{remixModeLabel(jobRemixMode)}</Text>
+                      </View>
+                      {jobCreatedAt ? (
+                        <Text style={s.jobMetaTime}>Started {formatGeneratedAt(jobCreatedAt)}</Text>
+                      ) : null}
+                    </View>
+                  ) : null}
+                  <View style={s.progressNote}>
+                    <ActivityIndicator size="small" color="#A78BFA" />
+                    <Text style={s.progressNoteText}>{MSG_PATIENCE}</Text>
+                  </View>
+                </>
               )}
             </>
           )}
@@ -387,6 +520,16 @@ export default function MovementVariationModal({
           {(phase === 'choose' || phase === 'cropping') && (
             <>
               <Text style={s.sectionLabel}>Choose a version</Text>
+              {jobRemixMode ? (
+                <View style={s.jobMetaRow}>
+                  <View style={s.jobMetaBadge}>
+                    <Text style={s.jobMetaBadgeText}>{remixModeLabel(jobRemixMode)}</Text>
+                  </View>
+                  {jobCreatedAt ? (
+                    <Text style={s.jobMetaTime}>Generated {formatGeneratedAt(jobCreatedAt)}</Text>
+                  ) : null}
+                </View>
+              ) : null}
               <Text style={s.instructionRecap} numberOfLines={2}>"{instruction.trim()}"</Text>
               {succeededCandidates.length === 0 ? (
                 <Text style={s.errorText}>{ERR_GENERATION_FAILED}</Text>
@@ -397,7 +540,7 @@ export default function MovementVariationModal({
                       <Text style={s.candidateLabel}>Option {idx + 1}</Text>
                       <View style={[s.candidateVideoWrap, { height: cardVideoHeight }]}>
                         <MovementVideoControls
-                          uri={c.videoUrl!}
+                          uri={candidatePlaybackUrl(c)!}
                           aspectRatio={4 / 5}
                           autoPlay={true}
                           showControls={false}
@@ -413,6 +556,14 @@ export default function MovementVariationModal({
               )}
               <Pressable style={s.tryAgainBtn} onPress={() => { setPhase('compose'); setCandidates([]); }}>
                 <Text style={s.tryAgainText}>Try a different instruction</Text>
+              </Pressable>
+              <Pressable style={s.discardBtn} onPress={handleDismiss} disabled={dismissing}>
+                {dismissing ? (
+                  <ActivityIndicator size="small" color="#E05252" />
+                ) : (
+                  <Icon name="trash" size={14} color="#E05252" />
+                )}
+                <Text style={s.discardText}>{dismissing ? 'Discarding…' : 'Discard remix'}</Text>
               </Pressable>
             </>
           )}
@@ -434,10 +585,10 @@ export default function MovementVariationModal({
       </View>
 
       {/* Crop modal — shown after coach selects a variation candidate */}
-      {pendingCandidate?.videoUrl ? (
+      {pendingCandidate && candidatePlaybackUrl(pendingCandidate) ? (
         <VideoCropModal
           visible={showCropModal}
-          videoUri={pendingCandidate.videoUrl}
+          videoUri={candidatePlaybackUrl(pendingCandidate)!}
           onDone={handleCropDone}
           onCancel={handleCropCancel}
         />
@@ -501,6 +652,83 @@ const s = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 8,
+    fontFamily: FB,
+  },
+  modeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  modeCard: {
+    flex: 1,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#1A2130',
+    borderWidth: 2,
+    borderColor: '#2A3347',
+  },
+  modeCardActive: {
+    backgroundColor: 'rgba(167,139,250,0.12)',
+    borderColor: '#A78BFA',
+  },
+  modeCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  modeCardTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#B8C0CC',
+    fontFamily: FB,
+  },
+  modeCardTitleActive: {
+    color: '#A78BFA',
+  },
+  modeCardDesc: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#8A95A3',
+    fontFamily: FB,
+  },
+  jobMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  jobMetaBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: 'rgba(167,139,250,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(167,139,250,0.4)',
+  },
+  jobMetaBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#A78BFA',
+    fontFamily: FB,
+  },
+  jobMetaTime: {
+    fontSize: 12,
+    color: '#8A95A3',
+    fontFamily: FB,
+  },
+  discardBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+  },
+  discardText: {
+    fontSize: 13,
+    color: '#E05252',
     fontFamily: FB,
   },
   input: {

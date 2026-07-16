@@ -68,6 +68,8 @@ export interface FlatMovement {
   voiceUrl?: string;
   /** Prescription voice clip URL — generated per-workout-build when weight/reps are set. Preferred over voiceUrl when present. */
   prescriptionVoiceUrl?: string;
+  /** Primary muscles from the canonical movement doc (merged in by useMovementHydrate — block snapshots don't store muscles). */
+  primaryMuscles?: string[];
 
   // ── Phase 3: Special block fields ───────────────────────────────
   /** What kind of step this is — determines which player screen renders */
@@ -399,6 +401,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropScale: 1,
               cropTranslateX: 0,
               cropTranslateY: 0,
+              cropFrameWidth: 0,
+              cropFrameHeight: 0,
               voiceUrl: '',
               blockMovCount: movements.length,
               blockRound: round,
@@ -450,6 +454,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropScale: mv.cropScale ?? 1,
               cropTranslateX: mv.cropTranslateX ?? 0,
               cropTranslateY: mv.cropTranslateY ?? 0,
+              cropFrameWidth: mv.cropFrameWidth ?? 0,
+              cropFrameHeight: mv.cropFrameHeight ?? 0,
               voiceUrl: mv.voiceUrl || '',
               prescriptionVoiceUrl: mv.prescriptionVoiceUrl || '',
               blockMovCount: movements.length,
@@ -496,6 +502,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropScale: 1,
               cropTranslateX: 0,
               cropTranslateY: 0,
+              cropFrameWidth: 0,
+              cropFrameHeight: 0,
               voiceUrl: '',
               blockMovCount: movements.length,
               blockRound: setNum,
@@ -543,6 +551,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropScale: mv.cropScale ?? 1,
               cropTranslateX: mv.cropTranslateX ?? 0,
               cropTranslateY: mv.cropTranslateY ?? 0,
+              cropFrameWidth: mv.cropFrameWidth ?? 0,
+              cropFrameHeight: mv.cropFrameHeight ?? 0,
               voiceUrl: mv.voiceUrl || '',
               prescriptionVoiceUrl: mv.prescriptionVoiceUrl || '',
               blockMovCount: movements.length,

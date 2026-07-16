@@ -54,6 +54,8 @@ import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from './Icon';
 import WorkoutPlayer from './WorkoutPlayer';
+import WorkoutIntroAnnouncementModal, { type IntroAnnouncementSaveFields } from './WorkoutIntroAnnouncementModal';
+import { buildDefaultIntroScript } from '../utils/workoutIntroAnnouncement';
 import VideoCropModal, { CropValues } from './VideoCropModal';
 import { FB, FH } from '../lib/theme';
 import PosterThumb from './PosterThumb';
@@ -445,6 +447,11 @@ export default function WorkoutFolderPage({
   const [showMusicModal, setShowMusicModal] = useState(false);
   const [musicEnabled, setMusicEnabled] = useState(false);
   const [musicStyle, setMusicStyle] = useState('workout');
+  const [musicVolume, setMusicVolume] = useState(0.35);
+  // Intro announcement (spoken welcome) — workout-level fields
+  const [showIntroAnnouncement, setShowIntroAnnouncement] = useState(false);
+  const [introAnnouncementEnabled, setIntroAnnouncementEnabled] = useState(true);
+  const [introAnnouncementText, setIntroAnnouncementText] = useState('');
   const [showMoveTo, setShowMoveTo] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -486,6 +493,26 @@ export default function WorkoutFolderPage({
     blocks,
   }), [originalData, workoutId, workoutName, workoutDescription, blocks]);
   const closePreview = useCallback(() => setShowPreview(false), []);
+
+  // ── Intro announcement (spoken welcome) ───────────────────────────────────
+  // Default script mirrors what the player generates for members — same
+  // builder function, muscles sourced from the movement library.
+  const introAnnouncementDefaultScript = useMemo(() => {
+    const musclesByMovementId: Record<string, string[]> = {};
+    for (const m of availableMovements) {
+      if (m.primaryMuscles && m.primaryMuscles.length > 0) musclesByMovementId[m.id] = m.primaryMuscles;
+    }
+    return buildDefaultIntroScript({ name: workoutName, blocks }, musclesByMovementId);
+  }, [availableMovements, workoutName, blocks]);
+
+  const saveIntroAnnouncement = useCallback(async (fields: IntroAnnouncementSaveFields) => {
+    await updateDoc(doc(db, 'workouts', workoutId), {
+      ...fields,
+      updatedAt: serverTimestamp(),
+    });
+    setIntroAnnouncementEnabled(fields.introAnnouncementEnabled);
+    setIntroAnnouncementText(fields.introAnnouncementText);
+  }, [workoutId]);
 
   // ── Dismiss all overlays ─────────────────────────────────────────────────
   const dismissAll = useCallback(() => {
@@ -722,10 +749,13 @@ export default function WorkoutFolderPage({
         setRestDurationSeconds(data.restDurationSeconds ?? 30);
         setIntroVideoUrl(data.introVideoUrl ?? null);
         setIntroGifUrl(data.introGifUrl ?? null);
+        setIntroAnnouncementEnabled(data.introAnnouncementEnabled ?? true);
+        setIntroAnnouncementText(data.introAnnouncementText ?? '');
         setOutroVideoUrl(data.outroVideoUrl ?? null);
         setOutroGifUrl(data.outroGifUrl ?? null);
         setMusicEnabled(data.workoutMusicEnabled ?? false);
         setMusicStyle(data.workoutMusicStyle ?? 'workout');
+        setMusicVolume(typeof data.workoutMusicVolume === 'number' ? data.workoutMusicVolume : 0.35);
         setIntroCrop({
           cropScale: data.introCropScale ?? 1,
           cropTranslateX: data.introCropTranslateX ?? 0,
@@ -1538,11 +1568,9 @@ export default function WorkoutFolderPage({
       thumbnailUrl: movement.thumbnailUrl ?? movement.mediaUrl ?? undefined,
       posterUrl: movement.posterUrl ?? undefined,
     };
-    if (movement.swapSides) {
-      next.swapSides = true;
-      next.swapMode = movement.swapMode ?? 'split';
-      next.swapWindowSec = movement.swapWindowSec ?? 5;
-    }
+    next.swapSides = movement.swapSides ?? false;
+    next.swapMode = movement.swapMode ?? 'split';
+    next.swapWindowSec = movement.swapWindowSec ?? 5;
     newBlocks[blockIdx].movements.push(next);
     updateBlocks(newBlocks);
   }, [blocks, updateBlocks]);
@@ -1655,9 +1683,11 @@ export default function WorkoutFolderPage({
   const saveWorkoutMusic = useCallback(async (updates: {
     workoutMusicEnabled?: boolean;
     workoutMusicStyle?: string;
+    workoutMusicVolume?: number;
   }) => {
     if (updates.workoutMusicEnabled !== undefined) setMusicEnabled(updates.workoutMusicEnabled);
     if (updates.workoutMusicStyle !== undefined) setMusicStyle(updates.workoutMusicStyle);
+    if (updates.workoutMusicVolume !== undefined) setMusicVolume(updates.workoutMusicVolume);
     try {
       setSaving(true);
       await updateDoc(doc(db, 'workouts', workoutId), {
@@ -2093,6 +2123,13 @@ export default function WorkoutFolderPage({
               <Icon name="music" size={16} color="#A78BFA" />
               <Text style={st.menuItemText}>Workout Music</Text>
             </Pressable>
+            <Pressable
+              style={st.menuItem}
+              onPress={() => { setShowTitleMenu(false); setShowIntroAnnouncement(true); }}
+            >
+              <Icon name="sparkle" size={16} color="#FBBF24" />
+              <Text style={st.menuItemText}>Intro Announcement</Text>
+            </Pressable>
             <View style={st.menuDivider} />
             <Pressable
               style={st.menuItem}
@@ -2121,7 +2158,7 @@ export default function WorkoutFolderPage({
       {/* ── Main content: blocks ─────────────────────────────────────────── */}
       <ScrollView
         style={st.scrollArea}
-        contentContainerStyle={{ paddingHorizontal: GRID_PADDING, paddingBottom: 200 }}
+        contentContainerStyle={{ paddingHorizontal: GRID_PADDING, paddingBottom: 280 }}
         showsVerticalScrollIndicator={false}
         onScrollBeginDrag={dismissAll}
       >
@@ -3364,6 +3401,17 @@ export default function WorkoutFolderPage({
         />
       )}
 
+      {/* ── Intro Announcement settings ── */}
+      <WorkoutIntroAnnouncementModal
+        visible={showIntroAnnouncement}
+        onClose={() => setShowIntroAnnouncement(false)}
+        workoutId={workoutId}
+        defaultScript={introAnnouncementDefaultScript}
+        enabled={introAnnouncementEnabled}
+        text={introAnnouncementText}
+        onSave={saveIntroAnnouncement}
+      />
+
       {/* ── Delete Workout Confirmation — uses <Modal> portal like description edit ── */}
       <Modal transparent visible={showDeleteConfirm} animationType="fade" onRequestClose={() => setShowDeleteConfirm(false)}>
         <Pressable style={st.modalBackdrop} onPress={() => setShowDeleteConfirm(false)}>
@@ -3569,6 +3617,31 @@ export default function WorkoutFolderPage({
                 );
               })}
             </View>
+
+            <Text style={st.shareModalSectionLabel}>Music volume</Text>
+            <View style={st.shareModalChipRow}>
+              {MUSIC_VOLUME_OPTIONS.map((opt) => {
+                const active = Math.abs(musicVolume - opt.value) < 0.01;
+                return (
+                  <TouchableOpacity
+                    key={opt.label}
+                    style={[st.shareModalChip, active && st.shareModalChipActive]}
+                    onPress={() => saveWorkoutMusic({ workoutMusicVolume: opt.value })}
+                    disabled={!musicEnabled}
+                  >
+                    <Text
+                      style={[
+                        st.shareModalChipText,
+                        active && st.shareModalChipTextActive,
+                        !musicEnabled && { opacity: 0.4 },
+                      ]}
+                    >
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
         </View>
       </Modal>
@@ -3577,6 +3650,13 @@ export default function WorkoutFolderPage({
 }
 
 // ── Workout Music constants ──────────────────────────────────────────────────
+const MUSIC_VOLUME_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: 0.2, label: 'Quiet' },
+  { value: 0.35, label: 'Soft' },
+  { value: 0.55, label: 'Medium' },
+  { value: 0.8, label: 'Loud' },
+];
+
 const MUSIC_STYLE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'workout', label: 'Workout' },
   { value: 'edm', label: 'EDM' },

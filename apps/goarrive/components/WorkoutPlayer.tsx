@@ -32,6 +32,7 @@ import {
   TextInput,
   useWindowDimensions,
   ScrollView,
+  Pressable,
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
 import MovementVideoControls from './MovementVideoControls';
@@ -58,6 +59,11 @@ import { isStagingHost } from '../lib/runtimeEnv';
 import { installVoiceAuditCapture } from '../lib/voiceAuditLog';
 import PosterThumb from './PosterThumb';
 import { isImageUrl } from '../utils/mediaKind';
+import {
+  buildDefaultIntroScript,
+  generateIntroAnnouncementVoice,
+  introAnnouncementHash,
+} from '../utils/workoutIntroAnnouncement';
 
 // Install [VOICE-AUDIT] console capture at module load on staging only so the
 // in-app debug panel can mirror the forensic trace without DevTools. Has zero
@@ -178,8 +184,11 @@ export default function WorkoutPlayer({
   // gesture (iOS Safari only allows play() from a user gesture); src attaches
   // when the prefetch resolves. Per the e49f0a0 rule, an element is always
   // paused + released before being abandoned so it can never resurrect.
-  const MUSIC_VOLUME = 0.35;
+  const musicVolume =
+    typeof workout?.workoutMusicVolume === 'number' ? workout.workoutMusicVolume : 0.35;
   const musicEnabled = Platform.OS === 'web' && !!workout?.workoutMusicEnabled;
+  // Member can mute music independently of the main workout audio.
+  const [musicMuted, setMusicMuted] = useState(false);
   const musicStyle =
     typeof workout?.workoutMusicStyle === 'string' && workout.workoutMusicStyle
       ? workout.workoutMusicStyle
@@ -226,8 +235,8 @@ export default function WorkoutPlayer({
     if (!musicEnabled || musicElRef.current) return;
     const el: HTMLAudioElement = new (window as any).Audio();
     el.loop = true;
-    el.volume = MUSIC_VOLUME;
-    el.muted = isMuted;
+    el.volume = musicVolume;
+    el.muted = isMuted || musicMuted;
     musicElRef.current = el;
     const attach = (url: string | null) => {
       if (!url || musicElRef.current !== el) return;
@@ -241,7 +250,7 @@ export default function WorkoutPlayer({
       el.play().catch(() => {});
       (musicFetchRef.current || Promise.resolve(null)).then(attach);
     }
-  }, [musicEnabled, isMuted]);
+  }, [musicEnabled, isMuted, musicMuted, musicVolume]);
 
   // Pause/resume with the workout; respect mute; stop on finish/close/unmount.
   useEffect(() => {
@@ -252,8 +261,8 @@ export default function WorkoutPlayer({
     else el.play().catch(() => {});
   }, [isPaused]);
   useEffect(() => {
-    if (musicElRef.current) musicElRef.current.muted = isMuted;
-  }, [isMuted]);
+    if (musicElRef.current) musicElRef.current.muted = isMuted || musicMuted;
+  }, [isMuted, musicMuted]);
   useEffect(() => {
     if (phase === 'complete') stopMusic();
   }, [phase, stopMusic]);
@@ -439,7 +448,15 @@ export default function WorkoutPlayer({
     }
     // Freshly-mounted Videos default to playing; if we're paused right now
     // (e.g. Skip while paused swapped in a new video), pause it immediately.
-    if (isPausedRef.current) el.pauseAsync?.().catch(() => {});
+    if (isPausedRef.current) {
+      el.pauseAsync?.().catch(() => {});
+    } else {
+      // Explicitly start via programmatic play() rather than relying on the
+      // HTML autoPlay attribute. Chrome blocks unmuted video autoPlay on
+      // first-visit sessions with low MEI, but allows programmatic play()
+      // when the page has user activation (set by the "Start" button tap).
+      el.playAsync?.().catch(() => {});
+    }
     if (Platform.OS === 'web') {
       // expo-av's web <video> gets React's playsInline but not the legacy
       // webkit-playsinline attribute older iOS Safari needs for inline play.
@@ -501,6 +518,91 @@ export default function WorkoutPlayer({
     extendControlsTimer();
   }, [handleSkip, extendControlsTimer, stopAllAudio]);
 
+  // ── Intro announcement (spoken welcome before the first movement) ─────
+  // Plays a coach-editable AI-generated TTS welcome when Play is tapped,
+  // BEFORE handleStart() kicks the timer. Skippable via tap. Web-only, like
+  // the rest of the voice pipeline. The audio element is owned by a ref and
+  // is paused + reset + released on finish/skip/unmount so an abandoned
+  // element can never resurrect mid-workout (see commit e49f0a0).
+  const [announcementUrl, setAnnouncementUrl] = useState<string | null>(null);
+  const [announcementActive, setAnnouncementActive] = useState(false);
+  const announcementAudioRef = useRef<HTMLAudioElement | null>(null);
+  const announcementFetchedTextRef = useRef<string | null>(null);
+  const announcementDoneRef = useRef(false);
+
+  const announcementEnabled = workout?.introAnnouncementEnabled !== false;
+  const announcementText = useMemo(() => {
+    if (!announcementEnabled) return '';
+    const coachText = typeof workout?.introAnnouncementText === 'string'
+      ? workout.introAnnouncementText.trim()
+      : '';
+    if (coachText) return coachText;
+    const musclesByMovementId: Record<string, string[]> = {};
+    for (const fm of flatMovements) {
+      if (fm.movementId && Array.isArray(fm.primaryMuscles) && fm.primaryMuscles.length > 0) {
+        musclesByMovementId[fm.movementId] = fm.primaryMuscles;
+      }
+    }
+    return buildDefaultIntroScript(workout, musclesByMovementId);
+  }, [announcementEnabled, workout, flatMovements]);
+
+  // Prefetch the intro MP3 while the ready screen shows so Play never waits
+  // on the TTS round trip. Coach-saved URL is used directly when its hash
+  // still matches the effective script; otherwise generate lazily (Storage
+  // cache makes repeats cheap). Debounced so movement hydration can deliver
+  // primaryMuscles before the default script's hash is locked in. If the
+  // clip isn't ready at Play-tap time, the workout just starts without it.
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    if (!announcementEnabled || !announcementText || phase !== 'ready') return;
+    if (
+      workout?.introAnnouncementVoiceUrl
+      && workout?.introAnnouncementVoiceHash === introAnnouncementHash(announcementText)
+    ) {
+      setAnnouncementUrl(workout.introAnnouncementVoiceUrl);
+      return;
+    }
+    if (announcementFetchedTextRef.current === announcementText) return;
+    const timer = setTimeout(() => {
+      announcementFetchedTextRef.current = announcementText;
+      const requestedText = announcementText;
+      generateIntroAnnouncementVoice(workout?.id || workout?.workoutId || '', requestedText)
+        .then(({ url }) => {
+          // Ignore stale responses from a script that has since changed.
+          if (url && announcementFetchedTextRef.current === requestedText) {
+            setAnnouncementUrl(url);
+          }
+        });
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [announcementEnabled, announcementText, phase, workout]);
+
+  const finishAnnouncement = useCallback(() => {
+    if (announcementDoneRef.current) return;
+    announcementDoneRef.current = true;
+    const el = announcementAudioRef.current;
+    if (el) {
+      try {
+        el.onended = null;
+        el.onerror = null;
+        el.pause();
+        el.currentTime = 0;
+      } catch { /* best-effort */ }
+      announcementAudioRef.current = null;
+    }
+    setAnnouncementActive(false);
+    handleStart();
+  }, [handleStart]);
+
+  // Unmount cleanup — never leave a live element behind.
+  useEffect(() => () => {
+    const el = announcementAudioRef.current;
+    if (el) {
+      try { el.pause(); el.currentTime = 0; } catch { /* best-effort */ }
+      announcementAudioRef.current = null;
+    }
+  }, []);
+
   // iOS Safari autoplay policy: HTMLAudioElement.play() and AudioContext
   // resume are only allowed from inside a user gesture. Every tap that can
   // start audio-producing flows must unlock synchronously — Start is the
@@ -510,8 +612,28 @@ export default function WorkoutPlayer({
     unlockAudioPlayback();
     unlockAudioContext();
     startMusic();
+    // Intro announcement gate: play the welcome clip before the timer starts.
+    // .play() is called synchronously inside this tap gesture so iOS allows it.
+    if (
+      Platform.OS === 'web'
+      && announcementEnabled
+      && announcementUrl
+      && !isMuted
+      && !announcementDoneRef.current
+    ) {
+      try {
+        const el = new window.Audio(announcementUrl);
+        announcementAudioRef.current = el;
+        el.onended = () => finishAnnouncement();
+        el.onerror = () => finishAnnouncement();
+        const p = el.play();
+        if (p && typeof p.catch === 'function') p.catch(() => finishAnnouncement());
+        setAnnouncementActive(true);
+        return;
+      } catch { /* fall through to normal start */ }
+    }
     handleStart();
-  }, [handleStart, startMusic]);
+  }, [handleStart, startMusic, announcementEnabled, announcementUrl, isMuted, finishAnnouncement]);
 
   const handlePauseResumeFromOverlay = useCallback(() => {
     unlockAudioPlayback();
@@ -682,11 +804,12 @@ export default function WorkoutPlayer({
   //
   // Exception: swap-sides movements stay on the current movement during the L-side
   // lookahead (the R side of the same movement is coming next, not a new item).
-  const { activeVideoUrl, activeThumbUrl } = useMemo<{
+  const { activeVideoUrl, activeThumbUrl, isInRevealWindow } = useMemo<{
     activeVideoUrl: string | null;
     activeThumbUrl: string | null;
+    isInRevealWindow: boolean;
   }>(() => {
-    if (!current) return { activeVideoUrl: null, activeThumbUrl: null };
+    if (!current) return { activeVideoUrl: null, activeThumbUrl: null, isInRevealWindow: false };
 
     // Resolve a timeline item to a displayable {video, thumb} pair, falling back
     // to the next exercise's media if the item itself has none (e.g. waterBreak,
@@ -724,7 +847,11 @@ export default function WorkoutPlayer({
 
     let displayItem: any = current;
     let displayIndex = currentIndex;
+    let inRevealWindow = false;
 
+    // Suppress the reveal only during work-L of a swap-sides movement — the R
+    // side of the SAME movement is coming next, not a new item. work-R is NOT
+    // suppressed: its reveal shows the next movement's start (always unmirrored).
     const stayingOnSameMovement =
       phase === 'work' && current?.swapSides === true && swapSide === 'L';
 
@@ -736,6 +863,7 @@ export default function WorkoutPlayer({
       // Rest is the bridge between current and next; show next throughout.
       displayItem = next;
       displayIndex = currentIndex + 1;
+      inRevealWindow = true;
     } else if (
       isTimedRevealPhase
       && !isRepBased
@@ -747,9 +875,10 @@ export default function WorkoutPlayer({
       // Last 3.5s of any timed phase: preview the next timeline item.
       displayItem = next;
       displayIndex = currentIndex + 1;
+      inRevealWindow = true;
     }
 
-    return pickAsset(displayItem, displayIndex);
+    return { ...pickAsset(displayItem, displayIndex), isInRevealWindow: inRevealWindow };
   }, [phase, timeLeft, current, next, currentIndex, isRepBased, swapSide, flatMovements]);
 
   // ── Double-buffered video layers, with eager preload ─────────────────
@@ -937,6 +1066,14 @@ export default function WorkoutPlayer({
               <Icon name="wifi-off" size={12} color="#F59E0B" />
               <Text style={st.offlineBadgeText}>Offline{queueSize > 0 ? ` (${queueSize})` : ''}</Text>
             </View>
+          )}
+          {musicEnabled && (
+            <TouchableOpacity
+              onPress={() => setMusicMuted(m => !m)}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Icon name="music" size={22} color={musicMuted ? '#F59E0B' : '#8A95A3'} />
+            </TouchableOpacity>
           )}
           <TouchableOpacity
             onPress={() => setIsMuted(m => !m)}
@@ -1156,6 +1293,62 @@ export default function WorkoutPlayer({
             </>
           );
         })()}
+
+        {/* ── INTRO ANNOUNCEMENT — spoken welcome, tap to skip ──── */}
+        {announcementActive && (
+          <Pressable
+            onPress={finishAnnouncement}
+            style={[
+              StyleSheet.absoluteFillObject,
+              {
+                backgroundColor: '#0E1117',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 100,
+                paddingHorizontal: fs(28),
+              },
+            ]}
+          >
+            <Image
+              source={require('../assets/logo.png')}
+              style={{ width: fs(160), height: fs(52), marginBottom: fs(28) }}
+              resizeMode="contain"
+            />
+            <Text
+              style={{
+                color: '#F0F4F8',
+                fontSize: fs(24),
+                fontFamily: FH,
+                fontWeight: '700',
+                textAlign: 'center',
+              }}
+            >
+              {workout?.name || 'Workout'}
+            </Text>
+            <Text
+              style={{
+                color: '#FBBF24',
+                fontSize: fs(14),
+                fontFamily: FB,
+                marginTop: fs(16),
+                textAlign: 'center',
+              }}
+            >
+              Your coach's intro is playing…
+            </Text>
+            <Text
+              style={{
+                color: '#8A95A3',
+                fontSize: fs(12),
+                fontFamily: FB,
+                marginTop: fs(40),
+                textAlign: 'center',
+              }}
+            >
+              Tap anywhere to skip
+            </Text>
+          </Pressable>
+        )}
 
         {/* ── INTRO — Full-screen cinematic welcome ────────────── */}
         {phase === 'intro' && current && (() => {
@@ -1489,25 +1682,36 @@ export default function WorkoutPlayer({
         {/* the same video; swap keeps the video mounted (mirrored if going  */}
         {/* to R) so the member sees the next side instead of an empty card. */}
         {(phase === 'work' || phase === 'rest' || phase === 'swap') && current && (() => {
-          // Mirror the media when about to enter / already on the R side of
-          // a swap-sides movement. `transform: [{ scaleX: -1 }]` works for
-          // both <Video> and <Image>; on web RN translates it to CSS
-          // `transform: scaleX(-1)` which the HTMLVideoElement honors. This
-          // way GIFs, MP4s, and image thumbnails all mirror with the same
-          // primitive — no per-source branching required.
-          const isMirrored = !!current.swapSides
+          // Single authoritative mirror flag driven by timer state (currentIndex,
+          // phase, swapSide). Mirror is ON for swap phase and work-R, OFF otherwise.
+          // Gated by isInRevealWindow: when the display has already switched to the
+          // next movement's preview (3-2-1 countdown), that preview is always
+          // unmirrored regardless of the current side — the next movement starts at
+          // work-L. This fixes the Tabata bug where work-R's reveal window showed
+          // the round-2 video still mirrored despite previewing round-2's work-L.
+          const isMirrored = !isInRevealWindow
+            && !!current.swapSides
             && ((phase === 'work' && swapSide === 'R') || phase === 'swap');
           const mirrorStyle = isMirrored ? { transform: [{ scaleX: -1 }] } as any : null;
-          // RN does not merge `transform` across style objects — last one wins.
-          // Compose crop + mirror into one array: crop first, mirror last.
+          // RN does not merge `transform` arrays across style objects — last wins.
+          // Crop goes in `style` (applied to the outer wrapper) on all platforms.
+          // Mirror goes in `style` on native and in `videoStyle` on web so that
+          // the CSS transform is applied directly to the <video> element — this
+          // avoids a one-frame delay if expo-av's wrapper doesn't re-apply the
+          // outer style transform synchronously on prop change.
           const buildLayerStyle = (url: string): any => {
             const crop = cropByUrl.get(url);
             const t = [
               ...getCropTransform(crop ?? null, mediaInnerSize.width, mediaInnerSize.height),
-              ...(isMirrored ? [{ scaleX: -1 }] : []),
+              ...(isMirrored && Platform.OS !== 'web' ? [{ scaleX: -1 }] : []),
             ];
             return t.length ? { transform: t } : null;
           };
+          const layerVideoStyle: any = Platform.OS === 'web'
+            ? (isMirrored
+              ? { width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }
+              : { width: '100%', height: '100%', objectFit: 'cover' })
+            : undefined;
           return (
           <View style={[st.workContainer, webSafeBottomStyle]}>
             {renderLogoSlot()}
@@ -1589,11 +1793,7 @@ export default function WorkoutPlayer({
                           shouldPlay={!isPaused}
                           isMuted
                           style={[st.videoPlayer, st.videoLayer, { opacity } as any, buildLayerStyle(layer.url)]}
-                          videoStyle={
-                            Platform.OS === 'web'
-                              ? ({ width: '100%', height: '100%', objectFit: 'cover' } as any)
-                              : undefined
-                          }
+                          videoStyle={layerVideoStyle}
                           onReadyForDisplay={() => handleLayerReady(layer.url)}
                           onError={() => {
                             console.warn('[WorkoutPlayer] video load error', { url: layer.url });

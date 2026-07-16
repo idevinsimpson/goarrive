@@ -2126,6 +2126,213 @@ export const claimMemberAccount = onCall(
   }
 );
 
+// ── sendMemberInvite — Coach-triggered: create Auth user + send password reset ──
+/**
+ * Allows a coach to send an account invite to a member they added via QuickAdd.
+ * If the member has no Firebase Auth account, one is created with a temp password.
+ * A password-reset link is generated so the member can set their own password.
+ *
+ * Input:  { memberId: string }
+ * Output: { success: boolean, resetLink: string }
+ */
+export const sendMemberInvite = onCall(
+  { region: 'us-central1' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    // Only coaches (or admins) may send invites
+    const callerRole = request.auth?.token?.role;
+    const callerAdmin = request.auth?.token?.admin === true || callerRole === 'platformAdmin';
+    if (callerRole !== 'coach' && !callerAdmin) {
+      throw new HttpsError('permission-denied', 'Only coaches can send member invites');
+    }
+
+    const { memberId } = request.data as { memberId?: string };
+    if (!memberId) throw new HttpsError('invalid-argument', 'memberId is required');
+
+    try {
+      // Fetch member doc
+      const memberRef = db.collection('members').doc(memberId);
+      const memberSnap = await memberRef.get();
+      if (!memberSnap.exists) {
+        throw new HttpsError('not-found', 'Member record not found');
+      }
+
+      const member = memberSnap.data()!;
+
+      // Coach-scope guard: caller must own this member (unless admin)
+      if (!callerAdmin && member.coachId !== callerUid) {
+        throw new HttpsError('permission-denied', 'You can only invite your own members');
+      }
+
+      const memberEmail = (member.email || '').trim().toLowerCase();
+      if (!memberEmail) {
+        throw new HttpsError('failed-precondition', 'Member has no email address on file');
+      }
+
+      // If member already has an account, just generate a reset link
+      if (member.hasAccount === true && member.uid) {
+        // No actionCodeSettings — avoids domain-allowlist requirement; Firebase uses its default continue URL
+        const resetLink = await admin.auth().generatePasswordResetLink(memberEmail);
+        console.log('[sendMemberInvite] Reset link for existing account:', memberId, memberEmail);
+        return { success: true, resetLink };
+      }
+
+      // Create Firebase Auth user with a temp password
+      const tempPassword = `GA-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      let userRecord;
+      try {
+        userRecord = await admin.auth().createUser({
+          email: memberEmail,
+          displayName: member.name || member.displayName || '',
+          password: tempPassword,
+        });
+      } catch (err: any) {
+        if (err.code === 'auth/email-already-exists') {
+          // Auth user exists but member doc wasn't linked — link it now
+          const existingUser = await admin.auth().getUserByEmail(memberEmail);
+          userRecord = existingUser;
+        } else {
+          throw new HttpsError('internal', `createUser failed: ${err.message ?? err.code ?? 'unknown'}`);
+        }
+      }
+
+      // Set custom claims for the member
+      await admin.auth().setCustomUserClaims(userRecord.uid, {
+        role: 'member',
+        coachId: member.coachId,
+        tenantId: member.tenantId,
+        memberId: memberId,
+      });
+
+      // Update member doc to link the auth account
+      await memberRef.update({
+        uid: userRecord.uid,
+        hasAccount: true,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      // Generate password reset link (no actionCodeSettings — avoids domain-allowlist requirement)
+      const resetLink = await admin.auth().generatePasswordResetLink(memberEmail);
+
+      console.log('[sendMemberInvite] Created auth + reset link:', userRecord.uid, memberEmail, 'by', callerUid);
+      return { success: true, resetLink };
+    } catch (err: any) {
+      // Re-throw HttpsErrors as-is; wrap everything else with a descriptive message
+      if (err instanceof HttpsError) throw err;
+      console.error('[sendMemberInvite] Unhandled error:', err?.code, err?.message, err);
+      throw new HttpsError('internal', `Unexpected error: ${err?.message ?? err?.code ?? String(err)}`);
+    }
+  }
+);
+
+
+/**
+ * sendMemberInvite – Coach-initiated: ensure a Firebase Auth account exists
+ * for a coach-created member and return a password-reset / first-time-setup
+ * link they can share.
+ *
+ * Handles both cases:
+ *   - Member has no Auth user yet → creates one, sets member claims, links
+ *     the member doc, returns a reset link for the member to set a password.
+ *   - Member already has an Auth user → just returns a fresh reset link.
+ *
+ * Tenant isolation: caller must be the member's coach (or a platformAdmin).
+ *
+ * Input:  { memberId: string }
+ * Output: { success, resetLink, email, authCreated }
+ */
+export const sendMemberInvite = onCall(
+  { region: 'us-central1', invoker: 'public' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const token = request.auth?.token;
+    const callerRole = token?.role;
+    const callerCoachId = (token?.coachId as string | undefined) ?? callerUid;
+    const isAdmin = token?.admin === true || callerRole === 'platformAdmin';
+    if (callerRole !== 'coach' && !isAdmin) {
+      throw new HttpsError('permission-denied', 'Only coaches can send member invites');
+    }
+
+    const { memberId } = request.data as { memberId?: string };
+    if (!memberId) throw new HttpsError('invalid-argument', 'memberId is required');
+
+    const memberRef = db.collection('members').doc(memberId);
+    const memberSnap = await memberRef.get();
+    if (!memberSnap.exists) {
+      throw new HttpsError('not-found', 'Member record not found');
+    }
+    const member = memberSnap.data()!;
+
+    if (!isAdmin && member.coachId !== callerCoachId) {
+      throw new HttpsError('permission-denied', 'This member belongs to a different coach');
+    }
+
+    const email = String(member.email ?? '').trim().toLowerCase();
+    if (!email) {
+      throw new HttpsError(
+        'failed-precondition',
+        'This member has no email on file. Add one before sending an invite.'
+      );
+    }
+
+    // Ensure a Firebase Auth user exists for this email
+    let userRecord: admin.auth.UserRecord;
+    let authCreated = false;
+    try {
+      userRecord = await admin.auth().getUserByEmail(email);
+    } catch (err: any) {
+      if (err.code !== 'auth/user-not-found') {
+        throw new HttpsError('internal', err.message ?? 'Failed to look up user');
+      }
+      const cryptoMod = require('crypto');
+      const tempPassword = cryptoMod.randomBytes(24).toString('base64');
+      userRecord = await admin.auth().createUser({
+        email,
+        password: tempPassword,
+        displayName: member.displayName || member.name || '',
+      });
+      authCreated = true;
+    }
+
+    // Set member custom claims so role-gated UI and rules resolve correctly
+    await admin.auth().setCustomUserClaims(userRecord.uid, {
+      role: 'member',
+      coachId: member.coachId,
+      tenantId: member.tenantId ?? member.coachId,
+      memberId: memberId,
+    });
+
+    // Link the auth account to the member doc if not already linked
+    if (!member.uid || member.uid !== userRecord.uid || member.hasAccount !== true) {
+      await memberRef.update({
+        uid: userRecord.uid,
+        hasAccount: true,
+        email,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
+    const actionCodeSettings = { url: appUrl, handleCodeInApp: false };
+    const resetLink = await admin.auth().generatePasswordResetLink(email, actionCodeSettings);
+
+    console.log(
+      `[sendMemberInvite] ${authCreated ? 'Created' : 'Found'} auth for ${email} memberId=${memberId} by ${callerUid}`
+    );
+
+    return {
+      success: true,
+      resetLink,
+      email,
+      authCreated,
+    };
+  }
+);
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SCHEDULING BACKBONE — Recurring Slots, Session Instances, Zoom Allocation
@@ -6640,7 +6847,7 @@ export const googleCalendarCallback = onRequest(
         details: 'Google Calendar OAuth2 connected successfully',
       });
       // Redirect to the app's account page
-      res.redirect('https://goarrive.web.app/account?gcal=connected');
+      res.redirect('https://goarrive.fit/account?gcal=connected');
     } catch (err: any) {
       console.error('[googleCalendarCallback] Error:', err);
       res.status(500).send('Failed to connect Google Calendar: ' + (err.message || 'Unknown error'));
@@ -6693,11 +6900,19 @@ export const syncToGoogleCalendar = onCall(
         continue;
       }
       try {
-        const startDateTime = `${inst.scheduledDate}T${inst.scheduledStartTime || '09:00'}:00`;
-        const durationMin = inst.durationMinutes || 30;
-        const endDate = new Date(startDateTime);
-        endDate.setMinutes(endDate.getMinutes() + durationMin);
-        const endDateTime = endDate.toISOString();
+        const timeStr = (inst.scheduledStartTime as string) || '09:00';
+        const startDateTime = `${inst.scheduledDate}T${timeStr}:00`;
+        const durationMin = (inst.durationMinutes as number) || 30;
+        // Compute end time using local integer arithmetic to avoid UTC timezone shift
+        const [startH, startM] = timeStr.split(':').map(Number);
+        const endTotalMin = startH * 60 + startM + durationMin;
+        const endH = Math.floor(endTotalMin / 60) % 24;
+        const endM = endTotalMin % 60;
+        // Handle sessions that run past midnight
+        const endDateStr = endTotalMin >= 24 * 60
+          ? new Date(new Date(inst.scheduledDate + 'T00:00:00Z').getTime() + 86400000).toISOString().slice(0, 10)
+          : inst.scheduledDate as string;
+        const endDateTime = `${endDateStr}T${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}:00`;
 
         const event = await calendar.events.insert({
           calendarId: 'primary',
@@ -6863,7 +7078,7 @@ export const gcalConflictCallback = onRequest(
         details: `Conflict-check Google account connected: ${email}`,
       });
 
-      res.redirect(`https://goarrive.web.app/account?gcal=conflict_connected&email=${encodeURIComponent(email)}`);
+      res.redirect(`https://goarrive.fit/account?gcal=conflict_connected&email=${encodeURIComponent(email)}`);
     } catch (err: any) {
       console.error('[gcalConflictCallback] Error:', err);
       res.status(500).send('Failed to connect conflict-check Google Calendar: ' + (err.message || 'Unknown error'));
@@ -9615,6 +9830,85 @@ export const onMemberCreated = onDocumentCreated(
   }
 );
 
+// ─── batchGenerateVoice — Batch TTS for workout phrase preloading ────────────
+// Accepts an array of {text, cacheKey} entries. For each entry, checks if the
+// audio already exists in Firebase Storage. If not, generates it via OpenAI TTS.
+// Returns a map of cacheKey → download URL for all entries.
+// ─────────────────────────────────────────────────────────────────────────────
+export const batchGenerateVoice = onCall(
+  { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 120, maxInstances: 10 },
+  async (request) => {
+    const { phrases } = request.data as {
+      phrases?: { text: string; cacheKey: string }[];
+    };
+
+    if (!phrases || !Array.isArray(phrases) || phrases.length === 0) {
+      throw new HttpsError('invalid-argument', 'phrases array is required');
+    }
+    if (phrases.length > 100) {
+      throw new HttpsError('invalid-argument', 'Maximum 100 phrases per batch');
+    }
+
+    const apiKey = openaiApiKey.value()?.trim();
+    if (!apiKey) {
+      throw new HttpsError('internal', 'OpenAI API key not configured');
+    }
+
+    const bucket = admin.storage().bucket();
+    const results: Record<string, string> = {};
+
+    // Process in parallel with concurrency limit of 5
+    const CONCURRENCY = 5;
+    for (let i = 0; i < phrases.length; i += CONCURRENCY) {
+      const batch = phrases.slice(i, i + CONCURRENCY);
+      await Promise.all(batch.map(async ({ text, cacheKey }) => {
+        if (!text || !cacheKey) return;
+
+        const storagePath = `voice_cache/phrases/${cacheKey}.mp3`;
+        const file = bucket.file(storagePath);
+
+        // Check if already cached
+        const [exists] = await file.exists();
+        if (exists) {
+          results[cacheKey] = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+          return;
+        }
+
+        // Generate via OpenAI TTS
+        try {
+          const response = await fetch('https://api.openai.com/v1/audio/speech', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: 'tts-1',
+              voice: 'onyx',
+              input: text,
+            }),
+          });
+
+          if (!response.ok) {
+            console.error(`[batchGenerateVoice] OpenAI error for "${cacheKey}":`, response.status);
+            return;
+          }
+
+          const audioBuffer = Buffer.from(await response.arrayBuffer());
+          await file.save(audioBuffer, { contentType: 'audio/mpeg' });
+          await file.makePublic();
+
+          results[cacheKey] = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+        } catch (err) {
+          console.error(`[batchGenerateVoice] Failed for "${cacheKey}":`, err);
+        }
+      }));
+    }
+
+    return { urls: results, generated: Object.keys(results).length, total: phrases.length };
+  }
+);
+
 // ─────────────────────────────────────────────
 // COACH APPLICATION EMAIL NOTIFICATION
 // Email notification is handled by the VM-based coach-app-watcher service
@@ -10083,6 +10377,92 @@ export const resolveShareToken = onRequest(
   },
 );
 
+// ─── submitGuestReflection — guest glow/grow after shared-workout play ───────
+// Unauthenticated guests can't write Firestore directly (rules deny), so this
+// endpoint validates the share token server-side and writes via Admin SDK.
+export const submitGuestReflection = onRequest(
+  { cors: true, region: 'us-central1' },
+  async (req, res) => {
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed.' });
+      return;
+    }
+
+    const body = (req.body || {}) as Record<string, any>;
+    const shareId = body.shareId;
+    if (!shareId || typeof shareId !== 'string' || shareId.length !== 32) {
+      res.status(400).json({ error: 'Invalid share link.' });
+      return;
+    }
+
+    const tokenSnap = await db.collection('shareTokens').doc(shareId).get();
+    if (!tokenSnap.exists) {
+      res.status(404).json({ error: 'This share link is no longer available.' });
+      return;
+    }
+    const tokenData = tokenSnap.data()!;
+    if (tokenData.revokedAt) {
+      res.status(410).json({ error: 'This share link has been revoked.' });
+      return;
+    }
+    const expiresAt = tokenData.expiresAt as admin.firestore.Timestamp | null | undefined;
+    if (expiresAt && expiresAt.toMillis() < Date.now()) {
+      res.status(410).json({ error: 'This share link has expired.' });
+      return;
+    }
+    const visibility: ShareVisibility = normalizeVisibility(tokenData.visibility);
+    if (visibility === 'restricted') {
+      res.status(403).json({ error: 'This workout is no longer shared via link.' });
+      return;
+    }
+    if (visibility === 'anyone_with_link_signin_required') {
+      const authHeader = req.headers.authorization;
+      let ok = false;
+      if (authHeader?.startsWith('Bearer ')) {
+        try {
+          await admin.auth().verifyIdToken(authHeader.slice(7));
+          ok = true;
+        } catch { /* invalid token */ }
+      }
+      if (!ok) {
+        res.status(403).json({ error: 'Sign in required for this link.' });
+        return;
+      }
+    }
+
+    const cleanText = (v: any) =>
+      typeof v === 'string' ? v.trim().slice(0, 500) : '';
+    const cleanRating = (v: any) =>
+      Number.isInteger(v) && v >= 1 && v <= 5 ? v : null;
+    const durationSec =
+      typeof body.durationSec === 'number' && body.durationSec >= 0 && body.durationSec <= 86400
+        ? Math.round(body.durationSec)
+        : null;
+
+    const workoutSnap = await db.collection('workouts').doc(tokenData.workoutId).get();
+    const workoutName = workoutSnap.exists ? (workoutSnap.data()!.name || 'Workout') : 'Workout';
+
+    const docRef = await db.collection('guest_reflections').add({
+      coachId: tokenData.createdBy,
+      workoutId: tokenData.workoutId,
+      workoutName,
+      shareId,
+      journal: {
+        glow: cleanText(body.glow),
+        grow: cleanText(body.grow),
+        energyRating: cleanRating(body.energyRating),
+        moodRating: cleanRating(body.moodRating),
+      },
+      durationSec,
+      source: 'shareLink',
+      reviewStatus: 'pending',
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    res.status(200).json({ ok: true, id: docRef.id });
+  },
+);
+
 // ─── generateEquipmentImage — AI image for grab-equipment phases ─────────────
 // Accepts grabEquipmentText + optional forceRegenerate flag.
 // Extracts equipment keyword via GPT-4o-mini, then:
@@ -10287,7 +10667,19 @@ interface VariationCandidate {
   status: 'PENDING' | 'THROTTLED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
   progress: number;
   videoUrl: string | null; // ephemeral Runway output URL (expires 24-48h)
+  storedVideoUrl?: string | null; // durable Storage copy written by the background poller
   error: string | null;
+}
+
+const VARIATION_JOB_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const VARIATION_MOTION_MODEL = 'gen4_turbo';
+const VARIATION_MOTION_DURATION_SEC = 10;
+
+const VARIATION_MOTION_BASE_PROMPT =
+  'Keep the same person, body type, outfit, equipment, background, camera angle, framing, and lighting as the image. The coach performs this movement as a safe, realistic, controlled, instructional fitness demonstration. Do not add extra people. Do not change the face. Do not add text overlays or logos. Do not add barbells, heavy weights, or any equipment not explicitly requested. Avoid unsafe, overloaded, or high-risk positions.';
+
+function isTerminalCandidate(c: VariationCandidate): boolean {
+  return c.status === 'SUCCEEDED' || c.status === 'FAILED' || c.status === 'CANCELLED';
 }
 
 /** Coach/admin gate + resolve caller's coach scope for ownership checks. */
@@ -10339,8 +10731,9 @@ async function fetchRunwayTask(apiKey: string, taskId: string): Promise<{
 }
 
 /**
- * Download a video from sourceUrl, transcode to ≤30fps (Runway's limit), upload to Storage,
- * and return a public URL. Cleans up /tmp on both success and failure.
+ * Download a video from sourceUrl, transcode to ≤30fps and trim to ≤29.5s (Runway rejects
+ * assets over 30s), upload to Storage, and return a public URL. Cleans up /tmp on both
+ * success and failure.
  */
 async function transcodeVideoTo30fps(sourceUrl: string, jobId: string, coachId: string): Promise<string> {
   const { execSync } = await import('child_process');
@@ -10360,7 +10753,7 @@ async function transcodeVideoTo30fps(sourceUrl: string, jobId: string, coachId: 
 
     // -loglevel error keeps stderr tiny so the pipe buffer can't deadlock execSync.
     execSync(
-      `ffmpeg -y -loglevel error -i "${inputPath}" -r 30 -vf fps=fps=30 -c:v libx264 -preset fast -crf 23 -movflags +faststart "${outputPath}"`,
+      `ffmpeg -y -loglevel error -i "${inputPath}" -t 29.5 -r 30 -vf fps=fps=30 -c:v libx264 -preset fast -crf 23 -movflags +faststart "${outputPath}"`,
       { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 1024 * 1024 },
     );
 
@@ -10383,16 +10776,71 @@ async function transcodeVideoTo30fps(sourceUrl: string, jobId: string, coachId: 
   }
 }
 
+/**
+ * Extract the first frame of a video for the "motion" remix path, upload it to
+ * Storage with a download token, and return the frame URL plus the gen4_turbo
+ * ratio matching the source orientation.
+ */
+async function extractFirstFrameForMotion(videoUrl: string, jobId: string, coachId: string): Promise<{
+  frameUrl: string;
+  ratio: '1280:720' | '720:1280' | '960:960';
+}> {
+  const { execSync } = await import('child_process');
+  const os = await import('os');
+  const path = await import('path');
+  const fs = await import('fs');
+
+  const tmpDir = os.tmpdir();
+  const inputPath = path.join(tmpDir, `variation-motion-src-${jobId}.mp4`);
+  const framePath = path.join(tmpDir, `variation-frame-${jobId}.jpg`);
+
+  try {
+    const resp = await fetch(videoUrl);
+    if (!resp.ok) throw new Error(`Failed to download video for frame extraction (${resp.status})`);
+    fs.writeFileSync(inputPath, Buffer.from(await resp.arrayBuffer()));
+
+    execSync(
+      `ffmpeg -y -loglevel error -i "${inputPath}" -frames:v 1 -q:v 2 "${framePath}"`,
+      { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 1024 * 1024 },
+    );
+
+    const dims = execSync(
+      `ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${inputPath}"`,
+      { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1024 * 1024 },
+    ).toString().trim();
+    const [w, h] = dims.split('x').map((n) => parseInt(n, 10));
+    const ratio = h > w ? '720:1280' as const : w > h ? '1280:720' as const : '960:960' as const;
+
+    const bucket = admin.storage().bucket();
+    const storagePath = `movements/${coachId}/variations/${jobId}/first-frame.jpg`;
+    const downloadToken = `${jobId}-ff`;
+    await bucket.upload(framePath, {
+      destination: storagePath,
+      metadata: {
+        contentType: 'image/jpeg',
+        metadata: { firebaseStorageDownloadTokens: downloadToken },
+      },
+    });
+    const frameUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
+    return { frameUrl, ratio };
+  } finally {
+    try { fs.unlinkSync(inputPath); } catch {}
+    try { fs.unlinkSync(framePath); } catch {}
+  }
+}
+
 export const startMovementVariation = onCall(
   { region: 'us-central1', secrets: [runwayApiSecret], timeoutSeconds: 180, memory: '1GiB', maxInstances: 10, invoker: 'public' },
   async (request) => {
     const { isAdmin, callerCoachIds } = requireCoachOrAdmin(request);
 
-    const { sourceMovementId, instruction, outputCount } = request.data as {
+    const { sourceMovementId, instruction, outputCount, remixMode: remixModeRaw } = request.data as {
       sourceMovementId?: string;
       instruction?: string;
       outputCount?: number;
+      remixMode?: string;
     };
+    const remixMode: 'edit' | 'motion' = remixModeRaw === 'motion' ? 'motion' : 'edit';
 
     if (!sourceMovementId || typeof sourceMovementId !== 'string') {
       throw new HttpsError('invalid-argument', 'sourceMovementId is required');
@@ -10437,7 +10885,8 @@ export const startMovementVariation = onCall(
       instruction: trimmedInstruction,
       status: 'queued',
       provider: VARIATION_PROVIDER,
-      model: VARIATION_MODEL,
+      model: remixMode === 'motion' ? VARIATION_MOTION_MODEL : VARIATION_MODEL,
+      remixMode,
       candidateCount,
       taskIds: [],
       candidates: [],
@@ -10467,22 +10916,52 @@ export const startMovementVariation = onCall(
         throw new HttpsError('internal', 'Failed to prepare video for generation');
       }
 
+      // Motion mode: aleph2 video-to-video preserves the source motion, so
+      // motion-change instructions produce near-identical output. Instead,
+      // regenerate motion from a still first frame via image_to_video.
+      let motionParams: { frameUrl: string; ratio: '1280:720' | '720:1280' | '960:960' } | null = null;
+      if (remixMode === 'motion') {
+        try {
+          console.info('[startMovementVariation] Extracting first frame for motion remix', { jobId: jobRef.id });
+          motionParams = await extractFirstFrameForMotion(videoUriForRunway, jobRef.id, movement.coachId);
+        } catch (ffErr: any) {
+          const ffMsg = `First-frame extraction failed: ${String(ffErr?.message || ffErr).slice(0, 300)}`;
+          console.error('[startMovementVariation] Frame extraction error', { jobId: jobRef.id, error: ffMsg });
+          await jobRef.update({ status: 'failed', errorMessage: ffMsg, updatedAt: Timestamp.now() });
+          throw new HttpsError('internal', 'Failed to prepare image for motion generation');
+        }
+      }
+
+      const motionPromptText = `${VARIATION_MOTION_BASE_PROMPT} The coach performs: ${trimmedInstruction}`;
+
       const candidates: VariationCandidate[] = [];
       let lastError: string | null = null;
 
       for (let i = 0; i < candidateCount; i++) {
         try {
-          console.info('[startMovementVariation] Creating Runway task', { jobId: jobRef.id, attempt: i });
-          const resp = await fetch(`${RUNWAY_API_BASE}/v1/video_to_video`, {
+          console.info('[startMovementVariation] Creating Runway task', { jobId: jobRef.id, attempt: i, remixMode });
+          const endpoint = motionParams ? 'image_to_video' : 'video_to_video';
+          const body = motionParams
+            ? {
+                model: VARIATION_MOTION_MODEL,
+                promptImage: motionParams.frameUrl,
+                promptText: motionPromptText,
+                ratio: motionParams.ratio,
+                duration: VARIATION_MOTION_DURATION_SEC,
+                seed: Math.floor(Math.random() * 4294967295),
+                contentModeration: { publicFigureThreshold: 'auto' },
+              }
+            : {
+                model: VARIATION_MODEL,
+                videoUri: videoUriForRunway,
+                promptText,
+                seed: Math.floor(Math.random() * 4294967295),
+                contentModeration: { publicFigureThreshold: 'auto' },
+              };
+          const resp = await fetch(`${RUNWAY_API_BASE}/v1/${endpoint}`, {
             method: 'POST',
             headers: runwayHeaders(apiKey),
-            body: JSON.stringify({
-              model: VARIATION_MODEL,
-              videoUri: videoUriForRunway,
-              promptText,
-              seed: Math.floor(Math.random() * 4294967295),
-              contentModeration: { publicFigureThreshold: 'auto' },
-            }),
+            body: JSON.stringify(body),
           });
           if (!resp.ok) {
             const body = await resp.text().catch(() => '');
@@ -10604,6 +11083,7 @@ export const getMovementVariationStatus = onCall(
         status: c.status,
         progress: c.progress,
         videoUrl: c.videoUrl,
+        storedVideoUrl: c.storedVideoUrl ?? null,
         error: c.error,
       })),
     };
@@ -10639,36 +11119,57 @@ export const finalizeMovementVariation = onCall(
       throw new HttpsError('internal', 'Runway API key not configured');
     }
 
-    // Runway output URLs expire within 24-48h — always re-fetch for a fresh URL.
-    let outputUrl = candidate.videoUrl;
-    try {
-      const task = await fetchRunwayTask(apiKey, candidateId);
-      if (task.status !== 'SUCCEEDED' || !task.outputUrl) {
-        throw new HttpsError('failed-precondition', 'Selected candidate has no completed output');
-      }
-      outputUrl = task.outputUrl;
-    } catch (err: any) {
-      if (err instanceof HttpsError) throw err;
-      if (!outputUrl) {
-        throw new HttpsError('internal', 'Could not retrieve generated video from provider');
-      }
-    }
-
-    const videoResp = await fetch(outputUrl!);
-    if (!videoResp.ok) {
-      throw new HttpsError('internal', `Failed to download generated video (${videoResp.status})`);
-    }
-    const videoBuffer = Buffer.from(await videoResp.arrayBuffer());
-
     const storagePath = `movements/${job.coachId}/ai-generated-videos/${jobId}-${candidateId}.mp4`;
     const bucket = admin.storage().bucket();
     const file = bucket.file(storagePath);
     // Download token so the client can play the file under authenticated-read storage rules.
     const downloadToken = require('crypto').randomUUID();
-    await file.save(videoBuffer, {
-      contentType: 'video/mp4',
-      metadata: { metadata: { firebaseStorageDownloadTokens: downloadToken } },
-    });
+
+    let persisted = false;
+    // Prefer the durable copy written by the background poller — the Runway URL
+    // may already be expired by the time the coach comes back to finalize.
+    if (candidate.storedVideoUrl) {
+      try {
+        const storedPath = `movements/${job.coachId}/variations/${jobId}/${candidateId}.mp4`;
+        await bucket.file(storedPath).copy(file);
+        await file.setMetadata({
+          contentType: 'video/mp4',
+          metadata: { firebaseStorageDownloadTokens: downloadToken },
+        });
+        persisted = true;
+      } catch (err: any) {
+        console.warn('[finalizeMovementVariation] Stored copy failed, falling back to Runway URL', {
+          jobId, candidateId, error: String(err?.message || err).slice(0, 200),
+        });
+      }
+    }
+
+    if (!persisted) {
+      // Fall back to the ephemeral Runway URL (re-fetch for freshness).
+      let outputUrl = candidate.videoUrl;
+      try {
+        const task = await fetchRunwayTask(apiKey, candidateId);
+        if (task.status !== 'SUCCEEDED' || !task.outputUrl) {
+          throw new HttpsError('failed-precondition', 'Selected candidate has no completed output');
+        }
+        outputUrl = task.outputUrl;
+      } catch (err: any) {
+        if (err instanceof HttpsError) throw err;
+        if (!outputUrl) {
+          throw new HttpsError('internal', 'Could not retrieve generated video from provider');
+        }
+      }
+
+      const videoResp = await fetch(outputUrl!);
+      if (!videoResp.ok) {
+        throw new HttpsError('internal', `Failed to download generated video (${videoResp.status})`);
+      }
+      const videoBuffer = Buffer.from(await videoResp.arrayBuffer());
+      await file.save(videoBuffer, {
+        contentType: 'video/mp4',
+        metadata: { metadata: { firebaseStorageDownloadTokens: downloadToken } },
+      });
+    }
     const videoUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
 
     const finalizedAt = Timestamp.now();
@@ -10683,7 +11184,7 @@ export const finalizeMovementVariation = onCall(
       jobId, candidateId, coachId: job.coachId,
       provider: job.provider, model: job.model,
       candidateCount: job.candidateCount,
-      bytes: videoBuffer.length,
+      fromStoredCopy: persisted,
       createdAt: job.createdAt?.toDate?.()?.toISOString?.() || null,
       finalizedAt: finalizedAt.toDate().toISOString(),
     });
@@ -10695,5 +11196,150 @@ export const finalizeMovementVariation = onCall(
       instruction: job.instruction,
       jobId,
     };
+  },
+);
+
+export const dismissMovementVariation = onCall(
+  { region: 'us-central1', timeoutSeconds: 30, maxInstances: 10, invoker: 'public' },
+  async (request) => {
+    const { isAdmin, callerCoachIds } = requireCoachOrAdmin(request);
+
+    const { jobId } = request.data as { jobId?: string };
+    if (!jobId || typeof jobId !== 'string') {
+      throw new HttpsError('invalid-argument', 'jobId is required');
+    }
+
+    const jobRef = db.doc(`movement_variation_jobs/${jobId}`);
+    const jobSnap = await jobRef.get();
+    if (!jobSnap.exists) {
+      throw new HttpsError('not-found', 'Variation job not found');
+    }
+    const job = jobSnap.data() as FirebaseFirestore.DocumentData;
+    assertVariationJobOwnership(job, isAdmin, callerCoachIds);
+
+    if (job.finalizedVideoUrl) {
+      throw new HttpsError('failed-precondition', 'Job is already finalized');
+    }
+
+    await jobRef.update({ status: 'dismissed', updatedAt: Timestamp.now() });
+    console.info('[dismissMovementVariation] Dismissed', { jobId, coachId: job.coachId });
+    return { jobId, status: 'dismissed' };
+  },
+);
+
+/**
+ * Download a completed Runway output and persist it to Storage before the
+ * ephemeral URL expires. Returns a durable token URL.
+ */
+async function persistVariationCandidateOutput(
+  coachId: string,
+  jobId: string,
+  candidateId: string,
+  outputUrl: string,
+): Promise<string> {
+  const resp = await fetch(outputUrl);
+  if (!resp.ok) throw new Error(`Failed to download Runway output (${resp.status})`);
+  const buf = Buffer.from(await resp.arrayBuffer());
+
+  const storagePath = `movements/${coachId}/variations/${jobId}/${candidateId}.mp4`;
+  const bucket = admin.storage().bucket();
+  const downloadToken = require('crypto').randomUUID();
+  await bucket.file(storagePath).save(buf, {
+    contentType: 'video/mp4',
+    metadata: { metadata: { firebaseStorageDownloadTokens: downloadToken } },
+  });
+  return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
+}
+
+// ─── pollMovementVariationJobs — background sweep so closed modals don't orphan jobs ──
+export const pollMovementVariationJobs = onSchedule(
+  {
+    schedule: 'every 1 minutes',
+    region: 'us-central1',
+    secrets: [runwayApiSecret],
+    timeoutSeconds: 300,
+    memory: '1GiB',
+  },
+  async () => {
+    const apiKey = runwayApiSecret.value()?.trim();
+    if (!apiKey) {
+      console.error('[pollMovementVariationJobs] Runway API key not configured — skipping sweep');
+      return;
+    }
+
+    const snap = await db.collection('movement_variation_jobs').where('status', '==', 'running').get();
+    if (snap.empty) return;
+
+    const nowMs = Date.now();
+    for (const jobDoc of snap.docs) {
+      // Per-job isolation: one bad job must never kill the whole sweep.
+      try {
+        const job = jobDoc.data();
+        const createdMs = job.createdAt?.toMillis?.() ?? 0;
+        if (createdMs && nowMs - createdMs > VARIATION_JOB_MAX_AGE_MS) {
+          await jobDoc.ref.update({
+            status: 'failed',
+            errorMessage: 'Generation timed out after 24 hours',
+            updatedAt: Timestamp.now(),
+          });
+          console.warn('[pollMovementVariationJobs] Job timed out', { jobId: jobDoc.id });
+          continue;
+        }
+
+        let candidates: VariationCandidate[] = Array.isArray(job.candidates) ? job.candidates : [];
+        let changed = false;
+
+        candidates = await Promise.all(
+          candidates.map(async (c) => {
+            // Already terminal + persisted (or unpersistable) — nothing to do.
+            if (isTerminalCandidate(c) && (c.status !== 'SUCCEEDED' || c.storedVideoUrl)) return c;
+            try {
+              let next: VariationCandidate = c;
+              if (!isTerminalCandidate(c)) {
+                const task = await fetchRunwayTask(apiKey, c.id);
+                next = {
+                  ...c,
+                  status: task.status,
+                  progress: task.status === 'SUCCEEDED' ? 1 : task.progress,
+                  videoUrl: task.outputUrl ?? c.videoUrl,
+                  error: task.failure,
+                };
+                changed = true;
+              }
+              if (next.status === 'SUCCEEDED' && !next.storedVideoUrl && next.videoUrl) {
+                const storedVideoUrl = await persistVariationCandidateOutput(job.coachId, jobDoc.id, c.id, next.videoUrl);
+                next = { ...next, storedVideoUrl };
+                changed = true;
+                console.info('[pollMovementVariationJobs] Persisted candidate output', { jobId: jobDoc.id, candidateId: c.id });
+              }
+              return next;
+            } catch (err: any) {
+              console.warn('[pollMovementVariationJobs] Candidate poll/persist failed', {
+                jobId: jobDoc.id, candidateId: c.id, error: String(err?.message || err).slice(0, 200),
+              });
+              return c; // transient — retry next sweep
+            }
+          }),
+        );
+
+        const terminal = candidates.length > 0 && candidates.every(isTerminalCandidate);
+        const anySucceeded = candidates.some((c) => c.status === 'SUCCEEDED');
+        let status = job.status;
+        let errorMessage = job.errorMessage || null;
+        if (terminal) {
+          status = anySucceeded ? 'succeeded' : 'failed';
+          if (!anySucceeded) errorMessage = candidates.find((c) => c.error)?.error || 'Generation failed';
+          changed = true;
+        }
+
+        if (changed) {
+          await jobDoc.ref.update({ candidates, status, errorMessage, updatedAt: Timestamp.now() });
+        }
+      } catch (err: any) {
+        console.error('[pollMovementVariationJobs] Job sweep failed', {
+          jobId: jobDoc.id, error: String(err?.message || err).slice(0, 300),
+        });
+      }
+    }
   },
 );
