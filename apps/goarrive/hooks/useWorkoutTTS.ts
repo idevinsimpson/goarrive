@@ -669,6 +669,13 @@ export function useWorkoutTTS({
           mediaError: (audio as any).error?.code,
           detail,
         });
+        // Hard-stop the element on any early exit. A stalled clip (watchdog
+        // fired while it was still buffering) would otherwise start playing
+        // once its data arrives — on top of the next queue item. Overlapping
+        // "workout starting" / "here's what's coming up" at cold start was
+        // exactly this. pause() also rejects a still-pending play() promise
+        // (AbortError), which onDone ignores because settled=true.
+        try { audio.pause(); audio.currentTime = 0; } catch {}
       }
       if (currentAudioRef.current === audio) currentAudioRef.current = null;
       queueOwnedElements.delete(audio);
