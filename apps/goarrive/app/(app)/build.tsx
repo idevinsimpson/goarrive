@@ -1053,32 +1053,41 @@ function BuildScreenInner() {
         listBottom = Math.min(listBottom, windowH - TRAY_HEIGHT - insets.bottom);
       }
       const band = (listBottom - win.top) * AUTO_SCROLL_BAND_PCT;
+      const x = pointerXRef.current;
       let delta = 0;
       // Scroll up if dragging near the top
       if (y < win.top + band) {
         const proximity = (win.top + band - y) / band;
         delta = -Math.min(1, proximity) * AUTO_SCROLL_MAX_PX;
       }
-      // Scroll down when dragging near the bottom edge of the list. Tray
-      // drop targets sit BELOW listBottom (which is clamped above the tray),
-      // so hovering them doesn't fall in this band.
-      else if (y > listBottom - band && y <= listBottom) {
-        const proximity = (y - (listBottom - band)) / band;
-        delta = Math.min(1, proximity) * AUTO_SCROLL_MAX_PX;
-      }
-      // Chevron-down hotspot: pointer over the tray zone at the bottom-right
-      // keeps scrolling at full speed without hovering any drop target.
-      else if (trayVisibleRef.current && y > listBottom) {
+      // Scroll down anywhere in the bottom zone — including past listBottom
+      // over the tray area — full width. The old version only scrolled inside
+      // a narrow band above the tray plus a 90px right-corner hotspot, which
+      // left most of the bottom (and the bottom-right on phones) dead.
+      else if (y > listBottom - band) {
+        // Exception: hovering an actual tray drop target means the user is
+        // aiming a drop, not scrolling — hold still so the target stays put.
+        // The right-edge chevron column always scrolls, even over a target.
         const windowW = Dimensions.get('window').width;
-        if (pointerXRef.current > windowW - AUTO_SCROLL_HOTSPOT_W) {
-          delta = AUTO_SCROLL_MAX_PX;
+        const inChevronColumn = x > windowW - AUTO_SCROLL_HOTSPOT_W;
+        if (inChevronColumn || !findTrayTarget(x, y)) {
+          const proximity = Math.min(1, (y - (listBottom - band)) / band);
+          delta = proximity * AUTO_SCROLL_MAX_PX;
         }
       }
       const node = getListScrollNode();
       if (delta !== 0) {
         if (node) {
-          node.scrollTop = Math.max(0, node.scrollTop + delta);
-          scrollOffsetRef.current = node.scrollTop;
+          const before = node.scrollTop;
+          const max = Math.max(0, node.scrollHeight - node.clientHeight);
+          const next = Math.min(max, Math.max(0, before + delta));
+          node.scrollTop = next;
+          // iOS WebKit can silently ignore scrollTop writes while a touch
+          // gesture is active — fall back to RNW's scrollTo in that case.
+          if (node.scrollTop === before && next !== before) {
+            listRef.current?.scrollToOffset({ offset: next, animated: false });
+          }
+          scrollOffsetRef.current = next;
         } else {
           const next = Math.max(0, scrollOffsetRef.current + delta);
           scrollOffsetRef.current = next;
@@ -1088,7 +1097,7 @@ function BuildScreenInner() {
       autoScrollRafRef.current = requestAnimationFrame(step);
     };
     autoScrollRafRef.current = requestAnimationFrame(step);
-  }, [stopAutoScroll, insets.bottom, getListScrollNode]);
+  }, [stopAutoScroll, insets.bottom, getListScrollNode, findTrayTarget]);
 
   const createFolderFromDrop = useCallback(async () => {
     if (!dropModal) return;
