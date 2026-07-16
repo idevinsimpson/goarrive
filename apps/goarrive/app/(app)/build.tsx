@@ -30,6 +30,7 @@ import {
   Image,
   Modal,
   useWindowDimensions,
+  type LayoutChangeEvent,
 } from 'react-native';
 import {
   collection,
@@ -79,6 +80,16 @@ const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 type BuildType = 'Plans' | 'Movements' | 'Workouts' | 'Follow-Alongs' | 'Playbooks';
 const TYPES: BuildType[] = ['Plans', 'Movements', 'Workouts', 'Follow-Alongs', 'Playbooks'];
 
+// Firestore collection backing each asset type — used by drag-and-drop
+// reparenting so any asset can be dropped into a folder.
+const COLLECTION_BY_TYPE: Record<BuildType, string> = {
+  Plans: 'plans',
+  Movements: 'movements',
+  Workouts: 'workouts',
+  'Follow-Alongs': 'followAlongVideos',
+  Playbooks: 'playbooks',
+};
+
 // ── Grid layout constants ──────────────────────────────────────────────────
 const GRID_PADDING = 16;       // padding on left/right of the grid
 const GRID_GAP = 12;           // gap between cards
@@ -101,17 +112,6 @@ const TRAY_HEIGHT = 96;              // content height of the drop tray (excl. s
 const TRAY_SLIDE_DISTANCE = 220;     // translateY when hidden — guaranteed offscreen incl. inset
 const TRAY_MAX_RECENTS = 5;
 const TRAY_NEW_FOLDER_KEY = 'tray:new';
-
-// On-screen drag diagnostics — enable with ?dragdebug=1 (persists via localStorage).
-const DRAG_DEBUG = Platform.OS === 'web' && typeof window !== 'undefined' && (() => {
-  try {
-    if (window.location.search.includes('dragdebug')) {
-      window.localStorage.setItem('dragdebug', '1');
-      return true;
-    }
-    return window.localStorage.getItem('dragdebug') === '1';
-  } catch { return false; }
-})();
 
 // Firestore rejects `undefined` values. Mirror the stripUndefined pattern
 // from components/WorkoutFolderPage.tsx so writes from drag/drop never throw.
@@ -187,11 +187,16 @@ function calcDurationMin(blocks: any[]): number {
   return Math.ceil(totalSec / 60);
 }
 
-// Drop target eligibility: only Folders, Workouts, and Movements accept drops.
-// Plans, Playbooks, and Follow-Alongs are pass-through tiles.
-function isDropTarget(item: { type?: string } | null | undefined): boolean {
-  if (!item) return false;
-  return item.type === 'Folder' || item.type === 'Workouts' || item.type === 'Movements';
+// Drop target eligibility. Folders accept every asset type. A Movement
+// dropped on a Workout appends to it. Any other asset-on-asset drop opens
+// the combine modal (create a folder containing both).
+function isDropTarget(
+  item: { type?: string } | null | undefined,
+  dragged: { type?: string } | null | undefined,
+): boolean {
+  if (!item || !dragged) return false;
+  if (dragged.type === 'Folder') return false;
+  return true;
 }
 
 interface BuildItem {
@@ -448,6 +453,11 @@ function BuildScreenInner() {
   const tileRefsMap = useRef(new Map<string, React.RefObject<View | null>>());
   const tileLayoutSnap = useRef(new Map<string, { x: number; y: number; w: number; h: number; item: BuildItem }>());
   const _dragItemRef = useRef<BuildItem | null>(null);
+  // Web: after a drag release, the browser synthesizes a click on the drag
+  // source, which fires the tile's Pressable onPress (workouts then navigate
+  // away via setOpenWorkoutId, making the drop look broken). Suppress presses
+  // briefly after any real drag ends.
+  const suppressPressUntilRef = useRef(0);
   const rootViewRef = useRef<View>(null);
 
   // ── Drag scroll tracking + edge auto-scroll ────────────────────────────
@@ -460,7 +470,6 @@ function BuildScreenInner() {
   const pointerXRef = useRef(0);
   const autoScrollRafRef = useRef<number | null>(null);
   const scrollLockCleanupRef = useRef<(() => void) | null>(null);
-  const [dragDebugInfo, setDragDebugInfo] = useState('');
 
   // ── Bottom drop tray ───────────────────────────────────────────────────
   const insets = useSafeAreaInsets();
@@ -469,8 +478,10 @@ function BuildScreenInner() {
   const trayVisibleRef = useRef(false);
   const trayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const trayTranslate = useSharedValue(TRAY_SLIDE_DISTANCE);
-  const trayItemRefsMap = useRef(new Map<string, React.RefObject<View | null>>());
-  const trayLayoutSnap = useRef(new Map<string, { x: number; y: number; w: number; h: number; item: BuildItem | null }>());
+  // Tray drop rects come from onLayout (relative to trayRow) + math for the
+  // absolute position — NOT from async measure() calls, which raced the
+  // tray's slide-up animation and left the snapshot empty on fast drops.
+  const trayItemLayoutsRef = useRef(new Map<string, { x: number; y: number; w: number; h: number; item: BuildItem | null }>());
   const [recentDropFolderIds, setRecentDropFolderIds] = useState<string[]>([]);
   const [pendingFolderDropItem, setPendingFolderDropItem] = useState<BuildItem | null>(null);
   // Movement dropped on the tray "New" target — chooser asks Folder vs Workout.
@@ -745,9 +756,9 @@ function BuildScreenInner() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      // Tray "New Folder" drop: insert the dragged movement into the folder.
-      if (pendingDrop) {
-        await updateDoc(doc(db, 'movements', pendingDrop.id), stripUndefined({
+      // Tray "New Folder" drop: insert the dragged asset into the folder.
+      if (pendingDrop && pendingDrop.type !== 'Folder') {
+        await updateDoc(doc(db, COLLECTION_BY_TYPE[pendingDrop.type], pendingDrop.id), stripUndefined({
           parentId: folderRef.id,
           updatedAt: serverTimestamp(),
         }));
@@ -839,12 +850,13 @@ function BuildScreenInner() {
     tryScroll();
   }, []);
 
-  const dropMovementIntoFolder = useCallback(async (dragged: BuildItem, folderId: string) => {
+  const dropItemIntoFolder = useCallback(async (dragged: BuildItem, folderId: string) => {
+    if (dragged.type === 'Folder') return;
     try {
       // Bump the folder's updatedAt too, so it resorts to the top of the
       // grid where the user is scrolled to see the result.
       const batch = writeBatch(db);
-      batch.update(doc(db, 'movements', dragged.id), stripUndefined({
+      batch.update(doc(db, COLLECTION_BY_TYPE[dragged.type], dragged.id), stripUndefined({
         parentId: folderId,
         updatedAt: serverTimestamp(),
       }));
@@ -855,16 +867,29 @@ function BuildScreenInner() {
     } catch (e) { console.error('[Build] Drop into folder error:', e); }
   }, [recordRecentDropFolder, scrollListToTop]);
 
-  // Tray targets live OUTSIDE the FlatList and don't move with scroll, so
-  // they're hit-tested against their own (unadjusted) measured rects.
+  // Tray targets live OUTSIDE the FlatList and don't move with scroll. Their
+  // absolute rects are deterministic: onLayout x/w within trayRow, plus the
+  // tray's known bottom-anchored geometry. Anything in the tray band snaps
+  // to the nearest target horizontally so near-miss drops still land.
   // item === null means the "New Folder" target.
   const findTrayTarget = useCallback((ax: number, ay: number): { key: string; item: BuildItem | null } | null => {
-    let found: { key: string; item: BuildItem | null } | null = null;
-    trayLayoutSnap.current.forEach(({ x, y, w, h, item }, key) => {
-      if (ax >= x && ax <= x + w && ay >= y && ay <= y + h) found = { key, item };
+    if (!trayVisibleRef.current || trayItemLayoutsRef.current.size === 0) return null;
+    const windowH = Dimensions.get('window').height;
+    // trayRow top = window bottom − bottom padding (inset + 12) − row height.
+    const rowTop = windowH - (insets.bottom + 12) - (TRAY_HEIGHT - 24);
+    if (ay < rowTop - 10) return null; // above the tray band (10px grace)
+    let best: { key: string; item: BuildItem | null } | null = null;
+    let bestDist = Infinity;
+    trayItemLayoutsRef.current.forEach(({ x, w, item }, key) => {
+      const left = 12 + x; // tray paddingHorizontal
+      const dist = ax < left ? left - ax : ax > left + w ? ax - (left + w) : 0;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = { key, item };
+      }
     });
-    return found;
-  }, []);
+    return best && bestDist <= 40 ? best : null;
+  }, [insets.bottom]);
 
   const findTarget = useCallback((ax: number, ay: number): BuildItem | null => {
     // snapshotLayouts captured absolute positions at drag start; edge
@@ -873,9 +898,9 @@ function BuildScreenInner() {
     const scrollDelta = scrollOffsetRef.current - offsetAtSnapshotRef.current;
     let found: BuildItem | null = null;
     tileLayoutSnap.current.forEach(({ x, y, w, h, item: candidate }) => {
-      // Only consider tiles that are actual drop targets. Plans / Playbooks /
-      // Follow-Alongs are ignored so their tiles never highlight or accept a drop.
-      if (!isDropTarget(candidate)) return;
+      // Only consider tiles that are actual drop targets for the item
+      // currently being dragged (see isDropTarget).
+      if (!isDropTarget(candidate, _dragItemRef.current)) return;
       const adjY = y - scrollDelta;
       if (ax >= x && ax <= x + w && ay >= adjY && ay <= adjY + h) found = candidate;
     });
@@ -899,7 +924,7 @@ function BuildScreenInner() {
     const tray = findTrayTarget(ax, ay);
     if (tray) {
       if (tray.item) {
-        await dropMovementIntoFolder(dragged, tray.item.id);
+        await dropItemIntoFolder(dragged, tray.item.id);
       } else {
         // Tray "New" target: ask Folder vs Workout, then run the matching flow.
         setTrayDropChooserItem(dragged);
@@ -909,14 +934,14 @@ function BuildScreenInner() {
 
     const target = findTarget(ax, ay);
     if (!target || target.id === dragged.id) return;
-    if (!isDropTarget(target)) return;
+    if (!isDropTarget(target, dragged)) return;
 
-    // No-op when dropping a movement onto the folder it already lives in.
+    // No-op when dropping an item onto the folder it already lives in.
     if (target.type === 'Folder' && target.id === dragged.parentId) return;
 
     if (target.type === 'Folder') {
-      await dropMovementIntoFolder(dragged, target.id);
-    } else if (target.type === 'Workouts') {
+      await dropItemIntoFolder(dragged, target.id);
+    } else if (target.type === 'Workouts' && dragged.type === 'Movements') {
       const blockMov = toBlockMov(dragged);
       const existingBlocks: any[] = Array.isArray(target.blocks) ? target.blocks : [];
       const updatedBlocks = existingBlocks.length > 0
@@ -942,10 +967,12 @@ function BuildScreenInner() {
         }));
         scrollListToTop();
       } catch (e) { console.error('[Build] Drop into workout error:', e); }
-    } else if (target.type === 'Movements') {
+    } else {
+      // Asset dropped onto another asset — combine them into a new folder
+      // (or, for two movements, optionally a new workout).
       setDropModal({ drag: dragged, target });
     }
-  }, [findTarget, findTrayTarget, dropMovementIntoFolder, scrollListToTop]);
+  }, [findTarget, findTrayTarget, dropItemIntoFolder, scrollListToTop]);
 
   const clearDragState = useCallback(() => {
     _dragItemRef.current = null;
@@ -1009,11 +1036,29 @@ function BuildScreenInner() {
     } catch { return null; }
   }, []);
 
+  // On-device diagnostics for the auto-scroll loop: open /build?dragdebug=1
+  // and a fixed overlay shows live pointer/band/scroll numbers during a drag.
+  // DOM-only (web) so it can't disturb React state mid-gesture.
+  const dragDebugEl = useCallback((): any => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return null;
+    if (!/[?&]dragdebug=1/.test(window.location.search)) return null;
+    let el = document.getElementById('drag-debug-overlay');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'drag-debug-overlay';
+      el.style.cssText =
+        'position:fixed;top:70px;left:4px;right:4px;z-index:99999;pointer-events:none;' +
+        'background:rgba(0,0,0,0.75);color:#0f0;font:10px monospace;padding:4px;white-space:pre;';
+      document.body.appendChild(el);
+    }
+    return el;
+  }, []);
+
   const startAutoScroll = useCallback(() => {
     stopAutoScroll();
-    let tick = 0;
+    let frame = 0;
     const step = () => {
-      tick++;
+      frame++;
       let win = listWindowRef.current;
       if (!win || win.height <= 0) {
         // Measurement unavailable — fall back to the full window so the
@@ -1028,41 +1073,59 @@ function BuildScreenInner() {
         listBottom = Math.min(listBottom, windowH - TRAY_HEIGHT - insets.bottom);
       }
       const band = (listBottom - win.top) * AUTO_SCROLL_BAND_PCT;
+      const x = pointerXRef.current;
       let delta = 0;
       // Scroll up if dragging near the top
       if (y < win.top + band) {
         const proximity = (win.top + band - y) / band;
         delta = -Math.min(1, proximity) * AUTO_SCROLL_MAX_PX;
       }
-      // Scroll down only when hovering the chevron-down hotspot at the
-      // bottom-right — dragging toward tray drop targets must not scroll.
+      // Scroll down anywhere in the bottom zone — including past listBottom
+      // over the tray area — full width. The old version only scrolled inside
+      // a narrow band above the tray plus a 90px right-corner hotspot, which
+      // left most of the bottom (and the bottom-right on phones) dead.
       else if (y > listBottom - band) {
+        // Exception: hovering an actual tray drop target means the user is
+        // aiming a drop, not scrolling — hold still so the target stays put.
+        // The right-edge chevron column always scrolls, even over a target.
         const windowW = Dimensions.get('window').width;
-        if (pointerXRef.current > windowW - AUTO_SCROLL_HOTSPOT_W) {
-          const proximity = (y - (listBottom - band)) / band;
-          delta = Math.min(1, proximity) * AUTO_SCROLL_MAX_PX;
+        const inChevronColumn = x > windowW - AUTO_SCROLL_HOTSPOT_W;
+        if (inChevronColumn || !findTrayTarget(x, y)) {
+          const proximity = Math.min(1, (y - (listBottom - band)) / band);
+          delta = proximity * AUTO_SCROLL_MAX_PX;
         }
       }
       const node = getListScrollNode();
       if (delta !== 0) {
         if (node) {
-          node.scrollTop = Math.max(0, node.scrollTop + delta);
-          scrollOffsetRef.current = node.scrollTop;
+          const before = node.scrollTop;
+          const max = Math.max(0, node.scrollHeight - node.clientHeight);
+          const next = Math.min(max, Math.max(0, before + delta));
+          node.scrollTop = next;
+          // iOS WebKit can silently ignore scrollTop writes while a touch
+          // gesture is active — fall back to RNW's scrollTo in that case.
+          if (node.scrollTop === before && next !== before) {
+            listRef.current?.scrollToOffset({ offset: next, animated: false });
+          }
+          scrollOffsetRef.current = next;
         } else {
           const next = Math.max(0, scrollOffsetRef.current + delta);
           scrollOffsetRef.current = next;
           listRef.current?.scrollToOffset({ offset: next, animated: false });
         }
       }
-      if (DRAG_DEBUG && tick % 15 === 0) {
-        setDragDebugInfo(
-          `t${tick} x:${Math.round(pointerXRef.current)} y:${Math.round(y)} win:${Math.round(win.top)}-${Math.round(listBottom)} band:${Math.round(band)} d:${delta.toFixed(1)} st:${node ? Math.round(node.scrollTop) : 'noNode'}`
-        );
+      const dbg = dragDebugEl();
+      if (dbg) {
+        dbg.textContent =
+          `f=${frame} x=${Math.round(x)} y=${Math.round(y)}\n` +
+          `winTop=${Math.round(win.top)} winH=${Math.round(win.height)} listBottom=${Math.round(listBottom)} band=${Math.round(band)}\n` +
+          `tray=${trayVisibleRef.current ? 1 : 0} overTarget=${findTrayTarget(x, y) ? 1 : 0} delta=${delta.toFixed(1)}\n` +
+          `node=${node ? 1 : 0} scrollTop=${node ? Math.round(node.scrollTop) : -1} off=${Math.round(scrollOffsetRef.current)}`;
       }
       autoScrollRafRef.current = requestAnimationFrame(step);
     };
     autoScrollRafRef.current = requestAnimationFrame(step);
-  }, [stopAutoScroll, insets.bottom, getListScrollNode]);
+  }, [stopAutoScroll, insets.bottom, getListScrollNode, findTrayTarget, dragDebugEl]);
 
   const createFolderFromDrop = useCallback(async () => {
     if (!dropModal) return;
@@ -1082,11 +1145,11 @@ function BuildScreenInner() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       }));
-      batch.update(doc(db, 'movements', drag.id), stripUndefined({
+      batch.update(doc(db, COLLECTION_BY_TYPE[drag.type as BuildType], drag.id), stripUndefined({
         parentId: folderRef.id,
         updatedAt: serverTimestamp(),
       }));
-      batch.update(doc(db, 'movements', target.id), stripUndefined({
+      batch.update(doc(db, COLLECTION_BY_TYPE[target.type as BuildType], target.id), stripUndefined({
         parentId: folderRef.id,
         updatedAt: serverTimestamp(),
       }));
@@ -1185,7 +1248,43 @@ function BuildScreenInner() {
       }
     }
 
+    // Folder tiles show a mini mosaic of what's inside — computed from the
+    // already-loaded item list (no extra Firestore fields or reads). Each
+    // child contributes one representative slot: its thumbnail if it has
+    // one, otherwise its name as a text placeholder.
+    const folderSlots = (folderId: string): (string | { name: string })[] => {
+      const children = items
+        .filter(i => i.parentId === folderId && !i.isArchived)
+        .sort((a, b) =>
+          (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0)
+        );
+      const slots: (string | { name: string })[] = [];
+      const seen = new Set<string>();
+      for (const child of children) {
+        if (slots.length >= 16) break;
+        let url: string | null = null;
+        if (child.type === 'Workouts') {
+          url = (child.coverThumbs ?? []).find((t: any) => typeof t === 'string') as string ?? null;
+        } else if (child.type === 'Movements' || child.type === 'Follow-Alongs') {
+          url = child.thumbnailUrl || (child as any).thumbnailImageUrl || (child as any).gifLowUrl || child.mediaUrl || null;
+        }
+        if (url) {
+          if (!seen.has(url)) {
+            seen.add(url);
+            slots.push(url);
+          }
+        } else {
+          slots.push({ name: child.name || 'Untitled' });
+        }
+      }
+      return slots;
+    };
+
     return items.map(item => {
+      if (item.type === 'Folder') {
+        const slots = folderSlots(item.id);
+        return slots.length > 0 ? { ...item, coverThumbs: slots } : item;
+      }
       if (item.type !== 'Workouts') return item;
       if (!item.blocks || !Array.isArray(item.blocks)) return item;
       // Build a per-movement slot list: real URL for videoed, { name } for placeholder.
@@ -1255,12 +1354,12 @@ function BuildScreenInner() {
         );
       }
     }
-    // Sort: folders first, then by date
-    list.sort((a, b) => {
-      if (a.type === 'Folder' && b.type !== 'Folder') return -1;
-      if (a.type !== 'Folder' && b.type === 'Folder') return 1;
-      return (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0);
-    });
+    // Sort: everything mixed by most-recently-updated. Folders get no
+    // special priority — creating/dropping into a folder bumps its
+    // updatedAt, which is what surfaces it to the top.
+    list.sort((a, b) =>
+      (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0)
+    );
     // Primary-muscle matches rank first; secondary-only matches sink
     if (activeType === 'Movements' && movMuscleGroupFilter !== 'All') {
       list = rankByPrimaryMuscle(list as any[], movMuscleGroupFilter) as typeof list;
@@ -1297,33 +1396,30 @@ function BuildScreenInner() {
     [recentDropFolderIds, items],
   );
 
-  const measureTrayTargets = useCallback(() => {
-    trayLayoutSnap.current.clear();
-    trayItemRefsMap.current.forEach((ref, key) => {
-      const item = key === TRAY_NEW_FOLDER_KEY
-        ? null
-        : trayFolders.find(f => `tray:${f.id}` === key) ?? null;
-      if (key !== TRAY_NEW_FOLDER_KEY && !item) return;
-      ref.current?.measure((_fx, _fy, width, height, px, py) => {
-        trayLayoutSnap.current.set(key, { x: px, y: py, w: width, h: height, item });
-      });
+  // Drop rects for tray items that left the tray — onLayout only fires for
+  // mounted views, so removed folders would otherwise leave stale rects.
+  useEffect(() => {
+    const valid = new Set([TRAY_NEW_FOLDER_KEY, ...trayFolders.map(f => `tray:${f.id}`)]);
+    trayItemLayoutsRef.current.forEach((_v, k) => {
+      if (!valid.has(k)) trayItemLayoutsRef.current.delete(k);
     });
   }, [trayFolders]);
 
-  // Slide the tray up/down and (re)measure its drop targets once it lands.
+  // Slide the tray up/down. Drop rects come from onLayout, which fires with
+  // final layout coords immediately on mount — the slide animation is a
+  // transform and doesn't affect them, so drops are valid right away.
   useEffect(() => {
     trayVisibleRef.current = trayVisible;
     if (trayVisible) {
       setTrayMounted(true);
       trayTranslate.value = withTiming(0, { duration: 200 });
-      const t = setTimeout(measureTrayTargets, 260);
-      return () => clearTimeout(t);
+      return;
     }
     trayTranslate.value = withTiming(TRAY_SLIDE_DISTANCE, { duration: 180 });
-    trayLayoutSnap.current.clear();
+    trayItemLayoutsRef.current.clear();
     const t = setTimeout(() => setTrayMounted(false), 200);
     return () => clearTimeout(t);
-  }, [trayVisible, measureTrayTargets, trayTranslate]);
+  }, [trayVisible, trayTranslate]);
 
   const trayAnimStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: trayTranslate.value }],
@@ -1348,6 +1444,9 @@ function BuildScreenInner() {
   // ALL teardown lives here — called from onFinalize, which fires on both
   // normal end and cancel (onEnd never fires when Safari cancels the pointer).
   const endDragSession = useCallback(() => {
+    // Only suppress when a drag actually activated — onFinalize also fires on
+    // plain taps (failed long-press), which must still open the item.
+    if (_dragItemRef.current) suppressPressUntilRef.current = Date.now() + 500;
     stopAutoScroll();
     unlockPageScroll();
     navigation.setOptions({ tabBarStyle: TAB_BAR_STYLE });
@@ -1376,12 +1475,13 @@ function BuildScreenInner() {
   }, [previewEngine.onScroll]);
 
   // ── Render Helpers ─────────────────────────────────────────────────────
-  const getTrayRef = (key: string) => {
-    if (!trayItemRefsMap.current.has(key)) {
-      trayItemRefsMap.current.set(key, React.createRef<View>());
-    }
-    return trayItemRefsMap.current.get(key)!;
-  };
+  // Record each tray item's rect (relative to trayRow) the moment layout
+  // resolves — no async measure() race with the tray slide animation.
+  const registerTrayLayout = useCallback((key: string, item: BuildItem | null) =>
+    (e: LayoutChangeEvent) => {
+      const { x, y, width, height } = e.nativeEvent.layout;
+      trayItemLayoutsRef.current.set(key, { x, y, w: width, h: height, item });
+    }, []);
 
   const renderItem = ({ item }: { item: BuildItem }) => {
     // Folder card
@@ -1410,7 +1510,10 @@ function BuildScreenInner() {
                 overflow: 'hidden',
                 backgroundColor: '#1A2332',
               }]}
-              onPress={() => enterFolder(item)}
+              onPress={() => {
+                if (Date.now() < suppressPressUntilRef.current) return;
+                enterFolder(item);
+              }}
             >
               {item.coverThumbs && item.coverThumbs.length > 0 ? (
                 <WorkoutMosaic
@@ -1434,6 +1537,11 @@ function BuildScreenInner() {
                   fallbackIcon={<Icon name="folder" size={36} color="#F5A623" />}
                 />
               )}
+              {/* Folder badge — keeps folders distinguishable from workout
+                  tiles now that both can render a mosaic. */}
+              <View style={styles.folderBadge}>
+                <Icon name="folder" size={12} color="#F5A623" />
+              </View>
               {/* Name overlay */}
               <View style={styles.nameOverlay}>
                 <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
@@ -1536,10 +1644,9 @@ function BuildScreenInner() {
               <Text style={styles.videoNeededText}>Video needed</Text>
             </View>
           )}
-          {/* Drop target highlight ring — only for drop-eligible tiles
-              (Movements, Workouts, Folders). Plans / Playbooks / Follow-Alongs
-              are not drop targets, so no hover ring appears on them. */}
-          {hoveredId === item.id && dragItem && dragItem.id !== item.id && isDropTarget(item) && (
+          {/* Drop target highlight ring — only for tiles that can accept the
+              currently dragged item (see isDropTarget). */}
+          {hoveredId === item.id && dragItem && dragItem.id !== item.id && isDropTarget(item, dragItem) && (
             <View
               style={[StyleSheet.absoluteFill, { borderWidth: 2, borderColor: '#F5A623', borderRadius: 10 }]}
               pointerEvents="none"
@@ -1548,14 +1655,15 @@ function BuildScreenInner() {
         </>
       );
 
-      // Movement tiles: wrap in GestureDetector for long-press drag
-      if (isMovement) {
-        if (!tileRefsMap.current.has(item.id)) {
-          tileRefsMap.current.set(item.id, React.createRef<View>());
-        }
-        const tileRef = tileRefsMap.current.get(item.id)!;
+      // ALL asset tiles (movements, workouts, plans, playbooks, follow-alongs)
+      // are draggable via long-press, and all register refs so drop-target
+      // hit-testing (workouts/movements as targets of a movement drag) works.
+      if (!tileRefsMap.current.has(item.id)) {
+        tileRefsMap.current.set(item.id, React.createRef<View>());
+      }
+      const tileRef = tileRefsMap.current.get(item.id)!;
 
-        const dragGesture = Gesture.Pan()
+      const dragGesture = Gesture.Pan()
           .activateAfterLongPress(600)
           .onStart((e) => {
             ghostX.value = e.absoluteX - cardWidth / 2 - rootOffX.value;
@@ -1580,72 +1688,43 @@ function BuildScreenInner() {
             runOnJS(endDragSession)();
           });
 
-        return (
-          // touchAction: RNGH web defaults to 'none', which blocks touch
-          // scrolling on every tile; 'manipulation' keeps scroll working
-          // before the long-press activates while blocking double-tap zoom.
-          // Once the drag activates, beginDragSession locks page scroll so
-          // Safari can't start a native pan and pointercancel the gesture.
-          // userSelect: web-only — stops the text-selection magnifier from
-          // hijacking the long press.
-          <GestureDetector gesture={dragGesture} touchAction="manipulation" userSelect="none">
-            <View
-              ref={tileRef as any}
-              style={{
-                width: cardWidth,
-                height: cardHeight,
-                marginBottom: GRID_GAP,
-                opacity: dragItem?.id === item.id ? 0.35 : 1,
-              }}
-            >
-              <Pressable
-                style={[StyleSheet.absoluteFill, {
-                  borderRadius: 10,
-                  overflow: 'hidden',
-                  backgroundColor: '#0E1117',
-                }]}
-                onPress={() => setSelectedMovement(item)}
-              >
-                {tileMedia}
-              </Pressable>
-            </View>
-          </GestureDetector>
-        );
-      }
-
-      // Non-movement tiles: workout tiles register refs so they participate in
-      // drop-target hit-testing. Plans / Playbooks / Follow-Alongs still render
-      // as Pressables but findTarget skips them (see isDropTarget).
-      const needsDropRef = isDropTarget(item);
-      if (needsDropRef && !tileRefsMap.current.has(item.id)) {
-        tileRefsMap.current.set(item.id, React.createRef<View>());
-      }
-      const nonMovTileRef = needsDropRef ? tileRefsMap.current.get(item.id) : null;
       return (
-        <View
-          ref={nonMovTileRef as any}
-          style={{
-            width: cardWidth,
-            height: cardHeight,
-            marginBottom: GRID_GAP,
-          }}
-        >
-          <Pressable
-            style={[StyleSheet.absoluteFill, {
-              borderRadius: 10,
-              overflow: 'hidden',
-              backgroundColor: (isWorkoutCard || hasMosaic) ? WORKOUT_CARD_BG : '#0E1117',
-            }]}
-            onPress={() => {
-              if (isPlan) setSelectedPlan(item);
-              else if (isPlaybook) setSelectedPlaybook(item);
-              else if (isFollowAlong) setSelectedFollowAlong(item);
-              else setOpenWorkoutId(item.id);
+        // touchAction: RNGH web defaults to 'none', which blocks touch
+        // scrolling on every tile; 'manipulation' keeps scroll working
+        // before the long-press activates while blocking double-tap zoom.
+        // Once the drag activates, beginDragSession locks page scroll so
+        // Safari can't start a native pan and pointercancel the gesture.
+        // userSelect: web-only — stops the text-selection magnifier from
+        // hijacking the long press.
+        <GestureDetector gesture={dragGesture} touchAction="manipulation" userSelect="none">
+          <View
+            ref={tileRef as any}
+            style={{
+              width: cardWidth,
+              height: cardHeight,
+              marginBottom: GRID_GAP,
+              opacity: dragItem?.id === item.id ? 0.35 : 1,
             }}
           >
-            {tileMedia}
-          </Pressable>
-        </View>
+            <Pressable
+              style={[StyleSheet.absoluteFill, {
+                borderRadius: 10,
+                overflow: 'hidden',
+                backgroundColor: (isWorkoutCard || hasMosaic) ? WORKOUT_CARD_BG : '#0E1117',
+              }]}
+              onPress={() => {
+                if (Date.now() < suppressPressUntilRef.current) return;
+                if (isMovement) setSelectedMovement(item);
+                else if (isPlan) setSelectedPlan(item);
+                else if (isPlaybook) setSelectedPlaybook(item);
+                else if (isFollowAlong) setSelectedFollowAlong(item);
+                else setOpenWorkoutId(item.id);
+              }}
+            >
+              {tileMedia}
+            </Pressable>
+          </View>
+        </GestureDetector>
       );
     }
 
@@ -2030,6 +2109,7 @@ function BuildScreenInner() {
         visible={isFollowAlongOpen}
         coachId={coachId}
         tenantId={tenantId}
+        parentId={currentFolderId || null}
         onClose={() => setIsFollowAlongOpen(false)}
         onUploaded={(_payload: FollowAlongVideoPayload) => {
           // Sheet writes the followAlongVideos asset doc itself.
@@ -2331,7 +2411,9 @@ function BuildScreenInner() {
       <Modal transparent visible={!!dropModal} animationType="fade" onRequestClose={() => setDropModal(null)}>
         <Pressable style={s.modalBackdrop} onPress={() => setDropModal(null)}>
           <View style={s.plusMenu} onStartShouldSetResponder={() => true}>
-            <Text style={s.plusMenuTitle}>Combine Movements</Text>
+            <Text style={s.plusMenuTitle}>
+              {dropModal?.drag.type === 'Movements' && dropModal?.target.type === 'Movements' ? 'Combine Movements' : 'Combine Items'}
+            </Text>
             <Text style={{ color: '#8A95A3', fontSize: 13, fontFamily: FB, marginBottom: 20, textAlign: 'center' }}>
               {dropModal?.drag.name} + {dropModal?.target.name}
             </Text>
@@ -2342,13 +2424,17 @@ function BuildScreenInner() {
               <Icon name="folder" size={22} color="#F5A623" />
               <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>Create Folder</Text>
             </Pressable>
-            <Pressable
-              style={[s.plusMenuItem, { backgroundColor: '#1E2A3A', borderRadius: 10, paddingVertical: 14 }]}
-              onPress={createWorkoutFromDrop}
-            >
-              <Icon name="workouts" size={22} color="#60A5FA" />
-              <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>Create Workout</Text>
-            </Pressable>
+            {/* New Workout only applies to two movements — other asset types
+                can't become workout blocks. */}
+            {dropModal?.drag.type === 'Movements' && dropModal?.target.type === 'Movements' && (
+              <Pressable
+                style={[s.plusMenuItem, { backgroundColor: '#1E2A3A', borderRadius: 10, paddingVertical: 14 }]}
+                onPress={createWorkoutFromDrop}
+              >
+                <Icon name="workouts" size={22} color="#60A5FA" />
+                <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>Create Workout</Text>
+              </Pressable>
+            )}
           </View>
         </Pressable>
       </Modal>
@@ -2375,13 +2461,17 @@ function BuildScreenInner() {
               <Icon name="folder" size={22} color="#F5A623" />
               <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>New Folder</Text>
             </Pressable>
-            <Pressable
-              style={[s.plusMenuItem, { backgroundColor: '#1E2A3A', borderRadius: 10, paddingVertical: 14 }]}
-              onPress={createWorkoutFromTrayDrop}
-            >
-              <Icon name="workouts" size={22} color="#60A5FA" />
-              <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>New Workout</Text>
-            </Pressable>
+            {/* New Workout only applies to a dragged movement — other asset
+                types can't become a workout block. */}
+            {trayDropChooserItem?.type === 'Movements' && (
+              <Pressable
+                style={[s.plusMenuItem, { backgroundColor: '#1E2A3A', borderRadius: 10, paddingVertical: 14 }]}
+                onPress={createWorkoutFromTrayDrop}
+              >
+                <Icon name="workouts" size={22} color="#60A5FA" />
+                <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>New Workout</Text>
+              </Pressable>
+            )}
           </View>
         </Pressable>
       </Modal>
@@ -2400,7 +2490,7 @@ function BuildScreenInner() {
               return (
                 <View
                   key={trayKey}
-                  ref={getTrayRef(trayKey) as any}
+                  onLayout={registerTrayLayout(trayKey, f)}
                   collapsable={false}
                   style={[s.trayItem, hoveredId === trayKey && s.trayItemHovered]}
                 >
@@ -2410,7 +2500,7 @@ function BuildScreenInner() {
               );
             })}
             <View
-              ref={getTrayRef(TRAY_NEW_FOLDER_KEY) as any}
+              onLayout={registerTrayLayout(TRAY_NEW_FOLDER_KEY, null)}
               collapsable={false}
               style={[s.trayItem, hoveredId === TRAY_NEW_FOLDER_KEY && s.trayItemHovered]}
             >
@@ -2428,16 +2518,6 @@ function BuildScreenInner() {
         </Reanimated.View>
       )}
 
-      {DRAG_DEBUG && !!dragItem && (
-        <View
-          pointerEvents="none"
-          style={{ position: 'absolute', top: 64, left: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.85)', padding: 6, borderRadius: 6, zIndex: 3000 }}
-        >
-          <Text style={{ color: '#4ADE80', fontSize: 11 }}>{dragDebugInfo || 'dragdebug: waiting for RAF ticks…'}</Text>
-        </View>
-      )}
-
-      {/* Scroll indicator will be added to the tray itself when visible */}
 
       {/* Drag ghost tile — floats above everything during drag */}
       <Reanimated.View style={[ghostAnimStyle, { width: cardWidth, height: cardHeight, borderRadius: 10 }]} pointerEvents="none">
@@ -2480,6 +2560,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold',
+  },
+  folderBadge: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    backgroundColor: 'rgba(14, 17, 23, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   videoNeededPill: {
     position: 'absolute',
