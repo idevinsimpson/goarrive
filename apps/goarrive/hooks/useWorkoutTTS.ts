@@ -219,6 +219,12 @@ const PRIORITY_CUES: CueKey[] = [
   'workout_complete', 'next_up', 'you_got_this', 'keep_pushing',
   'almost_there', 'workout_starting', 'lets_get_started',
   'get_ready', 'water_break', 'switch_sides',
+  // Special-block entry cues. These fire mid-workout, minutes after the Start
+  // tap — if they aren't pooled and blessed at unlock, iOS Safari gets a
+  // fresh post-gesture element whose play() rejects or stalls, and the cue is
+  // silently dropped (demo's "here's what's coming up" was inaudible on
+  // iPhone while every pre-blessed cue played fine).
+  'heres_whats_coming_up', 'workout_complete_long',
 ];
 if (Platform.OS === 'web' && typeof window !== 'undefined') {
   // Defer preloading slightly to not block initial render
