@@ -1036,9 +1036,29 @@ function BuildScreenInner() {
     } catch { return null; }
   }, []);
 
+  // On-device diagnostics for the auto-scroll loop: open /build?dragdebug=1
+  // and a fixed overlay shows live pointer/band/scroll numbers during a drag.
+  // DOM-only (web) so it can't disturb React state mid-gesture.
+  const dragDebugEl = useCallback((): any => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return null;
+    if (!/[?&]dragdebug=1/.test(window.location.search)) return null;
+    let el = document.getElementById('drag-debug-overlay');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'drag-debug-overlay';
+      el.style.cssText =
+        'position:fixed;top:70px;left:4px;right:4px;z-index:99999;pointer-events:none;' +
+        'background:rgba(0,0,0,0.75);color:#0f0;font:10px monospace;padding:4px;white-space:pre;';
+      document.body.appendChild(el);
+    }
+    return el;
+  }, []);
+
   const startAutoScroll = useCallback(() => {
     stopAutoScroll();
+    let frame = 0;
     const step = () => {
+      frame++;
       let win = listWindowRef.current;
       if (!win || win.height <= 0) {
         // Measurement unavailable — fall back to the full window so the
@@ -1094,10 +1114,18 @@ function BuildScreenInner() {
           listRef.current?.scrollToOffset({ offset: next, animated: false });
         }
       }
+      const dbg = dragDebugEl();
+      if (dbg) {
+        dbg.textContent =
+          `f=${frame} x=${Math.round(x)} y=${Math.round(y)}\n` +
+          `winTop=${Math.round(win.top)} winH=${Math.round(win.height)} listBottom=${Math.round(listBottom)} band=${Math.round(band)}\n` +
+          `tray=${trayVisibleRef.current ? 1 : 0} overTarget=${findTrayTarget(x, y) ? 1 : 0} delta=${delta.toFixed(1)}\n` +
+          `node=${node ? 1 : 0} scrollTop=${node ? Math.round(node.scrollTop) : -1} off=${Math.round(scrollOffsetRef.current)}`;
+      }
       autoScrollRafRef.current = requestAnimationFrame(step);
     };
     autoScrollRafRef.current = requestAnimationFrame(step);
-  }, [stopAutoScroll, insets.bottom, getListScrollNode, findTrayTarget]);
+  }, [stopAutoScroll, insets.bottom, getListScrollNode, findTrayTarget, dragDebugEl]);
 
   const createFolderFromDrop = useCallback(async () => {
     if (!dropModal) return;
