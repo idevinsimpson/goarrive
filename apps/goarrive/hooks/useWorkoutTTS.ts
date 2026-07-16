@@ -257,32 +257,53 @@ const SILENT_WAV =
 
 function blessElement(el: HTMLAudioElement, label: string): void {
   try {
+    // Bless by playing the 4-byte silent WAV, NOT the element's real clip.
+    // iOS doesn't reliably honor `.muted` on programmatic Audio elements, so
+    // muted-playing every pooled cue at the Start tap was briefly AUDIBLE —
+    // several voices firing at once for ~0.5s. The silent WAV is inaudible
+    // by construction; a blessed element stays blessed across src changes,
+    // so we restore the real clip src once the bless settles.
+    const originalSrc = el.src;
+    const restore = () => {
+      // If the queue took this element over mid-bless (shouldn't happen —
+      // resolvePlayableElement routes around in-flight elements — but
+      // belt-and-braces), don't yank its playback.
+      if (queueOwnedElements.has(el)) return;
+      try {
+        el.pause();
+        if (originalSrc && el.src !== originalSrc) {
+          el.src = originalSrc;
+          el.load();
+        } else {
+          el.currentTime = 0;
+        }
+      } catch {}
+    };
     el.muted = true;
+    if (originalSrc && originalSrc !== SILENT_WAV) {
+      el.src = SILENT_WAV;
+    }
     blessingInFlight.add(el);
     const p = el.play();
     if (p && typeof p.then === 'function') {
       p.then(
         () => {
           blessingInFlight.delete(el);
+          restore();
           el.muted = false;
-          // If the queue took this element over mid-bless (shouldn't happen —
-          // resolvePlayableElement routes around in-flight elements — but
-          // belt-and-braces), don't yank its playback.
-          if (!queueOwnedElements.has(el)) {
-            try { el.pause(); el.currentTime = 0; } catch {}
-          }
           blessedElements.add(el);
           console.info('[VOICE-AUDIT] unlock bless OK', { label });
         },
         (err: unknown) => {
           blessingInFlight.delete(el);
+          restore();
           el.muted = false;
           console.warn('[VOICE-AUDIT] unlock bless FAILED', { label, err: String(err) });
         },
       );
     } else {
       blessingInFlight.delete(el);
-      try { el.pause(); el.currentTime = 0; } catch {}
+      restore();
       el.muted = false;
       blessedElements.add(el);
     }
