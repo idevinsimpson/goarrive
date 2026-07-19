@@ -208,6 +208,8 @@ interface BuildItem {
   thumbnailUrl?: string;
   mediaUrl?: string;
   coverThumbs?: (string | { name: string })[];
+  folderPreview?: { id: string; name: string; thumbs: (string | { name: string })[] }[];
+  sortSeconds?: number;
   isArchived: boolean;
   createdAt: any;
   updatedAt: any;
@@ -384,6 +386,93 @@ function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle 
   );
 }
 
+// ── Folder Mosaic ────────────────────────────────────────────────────────
+/** Folder card preview — a miniature of the folder's contents. Each cell is a
+ *  tiny workout card rendered with STILL photos (posterUrl, never GIFs), so
+ *  the folder reads as a shrunken version of the view you get by tapping in. */
+type FolderPreviewEntry = { id: string; name: string; thumbs: (string | { name: string })[] };
+
+function FolderMiniCard({ entry, width, height, scrollIdle }: { entry: FolderPreviewEntry; width: number; height: number; scrollIdle: boolean }) {
+  const nameH = Math.max(12, Math.round(height * 0.16));
+  const mediaH = height - nameH;
+  const gap = 1;
+  const inset = 2;
+  const innerW = width - inset * 2;
+  const innerH = mediaH - inset * 2;
+  // Mirror WorkoutMosaic's dynamic grid exactly (2x2 → 3x3 → 4x4, max 16) so
+  // the mini card reads as a zoomed-out version of the full workout icon.
+  const thumbs = entry.thumbs.slice(0, 16);
+  const cols = thumbs.length <= 1 ? 1 : thumbs.length <= 4 ? 2 : thumbs.length <= 9 ? 3 : 4;
+  const rows = Math.ceil(Math.max(thumbs.length, 1) / cols);
+  const cellW = (innerW - gap * (cols - 1)) / cols;
+  const maxCellH = (innerH - gap * (rows - 1)) / rows;
+  const cellH = Math.max(1, Math.min(cellW * (5 / 4), maxCellH));
+  const finalCellW = Math.max(1, Math.min(cellW, cellH * (4 / 5)));
+  return (
+    <View style={{ width, height, borderRadius: 5, overflow: 'hidden', backgroundColor: '#10151F' }}>
+      <View style={{ width, height: mediaH, padding: inset, gap, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignContent: 'center', overflow: 'hidden' }}>
+        {thumbs.length === 0 ? (
+          <Icon name="workouts" size={14} color="#2D3B4E" />
+        ) : (
+          thumbs.map((slot, i) =>
+            typeof slot === 'string' ? (
+              <MosaicPreviewTile
+                key={i}
+                uri={slot}
+                width={finalCellW}
+                height={cellH}
+                parentIsAnimating={false}
+                scrollIdle={scrollIdle}
+                index={i}
+                borderRadius={2}
+              />
+            ) : (
+              <MosaicPlaceholderCell key={i} width={finalCellW} height={cellH} borderRadius={2} name={slot?.name} />
+            ),
+          )
+        )}
+      </View>
+      <View style={{ height: nameH, justifyContent: 'center', paddingHorizontal: 3 }}>
+        <Text numberOfLines={1} style={{ color: '#B8C4D2', fontSize: Math.max(7, Math.round(nameH * 0.58)), fontWeight: '600', fontFamily: FB }}>
+          {entry.name}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function FolderMosaic({ previews, width, height, scrollIdle }: { previews: FolderPreviewEntry[]; width: number; height: number; scrollIdle: boolean }) {
+  const gap = 4;
+  const inset = 6;
+  const innerW = width - inset * 2;
+  const innerH = height - inset * 2 - 28; // leave room for name overlay at bottom
+  const maxShow = Math.min(previews.length, 9);
+  const cols = maxShow <= 1 ? 1 : maxShow <= 4 ? 2 : 3;
+  const rows = Math.ceil(maxShow / cols);
+  const cellW = (innerW - gap * (cols - 1)) / cols;
+  const maxCellH = (innerH - gap * (rows - 1)) / rows;
+  const cellH = Math.max(1, Math.min(cellW / CARD_ASPECT, maxCellH));
+  const finalCellW = Math.max(1, Math.min(cellW, cellH * CARD_ASPECT));
+  return (
+    <View style={{ width, height, backgroundColor: WORKOUT_CARD_BG }}>
+      <View style={{
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap,
+        padding: inset,
+        paddingTop: inset + 2,
+        width,
+        overflow: 'hidden',
+        justifyContent: maxShow === 1 ? 'center' : 'flex-start',
+      }}>
+        {previews.slice(0, maxShow).map(p => (
+          <FolderMiniCard key={p.id} entry={p} width={finalCellW} height={cellH} scrollIdle={scrollIdle} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function BuildScreenInner() {
   const { user, claims, effectiveUid } = useAuth();
   const coachId = effectiveUid || claims?.coachId || user?.uid || '';
@@ -411,6 +500,13 @@ function BuildScreenInner() {
   const [folderStack, setFolderStack] = useState<{ id: string; name: string }[]>([]);
   const [showFolderCreate, setShowFolderCreate] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+  const [editingFolderTitle, setEditingFolderTitle] = useState(false);
+  const [folderTitleDraft, setFolderTitleDraft] = useState('');
+  // Refs so drag callbacks (created once) can see the live folder state
+  const folderStackRef = useRef<{ id: string; name: string }[]>([]);
+  folderStackRef.current = folderStack;
+  const folderHeaderRectRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+  const folderHeaderRef = useRef<View>(null);
 
   // Modals
   const [selectedMovement, setSelectedMovement] = useState<any | null>(null);
@@ -536,7 +632,7 @@ function BuildScreenInner() {
       (snap) => {
         const movementItems: BuildItem[] = snap.docs.map(d => ({
           id: d.id,
-          ...d.data(),
+          ...d.data({ serverTimestamps: 'estimate' }),
           type: 'Movements'
         } as BuildItem));
         
@@ -561,7 +657,7 @@ function BuildScreenInner() {
       workoutsQuery,
       (snap) => {
         const workoutItems: BuildItem[] = snap.docs.map(d => {
-          const data = d.data();
+          const data = d.data({ serverTimestamps: 'estimate' });
           // Build coverThumbs from blocks if not already set
           let coverThumbs = data.coverThumbs ?? [];
           if ((!coverThumbs || coverThumbs.length === 0) && data.blocks && Array.isArray(data.blocks)) {
@@ -585,7 +681,9 @@ function BuildScreenInner() {
         });
         
         setItems(prev => {
-          const otherItems = prev.filter(i => i.type !== 'Workouts' && i.type !== 'Folder');
+          // Only replace workouts — folders live in their own listener; filtering
+          // them out here wiped every folder whenever a workout doc changed.
+          const otherItems = prev.filter(i => i.type !== 'Workouts');
           return [...otherItems, ...workoutItems].sort((a, b) => 
             (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0)
           );
@@ -611,7 +709,7 @@ function BuildScreenInner() {
       (snap) => {
         const folderItems: BuildItem[] = snap.docs.map(d => ({
           id: d.id,
-          ...d.data(),
+          ...d.data({ serverTimestamps: 'estimate' }),
           type: 'Folder' as any,
           name: d.data().name || 'Untitled Folder',
           isArchived: false,
@@ -633,7 +731,7 @@ function BuildScreenInner() {
       (snap) => {
         const planItems: BuildItem[] = snap.docs.map(d => ({
           id: d.id,
-          ...d.data(),
+          ...d.data({ serverTimestamps: 'estimate' }),
           type: 'Plans' as BuildType,
           name: d.data().name || 'Untitled Plan',
         } as BuildItem));
@@ -654,7 +752,7 @@ function BuildScreenInner() {
       (snap) => {
         const playbookItems: BuildItem[] = snap.docs.map(d => ({
           id: d.id,
-          ...d.data(),
+          ...d.data({ serverTimestamps: 'estimate' }),
           type: 'Playbooks' as BuildType,
           name: d.data().name || 'Untitled Playbook',
         } as BuildItem));
@@ -678,7 +776,7 @@ function BuildScreenInner() {
       (snap) => {
         const followAlongItems: BuildItem[] = snap.docs.map(d => ({
           id: d.id,
-          ...d.data(),
+          ...d.data({ serverTimestamps: 'estimate' }),
           type: 'Follow-Alongs' as BuildType,
           name: d.data().name || 'Untitled Follow-Along',
         } as BuildItem));
@@ -752,6 +850,42 @@ function BuildScreenInner() {
       setCurrentFolderId(next.length > 0 ? next[next.length - 1].id : null);
       return next;
     });
+  }, []);
+
+  const saveFolderTitle = useCallback(async () => {
+    setEditingFolderTitle(false);
+    const stack = folderStackRef.current;
+    const current = stack[stack.length - 1];
+    const name = folderTitleDraft.trim();
+    if (!current || !name || name === current.name) return;
+    try {
+      await updateDoc(doc(db, 'build_folders', current.id), { name, updatedAt: serverTimestamp() });
+      setFolderStack(prev => prev.map((f, i) => (i === prev.length - 1 ? { ...f, name } : f)));
+    } catch (e) { console.error('[Build] Folder rename error:', e); }
+  }, [folderTitleDraft]);
+
+  // Drop zone on the folder header: dragging an asset onto "Build / …" moves
+  // it up one level — to the parent folder, or to the Build root at depth 1.
+  const isOverFolderHeader = useCallback((ax: number, ay: number): boolean => {
+    const rect = folderHeaderRectRef.current;
+    if (!rect || folderStackRef.current.length === 0) return false;
+    return ax >= rect.x && ax <= rect.x + rect.w && ay >= rect.y && ay <= rect.y + rect.h;
+  }, []);
+
+  const moveItemUpOneLevel = useCallback(async (dragged: BuildItem) => {
+    const stack = folderStackRef.current;
+    if (stack.length === 0) return;
+    const parent = stack.length >= 2 ? stack[stack.length - 2] : null;
+    try {
+      const batch = writeBatch(db);
+      const coll = dragged.type === 'Folder' ? 'build_folders' : COLLECTION_BY_TYPE[dragged.type];
+      batch.update(doc(db, coll, dragged.id), stripUndefined({
+        parentId: parent ? parent.id : null,
+        updatedAt: serverTimestamp(),
+      }));
+      if (parent) batch.update(doc(db, 'build_folders', parent.id), { updatedAt: serverTimestamp() });
+      await batch.commit();
+    } catch (e) { console.error('[Build] Move up one level error:', e); }
   }, []);
 
   // ── Recent drop folders (bottom tray) ──────────────────────────────────
@@ -949,15 +1083,22 @@ function BuildScreenInner() {
   const updateHovered = useCallback((ax: number, ay: number) => {
     pointerXRef.current = ax;
     pointerYRef.current = ay;
-    // Tray targets take precedence over tile snapshots.
-    const tray = findTrayTarget(ax, ay);
-    const nextId = tray ? tray.key : (findTarget(ax, ay)?.id ?? null);
+    // Header drop zone first, then tray targets, then tile snapshots.
+    const nextId = isOverFolderHeader(ax, ay)
+      ? '__parent__'
+      : (findTrayTarget(ax, ay)?.key ?? findTarget(ax, ay)?.id ?? null);
     setHoveredId(prev => (prev === nextId ? prev : nextId));
-  }, [findTarget, findTrayTarget]);
+  }, [findTarget, findTrayTarget, isOverFolderHeader]);
 
   const executeDrop = useCallback(async (ax: number, ay: number) => {
     const dragged = _dragItemRef.current;
     if (!dragged) return;
+
+    // Header "Build / …" zone: move the asset up one level.
+    if (isOverFolderHeader(ax, ay)) {
+      await moveItemUpOneLevel(dragged);
+      return;
+    }
 
     // Tray targets first — they float above the list.
     const tray = findTrayTarget(ax, ay);
@@ -1011,7 +1152,7 @@ function BuildScreenInner() {
       // (or, for two movements, optionally a new workout).
       setDropModal({ drag: dragged, target });
     }
-  }, [findTarget, findTrayTarget, dropItemIntoFolder, scrollListToTop]);
+  }, [findTarget, findTrayTarget, dropItemIntoFolder, scrollListToTop, isOverFolderHeader, moveItemUpOneLevel]);
 
   const clearDragState = useCallback(() => {
     _dragItemRef.current = null;
@@ -1278,52 +1419,19 @@ function BuildScreenInner() {
   const enrichedItems = useMemo(() => {
     const movementMap = new Map<string, string>();
     const movementNameMap = new Map<string, string>();
+    const movementStillMap = new Map<string, string>();
     for (const item of items) {
       if (item.type === 'Movements') {
         if (item.thumbnailUrl || item.mediaUrl) {
           movementMap.set(item.id, (item.thumbnailUrl || item.mediaUrl) as string);
         }
+        const still = item.posterUrl || item.thumbnailImageUrl;
+        if (still) movementStillMap.set(item.id, still as string);
         if (item.name) movementNameMap.set(item.id, item.name as string);
       }
     }
 
-    // Folder tiles show a mini mosaic of what's inside — computed from the
-    // already-loaded item list (no extra Firestore fields or reads). Each
-    // child contributes one representative slot: its thumbnail if it has
-    // one, otherwise its name as a text placeholder.
-    const folderSlots = (folderId: string): (string | { name: string })[] => {
-      const children = items
-        .filter(i => i.parentId === folderId && !i.isArchived)
-        .sort((a, b) =>
-          (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0)
-        );
-      const slots: (string | { name: string })[] = [];
-      const seen = new Set<string>();
-      for (const child of children) {
-        if (slots.length >= 16) break;
-        let url: string | null = null;
-        if (child.type === 'Workouts') {
-          url = (child.coverThumbs ?? []).find((t: any) => typeof t === 'string') as string ?? null;
-        } else if (child.type === 'Movements' || child.type === 'Follow-Alongs') {
-          url = child.thumbnailUrl || (child as any).thumbnailImageUrl || (child as any).gifLowUrl || child.mediaUrl || null;
-        }
-        if (url) {
-          if (!seen.has(url)) {
-            seen.add(url);
-            slots.push(url);
-          }
-        } else {
-          slots.push({ name: child.name || 'Untitled' });
-        }
-      }
-      return slots;
-    };
-
-    return items.map(item => {
-      if (item.type === 'Folder') {
-        const slots = folderSlots(item.id);
-        return slots.length > 0 ? { ...item, coverThumbs: slots } : item;
-      }
+    const withWorkouts = items.map(item => {
       if (item.type !== 'Workouts') return item;
       if (!item.blocks || !Array.isArray(item.blocks)) return item;
       // Build a per-movement slot list: real URL for videoed, { name } for placeholder.
@@ -1350,6 +1458,74 @@ function BuildScreenInner() {
       }
       if (slots.length > 0) return { ...item, coverThumbs: slots };
       return item;
+    });
+
+    // Folder previews: miniature of the folder's contents. Still photos
+    // (posterUrl/thumbnailImageUrl) preferred; GIF only as a last resort so
+    // movements without a poster frame aren't blank.
+    const stillForBlockMov = (mov: any): string | null => {
+      const movId = mov.movementId || mov.id || null;
+      return (
+        mov.posterUrl || mov.thumbnailImageUrl ||
+        (movId ? movementStillMap.get(movId) : null) ||
+        mov.thumbnailUrl || mov.gifUrl ||
+        (movId ? movementMap.get(movId) : null) || null
+      );
+    };
+
+    // Editing anything inside a folder must surface the folder in the grid
+    // the same way editing a loose asset surfaces it. Firestore only bumps
+    // the folder doc on create/drop, so compute an effective sort timestamp
+    // client-side: the newest updatedAt anywhere in the folder's subtree.
+    const childrenByParent = new Map<string, any[]>();
+    for (const i of withWorkouts) {
+      if (i.parentId) {
+        const arr = childrenByParent.get(i.parentId) ?? [];
+        arr.push(i);
+        childrenByParent.set(i.parentId, arr);
+      }
+    }
+    const effectiveCache = new Map<string, number>();
+    const effectiveSeconds = (i: any): number => {
+      const own = i.updatedAt?.seconds ?? i.createdAt?.seconds ?? 0;
+      if (i.type !== 'Folder') return own;
+      if (effectiveCache.has(i.id)) return effectiveCache.get(i.id)!;
+      effectiveCache.set(i.id, own); // cycle guard for malformed parent chains
+      let max = own;
+      for (const c of childrenByParent.get(i.id) ?? []) max = Math.max(max, effectiveSeconds(c));
+      effectiveCache.set(i.id, max);
+      return max;
+    };
+
+    return withWorkouts.map(item => {
+      if (item.type !== 'Folder') return item;
+      const sortSeconds = effectiveSeconds(item);
+      const children = withWorkouts
+        .filter(i => i.parentId === item.id && !i.isArchived && (i.type === 'Workouts' || i.type === 'Movements' || i.type === 'Follow-Alongs'))
+        .sort((a, b) => (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0))
+        .slice(0, 9);
+      if (children.length === 0) return { ...item, sortSeconds };
+      const folderPreview = children.map(child => {
+        if (child.type === 'Movements' || child.type === 'Follow-Alongs') {
+          const still = (child.posterUrl || child.thumbnailImageUrl || child.thumbnailUrl || child.mediaUrl) as string | undefined;
+          return { id: child.id, name: child.name || 'Movement', thumbs: still ? [still] : [{ name: child.name || 'Movement' }] };
+        }
+        const thumbs: (string | { name: string })[] = [];
+        const seen = new Set<string>();
+        outer: for (const block of (child.blocks ?? [])) {
+          for (const mov of (block?.movements ?? [])) {
+            if (thumbs.length >= 16) break outer;
+            const still = stillForBlockMov(mov);
+            if (still) {
+              if (!seen.has(still)) { seen.add(still); thumbs.push(still); }
+            } else {
+              thumbs.push({ name: mov.movementName || mov.name || 'Movement' });
+            }
+          }
+        }
+        return { id: child.id, name: child.name || 'Workout', thumbs };
+      });
+      return { ...item, folderPreview, sortSeconds };
     });
   }, [items]);
 
@@ -1393,11 +1569,12 @@ function BuildScreenInner() {
         );
       }
     }
-    // Sort: everything mixed by most-recently-updated. Folders get no
-    // special priority — creating/dropping into a folder bumps its
-    // updatedAt, which is what surfaces it to the top.
+    // Sort: everything mixed by most-recently-updated. Folders sort by
+    // sortSeconds — the newest edit anywhere inside them — so editing a
+    // folder's contents surfaces the folder like any other asset.
     list.sort((a, b) =>
-      (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0)
+      ((b as any).sortSeconds ?? b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) -
+      ((a as any).sortSeconds ?? a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0)
     );
     // Primary-muscle matches rank first; secondary-only matches sink
     if (activeType === 'Movements' && movMuscleGroupFilter !== 'All') {
@@ -1554,7 +1731,14 @@ function BuildScreenInner() {
                 enterFolder(item);
               }}
             >
-              {item.coverThumbs && item.coverThumbs.length > 0 ? (
+              {item.folderPreview && item.folderPreview.length > 0 ? (
+                <FolderMosaic
+                  previews={item.folderPreview}
+                  width={cardWidth}
+                  height={cardHeight}
+                  scrollIdle={previewEngine.scrollState !== 'scrolling'}
+                />
+              ) : item.coverThumbs && item.coverThumbs.length > 0 ? (
                 <WorkoutMosaic
                   thumbs={item.coverThumbs}
                   width={cardWidth}
@@ -1895,30 +2079,60 @@ function BuildScreenInner() {
     >
       <AppHeader />
 
-      {/* Folder breadcrumb */}
+      {/* Folder header — mirrors the workout screen: back arrow, Build / crumbs,
+          tappable title to rename. Also a drag drop-zone: dropping an asset
+          here moves it up one level. */}
       {folderStack.length > 0 && (
-        <View style={s.breadcrumb}>
-          <Pressable onPress={() => { setCurrentFolderId(null); setFolderStack([]); }}>
-            <Text style={s.breadcrumbText}>Build</Text>
+        <View
+          ref={folderHeaderRef}
+          onLayout={() => {
+            folderHeaderRef.current?.measureInWindow((x, y, w, h) => {
+              folderHeaderRectRef.current = { x, y, w, h };
+            });
+          }}
+          style={[s.folderHeader, hoveredId === '__parent__' && s.folderHeaderHover]}
+        >
+          <Pressable onPress={goBackFolder} style={s.folderBackBtn}>
+            <Icon name="arrow-left" size={20} color="#F0F4F8" />
           </Pressable>
-          {folderStack.map((f, i) => (
-            <React.Fragment key={f.id}>
-              <Text style={s.breadcrumbSep}>/</Text>
+          <View style={s.folderCrumb}>
+            <Pressable onPress={() => { setCurrentFolderId(null); setFolderStack([]); }}>
+              <Text style={s.folderCrumbRoot}>Build</Text>
+            </Pressable>
+            {folderStack.slice(0, -1).map((f, i) => (
+              <React.Fragment key={f.id}>
+                <Text style={s.folderCrumbSep}>/</Text>
+                <Pressable onPress={() => {
+                  const next = folderStack.slice(0, i + 1);
+                  setFolderStack(next);
+                  setCurrentFolderId(f.id);
+                }}>
+                  <Text style={s.folderCrumbRoot} numberOfLines={1}>{f.name}</Text>
+                </Pressable>
+              </React.Fragment>
+            ))}
+            <Text style={s.folderCrumbSep}>/</Text>
+            {editingFolderTitle ? (
+              <TextInput
+                style={s.folderTitleInput}
+                value={folderTitleDraft}
+                onChangeText={setFolderTitleDraft}
+                onBlur={saveFolderTitle}
+                onSubmitEditing={saveFolderTitle}
+                autoFocus
+                selectTextOnFocus
+              />
+            ) : (
               <Pressable onPress={() => {
-                const next = folderStack.slice(0, i + 1);
-                setFolderStack(next);
-                setCurrentFolderId(f.id);
+                setFolderTitleDraft(folderStack[folderStack.length - 1].name);
+                setEditingFolderTitle(true);
               }}>
-                <Text style={[s.breadcrumbText, i === folderStack.length - 1 && { color: '#F5A623' }]}>
-                  {f.name}
+                <Text style={s.folderTitleText} numberOfLines={1}>
+                  {folderStack[folderStack.length - 1].name}
                 </Text>
               </Pressable>
-            </React.Fragment>
-          ))}
-          <Pressable onPress={goBackFolder} style={s.breadcrumbBack}>
-            <Icon name="arrow-left" size={14} color="#8A95A3" />
-            <Text style={s.breadcrumbBackText}>Back</Text>
-          </Pressable>
+            )}
+          </View>
         </View>
       )}
 
@@ -2840,40 +3054,60 @@ const s = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
-  breadcrumb: {
+  folderHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 4,
-    flexWrap: 'wrap',
-    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E2A3A',
   },
-  breadcrumbText: {
-    fontSize: 13,
+  folderHeaderHover: {
+    backgroundColor: 'rgba(245,166,35,0.12)',
+    borderBottomColor: '#F5A623',
+  },
+  folderBackBtn: {
+    width: 36,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  folderCrumb: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    overflow: 'hidden',
+  },
+  folderCrumbRoot: {
+    fontSize: 14,
     color: '#8A95A3',
     fontFamily: FB,
     fontWeight: '600',
+    maxWidth: 110,
   },
-  breadcrumbSep: {
-    fontSize: 13,
+  folderCrumbSep: {
+    fontSize: 14,
     color: '#4A5568',
     fontFamily: FB,
-    marginHorizontal: 2,
   },
-  breadcrumbBack: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginLeft: 'auto',
-    gap: 4,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+  folderTitleText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#F5A623',
+    fontFamily: FH,
+    maxWidth: 200,
   },
-  breadcrumbBackText: {
-    fontSize: 12,
-    color: '#8A95A3',
-    fontFamily: FB,
-    fontWeight: '600',
+  folderTitleInput: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#F5A623',
+    fontFamily: FH,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5A623',
+    paddingVertical: 2,
+    minWidth: 120,
   },
   folderInput: {
     backgroundColor: '#0E1117',
