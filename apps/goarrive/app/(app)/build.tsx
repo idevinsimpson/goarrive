@@ -209,6 +209,7 @@ interface BuildItem {
   mediaUrl?: string;
   coverThumbs?: (string | { name: string })[];
   folderPreview?: { id: string; name: string; thumbs: (string | { name: string })[] }[];
+  sortSeconds?: number;
   isArchived: boolean;
   createdAt: any;
   updatedAt: any;
@@ -1418,13 +1419,38 @@ function BuildScreenInner() {
       );
     };
 
+    // Editing anything inside a folder must surface the folder in the grid
+    // the same way editing a loose asset surfaces it. Firestore only bumps
+    // the folder doc on create/drop, so compute an effective sort timestamp
+    // client-side: the newest updatedAt anywhere in the folder's subtree.
+    const childrenByParent = new Map<string, any[]>();
+    for (const i of withWorkouts) {
+      if (i.parentId) {
+        const arr = childrenByParent.get(i.parentId) ?? [];
+        arr.push(i);
+        childrenByParent.set(i.parentId, arr);
+      }
+    }
+    const effectiveCache = new Map<string, number>();
+    const effectiveSeconds = (i: any): number => {
+      const own = i.updatedAt?.seconds ?? i.createdAt?.seconds ?? 0;
+      if (i.type !== 'Folder') return own;
+      if (effectiveCache.has(i.id)) return effectiveCache.get(i.id)!;
+      effectiveCache.set(i.id, own); // cycle guard for malformed parent chains
+      let max = own;
+      for (const c of childrenByParent.get(i.id) ?? []) max = Math.max(max, effectiveSeconds(c));
+      effectiveCache.set(i.id, max);
+      return max;
+    };
+
     return withWorkouts.map(item => {
       if (item.type !== 'Folder') return item;
+      const sortSeconds = effectiveSeconds(item);
       const children = withWorkouts
         .filter(i => i.parentId === item.id && !i.isArchived && (i.type === 'Workouts' || i.type === 'Movements' || i.type === 'Follow-Alongs'))
         .sort((a, b) => (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0))
         .slice(0, 9);
-      if (children.length === 0) return item;
+      if (children.length === 0) return { ...item, sortSeconds };
       const folderPreview = children.map(child => {
         if (child.type === 'Movements' || child.type === 'Follow-Alongs') {
           const still = (child.posterUrl || child.thumbnailImageUrl || child.thumbnailUrl || child.mediaUrl) as string | undefined;
@@ -1445,7 +1471,7 @@ function BuildScreenInner() {
         }
         return { id: child.id, name: child.name || 'Workout', thumbs };
       });
-      return { ...item, folderPreview };
+      return { ...item, folderPreview, sortSeconds };
     });
   }, [items]);
 
@@ -1489,11 +1515,12 @@ function BuildScreenInner() {
         );
       }
     }
-    // Sort: everything mixed by most-recently-updated. Folders get no
-    // special priority — creating/dropping into a folder bumps its
-    // updatedAt, which is what surfaces it to the top.
+    // Sort: everything mixed by most-recently-updated. Folders sort by
+    // sortSeconds — the newest edit anywhere inside them — so editing a
+    // folder's contents surfaces the folder like any other asset.
     list.sort((a, b) =>
-      (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0)
+      ((b as any).sortSeconds ?? b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) -
+      ((a as any).sortSeconds ?? a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0)
     );
     // Primary-muscle matches rank first; secondary-only matches sink
     if (activeType === 'Movements' && movMuscleGroupFilter !== 'All') {
