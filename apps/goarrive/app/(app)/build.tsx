@@ -500,6 +500,13 @@ function BuildScreenInner() {
   const [folderStack, setFolderStack] = useState<{ id: string; name: string }[]>([]);
   const [showFolderCreate, setShowFolderCreate] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+  const [editingFolderTitle, setEditingFolderTitle] = useState(false);
+  const [folderTitleDraft, setFolderTitleDraft] = useState('');
+  // Refs so drag callbacks (created once) can see the live folder state
+  const folderStackRef = useRef<{ id: string; name: string }[]>([]);
+  folderStackRef.current = folderStack;
+  const folderHeaderRectRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+  const folderHeaderRef = useRef<View>(null);
 
   // Modals
   const [selectedMovement, setSelectedMovement] = useState<any | null>(null);
@@ -845,6 +852,42 @@ function BuildScreenInner() {
     });
   }, []);
 
+  const saveFolderTitle = useCallback(async () => {
+    setEditingFolderTitle(false);
+    const stack = folderStackRef.current;
+    const current = stack[stack.length - 1];
+    const name = folderTitleDraft.trim();
+    if (!current || !name || name === current.name) return;
+    try {
+      await updateDoc(doc(db, 'build_folders', current.id), { name, updatedAt: serverTimestamp() });
+      setFolderStack(prev => prev.map((f, i) => (i === prev.length - 1 ? { ...f, name } : f)));
+    } catch (e) { console.error('[Build] Folder rename error:', e); }
+  }, [folderTitleDraft]);
+
+  // Drop zone on the folder header: dragging an asset onto "Build / …" moves
+  // it up one level — to the parent folder, or to the Build root at depth 1.
+  const isOverFolderHeader = useCallback((ax: number, ay: number): boolean => {
+    const rect = folderHeaderRectRef.current;
+    if (!rect || folderStackRef.current.length === 0) return false;
+    return ax >= rect.x && ax <= rect.x + rect.w && ay >= rect.y && ay <= rect.y + rect.h;
+  }, []);
+
+  const moveItemUpOneLevel = useCallback(async (dragged: BuildItem) => {
+    const stack = folderStackRef.current;
+    if (stack.length === 0) return;
+    const parent = stack.length >= 2 ? stack[stack.length - 2] : null;
+    try {
+      const batch = writeBatch(db);
+      const coll = dragged.type === 'Folder' ? 'build_folders' : COLLECTION_BY_TYPE[dragged.type];
+      batch.update(doc(db, coll, dragged.id), stripUndefined({
+        parentId: parent ? parent.id : null,
+        updatedAt: serverTimestamp(),
+      }));
+      if (parent) batch.update(doc(db, 'build_folders', parent.id), { updatedAt: serverTimestamp() });
+      await batch.commit();
+    } catch (e) { console.error('[Build] Move up one level error:', e); }
+  }, []);
+
   // ── Recent drop folders (bottom tray) ──────────────────────────────────
   // Persisted per-coach so the tray survives reloads. coachId here derives
   // from claims.coachId (impersonation-safe) — see useAuth() above.
@@ -1040,15 +1083,22 @@ function BuildScreenInner() {
   const updateHovered = useCallback((ax: number, ay: number) => {
     pointerXRef.current = ax;
     pointerYRef.current = ay;
-    // Tray targets take precedence over tile snapshots.
-    const tray = findTrayTarget(ax, ay);
-    const nextId = tray ? tray.key : (findTarget(ax, ay)?.id ?? null);
+    // Header drop zone first, then tray targets, then tile snapshots.
+    const nextId = isOverFolderHeader(ax, ay)
+      ? '__parent__'
+      : (findTrayTarget(ax, ay)?.key ?? findTarget(ax, ay)?.id ?? null);
     setHoveredId(prev => (prev === nextId ? prev : nextId));
-  }, [findTarget, findTrayTarget]);
+  }, [findTarget, findTrayTarget, isOverFolderHeader]);
 
   const executeDrop = useCallback(async (ax: number, ay: number) => {
     const dragged = _dragItemRef.current;
     if (!dragged) return;
+
+    // Header "Build / …" zone: move the asset up one level.
+    if (isOverFolderHeader(ax, ay)) {
+      await moveItemUpOneLevel(dragged);
+      return;
+    }
 
     // Tray targets first — they float above the list.
     const tray = findTrayTarget(ax, ay);
@@ -1102,7 +1152,7 @@ function BuildScreenInner() {
       // (or, for two movements, optionally a new workout).
       setDropModal({ drag: dragged, target });
     }
-  }, [findTarget, findTrayTarget, dropItemIntoFolder, scrollListToTop]);
+  }, [findTarget, findTrayTarget, dropItemIntoFolder, scrollListToTop, isOverFolderHeader, moveItemUpOneLevel]);
 
   const clearDragState = useCallback(() => {
     _dragItemRef.current = null;
@@ -2029,30 +2079,60 @@ function BuildScreenInner() {
     >
       <AppHeader />
 
-      {/* Folder breadcrumb */}
+      {/* Folder header — mirrors the workout screen: back arrow, Build / crumbs,
+          tappable title to rename. Also a drag drop-zone: dropping an asset
+          here moves it up one level. */}
       {folderStack.length > 0 && (
-        <View style={s.breadcrumb}>
-          <Pressable onPress={() => { setCurrentFolderId(null); setFolderStack([]); }}>
-            <Text style={s.breadcrumbText}>Build</Text>
+        <View
+          ref={folderHeaderRef}
+          onLayout={() => {
+            folderHeaderRef.current?.measureInWindow((x, y, w, h) => {
+              folderHeaderRectRef.current = { x, y, w, h };
+            });
+          }}
+          style={[s.folderHeader, hoveredId === '__parent__' && s.folderHeaderHover]}
+        >
+          <Pressable onPress={goBackFolder} style={s.folderBackBtn}>
+            <Icon name="arrow-left" size={20} color="#F0F4F8" />
           </Pressable>
-          {folderStack.map((f, i) => (
-            <React.Fragment key={f.id}>
-              <Text style={s.breadcrumbSep}>/</Text>
+          <View style={s.folderCrumb}>
+            <Pressable onPress={() => { setCurrentFolderId(null); setFolderStack([]); }}>
+              <Text style={s.folderCrumbRoot}>Build</Text>
+            </Pressable>
+            {folderStack.slice(0, -1).map((f, i) => (
+              <React.Fragment key={f.id}>
+                <Text style={s.folderCrumbSep}>/</Text>
+                <Pressable onPress={() => {
+                  const next = folderStack.slice(0, i + 1);
+                  setFolderStack(next);
+                  setCurrentFolderId(f.id);
+                }}>
+                  <Text style={s.folderCrumbRoot} numberOfLines={1}>{f.name}</Text>
+                </Pressable>
+              </React.Fragment>
+            ))}
+            <Text style={s.folderCrumbSep}>/</Text>
+            {editingFolderTitle ? (
+              <TextInput
+                style={s.folderTitleInput}
+                value={folderTitleDraft}
+                onChangeText={setFolderTitleDraft}
+                onBlur={saveFolderTitle}
+                onSubmitEditing={saveFolderTitle}
+                autoFocus
+                selectTextOnFocus
+              />
+            ) : (
               <Pressable onPress={() => {
-                const next = folderStack.slice(0, i + 1);
-                setFolderStack(next);
-                setCurrentFolderId(f.id);
+                setFolderTitleDraft(folderStack[folderStack.length - 1].name);
+                setEditingFolderTitle(true);
               }}>
-                <Text style={[s.breadcrumbText, i === folderStack.length - 1 && { color: '#F5A623' }]}>
-                  {f.name}
+                <Text style={s.folderTitleText} numberOfLines={1}>
+                  {folderStack[folderStack.length - 1].name}
                 </Text>
               </Pressable>
-            </React.Fragment>
-          ))}
-          <Pressable onPress={goBackFolder} style={s.breadcrumbBack}>
-            <Icon name="arrow-left" size={14} color="#8A95A3" />
-            <Text style={s.breadcrumbBackText}>Back</Text>
-          </Pressable>
+            )}
+          </View>
         </View>
       )}
 
@@ -2974,40 +3054,60 @@ const s = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
-  breadcrumb: {
+  folderHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 4,
-    flexWrap: 'wrap',
-    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E2A3A',
   },
-  breadcrumbText: {
-    fontSize: 13,
+  folderHeaderHover: {
+    backgroundColor: 'rgba(245,166,35,0.12)',
+    borderBottomColor: '#F5A623',
+  },
+  folderBackBtn: {
+    width: 36,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  folderCrumb: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    overflow: 'hidden',
+  },
+  folderCrumbRoot: {
+    fontSize: 14,
     color: '#8A95A3',
     fontFamily: FB,
     fontWeight: '600',
+    maxWidth: 110,
   },
-  breadcrumbSep: {
-    fontSize: 13,
+  folderCrumbSep: {
+    fontSize: 14,
     color: '#4A5568',
     fontFamily: FB,
-    marginHorizontal: 2,
   },
-  breadcrumbBack: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginLeft: 'auto',
-    gap: 4,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+  folderTitleText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#F5A623',
+    fontFamily: FH,
+    maxWidth: 200,
   },
-  breadcrumbBackText: {
-    fontSize: 12,
-    color: '#8A95A3',
-    fontFamily: FB,
-    fontWeight: '600',
+  folderTitleInput: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#F5A623',
+    fontFamily: FH,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5A623',
+    paddingVertical: 2,
+    minWidth: 120,
   },
   folderInput: {
     backgroundColor: '#0E1117',
