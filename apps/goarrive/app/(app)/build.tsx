@@ -674,7 +674,9 @@ function BuildScreenInner() {
         });
         
         setItems(prev => {
-          const otherItems = prev.filter(i => i.type !== 'Workouts' && i.type !== 'Folder');
+          // Only replace workouts — folders live in their own listener; filtering
+          // them out here wiped every folder whenever a workout doc changed.
+          const otherItems = prev.filter(i => i.type !== 'Workouts');
           return [...otherItems, ...workoutItems].sort((a, b) => 
             (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0)
           );
