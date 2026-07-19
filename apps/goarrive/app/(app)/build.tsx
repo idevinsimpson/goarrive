@@ -208,6 +208,7 @@ interface BuildItem {
   thumbnailUrl?: string;
   mediaUrl?: string;
   coverThumbs?: (string | { name: string })[];
+  folderPreview?: { id: string; name: string; thumbs: (string | { name: string })[] }[];
   isArchived: boolean;
   createdAt: any;
   updatedAt: any;
@@ -378,6 +379,91 @@ function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle 
           ) : (
             <MosaicPlaceholderCell key={i} width={finalCellW} height={finalCellH} borderRadius={3} name={slot?.name} />
           )
+        ))}
+      </View>
+    </View>
+  );
+}
+
+// ── Folder Mosaic ────────────────────────────────────────────────────────
+/** Folder card preview — a miniature of the folder's contents. Each cell is a
+ *  tiny workout card rendered with STILL photos (posterUrl, never GIFs), so
+ *  the folder reads as a shrunken version of the view you get by tapping in. */
+type FolderPreviewEntry = { id: string; name: string; thumbs: (string | { name: string })[] };
+
+function FolderMiniCard({ entry, width, height, scrollIdle }: { entry: FolderPreviewEntry; width: number; height: number; scrollIdle: boolean }) {
+  const nameH = Math.max(12, Math.round(height * 0.16));
+  const mediaH = height - nameH;
+  const gap = 1;
+  const inset = 2;
+  const innerW = width - inset * 2;
+  const innerH = mediaH - inset * 2;
+  const thumbs = entry.thumbs.slice(0, 4);
+  const cols = thumbs.length <= 1 ? 1 : 2;
+  const rows = Math.ceil(Math.max(thumbs.length, 1) / cols);
+  const cellW = (innerW - gap * (cols - 1)) / cols;
+  const maxCellH = (innerH - gap * (rows - 1)) / rows;
+  const cellH = Math.max(1, Math.min(cellW * (5 / 4), maxCellH));
+  const finalCellW = Math.max(1, Math.min(cellW, cellH * (4 / 5)));
+  return (
+    <View style={{ width, height, borderRadius: 5, overflow: 'hidden', backgroundColor: '#10151F' }}>
+      <View style={{ width, height: mediaH, padding: inset, gap, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignContent: 'center', overflow: 'hidden' }}>
+        {thumbs.length === 0 ? (
+          <Icon name="workouts" size={14} color="#2D3B4E" />
+        ) : (
+          thumbs.map((slot, i) =>
+            typeof slot === 'string' ? (
+              <MosaicPreviewTile
+                key={i}
+                uri={slot}
+                width={finalCellW}
+                height={cellH}
+                parentIsAnimating={false}
+                scrollIdle={scrollIdle}
+                index={i}
+                borderRadius={2}
+              />
+            ) : (
+              <MosaicPlaceholderCell key={i} width={finalCellW} height={cellH} borderRadius={2} name={slot?.name} />
+            ),
+          )
+        )}
+      </View>
+      <View style={{ height: nameH, justifyContent: 'center', paddingHorizontal: 3 }}>
+        <Text numberOfLines={1} style={{ color: '#B8C4D2', fontSize: Math.max(7, Math.round(nameH * 0.58)), fontWeight: '600', fontFamily: FB }}>
+          {entry.name}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function FolderMosaic({ previews, width, height, scrollIdle }: { previews: FolderPreviewEntry[]; width: number; height: number; scrollIdle: boolean }) {
+  const gap = 4;
+  const inset = 6;
+  const innerW = width - inset * 2;
+  const innerH = height - inset * 2 - 28; // leave room for name overlay at bottom
+  const maxShow = Math.min(previews.length, 9);
+  const cols = maxShow <= 1 ? 1 : maxShow <= 4 ? 2 : 3;
+  const rows = Math.ceil(maxShow / cols);
+  const cellW = (innerW - gap * (cols - 1)) / cols;
+  const maxCellH = (innerH - gap * (rows - 1)) / rows;
+  const cellH = Math.max(1, Math.min(cellW / CARD_ASPECT, maxCellH));
+  const finalCellW = Math.max(1, Math.min(cellW, cellH * CARD_ASPECT));
+  return (
+    <View style={{ width, height, backgroundColor: WORKOUT_CARD_BG }}>
+      <View style={{
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap,
+        padding: inset,
+        paddingTop: inset + 2,
+        width,
+        overflow: 'hidden',
+        justifyContent: maxShow === 1 ? 'center' : 'flex-start',
+      }}>
+        {previews.slice(0, maxShow).map(p => (
+          <FolderMiniCard key={p.id} entry={p} width={finalCellW} height={cellH} scrollIdle={scrollIdle} />
         ))}
       </View>
     </View>
@@ -1278,52 +1364,19 @@ function BuildScreenInner() {
   const enrichedItems = useMemo(() => {
     const movementMap = new Map<string, string>();
     const movementNameMap = new Map<string, string>();
+    const movementStillMap = new Map<string, string>();
     for (const item of items) {
       if (item.type === 'Movements') {
         if (item.thumbnailUrl || item.mediaUrl) {
           movementMap.set(item.id, (item.thumbnailUrl || item.mediaUrl) as string);
         }
+        const still = item.posterUrl || item.thumbnailImageUrl;
+        if (still) movementStillMap.set(item.id, still as string);
         if (item.name) movementNameMap.set(item.id, item.name as string);
       }
     }
 
-    // Folder tiles show a mini mosaic of what's inside — computed from the
-    // already-loaded item list (no extra Firestore fields or reads). Each
-    // child contributes one representative slot: its thumbnail if it has
-    // one, otherwise its name as a text placeholder.
-    const folderSlots = (folderId: string): (string | { name: string })[] => {
-      const children = items
-        .filter(i => i.parentId === folderId && !i.isArchived)
-        .sort((a, b) =>
-          (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0)
-        );
-      const slots: (string | { name: string })[] = [];
-      const seen = new Set<string>();
-      for (const child of children) {
-        if (slots.length >= 16) break;
-        let url: string | null = null;
-        if (child.type === 'Workouts') {
-          url = (child.coverThumbs ?? []).find((t: any) => typeof t === 'string') as string ?? null;
-        } else if (child.type === 'Movements' || child.type === 'Follow-Alongs') {
-          url = child.thumbnailUrl || (child as any).thumbnailImageUrl || (child as any).gifLowUrl || child.mediaUrl || null;
-        }
-        if (url) {
-          if (!seen.has(url)) {
-            seen.add(url);
-            slots.push(url);
-          }
-        } else {
-          slots.push({ name: child.name || 'Untitled' });
-        }
-      }
-      return slots;
-    };
-
-    return items.map(item => {
-      if (item.type === 'Folder') {
-        const slots = folderSlots(item.id);
-        return slots.length > 0 ? { ...item, coverThumbs: slots } : item;
-      }
+    const withWorkouts = items.map(item => {
       if (item.type !== 'Workouts') return item;
       if (!item.blocks || !Array.isArray(item.blocks)) return item;
       // Build a per-movement slot list: real URL for videoed, { name } for placeholder.
@@ -1350,6 +1403,49 @@ function BuildScreenInner() {
       }
       if (slots.length > 0) return { ...item, coverThumbs: slots };
       return item;
+    });
+
+    // Folder previews: miniature of the folder's contents. Still photos
+    // (posterUrl/thumbnailImageUrl) preferred; GIF only as a last resort so
+    // movements without a poster frame aren't blank.
+    const stillForBlockMov = (mov: any): string | null => {
+      const movId = mov.movementId || mov.id || null;
+      return (
+        mov.posterUrl || mov.thumbnailImageUrl ||
+        (movId ? movementStillMap.get(movId) : null) ||
+        mov.thumbnailUrl || mov.gifUrl ||
+        (movId ? movementMap.get(movId) : null) || null
+      );
+    };
+
+    return withWorkouts.map(item => {
+      if (item.type !== 'Folder') return item;
+      const children = withWorkouts
+        .filter(i => i.parentId === item.id && !i.isArchived && (i.type === 'Workouts' || i.type === 'Movements' || i.type === 'Follow-Alongs'))
+        .sort((a, b) => (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0))
+        .slice(0, 9);
+      if (children.length === 0) return item;
+      const folderPreview = children.map(child => {
+        if (child.type === 'Movements' || child.type === 'Follow-Alongs') {
+          const still = (child.posterUrl || child.thumbnailImageUrl || child.thumbnailUrl || child.mediaUrl) as string | undefined;
+          return { id: child.id, name: child.name || 'Movement', thumbs: still ? [still] : [{ name: child.name || 'Movement' }] };
+        }
+        const thumbs: (string | { name: string })[] = [];
+        const seen = new Set<string>();
+        outer: for (const block of (child.blocks ?? [])) {
+          for (const mov of (block?.movements ?? [])) {
+            if (thumbs.length >= 4) break outer;
+            const still = stillForBlockMov(mov);
+            if (still) {
+              if (!seen.has(still)) { seen.add(still); thumbs.push(still); }
+            } else {
+              thumbs.push({ name: mov.movementName || mov.name || 'Movement' });
+            }
+          }
+        }
+        return { id: child.id, name: child.name || 'Workout', thumbs };
+      });
+      return { ...item, folderPreview };
     });
   }, [items]);
 
@@ -1554,7 +1650,14 @@ function BuildScreenInner() {
                 enterFolder(item);
               }}
             >
-              {item.coverThumbs && item.coverThumbs.length > 0 ? (
+              {item.folderPreview && item.folderPreview.length > 0 ? (
+                <FolderMosaic
+                  previews={item.folderPreview}
+                  width={cardWidth}
+                  height={cardHeight}
+                  scrollIdle={previewEngine.scrollState !== 'scrolling'}
+                />
+              ) : item.coverThumbs && item.coverThumbs.length > 0 ? (
                 <WorkoutMosaic
                   thumbs={item.coverThumbs}
                   width={cardWidth}
