@@ -399,8 +399,10 @@ function FolderMiniCard({ entry, width, height, scrollIdle }: { entry: FolderPre
   const inset = 2;
   const innerW = width - inset * 2;
   const innerH = mediaH - inset * 2;
-  const thumbs = entry.thumbs.slice(0, 4);
-  const cols = thumbs.length <= 1 ? 1 : 2;
+  // Mirror WorkoutMosaic's dynamic grid exactly (2x2 → 3x3 → 4x4, max 16) so
+  // the mini card reads as a zoomed-out version of the full workout icon.
+  const thumbs = entry.thumbs.slice(0, 16);
+  const cols = thumbs.length <= 1 ? 1 : thumbs.length <= 4 ? 2 : thumbs.length <= 9 ? 3 : 4;
   const rows = Math.ceil(Math.max(thumbs.length, 1) / cols);
   const cellW = (innerW - gap * (cols - 1)) / cols;
   const maxCellH = (innerH - gap * (rows - 1)) / rows;
@@ -1460,7 +1462,7 @@ function BuildScreenInner() {
         const seen = new Set<string>();
         outer: for (const block of (child.blocks ?? [])) {
           for (const mov of (block?.movements ?? [])) {
-            if (thumbs.length >= 4) break outer;
+            if (thumbs.length >= 16) break outer;
             const still = stillForBlockMov(mov);
             if (still) {
               if (!seen.has(still)) { seen.add(still); thumbs.push(still); }
