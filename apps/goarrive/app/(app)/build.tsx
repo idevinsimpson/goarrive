@@ -625,7 +625,7 @@ function BuildScreenInner() {
       (snap) => {
         const movementItems: BuildItem[] = snap.docs.map(d => ({
           id: d.id,
-          ...d.data(),
+          ...d.data({ serverTimestamps: 'estimate' }),
           type: 'Movements'
         } as BuildItem));
         
@@ -650,7 +650,7 @@ function BuildScreenInner() {
       workoutsQuery,
       (snap) => {
         const workoutItems: BuildItem[] = snap.docs.map(d => {
-          const data = d.data();
+          const data = d.data({ serverTimestamps: 'estimate' });
           // Build coverThumbs from blocks if not already set
           let coverThumbs = data.coverThumbs ?? [];
           if ((!coverThumbs || coverThumbs.length === 0) && data.blocks && Array.isArray(data.blocks)) {
@@ -702,7 +702,7 @@ function BuildScreenInner() {
       (snap) => {
         const folderItems: BuildItem[] = snap.docs.map(d => ({
           id: d.id,
-          ...d.data(),
+          ...d.data({ serverTimestamps: 'estimate' }),
           type: 'Folder' as any,
           name: d.data().name || 'Untitled Folder',
           isArchived: false,
@@ -724,7 +724,7 @@ function BuildScreenInner() {
       (snap) => {
         const planItems: BuildItem[] = snap.docs.map(d => ({
           id: d.id,
-          ...d.data(),
+          ...d.data({ serverTimestamps: 'estimate' }),
           type: 'Plans' as BuildType,
           name: d.data().name || 'Untitled Plan',
         } as BuildItem));
@@ -745,7 +745,7 @@ function BuildScreenInner() {
       (snap) => {
         const playbookItems: BuildItem[] = snap.docs.map(d => ({
           id: d.id,
-          ...d.data(),
+          ...d.data({ serverTimestamps: 'estimate' }),
           type: 'Playbooks' as BuildType,
           name: d.data().name || 'Untitled Playbook',
         } as BuildItem));
@@ -769,7 +769,7 @@ function BuildScreenInner() {
       (snap) => {
         const followAlongItems: BuildItem[] = snap.docs.map(d => ({
           id: d.id,
-          ...d.data(),
+          ...d.data({ serverTimestamps: 'estimate' }),
           type: 'Follow-Alongs' as BuildType,
           name: d.data().name || 'Untitled Follow-Along',
         } as BuildItem));
