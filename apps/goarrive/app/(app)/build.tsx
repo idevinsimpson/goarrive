@@ -45,6 +45,7 @@ import {
   writeBatch,
   arrayUnion,
   arrayRemove,
+  getDocs,
 } from 'firebase/firestore';
 import { useNavigation } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
@@ -395,7 +396,14 @@ function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle 
 /** Folder card preview — a miniature of the folder's contents. Each cell is a
  *  tiny workout card rendered with STILL photos (posterUrl, never GIFs), so
  *  the folder reads as a shrunken version of the view you get by tapping in. */
-type FolderPreviewEntry = { id: string; name: string; thumbs: (string | { name: string })[] };
+type FolderPreviewEntry = {
+  id: string;
+  name: string;
+  thumbs: (string | { name: string })[];
+  // Playbook-inside-folder: mosaic-inside-mosaic. Each inner array is one
+  // workout's stills (≤4). Per-workout titles are dropped at this size.
+  playbookWorkouts?: (string | { name: string })[][];
+};
 
 function FolderMiniCard({ entry, width, height, scrollIdle }: { entry: FolderPreviewEntry; width: number; height: number; scrollIdle: boolean }) {
   const nameH = Math.max(12, Math.round(height * 0.16));
@@ -413,6 +421,49 @@ function FolderMiniCard({ entry, width, height, scrollIdle }: { entry: FolderPre
   const maxCellH = (innerH - gap * (rows - 1)) / rows;
   const cellH = Math.max(1, Math.min(cellW * (5 / 4), maxCellH));
   const finalCellW = Math.max(1, Math.min(cellW, cellH * (4 / 5)));
+  // Playbook mini-card: up to 4 workout cells (2x2), each cell its own 2x2 of
+  // ≤4 movement stills — mosaic inside mosaic. Playbook name label only.
+  if (entry.playbookWorkouts && entry.playbookWorkouts.length > 0) {
+    const wks = entry.playbookWorkouts.slice(0, 4);
+    const wCols = wks.length <= 1 ? 1 : 2;
+    const wRows = Math.ceil(wks.length / wCols);
+    const wCellW = (innerW - gap * (wCols - 1)) / wCols;
+    const wCellH = (innerH - gap * (wRows - 1)) / wRows;
+    return (
+      <View style={{ width, height, borderRadius: 5, overflow: 'hidden', backgroundColor: '#141024', borderWidth: StyleSheet.hairlineWidth, borderColor: '#4C3D8F' }}>
+        <View style={{ width, height: mediaH, padding: inset, gap, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignContent: 'center', overflow: 'hidden' }}>
+          {wks.map((wThumbs, wi) => {
+            const t = wThumbs.slice(0, 4);
+            const tCols = t.length <= 1 ? 1 : 2;
+            const tRows = Math.ceil(Math.max(t.length, 1) / tCols);
+            const tGap = 1;
+            const tW = (wCellW - 2 - tGap * (tCols - 1)) / tCols;
+            const tH = (wCellH - 2 - tGap * (tRows - 1)) / tRows;
+            return (
+              <View key={wi} style={{ width: wCellW, height: wCellH, borderRadius: 3, overflow: 'hidden', backgroundColor: '#10151F', padding: 1, gap: tGap, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignContent: 'center' }}>
+                {t.length === 0 ? (
+                  <Icon name="workouts" size={8} color="#2D3B4E" />
+                ) : (
+                  t.map((slot, i) =>
+                    typeof slot === 'string' ? (
+                      <MosaicPreviewTile key={i} uri={slot} width={Math.max(1, tW)} height={Math.max(1, tH)} parentIsAnimating={false} scrollIdle={scrollIdle} index={i} borderRadius={1} />
+                    ) : (
+                      <MosaicPlaceholderCell key={i} width={Math.max(1, tW)} height={Math.max(1, tH)} borderRadius={1} name={undefined} />
+                    ),
+                  )
+                )}
+              </View>
+            );
+          })}
+        </View>
+        <View style={{ height: nameH, justifyContent: 'center', paddingHorizontal: 3 }}>
+          <Text numberOfLines={1} style={{ color: '#C4B5FD', fontSize: Math.max(7, Math.round(nameH * 0.58)), fontWeight: '600', fontFamily: FB }}>
+            {entry.name}
+          </Text>
+        </View>
+      </View>
+    );
+  }
   return (
     <View style={{ width, height, borderRadius: 5, overflow: 'hidden', backgroundColor: '#10151F' }}>
       <View style={{ width, height: mediaH, padding: inset, gap, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignContent: 'center', overflow: 'hidden' }}>
@@ -550,6 +601,14 @@ function BuildScreenInner() {
   const [showPlaybookCreate, setShowPlaybookCreate] = useState(false);
   const [newPlaybookName, setNewPlaybookName] = useState('');
   const [newPlaybookDesc, setNewPlaybookDesc] = useState('');
+  // Workout-on-workout combine → Create Playbook seeds both IDs here, then
+  // the create modal collects title + member assignment before writing.
+  const [playbookSeedWorkoutIds, setPlaybookSeedWorkoutIds] = useState<string[]>([]);
+  const [pbMembers, setPbMembers] = useState<{ id: string; name: string; email: string }[]>([]);
+  const [pbAssignMemberId, setPbAssignMemberId] = useState<string | null>(null);
+  const [pbAddByEmail, setPbAddByEmail] = useState(false);
+  const [pbNewMemberName, setPbNewMemberName] = useState('');
+  const [pbNewMemberEmail, setPbNewMemberEmail] = useState('');
   const [selectedPlan, setSelectedPlan] = useState<any | null>(null);
 
   const tenantId = claims?.tenantId ?? '';
@@ -590,6 +649,12 @@ function BuildScreenInner() {
   const [trayVisible, setTrayVisible] = useState(false);
   const [trayMounted, setTrayMounted] = useState(false);
   const trayVisibleRef = useRef(false);
+  // Measured absolute top of the tray row. iOS Safari's visual viewport can be
+  // shorter than Dimensions.get('window').height (toolbar collapse), which
+  // made the math-derived band miss and drops silently no-op. Prefer the
+  // measured value; the math stays as fallback until layout resolves.
+  const trayRowTopRef = useRef<number | null>(null);
+  const trayRowRef = useRef<View>(null);
   const trayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const trayTranslate = useSharedValue(TRAY_SLIDE_DISTANCE);
   // Tray drop rects come from onLayout (relative to trayRow) + math for the
@@ -1013,29 +1078,98 @@ function BuildScreenInner() {
     } catch (e) { console.error('[Build] Create plan error:', e); }
   }, [coachId, tenantId, currentFolderId, newPlanName, newPlanDesc, newPlanWeeks]);
 
+  const resetPlaybookCreateState = useCallback(() => {
+    setNewPlaybookName(''); setNewPlaybookDesc('');
+    setShowPlaybookCreate(false);
+    setPendingPlaybookDropItem(null);
+    setPlaybookSeedWorkoutIds([]);
+    setPbAssignMemberId(null);
+    setPbAddByEmail(false);
+    setPbNewMemberName(''); setPbNewMemberEmail('');
+  }, []);
+
+  // Load the coach's members whenever the create modal opens, for the
+  // assignment picker. One-shot fetch — the list is small and modal-scoped.
+  useEffect(() => {
+    if (!showPlaybookCreate || !coachId) return;
+    getDocs(query(collection(db, 'members'), where('coachId', '==', coachId)))
+      .then(snap => {
+        setPbMembers(
+          snap.docs
+            .filter(d => !d.data().isArchived)
+            .map(d => {
+              const x = d.data();
+              return {
+                id: d.id,
+                name: x.name || x.displayName || (x.firstName ? `${x.firstName} ${x.lastName || ''}`.trim() : '') || x.email || 'Unnamed',
+                email: x.email || '',
+              };
+            })
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        );
+      })
+      .catch(e => console.error('[Build] Load members error:', e));
+  }, [showPlaybookCreate, coachId]);
+
   const createPlaybook = useCallback(async () => {
     const name = newPlaybookName.trim();
     if (!name) return;
     const pendingDrop = pendingPlaybookDropItem;
     try {
+      // Assignment: an existing member, or a brand-new one added by email.
+      let assignedMemberId: string | null = pbAssignMemberId;
+      let assignedMemberName: string | null =
+        pbMembers.find(m => m.id === pbAssignMemberId)?.name ?? null;
+      if (pbAddByEmail && pbNewMemberEmail.trim()) {
+        const emailNorm = pbNewMemberEmail.trim().toLowerCase();
+        const memberName = pbNewMemberName.trim() || emailNorm;
+        const dupSnap = await getDocs(query(
+          collection(db, 'members'),
+          where('coachId', '==', coachId),
+          where('email', '==', emailNorm),
+        ));
+        const active = dupSnap.docs.find(d => !d.data().isArchived);
+        if (active) {
+          assignedMemberId = active.id;
+          assignedMemberName = active.data().name || memberName;
+        } else {
+          const memberRef = await addDoc(collection(db, 'members'), {
+            coachId,
+            tenantId,
+            name: memberName,
+            email: emailNorm,
+            phone: '',
+            notes: '',
+            isArchived: false,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+          assignedMemberId = memberRef.id;
+          assignedMemberName = memberName;
+        }
+      }
+      const seedIds = pendingDrop && pendingDrop.type === 'Workouts'
+        ? [pendingDrop.id]
+        : playbookSeedWorkoutIds;
       await addDoc(collection(db, 'playbooks'), {
         coachId,
         tenantId,
         name,
         description: newPlaybookDesc.trim(),
-        workoutIds: pendingDrop && pendingDrop.type === 'Workouts' ? [pendingDrop.id] : [],
+        workoutIds: seedIds,
         isArchived: false,
         parentId: currentFolderId || null,
+        assignedMemberId: assignedMemberId || null,
+        assignedMemberName: assignedMemberName || null,
+        assignedAt: assignedMemberId ? serverTimestamp() : null,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      setNewPlaybookName(''); setNewPlaybookDesc('');
-      setShowPlaybookCreate(false);
-      setPendingPlaybookDropItem(null);
+      resetPlaybookCreateState();
       scrollOffsetRef.current = 0;
       requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: false }));
     } catch (e) { console.error('[Build] Create playbook error:', e); }
-  }, [coachId, tenantId, currentFolderId, newPlaybookName, newPlaybookDesc, pendingPlaybookDropItem]);
+  }, [coachId, tenantId, currentFolderId, newPlaybookName, newPlaybookDesc, pendingPlaybookDropItem, playbookSeedWorkoutIds, pbAssignMemberId, pbAddByEmail, pbNewMemberName, pbNewMemberEmail, pbMembers, resetPlaybookCreateState]);
 
   // ── Drag & Drop handlers (filteredItems-independent) ──────────────────
   // The grid sorts by updatedAt desc, so a drop target jumps to the top of
@@ -1094,7 +1228,8 @@ function BuildScreenInner() {
     if (!trayVisibleRef.current || trayItemLayoutsRef.current.size === 0) return null;
     const windowH = Dimensions.get('window').height;
     // trayRow top = window bottom − bottom padding (inset + 12) − row height.
-    const rowTop = windowH - (insets.bottom + 12) - (TRAY_HEIGHT - 24);
+    // Prefer the measured absolute top (iOS visual-viewport safe); math fallback.
+    const rowTop = trayRowTopRef.current ?? (windowH - (insets.bottom + 12) - (TRAY_HEIGHT - 24));
     if (ay < rowTop - 10) return null; // above the tray band (10px grace)
     let best: { key: string; item: BuildItem | null } | null = null;
     let bestDist = Infinity;
@@ -1464,27 +1599,18 @@ function BuildScreenInner() {
     } catch (e) { console.error('[Build] Create workout from drop error:', e); }
   }, [dropModal, coachId, tenantId, currentFolderId, scrollListToTop]);
 
-  // Workout dropped on workout → user chose Playbook: both join a new playbook.
-  const createPlaybookFromDrop = useCallback(async () => {
+  // Workout dropped on workout → user chose Playbook: open the create modal
+  // seeded with both workouts so the coach titles and assigns it before the
+  // playbook is written.
+  const createPlaybookFromDrop = useCallback(() => {
     if (!dropModal) return;
     const { drag, target } = dropModal;
     if (drag.type !== 'Workouts' || target.type !== 'Workouts') return;
     setDropModal(null);
-    try {
-      await addDoc(collection(db, 'playbooks'), {
-        coachId,
-        tenantId,
-        name: `${drag.name} & ${target.name}`,
-        description: '',
-        workoutIds: [drag.id, target.id],
-        isArchived: false,
-        parentId: currentFolderId || null,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-      scrollListToTop();
-    } catch (e) { console.error('[Build] Create playbook from drop error:', e); }
-  }, [dropModal, coachId, tenantId, currentFolderId, scrollListToTop]);
+    setPlaybookSeedWorkoutIds([drag.id, target.id]);
+    setNewPlaybookName(`${drag.name} & ${target.name}`);
+    setShowPlaybookCreate(true);
+  }, [dropModal]);
 
   // Tray "New" drop → user chose Workout: create a one-movement workout.
   const createWorkoutFromTrayDrop = useCallback(async () => {
@@ -1653,7 +1779,7 @@ function BuildScreenInner() {
       if (item.type !== 'Folder') return item;
       const sortSeconds = effectiveSeconds(item);
       const children = withWorkouts
-        .filter(i => i.parentId === item.id && !i.isArchived && (i.type === 'Workouts' || i.type === 'Movements' || i.type === 'Follow-Alongs'))
+        .filter(i => i.parentId === item.id && !i.isArchived && (i.type === 'Workouts' || i.type === 'Movements' || i.type === 'Follow-Alongs' || i.type === 'Playbooks'))
         .sort((a, b) => (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0))
         .slice(0, 9);
       if (children.length === 0) return { ...item, sortSeconds };
@@ -1661,6 +1787,17 @@ function BuildScreenInner() {
         if (child.type === 'Movements' || child.type === 'Follow-Alongs') {
           const still = (child.posterUrl || child.thumbnailImageUrl || child.thumbnailUrl || child.mediaUrl) as string | undefined;
           return { id: child.id, name: child.name || 'Movement', thumbs: still ? [still] : [{ name: child.name || 'Movement' }] };
+        }
+        if (child.type === 'Playbooks') {
+          // Mosaic inside mosaic: each workout in the playbook contributes a
+          // tiny cell of ≤4 stills; per-workout titles dropped at this size.
+          const ids: string[] = Array.isArray(child.workoutIds) ? child.workoutIds : [];
+          const playbookWorkouts = ids
+            .map(id => workoutsById.get(id))
+            .filter(w => w && !w.isArchived)
+            .slice(0, 4)
+            .map(w => workoutPreviewEntry(w).thumbs.slice(0, 4));
+          return { id: child.id, name: child.name || 'Playbook', thumbs: [], playbookWorkouts };
         }
         return workoutPreviewEntry(child);
       });
@@ -2334,25 +2471,31 @@ function BuildScreenInner() {
         </View>
       )}
 
-      <View style={s.toolbar}>
-        <View style={s.searchWrap}>
-          <Icon name="search" size={18} color="#8A95A3" style={s.searchIcon} />
-          <TextInput
-            style={s.searchInput}
-            placeholder="Search Build..."
-            placeholderTextColor="#4A5568"
-            value={search}
-            onChangeText={setSearch}
-            clearButtonMode="while-editing"
-          />
-        </View>
+      {/* Inside a playbook the toolbar is just the plus button — search and
+          filters don't apply to a short ordered workout sequence. */}
+      <View style={[s.toolbar, currentPlaybook && { justifyContent: 'flex-end' }]}>
+        {!currentPlaybook && (
+          <>
+            <View style={s.searchWrap}>
+              <Icon name="search" size={18} color="#8A95A3" style={s.searchIcon} />
+              <TextInput
+                style={s.searchInput}
+                placeholder="Search Build..."
+                placeholderTextColor="#4A5568"
+                value={search}
+                onChangeText={setSearch}
+                clearButtonMode="while-editing"
+              />
+            </View>
 
-        <Pressable
-          style={[s.toolBtn, isFilterOpen && s.toolBtnActive]}
-          onPress={() => setIsFilterOpen(!isFilterOpen)}
-        >
-          <Icon name="filter" size={20} color={isFilterOpen ? '#F5A623' : '#F0F4F8'} />
-        </Pressable>
+            <Pressable
+              style={[s.toolBtn, isFilterOpen && s.toolBtnActive]}
+              onPress={() => setIsFilterOpen(!isFilterOpen)}
+            >
+              <Icon name="filter" size={20} color={isFilterOpen ? '#F5A623' : '#F0F4F8'} />
+            </Pressable>
+          </>
+        )}
 
         <Pressable
           style={s.plusBtn}
@@ -2362,7 +2505,7 @@ function BuildScreenInner() {
         </Pressable>
       </View>
 
-      {isFilterOpen && (
+      {!currentPlaybook && isFilterOpen && (
         <View style={s.filterPanel}>
           <Text style={s.filterTitle}>Filter by Type</Text>
           <ScrollView
@@ -2596,35 +2739,40 @@ function BuildScreenInner() {
         <Pressable style={s.modalBackdrop} onPress={() => setIsPlusOpen(false)}>
           <View style={s.plusMenu}>
             <Text style={s.plusMenuTitle}>Create New</Text>
-            <Pressable style={s.plusMenuItem} onPress={() => { setIsPlusOpen(false); setShowPlanCreate(true); }}>
-              <Icon name="plan" size={20} color="#60A5FA" />
-              <Text style={s.plusMenuItemText}>Plan</Text>
-            </Pressable>
-            <Pressable 
-              style={s.plusMenuItem} 
-              onPress={() => {
-                setIsPlusOpen(false);
-                setEditMovement(null);
-                setIsMovementFormOpen(true);
-              }}
-            >
-              <Icon name="movements" size={20} color="#F0F4F8" />
-              <Text style={s.plusMenuItemText}>Movement</Text>
-            </Pressable>
-            <Pressable 
-              style={s.plusMenuItem} 
-              onPress={() => {
-                setIsPlusOpen(false);
-                setIsBulkUploadOpen(true);
-              }}
-            >
-              <Icon name="movements" size={20} color="#22C55E" />
-              <Text style={s.plusMenuItemText}>Bulk Upload Movements</Text>
-            </Pressable>
-            <Pressable 
-              style={s.plusMenuItem} 
+            {!currentPlaybook && (
+              <>
+                <Pressable style={s.plusMenuItem} onPress={() => { setIsPlusOpen(false); setShowPlanCreate(true); }}>
+                  <Icon name="plan" size={20} color="#60A5FA" />
+                  <Text style={s.plusMenuItemText}>Plan</Text>
+                </Pressable>
+                <Pressable
+                  style={s.plusMenuItem}
+                  onPress={() => {
+                    setIsPlusOpen(false);
+                    setEditMovement(null);
+                    setIsMovementFormOpen(true);
+                  }}
+                >
+                  <Icon name="movements" size={20} color="#F0F4F8" />
+                  <Text style={s.plusMenuItemText}>Movement</Text>
+                </Pressable>
+                <Pressable
+                  style={s.plusMenuItem}
+                  onPress={() => {
+                    setIsPlusOpen(false);
+                    setIsBulkUploadOpen(true);
+                  }}
+                >
+                  <Icon name="movements" size={20} color="#22C55E" />
+                  <Text style={s.plusMenuItemText}>Bulk Upload Movements</Text>
+                </Pressable>
+              </>
+            )}
+            <Pressable
+              style={s.plusMenuItem}
               onPress={async () => {
                 setIsPlusOpen(false);
+                const pb = currentPlaybookRef.current;
                 try {
                   // Create an empty workout in Firestore and navigate into it
                   const newWorkoutRef = await addDoc(collection(db, 'workouts'), {
@@ -2655,6 +2803,14 @@ function BuildScreenInner() {
                      createdAt: serverTimestamp(),
                      updatedAt: serverTimestamp(),
                    });
+                  // Inside a playbook: the new workout joins the sequence,
+                  // then the coach lands straight in it to add movements.
+                  if (pb) {
+                    await updateDoc(doc(db, 'playbooks', pb.id), {
+                      workoutIds: arrayUnion(newWorkoutRef.id),
+                      updatedAt: serverTimestamp(),
+                    });
+                  }
                   setOpenWorkoutId(newWorkoutRef.id);
                 } catch (e) {
                   console.error('Create workout error:', e);
@@ -2664,30 +2820,34 @@ function BuildScreenInner() {
               <Icon name="workouts" size={20} color="#F0F4F8" />
               <Text style={s.plusMenuItemText}>Workout</Text>
             </Pressable>
-            <Pressable
-              style={s.plusMenuItem}
-              onPress={() => {
-                setIsPlusOpen(false);
-                setIsFollowAlongOpen(true);
-              }}
-            >
-              <Icon name="video" size={20} color="#22D3EE" />
-              <Text style={s.plusMenuItemText}>Follow-Along Video</Text>
-            </Pressable>
-            <Pressable style={s.plusMenuItem} onPress={() => { setIsPlusOpen(false); setShowPlaybookCreate(true); }}>
-              <Icon name="playbook" size={20} color="#A78BFA" />
-              <Text style={s.plusMenuItemText}>Playbook</Text>
-            </Pressable>
-            <Pressable 
-              style={s.plusMenuItem} 
-              onPress={() => {
-                setIsPlusOpen(false);
-                setShowFolderCreate(true);
-              }}
-            >
-              <Icon name="folder" size={20} color="#F5A623" />
-              <Text style={s.plusMenuItemText}>Folder</Text>
-            </Pressable>
+            {!currentPlaybook && (
+              <>
+                <Pressable
+                  style={s.plusMenuItem}
+                  onPress={() => {
+                    setIsPlusOpen(false);
+                    setIsFollowAlongOpen(true);
+                  }}
+                >
+                  <Icon name="video" size={20} color="#22D3EE" />
+                  <Text style={s.plusMenuItemText}>Follow-Along Video</Text>
+                </Pressable>
+                <Pressable style={s.plusMenuItem} onPress={() => { setIsPlusOpen(false); setShowPlaybookCreate(true); }}>
+                  <Icon name="playbook" size={20} color="#A78BFA" />
+                  <Text style={s.plusMenuItemText}>Playbook</Text>
+                </Pressable>
+                <Pressable
+                  style={s.plusMenuItem}
+                  onPress={() => {
+                    setIsPlusOpen(false);
+                    setShowFolderCreate(true);
+                  }}
+                >
+                  <Icon name="folder" size={20} color="#F5A623" />
+                  <Text style={s.plusMenuItemText}>Folder</Text>
+                </Pressable>
+              </>
+            )}
           </View>
         </Pressable>
       </Modal>
@@ -2774,41 +2934,87 @@ function BuildScreenInner() {
         </Pressable>
       </Modal>
 
-      {/* Playbook Create Modal */}
-      <Modal transparent visible={showPlaybookCreate} animationType="fade" onRequestClose={() => { setShowPlaybookCreate(false); setPendingPlaybookDropItem(null); }}>
-        <Pressable style={s.modalBackdrop} onPress={() => { setShowPlaybookCreate(false); setPendingPlaybookDropItem(null); }}>
-          <Pressable style={s.plusMenu} onPress={e => e.stopPropagation()}>
-            <Text style={s.plusMenuTitle}>New Playbook</Text>
-            <TextInput
-              style={s.folderInput}
-              placeholder="Playbook name..."
-              placeholderTextColor="#4A5568"
-              value={newPlaybookName}
-              onChangeText={setNewPlaybookName}
-              autoFocus
-            />
-            <TextInput
-              style={[s.folderInput, { marginTop: 10 }]}
-              placeholder="Description (optional)"
-              placeholderTextColor="#4A5568"
-              value={newPlaybookDesc}
-              onChangeText={setNewPlaybookDesc}
-              multiline
-            />
-            <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
-              <Pressable
-                style={[s.folderBtn, { backgroundColor: '#1E2A3A' }]}
-                onPress={() => { setShowPlaybookCreate(false); setNewPlaybookName(''); setNewPlaybookDesc(''); setPendingPlaybookDropItem(null); }}
-              >
-                <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={[s.folderBtn, { backgroundColor: '#A78BFA', flex: 1 }]}
-                onPress={createPlaybook}
-              >
-                <Text style={{ color: '#0E1117', fontWeight: '700', fontFamily: FH }}>Create Playbook</Text>
-              </Pressable>
-            </View>
+      {/* Playbook Create Modal — title + description, then assignment: pick
+          an existing member or add a new one by name + email. */}
+      <Modal transparent visible={showPlaybookCreate} animationType="fade" onRequestClose={resetPlaybookCreateState}>
+        <Pressable style={s.modalBackdrop} onPress={resetPlaybookCreateState}>
+          <Pressable style={[s.plusMenu, { maxHeight: '85%' }]} onPress={e => e.stopPropagation()}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <Text style={s.plusMenuTitle}>New Playbook</Text>
+              <TextInput
+                style={s.folderInput}
+                placeholder="Playbook name..."
+                placeholderTextColor="#4A5568"
+                value={newPlaybookName}
+                onChangeText={setNewPlaybookName}
+                autoFocus
+              />
+              <TextInput
+                style={[s.folderInput, { marginTop: 10 }]}
+                placeholder="Description (optional)"
+                placeholderTextColor="#4A5568"
+                value={newPlaybookDesc}
+                onChangeText={setNewPlaybookDesc}
+                multiline
+              />
+              <Text style={[s.filterTitle, { marginTop: 16 }]}>Assign to Member</Text>
+              {!pbAddByEmail && pbMembers.map(m => (
+                <Pressable
+                  key={m.id}
+                  style={[s.plusMenuItem, pbAssignMemberId === m.id && { backgroundColor: '#1E2A3A', borderRadius: 8 }]}
+                  onPress={() => setPbAssignMemberId(prev => (prev === m.id ? null : m.id))}
+                >
+                  <Icon name={pbAssignMemberId === m.id ? 'check' : 'members'} size={18} color={pbAssignMemberId === m.id ? '#A78BFA' : '#8A95A3'} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.plusMenuItemText} numberOfLines={1}>{m.name}</Text>
+                    {!!m.email && <Text style={{ color: '#4A5568', fontSize: 12, fontFamily: FB }} numberOfLines={1}>{m.email}</Text>}
+                  </View>
+                </Pressable>
+              ))}
+              {!pbAddByEmail ? (
+                <Pressable style={s.plusMenuItem} onPress={() => { setPbAddByEmail(true); setPbAssignMemberId(null); }}>
+                  <Icon name="plus" size={18} color="#A78BFA" />
+                  <Text style={[s.plusMenuItemText, { color: '#A78BFA' }]}>Add a member by email</Text>
+                </Pressable>
+              ) : (
+                <>
+                  <TextInput
+                    style={[s.folderInput, { marginTop: 8 }]}
+                    placeholder="Member name..."
+                    placeholderTextColor="#4A5568"
+                    value={pbNewMemberName}
+                    onChangeText={setPbNewMemberName}
+                  />
+                  <TextInput
+                    style={[s.folderInput, { marginTop: 10 }]}
+                    placeholder="Member email address..."
+                    placeholderTextColor="#4A5568"
+                    value={pbNewMemberEmail}
+                    onChangeText={setPbNewMemberEmail}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                  />
+                  <Pressable style={s.plusMenuItem} onPress={() => { setPbAddByEmail(false); setPbNewMemberName(''); setPbNewMemberEmail(''); }}>
+                    <Icon name="members" size={18} color="#8A95A3" />
+                    <Text style={[s.plusMenuItemText, { color: '#8A95A3' }]}>Pick an existing member instead</Text>
+                  </Pressable>
+                </>
+              )}
+              <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
+                <Pressable
+                  style={[s.folderBtn, { backgroundColor: '#1E2A3A' }]}
+                  onPress={resetPlaybookCreateState}
+                >
+                  <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[s.folderBtn, { backgroundColor: '#A78BFA', flex: 1 }]}
+                  onPress={createPlaybook}
+                >
+                  <Text style={{ color: '#0E1117', fontWeight: '700', fontFamily: FH }}>Create Playbook</Text>
+                </Pressable>
+              </View>
+            </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>
@@ -2949,7 +3155,19 @@ function BuildScreenInner() {
           style={[s.tray, trayAnimStyle, { paddingBottom: insets.bottom + 12 }]}
           pointerEvents="none"
         >
-          <View style={s.trayRow}>
+          <View
+            ref={trayRowRef}
+            style={s.trayRow}
+            collapsable={false}
+            onLayout={() => {
+              // Measure after the slide-in settles so pageY reflects rest position.
+              setTimeout(() => {
+                trayRowRef.current?.measureInWindow((_x, y) => {
+                  if (Number.isFinite(y) && y > 0) trayRowTopRef.current = y;
+                });
+              }, 300);
+            }}
+          >
             {trayFolders.map(f => {
               const trayKey = `tray:${f.id}`;
               return (
