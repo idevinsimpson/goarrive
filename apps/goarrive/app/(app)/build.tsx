@@ -114,6 +114,7 @@ const TRAY_HEIGHT = 96;              // content height of the drop tray (excl. s
 const TRAY_SLIDE_DISTANCE = 220;     // translateY when hidden — guaranteed offscreen incl. inset
 const TRAY_MAX_RECENTS = 5;
 const TRAY_NEW_FOLDER_KEY = 'tray:new';
+const TRAY_NEW_PLAYBOOK_KEY = 'tray:new-playbook';
 
 // Firestore rejects `undefined` values. Mirror the stripUndefined pattern
 // from components/WorkoutFolderPage.tsx so writes from drag/drop never throw.
@@ -597,6 +598,8 @@ function BuildScreenInner() {
   const trayItemLayoutsRef = useRef(new Map<string, { x: number; y: number; w: number; h: number; item: BuildItem | null }>());
   const [recentDropFolderIds, setRecentDropFolderIds] = useState<string[]>([]);
   const [pendingFolderDropItem, setPendingFolderDropItem] = useState<BuildItem | null>(null);
+  // Workout dropped on the tray "New Playbook" target — seeds the new playbook.
+  const [pendingPlaybookDropItem, setPendingPlaybookDropItem] = useState<BuildItem | null>(null);
   // Movement dropped on the tray "New" target — chooser asks Folder vs Workout.
   const [trayDropChooserItem, setTrayDropChooserItem] = useState<BuildItem | null>(null);
   const navigation = useNavigation();
@@ -1013,13 +1016,14 @@ function BuildScreenInner() {
   const createPlaybook = useCallback(async () => {
     const name = newPlaybookName.trim();
     if (!name) return;
+    const pendingDrop = pendingPlaybookDropItem;
     try {
       await addDoc(collection(db, 'playbooks'), {
         coachId,
         tenantId,
         name,
         description: newPlaybookDesc.trim(),
-        workoutIds: [],
+        workoutIds: pendingDrop && pendingDrop.type === 'Workouts' ? [pendingDrop.id] : [],
         isArchived: false,
         parentId: currentFolderId || null,
         createdAt: serverTimestamp(),
@@ -1027,8 +1031,11 @@ function BuildScreenInner() {
       });
       setNewPlaybookName(''); setNewPlaybookDesc('');
       setShowPlaybookCreate(false);
+      setPendingPlaybookDropItem(null);
+      scrollOffsetRef.current = 0;
+      requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: false }));
     } catch (e) { console.error('[Build] Create playbook error:', e); }
-  }, [coachId, tenantId, currentFolderId, newPlaybookName, newPlaybookDesc]);
+  }, [coachId, tenantId, currentFolderId, newPlaybookName, newPlaybookDesc, pendingPlaybookDropItem]);
 
   // ── Drag & Drop handlers (filteredItems-independent) ──────────────────
   // The grid sorts by updatedAt desc, so a drop target jumps to the top of
@@ -1175,6 +1182,13 @@ function BuildScreenInner() {
     if (tray) {
       if (tray.item) {
         await dropItemIntoFolder(dragged, tray.item.id);
+      } else if (tray.key === TRAY_NEW_PLAYBOOK_KEY) {
+        // Tray "New Playbook" target (workouts only): open the create modal
+        // seeded with the dragged workout.
+        if (dragged.type === 'Workouts') {
+          setPendingPlaybookDropItem(dragged);
+          setShowPlaybookCreate(true);
+        }
       } else {
         // Tray "New" target: ask Folder vs Workout, then run the matching flow.
         setTrayDropChooserItem(dragged);
@@ -1448,6 +1462,28 @@ function BuildScreenInner() {
       }));
       scrollListToTop();
     } catch (e) { console.error('[Build] Create workout from drop error:', e); }
+  }, [dropModal, coachId, tenantId, currentFolderId, scrollListToTop]);
+
+  // Workout dropped on workout → user chose Playbook: both join a new playbook.
+  const createPlaybookFromDrop = useCallback(async () => {
+    if (!dropModal) return;
+    const { drag, target } = dropModal;
+    if (drag.type !== 'Workouts' || target.type !== 'Workouts') return;
+    setDropModal(null);
+    try {
+      await addDoc(collection(db, 'playbooks'), {
+        coachId,
+        tenantId,
+        name: `${drag.name} & ${target.name}`,
+        description: '',
+        workoutIds: [drag.id, target.id],
+        isArchived: false,
+        parentId: currentFolderId || null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      scrollListToTop();
+    } catch (e) { console.error('[Build] Create playbook from drop error:', e); }
   }, [dropModal, coachId, tenantId, currentFolderId, scrollListToTop]);
 
   // Tray "New" drop → user chose Workout: create a one-movement workout.
@@ -1733,7 +1769,7 @@ function BuildScreenInner() {
   // Drop rects for tray items that left the tray — onLayout only fires for
   // mounted views, so removed folders would otherwise leave stale rects.
   useEffect(() => {
-    const valid = new Set([TRAY_NEW_FOLDER_KEY, ...trayFolders.map(f => `tray:${f.id}`)]);
+    const valid = new Set([TRAY_NEW_FOLDER_KEY, TRAY_NEW_PLAYBOOK_KEY, ...trayFolders.map(f => `tray:${f.id}`)]);
     trayItemLayoutsRef.current.forEach((_v, k) => {
       if (!valid.has(k)) trayItemLayoutsRef.current.delete(k);
     });
@@ -2659,7 +2695,7 @@ function BuildScreenInner() {
       {/* Folder Create Modal */}
       <Modal transparent visible={showFolderCreate} animationType="fade" onRequestClose={() => { setShowFolderCreate(false); setPendingFolderDropItem(null); }}>
         <Pressable style={s.modalBackdrop} onPress={() => { setShowFolderCreate(false); setPendingFolderDropItem(null); }}>
-          <View style={s.plusMenu} onStartShouldSetResponder={() => true}>
+          <Pressable style={s.plusMenu} onPress={e => e.stopPropagation()}>
             <Text style={s.plusMenuTitle}>New Folder</Text>
             <TextInput
               style={s.folderInput}
@@ -2684,14 +2720,14 @@ function BuildScreenInner() {
                 <Text style={{ color: '#0E1117', fontWeight: '700', fontFamily: FH }}>Create</Text>
               </Pressable>
             </View>
-          </View>
+          </Pressable>
         </Pressable>
       </Modal>
 
       {/* Plan Create Modal */}
       <Modal transparent visible={showPlanCreate} animationType="fade" onRequestClose={() => setShowPlanCreate(false)}>
         <Pressable style={s.modalBackdrop} onPress={() => setShowPlanCreate(false)}>
-          <View style={s.plusMenu} onStartShouldSetResponder={() => true}>
+          <Pressable style={s.plusMenu} onPress={e => e.stopPropagation()}>
             <Text style={s.plusMenuTitle}>New Plan</Text>
             <TextInput
               style={s.folderInput}
@@ -2734,14 +2770,14 @@ function BuildScreenInner() {
                 <Text style={{ color: '#0E1117', fontWeight: '700', fontFamily: FH }}>Create Plan</Text>
               </Pressable>
             </View>
-          </View>
+          </Pressable>
         </Pressable>
       </Modal>
 
       {/* Playbook Create Modal */}
-      <Modal transparent visible={showPlaybookCreate} animationType="fade" onRequestClose={() => setShowPlaybookCreate(false)}>
-        <Pressable style={s.modalBackdrop} onPress={() => setShowPlaybookCreate(false)}>
-          <View style={s.plusMenu} onStartShouldSetResponder={() => true}>
+      <Modal transparent visible={showPlaybookCreate} animationType="fade" onRequestClose={() => { setShowPlaybookCreate(false); setPendingPlaybookDropItem(null); }}>
+        <Pressable style={s.modalBackdrop} onPress={() => { setShowPlaybookCreate(false); setPendingPlaybookDropItem(null); }}>
+          <Pressable style={s.plusMenu} onPress={e => e.stopPropagation()}>
             <Text style={s.plusMenuTitle}>New Playbook</Text>
             <TextInput
               style={s.folderInput}
@@ -2762,7 +2798,7 @@ function BuildScreenInner() {
             <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
               <Pressable
                 style={[s.folderBtn, { backgroundColor: '#1E2A3A' }]}
-                onPress={() => { setShowPlaybookCreate(false); setNewPlaybookName(''); setNewPlaybookDesc(''); }}
+                onPress={() => { setShowPlaybookCreate(false); setNewPlaybookName(''); setNewPlaybookDesc(''); setPendingPlaybookDropItem(null); }}
               >
                 <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
               </Pressable>
@@ -2773,7 +2809,7 @@ function BuildScreenInner() {
                 <Text style={{ color: '#0E1117', fontWeight: '700', fontFamily: FH }}>Create Playbook</Text>
               </Pressable>
             </View>
-          </View>
+          </Pressable>
         </Pressable>
       </Modal>
 
@@ -2835,6 +2871,17 @@ function BuildScreenInner() {
                 <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>Create Workout</Text>
               </Pressable>
             )}
+            {/* New Playbook only applies to two workouts — playbooks are
+                workouts-only membership. */}
+            {dropModal?.drag.type === 'Workouts' && dropModal?.target.type === 'Workouts' && (
+              <Pressable
+                style={[s.plusMenuItem, { backgroundColor: '#1E2A3A', borderRadius: 10, paddingVertical: 14 }]}
+                onPress={createPlaybookFromDrop}
+              >
+                <Icon name="playbook" size={22} color="#A78BFA" />
+                <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>Create Playbook</Text>
+              </Pressable>
+            )}
           </View>
         </Pressable>
       </Modal>
@@ -2872,6 +2919,24 @@ function BuildScreenInner() {
                 <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>New Workout</Text>
               </Pressable>
             )}
+            {/* New Playbook only applies to a dragged workout — playbooks are
+                workouts-only membership. */}
+            {trayDropChooserItem?.type === 'Workouts' && (
+              <Pressable
+                style={[s.plusMenuItem, { backgroundColor: '#1E2A3A', borderRadius: 10, paddingVertical: 14 }]}
+                onPress={() => {
+                  const item = trayDropChooserItem;
+                  setTrayDropChooserItem(null);
+                  if (item) {
+                    setPendingPlaybookDropItem(item);
+                    setShowPlaybookCreate(true);
+                  }
+                }}
+              >
+                <Icon name="playbook" size={22} color="#A78BFA" />
+                <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>New Playbook</Text>
+              </Pressable>
+            )}
           </View>
         </Pressable>
       </Modal>
@@ -2907,6 +2972,18 @@ function BuildScreenInner() {
               <Icon name="plus" size={18} color="#F5A623" />
               <Text style={s.trayItemText} numberOfLines={1}>New…</Text>
             </View>
+            {/* Playbooks are workouts-only, so the target only appears when a
+                workout is being dragged. */}
+            {dragItem?.type === 'Workouts' && (
+              <View
+                onLayout={registerTrayLayout(TRAY_NEW_PLAYBOOK_KEY, null)}
+                collapsable={false}
+                style={[s.trayItem, hoveredId === TRAY_NEW_PLAYBOOK_KEY && s.trayItemHovered]}
+              >
+                <Icon name="playbook" size={18} color="#A78BFA" />
+                <Text style={s.trayItemText} numberOfLines={1}>New Playbook</Text>
+              </View>
+            )}
             {/* Scroll-down target on bottom-right of tray: visible during drag,
                 scales and brightens as user approaches the right edge. */}
             {dragItem && (
