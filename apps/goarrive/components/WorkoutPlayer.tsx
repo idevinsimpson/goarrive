@@ -509,6 +509,56 @@ export default function WorkoutPlayer({
     controlsTimerRef.current = setTimeout(() => setShowControls(false), 3000);
   }, []);
 
+  // ── Post-interruption touch recovery (web) ───────────────────────────
+  // iOS bug: when a phone call interrupts a standalone PWA, the in-call
+  // status bar shifts the visual viewport; after the call ends WebKit can
+  // leave touch hit-testing misaligned with the rendered layer — every tap
+  // lands offset from the drawn buttons, so the whole player feels dead
+  // while audio keeps playing. On every return-to-foreground signal we
+  // re-anchor the scroll position, force a reflow, re-dispatch resize so
+  // the artboard scale recomputes, and clear any responder RNW left stuck
+  // mid-touch when the call stole the gesture.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !visible) return;
+    if (typeof window === 'undefined') return;
+    const resync = () => {
+      try {
+        const ae = document.activeElement as HTMLElement | null;
+        // Don't fight the on-screen keyboard while an input is focused.
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+        window.scrollTo(0, 0);
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+        void document.body.offsetHeight;
+        window.dispatchEvent(new Event('resize'));
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const rs = require('react-native-web/dist/modules/useResponderEvents/ResponderSystem');
+          rs.terminateResponder?.();
+        } catch {}
+        console.info('[VOICE-AUDIT] player touch resync', {
+          innerH: window.innerHeight,
+          vvH: window.visualViewport?.height,
+          vvTop: window.visualViewport?.offsetTop,
+        });
+      } catch {}
+    };
+    const onVis = () => { if (document.visibilityState === 'visible') resync(); };
+    window.addEventListener('focus', resync);
+    window.addEventListener('pageshow', resync);
+    document.addEventListener('visibilitychange', onVis);
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', resync);
+    vv?.addEventListener('scroll', resync);
+    return () => {
+      window.removeEventListener('focus', resync);
+      window.removeEventListener('pageshow', resync);
+      document.removeEventListener('visibilitychange', onVis);
+      vv?.removeEventListener('resize', resync);
+      vv?.removeEventListener('scroll', resync);
+    };
+  }, [visible]);
+
   const handleSkipFromOverlay = useCallback(() => {
     // Cancel any audio from the skipped-from state BEFORE advancing. This
     // stops the in-flight MP3/voice clip and clears pending deferred cues so
