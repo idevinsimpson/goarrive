@@ -109,7 +109,6 @@ const NO_MOVEMENT_BLOCKS = ['Water Break', 'Rest', 'Follow-Along Video'];
 // ── Drag auto-scroll + drop tray constants ─────────────────────────────────
 const AUTO_SCROLL_MAX_PX = 15;       // max px scrolled per frame at edge proximity
 const AUTO_SCROLL_BAND_PCT = 0.18;  // edge band = 18% of the list height (at top/bottom where scroll fires)
-const AUTO_SCROLL_HOTSPOT_W = 90;    // down-scroll only fires within this many px of the right edge (over the chevron-down target)
 const TRAY_SHOW_DELAY_MS = 200;      // delay before tray slides up — avoids flashing on accidental long presses
 const TRAY_HEIGHT = 96;              // content height of the drop tray (excl. safe-area inset)
 const TRAY_SLIDE_DISTANCE = 220;     // translateY when hidden — guaranteed offscreen incl. inset
@@ -1491,19 +1490,15 @@ function BuildScreenInner() {
         delta = -Math.min(1, proximity) * AUTO_SCROLL_MAX_PX;
       }
       // Scroll down anywhere in the bottom zone — including past listBottom
-      // over the tray area — full width. The old version only scrolled inside
-      // a narrow band above the tray plus a 90px right-corner hotspot, which
-      // left most of the bottom (and the bottom-right on phones) dead.
+      // over the tray area — full width. No suppression over tray targets:
+      // they're bottom-anchored overlays that don't move with list scroll,
+      // and with a full recents row the targets span the entire width, so
+      // suppressing over them killed down-scroll across the whole bottom
+      // edge (the bug Devin hit). Aiming a tray drop is unaffected by the
+      // list scrolling underneath.
       else if (y > listBottom - band) {
-        // Exception: hovering an actual tray drop target means the user is
-        // aiming a drop, not scrolling — hold still so the target stays put.
-        // The right-edge chevron column always scrolls, even over a target.
-        const windowW = Dimensions.get('window').width;
-        const inChevronColumn = x > windowW - AUTO_SCROLL_HOTSPOT_W;
-        if (inChevronColumn || !findTrayTarget(x, y)) {
-          const proximity = Math.min(1, (y - (listBottom - band)) / band);
-          delta = proximity * AUTO_SCROLL_MAX_PX;
-        }
+        const proximity = Math.min(1, (y - (listBottom - band)) / band);
+        delta = proximity * AUTO_SCROLL_MAX_PX;
       }
       const node = getListScrollNode();
       if (delta !== 0) {
@@ -3162,8 +3157,14 @@ function BuildScreenInner() {
             onLayout={() => {
               // Measure after the slide-in settles so pageY reflects rest position.
               setTimeout(() => {
+                // Skip if the tray is already hiding — a mid-slide-down
+                // measurement would store a too-large top and break the
+                // next drag's tray drops.
+                if (!trayVisibleRef.current) return;
                 trayRowRef.current?.measureInWindow((_x, y) => {
-                  if (Number.isFinite(y) && y > 0) trayRowTopRef.current = y;
+                  if (!trayVisibleRef.current) return;
+                  const windowH = Dimensions.get('window').height;
+                  if (Number.isFinite(y) && y > 0 && y < windowH) trayRowTopRef.current = y;
                 });
               }, 300);
             }}
