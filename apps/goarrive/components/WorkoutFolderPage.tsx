@@ -42,6 +42,7 @@ import {
   getDocs,
   serverTimestamp,
   onSnapshot,
+  arrayUnion,
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, storage, functions } from '../lib/firebase';
@@ -468,6 +469,44 @@ export default function WorkoutFolderPage({
   });
   const [shareSettingsSaving, setShareSettingsSaving] = useState(false);
   const [moveToSearch, setMoveToSearch] = useState('');
+  const [movePlaybooks, setMovePlaybooks] = useState<any[]>([]);
+  const [moveToBusyId, setMoveToBusyId] = useState<string | null>(null);
+
+  // Load the coach's playbooks when the Move-to page opens.
+  useEffect(() => {
+    if (!showMoveTo || !coachId) return;
+    getDocs(query(collection(db, 'playbooks'), where('coachId', '==', coachId)))
+      .then(snap => {
+        const pbs = snap.docs
+          .map(d => ({ id: d.id, ...d.data() } as any))
+          .filter(pb => !pb.isArchived)
+          .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        setMovePlaybooks(pbs);
+      })
+      .catch(e => console.error('[WorkoutFolder] Load playbooks error:', e));
+  }, [showMoveTo, coachId]);
+
+  // Membership lives in the playbook's workoutIds array (ordered, deduped by
+  // arrayUnion) — never parentId, since a workout can be in many playbooks.
+  const addToPlaybook = useCallback(async (pb: any) => {
+    if (moveToBusyId) return;
+    setMoveToBusyId(pb.id);
+    try {
+      await updateDoc(doc(db, 'playbooks', pb.id), {
+        workoutIds: arrayUnion(workoutId),
+        updatedAt: serverTimestamp(),
+      });
+      setMovePlaybooks(prev => prev.map(p =>
+        p.id === pb.id
+          ? { ...p, workoutIds: Array.from(new Set([...(p.workoutIds ?? []), workoutId])) }
+          : p,
+      ));
+    } catch (e) {
+      console.error('[WorkoutFolder] Add to playbook error:', e);
+    } finally {
+      setMoveToBusyId(null);
+    }
+  }, [workoutId, moveToBusyId]);
   const [editingNameKey, setEditingNameKey] = useState<string | null>(null);
   const [editingNameValue, setEditingNameValue] = useState('');
   // Reorder: long-press to pick up, tap another slot to drop
@@ -1954,13 +1993,42 @@ export default function WorkoutFolderPage({
           </Pressable>
 
           <Text style={[st.moveToSectionTitle, { marginTop: 24 }]}>Playbooks</Text>
-          <View style={st.moveToEmpty}>
-            <Text style={st.moveToEmptyText}>No playbooks yet</Text>
-          </View>
-          <Pressable style={st.moveToCreateBtn} onPress={() => console.log('[WorkoutFolder] Create playbook — not yet wired')}>
-            <Icon name="plus" size={16} color="#A78BFA" />
-            <Text style={[st.moveToCreateText, { color: '#A78BFA' }]}>Create Playbook</Text>
-          </Pressable>
+          {(() => {
+            const q = moveToSearch.trim().toLowerCase();
+            const visible = q
+              ? movePlaybooks.filter(pb => (pb.name || '').toLowerCase().includes(q))
+              : movePlaybooks;
+            if (visible.length === 0) {
+              return (
+                <View style={st.moveToEmpty}>
+                  <Text style={st.moveToEmptyText}>No playbooks yet</Text>
+                </View>
+              );
+            }
+            return visible.map(pb => {
+              const alreadyIn = Array.isArray(pb.workoutIds) && pb.workoutIds.includes(workoutId);
+              return (
+                <Pressable
+                  key={pb.id}
+                  style={[st.moveToCreateBtn, { justifyContent: 'flex-start', borderStyle: 'solid', borderColor: '#2A3340', marginBottom: 8 }]}
+                  onPress={() => addToPlaybook(pb)}
+                  disabled={alreadyIn || moveToBusyId === pb.id}
+                >
+                  <Icon name="playbook" size={16} color="#A78BFA" />
+                  <Text style={[st.moveToCreateText, { color: '#F0F4F8', flex: 1 }]} numberOfLines={1}>
+                    {pb.name || 'Untitled Playbook'}
+                  </Text>
+                  {moveToBusyId === pb.id ? (
+                    <ActivityIndicator size="small" color="#A78BFA" />
+                  ) : alreadyIn ? (
+                    <Text style={[st.moveToCreateText, { color: '#34D399' }]}>Added ✓</Text>
+                  ) : (
+                    <Icon name="plus" size={16} color="#A78BFA" />
+                  )}
+                </Pressable>
+              );
+            });
+          })()}
         </ScrollView>
       </View>
     );

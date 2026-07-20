@@ -43,6 +43,8 @@ import {
   addDoc,
   serverTimestamp,
   writeBatch,
+  arrayUnion,
+  arrayRemove,
 } from 'firebase/firestore';
 import { useNavigation } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
@@ -188,14 +190,16 @@ function calcDurationMin(blocks: any[]): number {
 }
 
 // Drop target eligibility. Folders accept every asset type. A Movement
-// dropped on a Workout appends to it. Any other asset-on-asset drop opens
-// the combine modal (create a folder containing both).
+// dropped on a Workout appends to it. Playbooks are workouts-only — they
+// reject movements, folders, plans, and other playbooks. Any other
+// asset-on-asset drop opens the combine modal (create a folder containing both).
 function isDropTarget(
   item: { type?: string } | null | undefined,
   dragged: { type?: string } | null | undefined,
 ): boolean {
   if (!item || !dragged) return false;
   if (dragged.type === 'Folder') return false;
+  if (item.type === 'Playbooks') return dragged.type === 'Workouts';
   return true;
 }
 
@@ -483,6 +487,10 @@ function BuildScreenInner() {
 
   // ── State ──────────────────────────────────────────────────────────────
   const [items, setItems] = useState<BuildItem[]>([]);
+  // Live items for drag callbacks (created once) — e.g. playbook reorder needs
+  // the current workoutIds without re-creating executeDrop on every snapshot.
+  const itemsRef = useRef<BuildItem[]>([]);
+  itemsRef.current = items;
   const [variationBadges, setVariationBadges] = useState<Record<string, 'running' | 'ready'>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -507,6 +515,15 @@ function BuildScreenInner() {
   folderStackRef.current = folderStack;
   const folderHeaderRectRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
   const folderHeaderRef = useRef<View>(null);
+
+  // Playbook drill-in — same grid/header experience as folders, but membership
+  // and order come from the playbook's workoutIds array (never parentId, since
+  // one workout can live in many playbooks and order matters for rotation).
+  const [currentPlaybook, setCurrentPlaybook] = useState<{ id: string; name: string } | null>(null);
+  const [editingPlaybookTitle, setEditingPlaybookTitle] = useState(false);
+  const [playbookTitleDraft, setPlaybookTitleDraft] = useState('');
+  const currentPlaybookRef = useRef<{ id: string; name: string } | null>(null);
+  currentPlaybookRef.current = currentPlaybook;
 
   // Modals
   const [selectedMovement, setSelectedMovement] = useState<any | null>(null);
@@ -533,7 +550,6 @@ function BuildScreenInner() {
   const [newPlaybookName, setNewPlaybookName] = useState('');
   const [newPlaybookDesc, setNewPlaybookDesc] = useState('');
   const [selectedPlan, setSelectedPlan] = useState<any | null>(null);
-  const [selectedPlaybook, setSelectedPlaybook] = useState<any | null>(null);
 
   const tenantId = claims?.tenantId ?? '';
 
@@ -864,11 +880,33 @@ function BuildScreenInner() {
     } catch (e) { console.error('[Build] Folder rename error:', e); }
   }, [folderTitleDraft]);
 
+  // ── Playbook helpers ───────────────────────────────────────────────────
+  const enterPlaybook = useCallback((pb: BuildItem) => {
+    setCurrentPlaybook({ id: pb.id, name: pb.name });
+  }, []);
+
+  const exitPlaybook = useCallback(() => {
+    setCurrentPlaybook(null);
+    setEditingPlaybookTitle(false);
+  }, []);
+
+  const savePlaybookTitle = useCallback(async () => {
+    setEditingPlaybookTitle(false);
+    const pb = currentPlaybookRef.current;
+    const name = playbookTitleDraft.trim();
+    if (!pb || !name || name === pb.name) return;
+    try {
+      await updateDoc(doc(db, 'playbooks', pb.id), { name, updatedAt: serverTimestamp() });
+      setCurrentPlaybook(prev => (prev ? { ...prev, name } : prev));
+    } catch (e) { console.error('[Build] Playbook rename error:', e); }
+  }, [playbookTitleDraft]);
+
   // Drop zone on the folder header: dragging an asset onto "Build / …" moves
   // it up one level — to the parent folder, or to the Build root at depth 1.
+  // Inside a playbook, the same zone removes the workout from the playbook.
   const isOverFolderHeader = useCallback((ax: number, ay: number): boolean => {
     const rect = folderHeaderRectRef.current;
-    if (!rect || folderStackRef.current.length === 0) return false;
+    if (!rect || (folderStackRef.current.length === 0 && !currentPlaybookRef.current)) return false;
     return ax >= rect.x && ax <= rect.x + rect.w && ay >= rect.y && ay <= rect.y + rect.h;
   }, []);
 
@@ -1094,6 +1132,38 @@ function BuildScreenInner() {
     const dragged = _dragItemRef.current;
     if (!dragged) return;
 
+    // Inside a playbook: drags only reorder workoutIds (drop on another
+    // workout) or remove from the playbook (drop on the header). No
+    // parentId writes, folder drops, or combine modals in this context.
+    const pb = currentPlaybookRef.current;
+    if (pb) {
+      if (dragged.type !== 'Workouts') return;
+      try {
+        if (isOverFolderHeader(ax, ay)) {
+          await updateDoc(doc(db, 'playbooks', pb.id), {
+            workoutIds: arrayRemove(dragged.id),
+            updatedAt: serverTimestamp(),
+          });
+          return;
+        }
+        const target = findTarget(ax, ay);
+        if (!target || target.id === dragged.id || target.type !== 'Workouts') return;
+        const pbDoc = itemsRef.current.find(i => i.type === 'Playbooks' && i.id === pb.id);
+        const ids: string[] = Array.isArray(pbDoc?.workoutIds) ? [...pbDoc!.workoutIds] : [];
+        const from = ids.indexOf(dragged.id);
+        const to = ids.indexOf(target.id);
+        if (from === -1 || to === -1 || from === to) return;
+        ids.splice(from, 1);
+        const ti = ids.indexOf(target.id);
+        ids.splice(from < to ? ti + 1 : ti, 0, dragged.id);
+        await updateDoc(doc(db, 'playbooks', pb.id), {
+          workoutIds: ids,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (e) { console.error('[Build] Playbook drag error:', e); }
+      return;
+    }
+
     // Header "Build / …" zone: move the asset up one level.
     if (isOverFolderHeader(ax, ay)) {
       await moveItemUpOneLevel(dragged);
@@ -1121,6 +1191,17 @@ function BuildScreenInner() {
 
     if (target.type === 'Folder') {
       await dropItemIntoFolder(dragged, target.id);
+    } else if (target.type === 'Playbooks') {
+      // Workouts-only membership — isDropTarget already rejects everything
+      // else. arrayUnion dedupes if the workout is already in the playbook.
+      if (dragged.type !== 'Workouts') return;
+      try {
+        await updateDoc(doc(db, 'playbooks', target.id), {
+          workoutIds: arrayUnion(dragged.id),
+          updatedAt: serverTimestamp(),
+        });
+        scrollListToTop();
+      } catch (e) { console.error('[Build] Drop into playbook error:', e); }
     } else if (target.type === 'Workouts' && dragged.type === 'Movements') {
       const blockMov = toBlockMov(dragged);
       const existingBlocks: any[] = Array.isArray(target.blocks) ? target.blocks : [];
@@ -1473,6 +1554,30 @@ function BuildScreenInner() {
       );
     };
 
+    // Shared mini-card mapping for a workout inside a folder or playbook
+    // preview — still photos preferred, name placeholder otherwise.
+    const workoutPreviewEntry = (child: any): FolderPreviewEntry => {
+      const thumbs: (string | { name: string })[] = [];
+      const seen = new Set<string>();
+      outer: for (const block of (child.blocks ?? [])) {
+        for (const mov of (block?.movements ?? [])) {
+          if (thumbs.length >= 16) break outer;
+          const still = stillForBlockMov(mov);
+          if (still) {
+            if (!seen.has(still)) { seen.add(still); thumbs.push(still); }
+          } else {
+            thumbs.push({ name: mov.movementName || mov.name || 'Movement' });
+          }
+        }
+      }
+      return { id: child.id, name: child.name || 'Workout', thumbs };
+    };
+
+    const workoutsById = new Map<string, any>();
+    for (const i of withWorkouts) {
+      if (i.type === 'Workouts') workoutsById.set(i.id, i);
+    }
+
     // Editing anything inside a folder must surface the folder in the grid
     // the same way editing a loose asset surfaces it. Firestore only bumps
     // the folder doc on create/drop, so compute an effective sort timestamp
@@ -1498,6 +1603,17 @@ function BuildScreenInner() {
     };
 
     return withWorkouts.map(item => {
+      // Playbook tiles render the same mini-library mosaic as folders, but
+      // sourced from workoutIds (ordered) instead of parentId children.
+      if (item.type === 'Playbooks') {
+        const ids: string[] = Array.isArray(item.workoutIds) ? item.workoutIds : [];
+        const children = ids
+          .map(id => workoutsById.get(id))
+          .filter(c => c && !c.isArchived)
+          .slice(0, 9);
+        if (children.length === 0) return item;
+        return { ...item, folderPreview: children.map(workoutPreviewEntry) };
+      }
       if (item.type !== 'Folder') return item;
       const sortSeconds = effectiveSeconds(item);
       const children = withWorkouts
@@ -1510,20 +1626,7 @@ function BuildScreenInner() {
           const still = (child.posterUrl || child.thumbnailImageUrl || child.thumbnailUrl || child.mediaUrl) as string | undefined;
           return { id: child.id, name: child.name || 'Movement', thumbs: still ? [still] : [{ name: child.name || 'Movement' }] };
         }
-        const thumbs: (string | { name: string })[] = [];
-        const seen = new Set<string>();
-        outer: for (const block of (child.blocks ?? [])) {
-          for (const mov of (block?.movements ?? [])) {
-            if (thumbs.length >= 16) break outer;
-            const still = stillForBlockMov(mov);
-            if (still) {
-              if (!seen.has(still)) { seen.add(still); thumbs.push(still); }
-            } else {
-              thumbs.push({ name: mov.movementName || mov.name || 'Movement' });
-            }
-          }
-        }
-        return { id: child.id, name: child.name || 'Workout', thumbs };
+        return workoutPreviewEntry(child);
       });
       return { ...item, folderPreview, sortSeconds };
     });
@@ -1531,6 +1634,21 @@ function BuildScreenInner() {
 
   // ── Filtering ──────────────────────────────────────────────────────────────────
   const filteredItems = useMemo(() => {
+    // Playbook view: ONLY the playbook's workouts, in workoutIds order —
+    // the array is the source of truth for membership and sequence.
+    if (currentPlaybook) {
+      const pbDoc = enrichedItems.find(i => i.type === 'Playbooks' && i.id === currentPlaybook.id);
+      const ids: string[] = Array.isArray(pbDoc?.workoutIds) ? pbDoc!.workoutIds : [];
+      const workoutsById = new Map(
+        enrichedItems.filter(i => i.type === 'Workouts' && !i.isArchived).map(i => [i.id, i]),
+      );
+      let list = ids.map(id => workoutsById.get(id)).filter(Boolean) as BuildItem[];
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        list = list.filter(i => i.name?.toLowerCase().includes(q));
+      }
+      return list;
+    }
     let list = enrichedItems;
     // Client-side archive filter
     list = list.filter(i => !!i.isArchived === showArchived);
@@ -1581,7 +1699,7 @@ function BuildScreenInner() {
       list = rankByPrimaryMuscle(list as any[], movMuscleGroupFilter) as typeof list;
     }
     return list;
-  }, [enrichedItems, search, activeType, showArchived, currentFolderId, movEquipmentFilter, movMuscleGroupFilter, movDifficultyFilter]);
+  }, [enrichedItems, search, activeType, showArchived, currentFolderId, currentPlaybook, movEquipmentFilter, movMuscleGroupFilter, movDifficultyFilter]);
 
   // ── Drag & Drop handlers (require filteredItems) ───────────────────────
   const snapshotLayouts = useCallback(() => {
@@ -1654,7 +1772,11 @@ function BuildScreenInner() {
     lockPageScroll();
     startAutoScroll();
     if (trayTimerRef.current) clearTimeout(trayTimerRef.current);
-    trayTimerRef.current = setTimeout(() => setTrayVisible(true), TRAY_SHOW_DELAY_MS);
+    // No folder tray inside a playbook — drags there only reorder or remove,
+    // never reparent into folders.
+    if (!currentPlaybookRef.current) {
+      trayTimerRef.current = setTimeout(() => setTrayVisible(true), TRAY_SHOW_DELAY_MS);
+    }
   }, [snapshotLayouts, measureListWindow, _startDragById, lockPageScroll, startAutoScroll, navigation]);
 
   // ALL teardown lives here — called from onFinalize, which fires on both
@@ -1804,9 +1926,10 @@ function BuildScreenInner() {
       // Prefer thumbnailUrl (GIF), then first-frame image, then low-quality GIF, then mediaUrl
       const singleThumbUri = item.thumbnailUrl || item.thumbnailImageUrl || item.gifLowUrl || item.mediaUrl || null;
 
-      // Workout and playbook cards use the mosaic (mini-library) layout when they have coverThumbs
+      // Workout and playbook cards use the mosaic (mini-library) layout when they have contents
       const isWorkoutCard = isWorkout;
-      const hasMosaic = (isWorkoutCard || isPlaybook) && (item.coverThumbs ?? []).length > 0;
+      const hasMosaic = (isWorkoutCard || isPlaybook) &&
+        ((item.coverThumbs ?? []).length > 0 || (item.folderPreview?.length ?? 0) > 0);
 
       // Preview engine: register tile and check if promoted
       const tilePriority = isMovement ? 1 as const : 2 as const;
@@ -1816,7 +1939,14 @@ function BuildScreenInner() {
       // Shared tile content (media + overlays)
       const tileMedia = (
         <>
-          {(isWorkoutCard || hasMosaic) ? (
+          {isPlaybook && (item.folderPreview?.length ?? 0) > 0 ? (
+            <FolderMosaic
+              previews={item.folderPreview!}
+              width={cardWidth}
+              height={cardHeight}
+              scrollIdle={previewEngine.scrollState !== 'scrolling'}
+            />
+          ) : (isWorkoutCard || hasMosaic) ? (
             <WorkoutMosaic
               thumbs={item.coverThumbs ?? []}
               width={cardWidth}
@@ -1862,6 +1992,13 @@ function BuildScreenInner() {
           <View style={[styles.nameOverlay, isWorkoutCard && { backgroundColor: 'rgba(26, 35, 50, 0.92)' }]}>
             <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
           </View>
+          {/* Playbook badge — mirrors the folder badge so playbook tiles stay
+              distinguishable from workout tiles now that both render mosaics. */}
+          {isPlaybook && (
+            <View style={styles.folderBadge}>
+              <Icon name="playbook" size={12} color="#A78BFA" />
+            </View>
+          )}
           {isMovement && !item.videoUrl && !item.mediaUrl && !item.gifLoopUrl && !item.gifLowUrl && (
             <View style={styles.videoNeededPill}>
               <Text style={styles.videoNeededText}>Video needed</Text>
@@ -1946,7 +2083,7 @@ function BuildScreenInner() {
                 if (Date.now() < suppressPressUntilRef.current) return;
                 if (isMovement) setSelectedMovement(item);
                 else if (isPlan) setSelectedPlan(item);
-                else if (isPlaybook) setSelectedPlaybook(item);
+                else if (isPlaybook) enterPlaybook(item);
                 else if (isFollowAlong) setSelectedFollowAlong(item);
                 else setOpenWorkoutId(item.id);
               }}
@@ -1965,7 +2102,7 @@ function BuildScreenInner() {
         onPress={() => {
           if (item.type === 'Movements') setSelectedMovement(item);
           else if (item.type === 'Plans') setSelectedPlan(item);
-          else if (item.type === 'Playbooks') setSelectedPlaybook(item);
+          else if (item.type === 'Playbooks') enterPlaybook(item);
           else if (item.type === 'Follow-Alongs') setSelectedFollowAlong(item);
           else setOpenWorkoutId(item.id);
         }}
@@ -2079,10 +2216,11 @@ function BuildScreenInner() {
     >
       <AppHeader />
 
-      {/* Folder header — mirrors the workout screen: back arrow, Build / crumbs,
-          tappable title to rename. Also a drag drop-zone: dropping an asset
-          here moves it up one level. */}
-      {folderStack.length > 0 && (
+      {/* Folder / playbook header — mirrors the workout screen: back arrow,
+          Build / crumbs, tappable title to rename. Also a drag drop-zone:
+          dropping an asset here moves it up one level (folders) or removes
+          the workout from the playbook. */}
+      {(folderStack.length > 0 || currentPlaybook) && (
         <View
           ref={folderHeaderRef}
           onLayout={() => {
@@ -2092,17 +2230,20 @@ function BuildScreenInner() {
           }}
           style={[s.folderHeader, hoveredId === '__parent__' && s.folderHeaderHover]}
         >
-          <Pressable onPress={goBackFolder} style={s.folderBackBtn}>
+          <Pressable onPress={currentPlaybook ? exitPlaybook : goBackFolder} style={s.folderBackBtn}>
             <Icon name="arrow-left" size={20} color="#F0F4F8" />
           </Pressable>
           <View style={s.folderCrumb}>
-            <Pressable onPress={() => { setCurrentFolderId(null); setFolderStack([]); }}>
+            <Pressable onPress={() => { setCurrentPlaybook(null); setCurrentFolderId(null); setFolderStack([]); }}>
               <Text style={s.folderCrumbRoot}>Build</Text>
             </Pressable>
-            {folderStack.slice(0, -1).map((f, i) => (
+            {/* Inside a playbook every folder in the stack is an ancestor
+                crumb; in a folder the last entry is the editable title. */}
+            {(currentPlaybook ? folderStack : folderStack.slice(0, -1)).map((f, i) => (
               <React.Fragment key={f.id}>
                 <Text style={s.folderCrumbSep}>/</Text>
                 <Pressable onPress={() => {
+                  setCurrentPlaybook(null);
                   const next = folderStack.slice(0, i + 1);
                   setFolderStack(next);
                   setCurrentFolderId(f.id);
@@ -2112,7 +2253,28 @@ function BuildScreenInner() {
               </React.Fragment>
             ))}
             <Text style={s.folderCrumbSep}>/</Text>
-            {editingFolderTitle ? (
+            {currentPlaybook ? (
+              editingPlaybookTitle ? (
+                <TextInput
+                  style={s.folderTitleInput}
+                  value={playbookTitleDraft}
+                  onChangeText={setPlaybookTitleDraft}
+                  onBlur={savePlaybookTitle}
+                  onSubmitEditing={savePlaybookTitle}
+                  autoFocus
+                  selectTextOnFocus
+                />
+              ) : (
+                <Pressable onPress={() => {
+                  setPlaybookTitleDraft(currentPlaybook.name);
+                  setEditingPlaybookTitle(true);
+                }}>
+                  <Text style={[s.folderTitleText, { color: '#A78BFA' }]} numberOfLines={1}>
+                    {currentPlaybook.name}
+                  </Text>
+                </Pressable>
+              )
+            ) : editingFolderTitle ? (
               <TextInput
                 style={s.folderTitleInput}
                 value={folderTitleDraft}
@@ -2304,10 +2466,12 @@ function BuildScreenInner() {
         </View>
       ) : (
         <View style={s.centered}>
-          <Icon name="build" size={48} color="#1E2A3A" />
-          <Text style={s.emptyTitle}>Nothing Found</Text>
+          <Icon name={currentPlaybook ? 'playbook' : 'build'} size={48} color="#1E2A3A" />
+          <Text style={s.emptyTitle}>{currentPlaybook ? 'No Workouts Yet' : 'Nothing Found'}</Text>
           <Text style={s.emptyDesc}>
-            Try adjusting your search or filters.
+            {currentPlaybook
+              ? 'Drag workouts onto this playbook from the Build grid to add them.'
+              : 'Try adjusting your search or filters.'}
           </Text>
         </View>
       )}
@@ -2638,30 +2802,6 @@ function BuildScreenInner() {
             </View>
             <Text style={{ color: '#4A5568', fontSize: 12, fontFamily: FB, textAlign: 'center', marginTop: 8 }}>
               Drag workouts here to build your plan schedule. Coming soon.
-            </Text>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Playbook Detail Modal */}
-      <Modal transparent visible={!!selectedPlaybook} animationType="slide" onRequestClose={() => setSelectedPlaybook(null)}>
-        <View style={s.modalBackdrop}>
-          <View style={[s.plusMenu, { maxHeight: '80%' }]}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <Text style={[s.plusMenuTitle, { marginBottom: 0, color: '#A78BFA' }]}>{selectedPlaybook?.name}</Text>
-              <Pressable onPress={() => setSelectedPlaybook(null)}>
-                <Icon name="close" size={22} color="#8A95A3" />
-              </Pressable>
-            </View>
-            {selectedPlaybook?.description ? (
-              <Text style={{ color: '#8A95A3', fontSize: 14, fontFamily: FB, marginBottom: 12 }}>{selectedPlaybook.description}</Text>
-            ) : null}
-            <View style={{ backgroundColor: '#1E2A3A', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, alignSelf: 'flex-start', marginBottom: 16 }}>
-              <Text style={{ color: '#A78BFA', fontSize: 20, fontWeight: '700', fontFamily: FH }}>{selectedPlaybook?.workoutIds?.length || 0}</Text>
-              <Text style={{ color: '#4A5568', fontSize: 11, fontFamily: FB }}>Workouts</Text>
-            </View>
-            <Text style={{ color: '#4A5568', fontSize: 12, fontFamily: FB, textAlign: 'center', marginTop: 8 }}>
-              Add workouts to this playbook to create a reusable template library. Coming soon.
             </Text>
           </View>
         </View>
