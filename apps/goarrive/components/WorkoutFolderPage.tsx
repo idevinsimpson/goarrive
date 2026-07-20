@@ -58,6 +58,7 @@ import WorkoutIntroAnnouncementModal, { type IntroAnnouncementSaveFields } from 
 import { buildDefaultIntroScript } from '../utils/workoutIntroAnnouncement';
 import VideoCropModal, { CropValues } from './VideoCropModal';
 import { FB, FH } from '../lib/theme';
+import { CONTENT_BOTTOM_CLEARANCE } from '../lib/tabBarStyle';
 import PosterThumb from './PosterThumb';
 import {
   filterMovements,
@@ -1805,7 +1806,7 @@ export default function WorkoutFolderPage({
         </View>
         <ScrollView
           style={st.scrollArea}
-          contentContainerStyle={{ paddingHorizontal: GRID_PADDING, paddingBottom: 80 }}
+          contentContainerStyle={{ paddingHorizontal: GRID_PADDING, paddingBottom: CONTENT_BOTTOM_CLEARANCE }}
           showsVerticalScrollIndicator={false}
         >
           <Text style={st.ioSectionTitle}>Intro Video</Text>
@@ -1943,7 +1944,7 @@ export default function WorkoutFolderPage({
             />
           </View>
         </View>
-        <ScrollView style={st.scrollArea} contentContainerStyle={{ paddingHorizontal: GRID_PADDING, paddingBottom: 80 }}>
+        <ScrollView style={st.scrollArea} contentContainerStyle={{ paddingHorizontal: GRID_PADDING, paddingBottom: CONTENT_BOTTOM_CLEARANCE }}>
           <Text style={st.moveToSectionTitle}>Folders</Text>
           <View style={st.moveToEmpty}>
             <Text style={st.moveToEmptyText}>No folders yet</Text>

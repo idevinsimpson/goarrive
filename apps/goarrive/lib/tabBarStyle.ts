@@ -25,3 +25,7 @@ export const TAB_BAR_STYLE: any = {
       }
     : {}),
 };
+
+// Bottom padding for scroll content so the last row clears the fixed web tab
+// bar (62px + up to ~34px iOS safe-area inset — env() isn't readable from JS).
+export const CONTENT_BOTTOM_CLEARANCE = Platform.OS === 'web' ? 160 : 100;
