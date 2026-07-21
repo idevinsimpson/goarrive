@@ -92,7 +92,7 @@ export function composePrescriptionLabel(name: string, weight?: string, reps?: s
 
 // Pure helpers live in WorkoutPlayer.helpers.ts (no Firebase dep — safe to import in tests).
 export { computePreloadVideoUrl, handleVideoLayerPlaybackStatus } from './WorkoutPlayer.helpers';
-import { pickNameTier } from './WorkoutPlayer.helpers';
+import { pickNameTier, computePlayerCanvas } from './WorkoutPlayer.helpers';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface WorkoutPlayerProps {
@@ -365,15 +365,14 @@ export default function WorkoutPlayer({
   // Mirror SAFE_BOTTOM for the status bar / notch / Dynamic Island at the top.
   // Without this, PWA + iOS native overlap the logo with the status bar.
   const SAFE_TOP = (Platform.select({ ios: 47, android: 24, web: 0, default: 0 }) ?? 0) as number;
-  const availW = winW;
-  const availH = Math.max(1, winH - SAFE_BOTTOM - SAFE_TOP);
-  const scale = dimsValid
-    ? Math.max(0.0001, Math.min(availW / BASE_W, availH / BASE_H))
-    : 1;
-  // frameW / frameH are the rendered canvas dimensions — a 9:16 rectangle
-  // whose aspect is locked because both axes scale by the same factor.
-  const frameW = BASE_W * scale;
-  const frameH = BASE_H * scale;
+  // Canvas math lives in WorkoutPlayer.helpers.ts (computePlayerCanvas) so it
+  // is unit-testable across real-world viewports. Portrait: width always wins
+  // and short viewports shrink the media slot (cover-crop) instead of the
+  // whole canvas. Landscape / degenerate heights: uniform 9:16 fit.
+  const canvas = dimsValid
+    ? computePlayerCanvas(winW, winH, SAFE_TOP, SAFE_BOTTOM)
+    : { scale: 1, frameW: BASE_W, frameH: BASE_H, baseMediaW: 304, baseMediaH: 380 };
+  const { scale, frameW, frameH } = canvas;
   const fs = (n: number) => n * scale;
 
   // Every in-canvas style is produced by the makeStyles factory below with
@@ -399,20 +398,10 @@ export default function WorkoutPlayer({
   const SLOT_GAP_TITLE = fs(BASE_GAP_TITLE);
   const SLOT_GAP_MEDIA = fs(BASE_GAP_MEDIA);
 
-  // 4:5 media — constant in BASE units (same proportion of the canvas on
-  // every screen size), then scaled at the call site. Computed once at
-  // module level would be cleaner, but keeping it here makes the math
-  // visible alongside the slot constants.
-  const baseVertSlots = BASE_LOGO_H + BASE_GAP_LOGO + BASE_TITLE_H
-    + BASE_GAP_TITLE + BASE_GAP_MEDIA + BASE_NEXTUP_H;
-  const baseMediaAvailH = BASE_H - baseVertSlots; // 380
-  const baseMediaAvailW = BASE_W;                  // 360
-  let baseMediaW = baseMediaAvailW;
-  let baseMediaH = baseMediaW * (5 / 4);
-  if (baseMediaH > baseMediaAvailH) {
-    baseMediaH = baseMediaAvailH;                  // 380
-    baseMediaW = baseMediaH * (4 / 5);             // 304
-  }
+  // 4:5 media — BASE-unit size from computePlayerCanvas. On short portrait
+  // viewports baseMediaH shrinks below 380 (video cover-crops) so the canvas
+  // keeps full screen width instead of pillarboxing.
+  const { baseMediaW, baseMediaH } = canvas;
   const _mediaW = fs(baseMediaW);
   const _mediaH = fs(baseMediaH);
   const mediaInnerSize = { width: _mediaW, height: _mediaH };
