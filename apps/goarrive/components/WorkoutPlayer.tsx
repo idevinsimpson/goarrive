@@ -1438,10 +1438,10 @@ export default function WorkoutPlayer({
               <View style={st.introBrandPanel}>
                 <Image
                   source={require('../assets/logo.png')}
-                  style={st.introLogo}
+                  style={[st.introLogo, { width: fs(160), height: fs(54), marginBottom: fs(20) }]}
                   resizeMode="contain"
                 />
-                <Text style={st.introBlockLabel}>
+                <Text style={[st.introBlockLabel, { fontSize: fs(20), letterSpacing: fs(1), marginBottom: fs(24) }]}>
                   {current.name || current.label || 'WARM-UP & STRETCH'}
                 </Text>
                 {renderGoldTimer(String(Math.max(0, Math.ceil(timeLeft))))}
@@ -1478,10 +1478,10 @@ export default function WorkoutPlayer({
             <View style={[st.introOutroGradient, current.videoUrl && { backgroundColor: 'rgba(14,17,23,0.6)' }]}>
               <Image
                 source={require('../assets/logo.png')}
-                style={{ width: 280, height: 90, marginBottom: 16 }}
+                style={{ width: fs(280), height: fs(90), marginBottom: fs(16) }}
                 resizeMode="contain"
               />
-              <Text style={st.outroTitle}>WORKOUT</Text>
+              <Text style={[st.outroTitle, { fontSize: fs(42), letterSpacing: fs(8), marginBottom: fs(24) }]}>WORKOUT</Text>
               {renderGoldTimer(String(Math.max(0, Math.ceil(timeLeft))))}
             </View>
           </View>
@@ -1668,7 +1668,7 @@ export default function WorkoutPlayer({
                     />
                   ) : (
                     <View style={[st.videoPlayer, st.waterBreakPlaceholder]}>
-                      <Icon name="video" size={64} color="#22D3EE" />
+                      <Icon name="video" size={fs(64)} color="#22D3EE" />
                     </View>
                   )}
                 </View>
@@ -1710,15 +1710,15 @@ export default function WorkoutPlayer({
                   <Image source={{ uri: activeThumbUrl }} style={st.videoPlayer} resizeMode="cover" />
                 ) : (
                   <View style={[st.videoPlayer, st.waterBreakPlaceholder]}>
-                    <Icon name="droplet" size={64} color="#38BDF8" />
+                    <Icon name="droplet" size={fs(64)} color="#38BDF8" />
                   </View>
                 )}
                 {/* Blue tint overlay */}
                 <View style={st.waterBreakVideoOverlay} />
                 {/* WATER BREAK text overlay */}
                 <View style={st.waterBreakTextOverlay}>
-                  <Text style={st.waterBreakOverlayText}>WATER</Text>
-                  <Text style={st.waterBreakOverlayText}>BREAK</Text>
+                  <Text style={[st.waterBreakOverlayText, { fontSize: fs(48), letterSpacing: fs(6) }]}>WATER</Text>
+                  <Text style={[st.waterBreakOverlayText, { fontSize: fs(48), letterSpacing: fs(6) }]}>BREAK</Text>
                 </View>
               </View>
             </View>
