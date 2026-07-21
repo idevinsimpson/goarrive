@@ -343,37 +343,50 @@ function stopKeepalive(): void {
 
 function blessElement(el: HTMLAudioElement, label: string): void {
   try {
+    // Bless by playing the 4-byte silent WAV, not the element's real clip.
+    // muted alone is not a guarantee of silence: iOS Safari can ignore the
+    // muted property (Low Power Mode, interrupted audio sessions), which made
+    // the unlock storm audible — up to 17 cue voices at once right at the
+    // Start tap, for the whole window until the bless promises settled
+    // (2-4s observed on a busy main thread). With a silent source there is
+    // nothing audible to leak regardless of muted handling. Blessed status
+    // survives the src swap back — the generic-player routing already relies
+    // on that.
+    const realSrc = el.src;
+    const needsSwap = !!realSrc && realSrc !== SILENT_WAV;
     el.muted = true;
+    if (needsSwap) el.src = SILENT_WAV;
     blessingInFlight.add(el);
+    const restore = () => {
+      // If the queue took this element over mid-bless (shouldn't happen —
+      // resolvePlayableElement routes around in-flight elements — but
+      // belt-and-braces), don't yank its playback or src.
+      if (!queueOwnedElements.has(el)) {
+        try { el.pause(); el.currentTime = 0; } catch {}
+        if (needsSwap) {
+          try { el.src = realSrc; el.preload = 'auto'; el.load(); } catch {}
+        }
+      }
+      el.muted = false;
+    };
     const p = el.play();
     if (p && typeof p.then === 'function') {
       p.then(
         () => {
           blessingInFlight.delete(el);
-          // Pause BEFORE unmuting. The old order (unmute → pause) let every
-          // blessed cue play audibly for the gap between the two statements —
-          // ~40ms of up to 15 overlapping voices right at the Start tap, and
-          // much longer on a busy main thread (player mount + video loads).
-          // If the queue took this element over mid-bless (shouldn't happen —
-          // resolvePlayableElement routes around in-flight elements — but
-          // belt-and-braces), don't yank its playback.
-          if (!queueOwnedElements.has(el)) {
-            try { el.pause(); el.currentTime = 0; } catch {}
-          }
-          el.muted = false;
+          restore();
           blessedElements.add(el);
           console.info('[VOICE-AUDIT] unlock bless OK', { label });
         },
         (err: unknown) => {
           blessingInFlight.delete(el);
-          el.muted = false;
+          restore();
           console.warn('[VOICE-AUDIT] unlock bless FAILED', { label, err: String(err) });
         },
       );
     } else {
       blessingInFlight.delete(el);
-      try { el.pause(); el.currentTime = 0; } catch {}
-      el.muted = false;
+      restore();
       blessedElements.add(el);
     }
   } catch (err) {
@@ -537,8 +550,10 @@ type Phase = 'ready' | 'work' | 'rest' | 'swap' | 'complete'
   | 'followAlongVideo';
 
 type QueueItem =
-  | { kind: 'cue'; key: CueKey; context: string; runId: number; retries?: number }
-  | { kind: 'voice'; url: string; context: string; runId: number; retries?: number };
+  | { kind: 'cue'; key: CueKey; context: string; runId: number; retries?: number;
+      onComplete?: () => void }
+  | { kind: 'voice'; url: string; context: string; runId: number; retries?: number;
+      onComplete?: () => void };
 
 interface UseWorkoutTTSOptions {
   phase: Phase;
@@ -805,6 +820,13 @@ export function useWorkoutTTS({
       if (currentAudioRef.current === audio) currentAudioRef.current = null;
       queueOwnedElements.delete(audio);
       isPlayingRef.current = false;
+      // Items with a completion callback (intro announcement) settle exactly
+      // once, on any outcome — never requeued or retried, because the caller
+      // gates the workout start on this callback and a retried replay would
+      // fire it mid-workout. The callback itself must be idempotent.
+      if (item.onComplete) {
+        try { item.onComplete(); } catch {}
+      }
       // If a flush happened (runId bumped) while we were playing, don't pump —
       // the flush already cleared the queue and we should stay quiet until the
       // next enqueue.
@@ -814,6 +836,7 @@ export function useWorkoutTTS({
       // iOS Safari blocks autoplay after ~20s of silence (NotAllowedError).
       // Instead of dropping the item, put it back and retry on next user tap.
       if (
+        !item.onComplete &&
         reason === 'play-rejected' &&
         (detail as any)?.name === 'NotAllowedError' &&
         typeof window !== 'undefined'
@@ -846,7 +869,7 @@ export function useWorkoutTTS({
         reason === 'play-threw' ||
         reason === 'play-rejected' ||
         reason === 'paused-externally';
-      if (retriable) {
+      if (retriable && !item.onComplete) {
         consecutiveFailures++;
         if (audioPool[poolKey] === audio) {
           try { audio.pause(); } catch {}
@@ -986,6 +1009,37 @@ export function useWorkoutTTS({
       pumpQueue();
     },
     [isMuted, ttsDisabled, logSpeechSuppressed, pumpQueue],
+  );
+
+  // Play a one-off voice clip (intro announcement) through the serialized
+  // queue so it can never overlap other cues. onComplete fires exactly once
+  // on any outcome — including muted/unavailable, so callers can gate flow.
+  const playExclusiveVoice = useCallback(
+    (url: string, onComplete: () => void) => {
+      if (
+        isMuted || ttsDisabled || !url ||
+        Platform.OS !== 'web' || typeof window === 'undefined'
+      ) {
+        console.warn('[VOICE-AUDIT] playExclusiveVoice skipped', { isMuted, ttsDisabled, hasUrl: !!url });
+        try { onComplete(); } catch {}
+        return;
+      }
+      console.info('[VOICE-AUDIT] playExclusiveVoice queued', { urlPreview: url.slice(0, 80) });
+      const poolKey = poolKeyForVoice(url);
+      if (!audioPool[poolKey]) {
+        try {
+          const audio = new (window as any).Audio(url);
+          audio.preload = 'auto';
+          audioPool[poolKey] = audio;
+        } catch {}
+      }
+      queueRef.current.push({
+        kind: 'voice', url, context: 'intro_announcement',
+        runId: runIdRef.current, onComplete,
+      });
+      pumpQueue();
+    },
+    [isMuted, ttsDisabled, pumpQueue],
   );
 
   // Flush everything: bump runId so in-flight play()s drop their post-ended
@@ -1577,5 +1631,5 @@ export function useWorkoutTTS({
     };
   }, []);
 
-  return { isTTSAvailable, stopAllAudio };
+  return { isTTSAvailable, stopAllAudio, playExclusiveVoice };
 }

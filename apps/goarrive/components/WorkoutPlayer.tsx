@@ -197,6 +197,9 @@ export default function WorkoutPlayer({
   const musicUrlRef = useRef<string | null>(null);
   const musicFetchRef = useRef<Promise<string | null> | null>(null);
   const musicPausedRef = useRef(false);
+  // While the intro announcement speaks, music is held (primed but silent)
+  // so the welcome clip is never buried under the track.
+  const musicHoldRef = useRef(false);
 
   // Prefetch the track URL during the ready screen so Play starts instantly.
   useEffect(() => {
@@ -241,9 +244,15 @@ export default function WorkoutPlayer({
     const attach = (url: string | null) => {
       if (!url || musicElRef.current !== el) return;
       el.src = url;
-      if (!musicPausedRef.current) el.play().catch(() => {});
+      if (!musicPausedRef.current && !musicHoldRef.current) {
+        el.play().catch(() => {});
+      }
     };
     if (musicUrlRef.current) {
+      if (musicHoldRef.current) {
+        // Prime inside the gesture so releaseMusicHold's play() is allowed.
+        el.play().catch(() => {});
+      }
       attach(musicUrlRef.current);
     } else {
       // Prime inside the gesture so the later src-attach play() is allowed.
@@ -251,6 +260,13 @@ export default function WorkoutPlayer({
       (musicFetchRef.current || Promise.resolve(null)).then(attach);
     }
   }, [musicEnabled, isMuted, musicMuted, musicVolume]);
+
+  const releaseMusicHold = useCallback(() => {
+    if (!musicHoldRef.current) return;
+    musicHoldRef.current = false;
+    const el = musicElRef.current;
+    if (el && el.src && !musicPausedRef.current) el.play().catch(() => {});
+  }, []);
 
   // Pause/resume with the workout; respect mute; stop on finish/close/unmount.
   useEffect(() => {
@@ -272,7 +288,7 @@ export default function WorkoutPlayer({
   useEffect(() => () => stopMusic(), [stopMusic]);
 
   // ── Voice coaching ────────────────────────────────────
-  const { stopAllAudio } = useWorkoutTTS({
+  const { stopAllAudio, playExclusiveVoice } = useWorkoutTTS({
     phase,
     current,
     next,
@@ -571,14 +587,14 @@ export default function WorkoutPlayer({
   // ── Intro announcement (spoken welcome before the first movement) ─────
   // Plays a coach-editable AI-generated TTS welcome when Play is tapped,
   // BEFORE handleStart() kicks the timer. Skippable via tap. Web-only, like
-  // the rest of the voice pipeline. The audio element is owned by a ref and
-  // is paused + reset + released on finish/skip/unmount so an abandoned
-  // element can never resurrect mid-workout (see commit e49f0a0).
+  // the rest of the voice pipeline. Routed through the serialized voice queue
+  // (playExclusiveVoice) so it can never overlap cues, and music is held
+  // until it finishes.
   const [announcementUrl, setAnnouncementUrl] = useState<string | null>(null);
   const [announcementActive, setAnnouncementActive] = useState(false);
-  const announcementAudioRef = useRef<HTMLAudioElement | null>(null);
   const announcementFetchedTextRef = useRef<string | null>(null);
   const announcementDoneRef = useRef(false);
+  const announcementStartedRef = useRef(false);
 
   const announcementEnabled = workout?.introAnnouncementEnabled !== false;
   const announcementText = useMemo(() => {
@@ -630,28 +646,14 @@ export default function WorkoutPlayer({
   const finishAnnouncement = useCallback(() => {
     if (announcementDoneRef.current) return;
     announcementDoneRef.current = true;
-    const el = announcementAudioRef.current;
-    if (el) {
-      try {
-        el.onended = null;
-        el.onerror = null;
-        el.pause();
-        el.currentTime = 0;
-      } catch { /* best-effort */ }
-      announcementAudioRef.current = null;
-    }
+    // Flush without resetting spoken-state so a skip tap stops the clip
+    // immediately; on natural end the queue is already idle and this is a
+    // no-op. Then let the music in and start the workout.
+    stopAllAudio(false);
+    releaseMusicHold();
     setAnnouncementActive(false);
     handleStart();
-  }, [handleStart]);
-
-  // Unmount cleanup — never leave a live element behind.
-  useEffect(() => () => {
-    const el = announcementAudioRef.current;
-    if (el) {
-      try { el.pause(); el.currentTime = 0; } catch { /* best-effort */ }
-      announcementAudioRef.current = null;
-    }
-  }, []);
+  }, [handleStart, stopAllAudio, releaseMusicHold]);
 
   // iOS Safari autoplay policy: HTMLAudioElement.play() and AudioContext
   // resume are only allowed from inside a user gesture. Every tap that can
@@ -661,29 +663,27 @@ export default function WorkoutPlayer({
   const handleStartWithUnlock = useCallback(() => {
     unlockAudioPlayback();
     unlockAudioContext();
-    startMusic();
-    // Intro announcement gate: play the welcome clip before the timer starts.
-    // .play() is called synchronously inside this tap gesture so iOS allows it.
-    if (
+    // Intro announcement gate: speak the welcome clip through the serialized
+    // voice queue before the timer starts. Music is primed in-gesture but
+    // held silent until the announcement settles (finishAnnouncement).
+    const wantsAnnouncement =
       Platform.OS === 'web'
       && announcementEnabled
-      && announcementUrl
+      && !!announcementUrl
       && !isMuted
-      && !announcementDoneRef.current
-    ) {
-      try {
-        const el = new window.Audio(announcementUrl);
-        announcementAudioRef.current = el;
-        el.onended = () => finishAnnouncement();
-        el.onerror = () => finishAnnouncement();
-        const p = el.play();
-        if (p && typeof p.catch === 'function') p.catch(() => finishAnnouncement());
-        setAnnouncementActive(true);
-        return;
-      } catch { /* fall through to normal start */ }
+      && !announcementDoneRef.current;
+    if (wantsAnnouncement && !announcementStartedRef.current) {
+      announcementStartedRef.current = true;
+      musicHoldRef.current = true;
+      startMusic();
+      playExclusiveVoice(announcementUrl as string, finishAnnouncement);
+      setAnnouncementActive(true);
+      return;
     }
+    if (wantsAnnouncement) return; // double-tap while announcement pending
+    startMusic();
     handleStart();
-  }, [handleStart, startMusic, announcementEnabled, announcementUrl, isMuted, finishAnnouncement]);
+  }, [handleStart, startMusic, announcementEnabled, announcementUrl, isMuted, finishAnnouncement, playExclusiveVoice]);
 
   const handlePauseResumeFromOverlay = useCallback(() => {
     unlockAudioPlayback();
