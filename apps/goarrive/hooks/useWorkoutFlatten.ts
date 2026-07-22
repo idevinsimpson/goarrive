@@ -154,8 +154,11 @@ const GENERIC_BLOCK_LABELS = new Set(['', 'circuit', 'strength', 'block', 'exerc
 // Single-movement work blocks default to "Tabata" — matches the ready
 // screen's long-standing heuristic and how coaches author tabata-style
 // blocks (real data uses type "Circuit" with one movement per block).
+// 2 movements = Superset, 3+ = Circuit.
 function sectionDescriptor(block: any): string {
-  if ((block.movements || []).length >= 2) return 'Superset';
+  const movementCount = (block.movements || []).length;
+  if (movementCount >= 3) return 'Circuit';
+  if (movementCount === 2) return 'Superset';
   const t = String(block.type || '').trim();
   const meaningful = MEANINGFUL_SECTION_TYPES.find((m) => m.toLowerCase() === t.toLowerCase());
   if (meaningful) return meaningful;
