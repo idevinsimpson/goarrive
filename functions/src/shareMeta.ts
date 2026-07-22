@@ -12,7 +12,8 @@
 
 import { onRequest } from 'firebase-functions/v2/https';
 import * as admin from 'firebase-admin';
-import { collectOgGroups, generateWorkoutOgImage } from './ogImage';
+import { collectOgGroups, generateWorkoutOgImage, OG_IMAGE_VERSION } from './ogImage';
+import { OG_VIDEO_VERSION } from './ogVideo';
 
 const BOT_UA_RE = /facebookexternalhit|twitterbot|slackbot|slack-imgproxy|linkedinbot|discordbot|whatsapp|telegrambot|applebot|pinterest|redditbot|skypeuripreview|embedly|iframely|vkshare|snapchat|googlebot|bingbot|yandex|baiduspider|duckduckbot|quora link preview|facebookcatalog|imessagebot|bot\b/i;
 
@@ -34,10 +35,10 @@ function metaHtml(opts: { title: string; description: string; imageUrl?: string 
   const title = escapeHtml(opts.title);
   const description = escapeHtml(opts.description);
   const image = opts.imageUrl
-    ? `\n    <meta property="og:image" content="${escapeHtml(opts.imageUrl)}" />\n    <meta property="og:image:width" content="1200" />\n    <meta property="og:image:height" content="2000" />\n    <meta name="twitter:image" content="${escapeHtml(opts.imageUrl)}" />`
+    ? `\n    <meta property="og:image" content="${escapeHtml(opts.imageUrl)}" />\n    <meta property="og:image:width" content="1290" />\n    <meta property="og:image:height" content="2796" />\n    <meta name="twitter:image" content="${escapeHtml(opts.imageUrl)}" />`
     : '';
   const video = opts.videoUrl
-    ? `\n    <meta property="og:video" content="${escapeHtml(opts.videoUrl)}" />\n    <meta property="og:video:secure_url" content="${escapeHtml(opts.videoUrl)}" />\n    <meta property="og:video:type" content="video/mp4" />\n    <meta property="og:video:width" content="1080" />\n    <meta property="og:video:height" content="1350" />`
+    ? `\n    <meta property="og:video" content="${escapeHtml(opts.videoUrl)}" />\n    <meta property="og:video:secure_url" content="${escapeHtml(opts.videoUrl)}" />\n    <meta property="og:video:type" content="video/mp4" />\n    <meta property="og:video:width" content="1290" />\n    <meta property="og:video:height" content="2796" />`
     : '';
   return `<!DOCTYPE html>
 <html lang="en">
@@ -144,8 +145,9 @@ export const shareMeta = onRequest(
       const description = `Workout by ${coachName}${movementCount > 0 ? ` · ${movementCount} movement${movementCount === 1 ? '' : 's'}` : ''}`;
 
       let ogImageUrl: string | null = tokenData.ogImageUrl || null;
-      if (!ogImageUrl) {
-        // Lazy backfill for tokens minted before OG images existed.
+      if (!ogImageUrl || !ogImageUrl.includes(`-${OG_IMAGE_VERSION}`)) {
+        // Lazy backfill for tokens minted before OG images existed, or
+        // regenerate when the stored image predates the current layout.
         try {
           ogImageUrl = await generateWorkoutOgImage(shareId, workout);
         } catch (err) {
@@ -153,11 +155,16 @@ export const shareMeta = onRequest(
         }
       }
 
+      // Suppress stale-layout videos — better no video than the old layout.
+      const ogVideoUrl = typeof tokenData.ogVideoUrl === 'string' && tokenData.ogVideoUrl.includes(`-${OG_VIDEO_VERSION}`)
+        ? tokenData.ogVideoUrl
+        : null;
+
       res.status(200).type('html').send(metaHtml({
         title: workout.name || 'Workout',
         description,
         imageUrl: ogImageUrl,
-        videoUrl: typeof tokenData.ogVideoUrl === 'string' ? tokenData.ogVideoUrl : null,
+        videoUrl: ogVideoUrl,
         url: pageUrl,
       }));
     } catch (err) {

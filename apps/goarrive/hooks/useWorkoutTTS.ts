@@ -75,6 +75,7 @@ import * as Speech from 'expo-speech';
 import { Platform } from 'react-native';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import type { StepType } from './useWorkoutFlatten';
+import { unlockAudioContext } from '../lib/audioCues';
 import { normalizeTtsText, hashTtsText } from '../utils/normalizeTtsText';
 import {
   TTS_PROVIDER,
@@ -182,6 +183,7 @@ export function resetAudioPool(): void {
   }
   blessedGenericPlayers.length = 0;
   audioUnlocked = false;
+  stopKeepalive();
 }
 
 function poolKeyForCue(key: CueKey): string {
@@ -261,6 +263,84 @@ let audioUnlocked = false;
 const SILENT_WAV =
   'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==';
 
+// ── Silent keepalive loop ────────────────────────────────────────────
+// iOS Safari revokes autoplay permission after ~20s with no audio playing
+// (the NotAllowedError requeue in pumpQueue is the symptom). Long work/rest
+// phases regularly exceed 20s, so mid-workout cues rejected with nothing to
+// recover on until the member happened to tap. A continuously looping silent
+// clip keeps the page's audio session active so the revocation never
+// triggers, and keeps the session warm across brief backgrounding.
+let keepaliveEl: HTMLAudioElement | null = null;
+let keepaliveUrl: string | null = null;
+
+// The 4-byte SILENT_WAV is too short to loop (sub-ms loop churn); build a
+// 1-second 8kHz mono silent WAV at runtime instead of inlining ~11KB base64.
+function makeSilentWavUrl(seconds = 1): string {
+  const sampleRate = 8000;
+  const numSamples = Math.floor(sampleRate * seconds);
+  const buf = new ArrayBuffer(44 + numSamples);
+  const view = new DataView(buf);
+  const writeStr = (offset: number, s: string) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i));
+  };
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + numSamples, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate, true);
+  view.setUint16(32, 1, true);
+  view.setUint16(34, 8, true);
+  writeStr(36, 'data');
+  view.setUint32(40, numSamples, true);
+  new Uint8Array(buf, 44).fill(0x80); // 8-bit PCM silence midpoint
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
+
+// Must be called from inside a user gesture (the unlock tap).
+function startKeepalive(): void {
+  try {
+    if (!keepaliveEl) {
+      keepaliveUrl = makeSilentWavUrl();
+      keepaliveEl = new (window as any).Audio(keepaliveUrl);
+      keepaliveEl!.loop = true;
+      (keepaliveEl as any).playsInline = true;
+    }
+    keepaliveEl!.play().then(
+      () => console.info('[VOICE-AUDIT] keepalive loop playing'),
+      (err: unknown) =>
+        console.warn('[VOICE-AUDIT] keepalive play FAILED', { err: String(err) }),
+    );
+  } catch (err) {
+    console.warn('[VOICE-AUDIT] keepalive setup THREW', { err: String(err) });
+  }
+}
+
+// iOS pauses the loop on backgrounding / audio interruptions; call this from
+// gestures and foreground-return to revive it. No-op when already playing.
+export function resumeKeepalive(): void {
+  if (keepaliveEl && keepaliveEl.paused) {
+    keepaliveEl.play().catch(() => {});
+  }
+}
+
+function stopKeepalive(): void {
+  if (keepaliveEl) {
+    try {
+      keepaliveEl.pause();
+      keepaliveEl.removeAttribute('src');
+    } catch {}
+    keepaliveEl = null;
+  }
+  if (keepaliveUrl) {
+    try { URL.revokeObjectURL(keepaliveUrl); } catch {}
+    keepaliveUrl = null;
+  }
+}
+
 function blessElement(el: HTMLAudioElement, label: string): void {
   try {
     el.muted = true;
@@ -310,7 +390,12 @@ function blessElement(el: HTMLAudioElement, label: string): void {
  */
 export function unlockAudioPlayback(): void {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-  if (audioUnlocked) return;
+  if (audioUnlocked) {
+    // Repeat gesture (pause/resume tap): revive the keepalive loop if iOS
+    // paused it after a backgrounding or audio-session interruption.
+    resumeKeepalive();
+    return;
+  }
   audioUnlocked = true;
   // Make sure the priority cues exist in the pool before blessing.
   PRIORITY_CUES.forEach(preloadCue);
@@ -325,11 +410,37 @@ export function unlockAudioPlayback(): void {
       console.warn('[VOICE-AUDIT] unlock generic player create FAILED', { err: String(err) });
     }
   }
+  startKeepalive();
   console.info('[VOICE-AUDIT] unlockAudioPlayback ran', {
     pooledBlessed: Object.keys(audioPool).length,
     genericPlayers: blessedGenericPlayers.length,
   });
 }
+
+// Evict every pooled element (except any the queue currently owns). Used as
+// a recovery hammer when iOS Safari wedges the page's media elements — after
+// enough HTMLAudioElements are alive, every play() resolves without actually
+// playing. Fresh elements created after the purge route through the blessed
+// generic players, which stay untouched.
+function purgeAudioPool(): void {
+  let purged = 0;
+  for (const key of Object.keys(audioPool)) {
+    const el = audioPool[key];
+    if (queueOwnedElements.has(el)) continue;
+    try {
+      el.pause();
+      el.removeAttribute('src');
+    } catch {}
+    delete audioPool[key];
+    purged++;
+  }
+  console.warn('[VOICE-AUDIT] purgeAudioPool evicted elements', { purged });
+}
+
+// Consecutive early-ended plays (stall / error / external pause / rejection).
+// Reset on any clip that actually starts playing. At 3 the pool is purged —
+// see purgeAudioPool.
+let consecutiveFailures = 0;
 
 // Route playback through a pre-blessed generic player when the resolved pool
 // element was created after the unlock gesture (and would therefore be
@@ -426,8 +537,8 @@ type Phase = 'ready' | 'work' | 'rest' | 'swap' | 'complete'
   | 'followAlongVideo';
 
 type QueueItem =
-  | { kind: 'cue'; key: CueKey; context: string; runId: number }
-  | { kind: 'voice'; url: string; context: string; runId: number };
+  | { kind: 'cue'; key: CueKey; context: string; runId: number; retries?: number }
+  | { kind: 'voice'; url: string; context: string; runId: number; retries?: number };
 
 interface UseWorkoutTTSOptions {
   phase: Phase;
@@ -712,11 +823,43 @@ export function useWorkoutTTS({
         const retry = () => {
           document.removeEventListener('touchstart', retry);
           document.removeEventListener('click', retry);
+          // We're inside a real gesture — also re-arm the WebAudio context
+          // and the silent keepalive loop, both of which iOS may have
+          // suspended alongside the HTMLAudio permission.
+          unlockAudioContext();
+          resumeKeepalive();
           pumpQueue();
         };
         document.addEventListener('touchstart', retry, { once: true, passive: true });
         document.addEventListener('click', retry, { once: true });
         return;
+      }
+
+      // Early failures (stall, decode error, external pause from an audio
+      // interruption, non-NotAllowed rejection) used to silently drop the
+      // clip. Retry each item once: the wedged element gets evicted so the
+      // retry builds a fresh one, which resolvePlayableElement routes through
+      // a blessed generic player.
+      const retriable =
+        reason === 'play-stalled' ||
+        reason === 'error' ||
+        reason === 'play-threw' ||
+        reason === 'play-rejected' ||
+        reason === 'paused-externally';
+      if (retriable) {
+        consecutiveFailures++;
+        if (audioPool[poolKey] === audio) {
+          try { audio.pause(); } catch {}
+          delete audioPool[poolKey];
+        }
+        if ((item.retries ?? 0) < 1) {
+          console.info('[VOICE-AUDIT] retrying failed clip once', { context: item.context, reason });
+          queueRef.current.unshift({ ...item, retries: (item.retries ?? 0) + 1 });
+        }
+        if (consecutiveFailures >= 3) {
+          purgeAudioPool();
+          consecutiveFailures = 0;
+        }
       }
 
       const nextItemKind = queueRef.current[0]?.kind;
@@ -737,10 +880,26 @@ export function useWorkoutTTS({
       'playing',
       () => {
         started = true;
+        consecutiveFailures = 0;
         console.info('[VOICE-AUDIT] PLAY STARTED', {
           context: item.context,
           duration: audio.duration,
         });
+      },
+      listenerOpts,
+    );
+    // iOS pauses the element when the app backgrounds, the screen locks, or
+    // another audio session interrupts (phone call, Siri, alarm, another
+    // app's media). Without this listener 'ended' never fires, isPlayingRef
+    // stays true forever, and the queue deadlocks — no audio for the rest of
+    // the workout even though timers keep enqueueing. Natural completion also
+    // fires 'pause' just before 'ended'; audio.ended distinguishes the two.
+    // Our own cleanup pauses happen after settled=true / listener abort.
+    audio.addEventListener(
+      'pause',
+      () => {
+        if (audio.ended || settled) return;
+        onDone('paused-externally');
       },
       listenerOpts,
     );
@@ -872,6 +1031,33 @@ export function useWorkoutTTS({
         .catch(() => setIsTTSAvailable(false));
     }
   }, []);
+
+  // Recover audio when the app returns to the foreground. iOS suspends the
+  // WebAudio context and pauses media elements on backgrounding; the 'pause'
+  // listener in pumpQueue keeps the queue from deadlocking, but the context
+  // resume and the keepalive loop still need a nudge — and if the queue went
+  // idle with items pending (play rejected while hidden), kick it.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      console.info('[VOICE-AUDIT] visibilitychange → visible — resuming audio');
+      unlockAudioContext();
+      resumeKeepalive();
+      const cur = currentAudioRef.current;
+      if (isPlayingRef.current && cur && cur.paused && !cur.ended) {
+        // Element paused while hidden but its 'pause' event not yet
+        // delivered — try resuming the clip in place. If play() rejects, the
+        // pause listener settles the item and the queue moves on.
+        cur.play().catch(() => {});
+      } else if (!isPlayingRef.current) {
+        pumpQueue();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () =>
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [pumpQueue]);
 
   // ── Special block announcements ────────────────────────────────────
   useEffect(() => {

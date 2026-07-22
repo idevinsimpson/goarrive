@@ -9465,8 +9465,8 @@ export const getEmbeddedSessionJoinConfig = onCall(
 // ─── Workout Share Links ─────────────────────────────────────────────────────
 
 import * as crypto from 'crypto';
-import { generateWorkoutOgImage } from './ogImage';
-import { generateWorkoutOgVideo } from './ogVideo';
+import { generateWorkoutOgImage, OG_IMAGE_VERSION } from './ogImage';
+import { generateWorkoutOgVideo, OG_VIDEO_VERSION } from './ogVideo';
 export { shareMeta } from './shareMeta';
 
 // ─── Coach Comms — weekly digest, feedback ack, shipped/planned loop ─────────
@@ -9526,13 +9526,18 @@ export const createShareToken = onCall({ memory: '512MiB' }, async (request) => 
   if (!existingTokens.empty) {
     const existing = existingTokens.docs[0];
     const data = existing.data();
-    if (!data.ogImageUrl) {
-      // Backfill OG image for tokens minted before OG images existed.
+    if (!data.ogImageUrl || !data.ogImageUrl.includes(`-${OG_IMAGE_VERSION}`)) {
+      // Backfill for tokens minted before OG images existed, or regenerate
+      // when the stored image predates the current layout.
       try {
         await generateWorkoutOgImage(existing.id, workoutData);
       } catch (err) {
         console.warn('[createShareToken] OG image backfill failed:', err);
       }
+    }
+    if (typeof data.ogVideoUrl !== 'string' || !data.ogVideoUrl.includes(`-${OG_VIDEO_VERSION}`)) {
+      generateWorkoutOgVideo(existing.id, workoutData).catch((err) =>
+        console.warn('[createShareToken] OG video regeneration failed:', err));
     }
     return {
       shareId: existing.id,

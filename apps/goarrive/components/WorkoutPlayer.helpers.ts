@@ -102,3 +102,31 @@ export function handleVideoLayerPlaybackStatus(
     console.warn('[WorkoutPlayer] video stall detected', { url, stallMs: now - prev.ts });
   }
 }
+
+// ── Stall recovery escalation ───────────────────────────────────────────
+// Decides what to do about a detected stall, per URL. Escalates:
+//   nudge — re-issue play() on the existing element (covers browser-applied
+//           pauses where shouldPlay never changed, so expo-av won't retry)
+//   remount — bump the layer epoch so the <Video> gets a fresh element and
+//             decoder (covers iOS evicting the media pipeline of one of
+//             several mounted videos)
+//   fail — give up; caller marks the URL failed so the thumbnail fallback
+//          renders instead of a frozen frame forever
+// Attempts are throttled so the ladder climbs at most once per throttle
+// window — each attempt needs time to take effect before escalating.
+export const STALL_RECOVERY_THROTTLE_MS = 5000;
+export const STALL_MAX_REMOUNTS = 2;
+
+export interface StallRecoveryState { attempts: number; lastAttemptTs: number }
+
+export function nextStallRecoveryAction(
+  state: StallRecoveryState | undefined,
+  now: number,
+): { action: 'wait' | 'nudge' | 'remount' | 'fail'; state: StallRecoveryState } {
+  const prev = state ?? { attempts: 0, lastAttemptTs: -Infinity };
+  if (now - prev.lastAttemptTs < STALL_RECOVERY_THROTTLE_MS) return { action: 'wait', state: prev };
+  const next = { attempts: prev.attempts + 1, lastAttemptTs: now };
+  if (next.attempts === 1) return { action: 'nudge', state: next };
+  if (next.attempts <= 1 + STALL_MAX_REMOUNTS) return { action: 'remount', state: next };
+  return { action: 'fail', state: next };
+}
