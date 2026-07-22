@@ -7,7 +7,12 @@
  *  - The stall watchdog firing a false positive when position IS advancing
  */
 
-import { handleVideoLayerPlaybackStatus } from '../WorkoutPlayer.helpers';
+import {
+  handleVideoLayerPlaybackStatus,
+  nextStallRecoveryAction,
+  STALL_RECOVERY_THROTTLE_MS,
+  type StallRecoveryState,
+} from '../WorkoutPlayer.helpers';
 
 const LAYER_URL = 'https://storage.example.com/squat.mp4';
 
@@ -127,5 +132,45 @@ describe('handleVideoLayerPlaybackStatus — stall detection', () => {
     );
 
     expect(warnSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('nextStallRecoveryAction — escalation ladder', () => {
+  test('escalates nudge → remount → remount → fail across throttle windows', () => {
+    let state: StallRecoveryState | undefined;
+    let now = 10_000;
+    const step = () => {
+      const result = nextStallRecoveryAction(state, now);
+      state = result.state;
+      now += STALL_RECOVERY_THROTTLE_MS;
+      return result.action;
+    };
+
+    expect(step()).toBe('nudge');
+    expect(step()).toBe('remount');
+    expect(step()).toBe('remount');
+    expect(step()).toBe('fail');
+  });
+
+  test('first stall on a fresh URL acts immediately (no throttle)', () => {
+    expect(nextStallRecoveryAction(undefined, 0).action).toBe('nudge');
+  });
+
+  test('waits (no escalation) inside the throttle window', () => {
+    const first = nextStallRecoveryAction(undefined, 10_000);
+    const tooSoon = nextStallRecoveryAction(first.state, 10_000 + STALL_RECOVERY_THROTTLE_MS - 1);
+    expect(tooSoon.action).toBe('wait');
+    expect(tooSoon.state.attempts).toBe(1);
+  });
+
+  test('recovery restarts from nudge after the caller resets state on progress', () => {
+    let state: StallRecoveryState | undefined;
+    let result = nextStallRecoveryAction(state, 10_000);
+    result = nextStallRecoveryAction(result.state, 10_000 + STALL_RECOVERY_THROTTLE_MS);
+    expect(result.action).toBe('remount');
+
+    // Playback advanced → caller deletes the per-URL state. Next stall
+    // starts the ladder over instead of escalating straight to fail.
+    expect(nextStallRecoveryAction(undefined, 60_000).action).toBe('nudge');
   });
 });
