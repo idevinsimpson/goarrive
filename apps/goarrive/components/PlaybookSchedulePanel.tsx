@@ -1,26 +1,33 @@
 /**
- * PlaybookSchedulePanel — dead-simple scheduling inside the playbook drill-in.
+ * PlaybookSchedulePanel — scheduling inside the playbook drill-in.
  *
- * Coach picks day(s), a start time, session kind, and a repeat setting; the
- * bookPlaybookSession Cloud Function does the heavy lifting (transactional
- * member-level overlap guard + per-playbook weekly cap) and reports back
- * per-occurrence results. Shows the playbook TITLE only — never workout
- * names or sequence details.
+ * Phase B.2: per-day modules. Coach taps day chips; each tapped day reveals
+ * its own module with a flexible time field ("10a", "7:30pm", "0730" — always
+ * displayed as h:mm AM/PM, never military), a per-day Coach-Guided vs
+ * Self-Guided selector, and the workout that falls on that day (derived from
+ * playbook order). Workout tiles drag between day modules to reorder the
+ * playbook. Repeat control removed — schedules repeat weekly by definition;
+ * only the horizon remains. Public payloads still show the playbook TITLE
+ * only — never workout names.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View,
 } from 'react-native';
-import { collection, doc, getDoc, getDocs, limit, onSnapshot, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
+import {
+  collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query,
+  serverTimestamp, updateDoc, where, Timestamp,
+} from 'firebase/firestore';
 import { router } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, { useAnimatedStyle, useSharedValue, runOnJS } from 'react-native-reanimated';
 import { db, functions } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import {
   DAY_SHORT_LABELS,
   PLAYBOOK_SESSION_KIND_LABELS,
-  PlaybookRepeatFrequency,
   PlaybookSessionKind,
 } from '../lib/schedulingTypes';
 
@@ -28,7 +35,44 @@ const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
 const DURATIONS = [30, 45, 60];
-const TIME_PRESETS = ['06:00', '07:00', '09:00', '12:00', '17:00', '18:30'];
+
+// DECISION PENDING (rotate vs stop): when there are more scheduled days than
+// workouts, ROTATE_AT_END=true wraps back to the first workout; false leaves
+// extra days without a mapped workout. Mirrors ROTATE_AT_PLAYBOOK_END in
+// functions/src/playbookScheduling.ts — flip both together.
+export const ROTATE_AT_END = true;
+
+// ─── Flexible time parsing — coach types "10a", "10:30am", "7p", "0730" ──────
+export function parseFlexTime(raw: string): string | null {
+  const t = raw.trim().toLowerCase().replace(/[\s.]/g, '');
+  if (!t) return null;
+  const m = t.match(/^(\d{1,2})(?::?([0-5]\d))?(a|am|p|pm)?$/);
+  if (!m) return null;
+  let h = parseInt(m[1], 10);
+  const min = m[2] ? parseInt(m[2], 10) : 0;
+  const suffix = m[3];
+  if (suffix) {
+    if (h < 1 || h > 12) return null;
+    if ((suffix === 'p' || suffix === 'pm') && h !== 12) h += 12;
+    if ((suffix === 'a' || suffix === 'am') && h === 12) h = 0;
+  } else {
+    if (h > 23) return null;
+    const explicit24 = m[1].length === 2 && (m[1][0] === '0' || h >= 13);
+    if (!explicit24) {
+      // Bare hour heuristic: 1–6 → PM, 7–12 → AM (12 = noon)
+      if (h >= 1 && h <= 6) h += 12;
+    }
+  }
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
+
+export function formatTime12(hhmm: string): string {
+  const m = hhmm.match(/^(\d{2}):(\d{2})$/);
+  if (!m) return hhmm;
+  const h = parseInt(m[1], 10);
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${m[2]} ${h < 12 ? 'AM' : 'PM'}`;
+}
 
 interface BookingWindowRow {
   days: number[];
@@ -51,11 +95,19 @@ interface BookResult {
   reason?: string;
 }
 
+interface DayConfig {
+  raw: string;           // what the coach typed / formatted display
+  time: string | null;   // canonical HH:mm (null = unparseable)
+  kind: PlaybookSessionKind;
+}
+
 interface PlaybookDocLite {
   name?: string;
+  description?: string;
   assignedMemberId?: string | null;
   assignedMemberName?: string | null;
   memberIds?: string[];
+  workoutIds?: string[];
   sessionKind?: PlaybookSessionKind;
   recordingEnabled?: boolean;
   sessionDurationMinutes?: number;
@@ -63,9 +115,19 @@ interface PlaybookDocLite {
   timezone?: string;
   scheduleDaysOfWeek?: number[];
   scheduleStartTime?: string;
-  repeatFrequency?: PlaybookRepeatFrequency;
+  scheduleDaySettings?: Array<{ dayOfWeek: number; startTime: string; sessionKind?: PlaybookSessionKind }>;
   repeatHorizonWeeks?: number;
 }
+
+interface UpcomingSession {
+  id: string;
+  scheduledDate?: string;
+  scheduledStartTime?: string;
+  memberName?: string;
+  startUtcMillis: number;
+}
+
+const DEFAULT_CONFIG: DayConfig = { raw: '7:00 AM', time: '07:00', kind: 'coach_review' };
 
 export default function PlaybookSchedulePanel({
   playbookId,
@@ -81,16 +143,24 @@ export default function PlaybookSchedulePanel({
   const [playbook, setPlaybook] = useState<PlaybookDocLite | null>(null);
 
   const [days, setDays] = useState<number[]>([]);
-  const [startTime, setStartTime] = useState('07:00');
+  const [dayConfigs, setDayConfigs] = useState<Record<number, DayConfig>>({});
   const [duration, setDuration] = useState(45);
-  const [sessionKind, setSessionKind] = useState<PlaybookSessionKind>('coach_review');
   const [recordingEnabled, setRecordingEnabled] = useState(true);
-  const [repeatFrequency, setRepeatFrequency] = useState<PlaybookRepeatFrequency>('weekly');
   const [horizonWeeks, setHorizonWeeks] = useState(4);
   const [weeklyCap, setWeeklyCap] = useState<number | null>(null);
   const [booking, setBooking] = useState(false);
   const [results, setResults] = useState<BookResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const prefilledRef = useRef(false);
+
+  // Inline title + description editing (A5 / C10)
+  const [titleDraft, setTitleDraft] = useState('');
+  const [descDraft, setDescDraft] = useState('');
+  const titleDirty = useRef(false);
+  const descDirty = useRef(false);
+
+  // Workouts on this playbook — powers the per-day mosaic tiles
+  const [workoutNames, setWorkoutNames] = useState<Record<string, string>>({});
 
   // Booking link (Phase 3b): availability windows + public token URL
   const [windows, setWindows] = useState<BookingWindowRow[]>([]);
@@ -105,27 +175,74 @@ export default function PlaybookSchedulePanel({
   const [memberPickerOpen, setMemberPickerOpen] = useState(false);
   const [memberBusy, setMemberBusy] = useState(false);
 
+  // Upcoming sessions (B9): cancel via existing cancelInstance function
+  const [upcoming, setUpcoming] = useState<UpcomingSession[]>([]);
+  const [cancelBusyId, setCancelBusyId] = useState<string | null>(null);
+
   // Live playbook doc — pre-fills the form from previously saved settings.
   useEffect(() => {
     if (!visible || !playbookId || !effectiveUid) return;
+    prefilledRef.current = false;
     const unsub = onSnapshot(
       doc(db, 'playbooks', playbookId),
       (snap) => {
         const data = (snap.data() || {}) as PlaybookDocLite;
         setPlaybook(data);
-        if (data.scheduleDaysOfWeek?.length) setDays(data.scheduleDaysOfWeek);
-        if (data.scheduleStartTime) setStartTime(data.scheduleStartTime);
+        if (!titleDirty.current) setTitleDraft(data.name || '');
+        if (!descDirty.current) setDescDraft(data.description || '');
         if (data.sessionDurationMinutes) setDuration(data.sessionDurationMinutes);
-        if (data.sessionKind) setSessionKind(data.sessionKind);
         if (data.recordingEnabled !== undefined) setRecordingEnabled(data.recordingEnabled !== false);
-        if (data.repeatFrequency) setRepeatFrequency(data.repeatFrequency);
         if (data.repeatHorizonWeeks) setHorizonWeeks(data.repeatHorizonWeeks);
         if (data.weeklySessionCap !== undefined) setWeeklyCap(data.weeklySessionCap ?? null);
+        if (!prefilledRef.current) {
+          prefilledRef.current = true;
+          const saved = data.scheduleDaySettings;
+          if (Array.isArray(saved) && saved.length) {
+            const ds = saved.map((x) => x.dayOfWeek).sort((a, b) => a - b);
+            setDays(ds);
+            const cfg: Record<number, DayConfig> = {};
+            for (const x of saved) {
+              cfg[x.dayOfWeek] = {
+                raw: formatTime12(x.startTime),
+                time: x.startTime,
+                kind: x.sessionKind || data.sessionKind || 'coach_review',
+              };
+            }
+            setDayConfigs(cfg);
+          } else if (data.scheduleDaysOfWeek?.length) {
+            const ds = [...data.scheduleDaysOfWeek].sort((a, b) => a - b);
+            setDays(ds);
+            const t = data.scheduleStartTime || '07:00';
+            const cfg: Record<number, DayConfig> = {};
+            for (const d of ds) {
+              cfg[d] = { raw: formatTime12(t), time: t, kind: data.sessionKind || 'coach_review' };
+            }
+            setDayConfigs(cfg);
+          }
+        }
       },
       (err) => console.error('[PlaybookSchedulePanel] playbook listener error:', err),
     );
     return unsub;
   }, [visible, playbookId, effectiveUid]);
+
+  // Workout names for the day-module tiles (coach-facing, so names are fine).
+  const workoutIds = useMemo<string[]>(() => playbook?.workoutIds || [], [playbook?.workoutIds]);
+  useEffect(() => {
+    if (!visible || workoutIds.length === 0) return;
+    const missing = workoutIds.filter((id) => !(id in workoutNames));
+    if (missing.length === 0) return;
+    Promise.all(missing.map((id) => getDoc(doc(db, 'workouts', id)).catch(() => null)))
+      .then((snaps) => {
+        setWorkoutNames((prev) => {
+          const next = { ...prev };
+          snaps.forEach((snapDoc, i) => {
+            next[missing[i]] = (snapDoc?.data()?.name as string) || 'Workout';
+          });
+          return next;
+        });
+      });
+  }, [visible, workoutIds, workoutNames]);
 
   // Prefill saved availability + existing (unrevoked) booking token on open.
   useEffect(() => {
@@ -167,6 +284,53 @@ export default function PlaybookSchedulePanel({
       .catch((e) => console.error('[PlaybookSchedulePanel] members load error:', e));
   }, [visible, effectiveUid]);
 
+  // Upcoming scheduled sessions for this playbook (cancel list).
+  useEffect(() => {
+    if (!visible || !playbookId || !effectiveUid) return;
+    const q = query(
+      collection(db, 'session_instances'),
+      where('playbookId', '==', playbookId),
+      where('startUtc', '>=', Timestamp.now()),
+      orderBy('startUtc', 'asc'),
+      limit(25),
+    );
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        setUpcoming(
+          snap.docs
+            .filter((d) => d.data().status === 'scheduled')
+            .map((d) => {
+              const x = d.data();
+              return {
+                id: d.id,
+                scheduledDate: x.scheduledDate,
+                scheduledStartTime: x.scheduledStartTime,
+                memberName: x.memberName,
+                startUtcMillis: (x.startUtc as Timestamp)?.toMillis?.() || 0,
+              };
+            }),
+        );
+      },
+      (err) => console.error('[PlaybookSchedulePanel] upcoming listener error:', err),
+    );
+    return unsub;
+  }, [visible, playbookId, effectiveUid]);
+
+  const cancelSession = useCallback(async (instanceId: string) => {
+    if (cancelBusyId) return;
+    setCancelBusyId(instanceId);
+    try {
+      const fn = httpsCallable(functions, 'cancelInstance');
+      await fn({ instanceId });
+    } catch (e: any) {
+      console.error('[PlaybookSchedulePanel] cancel error:', e);
+      setError(e?.message || 'Cancel failed');
+    } finally {
+      setCancelBusyId(null);
+    }
+  }, [cancelBusyId]);
+
   const playbookMemberIds = useMemo<string[]>(
     () => (playbook?.memberIds?.length
       ? playbook.memberIds
@@ -198,6 +362,28 @@ export default function PlaybookSchedulePanel({
     }
   }, [memberBusy, playbookId, nameOf]);
 
+  const saveTitle = useCallback(async () => {
+    titleDirty.current = false;
+    const v = titleDraft.trim();
+    if (!v || v === playbook?.name) return;
+    try {
+      await updateDoc(doc(db, 'playbooks', playbookId), { name: v, updatedAt: serverTimestamp() });
+    } catch (e) {
+      console.error('[PlaybookSchedulePanel] title save error:', e);
+    }
+  }, [titleDraft, playbook?.name, playbookId]);
+
+  const saveDescription = useCallback(async () => {
+    descDirty.current = false;
+    const v = descDraft.trim();
+    if (v === (playbook?.description || '')) return;
+    try {
+      await updateDoc(doc(db, 'playbooks', playbookId), { description: v, updatedAt: serverTimestamp() });
+    } catch (e) {
+      console.error('[PlaybookSchedulePanel] description save error:', e);
+    }
+  }, [descDraft, playbook?.description, playbookId]);
+
   const memberName = playbook?.assignedMemberName || null;
   const hasMember = playbookMemberIds.length > 0;
   const timezone = useMemo(
@@ -206,12 +392,94 @@ export default function PlaybookSchedulePanel({
   );
 
   const toggleDay = useCallback((d: number) => {
-    setDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort()));
+    setDays((prev) => {
+      if (prev.includes(d)) return prev.filter((x) => x !== d);
+      return [...prev, d].sort((a, b) => a - b);
+    });
+    setDayConfigs((prev) => (prev[d] ? prev : { ...prev, [d]: { ...DEFAULT_CONFIG } }));
     setResults(null);
   }, []);
 
-  const timeValid = /^([01]\d|2[0-3]):[0-5]\d$/.test(startTime);
-  const canBook = hasMember && days.length > 0 && timeValid && !booking;
+  const setDayTime = useCallback((d: number, raw: string) => {
+    setDayConfigs((prev) => ({
+      ...prev,
+      [d]: { ...(prev[d] || DEFAULT_CONFIG), raw, time: parseFlexTime(raw) },
+    }));
+    setResults(null);
+  }, []);
+
+  const blurDayTime = useCallback((d: number) => {
+    setDayConfigs((prev) => {
+      const cfg = prev[d];
+      if (!cfg?.time) return prev;
+      return { ...prev, [d]: { ...cfg, raw: formatTime12(cfg.time) } };
+    });
+  }, []);
+
+  const setDayKind = useCallback((d: number, kind: PlaybookSessionKind) => {
+    setDayConfigs((prev) => ({ ...prev, [d]: { ...(prev[d] || DEFAULT_CONFIG), kind } }));
+    setResults(null);
+  }, []);
+
+  // Day k (in sorted selected days) → workout index in playbook order.
+  const workoutForModule = useCallback((k: number): string | null => {
+    if (workoutIds.length === 0) return null;
+    if (k < workoutIds.length) return workoutIds[k];
+    return ROTATE_AT_END ? workoutIds[k % workoutIds.length] : null;
+  }, [workoutIds]);
+
+  // ── B7: drag workout tiles between day modules ─────────────────────────────
+  const moduleLayouts = useRef<Record<number, { y: number; h: number }>>({});
+  const [dragFromIdx, setDragFromIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const dragTY = useSharedValue(0);
+  const dragActiveIdx = useSharedValue(-1);
+
+  const moveWorkout = useCallback(async (fromModule: number, toModule: number) => {
+    setDragFromIdx(null);
+    setDragOverIdx(null);
+    if (fromModule === toModule) return;
+    const n = workoutIds.length;
+    if (n === 0) return;
+    const fromPos = fromModule < n ? fromModule : (ROTATE_AT_END ? fromModule % n : -1);
+    const toPos = toModule < n ? toModule : (ROTATE_AT_END ? toModule % n : -1);
+    if (fromPos < 0 || toPos < 0 || fromPos === toPos) return;
+    const next = [...workoutIds];
+    const [moved] = next.splice(fromPos, 1);
+    next.splice(toPos, 0, moved);
+    try {
+      await updateDoc(doc(db, 'playbooks', playbookId), { workoutIds: next, updatedAt: serverTimestamp() });
+    } catch (e) {
+      console.error('[PlaybookSchedulePanel] workout reorder error:', e);
+    }
+  }, [workoutIds, playbookId]);
+
+  const hoverModule = useCallback((fromIdx: number, ty: number) => {
+    const from = moduleLayouts.current[fromIdx];
+    if (!from) return;
+    const centerY = from.y + from.h / 2 + ty;
+    let target: number | null = null;
+    for (const [k, r] of Object.entries(moduleLayouts.current)) {
+      if (centerY >= r.y && centerY < r.y + r.h) { target = Number(k); break; }
+    }
+    setDragOverIdx(target);
+  }, []);
+
+  const finishDrag = useCallback((fromIdx: number, ty: number) => {
+    const from = moduleLayouts.current[fromIdx];
+    if (!from) { setDragFromIdx(null); setDragOverIdx(null); return; }
+    const centerY = from.y + from.h / 2 + ty;
+    let target = fromIdx;
+    for (const [k, r] of Object.entries(moduleLayouts.current)) {
+      if (centerY >= r.y && centerY < r.y + r.h) { target = Number(k); break; }
+    }
+    moveWorkout(fromIdx, target);
+  }, [moveWorkout]);
+
+  const sortedDays = days;
+
+  const timesValid = sortedDays.length > 0 && sortedDays.every((d) => !!dayConfigs[d]?.time);
+  const canBook = hasMember && timesValid && !booking;
 
   const book = useCallback(async () => {
     if (!canBook) return;
@@ -219,16 +487,22 @@ export default function PlaybookSchedulePanel({
     setError(null);
     setResults(null);
     try {
+      const daySettings = sortedDays.map((d) => ({
+        dayOfWeek: d,
+        startTime: dayConfigs[d]!.time as string,
+        sessionKind: dayConfigs[d]!.kind,
+      }));
       const fn = httpsCallable(functions, 'bookPlaybookSession');
       const res = await fn({
         playbookId,
-        daysOfWeek: days,
-        startTime,
+        daysOfWeek: sortedDays,
+        startTime: daySettings[0].startTime,
+        daySettings,
         timezone,
         durationMinutes: duration,
-        sessionKind,
+        sessionKind: daySettings[0].sessionKind,
         recordingEnabled,
-        repeatFrequency,
+        repeatFrequency: 'weekly',
         repeatHorizonWeeks: horizonWeeks,
         weeklySessionCap: weeklyCap,
       });
@@ -240,7 +514,7 @@ export default function PlaybookSchedulePanel({
     } finally {
       setBooking(false);
     }
-  }, [canBook, playbookId, days, startTime, timezone, duration, sessionKind, recordingEnabled, repeatFrequency, horizonWeeks, weeklyCap]);
+  }, [canBook, playbookId, sortedDays, dayConfigs, timezone, duration, recordingEnabled, horizonWeeks, weeklyCap]);
 
   const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
   const windowsValid = windows.length > 0 && windows.every(
@@ -305,12 +579,78 @@ export default function PlaybookSchedulePanel({
   const bookedCount = results?.filter((r) => r.status === 'booked').length ?? 0;
   const problems = results?.filter((r) => r.status !== 'booked') ?? [];
 
+  const dragTileStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: dragTY.value }],
+  }));
+
+  const renderWorkoutTile = (moduleIdx: number) => {
+    const wid = workoutForModule(moduleIdx);
+    if (!wid) {
+      return (
+        <View style={[s.workoutTile, { opacity: 0.4 }]}>
+          <Text style={s.workoutTileText} numberOfLines={2}>No workout</Text>
+        </View>
+      );
+    }
+    const isDragging = dragFromIdx === moduleIdx;
+    const pan = Gesture.Pan()
+      .activateAfterLongPress(250)
+      .onStart(() => {
+        dragActiveIdx.value = moduleIdx;
+        dragTY.value = 0;
+        runOnJS(setDragFromIdx)(moduleIdx);
+      })
+      .onUpdate((e) => {
+        dragTY.value = e.translationY;
+        runOnJS(hoverModule)(moduleIdx, e.translationY);
+      })
+      .onEnd((e) => {
+        runOnJS(finishDrag)(moduleIdx, e.translationY);
+        dragTY.value = 0;
+        dragActiveIdx.value = -1;
+      })
+      .onFinalize(() => {
+        dragTY.value = 0;
+        dragActiveIdx.value = -1;
+      });
+    return (
+      <GestureDetector gesture={pan}>
+        <Animated.View
+          style={[
+            s.workoutTile,
+            isDragging && dragTileStyle,
+            isDragging && { zIndex: 10, elevation: 10, borderColor: '#A78BFA', borderWidth: 1 },
+          ]}
+        >
+          <Text style={s.workoutTileText} numberOfLines={2}>
+            {workoutNames[wid] || 'Workout'}
+          </Text>
+          <Text style={s.workoutTileHint}>hold + drag</Text>
+        </Animated.View>
+      </GestureDetector>
+    );
+  };
+
   return (
     <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
       <Pressable style={s.backdrop} onPress={onClose}>
         <Pressable style={s.card} onPress={(e) => e.stopPropagation()}>
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <Text style={s.title}>Schedule {playbook?.name || 'Playbook'}</Text>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            scrollEnabled={dragFromIdx === null}
+          >
+            {/* A5: inline editable title */}
+            <Text style={s.sectionLabel}>Playbook Title</Text>
+            <TextInput
+              style={s.titleInput}
+              value={titleDraft}
+              onChangeText={(v) => { titleDirty.current = true; setTitleDraft(v); }}
+              onBlur={saveTitle}
+              placeholder="Playbook name"
+              placeholderTextColor="#4A5568"
+              maxLength={80}
+            />
             {hasMember ? (
               <Text style={s.subtitle}>Sessions for {memberName || 'assigned member'}</Text>
             ) : (
@@ -318,6 +658,19 @@ export default function PlaybookSchedulePanel({
                 Add a member to this playbook before scheduling.
               </Text>
             )}
+
+            <Text style={s.sectionLabel}>Description</Text>
+            <Text style={s.hint}>Shown on the public booking page under the title.</Text>
+            <TextInput
+              style={s.descInput}
+              value={descDraft}
+              onChangeText={(v) => { descDirty.current = true; setDescDraft(v); }}
+              onBlur={saveDescription}
+              placeholder="What this program is about…"
+              placeholderTextColor="#4A5568"
+              multiline
+              maxLength={400}
+            />
 
             <Text style={s.sectionLabel}>Members</Text>
             {playbookMemberIds.map((id) => (
@@ -359,6 +712,7 @@ export default function PlaybookSchedulePanel({
               </View>
             )}
 
+            {/* B6: day chips reveal per-day modules */}
             <Text style={s.sectionLabel}>Days</Text>
             <View style={s.chipRow}>
               {DAY_SHORT_LABELS.map((label, i) => (
@@ -371,28 +725,66 @@ export default function PlaybookSchedulePanel({
                 </Pressable>
               ))}
             </View>
+            {sortedDays.length === 0 && (
+              <Text style={s.hint}>Tap the days you train — each day gets its own time and style.</Text>
+            )}
 
-            <Text style={s.sectionLabel}>Start Time</Text>
-            <View style={s.chipRow}>
-              {TIME_PRESETS.map((t) => (
-                <Pressable
-                  key={t}
-                  style={[s.chip, startTime === t && s.chipActive]}
-                  onPress={() => { setStartTime(t); setResults(null); }}
+            {sortedDays.map((d, k) => {
+              const cfg = dayConfigs[d] || DEFAULT_CONFIG;
+              const isOver = dragOverIdx === k && dragFromIdx !== null && dragFromIdx !== k;
+              return (
+                <View
+                  key={d}
+                  style={[s.dayModule, isOver && { borderColor: '#A78BFA', borderWidth: 1 }]}
+                  onLayout={(e) => {
+                    moduleLayouts.current[k] = {
+                      y: e.nativeEvent.layout.y,
+                      h: e.nativeEvent.layout.height,
+                    };
+                  }}
                 >
-                  <Text style={[s.chipText, startTime === t && s.chipTextActive]}>{t}</Text>
-                </Pressable>
-              ))}
-            </View>
-            <TextInput
-              style={[s.input, !timeValid && { borderColor: '#E5484D', borderWidth: 1 }]}
-              value={startTime}
-              onChangeText={(v) => { setStartTime(v); setResults(null); }}
-              placeholder="HH:mm"
-              placeholderTextColor="#4A5568"
-              autoCapitalize="none"
-            />
-            <Text style={s.hint}>Member timezone: {timezone}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.dayModuleTitle}>{DAY_SHORT_LABELS[d]}</Text>
+                    <View style={s.dayTimeRow}>
+                      <TextInput
+                        style={[s.dayTimeInput, !cfg.time && s.inputBad]}
+                        value={cfg.raw}
+                        onChangeText={(v) => setDayTime(d, v)}
+                        onBlur={() => blurDayTime(d)}
+                        placeholder="7:00 AM"
+                        placeholderTextColor="#4A5568"
+                        autoCapitalize="none"
+                      />
+                      {cfg.time && cfg.raw !== formatTime12(cfg.time) && (
+                        <Text style={s.dayTimePreview}>{formatTime12(cfg.time)}</Text>
+                      )}
+                    </View>
+                    <View style={[s.chipRow, { marginTop: 8 }]}>
+                      {(Object.keys(PLAYBOOK_SESSION_KIND_LABELS) as PlaybookSessionKind[]).map((kind) => (
+                        <Pressable
+                          key={kind}
+                          style={[s.kindChip, cfg.kind === kind && s.chipActive]}
+                          onPress={() => setDayKind(d, kind)}
+                        >
+                          <Text style={[s.kindChipText, cfg.kind === kind && s.chipTextActive]}>
+                            {PLAYBOOK_SESSION_KIND_LABELS[kind]}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                  {renderWorkoutTile(k)}
+                </View>
+              );
+            })}
+            {sortedDays.length > 0 && workoutIds.length > 0 && (
+              <Text style={s.hint}>
+                Workouts follow your playbook order — hold and drag a workout card to another day to
+                rearrange.{ROTATE_AT_END && sortedDays.length > workoutIds.length
+                  ? ' Extra days rotate back to the first workout.'
+                  : ''}
+              </Text>
+            )}
 
             <Text style={s.sectionLabel}>Duration</Text>
             <View style={s.chipRow}>
@@ -407,26 +799,6 @@ export default function PlaybookSchedulePanel({
               ))}
             </View>
 
-            <Text style={s.sectionLabel}>Session Kind</Text>
-            <View style={s.chipRow}>
-              {(Object.keys(PLAYBOOK_SESSION_KIND_LABELS) as PlaybookSessionKind[]).map((k) => (
-                <Pressable
-                  key={k}
-                  style={[s.chip, sessionKind === k && s.chipActive]}
-                  onPress={() => setSessionKind(k)}
-                >
-                  <Text style={[s.chipText, sessionKind === k && s.chipTextActive]}>
-                    {PLAYBOOK_SESSION_KIND_LABELS[k]}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-            <Text style={s.hint}>
-              {sessionKind === 'coach_guided'
-                ? 'Runs live in your own Zoom room.'
-                : 'Member trains in a hosted room; you review afterward.'}
-            </Text>
-
             <View style={s.switchRow}>
               <Text style={s.switchLabel}>Record sessions</Text>
               <Switch
@@ -437,32 +809,18 @@ export default function PlaybookSchedulePanel({
               />
             </View>
 
-            <Text style={s.sectionLabel}>Repeat</Text>
-            <View style={s.chipRow}>
-              {([['weekly', 'Weekly'], ['every_2_weeks', 'Every 2 Weeks'], ['none', 'One Time']] as const).map(([v, label]) => (
-                <Pressable
-                  key={v}
-                  style={[s.chip, repeatFrequency === v && s.chipActive]}
-                  onPress={() => setRepeatFrequency(v)}
-                >
-                  <Text style={[s.chipText, repeatFrequency === v && s.chipTextActive]}>{label}</Text>
+            <View style={s.stepperRow}>
+              <Text style={s.switchLabel}>Book ahead</Text>
+              <View style={s.stepper}>
+                <Pressable style={s.stepBtn} onPress={() => setHorizonWeeks((w) => Math.max(2, w - 1))}>
+                  <Text style={s.stepBtnText}>−</Text>
                 </Pressable>
-              ))}
-            </View>
-            {repeatFrequency !== 'none' && (
-              <View style={s.stepperRow}>
-                <Text style={s.switchLabel}>Book ahead</Text>
-                <View style={s.stepper}>
-                  <Pressable style={s.stepBtn} onPress={() => setHorizonWeeks((w) => Math.max(2, w - 1))}>
-                    <Text style={s.stepBtnText}>−</Text>
-                  </Pressable>
-                  <Text style={s.stepValue}>{horizonWeeks} wks</Text>
-                  <Pressable style={s.stepBtn} onPress={() => setHorizonWeeks((w) => Math.min(8, w + 1))}>
-                    <Text style={s.stepBtnText}>+</Text>
-                  </Pressable>
-                </View>
+                <Text style={s.stepValue}>{horizonWeeks} wks</Text>
+                <Pressable style={s.stepBtn} onPress={() => setHorizonWeeks((w) => Math.min(8, w + 1))}>
+                  <Text style={s.stepBtnText}>+</Text>
+                </Pressable>
               </View>
-            )}
+            </View>
 
             <View style={s.stepperRow}>
               <Text style={s.switchLabel}>Weekly session cap</Text>
@@ -482,6 +840,33 @@ export default function PlaybookSchedulePanel({
                 </Pressable>
               </View>
             </View>
+
+            {/* B9: cancel upcoming sessions */}
+            {upcoming.length > 0 && (
+              <>
+                <Text style={s.sectionLabel}>Upcoming Sessions</Text>
+                {upcoming.map((u) => (
+                  <View key={u.id} style={s.upcomingRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.upcomingDate}>
+                        {u.scheduledDate || new Date(u.startUtcMillis).toLocaleDateString()}
+                        {u.scheduledStartTime ? ` · ${formatTime12(u.scheduledStartTime)}` : ''}
+                      </Text>
+                      {!!u.memberName && <Text style={s.upcomingMember}>{u.memberName}</Text>}
+                    </View>
+                    <Pressable
+                      style={s.cancelBtn}
+                      disabled={cancelBusyId === u.id}
+                      onPress={() => cancelSession(u.id)}
+                    >
+                      <Text style={s.cancelBtnText}>
+                        {cancelBusyId === u.id ? 'Cancelling…' : 'Cancel'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </>
+            )}
 
             <Text style={s.sectionLabel}>Booking Link</Text>
             <Text style={s.hint}>
@@ -639,18 +1024,32 @@ const s = StyleSheet.create({
     paddingBottom: Platform.OS === 'ios' ? 40 : 24,
     maxHeight: '88%',
   },
-  title: {
+  titleInput: {
     fontSize: 18,
     fontWeight: '700',
     color: '#F0F4F8',
     fontFamily: FH,
+    backgroundColor: '#0E1117',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  descInput: {
+    backgroundColor: '#0E1117',
+    borderRadius: 10,
+    padding: 12,
+    color: '#F0F4F8',
+    fontSize: 14,
+    fontFamily: FB,
+    marginTop: 8,
+    minHeight: 64,
+    textAlignVertical: 'top',
   },
   subtitle: {
     fontSize: 13,
     color: '#8A95A3',
     fontFamily: FB,
-    marginTop: 4,
-    marginBottom: 8,
+    marginTop: 8,
   },
   sectionLabel: {
     fontSize: 11,
@@ -686,6 +1085,76 @@ const s = StyleSheet.create({
   dayChipTextActive: {
     color: '#0E1117',
   },
+  dayModule: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#0E1117',
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 10,
+  },
+  dayModuleTitle: {
+    color: '#F0F4F8',
+    fontSize: 14,
+    fontWeight: '700',
+    fontFamily: FH,
+  },
+  dayTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  dayTimeInput: {
+    backgroundColor: '#1E2A3A',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    color: '#F0F4F8',
+    fontSize: 14,
+    fontFamily: FB,
+    width: 110,
+  },
+  dayTimePreview: {
+    color: '#A78BFA',
+    fontSize: 12,
+    fontFamily: FB,
+  },
+  kindChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#1E2A3A',
+    borderRadius: 14,
+  },
+  kindChipText: {
+    color: '#8A95A3',
+    fontSize: 11,
+    fontWeight: '600',
+    fontFamily: FB,
+  },
+  workoutTile: {
+    width: 86,
+    height: 86,
+    borderRadius: 12,
+    backgroundColor: 'rgba(167,139,250,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 8,
+  },
+  workoutTileText: {
+    color: '#F0F4F8',
+    fontSize: 11,
+    fontWeight: '700',
+    fontFamily: FH,
+    textAlign: 'center',
+  },
+  workoutTileHint: {
+    color: '#4A5568',
+    fontSize: 9,
+    fontFamily: FB,
+    marginTop: 4,
+  },
   chip: {
     paddingHorizontal: 14,
     paddingVertical: 8,
@@ -703,16 +1172,6 @@ const s = StyleSheet.create({
   },
   chipTextActive: {
     color: '#0E1117',
-  },
-  input: {
-    backgroundColor: '#0E1117',
-    borderRadius: 10,
-    padding: 12,
-    color: '#F0F4F8',
-    fontSize: 15,
-    fontFamily: FB,
-    marginTop: 8,
-    width: 120,
   },
   hint: {
     color: '#4A5568',
@@ -775,6 +1234,40 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontFamily: FB,
     marginTop: 14,
+  },
+  upcomingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0E1117',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginTop: 6,
+    gap: 8,
+  },
+  upcomingDate: {
+    color: '#F0F4F8',
+    fontSize: 13,
+    fontFamily: FB,
+  },
+  upcomingMember: {
+    color: '#8A95A3',
+    fontSize: 11,
+    fontFamily: FB,
+    marginTop: 2,
+  },
+  cancelBtn: {
+    borderColor: '#E5484D',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  cancelBtnText: {
+    color: '#E5484D',
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: FB,
   },
   windowRow: {
     flexDirection: 'row',

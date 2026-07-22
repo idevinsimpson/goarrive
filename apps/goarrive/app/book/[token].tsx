@@ -13,7 +13,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
+  ActivityIndicator, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
@@ -37,6 +37,8 @@ interface Slot {
 
 interface BookingInfo {
   playbookTitle: string;
+  playbookDescription?: string | null;
+  coachId?: string | null;
   coachName: string | null;
   memberName: string | null;
   guestMode: boolean;
@@ -87,7 +89,7 @@ function openUrl(url: string) {
 export default function BookingPage() {
   const { token, preview } = useLocalSearchParams<{ token: string; preview?: string }>();
   const previewMode = preview === '1' || preview === 'true';
-  const { user, loading: authLoading } = useAuth();
+  const { user, claims, effectiveUid, loading: authLoading } = useAuth();
 
   const [info, setInfo] = useState<BookingInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -100,6 +102,8 @@ export default function BookingPage() {
   const [booking, setBooking] = useState(false);
   const [bookError, setBookError] = useState('');
   const [booked, setBooked] = useState<BookedResult | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(guestEmail.trim());
 
@@ -160,10 +164,40 @@ export default function BookingPage() {
   useEffect(() => { if (monthIdx >= months.length) setMonthIdx(0); }, [months, monthIdx]);
 
   const daySlots = selectedDate ? (slotsByDate.get(selectedDate) || []) : [];
-  const needsEmail = !!info?.guestMode || !user;
+  // A signed-in coach on their own playbook can book on behalf of the member,
+  // including from preview mode (testing-phase behavior). Server enforces too.
+  const isCoach = !!info?.coachId && (
+    user?.uid === info.coachId || effectiveUid === info.coachId || claims?.coachId === info.coachId
+  );
+  const needsEmail = (!!info?.guestMode || !user) && !isCoach;
   const needsLocation = (info?.locations.length || 0) > 0;
-  const canBook = !previewMode && !!selected && !selected.capReached && !booking
-    && (!needsEmail || emailValid) && (!needsLocation || !!location);
+  const canBook = !!selected && !selected.capReached && !booking
+    && (!needsEmail || emailValid) && (!needsLocation || !!location)
+    && (!previewMode || isCoach);
+
+  const pageUrl = useMemo(() => {
+    const origin =
+      Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'https://goarrive.fit';
+    return `${origin}/book/${token}`;
+  }, [token]);
+
+  const copyPageLink = useCallback(async () => {
+    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+      await navigator.clipboard.writeText(pageUrl);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    }
+  }, [pageUrl]);
+
+  const goBackToApp = useCallback(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.history.length > 1) {
+      window.history.back();
+    } else {
+      router.replace('/(app)/build' as any);
+    }
+  }, []);
 
   const book = useCallback(async () => {
     if (!selected || !canBook) return;
@@ -270,6 +304,125 @@ export default function BookingPage() {
     );
   }
 
+  // C11: day tap takes over the full screen — back arrow, weekday heading,
+  // timezone row, time slots. Booking controls live here too.
+  if (selectedDate) {
+    const [sy, sm, sd] = selectedDate.split('-').map(Number);
+    const selDate = new Date(Date.UTC(sy, sm - 1, sd, 12));
+    const weekdayName = selDate.toLocaleDateString(undefined, { weekday: 'long', timeZone: 'UTC' });
+    const longDate = selDate.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+    return (
+      <ScrollView style={{ flex: 1, backgroundColor: BG }} contentContainerStyle={s.page}>
+        <View style={s.card}>
+          <View style={s.headerRow}>
+            <Pressable
+              style={s.headerBtn}
+              onPress={() => { setSelectedDate(null); setSelected(null); setBookError(''); }}
+              accessibilityLabel="Back to calendar"
+            >
+              <Text style={s.headerBtnText}>‹</Text>
+            </Pressable>
+            {previewMode && (
+              <View style={s.previewPill}><Text style={s.previewPillText}>Preview</Text></View>
+            )}
+            <View style={s.headerBtnGhost} />
+          </View>
+          <Text style={s.dayHeading}>{weekdayName}</Text>
+          <Text style={s.daySubheading}>{longDate}</Text>
+          <View style={s.tzRow}>
+            <Text style={s.tzRowLabel}>Time zone</Text>
+            <Text style={s.tzRowValue}>{info.timezone}</Text>
+          </View>
+          <Text style={s.sectionLabel}>Select a Time</Text>
+          <Text style={s.hint}>Duration: {info.durationMinutes} min</Text>
+          <View style={s.slotCol}>
+            {daySlots.map((slot) => {
+              const isSel = selected?.startUtcMillis === slot.startUtcMillis;
+              return (
+                <Pressable
+                  key={slot.startUtcMillis}
+                  style={[s.slotBtn, isSel && s.slotBtnSel, slot.capReached && s.slotChipCapped]}
+                  disabled={slot.capReached}
+                  onPress={() => { setSelected(slot); setBookError(''); }}
+                >
+                  <Text style={[s.slotBtnText, isSel && s.slotBtnTextSel, slot.capReached && s.slotTextCapped]}>
+                    {friendlyTime(slot.startTime)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {daySlots.length > 0 && daySlots.every((x) => x.capReached) && (
+            <Text style={s.cappedNote}>Weekly session limit reached for this week</Text>
+          )}
+
+          {needsEmail && (
+            <View style={{ marginTop: 16 }}>
+              <Text style={s.sectionLabel}>Your Email</Text>
+              <TextInput
+                style={s.emailInput}
+                value={guestEmail}
+                onChangeText={setGuestEmail}
+                onBlur={() => { if (emailValid) load(guestEmail.trim()); }}
+                placeholder="you@example.com"
+                placeholderTextColor={DIM}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                autoComplete="email"
+              />
+              <Text style={s.hint}>
+                Book with just your email — no account needed. You can create one after.
+              </Text>
+            </View>
+          )}
+
+          {needsLocation && selected && (
+            <>
+              <Text style={s.sectionLabel}>Where will you train?</Text>
+              <View style={s.slotRow}>
+                {info.locations.map((loc) => {
+                  const isSel = location === loc;
+                  return (
+                    <Pressable
+                      key={loc}
+                      style={[s.slotChip, isSel && s.slotChipSel]}
+                      onPress={() => { setLocation(loc); setBookError(''); }}
+                    >
+                      <Text style={[s.slotText, isSel && s.slotTextSel]}>{loc}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </>
+          )}
+
+          {bookError !== '' && <Text style={s.bookError}>{bookError}</Text>}
+
+          <Pressable
+            style={[s.primaryBtn, !canBook && s.primaryBtnDisabled]}
+            onPress={book}
+            disabled={!canBook}
+          >
+            <Text style={s.primaryBtnText}>
+              {previewMode && !isCoach
+                ? 'Preview — booking disabled'
+                : booking
+                  ? 'Booking…'
+                  : selected
+                    ? needsLocation && !location
+                      ? 'Pick a location'
+                      : `Book ${friendlyDate(selected.date)} · ${friendlyTime(selected.startTime)}`
+                    : 'Select a time'}
+            </Text>
+          </Pressable>
+          {previewMode && isCoach && selected && (
+            <Text style={s.hint}>Preview booking runs a real booking on behalf of your member.</Text>
+          )}
+        </View>
+      </ScrollView>
+    );
+  }
+
   const { y, m } = months[Math.min(monthIdx, months.length - 1)];
   const firstDow = new Date(Date.UTC(y, m, 1, 12)).getUTCDay();
   const daysInMonth = new Date(Date.UTC(y, m + 1, 0, 12)).getUTCDate();
@@ -287,19 +440,31 @@ export default function BookingPage() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: BG }} contentContainerStyle={s.page}>
       <View style={s.card}>
-        {previewMode && (
-          <View style={s.previewBanner}>
-            <Text style={s.previewBannerText}>
-              Preview — this is exactly what your member sees. Booking is disabled.
-            </Text>
-          </View>
-        )}
+        <View style={s.headerRow}>
+          <Pressable style={s.headerBtn} onPress={() => setMenuOpen(true)} accessibilityLabel="Menu">
+            <Text style={s.headerBtnText}>☰</Text>
+          </Pressable>
+          {previewMode && (
+            <View style={s.previewPill}><Text style={s.previewPillText}>Preview</Text></View>
+          )}
+          <Pressable style={s.headerBtn} onPress={copyPageLink} accessibilityLabel="Copy link">
+            <Text style={s.copyBtnText}>{linkCopied ? 'Copied!' : 'Copy link'}</Text>
+          </Pressable>
+        </View>
         <Image source={require('../../assets/logo.png')} style={s.logo} resizeMode="contain" accessibilityLabel="GoArrive" />
         <Text style={s.title}>{info.playbookTitle}</Text>
         <Text style={s.subtitle}>
           {info.coachName ? `with Coach ${info.coachName} · ` : ''}
-          {info.durationMinutes} min · {info.sessionKind === 'coach_guided' ? 'live with your coach' : 'coach reviews after'}
+          {info.durationMinutes} min{info.sessionKind === 'coach_guided' ? ' · live with your coach' : ''}
         </Text>
+        {!!info.playbookDescription && (
+          <Text style={s.description}>{info.playbookDescription}</Text>
+        )}
+        {previewMode && isCoach && (
+          <Pressable style={s.backToAppBtn} onPress={goBackToApp}>
+            <Text style={s.backToAppText}>‹ Back to Playbook</Text>
+          </Pressable>
+        )}
         {info.memberName && <Text style={s.memberLine}>Booking for {info.memberName}</Text>}
         <Text style={s.tzLine}>Times shown in {info.timezone}</Text>
 
@@ -311,27 +476,7 @@ export default function BookingPage() {
           </View>
         )}
 
-        {needsEmail && !previewMode && (
-          <View style={{ marginTop: 16 }}>
-            <Text style={s.sectionLabel}>Your Email</Text>
-            <TextInput
-              style={s.emailInput}
-              value={guestEmail}
-              onChangeText={setGuestEmail}
-              onBlur={() => { if (emailValid) load(guestEmail.trim()); }}
-              placeholder="you@example.com"
-              placeholderTextColor={DIM}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              autoComplete="email"
-            />
-            <Text style={s.hint}>
-              Book with just your email — no account needed. You can create one after.
-            </Text>
-          </View>
-        )}
-
-        <Text style={s.sectionLabel}>Pick a Day</Text>
+        <Text style={s.sectionLabel}>Select a Day</Text>
         {slotsByDate.size === 0 && (
           <Text style={s.hint}>No open times in the next few weeks. Check back soon.</Text>
         )}
@@ -387,74 +532,31 @@ export default function BookingPage() {
           </View>
         )}
 
-        {selectedDate && (
-          <>
-            <Text style={s.sectionLabel}>{friendlyDate(selectedDate)} — Pick a Time</Text>
-            <View style={s.slotRow}>
-              {daySlots.map((slot) => {
-                const isSel = selected?.startUtcMillis === slot.startUtcMillis;
-                return (
-                  <Pressable
-                    key={slot.startUtcMillis}
-                    style={[s.slotChip, isSel && s.slotChipSel, slot.capReached && s.slotChipCapped]}
-                    disabled={slot.capReached}
-                    onPress={() => { setSelected(slot); setBookError(''); }}
-                  >
-                    <Text style={[s.slotText, isSel && s.slotTextSel, slot.capReached && s.slotTextCapped]}>
-                      {friendlyTime(slot.startTime)}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            {daySlots.length > 0 && daySlots.every((x) => x.capReached) && (
-              <Text style={s.cappedNote}>Weekly session limit reached for this week</Text>
-            )}
-          </>
-        )}
-
-        {needsLocation && selected && (
-          <>
-            <Text style={s.sectionLabel}>Where will you train?</Text>
-            <View style={s.slotRow}>
-              {info.locations.map((loc) => {
-                const isSel = location === loc;
-                return (
-                  <Pressable
-                    key={loc}
-                    style={[s.slotChip, isSel && s.slotChipSel]}
-                    onPress={() => { setLocation(loc); setBookError(''); }}
-                  >
-                    <Text style={[s.slotText, isSel && s.slotTextSel]}>{loc}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </>
-        )}
-
-        {bookError !== '' && <Text style={s.bookError}>{bookError}</Text>}
-
-        <Pressable
-          style={[s.primaryBtn, !canBook && s.primaryBtnDisabled]}
-          onPress={book}
-          disabled={!canBook}
-        >
-          <Text style={s.primaryBtnText}>
-            {previewMode
-              ? 'Preview mode — booking disabled'
-              : booking
-                ? 'Booking…'
-                : selected
-                  ? needsLocation && !location
-                    ? 'Pick a location'
-                    : `Book ${friendlyDate(selected.date)} · ${friendlyTime(selected.startTime)}`
-                  : selectedDate
-                    ? 'Select a time'
-                    : 'Select a day'}
-          </Text>
-        </Pressable>
       </View>
+
+      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <Pressable style={s.menuBackdrop} onPress={() => setMenuOpen(false)}>
+          <Pressable style={s.menuSheet} onPress={() => {}}>
+            <Pressable
+              style={s.menuItem}
+              onPress={() => { setMenuOpen(false); router.push('/' as any); }}
+            >
+              <Text style={s.menuItemText}>Home</Text>
+            </Pressable>
+            {isCoach && (
+              <Pressable
+                style={s.menuItem}
+                onPress={() => { setMenuOpen(false); goBackToApp(); }}
+              >
+                <Text style={s.menuItemText}>Back to Playbook</Text>
+              </Pressable>
+            )}
+            <Pressable style={s.menuClose} onPress={() => setMenuOpen(false)}>
+              <Text style={s.menuCloseText}>Close</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </ScrollView>
   );
 }
@@ -483,24 +585,59 @@ const s = StyleSheet.create({
     borderRadius: 20,
     padding: 24,
   },
-  previewBanner: {
-    backgroundColor: BG,
-    borderColor: GOLD,
-    borderWidth: 1,
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 14,
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
   },
-  previewBannerText: {
-    color: GOLD,
+  headerBtn: {
+    minWidth: 36,
+    height: 32,
+    paddingHorizontal: 10,
+    borderRadius: 16,
+    backgroundColor: BG,
+    borderColor: BORDER,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerBtnGhost: {
+    minWidth: 36,
+    height: 32,
+  },
+  headerBtnText: {
+    color: FG,
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: FH,
+    lineHeight: 20,
+  },
+  copyBtnText: {
+    color: ARRIVE,
     fontSize: 12,
     fontWeight: '700',
     fontFamily: FB,
   },
+  previewPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderColor: GOLD,
+    borderWidth: 1,
+    backgroundColor: BG,
+  },
+  previewPillText: {
+    color: GOLD,
+    fontSize: 11,
+    fontWeight: '700',
+    fontFamily: FB,
+    letterSpacing: 0.5,
+  },
   logo: {
     width: 132,
     height: 36,
-    alignSelf: 'flex-start',
+    alignSelf: 'center',
     marginBottom: 4,
   },
   title: {
@@ -509,24 +646,152 @@ const s = StyleSheet.create({
     fontWeight: '800',
     fontFamily: FH,
     marginTop: 8,
+    textAlign: 'center',
   },
   subtitle: {
     color: MUTED,
     fontSize: 14,
     fontFamily: FB,
     marginTop: 6,
+    textAlign: 'center',
+  },
+  description: {
+    color: MUTED,
+    fontSize: 13,
+    fontFamily: FB,
+    marginTop: 10,
+    lineHeight: 19,
+    textAlign: 'center',
+  },
+  backToAppBtn: {
+    alignSelf: 'center',
+    marginTop: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 16,
+    borderColor: BORDER,
+    borderWidth: 1,
+    backgroundColor: BG,
+  },
+  backToAppText: {
+    color: FG,
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: FB,
   },
   memberLine: {
     color: FG,
     fontSize: 13,
     fontFamily: FB,
     marginTop: 8,
+    textAlign: 'center',
   },
   tzLine: {
     color: DIM,
     fontSize: 12,
     fontFamily: FB,
     marginTop: 4,
+    textAlign: 'center',
+  },
+  dayHeading: {
+    color: FG,
+    fontSize: 24,
+    fontWeight: '800',
+    fontFamily: FH,
+    marginTop: 6,
+  },
+  daySubheading: {
+    color: MUTED,
+    fontSize: 14,
+    fontFamily: FB,
+    marginTop: 4,
+  },
+  tzRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: BG,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 14,
+  },
+  tzRowLabel: {
+    color: DIM,
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: FB,
+  },
+  tzRowValue: {
+    color: FG,
+    fontSize: 13,
+    fontFamily: FB,
+  },
+  slotCol: {
+    marginTop: 8,
+    gap: 8,
+  },
+  slotBtn: {
+    paddingVertical: 12,
+    backgroundColor: BG,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: BORDER,
+    alignItems: 'center',
+  },
+  slotBtnSel: {
+    backgroundColor: GO,
+    borderColor: GO,
+  },
+  slotBtnText: {
+    color: FG,
+    fontSize: 14,
+    fontWeight: '700',
+    fontFamily: FB,
+  },
+  slotBtnTextSel: {
+    color: BG,
+  },
+  menuBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
+  menuSheet: {
+    backgroundColor: CARD,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderColor: BORDER,
+    borderWidth: 1,
+    padding: 20,
+    paddingBottom: 32,
+  },
+  menuItem: {
+    paddingVertical: 14,
+    borderBottomColor: BORDER,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  menuItemText: {
+    color: FG,
+    fontSize: 16,
+    fontWeight: '700',
+    fontFamily: FH,
+  },
+  menuClose: {
+    alignSelf: 'center',
+    marginTop: 18,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: BG,
+    borderColor: BORDER,
+    borderWidth: 1,
+  },
+  menuCloseText: {
+    color: MUTED,
+    fontSize: 14,
+    fontWeight: '700',
+    fontFamily: FB,
   },
   capBanner: {
     backgroundColor: BG,

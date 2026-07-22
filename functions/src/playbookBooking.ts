@@ -312,6 +312,8 @@ export const resolvePlaybookBookingToken = onRequest(
       // Title-only projection — no workoutIds, workout names, or member docs.
       res.json({
         playbookTitle: playbook.name || 'Playbook',
+        playbookDescription: (typeof playbook.description === 'string' && playbook.description.trim()) || null,
+        coachId: tokenData.coachId,
         coachName,
         memberName,
         guestMode: !memberId,
@@ -412,12 +414,28 @@ export const bookViaBookingToken = onCall(
     let guestEmail: string | null = null;
     let bookerEmail: string | null = null;
 
+    // Coach preview booking (Phase B.2 testing behavior): the playbook's own
+    // coach (or an admin) books on behalf of the assigned member.
+    const callerClaims = (request.auth?.token || {}) as Record<string, any>;
+    const callerIsCoach = !!authUid && (
+      authUid === tokenData.coachId
+      || callerClaims.coachId === tokenData.coachId
+      || callerClaims.role === 'platformAdmin' || callerClaims.admin === true
+    );
+    const onBehalfMemberId = tokenData.memberId || memberIds[0] || null;
+
     if (authUid && (authUid === tokenData.memberId || memberIds.includes(authUid))) {
       memberId = authUid;
       memberKey = authUid;
       const memberSnap = await db.collection('members').doc(memberId).get();
       memberName = (memberSnap.data()?.name as string) || playbook.assignedMemberName || 'Member';
       bookerEmail = normalizeEmail(memberSnap.data()?.email) || normalizeEmail(request.auth?.token?.email);
+    } else if (callerIsCoach && onBehalfMemberId) {
+      memberId = onBehalfMemberId;
+      memberKey = onBehalfMemberId;
+      const memberSnap = await db.collection('members').doc(memberId).get();
+      memberName = (memberSnap.data()?.name as string) || playbook.assignedMemberName || 'Member';
+      bookerEmail = normalizeEmail(memberSnap.data()?.email);
     } else {
       guestEmail = normalizeEmail(rawGuestEmail);
       if (!guestEmail) {

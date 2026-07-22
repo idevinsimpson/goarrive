@@ -651,7 +651,8 @@ export type PlaybookSessionKind = 'coach_guided' | 'coach_review';
 
 export const PLAYBOOK_SESSION_KIND_LABELS: Record<PlaybookSessionKind, string> = {
   coach_guided: 'Live with Coach',
-  coach_review: 'Coach Review',
+  // Backend kind stays coach_review; label renamed per Phase B.2 UX pass.
+  coach_review: 'Self-Guided',
 };
 
 export type PlaybookRepeatFrequency = 'weekly' | 'every_2_weeks' | 'none';

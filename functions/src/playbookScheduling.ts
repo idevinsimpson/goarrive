@@ -35,6 +35,14 @@ const MAX_SESSION_MS = 4 * 60 * 60 * 1000;
 
 export type PlaybookSessionKind = 'coach_guided' | 'coach_review';
 
+/**
+ * DECISION PENDING (Devin, Phase B.2): after the last workout in the playbook,
+ * rotate back to the first workout (true) or stop assigning workouts (false).
+ * Single flip point — the client-side day→workout mapping reads the same
+ * default. Change here + PlaybookSchedulePanel.ROTATE_AT_END to flip.
+ */
+export const ROTATE_AT_PLAYBOOK_END = true;
+
 // ── Timezone math (no tz library in functions/ — Intl only) ─────────────────
 // All conversions are done per-date in the member's IANA timezone so DST
 // transitions land on the correct UTC instant.
@@ -365,6 +373,9 @@ interface BookPlaybookSessionData {
   startDate?: string;            // YYYY-MM-DD, default today (member tz)
   memberId?: string;             // default playbook.assignedMemberId
   pinnedWorkoutIds?: Record<string, string>; // date → workoutId (coach-pinned occurrences)
+  // Phase B.2: per-day time + kind. When present, overrides startTime /
+  // sessionKind for that day; daysOfWeek/startTime stay as the legacy shape.
+  daySettings?: Array<{ dayOfWeek: number; startTime: string; sessionKind?: PlaybookSessionKind }>;
 }
 
 export const bookPlaybookSession = onCall(
@@ -417,6 +428,23 @@ export const bookPlaybookSession = onCall(
     }
     const memberName = memberSnap.data()!.name || playbook.assignedMemberName || 'Member';
 
+    // Per-day settings (Phase B.2) — validated map dow → { startTime, kind }
+    const daySettingsMap = new Map<number, { startTime: string; sessionKind: PlaybookSessionKind }>();
+    if (Array.isArray(d.daySettings)) {
+      for (const ds of d.daySettings) {
+        if (typeof ds?.dayOfWeek !== 'number' || ds.dayOfWeek < 0 || ds.dayOfWeek > 6) {
+          throw new HttpsError('invalid-argument', 'daySettings dayOfWeek must be 0-6');
+        }
+        if (typeof ds?.startTime !== 'string' || !/^\d{2}:\d{2}$/.test(ds.startTime)) {
+          throw new HttpsError('invalid-argument', 'daySettings startTime must be HH:mm');
+        }
+        daySettingsMap.set(ds.dayOfWeek, {
+          startTime: ds.startTime,
+          sessionKind: ds.sessionKind === 'coach_guided' ? 'coach_guided' : 'coach_review',
+        });
+      }
+    }
+
     const sessionKind: PlaybookSessionKind = d.sessionKind === 'coach_guided' ? 'coach_guided' : 'coach_review';
     const recordingEnabled = d.recordingEnabled !== false;
     const durationMinutes = d.durationMinutes && d.durationMinutes > 0 && d.durationMinutes <= 240 ? d.durationMinutes : 45;
@@ -437,6 +465,9 @@ export const bookPlaybookSession = onCall(
       timezone,
       scheduleDaysOfWeek: d.daysOfWeek,
       scheduleStartTime: d.startTime,
+      scheduleDaySettings: Array.isArray(d.daySettings)
+        ? [...daySettingsMap.entries()].map(([dayOfWeek, v]) => ({ dayOfWeek, ...v }))
+        : FieldValue.delete(),
       repeatFrequency,
       repeatHorizonWeeks,
       memberIds,
@@ -453,35 +484,38 @@ export const bookPlaybookSession = onCall(
     const horizonEnd = addDaysToDateStr(firstDate, repeatHorizonWeeks * 7);
     const stepDays = repeatFrequency === 'every_2_weeks' ? 14 : 7;
 
-    const occurrenceDates: string[] = [];
+    const occurrences: Array<{ dateStr: string; startTime: string; sessionKind: PlaybookSessionKind }> = [];
     for (const dow of [...new Set(d.daysOfWeek)].sort()) {
+      const dayStart = daySettingsMap.get(dow)?.startTime || d.startTime;
+      const dayKind = daySettingsMap.get(dow)?.sessionKind || sessionKind;
       let cursor = firstDate;
       while (wallDateOf(wallTimeToUtc(cursor, '12:00', timezone), timezone).dow !== dow) {
         cursor = addDaysToDateStr(cursor, 1);
       }
       // Same-day booking only if the start time hasn't passed yet
-      if (cursor === todayStr && wallTimeToUtc(cursor, d.startTime, timezone) <= now) {
+      if (cursor === todayStr && wallTimeToUtc(cursor, dayStart, timezone) <= now) {
         cursor = addDaysToDateStr(cursor, stepDays);
       }
       if (repeatFrequency === 'none') {
-        if (cursor <= horizonEnd) occurrenceDates.push(cursor);
+        if (cursor <= horizonEnd) occurrences.push({ dateStr: cursor, startTime: dayStart, sessionKind: dayKind });
         continue;
       }
       while (cursor <= horizonEnd) {
-        occurrenceDates.push(cursor);
+        occurrences.push({ dateStr: cursor, startTime: dayStart, sessionKind: dayKind });
         cursor = addDaysToDateStr(cursor, stepDays);
       }
     }
-    occurrenceDates.sort();
+    occurrences.sort((a, b) => a.dateStr.localeCompare(b.dateStr));
 
-    if (occurrenceDates.length === 0) {
+    if (occurrences.length === 0) {
       throw new HttpsError('invalid-argument', 'No bookable occurrences in the selected window');
     }
 
     const memberKey = memberId; // guests book via bookViaBookingToken with `guest:<sha256(email)>`
     const results: Array<{ date: string; status: 'booked' | 'conflict' | 'cap_reached'; reason?: string; instanceId?: string }> = [];
 
-    for (const dateStr of occurrenceDates) {
+    for (const occ of occurrences) {
+      const dateStr = occ.dateStr;
       try {
         const { instanceId } = await bookOccurrence({
           playbookId: d.playbookId,
@@ -492,10 +526,10 @@ export const bookPlaybookSession = onCall(
           guestEmail: null,
           memberName,
           dateStr,
-          startTime: d.startTime,
+          startTime: occ.startTime,
           timezone,
           durationMinutes,
-          sessionKind,
+          sessionKind: occ.sessionKind,
           recordingEnabled,
           weeklySessionCap,
           pinnedWorkoutId: d.pinnedWorkoutIds?.[dateStr] || null,

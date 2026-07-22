@@ -38,6 +38,14 @@
       "collectionGroup": "session_instances",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "playbookId", "order": "ASCENDING" },
+        { "fieldPath": "startUtc", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "session_instances",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "coachId", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" }
       ]
