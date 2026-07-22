@@ -92,7 +92,7 @@ export function composePrescriptionLabel(name: string, weight?: string, reps?: s
 
 // Pure helpers live in WorkoutPlayer.helpers.ts (no Firebase dep — safe to import in tests).
 export { computePreloadVideoUrl, handleVideoLayerPlaybackStatus } from './WorkoutPlayer.helpers';
-import { pickNameTier } from './WorkoutPlayer.helpers';
+import { pickNameTier, nextStallRecoveryAction, type StallRecoveryState } from './WorkoutPlayer.helpers';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface WorkoutPlayerProps {
@@ -476,6 +476,32 @@ export default function WorkoutPlayer({
       else el?.playAsync?.().catch(() => {});
     }
   }, [isPaused]);
+
+  // iOS Safari pauses every <video> when the tab backgrounds, the screen
+  // locks, or an audio interruption fires (call, Siri, another app's media)
+  // — and never resumes them. `shouldPlay` can't recover it: the prop value
+  // never changed, so expo-av doesn't re-issue play(). Mirror the audio-side
+  // foreground recovery: imperatively resume every mounted video unless the
+  // member paused on purpose. pageshow covers bfcache restores; focus covers
+  // iOS overlay dismissals that don't fire visibilitychange.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const resumeAll = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (isPausedRef.current) return;
+      for (const el of videosRef.current.values()) {
+        el?.playAsync?.().catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', resumeAll);
+    window.addEventListener('pageshow', resumeAll);
+    window.addEventListener('focus', resumeAll);
+    return () => {
+      document.removeEventListener('visibilitychange', resumeAll);
+      window.removeEventListener('pageshow', resumeAll);
+      window.removeEventListener('focus', resumeAll);
+    };
+  }, []);
 
   // ── Tap-to-show controls ──────────────────────────────
   const [showControls, setShowControls] = useState(false);
@@ -966,8 +992,28 @@ export default function WorkoutPlayer({
     });
   }, []);
 
-  // Keep the imperative video registry and stall-watchdog map in sync with
-  // the mounted layers so neither grows unbounded over a long workout.
+  // Stall recovery: when the watchdog sees a frozen layer, escalate through
+  // play() nudge → full remount (epoch bump changes the element key so React
+  // builds a fresh <video> + decoder) → thumbnail fallback via
+  // markVideoFailed. Per-URL state, reset whenever playback advances again.
+  const stallRecoveryRef = useRef<Map<string, StallRecoveryState>>(new Map());
+  const [layerEpochs, setLayerEpochs] = useState<Record<string, number>>({});
+  const recoverStalledLayer = useCallback((url: string, now: number) => {
+    const { action, state } = nextStallRecoveryAction(stallRecoveryRef.current.get(url), now);
+    if (action === 'wait') return;
+    stallRecoveryRef.current.set(url, state);
+    console.warn('[WorkoutPlayer] video stall recovery', { url, action, attempt: state.attempts });
+    if (action === 'nudge') {
+      videosRef.current.get(`layer:${url}`)?.playAsync?.().catch(() => {});
+    } else if (action === 'remount') {
+      setLayerEpochs((prev) => ({ ...prev, [url]: (prev[url] ?? 0) + 1 }));
+    } else {
+      markVideoFailed(url);
+    }
+  }, [markVideoFailed]);
+
+  // Keep the imperative video registry and stall-watchdog maps in sync with
+  // the mounted layers so none grows unbounded over a long workout.
   useEffect(() => {
     const live = new Set(videoLayers.map((l) => l.url));
     for (const key of Array.from(videosRef.current.keys())) {
@@ -977,6 +1023,9 @@ export default function WorkoutPlayer({
     }
     for (const url of Array.from(lastPositionUpdateAtRef.current.keys())) {
       if (!live.has(url)) lastPositionUpdateAtRef.current.delete(url);
+    }
+    for (const url of Array.from(stallRecoveryRef.current.keys())) {
+      if (!live.has(url)) stallRecoveryRef.current.delete(url);
     }
   }, [videoLayers]);
 
@@ -1832,7 +1881,7 @@ export default function WorkoutPlayer({
                       const opacity = isDisplayed ? 1 : 0;
                       return (
                         <Video
-                          key={layer.url}
+                          key={`${layer.url}#${layerEpochs[layer.url] ?? 0}`}
                           ref={(el: any) => {
                             registerVideo(`layer:${layer.url}`, el);
                             if (isDisplayed) videoRef.current = el;
@@ -1866,8 +1915,14 @@ export default function WorkoutPlayer({
                             const prev = lastPositionUpdateAtRef.current.get(layer.url);
                             if (prev === undefined || status.positionMillis !== prev.pos) {
                               lastPositionUpdateAtRef.current.set(layer.url, { pos: status.positionMillis, ts: now });
+                              stallRecoveryRef.current.delete(layer.url);
                             } else if (status.shouldPlay && now - prev.ts >= 5000) {
+                              // Hidden tabs legitimately stop advancing; the
+                              // foreground-resume handler owns that case.
+                              if (Platform.OS === 'web' && typeof document !== 'undefined'
+                                && document.visibilityState !== 'visible') return;
                               console.warn('[WorkoutPlayer] video stall detected', { url: layer.url, stallMs: now - prev.ts });
+                              recoverStalledLayer(layer.url, now);
                             }
                           }}
                         />
