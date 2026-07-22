@@ -66,6 +66,12 @@ service cloud.firestore {
       return isCoachOfTenant(coachId) || isCoachByUid(coachId);
     }
 
+    // Member of coach check: member whose coachId claim matches the document's coachId.
+    // coachId claim is set in both onMemberCreated and claimMemberAccount — reliable for all members.
+    function isMemberOfCoach(coachId) {
+      return isAuthenticated() && getRole() == 'member' && getCoachId() == coachId;
+    }
+
     // ─────────────────────────────────────────────
     // USERS
     // ─────────────────────────────────────────────
@@ -303,7 +309,8 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (
         resource.data.isGlobal == true ||
         isCoachOrBootstrap(resource.data.coachId) ||
-        isPlatformAdmin()
+        isPlatformAdmin() ||
+        isMemberOfCoach(resource.data.coachId)
       );
       allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
       allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
@@ -421,7 +428,7 @@ service cloud.firestore {
                     || isPlatformAdmin()
                     || (isAuthenticated() && isOwnDoc(resource.data.uid)
                         && request.resource.data.diff(resource.data).affectedKeys()
-                            .hasOnly(['displayName', 'phone', 'photoURL', 'updatedAt']))
+                            .hasOnly(['displayName', 'phone', 'photoURL', 'updatedAt', 'hrDeviceName', 'hrEnabled']))
                     || (isAuthenticated() && request.auth.uid == request.resource.data.coachId
                         && request.resource.data.diff(resource.data).affectedKeys()
                             .hasOnly(['coachId', 'updatedAt']));
@@ -892,6 +899,23 @@ service cloud.firestore {
         || isPlatformAdmin()
       );
       allow create, update, delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
+    // GUEST REFLECTIONS (glow/grow from share-link guests)
+    // Created by submitGuestReflection Cloud Function (Admin SDK) after
+    // validating the share token. No client writes — guests are
+    // unauthenticated. Sharing coach can read and mark reviewed.
+    // ─────────────────────────────────────────────
+    match /guest_reflections/{reflectionId} {
+      allow read: if isAuthenticated() && (
+        isCoachOrBootstrap(resource.data.coachId)
+        || isPlatformAdmin()
+      );
+      allow update: if (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin())
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['reviewStatus', 'updatedAt']);
+      allow create, delete: if false;
     }
 
     match /acceptedPlanSnapshots/{snapshotId} {

@@ -42,6 +42,7 @@ import { enqueueWrite, processQueue } from '../../lib/offlineQueue';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
 import { Icon } from '../../components/Icon';
 import WorkoutPlayer from '../../components/WorkoutPlayer';
+import { HeartRateSessionStats } from '../../hooks/useHeartRate';
 import PostWorkoutJournal, { JournalEntry } from '../../components/PostWorkoutJournal';
 import MemberWorkoutHistory from '../../components/MemberWorkoutHistory';
 import WorkoutCalendarStrip from '../../components/WorkoutCalendarStrip';
@@ -138,6 +139,20 @@ function isPast(dateStr: string): boolean {
   return dateStr < todayString();
 }
 
+// Build the persisted heartRateMetrics object — plain defined numbers only
+// (Firestore rejects undefined fields), null when no HR samples were captured.
+function buildHeartRateMetrics(stats: HeartRateSessionStats | null): {
+  avgHR: number; maxHR: number; minHR: number; series: { t: number; hr: number }[];
+} | null {
+  if (!stats || !stats.sampleCount) return null;
+  return {
+    avgHR: stats.avgHR,
+    maxHR: stats.maxHR,
+    minHR: stats.minHR,
+    series: stats.series.map((p) => ({ t: p.t, hr: p.hr })),
+  };
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 export default function MemberWorkoutsScreen() {
   const insets = useSafeAreaInsets();
@@ -183,6 +198,9 @@ export default function MemberWorkoutsScreen() {
 
   // Duration tracking
   const workoutStartTime = useRef<number | null>(null);
+
+  // Heart-rate session summary from the player (null when HR wasn't used)
+  const hrMetricsRef = useRef<HeartRateSessionStats | null>(null);
 
   // ── Real-time listener for assignments ────────────────────────────────
   useEffect(() => {
@@ -335,6 +353,9 @@ export default function MemberWorkoutsScreen() {
           reviewedAt: null,
           coachNote: '',
           movementSwaps: sessionSwapLog.length > 0 ? sessionSwapLog : null,
+          ...(buildHeartRateMetrics(hrMetricsRef.current)
+            ? { heartRateMetrics: buildHeartRateMetrics(hrMetricsRef.current) }
+            : {}),
         });
       } catch (err) {
         console.error('[MemberWorkouts] Failed to log completion:', err);
@@ -345,6 +366,7 @@ export default function MemberWorkoutsScreen() {
       setJournalVisible(false);
       setPlayerWorkout(null);
       workoutStartTime.current = null;
+      hrMetricsRef.current = null;
       submittingRef.current = false;
     },
     [activeAssignmentId, memberId, playerWorkout, completedDuration, activeCoachId, sessionSwapLog],
@@ -383,6 +405,9 @@ export default function MemberWorkoutsScreen() {
         reviewStatus: 'pending',
         reviewedAt: null,
         coachNote: '',
+        ...(buildHeartRateMetrics(hrMetricsRef.current)
+          ? { heartRateMetrics: buildHeartRateMetrics(hrMetricsRef.current) }
+          : {}),
       });
     } catch (err) {
       console.error('[MemberWorkouts] Failed to log skip:', err);
@@ -392,6 +417,7 @@ export default function MemberWorkoutsScreen() {
     setJournalVisible(false);
     setPlayerWorkout(null);
     workoutStartTime.current = null;
+    hrMetricsRef.current = null;
     submittingRef.current = false;
   }, [activeAssignmentId, memberId, playerWorkout, completedDuration, activeCoachId]);
 
@@ -781,6 +807,7 @@ export default function MemberWorkoutsScreen() {
           }}
           onComplete={handlePlayerComplete}
           onSwapLog={(swaps: any[]) => setSessionSwapLog(swaps)}
+          onHeartRateSummary={(stats) => { hrMetricsRef.current = stats; }}
         />
       )}
 

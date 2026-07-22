@@ -14,9 +14,12 @@ import { useAuth } from '../../lib/AuthContext';
 import { auth } from '../../lib/firebase';
 import { Icon } from '../../components/Icon';
 import WorkoutPlayer from '../../components/WorkoutPlayer';
+import PostWorkoutJournal, { JournalEntry } from '../../components/PostWorkoutJournal';
+import { isWebBluetoothAvailable } from '../../hooks/useHeartRate';
 import { BG, CARD, BORDER, FG, GOLD, MUTED, FH, FB } from '../../lib/theme';
 
 const RESOLVE_URL = 'https://us-central1-goarrive.cloudfunctions.net/resolveShareToken';
+const GUEST_REFLECTION_URL = 'https://us-central1-goarrive.cloudfunctions.net/submitGuestReflection';
 
 type ShareVisibility = 'restricted' | 'anyone_with_link' | 'anyone_with_link_signin_required';
 
@@ -56,6 +59,8 @@ export default function SharePage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [showPlayer, setShowPlayer] = useState(false);
+  const [postFlow, setPostFlow] = useState<'none' | 'journal' | 'nudge'>('none');
+  const [playStartedAt, setPlayStartedAt] = useState<number | null>(null);
 
   useEffect(() => {
     if (!shareId) return;
@@ -107,6 +112,40 @@ export default function SharePage() {
     router.push('/(auth)/login');
   }
 
+  function guestDurationSec(): number {
+    return playStartedAt ? Math.round((Date.now() - playStartedAt) / 1000) : 0;
+  }
+
+  function handlePlayerComplete() {
+    setShowPlayer(false);
+    if (!user) {
+      setPostFlow('journal');
+    }
+  }
+
+  function handleGuestJournalSubmit(journal: JournalEntry) {
+    // Fire-and-forget — the nudge screen shouldn't wait on the network.
+    fetch(GUEST_REFLECTION_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        shareId,
+        glow: journal.glow,
+        grow: journal.grow,
+        energyRating: journal.energyRating,
+        moodRating: journal.moodRating,
+        durationSec: guestDurationSec(),
+      }),
+    }).catch((err) => {
+      console.warn('[SharePage] guest reflection save failed:', err);
+    });
+    setPostFlow('nudge');
+  }
+
+  function handleGuestJournalSkip() {
+    setPostFlow('nudge');
+  }
+
   if (loading || authLoading) {
     return (
       <View style={styles.center}>
@@ -130,9 +169,57 @@ export default function SharePage() {
 
   if (!teaser) return null;
 
+  if (workout && postFlow === 'nudge') {
+    return (
+      <View style={{ flex: 1, backgroundColor: BG }}>
+        <ScrollView contentContainerStyle={[styles.container, { paddingTop: Math.max(20, insets.top) }]}>
+          <View style={styles.heroCard}>
+            <View style={styles.nudgeHeader}>
+              <Icon name="check-circle" size={48} color={GOLD} />
+              <Text style={styles.nudgeTitle}>That workout is in the books</Text>
+              <Text style={styles.nudgeSubtitle}>
+                Nice work finishing {workout.name} from {teaser.coachName}.
+              </Text>
+            </View>
+
+            <View style={styles.nudgeValueList}>
+              <View style={styles.nudgeValueRow}>
+                <Icon name="trending-up" size={18} color={GOLD} />
+                <Text style={styles.nudgeValueText}>
+                  Keep your progress — workouts, reflections, and streaks saved in one place.
+                </Text>
+              </View>
+              <View style={styles.nudgeValueRow}>
+                <Icon name="person" size={18} color={GOLD} />
+                <Text style={styles.nudgeValueText}>
+                  Get coached — {teaser.coachName} can see your reflection and respond.
+                </Text>
+              </View>
+            </View>
+
+            <Pressable style={styles.playBtn} onPress={handleSignUp}>
+              <Text style={styles.playBtnText}>Create Free Account</Text>
+            </Pressable>
+
+            <Pressable style={styles.signUpBtnSubtle} onPress={() => setPostFlow('none')}>
+              <Text style={styles.nudgeDismissText}>Not now</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </View>
+    );
+  }
+
   if (workout) {
     return (
       <View style={{ flex: 1, backgroundColor: BG }}>
+        <PostWorkoutJournal
+          visible={postFlow === 'journal'}
+          workoutName={workout.name}
+          durationSeconds={guestDurationSec()}
+          onSubmit={handleGuestJournalSubmit}
+          onSkip={handleGuestJournalSkip}
+        />
         {!showPlayer ? (
           <ScrollView contentContainerStyle={[styles.container, { paddingTop: Math.max(20, insets.top) }]}>
             <View style={styles.heroCard}>
@@ -179,10 +266,25 @@ export default function SharePage() {
                 </View>
               ) : null}
 
-              <Pressable style={styles.playBtn} onPress={() => setShowPlayer(true)}>
+              <Pressable
+                style={styles.playBtn}
+                onPress={() => {
+                  setPlayStartedAt(Date.now());
+                  setShowPlayer(true);
+                }}
+              >
                 <Icon name="play" size={20} color={BG} />
                 <Text style={styles.playBtnText}>Start Workout</Text>
               </Pressable>
+
+              {Platform.OS === 'web' && !isWebBluetoothAvailable() ? (
+                <View style={styles.hrNoteRow}>
+                  <Icon name="heart" size={12} color={MUTED} />
+                  <Text style={styles.hrNoteText}>
+                    Heart rate tracking is available on Chrome (desktop or Android)
+                  </Text>
+                </View>
+              ) : null}
 
               {!user ? (
                 <Pressable style={styles.signUpBtnSubtle} onPress={handleSignUp}>
@@ -198,7 +300,7 @@ export default function SharePage() {
             visible={showPlayer}
             workout={workout}
             onClose={() => setShowPlayer(false)}
-            onComplete={() => setShowPlayer(false)}
+            onComplete={handlePlayerComplete}
           />
         )}
       </View>
@@ -457,9 +559,62 @@ const styles = StyleSheet.create({
     fontFamily: FB,
     flexShrink: 1,
   },
+  hrNoteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 10,
+  },
+  hrNoteText: {
+    color: MUTED,
+    fontSize: 12,
+    fontFamily: FB,
+    flexShrink: 1,
+  },
   signUpBtnSubtle: {
     alignItems: 'center',
     paddingVertical: 8,
+  },
+  nudgeHeader: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  nudgeTitle: {
+    color: FG,
+    fontSize: 22,
+    fontWeight: '700',
+    fontFamily: FH,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  nudgeSubtitle: {
+    color: MUTED,
+    fontSize: 14,
+    fontFamily: FB,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  nudgeValueList: {
+    gap: 12,
+  },
+  nudgeValueRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  nudgeValueText: {
+    color: FG,
+    fontSize: 14,
+    fontFamily: FB,
+    lineHeight: 20,
+    flexShrink: 1,
+  },
+  nudgeDismissText: {
+    color: MUTED,
+    fontSize: 14,
+    fontFamily: FB,
+    fontWeight: '600',
   },
   signUpBtnSubtleText: {
     color: GOLD,

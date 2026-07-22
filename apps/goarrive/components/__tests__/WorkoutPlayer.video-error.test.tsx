@@ -13,14 +13,15 @@ import {
   STALL_RECOVERY_THROTTLE_MS,
   type StallRecoveryState,
 } from '../WorkoutPlayer.helpers';
+import { vi } from 'vitest';
 
 const LAYER_URL = 'https://storage.example.com/squat.mp4';
 
 describe('handleVideoLayerPlaybackStatus — error path', () => {
-  let warnSpy: jest.SpyInstance;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -58,10 +59,10 @@ describe('handleVideoLayerPlaybackStatus — error path', () => {
 });
 
 describe('handleVideoLayerPlaybackStatus — stall detection', () => {
-  let warnSpy: jest.SpyInstance;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => {

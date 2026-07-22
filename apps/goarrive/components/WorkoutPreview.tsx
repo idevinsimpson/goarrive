@@ -30,6 +30,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Icon } from './Icon';
 import { useOfflineVideoCache } from '../hooks/useOfflineVideoCache';
+import { buildPreviewSections, sectionTitle } from '../hooks/useWorkoutFlatten';
 import { FB, FH } from '../lib/theme';
 
 interface WorkoutPreviewProps {
@@ -267,43 +268,48 @@ export default function WorkoutPreview({
             </View>
           )}
 
-          {/* Block breakdown */}
+          {/* Block breakdown — consecutive blocks between Water Breaks roll up
+              into one titled section (e.g. "Superset + Tabata") */}
           <View style={st.section}>
             <Text style={st.sectionTitle}>Block Breakdown</Text>
-            {blocks.map((block: any, bi: number) => (
-              <View key={bi} style={st.blockCard}>
-                <View style={st.blockHeader}>
-                  <Text style={st.blockName}>
-                    {block.name || block.label || `Block ${bi + 1}`}
-                  </Text>
-                  <Text style={st.blockType}>
-                    {block.type || 'Strength'}
-                    {(block.rounds ?? block.sets ?? 1) > 1
-                      ? ` · ${block.rounds ?? block.sets} rounds`
-                      : ''}
-                  </Text>
+            {buildPreviewSections(workout).map((section, si) => {
+              const roundsList = section.map(({ block }) => block.rounds ?? block.sets ?? 1);
+              const uniformRounds = roundsList.every((r) => r === roundsList[0]) ? roundsList[0] : null;
+              return (
+                <View key={si} style={st.blockCard}>
+                  <View style={st.blockHeader}>
+                    <Text style={st.blockName}>{sectionTitle(section)}</Text>
+                    {uniformRounds && uniformRounds > 1 ? (
+                      <Text style={st.blockType}>{uniformRounds} rounds</Text>
+                    ) : null}
+                  </View>
+                  {section.map(({ block, bi }) => (
+                    <React.Fragment key={bi}>
+                      {block.grabEquipmentText ? (
+                        <View style={st.grabEquipmentRow}>
+                          <Icon name="package" size={13} color="#F5A623" />
+                          <Text style={st.grabEquipmentText}>{block.grabEquipmentText}</Text>
+                        </View>
+                      ) : null}
+                      {(block.movements || [])
+                        .map((mv: any, idx: number) => ({ mv, idx }))
+                        .filter(({ mv }: { mv: any }) => mv.showOnPreview !== false)
+                        .map(({ mv, idx }: { mv: any; idx: number }) => (
+                        <View key={idx} style={st.movementRow}>
+                          <View style={st.movementDot} />
+                          <Text style={st.movementName}>{mv.name || mv.movementName || 'Movement'}</Text>
+                          <Text style={st.movementMeta}>
+                            {mv.reps
+                              ? `${mv.sets ?? 1}×${mv.reps}`
+                              : `${mv.durationSec ?? mv.duration ?? mv.workSec ?? 40}s`}
+                          </Text>
+                        </View>
+                      ))}
+                    </React.Fragment>
+                  ))}
                 </View>
-                {block.grabEquipmentText ? (
-                  <View style={st.grabEquipmentRow}>
-                    <Icon name="package" size={13} color="#F5A623" />
-                    <Text style={st.grabEquipmentText}>{block.grabEquipmentText}</Text>
-                  </View>
-                ) : null}
-                {(block.movements || [])
-                  .filter((mv: any) => mv.showOnPreview !== false)
-                  .map((mv: any, mi: number) => (
-                  <View key={mi} style={st.movementRow}>
-                    <View style={st.movementDot} />
-                    <Text style={st.movementName}>{mv.name || mv.movementName || 'Movement'}</Text>
-                    <Text style={st.movementMeta}>
-                      {mv.reps
-                        ? `${mv.sets ?? 1}×${mv.reps}`
-                        : `${mv.durationSec ?? mv.duration ?? mv.workSec ?? 40}s`}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            ))}
+              );
+            })}
           </View>
         </ScrollView>
 

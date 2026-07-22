@@ -39,6 +39,20 @@ function getAudioContext(): AudioContext | null {
   return sharedCtx;
 }
 
+/**
+ * Unlock the shared AudioContext from a user gesture handler.
+ * Must be called in response to a real user interaction (touch/click)
+ * for Safari/iOS to allow audio playback.
+ */
+export function unlockSharedAudioContext(): void {
+  const ctx = getAudioContext();
+  if (ctx) {
+    ctx.resume().then(() => {
+      console.log('[audioCues] SharedAudioContext resumed:', ctx.state);
+    }).catch(() => {});
+  }
+}
+
 /** Returns true if audio context is available and running */
 function isAudioAvailable(): boolean {
   const ctx = getAudioContext();
@@ -183,6 +197,24 @@ export function cueWorkoutComplete(): void {
 /** Short confirmation blip — rep-based movement done */
 export function cueRepDone(): void {
   playTone(784, 0.1, 0.2, 'sine', 0); // G5
+}
+
+/**
+ * Called once from the user-gesture handler that starts the workout (handleStart).
+ * Resumes the Web Audio context and pre-plays a silent HTMLAudioElement so
+ * subsequent programmatic play() calls are not blocked by Chrome's autoplay
+ * policy on first-visit sessions with low MEI.
+ */
+export function unlockAudio(): void {
+  if (typeof window === 'undefined') return;
+  getAudioContext();
+  try {
+    const el = new (window as any).Audio();
+    const p = el.play();
+    if (p && typeof p.then === 'function') {
+      p.then(() => { el.pause(); }).catch(() => {});
+    }
+  } catch {}
 }
 
 /** Get/set mute state (persisted in memory only) */

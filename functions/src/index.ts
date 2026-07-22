@@ -119,6 +119,10 @@ const twilioFromNumber = defineSecret('TWILIO_FROM_NUMBER');
 const googleClientId = defineSecret('GOOGLE_CLIENT_ID');
 const googleClientSecret = defineSecret('GOOGLE_CLIENT_SECRET');
 
+// ── Mubert Secrets (workout background music) ─────────────────────────────────
+const mubertCompanyId = defineSecret('MUBERT_COMPANY_ID');
+const mubertLicenseToken = defineSecret('MUBERT_LICENSE_TOKEN');
+
 // ── Tier split config (GoArrive share percent) ────────────────────────────────
 // 40% for coaches with < 5 active paying members
 // 35% for coaches with 5–9 active paying members
@@ -2119,6 +2123,112 @@ export const claimMemberAccount = onCall(
 
     console.log('[claimMemberAccount] Member claimed:', callerUid, memberId);
     return { success: true };
+  }
+);
+
+
+/**
+ * sendMemberInvite – Coach-initiated: ensure a Firebase Auth account exists
+ * for a coach-created member and return a password-reset / first-time-setup
+ * link they can share.
+ *
+ * Handles both cases:
+ *   - Member has no Auth user yet → creates one, sets member claims, links
+ *     the member doc, returns a reset link for the member to set a password.
+ *   - Member already has an Auth user → just returns a fresh reset link.
+ *
+ * Tenant isolation: caller must be the member's coach (or a platformAdmin).
+ *
+ * Input:  { memberId: string }
+ * Output: { success, resetLink, email, authCreated }
+ */
+export const sendMemberInvite = onCall(
+  { region: 'us-central1', invoker: 'public' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const token = request.auth?.token;
+    const callerRole = token?.role;
+    const callerCoachId = (token?.coachId as string | undefined) ?? callerUid;
+    const isAdmin = token?.admin === true || callerRole === 'platformAdmin';
+    if (callerRole !== 'coach' && !isAdmin) {
+      throw new HttpsError('permission-denied', 'Only coaches can send member invites');
+    }
+
+    const { memberId } = request.data as { memberId?: string };
+    if (!memberId) throw new HttpsError('invalid-argument', 'memberId is required');
+
+    const memberRef = db.collection('members').doc(memberId);
+    const memberSnap = await memberRef.get();
+    if (!memberSnap.exists) {
+      throw new HttpsError('not-found', 'Member record not found');
+    }
+    const member = memberSnap.data()!;
+
+    if (!isAdmin && member.coachId !== callerCoachId) {
+      throw new HttpsError('permission-denied', 'This member belongs to a different coach');
+    }
+
+    const email = String(member.email ?? '').trim().toLowerCase();
+    if (!email) {
+      throw new HttpsError(
+        'failed-precondition',
+        'This member has no email on file. Add one before sending an invite.'
+      );
+    }
+
+    // Ensure a Firebase Auth user exists for this email
+    let userRecord: admin.auth.UserRecord;
+    let authCreated = false;
+    try {
+      userRecord = await admin.auth().getUserByEmail(email);
+    } catch (err: any) {
+      if (err.code !== 'auth/user-not-found') {
+        throw new HttpsError('internal', err.message ?? 'Failed to look up user');
+      }
+      const cryptoMod = require('crypto');
+      const tempPassword = cryptoMod.randomBytes(24).toString('base64');
+      userRecord = await admin.auth().createUser({
+        email,
+        password: tempPassword,
+        displayName: member.displayName || member.name || '',
+      });
+      authCreated = true;
+    }
+
+    // Set member custom claims so role-gated UI and rules resolve correctly
+    await admin.auth().setCustomUserClaims(userRecord.uid, {
+      role: 'member',
+      coachId: member.coachId,
+      tenantId: member.tenantId ?? member.coachId,
+      memberId: memberId,
+    });
+
+    // Link the auth account to the member doc if not already linked
+    if (!member.uid || member.uid !== userRecord.uid || member.hasAccount !== true) {
+      await memberRef.update({
+        uid: userRecord.uid,
+        hasAccount: true,
+        email,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
+    const actionCodeSettings = { url: appUrl, handleCodeInApp: false };
+    const resetLink = await admin.auth().generatePasswordResetLink(email, actionCodeSettings);
+
+    console.log(
+      `[sendMemberInvite] ${authCreated ? 'Created' : 'Found'} auth for ${email} memberId=${memberId} by ${callerUid}`
+    );
+
+    return {
+      success: true,
+      resetLink,
+      email,
+      authCreated,
+    };
   }
 );
 
@@ -6636,7 +6746,7 @@ export const googleCalendarCallback = onRequest(
         details: 'Google Calendar OAuth2 connected successfully',
       });
       // Redirect to the app's account page
-      res.redirect('https://goarrive.web.app/account?gcal=connected');
+      res.redirect('https://goarrive.fit/account?gcal=connected');
     } catch (err: any) {
       console.error('[googleCalendarCallback] Error:', err);
       res.status(500).send('Failed to connect Google Calendar: ' + (err.message || 'Unknown error'));
@@ -6689,11 +6799,19 @@ export const syncToGoogleCalendar = onCall(
         continue;
       }
       try {
-        const startDateTime = `${inst.scheduledDate}T${inst.scheduledStartTime || '09:00'}:00`;
-        const durationMin = inst.durationMinutes || 30;
-        const endDate = new Date(startDateTime);
-        endDate.setMinutes(endDate.getMinutes() + durationMin);
-        const endDateTime = endDate.toISOString();
+        const timeStr = (inst.scheduledStartTime as string) || '09:00';
+        const startDateTime = `${inst.scheduledDate}T${timeStr}:00`;
+        const durationMin = (inst.durationMinutes as number) || 30;
+        // Compute end time using local integer arithmetic to avoid UTC timezone shift
+        const [startH, startM] = timeStr.split(':').map(Number);
+        const endTotalMin = startH * 60 + startM + durationMin;
+        const endH = Math.floor(endTotalMin / 60) % 24;
+        const endM = endTotalMin % 60;
+        // Handle sessions that run past midnight
+        const endDateStr = endTotalMin >= 24 * 60
+          ? new Date(new Date(inst.scheduledDate + 'T00:00:00Z').getTime() + 86400000).toISOString().slice(0, 10)
+          : inst.scheduledDate as string;
+        const endDateTime = `${endDateStr}T${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}:00`;
 
         const event = await calendar.events.insert({
           calendarId: 'primary',
@@ -6859,7 +6977,7 @@ export const gcalConflictCallback = onRequest(
         details: `Conflict-check Google account connected: ${email}`,
       });
 
-      res.redirect(`https://goarrive.web.app/account?gcal=conflict_connected&email=${encodeURIComponent(email)}`);
+      res.redirect(`https://goarrive.fit/account?gcal=conflict_connected&email=${encodeURIComponent(email)}`);
     } catch (err: any) {
       console.error('[gcalConflictCallback] Error:', err);
       res.status(500).send('Failed to connect conflict-check Google Calendar: ' + (err.message || 'Unknown error'));
@@ -8030,7 +8148,9 @@ export const analyzeMovement = onCall(
 - "category": string — one of: "Upper Body Push", "Upper Body Pull", "Lower Body Push", "Lower Body Pull", "Core", "Cardio", "Mobility"
 - "equipment": string — one of: "Bodyweight", "Dumbbell", "Barbell", "Kettlebell", "Band", "Cable", "Machine", or "" if unclear
 - "difficulty": string — one of: "Beginner", "Intermediate", "Advanced"
-- "muscleGroups": string[] — array from: "Chest", "Back", "Shoulders", "Biceps", "Triceps", "Quads", "Hamstrings", "Glutes", "Calves", "Core", "Full Body"
+- "primaryMuscles": string[] — the 1-3 muscle groups doing the main work (more than 3 only if the movement is truly full-body/dynamic), from: "Chest", "Back", "Shoulders", "Biceps", "Triceps", "Quads", "Hamstrings", "Glutes", "Calves", "Core", "Full Body"
+- "secondaryMuscles": string[] — muscle groups assisting or stabilizing (same allowed values, no overlap with primaryMuscles)
+- "muscleGroups": string[] — the union of primaryMuscles and secondaryMuscles (same allowed values)
 - "description": string — 1-2 sentence coaching cue (form tips, what to focus on)
 - "regression": string — an easier alternative exercise name
 - "progression": string — a harder alternative exercise name
@@ -8094,12 +8214,20 @@ Return ONLY valid JSON, no markdown, no explanation.${context ? `\n\nAdditional 
 
       const analysis = JSON.parse(jsonStr);
 
+      const primaryMuscles: string[] = Array.isArray(analysis.primaryMuscles) ? analysis.primaryMuscles : [];
+      const secondaryMuscles: string[] = (Array.isArray(analysis.secondaryMuscles) ? analysis.secondaryMuscles : [])
+        .filter((m: string) => !primaryMuscles.includes(m));
+      const rawUnion: string[] = Array.isArray(analysis.muscleGroups) ? analysis.muscleGroups : [];
+      const muscleGroups = Array.from(new Set([...primaryMuscles, ...secondaryMuscles, ...rawUnion]));
+
       return {
         name: analysis.name || '',
         category: analysis.category || '',
         equipment: analysis.equipment || '',
         difficulty: analysis.difficulty || '',
-        muscleGroups: Array.isArray(analysis.muscleGroups) ? analysis.muscleGroups : [],
+        primaryMuscles,
+        secondaryMuscles,
+        muscleGroups,
         description: analysis.description || '',
         regression: analysis.regression || '',
         progression: analysis.progression || '',
@@ -9169,6 +9297,265 @@ export const generateVoice = onCall(
   }
 );
 
+// ─── getWorkoutMusic — AI background music for workout playback (Mubert v3) ──
+// Auth-required callable. Mints per-user Mubert customer credentials via
+// service/customers (cached in Firestore), generates a text-to-music track for
+// the requested style+duration, and caches the MP3 in Firebase Storage at
+// music_cache/<style>/<duration>.mp3. Trial plan allows only 100 tracks total,
+// so an existing style+duration combo is NEVER regenerated — Storage is the
+// source of truth, and a Firestore lock (musicCache/{style_duration}) prevents
+// two concurrent callers from both spending a generation on the same combo.
+// ─────────────────────────────────────────────────────────────────────────────
+const MUBERT_API_BASE = 'https://music-api.mubert.com/api/v3';
+
+const MUSIC_STYLES: Record<string, { prompt: string; intensity: 'low' | 'medium' | 'high' }> = {
+  workout: { prompt: 'High energy gym workout music, driving beat, motivating and powerful', intensity: 'high' },
+  edm: { prompt: 'Energetic EDM electronic dance music, festival drops, pumping bass', intensity: 'high' },
+  hiphop: { prompt: 'Upbeat hip-hop beat, confident groove, punchy drums', intensity: 'medium' },
+  chill: { prompt: 'Chill relaxed lo-fi beats, calm steady rhythm, smooth and warm', intensity: 'low' },
+  rock: { prompt: 'Energetic rock music, electric guitars, driving drums, anthemic', intensity: 'high' },
+  focus: { prompt: 'Ambient focus music, minimal steady pulse, deep concentration', intensity: 'low' },
+};
+
+export const getWorkoutMusic = onCall(
+  {
+    region: 'us-central1',
+    secrets: [mubertCompanyId, mubertLicenseToken],
+    timeoutSeconds: 120,
+    invoker: 'public',
+  },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError('unauthenticated', 'Sign in required');
+    }
+    const uid = request.auth.uid;
+
+    const { style, duration } = request.data as { style?: string; duration?: number };
+
+    const styleKey = String(style || '').toLowerCase();
+    const styleConfig = MUSIC_STYLES[styleKey];
+    if (!styleConfig) {
+      throw new HttpsError(
+        'invalid-argument',
+        `style must be one of: ${Object.keys(MUSIC_STYLES).join(', ')}`
+      );
+    }
+
+    // Bucket duration to whole minutes (60s–600s) so near-identical requests
+    // share one cached track instead of burning trial quota per second value.
+    const requestedSecs = typeof duration === 'number' && isFinite(duration) ? duration : 300;
+    const durationSecs = Math.min(600, Math.max(60, Math.round(requestedSecs / 60) * 60));
+
+    const path = `music_cache/${styleKey}/${durationSecs}.mp3`;
+    const bucket = admin.storage().bucket();
+    const file = bucket.file(path);
+    const cdnUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media`;
+
+    // ── Layer 0: Storage cache hit — never regenerate an existing combo ────
+    try {
+      const [exists] = await file.exists();
+      if (exists) {
+        console.info('[MUSIC] getWorkoutMusic: cache hit', { path, styleKey, durationSecs });
+        return { url: cdnUrl, path, cached: true, style: styleKey, duration: durationSecs };
+      }
+    } catch (err: any) {
+      console.warn('[MUSIC] getWorkoutMusic: cache check failed', {
+        path, message: String(err?.message || err).slice(0, 200),
+      });
+    }
+
+    // ── Layer 1: generation lock — only one caller spends quota per combo ──
+    const lockRef = db.doc(`musicCache/${styleKey}_${durationSecs}`);
+    const LOCK_TTL_MS = 3 * 60 * 1000;
+    const acquiredLock = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(lockRef);
+      if (snap.exists) {
+        const data = snap.data() as { status?: string; createdAt?: number };
+        const fresh = typeof data.createdAt === 'number' && Date.now() - data.createdAt < LOCK_TTL_MS;
+        if (data.status === 'generating' && fresh) return false;
+      }
+      tx.set(lockRef, { status: 'generating', createdAt: Date.now(), uid, path });
+      return true;
+    });
+
+    if (!acquiredLock) {
+      // Another caller is generating this combo — wait for the file to land.
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const [exists] = await file.exists();
+        if (exists) {
+          return { url: cdnUrl, path, cached: true, style: styleKey, duration: durationSecs };
+        }
+      }
+      throw new HttpsError('unavailable', 'music:generation_in_progress', {
+        reason: 'Another request is generating this track. Retry shortly.',
+      });
+    }
+
+    const companyId = mubertCompanyId.value()?.trim();
+    const licenseToken = mubertLicenseToken.value()?.trim();
+    const releaseLock = () => lockRef.delete().catch(() => {});
+
+    if (!companyId || !licenseToken) {
+      await releaseLock();
+      console.error('[MUSIC] getWorkoutMusic: Mubert secrets empty');
+      throw new HttpsError('failed-precondition', 'music:apikey:missing', {
+        reason: 'MUBERT_COMPANY_ID / MUBERT_LICENSE_TOKEN secret is unset or empty',
+      });
+    }
+
+    try {
+      // ── Layer 2: per-user Mubert customer credentials ───────────────────
+      // Cached in Firestore; re-minted when missing or expired. custom_id is
+      // the Firebase uid, so re-minting is idempotent from Mubert's side.
+      const credsRef = db.doc(`mubertCustomers/${uid}`);
+      let customerId: string | null = null;
+      let accessToken: string | null = null;
+      try {
+        const credsSnap = await credsRef.get();
+        if (credsSnap.exists) {
+          const c = credsSnap.data() as {
+            customerId?: string; accessToken?: string; expiredAt?: string;
+          };
+          const stillValid = !c.expiredAt || new Date(c.expiredAt).getTime() > Date.now() + 60_000;
+          if (c.customerId && c.accessToken && stillValid) {
+            customerId = c.customerId;
+            accessToken = c.accessToken;
+          }
+        }
+      } catch {
+        // fall through to mint
+      }
+
+      if (!customerId || !accessToken) {
+        const custResp = await fetch(`${MUBERT_API_BASE}/service/customers`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'company-id': companyId,
+            'license-token': licenseToken,
+          },
+          body: JSON.stringify({ custom_id: uid }),
+        });
+        if (!custResp.ok) {
+          const errBody = (await custResp.text()).slice(0, 500);
+          console.error('[MUSIC] getWorkoutMusic: customer mint FAILED', {
+            status: custResp.status, body: errBody,
+          });
+          throw new HttpsError('internal', `music:customer:${custResp.status}`, {
+            layer: 'customer', status: custResp.status, body: errBody,
+          });
+        }
+        const custJson = (await custResp.json()) as {
+          data?: {
+            id?: string;
+            access?: { customer_id?: string; token?: string; access_token?: string; expired_at?: string };
+          };
+        };
+        customerId = custJson.data?.access?.customer_id || custJson.data?.id || null;
+        accessToken = custJson.data?.access?.token || custJson.data?.access?.access_token || null;
+        if (!customerId || !accessToken) {
+          console.error('[MUSIC] getWorkoutMusic: customer mint — bad response', {
+            body: JSON.stringify(custJson).slice(0, 400),
+          });
+          throw new HttpsError('internal', 'music:customer:bad_response');
+        }
+        await credsRef.set({
+          customerId,
+          accessToken,
+          expiredAt: custJson.data?.access?.expired_at || null,
+          updatedAt: Date.now(),
+        }).catch(() => {});
+      }
+
+      // ── Layer 3: text-to-music generation ───────────────────────────────
+      const genResp = await fetch(`${MUBERT_API_BASE}/public/tracks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'customer-id': customerId,
+          'access-token': accessToken,
+        },
+        body: JSON.stringify({
+          prompt: styleConfig.prompt,
+          duration: durationSecs,
+          bitrate: 128,
+          mode: 'track',
+          intensity: styleConfig.intensity,
+          format: 'mp3',
+        }),
+      });
+      if (!genResp.ok) {
+        const errBody = (await genResp.text()).slice(0, 500);
+        console.error('[MUSIC] getWorkoutMusic: generation FAILED', {
+          status: genResp.status, body: errBody, styleKey, durationSecs,
+        });
+        throw new HttpsError('internal', `music:generate:${genResp.status}`, {
+          layer: 'generate', status: genResp.status, body: errBody,
+        });
+      }
+
+      type MubertTrack = {
+        data?: {
+          id?: string;
+          generations?: Array<{ status?: string; url?: string | null }>;
+        };
+      };
+      const findReadyUrl = (t: MubertTrack): string | null => {
+        const gen = (t.data?.generations || []).find((g) => g.status === 'done' && g.url);
+        return gen?.url || null;
+      };
+
+      const genJson = (await genResp.json()) as MubertTrack;
+      const trackId = genJson.data?.id;
+      let trackUrl = findReadyUrl(genJson);
+
+      // Poll until the generation is done (~10s typical for 60s of audio).
+      if (!trackUrl && trackId) {
+        for (let i = 0; i < 25 && !trackUrl; i++) {
+          await new Promise((r) => setTimeout(r, 3000));
+          const pollResp = await fetch(`${MUBERT_API_BASE}/public/tracks/${trackId}`, {
+            headers: { 'customer-id': customerId, 'access-token': accessToken },
+          });
+          if (!pollResp.ok) continue;
+          trackUrl = findReadyUrl((await pollResp.json()) as MubertTrack);
+        }
+      }
+      if (!trackUrl) {
+        console.error('[MUSIC] getWorkoutMusic: generation timed out', { trackId, styleKey, durationSecs });
+        throw new HttpsError('deadline-exceeded', 'music:generate:timeout', { trackId });
+      }
+
+      // ── Layer 4: download + Storage upload (cache forever) ──────────────
+      const dlResp = await fetch(trackUrl);
+      if (!dlResp.ok) {
+        console.error('[MUSIC] getWorkoutMusic: download FAILED', { status: dlResp.status, trackUrl });
+        throw new HttpsError('internal', `music:download:${dlResp.status}`, {
+          layer: 'download', status: dlResp.status,
+        });
+      }
+      const audioBuffer = Buffer.from(await dlResp.arrayBuffer());
+      await file.save(audioBuffer, { contentType: 'audio/mpeg' });
+
+      await lockRef.set({
+        status: 'ready', url: cdnUrl, path, style: styleKey, duration: durationSecs,
+        trackId: trackId || null, createdAt: Date.now(), uid,
+      }).catch(() => {});
+
+      console.info('[MUSIC] getWorkoutMusic: generated + cached', {
+        path, styleKey, durationSecs, bytes: audioBuffer.length, trackId,
+      });
+      return { url: cdnUrl, path, cached: false, style: styleKey, duration: durationSecs };
+    } catch (err: any) {
+      await releaseLock();
+      if (err instanceof HttpsError) throw err;
+      const detail = String(err?.message || err).slice(0, 300);
+      console.error('[MUSIC] getWorkoutMusic: THREW', { styleKey, durationSecs, detail }, err);
+      throw new HttpsError('internal', 'music:failed', { message: detail });
+    }
+  }
+);
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // NEW COACH — Branded welcome email
 // Fires whenever a coaches/{coachId} doc is created, regardless of the path
@@ -9339,6 +9726,85 @@ export const onMemberCreated = onDocumentCreated(
     } catch (err) {
       console.error(TAG, 'Error notifying coach:', err);
     }
+  }
+);
+
+// ─── batchGenerateVoice — Batch TTS for workout phrase preloading ────────────
+// Accepts an array of {text, cacheKey} entries. For each entry, checks if the
+// audio already exists in Firebase Storage. If not, generates it via OpenAI TTS.
+// Returns a map of cacheKey → download URL for all entries.
+// ─────────────────────────────────────────────────────────────────────────────
+export const batchGenerateVoice = onCall(
+  { region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 120, maxInstances: 10 },
+  async (request) => {
+    const { phrases } = request.data as {
+      phrases?: { text: string; cacheKey: string }[];
+    };
+
+    if (!phrases || !Array.isArray(phrases) || phrases.length === 0) {
+      throw new HttpsError('invalid-argument', 'phrases array is required');
+    }
+    if (phrases.length > 100) {
+      throw new HttpsError('invalid-argument', 'Maximum 100 phrases per batch');
+    }
+
+    const apiKey = openaiApiKey.value()?.trim();
+    if (!apiKey) {
+      throw new HttpsError('internal', 'OpenAI API key not configured');
+    }
+
+    const bucket = admin.storage().bucket();
+    const results: Record<string, string> = {};
+
+    // Process in parallel with concurrency limit of 5
+    const CONCURRENCY = 5;
+    for (let i = 0; i < phrases.length; i += CONCURRENCY) {
+      const batch = phrases.slice(i, i + CONCURRENCY);
+      await Promise.all(batch.map(async ({ text, cacheKey }) => {
+        if (!text || !cacheKey) return;
+
+        const storagePath = `voice_cache/phrases/${cacheKey}.mp3`;
+        const file = bucket.file(storagePath);
+
+        // Check if already cached
+        const [exists] = await file.exists();
+        if (exists) {
+          results[cacheKey] = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+          return;
+        }
+
+        // Generate via OpenAI TTS
+        try {
+          const response = await fetch('https://api.openai.com/v1/audio/speech', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: 'tts-1',
+              voice: 'onyx',
+              input: text,
+            }),
+          });
+
+          if (!response.ok) {
+            console.error(`[batchGenerateVoice] OpenAI error for "${cacheKey}":`, response.status);
+            return;
+          }
+
+          const audioBuffer = Buffer.from(await response.arrayBuffer());
+          await file.save(audioBuffer, { contentType: 'audio/mpeg' });
+          await file.makePublic();
+
+          results[cacheKey] = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+        } catch (err) {
+          console.error(`[batchGenerateVoice] Failed for "${cacheKey}":`, err);
+        }
+      }));
+    }
+
+    return { urls: results, generated: Object.keys(results).length, total: phrases.length };
   }
 );
 
@@ -9812,6 +10278,92 @@ export const resolveShareToken = onRequest(
         ...sanitizePlayerWorkout(workout, movementCanonical),
       },
     });
+  },
+);
+
+// ─── submitGuestReflection — guest glow/grow after shared-workout play ───────
+// Unauthenticated guests can't write Firestore directly (rules deny), so this
+// endpoint validates the share token server-side and writes via Admin SDK.
+export const submitGuestReflection = onRequest(
+  { cors: true, region: 'us-central1' },
+  async (req, res) => {
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed.' });
+      return;
+    }
+
+    const body = (req.body || {}) as Record<string, any>;
+    const shareId = body.shareId;
+    if (!shareId || typeof shareId !== 'string' || shareId.length !== 32) {
+      res.status(400).json({ error: 'Invalid share link.' });
+      return;
+    }
+
+    const tokenSnap = await db.collection('shareTokens').doc(shareId).get();
+    if (!tokenSnap.exists) {
+      res.status(404).json({ error: 'This share link is no longer available.' });
+      return;
+    }
+    const tokenData = tokenSnap.data()!;
+    if (tokenData.revokedAt) {
+      res.status(410).json({ error: 'This share link has been revoked.' });
+      return;
+    }
+    const expiresAt = tokenData.expiresAt as admin.firestore.Timestamp | null | undefined;
+    if (expiresAt && expiresAt.toMillis() < Date.now()) {
+      res.status(410).json({ error: 'This share link has expired.' });
+      return;
+    }
+    const visibility: ShareVisibility = normalizeVisibility(tokenData.visibility);
+    if (visibility === 'restricted') {
+      res.status(403).json({ error: 'This workout is no longer shared via link.' });
+      return;
+    }
+    if (visibility === 'anyone_with_link_signin_required') {
+      const authHeader = req.headers.authorization;
+      let ok = false;
+      if (authHeader?.startsWith('Bearer ')) {
+        try {
+          await admin.auth().verifyIdToken(authHeader.slice(7));
+          ok = true;
+        } catch { /* invalid token */ }
+      }
+      if (!ok) {
+        res.status(403).json({ error: 'Sign in required for this link.' });
+        return;
+      }
+    }
+
+    const cleanText = (v: any) =>
+      typeof v === 'string' ? v.trim().slice(0, 500) : '';
+    const cleanRating = (v: any) =>
+      Number.isInteger(v) && v >= 1 && v <= 5 ? v : null;
+    const durationSec =
+      typeof body.durationSec === 'number' && body.durationSec >= 0 && body.durationSec <= 86400
+        ? Math.round(body.durationSec)
+        : null;
+
+    const workoutSnap = await db.collection('workouts').doc(tokenData.workoutId).get();
+    const workoutName = workoutSnap.exists ? (workoutSnap.data()!.name || 'Workout') : 'Workout';
+
+    const docRef = await db.collection('guest_reflections').add({
+      coachId: tokenData.createdBy,
+      workoutId: tokenData.workoutId,
+      workoutName,
+      shareId,
+      journal: {
+        glow: cleanText(body.glow),
+        grow: cleanText(body.grow),
+        energyRating: cleanRating(body.energyRating),
+        moodRating: cleanRating(body.moodRating),
+      },
+      durationSec,
+      source: 'shareLink',
+      reviewStatus: 'pending',
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    res.status(200).json({ ok: true, id: docRef.id });
   },
 );
 

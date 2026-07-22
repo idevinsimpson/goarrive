@@ -59,6 +59,11 @@ type IconDef = {
 };
 
 const ICONS: Record<string, IconDef> = {
+  heart: {
+    paths: [
+      'M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z',
+    ],
+  },
   // Navigation
   dashboard: {
     paths: [
@@ -274,6 +279,13 @@ const ICONS: Record<string, IconDef> = {
     paths: [],
     fill: ['M6 19h4V5H6v14zm8-14v14h4V5h-4z'],
   },
+  'music': {
+    paths: [
+      'M9 18V5l12-2v13',
+      'M6 21a3 3 0 100-6 3 3 0 000 6z',
+      'M18 19a3 3 0 100-6 3 3 0 000 6z',
+    ],
+  },
   'skip-forward': {
     paths: [],
     fill: ['M6 18l8.5-6L6 6v12zm2-8.14L11.03 12 8 14.14V9.86zM16 6h2v12h-2z'],
@@ -366,6 +378,11 @@ const ICONS: Record<string, IconDef> = {
     paths: [
       'M23 7l-7 5 7 5V7z',
       'M14 5H3a2 2 0 00-2 2v10a2 2 0 002 2h11a2 2 0 002-2V7a2 2 0 00-2-2z',
+    ],
+  },
+  'droplet': {
+    paths: [
+      'M12 2.69l5.66 5.66a8 8 0 11-11.31 0z',
     ],
   },
   'alert-circle': {
@@ -523,6 +540,20 @@ const ICONS: Record<string, IconDef> = {
       'M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6',
       'M10 11v6',
       'M14 11v6',
+    ],
+  },
+  'volume-2': {
+    paths: [
+      'M11 5L6 9H2v6h4l5 4V5z',
+      'M19.07 4.93a10 10 0 010 14.14',
+      'M15.54 8.46a5 5 0 010 7.07',
+    ],
+  },
+  'volume-x': {
+    paths: [
+      'M11 5L6 9H2v6h4l5 4V5z',
+      'M23 9l-6 6',
+      'M17 9l6 6',
     ],
   },
 };

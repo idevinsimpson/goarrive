@@ -88,8 +88,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.listPublicCoaches = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = void 0;
-exports.finalizeMovementVariation = exports.getMovementVariationStatus = exports.startMovementVariation = exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.onCoachFeedbackStatusChanged = exports.onCoachFeedbackCreated = exports.sendWeeklyDigest = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.onCoachCreated = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = void 0;
+exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.sendMemberInvite = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.listPublicCoaches = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = void 0;
+exports.pollMovementVariationJobs = exports.dismissMovementVariation = exports.finalizeMovementVariation = exports.getMovementVariationStatus = exports.startMovementVariation = exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.submitGuestReflection = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.onCoachFeedbackStatusChanged = exports.onCoachFeedbackCreated = exports.sendWeeklyDigest = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.batchGenerateVoice = exports.onMemberCreated = exports.onCoachCreated = exports.getWorkoutMusic = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -135,6 +135,9 @@ const twilioFromNumber = (0, params_1.defineSecret)('TWILIO_FROM_NUMBER');
 // ── Google Calendar Secrets ──────────────────────────────────────────────────
 const googleClientId = (0, params_1.defineSecret)('GOOGLE_CLIENT_ID');
 const googleClientSecret = (0, params_1.defineSecret)('GOOGLE_CLIENT_SECRET');
+// ── Mubert Secrets (workout background music) ─────────────────────────────────
+const mubertCompanyId = (0, params_1.defineSecret)('MUBERT_COMPANY_ID');
+const mubertLicenseToken = (0, params_1.defineSecret)('MUBERT_LICENSE_TOKEN');
 // ── Tier split config (GoArrive share percent) ────────────────────────────────
 // 40% for coaches with < 5 active paying members
 // 35% for coaches with 5–9 active paying members
@@ -1816,6 +1819,95 @@ exports.claimMemberAccount = (0, https_1.onCall)({ region: 'us-central1' }, asyn
     });
     console.log('[claimMemberAccount] Member claimed:', callerUid, memberId);
     return { success: true };
+});
+/**
+ * sendMemberInvite – Coach-initiated: ensure a Firebase Auth account exists
+ * for a coach-created member and return a password-reset / first-time-setup
+ * link they can share.
+ *
+ * Handles both cases:
+ *   - Member has no Auth user yet → creates one, sets member claims, links
+ *     the member doc, returns a reset link for the member to set a password.
+ *   - Member already has an Auth user → just returns a fresh reset link.
+ *
+ * Tenant isolation: caller must be the member's coach (or a platformAdmin).
+ *
+ * Input:  { memberId: string }
+ * Output: { success, resetLink, email, authCreated }
+ */
+exports.sendMemberInvite = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
+    var _a, _b, _c, _d, _e, _f;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const token = (_b = request.auth) === null || _b === void 0 ? void 0 : _b.token;
+    const callerRole = token === null || token === void 0 ? void 0 : token.role;
+    const callerCoachId = (_c = token === null || token === void 0 ? void 0 : token.coachId) !== null && _c !== void 0 ? _c : callerUid;
+    const isAdmin = (token === null || token === void 0 ? void 0 : token.admin) === true || callerRole === 'platformAdmin';
+    if (callerRole !== 'coach' && !isAdmin) {
+        throw new https_1.HttpsError('permission-denied', 'Only coaches can send member invites');
+    }
+    const { memberId } = request.data;
+    if (!memberId)
+        throw new https_1.HttpsError('invalid-argument', 'memberId is required');
+    const memberRef = db.collection('members').doc(memberId);
+    const memberSnap = await memberRef.get();
+    if (!memberSnap.exists) {
+        throw new https_1.HttpsError('not-found', 'Member record not found');
+    }
+    const member = memberSnap.data();
+    if (!isAdmin && member.coachId !== callerCoachId) {
+        throw new https_1.HttpsError('permission-denied', 'This member belongs to a different coach');
+    }
+    const email = String((_d = member.email) !== null && _d !== void 0 ? _d : '').trim().toLowerCase();
+    if (!email) {
+        throw new https_1.HttpsError('failed-precondition', 'This member has no email on file. Add one before sending an invite.');
+    }
+    // Ensure a Firebase Auth user exists for this email
+    let userRecord;
+    let authCreated = false;
+    try {
+        userRecord = await admin.auth().getUserByEmail(email);
+    }
+    catch (err) {
+        if (err.code !== 'auth/user-not-found') {
+            throw new https_1.HttpsError('internal', (_e = err.message) !== null && _e !== void 0 ? _e : 'Failed to look up user');
+        }
+        const cryptoMod = require('crypto');
+        const tempPassword = cryptoMod.randomBytes(24).toString('base64');
+        userRecord = await admin.auth().createUser({
+            email,
+            password: tempPassword,
+            displayName: member.displayName || member.name || '',
+        });
+        authCreated = true;
+    }
+    // Set member custom claims so role-gated UI and rules resolve correctly
+    await admin.auth().setCustomUserClaims(userRecord.uid, {
+        role: 'member',
+        coachId: member.coachId,
+        tenantId: (_f = member.tenantId) !== null && _f !== void 0 ? _f : member.coachId,
+        memberId: memberId,
+    });
+    // Link the auth account to the member doc if not already linked
+    if (!member.uid || member.uid !== userRecord.uid || member.hasAccount !== true) {
+        await memberRef.update({
+            uid: userRecord.uid,
+            hasAccount: true,
+            email,
+            updatedAt: firestore_2.FieldValue.serverTimestamp(),
+        });
+    }
+    const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
+    const actionCodeSettings = { url: appUrl, handleCodeInApp: false };
+    const resetLink = await admin.auth().generatePasswordResetLink(email, actionCodeSettings);
+    console.log(`[sendMemberInvite] ${authCreated ? 'Created' : 'Found'} auth for ${email} memberId=${memberId} by ${callerUid}`);
+    return {
+        success: true,
+        resetLink,
+        email,
+        authCreated,
+    };
 });
 // ═══════════════════════════════════════════════════════════════════════════════
 // SCHEDULING BACKBONE — Recurring Slots, Session Instances, Zoom Allocation
@@ -5814,7 +5906,7 @@ exports.googleCalendarCallback = (0, https_1.onRequest)({ secrets: [googleClient
             details: 'Google Calendar OAuth2 connected successfully',
         });
         // Redirect to the app's account page
-        res.redirect('https://goarrive.web.app/account?gcal=connected');
+        res.redirect('https://goarrive.fit/account?gcal=connected');
     }
     catch (err) {
         console.error('[googleCalendarCallback] Error:', err);
@@ -5863,11 +5955,19 @@ exports.syncToGoogleCalendar = (0, https_1.onCall)({ secrets: [googleClientId, g
             continue;
         }
         try {
-            const startDateTime = `${inst.scheduledDate}T${inst.scheduledStartTime || '09:00'}:00`;
+            const timeStr = inst.scheduledStartTime || '09:00';
+            const startDateTime = `${inst.scheduledDate}T${timeStr}:00`;
             const durationMin = inst.durationMinutes || 30;
-            const endDate = new Date(startDateTime);
-            endDate.setMinutes(endDate.getMinutes() + durationMin);
-            const endDateTime = endDate.toISOString();
+            // Compute end time using local integer arithmetic to avoid UTC timezone shift
+            const [startH, startM] = timeStr.split(':').map(Number);
+            const endTotalMin = startH * 60 + startM + durationMin;
+            const endH = Math.floor(endTotalMin / 60) % 24;
+            const endM = endTotalMin % 60;
+            // Handle sessions that run past midnight
+            const endDateStr = endTotalMin >= 24 * 60
+                ? new Date(new Date(inst.scheduledDate + 'T00:00:00Z').getTime() + 86400000).toISOString().slice(0, 10)
+                : inst.scheduledDate;
+            const endDateTime = `${endDateStr}T${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}:00`;
             const event = await calendar.events.insert({
                 calendarId: 'primary',
                 requestBody: {
@@ -6014,7 +6114,7 @@ exports.gcalConflictCallback = (0, https_1.onRequest)({ secrets: [googleClientId
             action: 'gcal_conflict_account_connected',
             details: `Conflict-check Google account connected: ${email}`,
         });
-        res.redirect(`https://goarrive.web.app/account?gcal=conflict_connected&email=${encodeURIComponent(email)}`);
+        res.redirect(`https://goarrive.fit/account?gcal=conflict_connected&email=${encodeURIComponent(email)}`);
     }
     catch (err) {
         console.error('[gcalConflictCallback] Error:', err);
@@ -7032,7 +7132,9 @@ exports.analyzeMovement = (0, https_1.onCall)({ region: 'us-central1', secrets: 
 - "category": string — one of: "Upper Body Push", "Upper Body Pull", "Lower Body Push", "Lower Body Pull", "Core", "Cardio", "Mobility"
 - "equipment": string — one of: "Bodyweight", "Dumbbell", "Barbell", "Kettlebell", "Band", "Cable", "Machine", or "" if unclear
 - "difficulty": string — one of: "Beginner", "Intermediate", "Advanced"
-- "muscleGroups": string[] — array from: "Chest", "Back", "Shoulders", "Biceps", "Triceps", "Quads", "Hamstrings", "Glutes", "Calves", "Core", "Full Body"
+- "primaryMuscles": string[] — the 1-3 muscle groups doing the main work (more than 3 only if the movement is truly full-body/dynamic), from: "Chest", "Back", "Shoulders", "Biceps", "Triceps", "Quads", "Hamstrings", "Glutes", "Calves", "Core", "Full Body"
+- "secondaryMuscles": string[] — muscle groups assisting or stabilizing (same allowed values, no overlap with primaryMuscles)
+- "muscleGroups": string[] — the union of primaryMuscles and secondaryMuscles (same allowed values)
 - "description": string — 1-2 sentence coaching cue (form tips, what to focus on)
 - "regression": string — an easier alternative exercise name
 - "progression": string — a harder alternative exercise name
@@ -7087,12 +7189,19 @@ Return ONLY valid JSON, no markdown, no explanation.${context ? `\n\nAdditional 
             jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
         }
         const analysis = JSON.parse(jsonStr);
+        const primaryMuscles = Array.isArray(analysis.primaryMuscles) ? analysis.primaryMuscles : [];
+        const secondaryMuscles = (Array.isArray(analysis.secondaryMuscles) ? analysis.secondaryMuscles : [])
+            .filter((m) => !primaryMuscles.includes(m));
+        const rawUnion = Array.isArray(analysis.muscleGroups) ? analysis.muscleGroups : [];
+        const muscleGroups = Array.from(new Set([...primaryMuscles, ...secondaryMuscles, ...rawUnion]));
         return {
             name: analysis.name || '',
             category: analysis.category || '',
             equipment: analysis.equipment || '',
             difficulty: analysis.difficulty || '',
-            muscleGroups: Array.isArray(analysis.muscleGroups) ? analysis.muscleGroups : [],
+            primaryMuscles,
+            secondaryMuscles,
+            muscleGroups,
             description: analysis.description || '',
             regression: analysis.regression || '',
             progression: analysis.progression || '',
@@ -7989,6 +8098,233 @@ exports.generateVoice = (0, https_1.onCall)({
     }
     return { url: cdnUrl, path, writeback, writebackError, provider: selectedProvider };
 });
+// ─── getWorkoutMusic — AI background music for workout playback (Mubert v3) ──
+// Auth-required callable. Mints per-user Mubert customer credentials via
+// service/customers (cached in Firestore), generates a text-to-music track for
+// the requested style+duration, and caches the MP3 in Firebase Storage at
+// music_cache/<style>/<duration>.mp3. Trial plan allows only 100 tracks total,
+// so an existing style+duration combo is NEVER regenerated — Storage is the
+// source of truth, and a Firestore lock (musicCache/{style_duration}) prevents
+// two concurrent callers from both spending a generation on the same combo.
+// ─────────────────────────────────────────────────────────────────────────────
+const MUBERT_API_BASE = 'https://music-api.mubert.com/api/v3';
+const MUSIC_STYLES = {
+    workout: { prompt: 'High energy gym workout music, driving beat, motivating and powerful', intensity: 'high' },
+    edm: { prompt: 'Energetic EDM electronic dance music, festival drops, pumping bass', intensity: 'high' },
+    hiphop: { prompt: 'Upbeat hip-hop beat, confident groove, punchy drums', intensity: 'medium' },
+    chill: { prompt: 'Chill relaxed lo-fi beats, calm steady rhythm, smooth and warm', intensity: 'low' },
+    rock: { prompt: 'Energetic rock music, electric guitars, driving drums, anthemic', intensity: 'high' },
+    focus: { prompt: 'Ambient focus music, minimal steady pulse, deep concentration', intensity: 'low' },
+};
+exports.getWorkoutMusic = (0, https_1.onCall)({
+    region: 'us-central1',
+    secrets: [mubertCompanyId, mubertLicenseToken],
+    timeoutSeconds: 120,
+    invoker: 'public',
+}, async (request) => {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
+    if (!((_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid)) {
+        throw new https_1.HttpsError('unauthenticated', 'Sign in required');
+    }
+    const uid = request.auth.uid;
+    const { style, duration } = request.data;
+    const styleKey = String(style || '').toLowerCase();
+    const styleConfig = MUSIC_STYLES[styleKey];
+    if (!styleConfig) {
+        throw new https_1.HttpsError('invalid-argument', `style must be one of: ${Object.keys(MUSIC_STYLES).join(', ')}`);
+    }
+    // Bucket duration to whole minutes (60s–600s) so near-identical requests
+    // share one cached track instead of burning trial quota per second value.
+    const requestedSecs = typeof duration === 'number' && isFinite(duration) ? duration : 300;
+    const durationSecs = Math.min(600, Math.max(60, Math.round(requestedSecs / 60) * 60));
+    const path = `music_cache/${styleKey}/${durationSecs}.mp3`;
+    const bucket = admin.storage().bucket();
+    const file = bucket.file(path);
+    const cdnUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media`;
+    // ── Layer 0: Storage cache hit — never regenerate an existing combo ────
+    try {
+        const [exists] = await file.exists();
+        if (exists) {
+            console.info('[MUSIC] getWorkoutMusic: cache hit', { path, styleKey, durationSecs });
+            return { url: cdnUrl, path, cached: true, style: styleKey, duration: durationSecs };
+        }
+    }
+    catch (err) {
+        console.warn('[MUSIC] getWorkoutMusic: cache check failed', {
+            path, message: String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 200),
+        });
+    }
+    // ── Layer 1: generation lock — only one caller spends quota per combo ──
+    const lockRef = db.doc(`musicCache/${styleKey}_${durationSecs}`);
+    const LOCK_TTL_MS = 3 * 60 * 1000;
+    const acquiredLock = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(lockRef);
+        if (snap.exists) {
+            const data = snap.data();
+            const fresh = typeof data.createdAt === 'number' && Date.now() - data.createdAt < LOCK_TTL_MS;
+            if (data.status === 'generating' && fresh)
+                return false;
+        }
+        tx.set(lockRef, { status: 'generating', createdAt: Date.now(), uid, path });
+        return true;
+    });
+    if (!acquiredLock) {
+        // Another caller is generating this combo — wait for the file to land.
+        for (let i = 0; i < 20; i++) {
+            await new Promise((r) => setTimeout(r, 3000));
+            const [exists] = await file.exists();
+            if (exists) {
+                return { url: cdnUrl, path, cached: true, style: styleKey, duration: durationSecs };
+            }
+        }
+        throw new https_1.HttpsError('unavailable', 'music:generation_in_progress', {
+            reason: 'Another request is generating this track. Retry shortly.',
+        });
+    }
+    const companyId = (_b = mubertCompanyId.value()) === null || _b === void 0 ? void 0 : _b.trim();
+    const licenseToken = (_c = mubertLicenseToken.value()) === null || _c === void 0 ? void 0 : _c.trim();
+    const releaseLock = () => lockRef.delete().catch(() => { });
+    if (!companyId || !licenseToken) {
+        await releaseLock();
+        console.error('[MUSIC] getWorkoutMusic: Mubert secrets empty');
+        throw new https_1.HttpsError('failed-precondition', 'music:apikey:missing', {
+            reason: 'MUBERT_COMPANY_ID / MUBERT_LICENSE_TOKEN secret is unset or empty',
+        });
+    }
+    try {
+        // ── Layer 2: per-user Mubert customer credentials ───────────────────
+        // Cached in Firestore; re-minted when missing or expired. custom_id is
+        // the Firebase uid, so re-minting is idempotent from Mubert's side.
+        const credsRef = db.doc(`mubertCustomers/${uid}`);
+        let customerId = null;
+        let accessToken = null;
+        try {
+            const credsSnap = await credsRef.get();
+            if (credsSnap.exists) {
+                const c = credsSnap.data();
+                const stillValid = !c.expiredAt || new Date(c.expiredAt).getTime() > Date.now() + 60000;
+                if (c.customerId && c.accessToken && stillValid) {
+                    customerId = c.customerId;
+                    accessToken = c.accessToken;
+                }
+            }
+        }
+        catch (_p) {
+            // fall through to mint
+        }
+        if (!customerId || !accessToken) {
+            const custResp = await fetch(`${MUBERT_API_BASE}/service/customers`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'company-id': companyId,
+                    'license-token': licenseToken,
+                },
+                body: JSON.stringify({ custom_id: uid }),
+            });
+            if (!custResp.ok) {
+                const errBody = (await custResp.text()).slice(0, 500);
+                console.error('[MUSIC] getWorkoutMusic: customer mint FAILED', {
+                    status: custResp.status, body: errBody,
+                });
+                throw new https_1.HttpsError('internal', `music:customer:${custResp.status}`, {
+                    layer: 'customer', status: custResp.status, body: errBody,
+                });
+            }
+            const custJson = (await custResp.json());
+            customerId = ((_e = (_d = custJson.data) === null || _d === void 0 ? void 0 : _d.access) === null || _e === void 0 ? void 0 : _e.customer_id) || ((_f = custJson.data) === null || _f === void 0 ? void 0 : _f.id) || null;
+            accessToken = ((_h = (_g = custJson.data) === null || _g === void 0 ? void 0 : _g.access) === null || _h === void 0 ? void 0 : _h.token) || ((_k = (_j = custJson.data) === null || _j === void 0 ? void 0 : _j.access) === null || _k === void 0 ? void 0 : _k.access_token) || null;
+            if (!customerId || !accessToken) {
+                console.error('[MUSIC] getWorkoutMusic: customer mint — bad response', {
+                    body: JSON.stringify(custJson).slice(0, 400),
+                });
+                throw new https_1.HttpsError('internal', 'music:customer:bad_response');
+            }
+            await credsRef.set({
+                customerId,
+                accessToken,
+                expiredAt: ((_m = (_l = custJson.data) === null || _l === void 0 ? void 0 : _l.access) === null || _m === void 0 ? void 0 : _m.expired_at) || null,
+                updatedAt: Date.now(),
+            }).catch(() => { });
+        }
+        // ── Layer 3: text-to-music generation ───────────────────────────────
+        const genResp = await fetch(`${MUBERT_API_BASE}/public/tracks`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'customer-id': customerId,
+                'access-token': accessToken,
+            },
+            body: JSON.stringify({
+                prompt: styleConfig.prompt,
+                duration: durationSecs,
+                bitrate: 128,
+                mode: 'track',
+                intensity: styleConfig.intensity,
+                format: 'mp3',
+            }),
+        });
+        if (!genResp.ok) {
+            const errBody = (await genResp.text()).slice(0, 500);
+            console.error('[MUSIC] getWorkoutMusic: generation FAILED', {
+                status: genResp.status, body: errBody, styleKey, durationSecs,
+            });
+            throw new https_1.HttpsError('internal', `music:generate:${genResp.status}`, {
+                layer: 'generate', status: genResp.status, body: errBody,
+            });
+        }
+        const findReadyUrl = (t) => {
+            var _a;
+            const gen = (((_a = t.data) === null || _a === void 0 ? void 0 : _a.generations) || []).find((g) => g.status === 'done' && g.url);
+            return (gen === null || gen === void 0 ? void 0 : gen.url) || null;
+        };
+        const genJson = (await genResp.json());
+        const trackId = (_o = genJson.data) === null || _o === void 0 ? void 0 : _o.id;
+        let trackUrl = findReadyUrl(genJson);
+        // Poll until the generation is done (~10s typical for 60s of audio).
+        if (!trackUrl && trackId) {
+            for (let i = 0; i < 25 && !trackUrl; i++) {
+                await new Promise((r) => setTimeout(r, 3000));
+                const pollResp = await fetch(`${MUBERT_API_BASE}/public/tracks/${trackId}`, {
+                    headers: { 'customer-id': customerId, 'access-token': accessToken },
+                });
+                if (!pollResp.ok)
+                    continue;
+                trackUrl = findReadyUrl((await pollResp.json()));
+            }
+        }
+        if (!trackUrl) {
+            console.error('[MUSIC] getWorkoutMusic: generation timed out', { trackId, styleKey, durationSecs });
+            throw new https_1.HttpsError('deadline-exceeded', 'music:generate:timeout', { trackId });
+        }
+        // ── Layer 4: download + Storage upload (cache forever) ──────────────
+        const dlResp = await fetch(trackUrl);
+        if (!dlResp.ok) {
+            console.error('[MUSIC] getWorkoutMusic: download FAILED', { status: dlResp.status, trackUrl });
+            throw new https_1.HttpsError('internal', `music:download:${dlResp.status}`, {
+                layer: 'download', status: dlResp.status,
+            });
+        }
+        const audioBuffer = Buffer.from(await dlResp.arrayBuffer());
+        await file.save(audioBuffer, { contentType: 'audio/mpeg' });
+        await lockRef.set({
+            status: 'ready', url: cdnUrl, path, style: styleKey, duration: durationSecs,
+            trackId: trackId || null, createdAt: Date.now(), uid,
+        }).catch(() => { });
+        console.info('[MUSIC] getWorkoutMusic: generated + cached', {
+            path, styleKey, durationSecs, bytes: audioBuffer.length, trackId,
+        });
+        return { url: cdnUrl, path, cached: false, style: styleKey, duration: durationSecs };
+    }
+    catch (err) {
+        await releaseLock();
+        if (err instanceof https_1.HttpsError)
+            throw err;
+        const detail = String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 300);
+        console.error('[MUSIC] getWorkoutMusic: THREW', { styleKey, durationSecs, detail }, err);
+        throw new https_1.HttpsError('internal', 'music:failed', { message: detail });
+    }
+});
 // ═══════════════════════════════════════════════════════════════════════════════
 // NEW COACH — Branded welcome email
 // Fires whenever a coaches/{coachId} doc is created, regardless of the path
@@ -8131,6 +8467,71 @@ exports.onMemberCreated = (0, firestore_1.onDocumentCreated)('members/{memberId}
     catch (err) {
         console.error(TAG, 'Error notifying coach:', err);
     }
+});
+// ─── batchGenerateVoice — Batch TTS for workout phrase preloading ────────────
+// Accepts an array of {text, cacheKey} entries. For each entry, checks if the
+// audio already exists in Firebase Storage. If not, generates it via OpenAI TTS.
+// Returns a map of cacheKey → download URL for all entries.
+// ─────────────────────────────────────────────────────────────────────────────
+exports.batchGenerateVoice = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 120, maxInstances: 10 }, async (request) => {
+    var _a;
+    const { phrases } = request.data;
+    if (!phrases || !Array.isArray(phrases) || phrases.length === 0) {
+        throw new https_1.HttpsError('invalid-argument', 'phrases array is required');
+    }
+    if (phrases.length > 100) {
+        throw new https_1.HttpsError('invalid-argument', 'Maximum 100 phrases per batch');
+    }
+    const apiKey = (_a = openaiApiKey.value()) === null || _a === void 0 ? void 0 : _a.trim();
+    if (!apiKey) {
+        throw new https_1.HttpsError('internal', 'OpenAI API key not configured');
+    }
+    const bucket = admin.storage().bucket();
+    const results = {};
+    // Process in parallel with concurrency limit of 5
+    const CONCURRENCY = 5;
+    for (let i = 0; i < phrases.length; i += CONCURRENCY) {
+        const batch = phrases.slice(i, i + CONCURRENCY);
+        await Promise.all(batch.map(async ({ text, cacheKey }) => {
+            if (!text || !cacheKey)
+                return;
+            const storagePath = `voice_cache/phrases/${cacheKey}.mp3`;
+            const file = bucket.file(storagePath);
+            // Check if already cached
+            const [exists] = await file.exists();
+            if (exists) {
+                results[cacheKey] = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+                return;
+            }
+            // Generate via OpenAI TTS
+            try {
+                const response = await fetch('https://api.openai.com/v1/audio/speech', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        model: 'tts-1',
+                        voice: 'onyx',
+                        input: text,
+                    }),
+                });
+                if (!response.ok) {
+                    console.error(`[batchGenerateVoice] OpenAI error for "${cacheKey}":`, response.status);
+                    return;
+                }
+                const audioBuffer = Buffer.from(await response.arrayBuffer());
+                await file.save(audioBuffer, { contentType: 'audio/mpeg' });
+                await file.makePublic();
+                results[cacheKey] = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+            }
+            catch (err) {
+                console.error(`[batchGenerateVoice] Failed for "${cacheKey}":`, err);
+            }
+        }));
+    }
+    return { urls: results, generated: Object.keys(results).length, total: phrases.length };
 });
 // ─────────────────────────────────────────────
 // COACH APPLICATION EMAIL NOTIFICATION
@@ -8283,14 +8684,18 @@ exports.createShareToken = (0, https_1.onCall)({ memory: '512MiB' }, async (requ
     if (!existingTokens.empty) {
         const existing = existingTokens.docs[0];
         const data = existing.data();
-        if (!data.ogImageUrl) {
-            // Backfill OG image for tokens minted before OG images existed.
+        if (!data.ogImageUrl || !data.ogImageUrl.includes(`-${ogImage_1.OG_IMAGE_VERSION}`)) {
+            // Backfill for tokens minted before OG images existed, or regenerate
+            // when the stored image predates the current layout.
             try {
                 await (0, ogImage_1.generateWorkoutOgImage)(existing.id, workoutData);
             }
             catch (err) {
                 console.warn('[createShareToken] OG image backfill failed:', err);
             }
+        }
+        if (typeof data.ogVideoUrl !== 'string' || !data.ogVideoUrl.includes(`-${ogVideo_1.OG_VIDEO_VERSION}`)) {
+            (0, ogVideo_1.generateWorkoutOgVideo)(existing.id, workoutData).catch((err) => console.warn('[createShareToken] OG video regeneration failed:', err));
         }
         return {
             shareId: existing.id,
@@ -8530,6 +8935,80 @@ exports.resolveShareToken = (0, https_1.onRequest)({ cors: true, region: 'us-cen
         workout: Object.assign({ id: tokenData.workoutId }, (0, workoutPlayerSanitizer_1.sanitizePlayerWorkout)(workout, movementCanonical)),
     });
 });
+// ─── submitGuestReflection — guest glow/grow after shared-workout play ───────
+// Unauthenticated guests can't write Firestore directly (rules deny), so this
+// endpoint validates the share token server-side and writes via Admin SDK.
+exports.submitGuestReflection = (0, https_1.onRequest)({ cors: true, region: 'us-central1' }, async (req, res) => {
+    if (req.method !== 'POST') {
+        res.status(405).json({ error: 'Method not allowed.' });
+        return;
+    }
+    const body = (req.body || {});
+    const shareId = body.shareId;
+    if (!shareId || typeof shareId !== 'string' || shareId.length !== 32) {
+        res.status(400).json({ error: 'Invalid share link.' });
+        return;
+    }
+    const tokenSnap = await db.collection('shareTokens').doc(shareId).get();
+    if (!tokenSnap.exists) {
+        res.status(404).json({ error: 'This share link is no longer available.' });
+        return;
+    }
+    const tokenData = tokenSnap.data();
+    if (tokenData.revokedAt) {
+        res.status(410).json({ error: 'This share link has been revoked.' });
+        return;
+    }
+    const expiresAt = tokenData.expiresAt;
+    if (expiresAt && expiresAt.toMillis() < Date.now()) {
+        res.status(410).json({ error: 'This share link has expired.' });
+        return;
+    }
+    const visibility = normalizeVisibility(tokenData.visibility);
+    if (visibility === 'restricted') {
+        res.status(403).json({ error: 'This workout is no longer shared via link.' });
+        return;
+    }
+    if (visibility === 'anyone_with_link_signin_required') {
+        const authHeader = req.headers.authorization;
+        let ok = false;
+        if (authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith('Bearer ')) {
+            try {
+                await admin.auth().verifyIdToken(authHeader.slice(7));
+                ok = true;
+            }
+            catch ( /* invalid token */_a) { /* invalid token */ }
+        }
+        if (!ok) {
+            res.status(403).json({ error: 'Sign in required for this link.' });
+            return;
+        }
+    }
+    const cleanText = (v) => typeof v === 'string' ? v.trim().slice(0, 500) : '';
+    const cleanRating = (v) => Number.isInteger(v) && v >= 1 && v <= 5 ? v : null;
+    const durationSec = typeof body.durationSec === 'number' && body.durationSec >= 0 && body.durationSec <= 86400
+        ? Math.round(body.durationSec)
+        : null;
+    const workoutSnap = await db.collection('workouts').doc(tokenData.workoutId).get();
+    const workoutName = workoutSnap.exists ? (workoutSnap.data().name || 'Workout') : 'Workout';
+    const docRef = await db.collection('guest_reflections').add({
+        coachId: tokenData.createdBy,
+        workoutId: tokenData.workoutId,
+        workoutName,
+        shareId,
+        journal: {
+            glow: cleanText(body.glow),
+            grow: cleanText(body.grow),
+            energyRating: cleanRating(body.energyRating),
+            moodRating: cleanRating(body.moodRating),
+        },
+        durationSec,
+        source: 'shareLink',
+        reviewStatus: 'pending',
+        createdAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    res.status(200).json({ ok: true, id: docRef.id });
+});
 // ─── generateEquipmentImage — AI image for grab-equipment phases ─────────────
 // Accepts grabEquipmentText + optional forceRegenerate flag.
 // Extracts equipment keyword via GPT-4o-mini, then:
@@ -8715,6 +9194,13 @@ const VARIATION_MAX_CANDIDATES = 3;
 const VARIATION_DEFAULT_CANDIDATES = 2;
 const VARIATION_MAX_INSTRUCTION_CHARS = 600;
 const VARIATION_BASE_PROMPT = "Use the source workout video as the visual reference. Keep the same coach, body type, outfit, background, camera angle, framing, and lighting. Create a safe fitness demonstration variation. Do not add extra people. Do not change the coach's face. Do not add text overlays. Do not add logos. Keep it realistic, controlled, and instructional. Do not add barbells, heavy weights, or any equipment not explicitly requested. Avoid unsafe, overloaded, or high-risk positions.";
+const VARIATION_JOB_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const VARIATION_MOTION_MODEL = 'gen4_turbo';
+const VARIATION_MOTION_DURATION_SEC = 10;
+const VARIATION_MOTION_BASE_PROMPT = 'Keep the same person, body type, outfit, equipment, background, camera angle, framing, and lighting as the image. The coach performs this movement as a safe, realistic, controlled, instructional fitness demonstration. Do not add extra people. Do not change the face. Do not add text overlays or logos. Do not add barbells, heavy weights, or any equipment not explicitly requested. Avoid unsafe, overloaded, or high-risk positions.';
+function isTerminalCandidate(c) {
+    return c.status === 'SUCCEEDED' || c.status === 'FAILED' || c.status === 'CANCELLED';
+}
 /** Coach/admin gate + resolve caller's coach scope for ownership checks. */
 function requireCoachOrAdmin(request) {
     if (!request.auth) {
@@ -8755,8 +9241,9 @@ async function fetchRunwayTask(apiKey, taskId) {
     };
 }
 /**
- * Download a video from sourceUrl, transcode to ≤30fps (Runway's limit), upload to Storage,
- * and return a public URL. Cleans up /tmp on both success and failure.
+ * Download a video from sourceUrl, transcode to ≤30fps and trim to ≤29.5s (Runway rejects
+ * assets over 30s), upload to Storage, and return a public URL. Cleans up /tmp on both
+ * success and failure.
  */
 async function transcodeVideoTo30fps(sourceUrl, jobId, coachId) {
     const { execSync } = await Promise.resolve().then(() => __importStar(require('child_process')));
@@ -8773,7 +9260,7 @@ async function transcodeVideoTo30fps(sourceUrl, jobId, coachId) {
         const buf = Buffer.from(await resp.arrayBuffer());
         fs.writeFileSync(inputPath, buf);
         // -loglevel error keeps stderr tiny so the pipe buffer can't deadlock execSync.
-        execSync(`ffmpeg -y -loglevel error -i "${inputPath}" -r 30 -vf fps=fps=30 -c:v libx264 -preset fast -crf 23 -movflags +faststart "${outputPath}"`, { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 1024 * 1024 });
+        execSync(`ffmpeg -y -loglevel error -i "${inputPath}" -t 29.5 -r 30 -vf fps=fps=30 -c:v libx264 -preset fast -crf 23 -movflags +faststart "${outputPath}"`, { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 1024 * 1024 });
         const bucket = admin.storage().bucket();
         const storagePath = `movements/${coachId}/transcoded/${jobId}.mp4`;
         // Embed a Firebase download token so the URL is publicly accessible without ACL or signBlob.
@@ -8801,10 +9288,57 @@ async function transcodeVideoTo30fps(sourceUrl, jobId, coachId) {
         catch (_b) { }
     }
 }
+/**
+ * Extract the first frame of a video for the "motion" remix path, upload it to
+ * Storage with a download token, and return the frame URL plus the gen4_turbo
+ * ratio matching the source orientation.
+ */
+async function extractFirstFrameForMotion(videoUrl, jobId, coachId) {
+    const { execSync } = await Promise.resolve().then(() => __importStar(require('child_process')));
+    const os = await Promise.resolve().then(() => __importStar(require('os')));
+    const path = await Promise.resolve().then(() => __importStar(require('path')));
+    const fs = await Promise.resolve().then(() => __importStar(require('fs')));
+    const tmpDir = os.tmpdir();
+    const inputPath = path.join(tmpDir, `variation-motion-src-${jobId}.mp4`);
+    const framePath = path.join(tmpDir, `variation-frame-${jobId}.jpg`);
+    try {
+        const resp = await fetch(videoUrl);
+        if (!resp.ok)
+            throw new Error(`Failed to download video for frame extraction (${resp.status})`);
+        fs.writeFileSync(inputPath, Buffer.from(await resp.arrayBuffer()));
+        execSync(`ffmpeg -y -loglevel error -i "${inputPath}" -frames:v 1 -q:v 2 "${framePath}"`, { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 1024 * 1024 });
+        const dims = execSync(`ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${inputPath}"`, { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1024 * 1024 }).toString().trim();
+        const [w, h] = dims.split('x').map((n) => parseInt(n, 10));
+        const ratio = h > w ? '720:1280' : w > h ? '1280:720' : '960:960';
+        const bucket = admin.storage().bucket();
+        const storagePath = `movements/${coachId}/variations/${jobId}/first-frame.jpg`;
+        const downloadToken = `${jobId}-ff`;
+        await bucket.upload(framePath, {
+            destination: storagePath,
+            metadata: {
+                contentType: 'image/jpeg',
+                metadata: { firebaseStorageDownloadTokens: downloadToken },
+            },
+        });
+        const frameUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
+        return { frameUrl, ratio };
+    }
+    finally {
+        try {
+            fs.unlinkSync(inputPath);
+        }
+        catch (_a) { }
+        try {
+            fs.unlinkSync(framePath);
+        }
+        catch (_b) { }
+    }
+}
 exports.startMovementVariation = (0, https_1.onCall)({ region: 'us-central1', secrets: [runwayApiSecret], timeoutSeconds: 180, memory: '1GiB', maxInstances: 10, invoker: 'public' }, async (request) => {
     var _a;
     const { isAdmin, callerCoachIds } = requireCoachOrAdmin(request);
-    const { sourceMovementId, instruction, outputCount } = request.data;
+    const { sourceMovementId, instruction, outputCount, remixMode: remixModeRaw } = request.data;
+    const remixMode = remixModeRaw === 'motion' ? 'motion' : 'edit';
     if (!sourceMovementId || typeof sourceMovementId !== 'string') {
         throw new https_1.HttpsError('invalid-argument', 'sourceMovementId is required');
     }
@@ -8842,7 +9376,8 @@ exports.startMovementVariation = (0, https_1.onCall)({ region: 'us-central1', se
         instruction: trimmedInstruction,
         status: 'queued',
         provider: VARIATION_PROVIDER,
-        model: VARIATION_MODEL,
+        model: remixMode === 'motion' ? VARIATION_MOTION_MODEL : VARIATION_MODEL,
+        remixMode,
         candidateCount,
         taskIds: [],
         candidates: [],
@@ -8870,21 +9405,50 @@ exports.startMovementVariation = (0, https_1.onCall)({ region: 'us-central1', se
             await jobRef.update({ status: 'failed', errorMessage: tcMsg, updatedAt: firestore_2.Timestamp.now() });
             throw new https_1.HttpsError('internal', 'Failed to prepare video for generation');
         }
+        // Motion mode: aleph2 video-to-video preserves the source motion, so
+        // motion-change instructions produce near-identical output. Instead,
+        // regenerate motion from a still first frame via image_to_video.
+        let motionParams = null;
+        if (remixMode === 'motion') {
+            try {
+                console.info('[startMovementVariation] Extracting first frame for motion remix', { jobId: jobRef.id });
+                motionParams = await extractFirstFrameForMotion(videoUriForRunway, jobRef.id, movement.coachId);
+            }
+            catch (ffErr) {
+                const ffMsg = `First-frame extraction failed: ${String((ffErr === null || ffErr === void 0 ? void 0 : ffErr.message) || ffErr).slice(0, 300)}`;
+                console.error('[startMovementVariation] Frame extraction error', { jobId: jobRef.id, error: ffMsg });
+                await jobRef.update({ status: 'failed', errorMessage: ffMsg, updatedAt: firestore_2.Timestamp.now() });
+                throw new https_1.HttpsError('internal', 'Failed to prepare image for motion generation');
+            }
+        }
+        const motionPromptText = `${VARIATION_MOTION_BASE_PROMPT} The coach performs: ${trimmedInstruction}`;
         const candidates = [];
         let lastError = null;
         for (let i = 0; i < candidateCount; i++) {
             try {
-                console.info('[startMovementVariation] Creating Runway task', { jobId: jobRef.id, attempt: i });
-                const resp = await fetch(`${RUNWAY_API_BASE}/v1/video_to_video`, {
-                    method: 'POST',
-                    headers: runwayHeaders(apiKey),
-                    body: JSON.stringify({
+                console.info('[startMovementVariation] Creating Runway task', { jobId: jobRef.id, attempt: i, remixMode });
+                const endpoint = motionParams ? 'image_to_video' : 'video_to_video';
+                const body = motionParams
+                    ? {
+                        model: VARIATION_MOTION_MODEL,
+                        promptImage: motionParams.frameUrl,
+                        promptText: motionPromptText,
+                        ratio: motionParams.ratio,
+                        duration: VARIATION_MOTION_DURATION_SEC,
+                        seed: Math.floor(Math.random() * 4294967295),
+                        contentModeration: { publicFigureThreshold: 'auto' },
+                    }
+                    : {
                         model: VARIATION_MODEL,
                         videoUri: videoUriForRunway,
                         promptText,
                         seed: Math.floor(Math.random() * 4294967295),
                         contentModeration: { publicFigureThreshold: 'auto' },
-                    }),
+                    };
+                const resp = await fetch(`${RUNWAY_API_BASE}/v1/${endpoint}`, {
+                    method: 'POST',
+                    headers: runwayHeaders(apiKey),
+                    body: JSON.stringify(body),
                 });
                 if (!resp.ok) {
                     const body = await resp.text().catch(() => '');
@@ -8988,13 +9552,17 @@ exports.getMovementVariationStatus = (0, https_1.onCall)({ region: 'us-central1'
         sourceMovementId: job.sourceMovementId,
         sourceMovementName: job.sourceMovementName,
         instruction: job.instruction,
-        candidates: candidates.map((c) => ({
-            id: c.id,
-            status: c.status,
-            progress: c.progress,
-            videoUrl: c.videoUrl,
-            error: c.error,
-        })),
+        candidates: candidates.map((c) => {
+            var _a;
+            return ({
+                id: c.id,
+                status: c.status,
+                progress: c.progress,
+                videoUrl: c.videoUrl,
+                storedVideoUrl: (_a = c.storedVideoUrl) !== null && _a !== void 0 ? _a : null,
+                error: c.error,
+            });
+        }),
     };
 });
 exports.finalizeMovementVariation = (0, https_1.onCall)({ region: 'us-central1', secrets: [runwayApiSecret], timeoutSeconds: 300, memory: '1GiB', maxInstances: 10, invoker: 'public' }, async (request) => {
@@ -9020,36 +9588,57 @@ exports.finalizeMovementVariation = (0, https_1.onCall)({ region: 'us-central1',
     if (!apiKey) {
         throw new https_1.HttpsError('internal', 'Runway API key not configured');
     }
-    // Runway output URLs expire within 24-48h — always re-fetch for a fresh URL.
-    let outputUrl = candidate.videoUrl;
-    try {
-        const task = await fetchRunwayTask(apiKey, candidateId);
-        if (task.status !== 'SUCCEEDED' || !task.outputUrl) {
-            throw new https_1.HttpsError('failed-precondition', 'Selected candidate has no completed output');
-        }
-        outputUrl = task.outputUrl;
-    }
-    catch (err) {
-        if (err instanceof https_1.HttpsError)
-            throw err;
-        if (!outputUrl) {
-            throw new https_1.HttpsError('internal', 'Could not retrieve generated video from provider');
-        }
-    }
-    const videoResp = await fetch(outputUrl);
-    if (!videoResp.ok) {
-        throw new https_1.HttpsError('internal', `Failed to download generated video (${videoResp.status})`);
-    }
-    const videoBuffer = Buffer.from(await videoResp.arrayBuffer());
     const storagePath = `movements/${job.coachId}/ai-generated-videos/${jobId}-${candidateId}.mp4`;
     const bucket = admin.storage().bucket();
     const file = bucket.file(storagePath);
     // Download token so the client can play the file under authenticated-read storage rules.
     const downloadToken = require('crypto').randomUUID();
-    await file.save(videoBuffer, {
-        contentType: 'video/mp4',
-        metadata: { metadata: { firebaseStorageDownloadTokens: downloadToken } },
-    });
+    let persisted = false;
+    // Prefer the durable copy written by the background poller — the Runway URL
+    // may already be expired by the time the coach comes back to finalize.
+    if (candidate.storedVideoUrl) {
+        try {
+            const storedPath = `movements/${job.coachId}/variations/${jobId}/${candidateId}.mp4`;
+            await bucket.file(storedPath).copy(file);
+            await file.setMetadata({
+                contentType: 'video/mp4',
+                metadata: { firebaseStorageDownloadTokens: downloadToken },
+            });
+            persisted = true;
+        }
+        catch (err) {
+            console.warn('[finalizeMovementVariation] Stored copy failed, falling back to Runway URL', {
+                jobId, candidateId, error: String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 200),
+            });
+        }
+    }
+    if (!persisted) {
+        // Fall back to the ephemeral Runway URL (re-fetch for freshness).
+        let outputUrl = candidate.videoUrl;
+        try {
+            const task = await fetchRunwayTask(apiKey, candidateId);
+            if (task.status !== 'SUCCEEDED' || !task.outputUrl) {
+                throw new https_1.HttpsError('failed-precondition', 'Selected candidate has no completed output');
+            }
+            outputUrl = task.outputUrl;
+        }
+        catch (err) {
+            if (err instanceof https_1.HttpsError)
+                throw err;
+            if (!outputUrl) {
+                throw new https_1.HttpsError('internal', 'Could not retrieve generated video from provider');
+            }
+        }
+        const videoResp = await fetch(outputUrl);
+        if (!videoResp.ok) {
+            throw new https_1.HttpsError('internal', `Failed to download generated video (${videoResp.status})`);
+        }
+        const videoBuffer = Buffer.from(await videoResp.arrayBuffer());
+        await file.save(videoBuffer, {
+            contentType: 'video/mp4',
+            metadata: { metadata: { firebaseStorageDownloadTokens: downloadToken } },
+        });
+    }
     const videoUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
     const finalizedAt = firestore_2.Timestamp.now();
     await jobRef.update({
@@ -9062,7 +9651,7 @@ exports.finalizeMovementVariation = (0, https_1.onCall)({ region: 'us-central1',
         jobId, candidateId, coachId: job.coachId,
         provider: job.provider, model: job.model,
         candidateCount: job.candidateCount,
-        bytes: videoBuffer.length,
+        fromStoredCopy: persisted,
         createdAt: ((_e = (_d = (_c = (_b = job.createdAt) === null || _b === void 0 ? void 0 : _b.toDate) === null || _c === void 0 ? void 0 : _c.call(_b)) === null || _d === void 0 ? void 0 : _d.toISOString) === null || _e === void 0 ? void 0 : _e.call(_d)) || null,
         finalizedAt: finalizedAt.toDate().toISOString(),
     });
@@ -9073,5 +9662,125 @@ exports.finalizeMovementVariation = (0, https_1.onCall)({ region: 'us-central1',
         instruction: job.instruction,
         jobId,
     };
+});
+exports.dismissMovementVariation = (0, https_1.onCall)({ region: 'us-central1', timeoutSeconds: 30, maxInstances: 10, invoker: 'public' }, async (request) => {
+    const { isAdmin, callerCoachIds } = requireCoachOrAdmin(request);
+    const { jobId } = request.data;
+    if (!jobId || typeof jobId !== 'string') {
+        throw new https_1.HttpsError('invalid-argument', 'jobId is required');
+    }
+    const jobRef = db.doc(`movement_variation_jobs/${jobId}`);
+    const jobSnap = await jobRef.get();
+    if (!jobSnap.exists) {
+        throw new https_1.HttpsError('not-found', 'Variation job not found');
+    }
+    const job = jobSnap.data();
+    assertVariationJobOwnership(job, isAdmin, callerCoachIds);
+    if (job.finalizedVideoUrl) {
+        throw new https_1.HttpsError('failed-precondition', 'Job is already finalized');
+    }
+    await jobRef.update({ status: 'dismissed', updatedAt: firestore_2.Timestamp.now() });
+    console.info('[dismissMovementVariation] Dismissed', { jobId, coachId: job.coachId });
+    return { jobId, status: 'dismissed' };
+});
+/**
+ * Download a completed Runway output and persist it to Storage before the
+ * ephemeral URL expires. Returns a durable token URL.
+ */
+async function persistVariationCandidateOutput(coachId, jobId, candidateId, outputUrl) {
+    const resp = await fetch(outputUrl);
+    if (!resp.ok)
+        throw new Error(`Failed to download Runway output (${resp.status})`);
+    const buf = Buffer.from(await resp.arrayBuffer());
+    const storagePath = `movements/${coachId}/variations/${jobId}/${candidateId}.mp4`;
+    const bucket = admin.storage().bucket();
+    const downloadToken = require('crypto').randomUUID();
+    await bucket.file(storagePath).save(buf, {
+        contentType: 'video/mp4',
+        metadata: { metadata: { firebaseStorageDownloadTokens: downloadToken } },
+    });
+    return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
+}
+// ─── pollMovementVariationJobs — background sweep so closed modals don't orphan jobs ──
+exports.pollMovementVariationJobs = (0, scheduler_1.onSchedule)({
+    schedule: 'every 1 minutes',
+    region: 'us-central1',
+    secrets: [runwayApiSecret],
+    timeoutSeconds: 300,
+    memory: '1GiB',
+}, async () => {
+    var _a, _b, _c, _d, _e;
+    const apiKey = (_a = runwayApiSecret.value()) === null || _a === void 0 ? void 0 : _a.trim();
+    if (!apiKey) {
+        console.error('[pollMovementVariationJobs] Runway API key not configured — skipping sweep');
+        return;
+    }
+    const snap = await db.collection('movement_variation_jobs').where('status', '==', 'running').get();
+    if (snap.empty)
+        return;
+    const nowMs = Date.now();
+    for (const jobDoc of snap.docs) {
+        // Per-job isolation: one bad job must never kill the whole sweep.
+        try {
+            const job = jobDoc.data();
+            const createdMs = (_d = (_c = (_b = job.createdAt) === null || _b === void 0 ? void 0 : _b.toMillis) === null || _c === void 0 ? void 0 : _c.call(_b)) !== null && _d !== void 0 ? _d : 0;
+            if (createdMs && nowMs - createdMs > VARIATION_JOB_MAX_AGE_MS) {
+                await jobDoc.ref.update({
+                    status: 'failed',
+                    errorMessage: 'Generation timed out after 24 hours',
+                    updatedAt: firestore_2.Timestamp.now(),
+                });
+                console.warn('[pollMovementVariationJobs] Job timed out', { jobId: jobDoc.id });
+                continue;
+            }
+            let candidates = Array.isArray(job.candidates) ? job.candidates : [];
+            let changed = false;
+            candidates = await Promise.all(candidates.map(async (c) => {
+                var _a;
+                // Already terminal + persisted (or unpersistable) — nothing to do.
+                if (isTerminalCandidate(c) && (c.status !== 'SUCCEEDED' || c.storedVideoUrl))
+                    return c;
+                try {
+                    let next = c;
+                    if (!isTerminalCandidate(c)) {
+                        const task = await fetchRunwayTask(apiKey, c.id);
+                        next = Object.assign(Object.assign({}, c), { status: task.status, progress: task.status === 'SUCCEEDED' ? 1 : task.progress, videoUrl: (_a = task.outputUrl) !== null && _a !== void 0 ? _a : c.videoUrl, error: task.failure });
+                        changed = true;
+                    }
+                    if (next.status === 'SUCCEEDED' && !next.storedVideoUrl && next.videoUrl) {
+                        const storedVideoUrl = await persistVariationCandidateOutput(job.coachId, jobDoc.id, c.id, next.videoUrl);
+                        next = Object.assign(Object.assign({}, next), { storedVideoUrl });
+                        changed = true;
+                        console.info('[pollMovementVariationJobs] Persisted candidate output', { jobId: jobDoc.id, candidateId: c.id });
+                    }
+                    return next;
+                }
+                catch (err) {
+                    console.warn('[pollMovementVariationJobs] Candidate poll/persist failed', {
+                        jobId: jobDoc.id, candidateId: c.id, error: String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 200),
+                    });
+                    return c; // transient — retry next sweep
+                }
+            }));
+            const terminal = candidates.length > 0 && candidates.every(isTerminalCandidate);
+            const anySucceeded = candidates.some((c) => c.status === 'SUCCEEDED');
+            let status = job.status;
+            let errorMessage = job.errorMessage || null;
+            if (terminal) {
+                status = anySucceeded ? 'succeeded' : 'failed';
+                if (!anySucceeded)
+                    errorMessage = ((_e = candidates.find((c) => c.error)) === null || _e === void 0 ? void 0 : _e.error) || 'Generation failed';
+                changed = true;
+            }
+            if (changed) {
+                await jobDoc.ref.update({ candidates, status, errorMessage, updatedAt: firestore_2.Timestamp.now() });
+            }
+        }
+        catch (err) {
+            console.error('[pollMovementVariationJobs] Job sweep failed', {
+                jobId: jobDoc.id, error: String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 300),
+            });
+        }
+    }
 });
 //# sourceMappingURL=index.js.map

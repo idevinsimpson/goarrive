@@ -112,6 +112,13 @@ function sanitizePlayerWorkout(workout, movementCanonical) {
         tags: workout.tags || [],
         introVideoUrl: workout.introVideoUrl || null,
         outroVideoUrl: workout.outroVideoUrl || null,
+        // Spoken intro announcement — share-link viewers can't call generateVoice
+        // (unauthenticated), so they only hear the intro when the coach has saved
+        // a generated URL. The hash lets the player detect a stale clip.
+        introAnnouncementEnabled: workout.introAnnouncementEnabled !== false,
+        introAnnouncementText: workout.introAnnouncementText || '',
+        introAnnouncementVoiceUrl: workout.introAnnouncementVoiceUrl || null,
+        introAnnouncementVoiceHash: workout.introAnnouncementVoiceHash || null,
         restDurationSeconds: (_a = workout.restDurationSeconds) !== null && _a !== void 0 ? _a : null,
         blocks: (workout.blocks || []).map((b) => sanitizePlayerBlock(b, movementCanonical)),
     };

@@ -6,7 +6,13 @@
  */
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
-import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  connectFirestoreEmulator,
+} from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
 import { getStorage } from 'firebase/storage';
 
@@ -24,7 +30,23 @@ const firebaseConfig = {
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+// Persistent local cache (IndexedDB, web only): after a reload or PWA resume,
+// listeners render instantly from disk while the server refresh streams in.
+// Without it every cold load races the network and small collections (e.g.
+// build_folders) can paint seconds after the rest of the grid.
+let firestoreDb: ReturnType<typeof getFirestore>;
+if (typeof window !== 'undefined' && typeof indexedDB !== 'undefined') {
+  try {
+    firestoreDb = initializeFirestore(app, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    });
+  } catch {
+    firestoreDb = getFirestore(app);
+  }
+} else {
+  firestoreDb = getFirestore(app);
+}
+export const db = firestoreDb;
 export const functions = getFunctions(app);
 export const storage = getStorage(app);
 

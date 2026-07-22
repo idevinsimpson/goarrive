@@ -68,6 +68,8 @@ export interface FlatMovement {
   voiceUrl?: string;
   /** Prescription voice clip URL — generated per-workout-build when weight/reps are set. Preferred over voiceUrl when present. */
   prescriptionVoiceUrl?: string;
+  /** Primary muscles from the canonical movement doc (merged in by useMovementHydrate — block snapshots don't store muscles). */
+  primaryMuscles?: string[];
 
   // ── Phase 3: Special block fields ───────────────────────────────
   /** What kind of step this is — determines which player screen renders */
@@ -106,6 +108,72 @@ export function resolveBlockType(blockType: string | undefined): 'linear' | 'sup
 function makeLabel(blockIndex: number, movementIndex: number): string {
   const letter = String.fromCharCode(65 + blockIndex);
   return `${letter}${movementIndex + 1}`;
+}
+
+/**
+ * Display-only helper for pre-play previews. Groups adjacent exercise
+ * blocks into visual sections; a Water Break or Transition block splits
+ * sections. Does not affect playback timing or step ordering.
+ */
+export interface PreviewSectionBlock {
+  block: any;
+  /** Index in the flatten-ordered block list */
+  bi: number;
+}
+export function buildPreviewSections(workout: any): PreviewSectionBlock[][] {
+  const rawBlocks = workout?.blocks || [];
+  const introBlocks = rawBlocks.filter((b: any) => (b.type || '') === 'Intro');
+  const outroBlocks = rawBlocks.filter((b: any) => (b.type || '') === 'Outro');
+  const middleBlocks = rawBlocks.filter((b: any) => (b.type || '') !== 'Intro' && (b.type || '') !== 'Outro');
+  if (introBlocks.length === 0 && workout?.introVideoUrl) introBlocks.push({ type: 'Intro' });
+  if (outroBlocks.length === 0 && workout?.outroVideoUrl) outroBlocks.push({ type: 'Outro' });
+  const ordered = [...introBlocks, ...middleBlocks, ...outroBlocks];
+
+  const sections: PreviewSectionBlock[][] = [];
+  let current: PreviewSectionBlock[] | null = null;
+  ordered.forEach((b: any, bi: number) => {
+    const t = b.type || '';
+    if (t === 'Water Break' || t === 'Transition') {
+      current = null;
+      return;
+    }
+    if (['Intro', 'Outro', 'Demo', 'Grab Equipment', 'Follow-Along Video'].includes(t)) return;
+    if ((b.movements || []).length === 0) return;
+    if (!current) {
+      current = [];
+      sections.push(current);
+    }
+    current.push({ block: b, bi });
+  });
+  return sections;
+}
+
+const MEANINGFUL_SECTION_TYPES = ['Tabata', 'Interval', 'Timed', 'AMRAP', 'EMOM', 'For Time', 'Cardio'];
+const GENERIC_BLOCK_LABELS = new Set(['', 'circuit', 'strength', 'block', 'exercise', 'work']);
+
+// Single-movement work blocks default to "Tabata" — matches the ready
+// screen's long-standing heuristic and how coaches author tabata-style
+// blocks (real data uses type "Circuit" with one movement per block).
+function sectionDescriptor(block: any): string {
+  if ((block.movements || []).length >= 2) return 'Superset';
+  const t = String(block.type || '').trim();
+  const meaningful = MEANINGFUL_SECTION_TYPES.find((m) => m.toLowerCase() === t.toLowerCase());
+  if (meaningful) return meaningful;
+  const label = String(block.name || block.label || '').trim();
+  if (label && !GENERIC_BLOCK_LABELS.has(label.toLowerCase()) && !/^block\s*\d*$/i.test(label)) {
+    return label;
+  }
+  return 'Tabata';
+}
+
+/** Composite preview-section title, e.g. "Superset + Tabata". */
+export function sectionTitle(section: PreviewSectionBlock[]): string {
+  const descriptors: string[] = [];
+  section.forEach(({ block }) => {
+    const d = sectionDescriptor(block);
+    if (!descriptors.includes(d)) descriptors.push(d);
+  });
+  return descriptors.join(' + ') || 'Workout';
 }
 
 /** Map block type string to StepType */
@@ -333,6 +401,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropScale: 1,
               cropTranslateX: 0,
               cropTranslateY: 0,
+              cropFrameWidth: 0,
+              cropFrameHeight: 0,
               voiceUrl: '',
               blockMovCount: movements.length,
               blockRound: round,
@@ -384,6 +454,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropScale: mv.cropScale ?? 1,
               cropTranslateX: mv.cropTranslateX ?? 0,
               cropTranslateY: mv.cropTranslateY ?? 0,
+              cropFrameWidth: mv.cropFrameWidth ?? 0,
+              cropFrameHeight: mv.cropFrameHeight ?? 0,
               voiceUrl: mv.voiceUrl || '',
               prescriptionVoiceUrl: mv.prescriptionVoiceUrl || '',
               blockMovCount: movements.length,
@@ -430,6 +502,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropScale: 1,
               cropTranslateX: 0,
               cropTranslateY: 0,
+              cropFrameWidth: 0,
+              cropFrameHeight: 0,
               voiceUrl: '',
               blockMovCount: movements.length,
               blockRound: setNum,
@@ -477,6 +551,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               cropScale: mv.cropScale ?? 1,
               cropTranslateX: mv.cropTranslateX ?? 0,
               cropTranslateY: mv.cropTranslateY ?? 0,
+              cropFrameWidth: mv.cropFrameWidth ?? 0,
+              cropFrameHeight: mv.cropFrameHeight ?? 0,
               voiceUrl: mv.voiceUrl || '',
               prescriptionVoiceUrl: mv.prescriptionVoiceUrl || '',
               blockMovCount: movements.length,

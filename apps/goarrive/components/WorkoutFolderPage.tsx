@@ -27,6 +27,7 @@ import {
   TouchableOpacity,
   Alert,
   Share,
+  Switch,
 } from 'react-native';
 import ModalSheet from './ModalSheet';
 import {
@@ -41,6 +42,7 @@ import {
   getDocs,
   serverTimestamp,
   onSnapshot,
+  arrayUnion,
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, storage, functions } from '../lib/firebase';
@@ -53,11 +55,15 @@ import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from './Icon';
 import WorkoutPlayer from './WorkoutPlayer';
+import WorkoutIntroAnnouncementModal, { type IntroAnnouncementSaveFields } from './WorkoutIntroAnnouncementModal';
+import { buildDefaultIntroScript } from '../utils/workoutIntroAnnouncement';
 import VideoCropModal, { CropValues } from './VideoCropModal';
 import { FB, FH } from '../lib/theme';
+import { CONTENT_BOTTOM_CLEARANCE } from '../lib/tabBarStyle';
 import PosterThumb from './PosterThumb';
 import {
   filterMovements,
+  rankByPrimaryMuscle,
   EQUIPMENT_FILTER_OPTIONS,
   MUSCLE_GROUP_FILTER_OPTIONS,
   DIFFICULTY_FILTER_OPTIONS,
@@ -177,6 +183,8 @@ interface MovementOption {
   category: string;
   equipment?: string;
   muscleGroups?: string[];
+  primaryMuscles?: string[];
+  secondaryMuscles?: string[];
   difficulty?: string;
   thumbnailUrl?: string | null;
   posterUrl?: string | null;
@@ -438,6 +446,14 @@ export default function WorkoutFolderPage({
   const [showDescriptionEdit, setShowDescriptionEdit] = useState(false);
   const [restDurationSeconds, setRestDurationSeconds] = useState(30);
   const [showIntroOutroPage, setShowIntroOutroPage] = useState(false);
+  const [showMusicModal, setShowMusicModal] = useState(false);
+  const [musicEnabled, setMusicEnabled] = useState(false);
+  const [musicStyle, setMusicStyle] = useState('workout');
+  const [musicVolume, setMusicVolume] = useState(0.35);
+  // Intro announcement (spoken welcome) — workout-level fields
+  const [showIntroAnnouncement, setShowIntroAnnouncement] = useState(false);
+  const [introAnnouncementEnabled, setIntroAnnouncementEnabled] = useState(true);
+  const [introAnnouncementText, setIntroAnnouncementText] = useState('');
   const [showMoveTo, setShowMoveTo] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -454,6 +470,44 @@ export default function WorkoutFolderPage({
   });
   const [shareSettingsSaving, setShareSettingsSaving] = useState(false);
   const [moveToSearch, setMoveToSearch] = useState('');
+  const [movePlaybooks, setMovePlaybooks] = useState<any[]>([]);
+  const [moveToBusyId, setMoveToBusyId] = useState<string | null>(null);
+
+  // Load the coach's playbooks when the Move-to page opens.
+  useEffect(() => {
+    if (!showMoveTo || !coachId) return;
+    getDocs(query(collection(db, 'playbooks'), where('coachId', '==', coachId)))
+      .then(snap => {
+        const pbs = snap.docs
+          .map(d => ({ id: d.id, ...d.data() } as any))
+          .filter(pb => !pb.isArchived)
+          .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        setMovePlaybooks(pbs);
+      })
+      .catch(e => console.error('[WorkoutFolder] Load playbooks error:', e));
+  }, [showMoveTo, coachId]);
+
+  // Membership lives in the playbook's workoutIds array (ordered, deduped by
+  // arrayUnion) — never parentId, since a workout can be in many playbooks.
+  const addToPlaybook = useCallback(async (pb: any) => {
+    if (moveToBusyId) return;
+    setMoveToBusyId(pb.id);
+    try {
+      await updateDoc(doc(db, 'playbooks', pb.id), {
+        workoutIds: arrayUnion(workoutId),
+        updatedAt: serverTimestamp(),
+      });
+      setMovePlaybooks(prev => prev.map(p =>
+        p.id === pb.id
+          ? { ...p, workoutIds: Array.from(new Set([...(p.workoutIds ?? []), workoutId])) }
+          : p,
+      ));
+    } catch (e) {
+      console.error('[WorkoutFolder] Add to playbook error:', e);
+    } finally {
+      setMoveToBusyId(null);
+    }
+  }, [workoutId, moveToBusyId]);
   const [editingNameKey, setEditingNameKey] = useState<string | null>(null);
   const [editingNameValue, setEditingNameValue] = useState('');
   // Reorder: long-press to pick up, tap another slot to drop
@@ -479,6 +533,26 @@ export default function WorkoutFolderPage({
     blocks,
   }), [originalData, workoutId, workoutName, workoutDescription, blocks]);
   const closePreview = useCallback(() => setShowPreview(false), []);
+
+  // ── Intro announcement (spoken welcome) ───────────────────────────────────
+  // Default script mirrors what the player generates for members — same
+  // builder function, muscles sourced from the movement library.
+  const introAnnouncementDefaultScript = useMemo(() => {
+    const musclesByMovementId: Record<string, string[]> = {};
+    for (const m of availableMovements) {
+      if (m.primaryMuscles && m.primaryMuscles.length > 0) musclesByMovementId[m.id] = m.primaryMuscles;
+    }
+    return buildDefaultIntroScript({ name: workoutName, blocks }, musclesByMovementId);
+  }, [availableMovements, workoutName, blocks]);
+
+  const saveIntroAnnouncement = useCallback(async (fields: IntroAnnouncementSaveFields) => {
+    await updateDoc(doc(db, 'workouts', workoutId), {
+      ...fields,
+      updatedAt: serverTimestamp(),
+    });
+    setIntroAnnouncementEnabled(fields.introAnnouncementEnabled);
+    setIntroAnnouncementText(fields.introAnnouncementText);
+  }, [workoutId]);
 
   // ── Dismiss all overlays ─────────────────────────────────────────────────
   const dismissAll = useCallback(() => {
@@ -715,8 +789,13 @@ export default function WorkoutFolderPage({
         setRestDurationSeconds(data.restDurationSeconds ?? 30);
         setIntroVideoUrl(data.introVideoUrl ?? null);
         setIntroGifUrl(data.introGifUrl ?? null);
+        setIntroAnnouncementEnabled(data.introAnnouncementEnabled ?? true);
+        setIntroAnnouncementText(data.introAnnouncementText ?? '');
         setOutroVideoUrl(data.outroVideoUrl ?? null);
         setOutroGifUrl(data.outroGifUrl ?? null);
+        setMusicEnabled(data.workoutMusicEnabled ?? false);
+        setMusicStyle(data.workoutMusicStyle ?? 'workout');
+        setMusicVolume(typeof data.workoutMusicVolume === 'number' ? data.workoutMusicVolume : 0.35);
         setIntroCrop({
           cropScale: data.introCropScale ?? 1,
           cropTranslateX: data.introCropTranslateX ?? 0,
@@ -754,6 +833,8 @@ export default function WorkoutFolderPage({
       category: d.category ?? '',
       equipment: d.equipment ?? undefined,
       muscleGroups: d.muscleGroups ?? undefined,
+      primaryMuscles: d.primaryMuscles ?? undefined,
+      secondaryMuscles: d.secondaryMuscles ?? undefined,
       difficulty: d.difficulty ?? undefined,
       thumbnailUrl: d.thumbnailUrl ?? null,
       posterUrl: d.posterUrl ?? d.thumbnailImageUrl ?? null,
@@ -1527,11 +1608,9 @@ export default function WorkoutFolderPage({
       thumbnailUrl: movement.thumbnailUrl ?? movement.mediaUrl ?? undefined,
       posterUrl: movement.posterUrl ?? undefined,
     };
-    if (movement.swapSides) {
-      next.swapSides = true;
-      next.swapMode = movement.swapMode ?? 'split';
-      next.swapWindowSec = movement.swapWindowSec ?? 5;
-    }
+    next.swapSides = movement.swapSides ?? false;
+    next.swapMode = movement.swapMode ?? 'split';
+    next.swapWindowSec = movement.swapWindowSec ?? 5;
     newBlocks[blockIdx].movements.push(next);
     updateBlocks(newBlocks);
   }, [blocks, updateBlocks]);
@@ -1640,6 +1719,28 @@ export default function WorkoutFolderPage({
     }
   }, [workoutId]);
 
+  // ── Workout music save ───────────────────────────────────────────────────
+  const saveWorkoutMusic = useCallback(async (updates: {
+    workoutMusicEnabled?: boolean;
+    workoutMusicStyle?: string;
+    workoutMusicVolume?: number;
+  }) => {
+    if (updates.workoutMusicEnabled !== undefined) setMusicEnabled(updates.workoutMusicEnabled);
+    if (updates.workoutMusicStyle !== undefined) setMusicStyle(updates.workoutMusicStyle);
+    if (updates.workoutMusicVolume !== undefined) setMusicVolume(updates.workoutMusicVolume);
+    try {
+      setSaving(true);
+      await updateDoc(doc(db, 'workouts', workoutId), {
+        ...updates,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err: any) {
+      console.error('[WorkoutFolder] Save workout music error:', err?.message ?? err);
+    } finally {
+      setSaving(false);
+    }
+  }, [workoutId]);
+
   // ── Crop done handler — saves crop values to Firestore ─────────────────
   const handleCropDone = useCallback(async (crop: CropValues) => {
     if (!cropTarget) return;
@@ -1662,12 +1763,13 @@ export default function WorkoutFolderPage({
 
   // ── Filtered movements for picker ─────────────────────────────────────────
   const filteredMovements = useMemo((): MovementOption[] => {
-    return filterMovements(availableMovements as any[], {
+    const f = filterMovements(availableMovements as any[], {
       search: movementSearch,
       equipment: pickerEquipmentFilter,
       muscleGroup: pickerMuscleGroupFilter,
       difficulty: pickerDifficultyFilter,
-    }) as MovementOption[];
+    });
+    return rankByPrimaryMuscle(f, pickerMuscleGroupFilter) as MovementOption[];
   }, [availableMovements, movementSearch, pickerEquipmentFilter, pickerMuscleGroupFilter, pickerDifficultyFilter]);
 
   // ── Filtered follow-alongs for picker ─────────────────────────────────────
@@ -1743,7 +1845,7 @@ export default function WorkoutFolderPage({
         </View>
         <ScrollView
           style={st.scrollArea}
-          contentContainerStyle={{ paddingHorizontal: GRID_PADDING, paddingBottom: 80 }}
+          contentContainerStyle={{ paddingHorizontal: GRID_PADDING, paddingBottom: CONTENT_BOTTOM_CLEARANCE }}
           showsVerticalScrollIndicator={false}
         >
           <Text style={st.ioSectionTitle}>Intro Video</Text>
@@ -1881,7 +1983,7 @@ export default function WorkoutFolderPage({
             />
           </View>
         </View>
-        <ScrollView style={st.scrollArea} contentContainerStyle={{ paddingHorizontal: GRID_PADDING, paddingBottom: 80 }}>
+        <ScrollView style={st.scrollArea} contentContainerStyle={{ paddingHorizontal: GRID_PADDING, paddingBottom: CONTENT_BOTTOM_CLEARANCE }}>
           <Text style={st.moveToSectionTitle}>Folders</Text>
           <View style={st.moveToEmpty}>
             <Text style={st.moveToEmptyText}>No folders yet</Text>
@@ -1892,13 +1994,42 @@ export default function WorkoutFolderPage({
           </Pressable>
 
           <Text style={[st.moveToSectionTitle, { marginTop: 24 }]}>Playbooks</Text>
-          <View style={st.moveToEmpty}>
-            <Text style={st.moveToEmptyText}>No playbooks yet</Text>
-          </View>
-          <Pressable style={st.moveToCreateBtn} onPress={() => console.log('[WorkoutFolder] Create playbook — not yet wired')}>
-            <Icon name="plus" size={16} color="#A78BFA" />
-            <Text style={[st.moveToCreateText, { color: '#A78BFA' }]}>Create Playbook</Text>
-          </Pressable>
+          {(() => {
+            const q = moveToSearch.trim().toLowerCase();
+            const visible = q
+              ? movePlaybooks.filter(pb => (pb.name || '').toLowerCase().includes(q))
+              : movePlaybooks;
+            if (visible.length === 0) {
+              return (
+                <View style={st.moveToEmpty}>
+                  <Text style={st.moveToEmptyText}>No playbooks yet</Text>
+                </View>
+              );
+            }
+            return visible.map(pb => {
+              const alreadyIn = Array.isArray(pb.workoutIds) && pb.workoutIds.includes(workoutId);
+              return (
+                <Pressable
+                  key={pb.id}
+                  style={[st.moveToCreateBtn, { justifyContent: 'flex-start', borderStyle: 'solid', borderColor: '#2A3340', marginBottom: 8 }]}
+                  onPress={() => addToPlaybook(pb)}
+                  disabled={alreadyIn || moveToBusyId === pb.id}
+                >
+                  <Icon name="playbook" size={16} color="#A78BFA" />
+                  <Text style={[st.moveToCreateText, { color: '#F0F4F8', flex: 1 }]} numberOfLines={1}>
+                    {pb.name || 'Untitled Playbook'}
+                  </Text>
+                  {moveToBusyId === pb.id ? (
+                    <ActivityIndicator size="small" color="#A78BFA" />
+                  ) : alreadyIn ? (
+                    <Text style={[st.moveToCreateText, { color: '#34D399' }]}>Added ✓</Text>
+                  ) : (
+                    <Icon name="plus" size={16} color="#A78BFA" />
+                  )}
+                </Pressable>
+              );
+            });
+          })()}
         </ScrollView>
       </View>
     );
@@ -2054,6 +2185,20 @@ export default function WorkoutFolderPage({
               <Icon name="play" size={16} color="#F472B6" />
               <Text style={st.menuItemText}>Edit Intro / Outro</Text>
             </Pressable>
+            <Pressable
+              style={st.menuItem}
+              onPress={() => { setShowTitleMenu(false); setShowMusicModal(true); }}
+            >
+              <Icon name="music" size={16} color="#A78BFA" />
+              <Text style={st.menuItemText}>Workout Music</Text>
+            </Pressable>
+            <Pressable
+              style={st.menuItem}
+              onPress={() => { setShowTitleMenu(false); setShowIntroAnnouncement(true); }}
+            >
+              <Icon name="sparkle" size={16} color="#FBBF24" />
+              <Text style={st.menuItemText}>Intro Announcement</Text>
+            </Pressable>
             <View style={st.menuDivider} />
             <Pressable
               style={st.menuItem}
@@ -2082,7 +2227,7 @@ export default function WorkoutFolderPage({
       {/* ── Main content: blocks ─────────────────────────────────────────── */}
       <ScrollView
         style={st.scrollArea}
-        contentContainerStyle={{ paddingHorizontal: GRID_PADDING, paddingBottom: 200 }}
+        contentContainerStyle={{ paddingHorizontal: GRID_PADDING, paddingBottom: 280 }}
         showsVerticalScrollIndicator={false}
         onScrollBeginDrag={dismissAll}
       >
@@ -3325,6 +3470,17 @@ export default function WorkoutFolderPage({
         />
       )}
 
+      {/* ── Intro Announcement settings ── */}
+      <WorkoutIntroAnnouncementModal
+        visible={showIntroAnnouncement}
+        onClose={() => setShowIntroAnnouncement(false)}
+        workoutId={workoutId}
+        defaultScript={introAnnouncementDefaultScript}
+        enabled={introAnnouncementEnabled}
+        text={introAnnouncementText}
+        onSave={saveIntroAnnouncement}
+      />
+
       {/* ── Delete Workout Confirmation — uses <Modal> portal like description edit ── */}
       <Modal transparent visible={showDeleteConfirm} animationType="fade" onRequestClose={() => setShowDeleteConfirm(false)}>
         <Pressable style={st.modalBackdrop} onPress={() => setShowDeleteConfirm(false)}>
@@ -3474,9 +3630,110 @@ export default function WorkoutFolderPage({
           </View>
         </View>
       </Modal>
+
+      {/* ── Workout Music Modal ─────────────────────────────────────────── */}
+      <Modal
+        visible={showMusicModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMusicModal(false)}
+      >
+        <View style={st.shareModalOverlay}>
+          <View style={st.shareModalCard}>
+            <View style={st.shareModalHeader}>
+              <Text style={st.shareModalTitle}>Workout Music</Text>
+              <TouchableOpacity onPress={() => setShowMusicModal(false)}>
+                <Icon name="x" size={20} color="#8A95A3" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={st.shareModalOptionTitle}>Background music</Text>
+                <Text style={st.shareModalOptionDesc}>
+                  AI-generated music plays softly under coach audio during playback
+                </Text>
+              </View>
+              <Switch
+                value={musicEnabled}
+                onValueChange={(v) => saveWorkoutMusic({ workoutMusicEnabled: v })}
+                trackColor={{ false: '#2A3441', true: '#6EBB7A' }}
+                thumbColor="#F5F7FA"
+              />
+            </View>
+
+            <Text style={st.shareModalSectionLabel}>Music style</Text>
+            <View style={st.shareModalChipRow}>
+              {MUSIC_STYLE_OPTIONS.map((opt) => {
+                const active = musicStyle === opt.value;
+                return (
+                  <TouchableOpacity
+                    key={opt.value}
+                    style={[st.shareModalChip, active && st.shareModalChipActive]}
+                    onPress={() => saveWorkoutMusic({ workoutMusicStyle: opt.value })}
+                    disabled={!musicEnabled}
+                  >
+                    <Text
+                      style={[
+                        st.shareModalChipText,
+                        active && st.shareModalChipTextActive,
+                        !musicEnabled && { opacity: 0.4 },
+                      ]}
+                    >
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={st.shareModalSectionLabel}>Music volume</Text>
+            <View style={st.shareModalChipRow}>
+              {MUSIC_VOLUME_OPTIONS.map((opt) => {
+                const active = Math.abs(musicVolume - opt.value) < 0.01;
+                return (
+                  <TouchableOpacity
+                    key={opt.label}
+                    style={[st.shareModalChip, active && st.shareModalChipActive]}
+                    onPress={() => saveWorkoutMusic({ workoutMusicVolume: opt.value })}
+                    disabled={!musicEnabled}
+                  >
+                    <Text
+                      style={[
+                        st.shareModalChipText,
+                        active && st.shareModalChipTextActive,
+                        !musicEnabled && { opacity: 0.4 },
+                      ]}
+                    >
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
+
+// ── Workout Music constants ──────────────────────────────────────────────────
+const MUSIC_VOLUME_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: 0.2, label: 'Quiet' },
+  { value: 0.35, label: 'Soft' },
+  { value: 0.55, label: 'Medium' },
+  { value: 0.8, label: 'Loud' },
+];
+
+const MUSIC_STYLE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'workout', label: 'Workout' },
+  { value: 'edm', label: 'EDM' },
+  { value: 'hiphop', label: 'Hip-Hop' },
+  { value: 'chill', label: 'Chill' },
+  { value: 'rock', label: 'Rock' },
+  { value: 'focus', label: 'Focus' },
+];
 
 // ── Share Settings constants & helpers ──────────────────────────────────────
 const VISIBILITY_OPTIONS: Array<{ value: ShareVisibility; label: string; description: string }> = [
