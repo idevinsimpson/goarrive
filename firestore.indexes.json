@@ -9,6 +9,23 @@
       ]
     },
     {
+      "collectionGroup": "member_time_reservations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "memberKey", "order": "ASCENDING" },
+        { "fieldPath": "startUtc", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "session_instances",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "playbookId", "order": "ASCENDING" },
+        { "fieldPath": "memberId", "order": "ASCENDING" },
+        { "fieldPath": "startUtc", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "session_instances",
       "queryScope": "COLLECTION",
       "fields": [

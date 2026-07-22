@@ -63,6 +63,7 @@ import WorkoutFolderPage from '../../components/WorkoutFolderPage';
 import BulkMovementUpload from '../../components/BulkMovementUpload';
 import FollowAlongVideoUploadSheet, { FollowAlongVideoPayload } from '../../components/FollowAlongVideoUploadSheet';
 import FollowAlongVideoDetail from '../../components/FollowAlongVideoDetail';
+import PlaybookSchedulePanel from '../../components/PlaybookSchedulePanel';
 import { usePreviewEngine } from '../../hooks/usePreviewEngine';
 import { AnimatedPreviewTile, MosaicPreviewTile } from '../../components/AnimatedPreviewTile';
 import {
@@ -571,6 +572,7 @@ function BuildScreenInner() {
   // and order come from the playbook's workoutIds array (never parentId, since
   // one workout can live in many playbooks and order matters for rotation).
   const [currentPlaybook, setCurrentPlaybook] = useState<{ id: string; name: string } | null>(null);
+  const [showPlaybookSchedule, setShowPlaybookSchedule] = useState(false);
   const [editingPlaybookTitle, setEditingPlaybookTitle] = useState(false);
   const [playbookTitleDraft, setPlaybookTitleDraft] = useState('');
   const currentPlaybookRef = useRef<{ id: string; name: string } | null>(null);
@@ -954,6 +956,7 @@ function BuildScreenInner() {
 
   const exitPlaybook = useCallback(() => {
     setCurrentPlaybook(null);
+    setShowPlaybookSchedule(false);
     setEditingPlaybookTitle(false);
   }, []);
 
@@ -2492,6 +2495,14 @@ function BuildScreenInner() {
           </>
         )}
 
+        {currentPlaybook && (
+          <Pressable
+            style={[s.toolBtn, showPlaybookSchedule && s.toolBtnActive]}
+            onPress={() => setShowPlaybookSchedule(true)}
+          >
+            <Icon name="calendar" size={20} color={showPlaybookSchedule ? '#F5A623' : '#F0F4F8'} />
+          </Pressable>
+        )}
         <Pressable
           style={s.plusBtn}
           onPress={() => setIsPlusOpen(true)}
@@ -2499,6 +2510,15 @@ function BuildScreenInner() {
           <Icon name="plus" size={24} color="#0E1117" />
         </Pressable>
       </View>
+
+      {/* Playbook scheduling — dead-simple panel over the drill-in */}
+      {currentPlaybook && (
+        <PlaybookSchedulePanel
+          playbookId={currentPlaybook.id}
+          visible={showPlaybookSchedule}
+          onClose={() => setShowPlaybookSchedule(false)}
+        />
+      )}
 
       {!currentPlaybook && isFilterOpen && (
         <View style={s.filterPanel}>

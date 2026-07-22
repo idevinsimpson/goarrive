@@ -25,6 +25,7 @@ export interface ZoomMeetingRequest {
   duration: number;        // minutes
   timezone: string;
   hostEmail: string;       // Zoom user email to host the meeting
+  autoRecording?: 'cloud' | 'none';  // default 'cloud'; playbooks can turn recording off
 }
 
 export interface ZoomMeetingResponse {
@@ -146,7 +147,7 @@ export class RealZoomProvider implements ZoomProvider {
       settings: {
         join_before_host: true,
         waiting_room: false,
-        auto_recording: 'cloud',
+        auto_recording: request.autoRecording ?? 'cloud',
         mute_upon_entry: true,
         approval_type: 0, // Automatically approve
       },
