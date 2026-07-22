@@ -34,6 +34,7 @@ export type MessageType =
   | 'workout_reviewed'
   | 'workout_completed'
   | 'coach_welcome'
+  | 'booking_confirmation'
   | 'platform_digest'
   | 'feedback_ack'
   | 'feedback_shipped'

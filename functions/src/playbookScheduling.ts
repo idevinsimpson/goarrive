@@ -248,6 +248,7 @@ export interface BookOccurrenceParams {
   weeklySessionCap: number | null;
   pinnedWorkoutId?: string | null;
   bookedVia?: 'coach_panel' | 'booking_link';
+  location?: string | null;
 }
 
 export function hostingFieldsFor(sessionKind: PlaybookSessionKind): Record<string, any> {
@@ -334,6 +335,7 @@ export async function bookOccurrence(p: BookOccurrenceParams): Promise<{ instanc
       allocationAttempts: 0,
       guestEmail: p.guestEmail,
       bookedVia: p.bookedVia || 'coach_panel',
+      location: p.location || null,
       ...hostingFieldsFor(p.sessionKind),
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),

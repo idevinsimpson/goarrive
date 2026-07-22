@@ -238,6 +238,7 @@ export interface SessionInstance {
   endUtc?: Timestamp;
   reservationId?: string;             // member_time_reservations doc backing this booking
   guestEmail?: string | null;         // Guest-by-email booking hook (Phase B)
+  location?: string | null;           // Member-picked location option (Phase B.1)
 
   // Allocation fields
   zoomRoomId?: string;              // Assigned Zoom room doc ID

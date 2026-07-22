@@ -1,24 +1,32 @@
 /**
- * Public Calendly-style booking page — /book/{token} (Phase 3b).
+ * Public Calendly-style booking page — /book/{token} (Phase 3b, reworked B.1).
  *
  * Resolves an unguessable booking token through
  * resolvePlaybookBookingToken (Admin SDK, title-only projection — never
- * workout names). Signed-in members on the playbook book as themselves;
- * anyone else books as a guest by email, then gets a nudge to create an
- * account so the coach knows it's really the member.
+ * workout names). Month-view calendar → pick a day → pick a time →
+ * (optional) pick a location → confirm. Signed-in members on the playbook
+ * book as themselves; anyone else books as a guest by email.
+ *
+ * ?preview=1 renders the exact member view for the coach with booking
+ * disabled.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
+  ActivityIndicator, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../../lib/firebase';
 import { useAuth } from '../../lib/AuthContext';
-import { BG, CARD, BORDER, FG, MUTED, GREEN, RED, FH, FB } from '../../lib/theme';
+import { BG, CARD, BORDER, FG, MUTED, GOLD, GREEN, RED, FH, FB } from '../../lib/theme';
 
 const RESOLVE_URL = 'https://us-central1-goarrive.cloudfunctions.net/resolvePlaybookBookingToken';
+
+// Brand tokens from .claude/design-system.md — "GO" sage / "ARRIVE" steel blue
+const GO = '#7BA05B';
+const ARRIVE = '#7BA7D4';
+const DIM = '#4A5568';
 
 interface Slot {
   date: string;
@@ -37,10 +45,21 @@ interface BookingInfo {
   timezone: string;
   weeklySessionCap: number | null;
   capState: { booked: number; cap: number } | null;
+  locations: string[];
   slots: Slot[];
 }
 
-const ACCENT = '#A78BFA';
+interface BookedResult {
+  date: string;
+  startTime: string;
+  guest: boolean;
+  location: string | null;
+  icsUrl: string | null;
+  googleCalUrl: string | null;
+}
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const DOW_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
 function friendlyDate(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -56,18 +75,31 @@ function friendlyTime(hhmm: string): string {
   return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
 }
 
+function ymKey(y: number, m: number): string {
+  return `${y}-${String(m + 1).padStart(2, '0')}`;
+}
+
+function openUrl(url: string) {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') window.open(url, '_blank');
+  else Linking.openURL(url).catch(() => {});
+}
+
 export default function BookingPage() {
-  const { token } = useLocalSearchParams<{ token: string }>();
+  const { token, preview } = useLocalSearchParams<{ token: string; preview?: string }>();
+  const previewMode = preview === '1' || preview === 'true';
   const { user, loading: authLoading } = useAuth();
 
   const [info, setInfo] = useState<BookingInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [guestEmail, setGuestEmail] = useState('');
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selected, setSelected] = useState<Slot | null>(null);
+  const [location, setLocation] = useState<string | null>(null);
+  const [monthIdx, setMonthIdx] = useState(0);
   const [booking, setBooking] = useState(false);
   const [bookError, setBookError] = useState('');
-  const [booked, setBooked] = useState<{ date: string; startTime: string; guest: boolean } | null>(null);
+  const [booked, setBooked] = useState<BookedResult | null>(null);
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(guestEmail.trim());
 
@@ -82,7 +114,7 @@ export default function BookingPage() {
         setError(json.error || 'This booking link is not available.');
         return;
       }
-      setInfo(json);
+      setInfo({ ...json, locations: Array.isArray(json.locations) ? json.locations : [] });
     } catch (err) {
       console.error('[BookingPage] resolve error:', err);
       setError('Something went wrong loading this booking page.');
@@ -102,11 +134,36 @@ export default function BookingPage() {
       if (!map.has(s.date)) map.set(s.date, []);
       map.get(s.date)!.push(s);
     }
-    return [...map.entries()];
+    return map;
   }, [info?.slots]);
 
+  // Months spanned by the booking horizon (from today through the last slot).
+  const months = useMemo(() => {
+    const now = new Date();
+    const first = { y: now.getFullYear(), m: now.getMonth() };
+    const dates = [...slotsByDate.keys()].sort();
+    const lastDate = dates[dates.length - 1];
+    const out = [first];
+    if (lastDate) {
+      const [ly, lm] = lastDate.split('-').map(Number);
+      let y = first.y;
+      let m = first.m;
+      while (y < ly || (y === ly && m < lm - 1)) {
+        m += 1;
+        if (m > 11) { m = 0; y += 1; }
+        out.push({ y, m });
+      }
+    }
+    return out;
+  }, [slotsByDate]);
+
+  useEffect(() => { if (monthIdx >= months.length) setMonthIdx(0); }, [months, monthIdx]);
+
+  const daySlots = selectedDate ? (slotsByDate.get(selectedDate) || []) : [];
   const needsEmail = !!info?.guestMode || !user;
-  const canBook = !!selected && !selected.capReached && !booking && (!needsEmail || emailValid);
+  const needsLocation = (info?.locations.length || 0) > 0;
+  const canBook = !previewMode && !!selected && !selected.capReached && !booking
+    && (!needsEmail || emailValid) && (!needsLocation || !!location);
 
   const book = useCallback(async () => {
     if (!selected || !canBook) return;
@@ -119,9 +176,17 @@ export default function BookingPage() {
         date: selected.date,
         startTime: selected.startTime,
         ...(needsEmail ? { guestEmail: guestEmail.trim() } : {}),
+        ...(location ? { location } : {}),
       });
-      const data = res.data as { guest: boolean };
-      setBooked({ date: selected.date, startTime: selected.startTime, guest: data.guest });
+      const data = res.data as { guest: boolean; icsUrl?: string; googleCalUrl?: string; location?: string | null };
+      setBooked({
+        date: selected.date,
+        startTime: selected.startTime,
+        guest: data.guest,
+        location: data.location || null,
+        icsUrl: data.icsUrl || null,
+        googleCalUrl: data.googleCalUrl || null,
+      });
     } catch (e: any) {
       console.error('[BookingPage] booking error:', e);
       setBookError(e?.message || 'Booking failed — that time may have just been taken.');
@@ -129,12 +194,12 @@ export default function BookingPage() {
     } finally {
       setBooking(false);
     }
-  }, [selected, canBook, token, needsEmail, guestEmail, load]);
+  }, [selected, canBook, token, needsEmail, guestEmail, location, load]);
 
   if (loading || authLoading) {
     return (
       <View style={s.center}>
-        <ActivityIndicator color={ACCENT} size="large" />
+        <ActivityIndicator color={GO} size="large" />
       </View>
     );
   }
@@ -154,11 +219,28 @@ export default function BookingPage() {
     return (
       <View style={s.center}>
         <View style={s.card}>
+          <Image source={require('../../assets/logo.png')} style={s.logo} resizeMode="contain" accessibilityLabel="GoArrive" />
           <Text style={s.bigCheck}>✓</Text>
           <Text style={s.doneTitle}>You're booked</Text>
           <Text style={s.doneBody}>
             {info.playbookTitle} — {friendlyDate(booked.date)} at {friendlyTime(booked.startTime)} ({info.timezone})
           </Text>
+          {booked.location && <Text style={s.doneLocation}>Location: {booked.location}</Text>}
+          <Text style={s.doneHint}>A confirmation email with calendar invite is on its way.</Text>
+
+          <View style={s.calRow}>
+            {booked.googleCalUrl && (
+              <Pressable style={s.calBtn} onPress={() => openUrl(booked.googleCalUrl!)}>
+                <Text style={s.calBtnText}>Google Calendar</Text>
+              </Pressable>
+            )}
+            {booked.icsUrl && (
+              <Pressable style={s.calBtn} onPress={() => openUrl(booked.icsUrl!)}>
+                <Text style={s.calBtnText}>Download .ics</Text>
+              </Pressable>
+            )}
+          </View>
+
           {booked.guest ? (
             <>
               <Text style={s.nudge}>
@@ -176,7 +258,10 @@ export default function BookingPage() {
           )}
           <Pressable
             style={s.ghostBtn}
-            onPress={() => { setBooked(null); setSelected(null); load(booked.guest ? guestEmail.trim() : undefined); }}
+            onPress={() => {
+              setBooked(null); setSelected(null); setSelectedDate(null); setLocation(null);
+              load(booked.guest ? guestEmail.trim() : undefined);
+            }}
           >
             <Text style={s.ghostBtnText}>Book another time</Text>
           </Pressable>
@@ -185,10 +270,31 @@ export default function BookingPage() {
     );
   }
 
+  const { y, m } = months[Math.min(monthIdx, months.length - 1)];
+  const firstDow = new Date(Date.UTC(y, m, 1, 12)).getUTCDay();
+  const daysInMonth = new Date(Date.UTC(y, m + 1, 0, 12)).getUTCDate();
+  const cells: Array<{ day: number; dateStr: string; available: boolean } | null> = [];
+  for (let i = 0; i < firstDow; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const daySlotList = slotsByDate.get(dateStr) || [];
+    cells.push({ day: d, dateStr, available: daySlotList.some((x) => !x.capReached) });
+  }
+  while (cells.length % 7 !== 0) cells.push(null);
+  const weeks: Array<typeof cells> = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+
   return (
     <ScrollView style={{ flex: 1, backgroundColor: BG }} contentContainerStyle={s.page}>
       <View style={s.card}>
-        <Text style={s.brand}>G➲A</Text>
+        {previewMode && (
+          <View style={s.previewBanner}>
+            <Text style={s.previewBannerText}>
+              Preview — this is exactly what your member sees. Booking is disabled.
+            </Text>
+          </View>
+        )}
+        <Image source={require('../../assets/logo.png')} style={s.logo} resizeMode="contain" accessibilityLabel="GoArrive" />
         <Text style={s.title}>{info.playbookTitle}</Text>
         <Text style={s.subtitle}>
           {info.coachName ? `with Coach ${info.coachName} · ` : ''}
@@ -205,7 +311,7 @@ export default function BookingPage() {
           </View>
         )}
 
-        {needsEmail && (
+        {needsEmail && !previewMode && (
           <View style={{ marginTop: 16 }}>
             <Text style={s.sectionLabel}>Your Email</Text>
             <TextInput
@@ -214,7 +320,7 @@ export default function BookingPage() {
               onChangeText={setGuestEmail}
               onBlur={() => { if (emailValid) load(guestEmail.trim()); }}
               placeholder="you@example.com"
-              placeholderTextColor="#4A5568"
+              placeholderTextColor={DIM}
               autoCapitalize="none"
               keyboardType="email-address"
               autoComplete="email"
@@ -225,15 +331,67 @@ export default function BookingPage() {
           </View>
         )}
 
-        <Text style={s.sectionLabel}>Pick a Time</Text>
-        {slotsByDate.length === 0 && (
+        <Text style={s.sectionLabel}>Pick a Day</Text>
+        {slotsByDate.size === 0 && (
           <Text style={s.hint}>No open times in the next few weeks. Check back soon.</Text>
         )}
-        {slotsByDate.map(([date, slots]) => (
-          <View key={date} style={{ marginTop: 12 }}>
-            <Text style={s.dateLabel}>{friendlyDate(date)}</Text>
+        {slotsByDate.size > 0 && (
+          <View style={s.calendar}>
+            <View style={s.monthHeader}>
+              <Pressable
+                style={[s.monthNavBtn, monthIdx === 0 && s.monthNavBtnOff]}
+                disabled={monthIdx === 0}
+                onPress={() => setMonthIdx((i) => Math.max(0, i - 1))}
+              >
+                <Text style={[s.monthNavText, monthIdx === 0 && s.monthNavTextOff]}>‹</Text>
+              </Pressable>
+              <Text style={s.monthTitle}>{MONTH_NAMES[m]} {y}</Text>
+              <Pressable
+                style={[s.monthNavBtn, monthIdx >= months.length - 1 && s.monthNavBtnOff]}
+                disabled={monthIdx >= months.length - 1}
+                onPress={() => setMonthIdx((i) => Math.min(months.length - 1, i + 1))}
+              >
+                <Text style={[s.monthNavText, monthIdx >= months.length - 1 && s.monthNavTextOff]}>›</Text>
+              </Pressable>
+            </View>
+            <View style={s.dowRow}>
+              {DOW_LABELS.map((d, i) => (
+                <Text key={`${d}${i}`} style={s.dowLabel}>{d}</Text>
+              ))}
+            </View>
+            {weeks.map((week, wi) => (
+              <View key={`${ymKey(y, m)}-${wi}`} style={s.weekRow}>
+                {week.map((cell, ci) => {
+                  if (!cell) return <View key={ci} style={s.dayCell} />;
+                  const isSel = selectedDate === cell.dateStr;
+                  return (
+                    <Pressable
+                      key={ci}
+                      style={[s.dayCell, cell.available && s.dayCellAvail, isSel && s.dayCellSel]}
+                      disabled={!cell.available}
+                      onPress={() => {
+                        setSelectedDate(cell.dateStr);
+                        setSelected(null);
+                        setBookError('');
+                      }}
+                    >
+                      <Text style={[s.dayText, !cell.available && s.dayTextOff, cell.available && s.dayTextAvail, isSel && s.dayTextSel]}>
+                        {cell.day}
+                      </Text>
+                      {cell.available && !isSel && <View style={s.dayDot} />}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ))}
+          </View>
+        )}
+
+        {selectedDate && (
+          <>
+            <Text style={s.sectionLabel}>{friendlyDate(selectedDate)} — Pick a Time</Text>
             <View style={s.slotRow}>
-              {slots.map((slot) => {
+              {daySlots.map((slot) => {
                 const isSel = selected?.startUtcMillis === slot.startUtcMillis;
                 return (
                   <Pressable
@@ -249,11 +407,31 @@ export default function BookingPage() {
                 );
               })}
             </View>
-            {slots.every((x) => x.capReached) && (
+            {daySlots.length > 0 && daySlots.every((x) => x.capReached) && (
               <Text style={s.cappedNote}>Weekly session limit reached for this week</Text>
             )}
-          </View>
-        ))}
+          </>
+        )}
+
+        {needsLocation && selected && (
+          <>
+            <Text style={s.sectionLabel}>Where will you train?</Text>
+            <View style={s.slotRow}>
+              {info.locations.map((loc) => {
+                const isSel = location === loc;
+                return (
+                  <Pressable
+                    key={loc}
+                    style={[s.slotChip, isSel && s.slotChipSel]}
+                    onPress={() => { setLocation(loc); setBookError(''); }}
+                  >
+                    <Text style={[s.slotText, isSel && s.slotTextSel]}>{loc}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </>
+        )}
 
         {bookError !== '' && <Text style={s.bookError}>{bookError}</Text>}
 
@@ -263,11 +441,17 @@ export default function BookingPage() {
           disabled={!canBook}
         >
           <Text style={s.primaryBtnText}>
-            {booking
-              ? 'Booking…'
-              : selected
-                ? `Book ${friendlyDate(selected.date)} · ${friendlyTime(selected.startTime)}`
-                : 'Select a time'}
+            {previewMode
+              ? 'Preview mode — booking disabled'
+              : booking
+                ? 'Booking…'
+                : selected
+                  ? needsLocation && !location
+                    ? 'Pick a location'
+                    : `Book ${friendlyDate(selected.date)} · ${friendlyTime(selected.startTime)}`
+                  : selectedDate
+                    ? 'Select a time'
+                    : 'Select a day'}
           </Text>
         </Pressable>
       </View>
@@ -299,12 +483,25 @@ const s = StyleSheet.create({
     borderRadius: 20,
     padding: 24,
   },
-  brand: {
-    color: ACCENT,
-    fontSize: 14,
-    fontWeight: '800',
-    fontFamily: FH,
-    letterSpacing: 2,
+  previewBanner: {
+    backgroundColor: BG,
+    borderColor: GOLD,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 14,
+  },
+  previewBannerText: {
+    color: GOLD,
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: FB,
+  },
+  logo: {
+    width: 132,
+    height: 36,
+    alignSelf: 'flex-start',
+    marginBottom: 4,
   },
   title: {
     color: FG,
@@ -326,7 +523,7 @@ const s = StyleSheet.create({
     marginTop: 8,
   },
   tzLine: {
-    color: '#4A5568',
+    color: DIM,
     fontSize: 12,
     fontFamily: FB,
     marginTop: 4,
@@ -338,7 +535,7 @@ const s = StyleSheet.create({
     marginTop: 14,
   },
   capText: {
-    color: ACCENT,
+    color: ARRIVE,
     fontSize: 13,
     fontWeight: '700',
     fontFamily: FB,
@@ -346,7 +543,7 @@ const s = StyleSheet.create({
   sectionLabel: {
     fontSize: 11,
     fontWeight: '800',
-    color: '#4A5568',
+    color: DIM,
     letterSpacing: 1,
     marginTop: 18,
     marginBottom: 4,
@@ -363,16 +560,101 @@ const s = StyleSheet.create({
     marginTop: 6,
   },
   hint: {
-    color: '#4A5568',
+    color: DIM,
     fontSize: 12,
     fontFamily: FB,
     marginTop: 6,
   },
-  dateLabel: {
-    color: FG,
-    fontSize: 14,
+  calendar: {
+    backgroundColor: BG,
+    borderRadius: 14,
+    padding: 12,
+    marginTop: 8,
+  },
+  monthHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  monthNavBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: CARD,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  monthNavBtnOff: {
+    opacity: 0.3,
+  },
+  monthNavText: {
+    color: GO,
+    fontSize: 18,
     fontWeight: '700',
     fontFamily: FH,
+  },
+  monthNavTextOff: {
+    color: DIM,
+  },
+  monthTitle: {
+    color: FG,
+    fontSize: 15,
+    fontWeight: '700',
+    fontFamily: FH,
+  },
+  dowRow: {
+    flexDirection: 'row',
+    marginBottom: 4,
+  },
+  dowLabel: {
+    flex: 1,
+    textAlign: 'center',
+    color: DIM,
+    fontSize: 11,
+    fontWeight: '700',
+    fontFamily: FB,
+  },
+  weekRow: {
+    flexDirection: 'row',
+  },
+  dayCell: {
+    flex: 1,
+    aspectRatio: 1,
+    maxHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    margin: 1,
+  },
+  dayCellAvail: {
+    backgroundColor: CARD,
+  },
+  dayCellSel: {
+    backgroundColor: GO,
+  },
+  dayText: {
+    color: MUTED,
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: FB,
+  },
+  dayTextOff: {
+    color: '#2A3444',
+  },
+  dayTextAvail: {
+    color: FG,
+  },
+  dayTextSel: {
+    color: BG,
+    fontWeight: '800',
+  },
+  dayDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: GO,
+    marginTop: 2,
   },
   slotRow: {
     flexDirection: 'row',
@@ -389,8 +671,8 @@ const s = StyleSheet.create({
     borderColor: BORDER,
   },
   slotChipSel: {
-    backgroundColor: ACCENT,
-    borderColor: ACCENT,
+    backgroundColor: GO,
+    borderColor: GO,
   },
   slotChipCapped: {
     opacity: 0.35,
@@ -405,10 +687,10 @@ const s = StyleSheet.create({
     color: BG,
   },
   slotTextCapped: {
-    color: '#4A5568',
+    color: DIM,
   },
   cappedNote: {
-    color: '#F5A623',
+    color: GOLD,
     fontSize: 12,
     fontFamily: FB,
     marginTop: 6,
@@ -420,14 +702,14 @@ const s = StyleSheet.create({
     marginTop: 14,
   },
   primaryBtn: {
-    backgroundColor: ACCENT,
+    backgroundColor: GO,
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 20,
   },
   primaryBtnDisabled: {
-    backgroundColor: '#4A5568',
+    backgroundColor: DIM,
   },
   primaryBtnText: {
     color: BG,
@@ -464,6 +746,41 @@ const s = StyleSheet.create({
     fontFamily: FB,
     textAlign: 'center',
     marginTop: 8,
+  },
+  doneLocation: {
+    color: ARRIVE,
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: FB,
+    textAlign: 'center',
+    marginTop: 6,
+  },
+  doneHint: {
+    color: DIM,
+    fontSize: 12,
+    fontFamily: FB,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  calRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+    marginTop: 14,
+    flexWrap: 'wrap',
+  },
+  calBtn: {
+    borderColor: ARRIVE,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  calBtnText: {
+    color: ARRIVE,
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: FB,
   },
   nudge: {
     color: FG,

@@ -12,7 +12,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View,
 } from 'react-native';
-import { collection, doc, getDoc, getDocs, limit, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, onSnapshot, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
+import { router } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
@@ -30,9 +31,18 @@ const DURATIONS = [30, 45, 60];
 const TIME_PRESETS = ['06:00', '07:00', '09:00', '12:00', '17:00', '18:30'];
 
 interface BookingWindowRow {
-  dayOfWeek: number;
+  days: number[];
   startTime: string;
   endTime: string;
+}
+
+// booking_windows docs written before multi-day support carry dayOfWeek.
+function normalizeWindow(w: any): BookingWindowRow {
+  return {
+    days: Array.isArray(w?.days) ? w.days : (typeof w?.dayOfWeek === 'number' ? [w.dayOfWeek] : []),
+    startTime: w?.startTime || '09:00',
+    endTime: w?.endTime || '12:00',
+  };
 }
 
 interface BookResult {
@@ -84,10 +94,16 @@ export default function PlaybookSchedulePanel({
 
   // Booking link (Phase 3b): availability windows + public token URL
   const [windows, setWindows] = useState<BookingWindowRow[]>([]);
+  const [locations, setLocations] = useState<string[]>([]);
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+
+  // Members on this playbook (B.1): coach member list + add/remove
+  const [coachMembers, setCoachMembers] = useState<Array<{ id: string; name: string }>>([]);
+  const [memberPickerOpen, setMemberPickerOpen] = useState(false);
+  const [memberBusy, setMemberBusy] = useState(false);
 
   // Live playbook doc — pre-fills the form from previously saved settings.
   useEffect(() => {
@@ -117,7 +133,9 @@ export default function PlaybookSchedulePanel({
     getDoc(doc(db, 'booking_windows', playbookId))
       .then((snap) => {
         const w = snap.data()?.windows;
-        if (Array.isArray(w) && w.length) setWindows(w as BookingWindowRow[]);
+        if (Array.isArray(w) && w.length) setWindows(w.map(normalizeWindow));
+        const locs = snap.data()?.locations;
+        if (Array.isArray(locs)) setLocations(locs);
       })
       .catch(() => {});
     getDocs(query(
@@ -131,8 +149,57 @@ export default function PlaybookSchedulePanel({
       .catch(() => {});
   }, [visible, playbookId, effectiveUid]);
 
+  // Coach's member list — powers the add-member picker + name lookups.
+  useEffect(() => {
+    if (!visible || !effectiveUid) return;
+    getDocs(query(collection(db, 'members'), where('coachId', '==', effectiveUid)))
+      .then((snap) => {
+        setCoachMembers(
+          snap.docs
+            .filter((d) => !d.data().isArchived)
+            .map((d) => {
+              const x = d.data();
+              return { id: d.id, name: x.name || x.displayName || x.email || 'Unnamed' };
+            })
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        );
+      })
+      .catch((e) => console.error('[PlaybookSchedulePanel] members load error:', e));
+  }, [visible, effectiveUid]);
+
+  const playbookMemberIds = useMemo<string[]>(
+    () => (playbook?.memberIds?.length
+      ? playbook.memberIds
+      : (playbook?.assignedMemberId ? [playbook.assignedMemberId] : [])),
+    [playbook?.memberIds, playbook?.assignedMemberId],
+  );
+  const nameOf = useCallback(
+    (id: string) => coachMembers.find((m) => m.id === id)?.name
+      || (id === playbook?.assignedMemberId ? playbook?.assignedMemberName : null)
+      || 'Member',
+    [coachMembers, playbook?.assignedMemberId, playbook?.assignedMemberName],
+  );
+
+  const writeMembers = useCallback(async (newIds: string[]) => {
+    if (memberBusy) return;
+    setMemberBusy(true);
+    try {
+      // assignedMemberId stays in sync for legacy single-member reads
+      await updateDoc(doc(db, 'playbooks', playbookId), {
+        memberIds: newIds,
+        assignedMemberId: newIds[0] || null,
+        assignedMemberName: newIds[0] ? nameOf(newIds[0]) : null,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.error('[PlaybookSchedulePanel] member update error:', e);
+    } finally {
+      setMemberBusy(false);
+    }
+  }, [memberBusy, playbookId, nameOf]);
+
   const memberName = playbook?.assignedMemberName || null;
-  const hasMember = !!(playbook?.assignedMemberId || playbook?.memberIds?.length);
+  const hasMember = playbookMemberIds.length > 0;
   const timezone = useMemo(
     () => playbook?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
     [playbook?.timezone],
@@ -177,7 +244,7 @@ export default function PlaybookSchedulePanel({
 
   const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
   const windowsValid = windows.length > 0 && windows.every(
-    (w) => timeRe.test(w.startTime) && timeRe.test(w.endTime) && w.startTime < w.endTime,
+    (w) => w.days.length > 0 && timeRe.test(w.startTime) && timeRe.test(w.endTime) && w.startTime < w.endTime,
   );
 
   const bookingUrl = useMemo(() => {
@@ -200,7 +267,12 @@ export default function PlaybookSchedulePanel({
     setLinkError(null);
     try {
       const fn = httpsCallable(functions, 'createPlaybookBookingLink');
-      const res = await fn({ playbookId, windows, timezone });
+      const res = await fn({
+        playbookId,
+        windows,
+        timezone,
+        locations: locations.map((l) => l.trim()).filter(Boolean),
+      });
       const data = res.data as { token: string };
       setLinkToken(data.token);
     } catch (e: any) {
@@ -209,7 +281,17 @@ export default function PlaybookSchedulePanel({
     } finally {
       setLinkBusy(false);
     }
-  }, [windowsValid, linkBusy, playbookId, windows, timezone]);
+  }, [windowsValid, linkBusy, playbookId, windows, timezone, locations]);
+
+  const openPreview = useCallback(() => {
+    if (!linkToken) return;
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.open(`${bookingUrl}?preview=1`, '_blank');
+    } else {
+      onClose();
+      router.push(`/book/${linkToken}?preview=1`);
+    }
+  }, [linkToken, bookingUrl, onClose]);
 
   const copyLink = useCallback(async () => {
     if (!bookingUrl) return;
@@ -233,8 +315,48 @@ export default function PlaybookSchedulePanel({
               <Text style={s.subtitle}>Sessions for {memberName || 'assigned member'}</Text>
             ) : (
               <Text style={[s.subtitle, { color: '#F5A623' }]}>
-                Assign a member to this playbook before scheduling.
+                Add a member to this playbook before scheduling.
               </Text>
+            )}
+
+            <Text style={s.sectionLabel}>Members</Text>
+            {playbookMemberIds.map((id) => (
+              <View key={id} style={s.memberRow}>
+                <Text style={s.memberRowName} numberOfLines={1}>{nameOf(id)}</Text>
+                <Pressable
+                  style={s.windowRemove}
+                  disabled={memberBusy}
+                  onPress={() => writeMembers(playbookMemberIds.filter((x) => x !== id))}
+                >
+                  <Text style={s.windowRemoveText}>×</Text>
+                </Pressable>
+              </View>
+            ))}
+            {playbookMemberIds.length === 0 && (
+              <Text style={s.hint}>No members on this playbook yet.</Text>
+            )}
+            <Pressable style={s.addWindowBtn} onPress={() => setMemberPickerOpen((v) => !v)}>
+              <Text style={s.addWindowText}>{memberPickerOpen ? 'Close member list' : '+ Add member'}</Text>
+            </Pressable>
+            {memberPickerOpen && (
+              <View style={s.memberPicker}>
+                {coachMembers.filter((m) => !playbookMemberIds.includes(m.id)).length === 0 && (
+                  <Text style={s.hint}>All your members are already on this playbook.</Text>
+                )}
+                {coachMembers
+                  .filter((m) => !playbookMemberIds.includes(m.id))
+                  .map((m) => (
+                    <Pressable
+                      key={m.id}
+                      style={s.memberPickRow}
+                      disabled={memberBusy}
+                      onPress={() => { writeMembers([...playbookMemberIds, m.id]); setMemberPickerOpen(false); }}
+                    >
+                      <Text style={s.memberPickName} numberOfLines={1}>{m.name}</Text>
+                      <Text style={s.memberPickAdd}>Add</Text>
+                    </Pressable>
+                  ))}
+              </View>
             )}
 
             <Text style={s.sectionLabel}>Days</Text>
@@ -372,10 +494,14 @@ export default function PlaybookSchedulePanel({
                   {DAY_SHORT_LABELS.map((label, d) => (
                     <Pressable
                       key={label}
-                      style={[s.miniDayChip, w.dayOfWeek === d && s.dayChipActive]}
-                      onPress={() => updateWindow(i, { dayOfWeek: d })}
+                      style={[s.miniDayChip, w.days.includes(d) && s.dayChipActive]}
+                      onPress={() => updateWindow(i, {
+                        days: w.days.includes(d)
+                          ? w.days.filter((x) => x !== d)
+                          : [...w.days, d].sort((a, b) => a - b),
+                      })}
                     >
-                      <Text style={[s.miniDayChipText, w.dayOfWeek === d && s.dayChipTextActive]}>
+                      <Text style={[s.miniDayChipText, w.days.includes(d) && s.dayChipTextActive]}>
                         {label[0]}
                       </Text>
                     </Pressable>
@@ -408,10 +534,38 @@ export default function PlaybookSchedulePanel({
             ))}
             <Pressable
               style={s.addWindowBtn}
-              onPress={() => setWindows((prev) => [...prev, { dayOfWeek: 1, startTime: '09:00', endTime: '12:00' }])}
+              onPress={() => setWindows((prev) => [...prev, { days: [1], startTime: '09:00', endTime: '12:00' }])}
             >
               <Text style={s.addWindowText}>+ Add availability window</Text>
             </Pressable>
+
+            <Text style={s.sectionLabel}>Locations</Text>
+            <Text style={s.hint}>
+              Optional — where sessions can happen (e.g. Condo gym, Hotel). The member picks one when booking.
+            </Text>
+            {locations.map((loc, i) => (
+              <View key={i} style={s.windowRow}>
+                <TextInput
+                  style={[s.timeInput, { flex: 1, width: undefined, textAlign: 'left' }]}
+                  value={loc}
+                  onChangeText={(v) => { setLocations((prev) => prev.map((x, idx) => (idx === i ? v : x))); setLinkError(null); }}
+                  placeholder="Condo gym"
+                  placeholderTextColor="#4A5568"
+                  maxLength={80}
+                />
+                <Pressable
+                  style={s.windowRemove}
+                  onPress={() => setLocations((prev) => prev.filter((_, idx) => idx !== i))}
+                >
+                  <Text style={s.windowRemoveText}>×</Text>
+                </Pressable>
+              </View>
+            ))}
+            {locations.length < 10 && (
+              <Pressable style={s.addWindowBtn} onPress={() => setLocations((prev) => [...prev, ''])}>
+                <Text style={s.addWindowText}>+ Add location option</Text>
+              </Pressable>
+            )}
             {windows.length > 0 && (
               <Pressable
                 style={[s.btn, { backgroundColor: windowsValid && !linkBusy ? '#1E2A3A' : '#161D29', borderWidth: 1, borderColor: '#A78BFA', marginTop: 10 }]}
@@ -429,6 +583,9 @@ export default function PlaybookSchedulePanel({
                 <Text style={s.linkUrl} numberOfLines={1}>{bookingUrl}</Text>
                 <Pressable style={s.copyBtn} onPress={copyLink}>
                   <Text style={s.copyBtnText}>{linkCopied ? 'Copied' : 'Copy'}</Text>
+                </Pressable>
+                <Pressable style={s.previewBtn} onPress={openPreview}>
+                  <Text style={s.previewBtnText}>Preview</Text>
                 </Pressable>
               </View>
             )}
@@ -711,6 +868,63 @@ const s = StyleSheet.create({
   copyBtnText: {
     color: '#0E1117',
     fontSize: 12,
+    fontWeight: '700',
+    fontFamily: FB,
+  },
+  previewBtn: {
+    borderColor: '#A78BFA',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  previewBtnText: {
+    color: '#A78BFA',
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: FB,
+  },
+  memberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#0E1117',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginTop: 6,
+    gap: 8,
+  },
+  memberRowName: {
+    color: '#F0F4F8',
+    fontSize: 14,
+    fontFamily: FB,
+    flex: 1,
+  },
+  memberPicker: {
+    backgroundColor: '#0E1117',
+    borderRadius: 10,
+    padding: 8,
+    marginTop: 8,
+    maxHeight: 220,
+  },
+  memberPickRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    gap: 8,
+  },
+  memberPickName: {
+    color: '#F0F4F8',
+    fontSize: 14,
+    fontFamily: FB,
+    flex: 1,
+  },
+  memberPickAdd: {
+    color: '#A78BFA',
+    fontSize: 13,
     fontWeight: '700',
     fontFamily: FB,
   },

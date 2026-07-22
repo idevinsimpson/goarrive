@@ -19,6 +19,7 @@
 import * as admin from 'firebase-admin';
 import * as crypto from 'crypto';
 import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
+import { defineSecret } from 'firebase-functions/params';
 import { Timestamp, FieldValue } from 'firebase-admin/firestore';
 import {
   bookOccurrence,
@@ -26,16 +27,26 @@ import {
   wallTimeToUtc,
   PlaybookSessionKind,
 } from './playbookScheduling';
+import { sendNotification } from './notifications';
 
 const getDb = () => admin.firestore();
+const emailApiKey = defineSecret('EMAIL_API_KEY');
 
 const BOOKING_HORIZON_DAYS = 21;
 const BLOCKING_OR_DONE = ['scheduled', 'allocated', 'in_progress', 'skip_requested', 'allocation_failed', 'completed'];
+const ICS_URL = 'https://us-central1-goarrive.cloudfunctions.net/playbookBookingIcs';
+const SESSIONS_URL = 'https://goarrive.fit/my-sessions';
 
 interface BookingWindow {
-  dayOfWeek: number;   // 0 (Sun) – 6 (Sat)
+  days: number[];      // 0 (Sun) – 6 (Sat), one or more
   startTime: string;   // HH:mm
   endTime: string;     // HH:mm
+}
+
+/** Accept both the legacy single-day shape ({ dayOfWeek }) and the new multi-day shape ({ days }). */
+function windowDays(w: any): number[] {
+  if (Array.isArray(w?.days)) return w.days.filter((d: any) => Number.isInteger(d) && d >= 0 && d <= 6);
+  return Number.isInteger(w?.dayOfWeek) ? [w.dayOfWeek] : [];
 }
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -61,9 +72,9 @@ function validateWindows(raw: unknown): BookingWindow[] {
     throw new HttpsError('invalid-argument', 'Provide 1-21 booking windows');
   }
   return raw.map((w: any) => {
-    const dayOfWeek = Number(w?.dayOfWeek);
-    if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) {
-      throw new HttpsError('invalid-argument', 'dayOfWeek must be 0-6');
+    const days = [...new Set(windowDays(w))].sort();
+    if (days.length === 0 || days.length > 7) {
+      throw new HttpsError('invalid-argument', 'each window needs 1-7 days (0-6)');
     }
     if (typeof w?.startTime !== 'string' || !HHMM.test(w.startTime)
       || typeof w?.endTime !== 'string' || !HHMM.test(w.endTime)) {
@@ -72,8 +83,22 @@ function validateWindows(raw: unknown): BookingWindow[] {
     if (minutesOf(w.endTime) <= minutesOf(w.startTime)) {
       throw new HttpsError('invalid-argument', 'window endTime must be after startTime');
     }
-    return { dayOfWeek, startTime: w.startTime, endTime: w.endTime };
+    return { days, startTime: w.startTime, endTime: w.endTime };
   });
+}
+
+function validateLocations(raw: unknown): string[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw) || raw.length > 10) {
+    throw new HttpsError('invalid-argument', 'Provide at most 10 locations');
+  }
+  const out: string[] = [];
+  for (const l of raw) {
+    if (typeof l !== 'string') throw new HttpsError('invalid-argument', 'locations must be strings');
+    const v = l.trim().slice(0, 80);
+    if (v) out.push(v);
+  }
+  return [...new Set(out)];
 }
 
 async function loadActiveToken(token: string) {
@@ -116,8 +141,8 @@ export const createPlaybookBookingLink = onCall(
     const coachId = (callerToken.coachId as string) || request.auth.uid;
     const isAdmin = callerToken.role === 'platformAdmin' || !!callerToken.admin;
 
-    const { playbookId, windows, timezone } = request.data as {
-      playbookId: string; windows: unknown; timezone: string;
+    const { playbookId, windows, timezone, locations } = request.data as {
+      playbookId: string; windows: unknown; timezone: string; locations?: unknown;
     };
     if (!playbookId) throw new HttpsError('invalid-argument', 'playbookId is required');
     if (typeof timezone !== 'string' || !timezone) {
@@ -129,6 +154,7 @@ export const createPlaybookBookingLink = onCall(
       throw new HttpsError('invalid-argument', 'timezone must be a valid IANA timezone');
     }
     const validated = validateWindows(windows);
+    const validatedLocations = validateLocations(locations);
 
     const playbookSnap = await db.collection('playbooks').doc(playbookId).get();
     if (!playbookSnap.exists) throw new HttpsError('not-found', 'Playbook not found');
@@ -142,6 +168,7 @@ export const createPlaybookBookingLink = onCall(
       coachId: playbook.coachId,
       timezone,
       windows: validated,
+      locations: validatedLocations,
       updatedAt: FieldValue.serverTimestamp(),
     });
 
@@ -190,8 +217,9 @@ export const resolvePlaybookBookingToken = onRequest(
         res.status(409).json({ error: 'The coach has not opened booking for this playbook yet.' });
         return;
       }
-      const windowsDoc = windowsSnap.data() as { timezone: string; windows: BookingWindow[] };
+      const windowsDoc = windowsSnap.data() as { timezone: string; windows: BookingWindow[]; locations?: string[] };
       const timezone = windowsDoc.timezone;
+      const locations = Array.isArray(windowsDoc.locations) ? windowsDoc.locations : [];
       const durationMinutes = playbook.sessionDurationMinutes || 45;
       const weeklySessionCap: number | null =
         typeof playbook.weeklySessionCap === 'number' && playbook.weeklySessionCap > 0
@@ -253,7 +281,7 @@ export const resolvePlaybookBookingToken = onRequest(
       const slots: Array<{ date: string; startTime: string; startUtcMillis: number; capReached: boolean }> = [];
       for (const { dateStr, dow } of days) {
         for (const w of windowsDoc.windows) {
-          if (w.dayOfWeek !== dow) continue;
+          if (!windowDays(w).includes(dow)) continue;
           const startMin = minutesOf(w.startTime);
           const endMin = minutesOf(w.endTime);
           for (let m = startMin; m + durationMinutes <= endMin; m += durationMinutes) {
@@ -295,6 +323,7 @@ export const resolvePlaybookBookingToken = onRequest(
         capState: weeklySessionCap !== null && memberKey
           ? { booked: bookedThisWeek, cap: weeklySessionCap }
           : null,
+        locations,
         slots,
       });
     } catch (err: any) {
@@ -312,11 +341,11 @@ export const resolvePlaybookBookingToken = onRequest(
 // ── bookViaBookingToken (public — signed-in member OR guest by email) ───────
 
 export const bookViaBookingToken = onCall(
-  { region: 'us-central1', invoker: 'public' },
+  { region: 'us-central1', invoker: 'public', secrets: [emailApiKey] },
   async (request) => {
     const db = getDb();
-    const { token, date, startTime, guestEmail: rawGuestEmail } = request.data as {
-      token: string; date: string; startTime: string; guestEmail?: string;
+    const { token, date, startTime, guestEmail: rawGuestEmail, location: rawLocation } = request.data as {
+      token: string; date: string; startTime: string; guestEmail?: string; location?: string;
     };
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       throw new HttpsError('invalid-argument', 'date must be YYYY-MM-DD');
@@ -334,9 +363,18 @@ export const bookViaBookingToken = onCall(
     if (!playbookSnap.exists) throw new HttpsError('not-found', 'This playbook no longer exists');
     if (!windowsSnap.exists) throw new HttpsError('failed-precondition', 'Booking is not open for this playbook');
     const playbook = playbookSnap.data()!;
-    const windowsDoc = windowsSnap.data() as { timezone: string; windows: BookingWindow[] };
+    const windowsDoc = windowsSnap.data() as { timezone: string; windows: BookingWindow[]; locations?: string[] };
     const timezone = windowsDoc.timezone;
     const durationMinutes = playbook.sessionDurationMinutes || 45;
+
+    const definedLocations = Array.isArray(windowsDoc.locations) ? windowsDoc.locations : [];
+    let location: string | null = null;
+    if (definedLocations.length > 0) {
+      if (typeof rawLocation !== 'string' || !definedLocations.includes(rawLocation.trim())) {
+        throw new HttpsError('invalid-argument', 'Pick a location for this session');
+      }
+      location = rawLocation.trim();
+    }
 
     // Server-side slot validation: the requested time must sit inside a coach
     // window, on the duration grid — the public page is never trusted.
@@ -352,7 +390,7 @@ export const bookViaBookingToken = onCall(
     const slotDow = dowMap[dowFmt.format(wallTimeToUtc(date, '12:00', timezone))] ?? -1;
     const startMin = minutesOf(startTime);
     const inWindow = windowsDoc.windows.some((w) =>
-      w.dayOfWeek === slotDow
+      windowDays(w).includes(slotDow)
       && startMin >= minutesOf(w.startTime)
       && startMin + durationMinutes <= minutesOf(w.endTime)
       && (startMin - minutesOf(w.startTime)) % durationMinutes === 0
@@ -373,12 +411,14 @@ export const bookViaBookingToken = onCall(
     let memberKey: string;
     let memberName: string;
     let guestEmail: string | null = null;
+    let bookerEmail: string | null = null;
 
     if (authUid && (authUid === tokenData.memberId || memberIds.includes(authUid))) {
       memberId = authUid;
       memberKey = authUid;
       const memberSnap = await db.collection('members').doc(memberId).get();
       memberName = (memberSnap.data()?.name as string) || playbook.assignedMemberName || 'Member';
+      bookerEmail = normalizeEmail(memberSnap.data()?.email) || normalizeEmail(request.auth?.token?.email);
     } else {
       guestEmail = normalizeEmail(rawGuestEmail);
       if (!guestEmail) {
@@ -386,6 +426,7 @@ export const bookViaBookingToken = onCall(
       }
       memberKey = guestMemberKey(guestEmail);
       memberName = guestEmail.split('@')[0];
+      bookerEmail = guestEmail;
     }
 
     const weeklySessionCap: number | null =
@@ -408,16 +449,63 @@ export const bookViaBookingToken = onCall(
       recordingEnabled: playbook.recordingEnabled !== false,
       weeklySessionCap,
       bookedVia: 'booking_link',
+      location,
     });
 
     await db.collection('scheduling_audit_log').add({
       coachId: tokenData.coachId,
       action: 'playbook_session_booked_via_link',
       memberId,
-      details: `${guestEmail ? `Guest ${guestEmail}` : memberName} booked ${playbook.name || 'playbook'} session ${date} ${startTime} via booking link`,
+      details: `${guestEmail ? `Guest ${guestEmail}` : memberName} booked ${playbook.name || 'playbook'} session ${date} ${startTime}${location ? ` at ${location}` : ''} via booking link`,
       metadata: { playbookId: tokenData.playbookId, instanceId, guest: !!guestEmail },
       createdAt: FieldValue.serverTimestamp(),
     });
+
+    // Calendar + email confirmation (never blocks the booking itself)
+    let coachFirstName = 'your coach';
+    try {
+      const coachSnap = await db.collection('coaches').doc(tokenData.coachId).get();
+      const full = (coachSnap.data()?.displayName as string) || (coachSnap.data()?.name as string) || '';
+      if (full) coachFirstName = full.split(' ')[0];
+    } catch { /* branding only */ }
+
+    const startUtc2 = wallTimeToUtc(date, startTime, timezone);
+    const endUtc2 = new Date(startUtc2.getTime() + durationMinutes * 60 * 1000);
+    const eventTitle = `Session with ${coachFirstName} — ${playbook.name || 'Playbook'}`;
+    const icsUrl = `${ICS_URL}?token=${token}&instance=${instanceId}`;
+    const googleCalUrl = 'https://calendar.google.com/calendar/render?action=TEMPLATE'
+      + `&text=${encodeURIComponent(eventTitle)}`
+      + `&dates=${icsUtcStamp(startUtc2)}/${icsUtcStamp(endUtc2)}`
+      + `&location=${encodeURIComponent(SESSIONS_URL)}`
+      + `&details=${encodeURIComponent(`Booked via GoArrive.${location ? ` Location: ${location}.` : ''} Your Zoom join link appears in ${SESSIONS_URL} once the session room is ready.`)}`;
+
+    if (bookerEmail) {
+      try {
+        const whenLine = `${friendlyIcsDate(date)} at ${startTime} (${timezone}) · ${durationMinutes} min`;
+        await sendNotification({
+          messageType: 'booking_confirmation',
+          channel: 'email',
+          recipient: {
+            uid: memberId || memberKey,
+            email: bookerEmail,
+            displayName: memberName,
+            role: 'member',
+          },
+          subject: `You're booked — ${playbook.name || 'Playbook'} on ${friendlyIcsDate(date)}`,
+          body: `${eventTitle}\n${whenLine}${location ? `\nLocation: ${location}` : ''}\n\nAdd to calendar: ${icsUrl}\nGoogle Calendar: ${googleCalUrl}\n\nYour Zoom join link will appear at ${SESSIONS_URL} once the session room is ready.`,
+          htmlBody: `<h2>${eventTitle}</h2>`
+            + `<p>${whenLine}</p>`
+            + (location ? `<p><strong>Location:</strong> ${location}</p>` : '')
+            + `<p><a href="${icsUrl}">Add to calendar (.ics)</a> · <a href="${googleCalUrl}">Add to Google Calendar</a></p>`
+            + `<p>Your Zoom join link will appear in <a href="${SESSIONS_URL}">My Sessions</a> once the session room is ready.</p>`,
+          sessionInstanceId: instanceId,
+          coachId: tokenData.coachId,
+          memberId: memberId || undefined,
+        });
+      } catch (err: any) {
+        console.error(`[bookViaBookingToken] confirmation email failed for ${instanceId}: ${err.message}`);
+      }
+    }
 
     return {
       success: true,
@@ -427,6 +515,100 @@ export const bookViaBookingToken = onCall(
       timezone,
       guest: !!guestEmail,
       encourageAccount: !!guestEmail,
+      location,
+      eventTitle,
+      startUtcMillis: startUtc2.getTime(),
+      endUtcMillis: endUtc2.getTime(),
+      icsUrl,
+      googleCalUrl,
+      confirmationEmailSent: !!bookerEmail,
     };
+  }
+);
+
+// ── Calendar helpers + public .ics endpoint ─────────────────────────────────
+
+function icsUtcStamp(d: Date): string {
+  return d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+}
+
+function friendlyIcsDate(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC',
+  });
+}
+
+function icsEscape(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+}
+
+/**
+ * Serves a downloadable .ics for a booked session. Auth = the unguessable
+ * booking token + the instance must belong to that token's playbook.
+ * LOCATION = the session's Zoom join link when allocated, else the member
+ * sessions page (locked decision: calendar LOCATION carries the join link).
+ */
+export const playbookBookingIcs = onRequest(
+  { cors: true, region: 'us-central1' },
+  async (req, res) => {
+    try {
+      const token = (req.query.token as string) || '';
+      const instanceId = (req.query.instance as string) || '';
+      const tokenData = await loadActiveToken(token);
+      if (!instanceId || !/^[A-Za-z0-9]{1,40}$/.test(instanceId)) {
+        res.status(400).json({ error: 'Invalid instance' });
+        return;
+      }
+      const instSnap = await getDb().collection('session_instances').doc(instanceId).get();
+      if (!instSnap.exists || instSnap.data()!.playbookId !== tokenData.playbookId) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+      const inst = instSnap.data()!;
+
+      let coachFirstName = 'your coach';
+      try {
+        const coachSnap = await getDb().collection('coaches').doc(tokenData.coachId).get();
+        const full = (coachSnap.data()?.displayName as string) || (coachSnap.data()?.name as string) || '';
+        if (full) coachFirstName = full.split(' ')[0];
+      } catch { /* branding only */ }
+
+      const startUtc = (inst.startUtc as Timestamp).toDate();
+      const endUtc = (inst.endUtc as Timestamp).toDate();
+      const title = `Session with ${coachFirstName} — ${inst.playbookTitle || 'Playbook'}`;
+      const locationField = inst.zoomJoinUrl || SESSIONS_URL;
+      const description = `${inst.location ? `Location: ${inst.location}\n` : ''}`
+        + (inst.zoomJoinUrl ? `Join: ${inst.zoomJoinUrl}` : `Your Zoom join link will appear at ${SESSIONS_URL} once the session room is ready.`);
+
+      const ics = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//GoArrive//Playbook Booking//EN',
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH',
+        'BEGIN:VEVENT',
+        `UID:${instanceId}@goarrive.fit`,
+        `DTSTAMP:${icsUtcStamp(new Date())}`,
+        `DTSTART:${icsUtcStamp(startUtc)}`,
+        `DTEND:${icsUtcStamp(endUtc)}`,
+        `SUMMARY:${icsEscape(title)}`,
+        `LOCATION:${icsEscape(locationField)}`,
+        `DESCRIPTION:${icsEscape(description)}`,
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n');
+
+      res.set('Content-Type', 'text/calendar; charset=utf-8');
+      res.set('Content-Disposition', 'attachment; filename="goarrive-session.ics"');
+      res.status(200).send(ics);
+    } catch (err: any) {
+      if (err instanceof HttpsError) {
+        res.status(err.code === 'not-found' ? 404 : 400).json({ error: err.message });
+        return;
+      }
+      console.error('[playbookBookingIcs] error:', err);
+      res.status(500).json({ error: 'Something went wrong.' });
+    }
   }
 );
