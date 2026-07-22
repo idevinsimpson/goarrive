@@ -27,7 +27,6 @@ import {
   wallTimeToUtc,
   PlaybookSessionKind,
 } from './playbookScheduling';
-import { sendNotification } from './notifications';
 
 const getDb = () => admin.firestore();
 const emailApiKey = defineSecret('EMAIL_API_KEY');
@@ -481,6 +480,9 @@ export const bookViaBookingToken = onCall(
 
     if (bookerEmail) {
       try {
+        // Lazy import — notifications.ts touches Firestore at module load, so
+        // it must not be pulled in before index.ts runs admin.initializeApp().
+        const { sendNotification } = await import('./notifications');
         const whenLine = `${friendlyIcsDate(date)} at ${startTime} (${timezone}) · ${durationMinutes} min`;
         await sendNotification({
           messageType: 'booking_confirmation',
