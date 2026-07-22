@@ -92,7 +92,7 @@ export function composePrescriptionLabel(name: string, weight?: string, reps?: s
 
 // Pure helpers live in WorkoutPlayer.helpers.ts (no Firebase dep — safe to import in tests).
 export { computePreloadVideoUrl, handleVideoLayerPlaybackStatus } from './WorkoutPlayer.helpers';
-import { pickNameTier, nextStallRecoveryAction, type StallRecoveryState } from './WorkoutPlayer.helpers';
+import { pickNameTier, computePlayerCanvas, nextStallRecoveryAction, type StallRecoveryState } from './WorkoutPlayer.helpers';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface WorkoutPlayerProps {
@@ -365,16 +365,22 @@ export default function WorkoutPlayer({
   // Mirror SAFE_BOTTOM for the status bar / notch / Dynamic Island at the top.
   // Without this, PWA + iOS native overlap the logo with the status bar.
   const SAFE_TOP = (Platform.select({ ios: 47, android: 24, web: 0, default: 0 }) ?? 0) as number;
-  const availW = winW;
-  const availH = Math.max(1, winH - SAFE_BOTTOM - SAFE_TOP);
-  const scale = dimsValid
-    ? Math.max(0.0001, Math.min(availW / BASE_W, availH / BASE_H))
-    : 1;
-  // frameW / frameH are the rendered canvas dimensions — a 9:16 rectangle
-  // whose aspect is locked because both axes scale by the same factor.
-  const frameW = BASE_W * scale;
-  const frameH = BASE_H * scale;
+  // Canvas math lives in WorkoutPlayer.helpers.ts (computePlayerCanvas) so it
+  // is unit-testable across real-world viewports. Portrait: width always wins
+  // and short viewports shrink the media slot (cover-crop) instead of the
+  // whole canvas. Landscape / degenerate heights: uniform 9:16 fit.
+  const canvas = dimsValid
+    ? computePlayerCanvas(winW, winH, SAFE_TOP, SAFE_BOTTOM)
+    : { scale: 1, frameW: BASE_W, frameH: BASE_H, baseMediaW: 304, baseMediaH: 380 };
+  const { scale, frameW, frameH } = canvas;
   const fs = (n: number) => n * scale;
+
+  // Every in-canvas style is produced by the makeStyles factory below with
+  // all dimensional constants (BASE units) passed through fs(). Recomputed
+  // only when the canvas scale changes, so no in-canvas style can ever carry
+  // an unscaled pixel size — the composition is proportionally identical in
+  // portrait, landscape, small and large windows.
+  const st = useMemo(() => makeStyles((n: number) => n * scale), [scale]);
 
   // Slot dimensions in BASE design units. Sum (260) + media slot (380)
   // = BASE_H (640), so the canvas is exactly the design height with no
@@ -392,20 +398,10 @@ export default function WorkoutPlayer({
   const SLOT_GAP_TITLE = fs(BASE_GAP_TITLE);
   const SLOT_GAP_MEDIA = fs(BASE_GAP_MEDIA);
 
-  // 4:5 media — constant in BASE units (same proportion of the canvas on
-  // every screen size), then scaled at the call site. Computed once at
-  // module level would be cleaner, but keeping it here makes the math
-  // visible alongside the slot constants.
-  const baseVertSlots = BASE_LOGO_H + BASE_GAP_LOGO + BASE_TITLE_H
-    + BASE_GAP_TITLE + BASE_GAP_MEDIA + BASE_NEXTUP_H;
-  const baseMediaAvailH = BASE_H - baseVertSlots; // 380
-  const baseMediaAvailW = BASE_W;                  // 360
-  let baseMediaW = baseMediaAvailW;
-  let baseMediaH = baseMediaW * (5 / 4);
-  if (baseMediaH > baseMediaAvailH) {
-    baseMediaH = baseMediaAvailH;                  // 380
-    baseMediaW = baseMediaH * (4 / 5);             // 304
-  }
+  // 4:5 media — BASE-unit size from computePlayerCanvas. On short portrait
+  // viewports baseMediaH shrinks below 380 (video cover-crops) so the canvas
+  // keeps full screen width instead of pillarboxing.
+  const { baseMediaW, baseMediaH } = canvas;
   const _mediaW = fs(baseMediaW);
   const _mediaH = fs(baseMediaH);
   const mediaInnerSize = { width: _mediaW, height: _mediaH };
@@ -751,7 +747,8 @@ export default function WorkoutPlayer({
 
   // Dominant-digit timer sizing. Char-count tiers are scaled by frameScale so
   // the timer text grows with the player frame. Box is also scaled (see
-  // scaledTimerBox below) so the box/font ratio stays the same on every size.
+  // the factory-scaled goldTimerBox/restTimerBox) so the box/font ratio stays
+  // the same on every size.
   const getTimerFontStyle = (
     text: string,
   ): { fontSize: number; lineHeight: number; letterSpacing: number } => {
@@ -779,8 +776,8 @@ export default function WorkoutPlayer({
   };
 
   // Inner content width of titleColumn in BASE units. titleColumn has
-  // marginRight: 4 and paddingHorizontal: 8 (both unscaled in stylesheet,
-  // scaled at render via scaledTitlePadH). The timer column, when present,
+  // marginRight: 4 and paddingHorizontal: 8 (both in BASE units, scaled by
+  // the makeStyles factory). The timer column, when present,
   // is a fixed BASE 132. Used by getNameFontStyle to pick a tier that never
   // overflows and never mid-word-breaks.
   const BASE_TITLE_INNER_W_WITH_TIMER = Math.max(0, baseMediaW - 132 - 4 - 16);
@@ -822,36 +819,8 @@ export default function WorkoutPlayer({
     );
   };
 
-  // Frame-derived dimensions for every module that lives inside the player
-  // frame. Apply these inline as override styles so the StyleSheet baselines
-  // (phone-tuned) are replaced by frame-relative pixel values.
-  const scaledLogoImg = { width: fs(260), height: fs(52) };
-  const scaledTimerBox = {
-    width: fs(132),
-    height: fs(112),
-    borderRadius: fs(12),
-  };
-  const scaledNextUpBar = {
-    borderRadius: fs(12),
-    paddingVertical: fs(8),
-    paddingHorizontal: fs(12),
-    gap: fs(12),
-  };
-  const scaledNextUpLabelFs = fs(11);
-  const scaledNextUpNameFs = fs(15);
-  const scaledNextUpMetaFs = fs(11);
-  const scaledNextUpThumb = { width: fs(40), height: fs(40), borderRadius: fs(8) };
-  const scaledTitlePadH = fs(8);
-
-  // Title-slot label fonts (scale with frame). The main title text inside
-  // the title module is sized by renderAutoFitTitle, not by scaledLabels.
-  const scaledLabels = {
-    restPhase: fs(18),
-    waterBreakLabel: fs(20),
-    transitionInline: fs(13),
-    phaseLabel: fs(16),
-  };
-
+  // All module dimensions (logo, timer box, next-up bar, labels) are scaled
+  // inside the makeStyles factory — no per-render override objects needed.
   const handleFinish = () => {
     if (onSwapLog) {
       const swaps = getSwapLog();
@@ -1154,15 +1123,15 @@ export default function WorkoutPlayer({
     <>
       <View style={st.header}>
         <TouchableOpacity onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-          <Icon name="close" size={28} color="#8A95A3" />
+          <Icon name="close" size={fs(28)} color="#8A95A3" />
         </TouchableOpacity>
         <Text style={st.workoutName} numberOfLines={1}>
           {workout?.name ?? 'Workout'}
         </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: fs(12) }}>
           {isOffline && (
             <View style={st.offlineBadge}>
-              <Icon name="wifi-off" size={12} color="#F59E0B" />
+              <Icon name="wifi-off" size={fs(12)} color="#F59E0B" />
               <Text style={st.offlineBadgeText}>Offline{queueSize > 0 ? ` (${queueSize})` : ''}</Text>
             </View>
           )}
@@ -1171,14 +1140,14 @@ export default function WorkoutPlayer({
               onPress={() => setMusicMuted(m => !m)}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             >
-              <Icon name="music" size={22} color={musicMuted ? '#F59E0B' : '#8A95A3'} />
+              <Icon name="music" size={fs(22)} color={musicMuted ? '#F59E0B' : '#8A95A3'} />
             </TouchableOpacity>
           )}
           <TouchableOpacity
             onPress={() => setIsMuted(m => !m)}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
-            <Icon name={isMuted ? 'volume-x' : 'volume-2'} size={22} color={isMuted ? '#F59E0B' : '#8A95A3'} />
+            <Icon name={isMuted ? 'volume-x' : 'volume-2'} size={fs(22)} color={isMuted ? '#F59E0B' : '#8A95A3'} />
           </TouchableOpacity>
           {showProgress && (
             <Text style={st.progressText}>
@@ -1204,11 +1173,11 @@ export default function WorkoutPlayer({
       ? composePrescriptionLabel(next.name, next.weight, next.reps)
       : next.originalBlockType || next.name;
     return (
-      <View style={[st.nextUpBar, scaledNextUpBar]}>
-        <Text style={[st.nextUpLabel, { fontSize: scaledNextUpLabelFs }]}>NEXT UP</Text>
+      <View style={st.nextUpBar}>
+        <Text style={st.nextUpLabel}>NEXT UP</Text>
         <View style={st.nextUpInfo}>
-          <Text style={[st.nextUpName, { fontSize: scaledNextUpNameFs }]} numberOfLines={1}>{nextLabel}</Text>
-          <Text style={[st.nextUpMeta, { fontSize: scaledNextUpMetaFs }]} numberOfLines={1}>
+          <Text style={st.nextUpName} numberOfLines={1}>{nextLabel}</Text>
+          <Text style={st.nextUpMeta} numberOfLines={1}>
             {next.blockName}{next.duration ? ` · ${next.duration}s` : ''}
           </Text>
         </View>
@@ -1216,11 +1185,11 @@ export default function WorkoutPlayer({
           <PosterThumb
             posterUrl={(next as any).posterUrl}
             gifUrl={next.thumbnailUrl}
-            containerStyle={[st.nextUpThumb, scaledNextUpThumb]}
+            containerStyle={st.nextUpThumb}
             resizeMode="cover"
           />
         ) : (
-          <View style={[st.nextUpThumb, scaledNextUpThumb, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#1A2035' }]}>
+          <View style={[st.nextUpThumb, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#1A2035' }]}>
             <Icon name={
               next.stepType === 'waterBreak' ? 'droplet' :
               next.stepType === 'transition' ? 'arrow-right' :
@@ -1244,7 +1213,7 @@ export default function WorkoutPlayer({
     <View style={[st.logoSlot, { height: SLOT_LOGO_H, marginBottom: SLOT_GAP_LOGO }]}>
       <Image
         source={require('../assets/logo.png')}
-        style={[st.slotLogo, scaledLogoImg]}
+        style={st.slotLogo}
         resizeMode="contain"
       />
     </View>
@@ -1259,7 +1228,7 @@ export default function WorkoutPlayer({
     timer: React.ReactNode | null,
   ) => (
     <View style={[st.titleTimerSlot, { height: SLOT_TITLE_H, marginBottom: SLOT_GAP_TITLE, width: _mediaW }]}>
-      <View style={[st.titleColumn, { height: SLOT_TITLE_H, paddingHorizontal: scaledTitlePadH }]}>{title}</View>
+      <View style={[st.titleColumn, { height: SLOT_TITLE_H }]}>{title}</View>
       {timer ? <View style={st.timerColumn}>{timer}</View> : null}
     </View>
   );
@@ -1272,12 +1241,12 @@ export default function WorkoutPlayer({
   // never crops or floats on a larger frame. Used by every phase that shows
   // a countdown (work/rest/demo/transition/grabEquipment/waterBreak/swap/outro).
   const renderGoldTimer = (text: string) => (
-    <View style={[st.goldTimerBox, scaledTimerBox]}>
+    <View style={st.goldTimerBox}>
       <Text style={[st.goldTimerText, getTimerFontStyle(text)]}>{text}</Text>
     </View>
   );
   const renderRestTimer = (text: string) => (
-    <View style={[st.restTimerBox, scaledTimerBox]}>
+    <View style={st.restTimerBox}>
       <Text style={[st.restTimerText, getTimerFontStyle(text)]}>{text}</Text>
     </View>
   );
@@ -1303,7 +1272,7 @@ export default function WorkoutPlayer({
               {renderHeader(false)}
               <ScrollView
                 style={{ flex: 1 }}
-                contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 100 }}
+                contentContainerStyle={{ paddingHorizontal: fs(16), paddingTop: fs(12), paddingBottom: fs(100) }}
                 showsVerticalScrollIndicator={false}
               >
                 {sections.map((section, si) => {
@@ -1311,7 +1280,7 @@ export default function WorkoutPlayer({
                   const uniformRounds = roundsList.every((r) => r === roundsList[0]) ? roundsList[0] : null;
                   return (
                     <View key={si} style={st.readySection}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: fs(8) }}>
                         <View style={st.readyBlockBadge}>
                           <Text style={st.readyBlockBadgeText}>{si + 1}</Text>
                         </View>
@@ -1355,7 +1324,7 @@ export default function WorkoutPlayer({
                 {hr.supported && hrEnabled && (
                   hr.status === 'connected' ? (
                     <View style={st.hrLinkRow}>
-                      <Icon name="heart" size={14} color="#E05252" />
+                      <Icon name="heart" size={fs(14)} color="#E05252" />
                       <Text style={st.hrLinkedText} numberOfLines={1}>
                         {hr.deviceName}{hr.bpm != null ? ` · ${hr.bpm} bpm` : ' · linked'}
                       </Text>
@@ -1366,7 +1335,7 @@ export default function WorkoutPlayer({
                       onPress={hr.connect}
                       disabled={hr.status === 'connecting'}
                     >
-                      <Icon name="heart" size={14} color="#E05252" />
+                      <Icon name="heart" size={fs(14)} color="#E05252" />
                       <Text style={st.hrLinkBtnText} numberOfLines={1}>
                         {hr.status === 'connecting'
                           ? 'Connecting...'
@@ -1382,11 +1351,11 @@ export default function WorkoutPlayer({
                 )}
                 <Image
                   source={require('../assets/logo.png')}
-                  style={{ width: 140, height: 46, marginBottom: 12 }}
+                  style={{ width: fs(140), height: fs(46), marginBottom: fs(12) }}
                   resizeMode="contain"
                 />
                 <TouchableOpacity style={st.readyPlayBtn} onPress={handleStartWithUnlock}>
-                  <Icon name="play" size={32} color="#0E1117" />
+                  <Icon name="play" size={fs(32)} color="#0E1117" />
                 </TouchableOpacity>
               </View>
             </>
@@ -1527,7 +1496,7 @@ export default function WorkoutPlayer({
             <View style={[st.introOutroGradient, current.videoUrl && { backgroundColor: 'rgba(14,17,23,0.6)' }]}>
               <Image
                 source={require('../assets/logo.png')}
-                style={{ width: 280, height: 90, marginBottom: 16 }}
+                style={{ width: fs(280), height: fs(90), marginBottom: fs(16) }}
                 resizeMode="contain"
               />
               <Text style={st.outroTitle}>WORKOUT</Text>
@@ -1575,7 +1544,7 @@ export default function WorkoutPlayer({
             {renderLogoSlot()}
             {renderTitleTimerSlot(
               <>
-                <Text style={[st.restPhaseLabel, { color: '#94A3B8', fontSize: scaledLabels.restPhase }]}>TRANSITION</Text>
+                <Text style={[st.restPhaseLabel, { color: '#94A3B8' }]}>TRANSITION</Text>
                 {renderAutoFitTitle(current.name, {
                   hasTimer: true,
                   maxLines: 2,
@@ -1584,7 +1553,7 @@ export default function WorkoutPlayer({
                   marginTop: 2,
                 })}
                 {(current.instructionText || current.description) ? (
-                  <Text style={[st.transitionInstructionInline, { fontSize: scaledLabels.transitionInline }]} numberOfLines={1}>
+                  <Text style={st.transitionInstructionInline} numberOfLines={1}>
                     {current.instructionText || current.description}
                   </Text>
                 ) : null}
@@ -1656,20 +1625,20 @@ export default function WorkoutPlayer({
                   <>
                     <Image
                       source={{ uri: current.grabEquipmentImageUrl }}
-                      style={[st.videoPlayer, { borderRadius: 12 }]}
+                      style={[st.videoPlayer, { borderRadius: fs(12) }]}
                       resizeMode="cover"
                     />
                     <View
                       style={[
                         StyleSheet.absoluteFillObject,
-                        { backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 12 },
+                        { backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: fs(12) },
                       ]}
                     />
                   </>
                 ) : (
                   <View style={[st.videoPlayer, st.equipmentPanel]}>
                     <View style={[st.specialIconCircle, { backgroundColor: 'rgba(251,146,60,0.15)' }]}>
-                      <Icon name="briefcase" size={48} color="#FB923C" />
+                      <Icon name="briefcase" size={fs(48)} color="#FB923C" />
                     </View>
                   </View>
                 )}
@@ -1717,7 +1686,7 @@ export default function WorkoutPlayer({
                     />
                   ) : (
                     <View style={[st.videoPlayer, st.waterBreakPlaceholder]}>
-                      <Icon name="video" size={64} color="#22D3EE" />
+                      <Icon name="video" size={fs(64)} color="#22D3EE" />
                     </View>
                   )}
                 </View>
@@ -1734,7 +1703,7 @@ export default function WorkoutPlayer({
           <View style={[st.workContainer, webSafeBottomStyle]}>
             {renderLogoSlot()}
             {renderTitleTimerSlot(
-              <Text style={[st.waterBreakLabel, { fontSize: scaledLabels.waterBreakLabel }]}>WATER BREAK</Text>,
+              <Text style={st.waterBreakLabel}>WATER BREAK</Text>,
               renderGoldTimer(formatTime(timeLeft)),
             )}
             <View style={st.mediaSlot}>
@@ -1759,7 +1728,7 @@ export default function WorkoutPlayer({
                   <Image source={{ uri: activeThumbUrl }} style={st.videoPlayer} resizeMode="cover" />
                 ) : (
                   <View style={[st.videoPlayer, st.waterBreakPlaceholder]}>
-                    <Icon name="droplet" size={64} color="#38BDF8" />
+                    <Icon name="droplet" size={fs(64)} color="#38BDF8" />
                   </View>
                 )}
                 {/* Blue tint overlay */}
@@ -1842,7 +1811,7 @@ export default function WorkoutPlayer({
             )}
             {phase === 'rest' && renderTitleTimerSlot(
               <>
-                <Text style={[st.restPhaseLabel, { fontSize: scaledLabels.restPhase }]}>REST</Text>
+                <Text style={st.restPhaseLabel}>REST</Text>
                 {next && renderAutoFitTitle(`Next: ${composePrescriptionLabel(next.name, next.weight, next.reps)}`, {
                   hasTimer: true,
                   maxLines: 3,
@@ -1855,7 +1824,7 @@ export default function WorkoutPlayer({
             )}
             {phase === 'swap' && renderTitleTimerSlot(
               <>
-                <Text style={[st.phaseLabel, { fontSize: scaledLabels.phaseLabel }]}>SWITCH SIDES</Text>
+                <Text style={st.phaseLabel}>SWITCH SIDES</Text>
                 {renderAutoFitTitle(composePrescriptionLabel(current.name, current.weight, current.reps), {
                   hasTimer: true,
                   maxLines: 2,
@@ -1976,11 +1945,11 @@ export default function WorkoutPlayer({
             <View style={st.centerContent}>
               {isPreview && (
                 <View style={st.previewBadge}>
-                  <Icon name="eye" size={14} color="#F5A623" />
+                  <Icon name="eye" size={fs(14)} color="#F5A623" />
                   <Text style={st.previewBadgeText}>COACH PREVIEW</Text>
                 </View>
               )}
-              <Icon name="check-circle" size={72} color="#F5A623" />
+              <Icon name="check-circle" size={fs(72)} color="#F5A623" />
               <Text style={st.completeTitle}>
                 {isPreview ? 'Preview Complete' : 'Workout Complete!'}
               </Text>
@@ -1989,7 +1958,7 @@ export default function WorkoutPlayer({
               </Text>
               {hr.sessionStats && (
                 <View style={st.hrSummaryRow}>
-                  <Icon name="heart" size={16} color="#E05252" />
+                  <Icon name="heart" size={fs(16)} color="#E05252" />
                   <Text style={st.hrSummaryText}>
                     Avg {hr.sessionStats.avgHR} bpm · Max {hr.sessionStats.maxHR} bpm
                   </Text>
@@ -2033,12 +2002,12 @@ export default function WorkoutPlayer({
                 </TouchableOpacity>
                 {phase === 'work' && isRepBased ? (
                   <TouchableOpacity style={st.sharedOverlayCenterBtn} onPress={handleRepDoneFromOverlay}>
-                    <Icon name="check" size={32} color="#0E1117" />
+                    <Icon name="check" size={fs(32)} color="#0E1117" />
                     <Text style={st.sharedOverlayDoneText}>Done</Text>
                   </TouchableOpacity>
                 ) : (
                   <TouchableOpacity style={st.sharedOverlayCenterBtn} onPress={handlePauseResumeFromOverlay}>
-                    <Icon name={isPaused ? 'play' : 'pause'} size={36} color="#0E1117" />
+                    <Icon name={isPaused ? 'play' : 'pause'} size={fs(36)} color="#0E1117" />
                   </TouchableOpacity>
                 )}
                 <TouchableOpacity style={st.seekBtn10} onPress={() => handleSeek10(10)}>
@@ -2047,7 +2016,7 @@ export default function WorkoutPlayer({
                 </TouchableOpacity>
               </View>
               <TouchableOpacity style={st.sharedOverlaySkipBtn} onPress={handleSkipFromOverlay}>
-                <Icon name="skip-forward" size={18} color="#F5A623" />
+                <Icon name="skip-forward" size={fs(18)} color="#F5A623" />
                 <Text style={st.sharedOverlaySkipText}>Skip</Text>
               </TouchableOpacity>
             </View>
@@ -2125,7 +2094,7 @@ const { width: SCREEN_W } = Dimensions.get('window');
 // space at the bottom is now reserved by the centered outer wrapper instead.
 const webSafeBottomStyle: any = null;
 
-const st = StyleSheet.create({
+const makeStyles = (fs: (n: number) => number) => StyleSheet.create({
   portraitLockOuter: {
     flex: 1,
     backgroundColor: '#000000',
@@ -2145,36 +2114,36 @@ const st = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: Platform.select({ ios: 44, android: 24, web: 8, default: 8 }),
-    paddingBottom: 6,
+    paddingHorizontal: fs(16),
+    paddingTop: fs((Platform.select({ ios: 44, android: 24, web: 8, default: 8 }) ?? 8) as number),
+    paddingBottom: fs(6),
   },
   workoutName: {
     flex: 1,
     textAlign: 'center',
     color: '#8A95A3',
-    fontSize: 14,
+    fontSize: fs(14),
     fontWeight: '600',
     fontFamily: FB,
-    marginHorizontal: 12,
+    marginHorizontal: fs(12),
   },
   progressText: {
     color: '#F5A623',
-    fontSize: 14,
+    fontSize: fs(14),
     fontWeight: '700',
     fontFamily: FH,
   },
   progressBar: {
-    height: 3,
+    height: fs(3),
     backgroundColor: '#1A1E26',
-    marginHorizontal: 20,
-    borderRadius: 2,
+    marginHorizontal: fs(20),
+    borderRadius: fs(2),
     overflow: 'hidden',
   },
   progressFill: {
-    height: 3,
+    height: fs(3),
     backgroundColor: '#F5A623',
-    borderRadius: 2,
+    borderRadius: fs(2),
   },
 
   // Center content area
@@ -2182,102 +2151,102 @@ const st = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 32,
-    paddingBottom: 40,
+    paddingHorizontal: fs(32),
+    paddingBottom: fs(40),
   },
 
   // Ready
-  readyLogo: { width: 180, height: 60, marginBottom: 16 },
+  readyLogo: { width: fs(180), height: fs(60), marginBottom: fs(16) },
   readyTitle: {
-    fontSize: 28, fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
-    marginTop: 16, textAlign: 'center',
+    fontSize: fs(28), fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
+    marginTop: fs(16), textAlign: 'center',
   },
-  readyMeta: { fontSize: 15, color: '#8A95A3', fontFamily: FB, marginTop: 8 },
+  readyMeta: { fontSize: fs(15), color: '#8A95A3', fontFamily: FB, marginTop: fs(8) },
   bigStartBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 10, backgroundColor: '#F5A623', paddingVertical: 18,
-    paddingHorizontal: 48, borderRadius: 16, marginTop: 40,
+    gap: fs(10), backgroundColor: '#F5A623', paddingVertical: fs(18),
+    paddingHorizontal: fs(48), borderRadius: fs(16), marginTop: fs(40),
   },
-  bigStartText: { fontSize: 20, fontWeight: '700', color: '#0E1117', fontFamily: FH },
+  bigStartText: { fontSize: fs(20), fontWeight: '700', color: '#0E1117', fontFamily: FH },
 
   // Ready — block overview grid
   readyBlockBadge: {
-    width: 28, height: 28, borderRadius: 14,
+    width: fs(28), height: fs(28), borderRadius: fs(14),
     backgroundColor: '#F5A623', justifyContent: 'center', alignItems: 'center',
-    marginRight: 10,
+    marginRight: fs(10),
   },
   readyBlockBadgeText: {
-    fontSize: 14, fontWeight: '700', color: '#0E1117', fontFamily: FH,
+    fontSize: fs(14), fontWeight: '700', color: '#0E1117', fontFamily: FH,
   },
   readyBlockLabel: {
-    fontSize: 18, fontWeight: '700', color: '#F0F4F8', fontFamily: FH, flex: 1,
+    fontSize: fs(18), fontWeight: '700', color: '#F0F4F8', fontFamily: FH, flex: 1,
   },
   readyBlockRounds: {
-    fontSize: 14, fontWeight: '600', color: '#8A95A3', fontFamily: FH, marginLeft: 8,
+    fontSize: fs(14), fontWeight: '600', color: '#8A95A3', fontFamily: FH, marginLeft: fs(8),
   },
   readyThumbGrid: {
-    flexDirection: 'row', flexWrap: 'wrap', gap: 8,
+    flexDirection: 'row', flexWrap: 'wrap', gap: fs(8),
   },
   readyThumbCell: {
-    width: '30%' as any, marginBottom: 4,
+    width: '30%' as any, marginBottom: fs(4),
   },
   readyThumbImage: {
-    width: '100%' as any, aspectRatio: 4 / 5, borderRadius: 8,
+    width: '100%' as any, aspectRatio: 4 / 5, borderRadius: fs(8),
   },
   readyThumbName: {
-    fontSize: 11, color: '#8A95A3', fontFamily: FB, marginTop: 4, textAlign: 'center',
+    fontSize: fs(11), color: '#8A95A3', fontFamily: FB, marginTop: fs(4), textAlign: 'center',
   },
   readySection: {
-    borderWidth: 1, borderColor: '#232B36', borderRadius: 12,
+    borderWidth: fs(1), borderColor: '#232B36', borderRadius: fs(12),
     backgroundColor: 'rgba(255,255,255,0.02)',
-    padding: 10, marginBottom: 16,
+    padding: fs(10), marginBottom: fs(16),
   },
   readyFooter: {
-    position: 'absolute' as any, bottom: 0, left: 0, right: 0,
-    alignItems: 'center', paddingBottom: Platform.select({ ios: 40, android: 24, web: 24, default: 24 }),
-    paddingTop: 16,
+    position: 'absolute' as any, bottom: fs(0), left: fs(0), right: fs(0),
+    alignItems: 'center', paddingBottom: fs((Platform.select({ ios: 40, android: 24, web: 24, default: 24 }) ?? 24) as number),
+    paddingTop: fs(16),
     backgroundColor: 'rgba(14,17,23,0.92)',
   },
   readyPlayBtn: {
-    width: 64, height: 64, borderRadius: 32,
+    width: fs(64), height: fs(64), borderRadius: fs(32),
     backgroundColor: '#F5A623', justifyContent: 'center', alignItems: 'center',
   },
 
   // ── Heart rate ─────────────────────────────────────────────────────
   hrLinkBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 14, paddingVertical: 8, marginBottom: 10,
-    borderRadius: 20, borderWidth: 1, borderColor: '#1E2A3A',
-    backgroundColor: '#151B28', maxWidth: 280,
+    flexDirection: 'row', alignItems: 'center', gap: fs(6),
+    paddingHorizontal: fs(14), paddingVertical: fs(8), marginBottom: fs(10),
+    borderRadius: fs(20), borderWidth: fs(1), borderColor: '#1E2A3A',
+    backgroundColor: '#151B28', maxWidth: fs(280),
   },
   hrLinkBtnText: {
-    color: '#F0F4F8', fontSize: 13, fontWeight: '600', fontFamily: FB,
+    color: '#F0F4F8', fontSize: fs(13), fontWeight: '600', fontFamily: FB,
   },
   hrLinkRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10,
-    maxWidth: 280,
+    flexDirection: 'row', alignItems: 'center', gap: fs(6), marginBottom: fs(10),
+    maxWidth: fs(280),
   },
   hrLinkedText: {
-    color: '#8A95A3', fontSize: 13, fontFamily: FB,
+    color: '#8A95A3', fontSize: fs(13), fontFamily: FB,
   },
   hrUnsupportedNote: {
-    color: '#8A95A3', fontSize: 11, fontFamily: FB, marginBottom: 10,
+    color: '#8A95A3', fontSize: fs(11), fontFamily: FB, marginBottom: fs(10),
   },
   hrBadge: {
-    position: 'absolute', top: 8, right: 8,
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 8, paddingVertical: 4,
-    borderRadius: 14, borderWidth: 1,
+    position: 'absolute', top: fs(8), right: fs(8),
+    flexDirection: 'row', alignItems: 'center', gap: fs(4),
+    paddingHorizontal: fs(8), paddingVertical: fs(4),
+    borderRadius: fs(14), borderWidth: fs(1),
     backgroundColor: 'rgba(14,17,23,0.72)',
   },
   hrBadgeText: {
     fontWeight: '700', fontFamily: FH,
   },
   hrSummaryRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4,
+    flexDirection: 'row', alignItems: 'center', gap: fs(6), marginTop: fs(4),
   },
   hrSummaryText: {
-    color: '#8A95A3', fontSize: 14, fontFamily: FB,
+    color: '#8A95A3', fontSize: fs(14), fontFamily: FB,
   },
 
   // ── Intro / Outro ──────────────────────────────────────────────────
@@ -2292,7 +2261,7 @@ const st = StyleSheet.create({
     width: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 32,
+    paddingHorizontal: fs(32),
   },
   // Intro split-screen
   introSplitContainer: {
@@ -2309,83 +2278,83 @@ const st = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: fs(16),
     backgroundColor: '#0E1117',
   },
-  introLogo: { width: 160, height: 54, marginBottom: 20 },
+  introLogo: { width: fs(160), height: fs(54), marginBottom: fs(20) },
   introBlockLabel: {
-    fontSize: 20, fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
-    textAlign: 'center', marginBottom: 24, letterSpacing: 1,
+    fontSize: fs(20), fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
+    textAlign: 'center', marginBottom: fs(24), letterSpacing: fs(1),
   },
   introTitle: {
-    fontSize: 36, fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
-    textAlign: 'center', marginBottom: 8,
+    fontSize: fs(36), fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
+    textAlign: 'center', marginBottom: fs(8),
   },
   introSubtitle: {
-    fontSize: 18, fontWeight: '700', color: '#F5A623', fontFamily: FH,
-    letterSpacing: 4, marginBottom: 32,
+    fontSize: fs(18), fontWeight: '700', color: '#F5A623', fontFamily: FH,
+    letterSpacing: fs(4), marginBottom: fs(32),
   },
   introTimerPill: {
     backgroundColor: 'rgba(245,166,35,0.15)',
-    paddingHorizontal: 24, paddingVertical: 8,
-    borderRadius: 20, marginBottom: 16,
+    paddingHorizontal: fs(24), paddingVertical: fs(8),
+    borderRadius: fs(20), marginBottom: fs(16),
   },
   introTimerText: {
-    fontSize: 24, fontWeight: '700', color: '#F5A623', fontFamily: FH,
+    fontSize: fs(24), fontWeight: '700', color: '#F5A623', fontFamily: FH,
   },
   outroTitle: {
-    fontSize: 42, fontWeight: '900', color: '#FFFFFF', fontFamily: FH,
-    textAlign: 'center', letterSpacing: 8, marginBottom: 24,
+    fontSize: fs(42), fontWeight: '900', color: '#FFFFFF', fontFamily: FH,
+    textAlign: 'center', letterSpacing: fs(8), marginBottom: fs(24),
   },
   outroSubtitle: {
-    fontSize: 18, color: '#8A95A3', fontFamily: FB,
-    textAlign: 'center', marginBottom: 32,
+    fontSize: fs(18), color: '#8A95A3', fontFamily: FB,
+    textAlign: 'center', marginBottom: fs(32),
   },
 
   // ── Special block shared styles ────────────────────────────────────
   specialContent: {
     flex: 1,
     alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingTop: 24,
+    paddingHorizontal: fs(24),
+    paddingTop: fs(24),
   },
   specialIconCircle: {
-    width: 72, height: 72, borderRadius: 36,
+    width: fs(72), height: fs(72), borderRadius: fs(36),
     backgroundColor: 'rgba(251,191,36,0.15)',
     justifyContent: 'center', alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: fs(16),
   },
   specialPhaseLabel: {
-    fontSize: 14, fontWeight: '700', color: '#FBBF24', fontFamily: FH,
-    letterSpacing: 2, marginBottom: 8,
+    fontSize: fs(14), fontWeight: '700', color: '#FBBF24', fontFamily: FH,
+    letterSpacing: fs(2), marginBottom: fs(8),
   },
   specialTitle: {
-    fontSize: 24, fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
-    textAlign: 'center', marginBottom: 16,
+    fontSize: fs(24), fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
+    textAlign: 'center', marginBottom: fs(16),
   },
   specialTimerRow: {
-    alignItems: 'center', marginTop: 'auto' as any, paddingBottom: 24,
+    alignItems: 'center', marginTop: 'auto' as any, paddingBottom: fs(24),
   },
   specialTimerNum: {
-    fontSize: 48, fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
-    marginBottom: 8,
+    fontSize: fs(48), fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
+    marginBottom: fs(8),
   },
 
   // ── Demo block — thumbnail grid ─────────────────────────────────────
   demoTitleRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    width: '100%', paddingHorizontal: 4, marginBottom: 16,
+    width: '100%', paddingHorizontal: fs(4), marginBottom: fs(16),
   },
   demoBlockTitle: {
-    fontSize: 22, fontWeight: '700', color: '#F0F4F8', fontFamily: FH, textAlign: 'center',
+    fontSize: fs(22), fontWeight: '700', color: '#F0F4F8', fontFamily: FH, textAlign: 'center',
   },
   demoGrid: {
     flex: 1, flexDirection: 'row', flexWrap: 'wrap',
-    justifyContent: 'center', gap: 8, width: '100%',
+    justifyContent: 'center', gap: fs(8), width: '100%',
   },
   demoGridCell: {
     aspectRatio: 4 / 5,
-    borderRadius: 10,
+    borderRadius: fs(10),
     overflow: 'hidden',
     backgroundColor: '#1A2035',
   },
@@ -2395,29 +2364,29 @@ const st = StyleSheet.create({
 
   // ── Transition block ───────────────────────────────────────────────
   transitionInstruction: {
-    fontSize: 18, color: '#C9D1D9', fontFamily: FB,
-    textAlign: 'center', lineHeight: 26,
-    paddingHorizontal: 16, marginBottom: 24,
+    fontSize: fs(18), color: '#C9D1D9', fontFamily: FB,
+    textAlign: 'center', lineHeight: fs(26),
+    paddingHorizontal: fs(16), marginBottom: fs(24),
   },
 
   // ── Water Break block ──────────────────────────────────────────────
   waterBreakLabel: {
-    fontSize: 20, fontWeight: '700', color: '#38BDF8', fontFamily: FH,
-    letterSpacing: 2, textAlign: 'center',
+    fontSize: fs(20), fontWeight: '700', color: '#38BDF8', fontFamily: FH,
+    letterSpacing: fs(2), textAlign: 'center',
   },
   waterBreakVideoOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(56,189,248,0.25)',
   } as any,
   waterBreakTextOverlay: {
-    position: 'absolute', bottom: 24, left: 0, right: 0,
+    position: 'absolute', bottom: fs(24), left: fs(0), right: fs(0),
     alignItems: 'center',
   } as any,
   waterBreakOverlayText: {
-    fontSize: 48, fontWeight: '900', color: '#FFFFFF', fontFamily: FH,
-    letterSpacing: 6, textAlign: 'center', opacity: 0.7,
-    textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 8,
+    fontSize: fs(48), fontWeight: '900', color: '#FFFFFF', fontFamily: FH,
+    letterSpacing: fs(6), textAlign: 'center', opacity: 0.7,
+    textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: fs(0), height: fs(2) },
+    textShadowRadius: fs(8),
   },
   waterBreakPlaceholder: {
     backgroundColor: 'rgba(56,189,248,0.08)',
@@ -2425,18 +2394,18 @@ const st = StyleSheet.create({
     alignItems: 'center',
   },
   waterBreakPlaceholderText: {
-    fontSize: 32, fontWeight: '900', color: '#FFFFFF', fontFamily: FH,
-    letterSpacing: 4, textAlign: 'center',
+    fontSize: fs(32), fontWeight: '900', color: '#FFFFFF', fontFamily: FH,
+    letterSpacing: fs(4), textAlign: 'center',
   },
 
   // Phase labels
   phaseLabel: {
-    fontSize: 16, fontWeight: '700', color: '#F5A623', fontFamily: FH,
-    letterSpacing: 2, marginBottom: 16, textAlign: 'center',
+    fontSize: fs(16), fontWeight: '700', color: '#F5A623', fontFamily: FH,
+    letterSpacing: fs(2), marginBottom: fs(16), textAlign: 'center',
   },
   blockLabel: {
-    fontSize: 14, fontWeight: '600', color: '#8A95A3', fontFamily: FB,
-    marginBottom: 8,
+    fontSize: fs(14), fontWeight: '600', color: '#8A95A3', fontFamily: FB,
+    marginBottom: fs(8),
   },
 
   // ── In-workout shared frame ────────────────────────────────────────
@@ -2445,7 +2414,7 @@ const st = StyleSheet.create({
   // exactly inside the available viewport (after outer safe-area), so no
   // inner padding is needed — the slots fill the canvas precisely.
   workContainer: {
-    flex: 1, paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0,
+    flex: 1, paddingHorizontal: fs(0), paddingTop: fs(0), paddingBottom: fs(0),
     overflow: 'hidden',
   },
 
@@ -2453,13 +2422,13 @@ const st = StyleSheet.create({
   // Heights are stable across phases so logo / title / timer / media /
   // next-up never shift between work, rest, transition, etc.
   logoSlot: {
-    height: 56,
+    height: fs(56),
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 0,
-    marginBottom: 4, // SLOT_GAP_LOGO — gap to title row
+    marginTop: fs(0),
+    marginBottom: fs(4), // SLOT_GAP_LOGO — gap to title row
   },
-  slotLogo: { width: 260, height: 52 },
+  slotLogo: { width: fs(260), height: fs(52) },
   // Title/timer row is locked to a fixed pixel height — NOT minHeight — so
   // the slot does not grow when content varies between phases (REST shows
   // 2 short lines, WORK can show superset + 2-line name + reps + cues). If
@@ -2469,18 +2438,18 @@ const st = StyleSheet.create({
   // fixed-height transparent module with centered text (Devin's "title module"
   // requirement). Timer pins to the right with a fixed minWidth.
   titleTimerSlot: {
-    height: 112,
+    height: fs(112),
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 0,
-    marginBottom: 12, // SLOT_GAP_TITLE — gap to media (must always be visible)
+    paddingHorizontal: fs(0),
+    marginBottom: fs(12), // SLOT_GAP_TITLE — gap to media (must always be visible)
     alignSelf: 'center',
   },
   titleColumn: {
-    flex: 1, height: 112, marginRight: 4,
+    flex: 1, height: fs(112), marginRight: fs(4),
     alignItems: 'center', justifyContent: 'center',
-    paddingHorizontal: 8, backgroundColor: 'transparent',
+    paddingHorizontal: fs(8), backgroundColor: 'transparent',
   },
   timerColumn: { justifyContent: 'center' },
   // Media slot — outer reserves the vertical space between the title row
@@ -2491,14 +2460,14 @@ const st = StyleSheet.create({
   mediaSlot: {
     flex: 1,
     width: '100%',
-    minHeight: 180,
+    minHeight: fs(180),
     alignItems: 'center',
     justifyContent: 'center',
   },
   mediaInner: {
     overflow: 'hidden',
     backgroundColor: '#000000',
-    borderRadius: 12,
+    borderRadius: fs(12),
     position: 'relative',
   },
   // Next-up row is also locked to a fixed pixel height. REST passes null
@@ -2506,10 +2475,10 @@ const st = StyleSheet.create({
   // bar (~92px). Locking the height stops the flex mediaSlot above from
   // shrinking on work, which is what was visibly shifting the media up.
   nextUpSlot: {
-    height: 64,
+    height: fs(64),
     justifyContent: 'center',
-    paddingTop: 0,
-    marginTop: 12, // SLOT_GAP_MEDIA — gap from media (must always be visible)
+    paddingTop: fs(0),
+    marginTop: fs(12), // SLOT_GAP_MEDIA — gap from media (must always be visible)
     alignSelf: 'center',
   },
   // Swap-mode badge — small pill that stacks naturally inside the centered
@@ -2520,10 +2489,10 @@ const st = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.55)',
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 12,
-    marginTop: 6,
+    paddingHorizontal: fs(10),
+    paddingVertical: fs(3),
+    borderRadius: fs(12),
+    marginTop: fs(6),
   },
   equipmentPanel: {
     backgroundColor: 'rgba(251,146,60,0.08)',
@@ -2536,28 +2505,28 @@ const st = StyleSheet.create({
     justifyContent: 'center',
   },
   transitionInstructionInline: {
-    fontSize: 13, color: '#8A95A3', fontFamily: FB, marginTop: 2, textAlign: 'center',
+    fontSize: fs(13), color: '#8A95A3', fontFamily: FB, marginTop: fs(2), textAlign: 'center',
   },
 
   // Legacy aliases (kept for any leftover references)
-  workLogo: { width: 260, height: 72, alignSelf: 'center', marginBottom: 6 },
+  workLogo: { width: fs(260), height: fs(72), alignSelf: 'center', marginBottom: fs(6) },
   nameTimerRow: {
     flexDirection: 'row', alignItems: 'flex-start',
-    justifyContent: 'space-between', paddingHorizontal: 4, marginBottom: 8,
+    justifyContent: 'space-between', paddingHorizontal: fs(4), marginBottom: fs(8),
   },
-  nameColumn: { flex: 1, marginRight: 12 },
+  nameColumn: { flex: 1, marginRight: fs(12) },
   workMovementName: {
     fontWeight: '800', color: '#FFFFFF', fontFamily: FH, textAlign: 'center',
   },
   workReps: {
-    fontSize: 18, fontWeight: '600', color: '#F5A623', fontFamily: FH,
-    marginTop: 2, textAlign: 'center',
+    fontSize: fs(18), fontWeight: '600', color: '#F5A623', fontFamily: FH,
+    marginTop: fs(2), textAlign: 'center',
   },
   workCues: {
-    fontSize: 13, color: '#8A95A3', fontFamily: FB, marginTop: 2, textAlign: 'center',
+    fontSize: fs(13), color: '#8A95A3', fontFamily: FB, marginTop: fs(2), textAlign: 'center',
   },
   workTimer: {
-    fontSize: 80, fontWeight: '700', color: '#FFFFFF', fontFamily: FH, lineHeight: 80,
+    fontSize: fs(80), fontWeight: '700', color: '#FFFFFF', fontFamily: FH, lineHeight: fs(80),
   },
   // Gold timer box (used across all screens). Width and height are fixed so
   // the box never resizes when the digit count changes (9→10, 39→40, or when
@@ -2566,9 +2535,9 @@ const st = StyleSheet.create({
   // and 3+ char values (M:SS) shrink to fit cleanly.
   goldTimerBox: {
     backgroundColor: '#F5A623',
-    width: 132,
-    height: 112,
-    borderRadius: 12,
+    width: fs(132),
+    height: fs(112),
+    borderRadius: fs(12),
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2580,18 +2549,18 @@ const st = StyleSheet.create({
   },
   // REST phase styles
   restPhaseLabel: {
-    fontSize: 18, fontWeight: '700', color: '#8A95A3', fontFamily: FH,
-    letterSpacing: 2, textAlign: 'center',
+    fontSize: fs(18), fontWeight: '700', color: '#8A95A3', fontFamily: FH,
+    letterSpacing: fs(2), textAlign: 'center',
   },
   restNextName: {
-    fontSize: 28, fontWeight: '800', color: '#F0F4F8', fontFamily: FH,
-    marginTop: 2, textAlign: 'center',
+    fontSize: fs(28), fontWeight: '800', color: '#F0F4F8', fontFamily: FH,
+    marginTop: fs(2), textAlign: 'center',
   },
   restTimerBox: {
     backgroundColor: '#1A2035',
-    width: 132,
-    height: 112,
-    borderRadius: 12,
+    width: fs(132),
+    height: fs(112),
+    borderRadius: fs(12),
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2601,31 +2570,31 @@ const st = StyleSheet.create({
     fontFamily: FH,
     textAlign: 'center',
   },
-  sideBadgeRow: { alignItems: 'center', marginBottom: 4 },
+  sideBadgeRow: { alignItems: 'center', marginBottom: fs(4) },
   // SPLIT label
   splitLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 4,
-    marginBottom: 4,
+    paddingHorizontal: fs(4),
+    marginBottom: fs(4),
   },
   splitText: {
-    fontSize: 14, fontWeight: '700', color: '#F5A623', fontFamily: FH, letterSpacing: 1,
+    fontSize: fs(14), fontWeight: '700', color: '#F5A623', fontFamily: FH, letterSpacing: fs(1),
   },
   splitSep: {
-    fontSize: 14, color: '#6B7280', fontFamily: FB,
+    fontSize: fs(14), color: '#6B7280', fontFamily: FB,
   },
   splitDuration: {
-    fontSize: 14, color: '#8A95A3', fontFamily: FB,
+    fontSize: fs(14), color: '#8A95A3', fontFamily: FB,
   },
   splitArrows: {
-    fontSize: 14, color: '#F5A623', fontFamily: FB,
+    fontSize: fs(14), color: '#F5A623', fontFamily: FB,
   },
 
   // Video area — strict 4:5 portrait crop
   videoArea: {
-    aspectRatio: 4 / 5, width: '100%', marginTop: 4,
-    borderRadius: 0, overflow: 'hidden', backgroundColor: '#000000',
+    aspectRatio: 4 / 5, width: '100%', marginTop: fs(4),
+    borderRadius: fs(0), overflow: 'hidden', backgroundColor: '#000000',
   },
   videoInner: { flex: 1, position: 'relative' },
   videoPlayer: { width: '100%', height: '100%' },
@@ -2659,74 +2628,74 @@ const st = StyleSheet.create({
   } as any,
   sharedOverlayHeader: {
     position: 'absolute' as any,
-    top: 0, left: 0, right: 0,
+    top: fs(0), left: fs(0), right: fs(0),
     zIndex: 110,
   },
   sharedOverlayCloseRow: {
     position: 'absolute' as any,
-    top: Platform.select({ ios: 44, android: 20, web: 16, default: 16 }),
-    left: 16,
+    top: fs((Platform.select({ ios: 44, android: 20, web: 16, default: 16 }) ?? 16) as number),
+    left: fs(16),
   },
   sharedOverlayCenterStack: {
     ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center', alignItems: 'center', gap: 18,
+    justifyContent: 'center', alignItems: 'center', gap: fs(18),
   } as any,
   sharedOverlayCenterBtn: {
-    width: 84, height: 84, borderRadius: 42,
+    width: fs(84), height: fs(84), borderRadius: fs(42),
     backgroundColor: '#F5A623',
     justifyContent: 'center', alignItems: 'center',
   },
   sharedOverlayDoneText: {
-    fontSize: 14, fontWeight: '700', color: '#0E1117', fontFamily: FH, marginTop: 2,
+    fontSize: fs(14), fontWeight: '700', color: '#0E1117', fontFamily: FH, marginTop: fs(2),
   },
   sharedOverlaySkipBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingVertical: 10, paddingHorizontal: 20,
-    borderRadius: 20, borderWidth: 1,
+    flexDirection: 'row', alignItems: 'center', gap: fs(6),
+    paddingVertical: fs(10), paddingHorizontal: fs(20),
+    borderRadius: fs(20), borderWidth: fs(1),
     borderColor: 'rgba(245,166,35,0.5)',
   },
   sharedOverlaySkipText: {
-    fontSize: 15, fontWeight: '600', color: '#F5A623', fontFamily: FH,
+    fontSize: fs(15), fontWeight: '600', color: '#F5A623', fontFamily: FH,
   },
   seekRow: {
     flexDirection: 'row' as any,
     alignItems: 'center' as any,
-    gap: 24,
+    gap: fs(24),
   },
   seekBtn10: {
-    width: 60, height: 60, borderRadius: 30,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)',
+    width: fs(60), height: fs(60), borderRadius: fs(30),
+    borderWidth: fs(1), borderColor: 'rgba(255,255,255,0.3)',
     justifyContent: 'center' as any, alignItems: 'center' as any,
   },
   seekBtn10Label: {
-    fontSize: 18, color: '#F0F4F8', fontWeight: '700' as any, lineHeight: 18,
+    fontSize: fs(18), color: '#F0F4F8', fontWeight: '700' as any, lineHeight: fs(18),
     fontFamily: FH,
   },
   seekBtn10Sec: {
-    fontSize: 10, color: '#8A95A3', fontWeight: '600' as any, lineHeight: 12,
+    fontSize: fs(10), color: '#8A95A3', fontWeight: '600' as any, lineHeight: fs(12),
     fontFamily: FH,
   },
 
   // Legacy styles
   movementName: {
-    fontSize: 32, fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
-    textAlign: 'center', marginBottom: 8,
+    fontSize: fs(32), fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
+    textAlign: 'center', marginBottom: fs(8),
   },
   cues: {
-    fontSize: 14, color: '#8A95A3', fontFamily: FB,
-    textAlign: 'center', marginBottom: 8, lineHeight: 20,
+    fontSize: fs(14), color: '#8A95A3', fontFamily: FB,
+    textAlign: 'center', marginBottom: fs(8), lineHeight: fs(20),
   },
   repsText: {
-    fontSize: 16, fontWeight: '600', color: '#F5A623', fontFamily: FH, marginBottom: 8,
+    fontSize: fs(16), fontWeight: '600', color: '#F5A623', fontFamily: FH, marginBottom: fs(8),
   },
   sideBadge: {
     backgroundColor: 'rgba(245,166,35,0.15)',
-    paddingHorizontal: 16, paddingVertical: 6, borderRadius: 12,
-    borderWidth: 1, borderColor: 'rgba(245,166,35,0.3)',
-    marginBottom: 12, alignSelf: 'center',
+    paddingHorizontal: fs(16), paddingVertical: fs(6), borderRadius: fs(12),
+    borderWidth: fs(1), borderColor: 'rgba(245,166,35,0.3)',
+    marginBottom: fs(12), alignSelf: 'center',
   },
   sideBadgeText: {
-    fontSize: 14, fontWeight: '700', color: '#F5A623', fontFamily: FH, letterSpacing: 1,
+    fontSize: fs(14), fontWeight: '700', color: '#F5A623', fontFamily: FH, letterSpacing: fs(1),
   },
 
   // Timer
@@ -2734,96 +2703,96 @@ const st = StyleSheet.create({
     width: Math.min(SCREEN_W * 0.55, 220),
     height: Math.min(SCREEN_W * 0.55, 220),
     borderRadius: Math.min(SCREEN_W * 0.55, 220) / 2,
-    borderWidth: 6, borderColor: '#F5A623',
+    borderWidth: fs(6), borderColor: '#F5A623',
     justifyContent: 'center', alignItems: 'center',
-    marginTop: 24, marginBottom: 24,
+    marginTop: fs(24), marginBottom: fs(24),
   },
   timerRingRest: { borderColor: '#2A3040' },
   timerNum: {
-    fontSize: 64, fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
+    fontSize: fs(64), fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
   },
   timerSub: {
-    fontSize: 13, color: '#8A95A3', fontFamily: FB, marginTop: -4,
+    fontSize: fs(13), color: '#8A95A3', fontFamily: FB, marginTop: fs(-4),
   },
   countdownNum: {
-    fontSize: 96, fontWeight: '700', color: '#F5A623', fontFamily: FH,
+    fontSize: fs(96), fontWeight: '700', color: '#F5A623', fontFamily: FH,
   },
   upNextName: {
-    fontSize: 22, fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
-    marginTop: 12, textAlign: 'center',
+    fontSize: fs(22), fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
+    marginTop: fs(12), textAlign: 'center',
   },
 
   // Controls (REST phase)
-  controls: { flexDirection: 'row', alignItems: 'center', gap: 24 },
+  controls: { flexDirection: 'row', alignItems: 'center', gap: fs(24) },
   controlBtn: {
-    width: 72, height: 72, borderRadius: 36,
+    width: fs(72), height: fs(72), borderRadius: fs(36),
     backgroundColor: '#F5A623', justifyContent: 'center', alignItems: 'center',
   },
   repDoneBtn: {
-    width: 120, height: 120, borderRadius: 60,
+    width: fs(120), height: fs(120), borderRadius: fs(60),
     backgroundColor: '#6EBB7A', justifyContent: 'center', alignItems: 'center',
-    marginTop: 24, marginBottom: 16,
+    marginTop: fs(24), marginBottom: fs(16),
   },
   repDoneBtnText: {
-    fontSize: 18, fontWeight: '700', color: '#0E1117', fontFamily: FH, marginTop: 4,
+    fontSize: fs(18), fontWeight: '700', color: '#0E1117', fontFamily: FH, marginTop: fs(4),
   },
   skipBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingVertical: 12, paddingHorizontal: 16,
+    flexDirection: 'row', alignItems: 'center', gap: fs(6),
+    paddingVertical: fs(12), paddingHorizontal: fs(16),
   },
   skipText: {
-    fontSize: 14, fontWeight: '600', color: '#F5A623', fontFamily: FH,
+    fontSize: fs(14), fontWeight: '600', color: '#F5A623', fontFamily: FH,
   },
 
   // Next up — short horizontal row: [LABEL | name+meta (flex) | thumb]
   nextUpBar: {
     backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12,
+    borderRadius: fs(12), paddingVertical: fs(8), paddingHorizontal: fs(12),
     flexDirection: 'row', alignItems: 'center', width: '100%',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
-    alignSelf: 'center', gap: 12,
+    borderWidth: fs(1), borderColor: 'rgba(255,255,255,0.1)',
+    alignSelf: 'center', gap: fs(12),
   },
   nextUpLabel: {
-    fontSize: 11, fontWeight: '700', color: '#8A95A3', fontFamily: FH,
-    letterSpacing: 1,
+    fontSize: fs(11), fontWeight: '700', color: '#8A95A3', fontFamily: FH,
+    letterSpacing: fs(1),
   },
   nextUpContent: {
-    flexDirection: 'row', alignItems: 'center', gap: 12, width: '100%',
+    flexDirection: 'row', alignItems: 'center', gap: fs(12), width: '100%',
   },
-  nextUpThumb: { width: 40, height: 40, borderRadius: 8, backgroundColor: '#1A2035' },
+  nextUpThumb: { width: fs(40), height: fs(40), borderRadius: fs(8), backgroundColor: '#1A2035' },
   nextUpInfo: { flex: 1 },
   nextUpName: {
-    fontSize: 15, fontWeight: '600', color: '#F0F4F8', fontFamily: FH,
+    fontSize: fs(15), fontWeight: '600', color: '#F0F4F8', fontFamily: FH,
   },
   nextUpMeta: {
-    fontSize: 11, color: '#8A95A3', fontFamily: FB, marginTop: 1,
+    fontSize: fs(11), color: '#8A95A3', fontFamily: FB, marginTop: fs(1),
   },
 
   // Complete
   completeTitle: {
-    fontSize: 28, fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
-    marginTop: 16, textAlign: 'center',
+    fontSize: fs(28), fontWeight: '700', color: '#F0F4F8', fontFamily: FH,
+    marginTop: fs(16), textAlign: 'center',
   },
   completeMeta: {
-    fontSize: 15, color: '#8A95A3', fontFamily: FB, marginTop: 8,
+    fontSize: fs(15), color: '#8A95A3', fontFamily: FB, marginTop: fs(8),
   },
 
   // TTS warning
   ttsWarning: {
-    flexDirection: 'row', alignItems: 'center', gap: 3,
-    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8,
+    flexDirection: 'row', alignItems: 'center', gap: fs(3),
+    paddingHorizontal: fs(6), paddingVertical: fs(2), borderRadius: fs(8),
     backgroundColor: 'rgba(224,107,79,0.15)',
   },
   ttsWarningText: {
-    fontSize: 10, color: '#E06B4F', fontFamily: FB, fontWeight: '600',
+    fontSize: fs(10), color: '#E06B4F', fontFamily: FB, fontWeight: '600',
   },
   offlineBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 3,
-    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8,
+    flexDirection: 'row', alignItems: 'center', gap: fs(3),
+    paddingHorizontal: fs(6), paddingVertical: fs(2), borderRadius: fs(8),
     backgroundColor: 'rgba(245,158,11,0.15)',
   },
   offlineBadgeText: {
-    fontSize: 10, color: '#F59E0B', fontFamily: FB, fontWeight: '600',
+    fontSize: fs(10), color: '#F59E0B', fontFamily: FB, fontWeight: '600',
   },
 
   // Swap modal
@@ -2864,20 +2833,20 @@ const st = StyleSheet.create({
   previewBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: fs(6),
     backgroundColor: 'rgba(245,166,35,0.12)',
-    borderWidth: 1,
+    borderWidth: fs(1),
     borderColor: 'rgba(245,166,35,0.3)',
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    marginBottom: 16,
+    borderRadius: fs(20),
+    paddingHorizontal: fs(14),
+    paddingVertical: fs(6),
+    marginBottom: fs(16),
   },
   previewBadgeText: {
-    fontSize: 12,
+    fontSize: fs(12),
     fontWeight: '700',
     color: '#F5A623',
     fontFamily: FH,
-    letterSpacing: 1,
+    letterSpacing: fs(1),
   },
 });
