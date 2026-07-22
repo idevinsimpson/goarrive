@@ -674,6 +674,37 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
+    // BOOKING WINDOWS (Playbook scheduling — Phase 3b)
+    // Coach-defined availability per playbook. Written only by
+    // createPlaybookBookingLink (Admin SDK). Coach reads own for the
+    // schedule panel prefill. Public page NEVER reads Firestore directly —
+    // it goes through resolvePlaybookBookingToken (title-only projection).
+    // ─────────────────────────────────────────────
+
+    match /booking_windows/{playbookId} {
+      allow read: if isAuthenticated() && (
+        isCoachOrBootstrap(resource.data.coachId)
+        || isPlatformAdmin()
+      );
+      allow write: if false; // Cloud Functions only (Admin SDK)
+    }
+
+    // ─────────────────────────────────────────────
+    // PLAYBOOK BOOKING TOKENS (Playbook scheduling — Phase 3b)
+    // Unguessable 32-hex tokens minted by createPlaybookBookingLink.
+    // Coach reads own (link display); resolver uses Admin SDK. No client
+    // writes, no unauthenticated reads — no enumeration surface.
+    // ─────────────────────────────────────────────
+
+    match /playbook_booking_tokens/{tokenId} {
+      allow read: if isAuthenticated() && (
+        isCoachOrBootstrap(resource.data.coachId)
+        || isPlatformAdmin()
+      );
+      allow write: if false; // Cloud Functions only (Admin SDK)
+    }
+
+    // ─────────────────────────────────────────────
     // SCHEDULING AUDIT LOG (Scheduling backbone)
     // Append-only audit trail for scheduling decisions.
     // Coach can read their own entries.

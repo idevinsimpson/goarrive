@@ -12,7 +12,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View,
 } from 'react-native';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, onSnapshot, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
@@ -28,6 +28,12 @@ const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
 const DURATIONS = [30, 45, 60];
 const TIME_PRESETS = ['06:00', '07:00', '09:00', '12:00', '17:00', '18:30'];
+
+interface BookingWindowRow {
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+}
 
 interface BookResult {
   date: string;
@@ -76,6 +82,13 @@ export default function PlaybookSchedulePanel({
   const [results, setResults] = useState<BookResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Booking link (Phase 3b): availability windows + public token URL
+  const [windows, setWindows] = useState<BookingWindowRow[]>([]);
+  const [linkToken, setLinkToken] = useState<string | null>(null);
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+
   // Live playbook doc — pre-fills the form from previously saved settings.
   useEffect(() => {
     if (!visible || !playbookId || !effectiveUid) return;
@@ -96,6 +109,26 @@ export default function PlaybookSchedulePanel({
       (err) => console.error('[PlaybookSchedulePanel] playbook listener error:', err),
     );
     return unsub;
+  }, [visible, playbookId, effectiveUid]);
+
+  // Prefill saved availability + existing (unrevoked) booking token on open.
+  useEffect(() => {
+    if (!visible || !playbookId || !effectiveUid) return;
+    getDoc(doc(db, 'booking_windows', playbookId))
+      .then((snap) => {
+        const w = snap.data()?.windows;
+        if (Array.isArray(w) && w.length) setWindows(w as BookingWindowRow[]);
+      })
+      .catch(() => {});
+    getDocs(query(
+      collection(db, 'playbook_booking_tokens'),
+      where('coachId', '==', effectiveUid),
+      where('playbookId', '==', playbookId),
+      where('revokedAt', '==', null),
+      limit(1),
+    ))
+      .then((snap) => { if (!snap.empty) setLinkToken(snap.docs[0].id); })
+      .catch(() => {});
   }, [visible, playbookId, effectiveUid]);
 
   const memberName = playbook?.assignedMemberName || null;
@@ -141,6 +174,51 @@ export default function PlaybookSchedulePanel({
       setBooking(false);
     }
   }, [canBook, playbookId, days, startTime, timezone, duration, sessionKind, recordingEnabled, repeatFrequency, horizonWeeks, weeklyCap]);
+
+  const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
+  const windowsValid = windows.length > 0 && windows.every(
+    (w) => timeRe.test(w.startTime) && timeRe.test(w.endTime) && w.startTime < w.endTime,
+  );
+
+  const bookingUrl = useMemo(() => {
+    if (!linkToken) return null;
+    const origin =
+      Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'https://goarrive.fit';
+    return `${origin}/book/${linkToken}`;
+  }, [linkToken]);
+
+  const updateWindow = useCallback((i: number, patch: Partial<BookingWindowRow>) => {
+    setWindows((prev) => prev.map((w, idx) => (idx === i ? { ...w, ...patch } : w)));
+    setLinkError(null);
+  }, []);
+
+  const createLink = useCallback(async () => {
+    if (!windowsValid || linkBusy) return;
+    setLinkBusy(true);
+    setLinkError(null);
+    try {
+      const fn = httpsCallable(functions, 'createPlaybookBookingLink');
+      const res = await fn({ playbookId, windows, timezone });
+      const data = res.data as { token: string };
+      setLinkToken(data.token);
+    } catch (e: any) {
+      console.error('[PlaybookSchedulePanel] booking link error:', e);
+      setLinkError(e?.message || 'Could not create booking link');
+    } finally {
+      setLinkBusy(false);
+    }
+  }, [windowsValid, linkBusy, playbookId, windows, timezone]);
+
+  const copyLink = useCallback(async () => {
+    if (!bookingUrl) return;
+    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+      await navigator.clipboard.writeText(bookingUrl);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    }
+  }, [bookingUrl]);
 
   const bookedCount = results?.filter((r) => r.status === 'booked').length ?? 0;
   const problems = results?.filter((r) => r.status !== 'booked') ?? [];
@@ -282,6 +360,78 @@ export default function PlaybookSchedulePanel({
                 </Pressable>
               </View>
             </View>
+
+            <Text style={s.sectionLabel}>Booking Link</Text>
+            <Text style={s.hint}>
+              Let the member pick their own times from your availability. The public page shows the
+              playbook title only — never workout details.
+            </Text>
+            {windows.map((w, i) => (
+              <View key={i} style={s.windowRow}>
+                <View style={s.windowDays}>
+                  {DAY_SHORT_LABELS.map((label, d) => (
+                    <Pressable
+                      key={label}
+                      style={[s.miniDayChip, w.dayOfWeek === d && s.dayChipActive]}
+                      onPress={() => updateWindow(i, { dayOfWeek: d })}
+                    >
+                      <Text style={[s.miniDayChipText, w.dayOfWeek === d && s.dayChipTextActive]}>
+                        {label[0]}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <TextInput
+                  style={[s.timeInput, !timeRe.test(w.startTime) && s.inputBad]}
+                  value={w.startTime}
+                  onChangeText={(v) => updateWindow(i, { startTime: v })}
+                  placeholder="09:00"
+                  placeholderTextColor="#4A5568"
+                  autoCapitalize="none"
+                />
+                <Text style={s.windowDash}>–</Text>
+                <TextInput
+                  style={[s.timeInput, !timeRe.test(w.endTime) && s.inputBad]}
+                  value={w.endTime}
+                  onChangeText={(v) => updateWindow(i, { endTime: v })}
+                  placeholder="12:00"
+                  placeholderTextColor="#4A5568"
+                  autoCapitalize="none"
+                />
+                <Pressable
+                  style={s.windowRemove}
+                  onPress={() => setWindows((prev) => prev.filter((_, idx) => idx !== i))}
+                >
+                  <Text style={s.windowRemoveText}>×</Text>
+                </Pressable>
+              </View>
+            ))}
+            <Pressable
+              style={s.addWindowBtn}
+              onPress={() => setWindows((prev) => [...prev, { dayOfWeek: 1, startTime: '09:00', endTime: '12:00' }])}
+            >
+              <Text style={s.addWindowText}>+ Add availability window</Text>
+            </Pressable>
+            {windows.length > 0 && (
+              <Pressable
+                style={[s.btn, { backgroundColor: windowsValid && !linkBusy ? '#1E2A3A' : '#161D29', borderWidth: 1, borderColor: '#A78BFA', marginTop: 10 }]}
+                onPress={createLink}
+                disabled={!windowsValid || linkBusy}
+              >
+                <Text style={{ color: '#A78BFA', fontWeight: '700', fontFamily: FH }}>
+                  {linkBusy ? 'Saving…' : linkToken ? 'Update Availability' : 'Create Booking Link'}
+                </Text>
+              </Pressable>
+            )}
+            {linkError && <Text style={s.error}>{linkError}</Text>}
+            {bookingUrl && (
+              <View style={s.linkBox}>
+                <Text style={s.linkUrl} numberOfLines={1}>{bookingUrl}</Text>
+                <Pressable style={s.copyBtn} onPress={copyLink}>
+                  <Text style={s.copyBtnText}>{linkCopied ? 'Copied' : 'Copy'}</Text>
+                </Pressable>
+              </View>
+            )}
 
             {error && <Text style={s.error}>{error}</Text>}
             {results && (
@@ -468,6 +618,101 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontFamily: FB,
     marginTop: 14,
+  },
+  windowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+    flexWrap: 'wrap',
+  },
+  windowDays: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  miniDayChip: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#0E1117',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  miniDayChipText: {
+    color: '#8A95A3',
+    fontSize: 11,
+    fontWeight: '700',
+    fontFamily: FB,
+  },
+  timeInput: {
+    backgroundColor: '#0E1117',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    color: '#F0F4F8',
+    fontSize: 13,
+    fontFamily: FB,
+    width: 62,
+    textAlign: 'center',
+  },
+  inputBad: {
+    borderColor: '#E5484D',
+    borderWidth: 1,
+  },
+  windowDash: {
+    color: '#4A5568',
+    fontSize: 14,
+    fontFamily: FB,
+  },
+  windowRemove: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#0E1117',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  windowRemoveText: {
+    color: '#E5484D',
+    fontSize: 15,
+    fontWeight: '700',
+    fontFamily: FB,
+  },
+  addWindowBtn: {
+    marginTop: 10,
+  },
+  addWindowText: {
+    color: '#A78BFA',
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: FB,
+  },
+  linkBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0E1117',
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 10,
+    gap: 8,
+  },
+  linkUrl: {
+    flex: 1,
+    color: '#8A95A3',
+    fontSize: 12,
+    fontFamily: FB,
+  },
+  copyBtn: {
+    backgroundColor: '#A78BFA',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  copyBtnText: {
+    color: '#0E1117',
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: FB,
   },
   resultBox: {
     backgroundColor: '#0E1117',

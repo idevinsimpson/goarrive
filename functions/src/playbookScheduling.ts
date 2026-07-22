@@ -229,6 +229,124 @@ export async function moveReservationForInstance(
   return { reservationId: newResId, startUtc, endUtc };
 }
 
+// ── Shared single-occurrence booking (coach path + public token path) ───────
+
+export interface BookOccurrenceParams {
+  playbookId: string;
+  playbook: Record<string, any>;
+  coachId: string;
+  memberKey: string;               // memberId, or `guest:<sha256(email)>`
+  memberId: string | null;         // null for guest bookings
+  guestEmail: string | null;
+  memberName: string;
+  dateStr: string;                 // YYYY-MM-DD (member-local wall clock)
+  startTime: string;               // HH:mm
+  timezone: string;                // IANA
+  durationMinutes: number;
+  sessionKind: PlaybookSessionKind;
+  recordingEnabled: boolean;
+  weeklySessionCap: number | null;
+  pinnedWorkoutId?: string | null;
+  bookedVia?: 'coach_panel' | 'booking_link';
+}
+
+export function hostingFieldsFor(sessionKind: PlaybookSessionKind): Record<string, any> {
+  // coach_guided rides the coach's own Zoom room; coach_review rides the
+  // shared bot-room pool (round-robin in allocateSessionInstance).
+  return sessionKind === 'coach_guided'
+    ? { roomSource: 'coach_personal', hostingMode: 'coach_led', coachExpectedLive: true, personalZoomRequired: true, guidancePhase: 'coach_guided' }
+    : { roomSource: 'shared_pool', hostingMode: 'hosted', coachExpectedLive: false, personalZoomRequired: false, guidancePhase: 'self_guided' };
+}
+
+/**
+ * One atomic booking: global overlap guard + per-playbook weekly cap +
+ * reservation create + session_instance create, all in one transaction.
+ * Throws HttpsError already-exists (conflict) / resource-exhausted (cap).
+ */
+export async function bookOccurrence(p: BookOccurrenceParams): Promise<{ instanceId: string; reservationId: string }> {
+  const db = getDb();
+  const startUtc = wallTimeToUtc(p.dateStr, p.startTime, p.timezone);
+  const endUtc = new Date(startUtc.getTime() + p.durationMinutes * 60 * 1000);
+  const endMinutesTotal = Number(p.startTime.split(':')[0]) * 60 + Number(p.startTime.split(':')[1]) + p.durationMinutes;
+  const scheduledEndTime = `${String(Math.floor(endMinutesTotal / 60) % 24).padStart(2, '0')}:${String(endMinutesTotal % 60).padStart(2, '0')}`;
+  const resId = reservationId(p.memberKey, startUtc);
+  const instRef = db.collection('session_instances').doc();
+
+  await db.runTransaction(async (txn) => {
+    // 1. Global overlap guard — reservations (all playbooks) + legacy instances
+    const conflict = await findOverlapInTxn(txn, p.memberKey, p.memberId, startUtc, endUtc);
+    if (conflict) throw new HttpsError('already-exists', conflict);
+
+    // 2. Per-playbook weekly cap — Monday boundary in member tz. Signed-in
+    // members are counted by memberId (covers Phase A instances that predate
+    // the memberKey field); guests are counted by memberKey.
+    if (p.weeklySessionCap !== null) {
+      const { weekStartUtc, weekEndUtc } = memberWeekWindowUtc(startUtc, p.timezone);
+      const baseQuery = db.collection('session_instances')
+        .where('playbookId', '==', p.playbookId);
+      const capQuery = p.memberId
+        ? baseQuery.where('memberId', '==', p.memberId)
+        : baseQuery.where('memberKey', '==', p.memberKey);
+      const capSnap = await txn.get(
+        capQuery
+          .where('startUtc', '>=', Timestamp.fromDate(weekStartUtc))
+          .where('startUtc', '<', Timestamp.fromDate(weekEndUtc))
+      );
+      const activeCount = capSnap.docs.filter((doc) => BLOCKING_STATUSES.includes(doc.data().status) || doc.data().status === 'completed').length;
+      if (activeCount >= p.weeklySessionCap) {
+        throw new HttpsError('resource-exhausted', `weekly cap of ${p.weeklySessionCap} reached`);
+      }
+    }
+
+    // 3. Reservation — deterministic ID, create() collides on races
+    txn.create(db.collection('member_time_reservations').doc(resId), {
+      memberKey: p.memberKey,
+      memberId: p.memberId,
+      guestEmail: p.guestEmail,
+      coachId: p.coachId,
+      playbookId: p.playbookId,
+      sessionInstanceId: instRef.id,
+      startUtc: Timestamp.fromDate(startUtc),
+      endUtc: Timestamp.fromDate(endUtc),
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    // 4. Session instance — reuses the legacy state machine end-to-end
+    const inst: Record<string, any> = {
+      id: instRef.id,
+      coachId: p.coachId,
+      memberId: p.memberId,
+      memberKey: p.memberKey,
+      memberName: p.memberName,
+      playbookId: p.playbookId,
+      playbookTitle: p.playbook.name || 'Playbook',
+      sessionKind: p.sessionKind,
+      recordingEnabled: p.recordingEnabled,
+      scheduledDate: p.dateStr,
+      scheduledStartTime: p.startTime,
+      scheduledEndTime,
+      durationMinutes: p.durationMinutes,
+      timezone: p.timezone,
+      startUtc: Timestamp.fromDate(startUtc),
+      endUtc: Timestamp.fromDate(endUtc),
+      reservationId: resId,
+      status: 'scheduled',
+      allocationAttempts: 0,
+      guestEmail: p.guestEmail,
+      bookedVia: p.bookedVia || 'coach_panel',
+      ...hostingFieldsFor(p.sessionKind),
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+    if (p.pinnedWorkoutId && Array.isArray(p.playbook.workoutIds) && p.playbook.workoutIds.includes(p.pinnedWorkoutId)) {
+      inst.pinnedWorkoutId = p.pinnedWorkoutId;
+    }
+    txn.set(instRef, inst);
+  });
+
+  return { instanceId: instRef.id, reservationId: resId };
+}
+
 // ── bookPlaybookSession ──────────────────────────────────────────────────────
 
 interface BookPlaybookSessionData {
@@ -358,92 +476,30 @@ export const bookPlaybookSession = onCall(
       throw new HttpsError('invalid-argument', 'No bookable occurrences in the selected window');
     }
 
-    // Existing-hosting-pipeline mapping: coach_guided rides the coach's own
-    // Zoom room; coach_review rides the shared bot-room pool (round-robin in
-    // allocateSessionInstance). Copy is member-facing elsewhere — these are
-    // internal routing fields.
-    const hostingFields = sessionKind === 'coach_guided'
-      ? { roomSource: 'coach_personal', hostingMode: 'coach_led', coachExpectedLive: true, personalZoomRequired: true, guidancePhase: 'coach_guided' }
-      : { roomSource: 'shared_pool', hostingMode: 'hosted', coachExpectedLive: false, personalZoomRequired: false, guidancePhase: 'self_guided' };
-
-    const memberKey = memberId; // guests (Phase B): `guest:<sha256(email)>`
+    const memberKey = memberId; // guests book via bookViaBookingToken with `guest:<sha256(email)>`
     const results: Array<{ date: string; status: 'booked' | 'conflict' | 'cap_reached'; reason?: string; instanceId?: string }> = [];
 
     for (const dateStr of occurrenceDates) {
-      const startUtc = wallTimeToUtc(dateStr, d.startTime, timezone);
-      const endUtc = new Date(startUtc.getTime() + durationMinutes * 60 * 1000);
-      const endMinutesTotal = Number(d.startTime.split(':')[0]) * 60 + Number(d.startTime.split(':')[1]) + durationMinutes;
-      const scheduledEndTime = `${String(Math.floor(endMinutesTotal / 60) % 24).padStart(2, '0')}:${String(endMinutesTotal % 60).padStart(2, '0')}`;
-      const resId = reservationId(memberKey, startUtc);
-      const instRef = db.collection('session_instances').doc();
-
       try {
-        await db.runTransaction(async (txn) => {
-          // 1. Global overlap guard — reservations (all playbooks) + legacy instances
-          const conflict = await findOverlapInTxn(txn, memberKey, memberId, startUtc, endUtc);
-          if (conflict) throw new HttpsError('already-exists', conflict);
-
-          // 2. Per-playbook weekly cap — Monday boundary in member tz
-          if (weeklySessionCap !== null) {
-            const { weekStartUtc, weekEndUtc } = memberWeekWindowUtc(startUtc, timezone);
-            const capSnap = await txn.get(
-              db.collection('session_instances')
-                .where('playbookId', '==', d.playbookId)
-                .where('memberId', '==', memberId)
-                .where('startUtc', '>=', Timestamp.fromDate(weekStartUtc))
-                .where('startUtc', '<', Timestamp.fromDate(weekEndUtc))
-            );
-            const activeCount = capSnap.docs.filter((doc) => BLOCKING_STATUSES.includes(doc.data().status) || doc.data().status === 'completed').length;
-            if (activeCount >= weeklySessionCap) {
-              throw new HttpsError('resource-exhausted', `weekly cap of ${weeklySessionCap} reached`);
-            }
-          }
-
-          // 3. Reservation — deterministic ID, create() collides on races
-          txn.create(db.collection('member_time_reservations').doc(resId), {
-            memberKey,
-            memberId,
-            guestEmail: null,
-            coachId,
-            playbookId: d.playbookId,
-            sessionInstanceId: instRef.id,
-            startUtc: Timestamp.fromDate(startUtc),
-            endUtc: Timestamp.fromDate(endUtc),
-            createdAt: FieldValue.serverTimestamp(),
-          });
-
-          // 4. Session instance — reuses the legacy state machine end-to-end
-          const inst: Record<string, any> = {
-            id: instRef.id,
-            coachId,
-            memberId,
-            memberName,
-            playbookId: d.playbookId,
-            playbookTitle: playbook.name || 'Playbook',
-            sessionKind,
-            recordingEnabled,
-            scheduledDate: dateStr,
-            scheduledStartTime: d.startTime,
-            scheduledEndTime,
-            durationMinutes,
-            timezone,
-            startUtc: Timestamp.fromDate(startUtc),
-            endUtc: Timestamp.fromDate(endUtc),
-            reservationId: resId,
-            status: 'scheduled',
-            allocationAttempts: 0,
-            guestEmail: null,
-            ...hostingFields,
-            createdAt: FieldValue.serverTimestamp(),
-            updatedAt: FieldValue.serverTimestamp(),
-          };
-          const pinned = d.pinnedWorkoutIds?.[dateStr];
-          if (pinned && Array.isArray(playbook.workoutIds) && playbook.workoutIds.includes(pinned)) {
-            inst.pinnedWorkoutId = pinned;
-          }
-          txn.set(instRef, inst);
+        const { instanceId } = await bookOccurrence({
+          playbookId: d.playbookId,
+          playbook,
+          coachId,
+          memberKey,
+          memberId,
+          guestEmail: null,
+          memberName,
+          dateStr,
+          startTime: d.startTime,
+          timezone,
+          durationMinutes,
+          sessionKind,
+          recordingEnabled,
+          weeklySessionCap,
+          pinnedWorkoutId: d.pinnedWorkoutIds?.[dateStr] || null,
+          bookedVia: 'coach_panel',
         });
-        results.push({ date: dateStr, status: 'booked', instanceId: instRef.id });
+        results.push({ date: dateStr, status: 'booked', instanceId });
       } catch (err: any) {
         if (err instanceof HttpsError && err.code === 'resource-exhausted') {
           results.push({ date: dateStr, status: 'cap_reached', reason: err.message });
