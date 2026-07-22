@@ -3166,26 +3166,47 @@ export const allocateSessionInstance = onCall(
 
     // Phase-aware room routing:
     //   coach_personal → use coach's personal Zoom room (tagged isPersonal: true)
-    //   shared_pool    → round-robin from shared pool rooms (isPersonal !== true)
+    //   shared_pool    → platform HMTI pool rooms (poolId == 'hmti'), LRU round-robin;
+    //                    falls back to per-coach shared rooms until pool rooms exist
     //   (no roomSource) → legacy behavior: try all active rooms
     const roomSource = (instance.roomSource as string) || '';
 
-    let roomQuery = db.collection('zoom_rooms')
-      .where('coachId', '==', callerUid)
-      .where('status', '==', 'active');
+    let candidateRooms: FirebaseFirestore.QueryDocumentSnapshot[] = [];
 
-    const roomsSnap = await roomQuery.get();
+    if (roomSource === 'shared_pool') {
+      // Platform-wide HMTI agent pool — not scoped to the calling coach
+      const poolSnap = await db.collection('zoom_rooms')
+        .where('poolId', '==', 'hmti')
+        .where('status', '==', 'active')
+        .get();
 
-    // Filter rooms based on roomSource
-    let candidateRooms = roomsSnap.docs;
-    if (roomSource === 'coach_personal') {
-      // Prefer rooms tagged as personal; fall back to all if none tagged
-      const personalRooms = candidateRooms.filter(d => d.data().isPersonal === true);
-      if (personalRooms.length > 0) candidateRooms = personalRooms;
-    } else if (roomSource === 'shared_pool') {
-      // Prefer rooms NOT tagged as personal; fall back to all if none
-      const poolRooms = candidateRooms.filter(d => d.data().isPersonal !== true);
-      if (poolRooms.length > 0) candidateRooms = poolRooms;
+      if (poolSnap.docs.length > 0) {
+        // LRU round-robin: least recently allocated first, never-allocated first of all
+        candidateRooms = poolSnap.docs.slice().sort((a, b) => {
+          const aTs = a.data().lastAllocatedAt?.toMillis?.() ?? 0;
+          const bTs = b.data().lastAllocatedAt?.toMillis?.() ?? 0;
+          return aTs - bTs;
+        });
+      }
+    }
+
+    if (candidateRooms.length === 0) {
+      const roomsSnap = await db.collection('zoom_rooms')
+        .where('coachId', '==', callerUid)
+        .where('status', '==', 'active')
+        .get();
+
+      // Filter rooms based on roomSource
+      candidateRooms = roomsSnap.docs;
+      if (roomSource === 'coach_personal') {
+        // Prefer rooms tagged as personal; fall back to all if none tagged
+        const personalRooms = candidateRooms.filter(d => d.data().isPersonal === true);
+        if (personalRooms.length > 0) candidateRooms = personalRooms;
+      } else if (roomSource === 'shared_pool') {
+        // No hmti-pool rooms provisioned yet — legacy per-coach shared behavior
+        const poolRooms = candidateRooms.filter(d => d.data().isPersonal !== true);
+        if (poolRooms.length > 0) candidateRooms = poolRooms;
+      }
     }
 
     if (candidateRooms.length === 0) {
@@ -3319,6 +3340,14 @@ export const allocateSessionInstance = onCall(
       allocationAttempts: (instance.allocationAttempts || 0) + 1,
       updatedAt: FieldValue.serverTimestamp(),
     });
+
+    // Advance LRU cursor for platform pool rooms
+    if (allocatedRoom.poolId) {
+      await db.collection('zoom_rooms').doc(allocatedRoom.id).update({
+        lastAllocatedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
 
     // Write session event for traceability
     await writeSessionEvent({
