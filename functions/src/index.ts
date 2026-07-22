@@ -3350,7 +3350,7 @@ export const allocateSessionInstance = onCall(
       zoomMeetingUuid: meeting.uuid || null,
       zoomJoinUrl: meeting.joinUrl,
       zoomStartUrl: meeting.startUrl,
-      zoomMeetingPassword: meeting.password,
+      zoomMeetingPassword: meeting.password ?? null,
       zoomProviderMode: zoomProvider.mode,
       allocatedAt: FieldValue.serverTimestamp(),
       allocationAttempts: (instance.allocationAttempts || 0) + 1,
