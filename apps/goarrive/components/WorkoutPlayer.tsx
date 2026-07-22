@@ -1787,7 +1787,12 @@ export default function WorkoutPlayer({
               <>
                 {renderAutoFitTitle(composePrescriptionLabel(current.name, current.weight, current.reps), {
                   hasTimer: !isRepBased,
-                  maxLines: NAME_MAX_LINES,
+                  // Swap-sides movements stack the FULL/SPLIT badge (~30 base
+                  // units incl. margin) under the title inside the fixed
+                  // 112-unit module — shrink the title budget so the pair
+                  // never overflows into the logo above.
+                  maxLines: current.swapSides ? 2 : NAME_MAX_LINES,
+                  maxHeight: current.swapSides ? 82 : undefined,
                 })}
                 {/* Swap-mode badge stacks naturally below the title — the */}
                 {/* title column is center-aligned, so it appears centered  */}
@@ -1829,6 +1834,7 @@ export default function WorkoutPlayer({
                   hasTimer: true,
                   maxLines: 2,
                   maxFontSize: 34,
+                  maxHeight: 82,
                   color: '#F0F4F8',
                   marginTop: 2,
                 })}

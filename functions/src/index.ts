@@ -2126,107 +2126,6 @@ export const claimMemberAccount = onCall(
   }
 );
 
-// ── sendMemberInvite — Coach-triggered: create Auth user + send password reset ──
-/**
- * Allows a coach to send an account invite to a member they added via QuickAdd.
- * If the member has no Firebase Auth account, one is created with a temp password.
- * A password-reset link is generated so the member can set their own password.
- *
- * Input:  { memberId: string }
- * Output: { success: boolean, resetLink: string }
- */
-export const sendMemberInvite = onCall(
-  { region: 'us-central1' },
-  async (request) => {
-    const callerUid = request.auth?.uid;
-    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
-
-    // Only coaches (or admins) may send invites
-    const callerRole = request.auth?.token?.role;
-    const callerAdmin = request.auth?.token?.admin === true || callerRole === 'platformAdmin';
-    if (callerRole !== 'coach' && !callerAdmin) {
-      throw new HttpsError('permission-denied', 'Only coaches can send member invites');
-    }
-
-    const { memberId } = request.data as { memberId?: string };
-    if (!memberId) throw new HttpsError('invalid-argument', 'memberId is required');
-
-    try {
-      // Fetch member doc
-      const memberRef = db.collection('members').doc(memberId);
-      const memberSnap = await memberRef.get();
-      if (!memberSnap.exists) {
-        throw new HttpsError('not-found', 'Member record not found');
-      }
-
-      const member = memberSnap.data()!;
-
-      // Coach-scope guard: caller must own this member (unless admin)
-      if (!callerAdmin && member.coachId !== callerUid) {
-        throw new HttpsError('permission-denied', 'You can only invite your own members');
-      }
-
-      const memberEmail = (member.email || '').trim().toLowerCase();
-      if (!memberEmail) {
-        throw new HttpsError('failed-precondition', 'Member has no email address on file');
-      }
-
-      // If member already has an account, just generate a reset link
-      if (member.hasAccount === true && member.uid) {
-        // No actionCodeSettings — avoids domain-allowlist requirement; Firebase uses its default continue URL
-        const resetLink = await admin.auth().generatePasswordResetLink(memberEmail);
-        console.log('[sendMemberInvite] Reset link for existing account:', memberId, memberEmail);
-        return { success: true, resetLink };
-      }
-
-      // Create Firebase Auth user with a temp password
-      const tempPassword = `GA-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      let userRecord;
-      try {
-        userRecord = await admin.auth().createUser({
-          email: memberEmail,
-          displayName: member.name || member.displayName || '',
-          password: tempPassword,
-        });
-      } catch (err: any) {
-        if (err.code === 'auth/email-already-exists') {
-          // Auth user exists but member doc wasn't linked — link it now
-          const existingUser = await admin.auth().getUserByEmail(memberEmail);
-          userRecord = existingUser;
-        } else {
-          throw new HttpsError('internal', `createUser failed: ${err.message ?? err.code ?? 'unknown'}`);
-        }
-      }
-
-      // Set custom claims for the member
-      await admin.auth().setCustomUserClaims(userRecord.uid, {
-        role: 'member',
-        coachId: member.coachId,
-        tenantId: member.tenantId,
-        memberId: memberId,
-      });
-
-      // Update member doc to link the auth account
-      await memberRef.update({
-        uid: userRecord.uid,
-        hasAccount: true,
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-
-      // Generate password reset link (no actionCodeSettings — avoids domain-allowlist requirement)
-      const resetLink = await admin.auth().generatePasswordResetLink(memberEmail);
-
-      console.log('[sendMemberInvite] Created auth + reset link:', userRecord.uid, memberEmail, 'by', callerUid);
-      return { success: true, resetLink };
-    } catch (err: any) {
-      // Re-throw HttpsErrors as-is; wrap everything else with a descriptive message
-      if (err instanceof HttpsError) throw err;
-      console.error('[sendMemberInvite] Unhandled error:', err?.code, err?.message, err);
-      throw new HttpsError('internal', `Unexpected error: ${err?.message ?? err?.code ?? String(err)}`);
-    }
-  }
-);
-
 
 /**
  * sendMemberInvite – Coach-initiated: ensure a Firebase Auth account exists
@@ -10032,8 +9931,8 @@ export const getEmbeddedSessionJoinConfig = onCall(
 // ─── Workout Share Links ─────────────────────────────────────────────────────
 
 import * as crypto from 'crypto';
-import { generateWorkoutOgImage } from './ogImage';
-import { generateWorkoutOgVideo } from './ogVideo';
+import { generateWorkoutOgImage, OG_IMAGE_VERSION } from './ogImage';
+import { generateWorkoutOgVideo, OG_VIDEO_VERSION } from './ogVideo';
 export { shareMeta } from './shareMeta';
 
 // ─── Coach Comms — weekly digest, feedback ack, shipped/planned loop ─────────
@@ -10093,13 +9992,18 @@ export const createShareToken = onCall({ memory: '512MiB' }, async (request) => 
   if (!existingTokens.empty) {
     const existing = existingTokens.docs[0];
     const data = existing.data();
-    if (!data.ogImageUrl) {
-      // Backfill OG image for tokens minted before OG images existed.
+    if (!data.ogImageUrl || !data.ogImageUrl.includes(`-${OG_IMAGE_VERSION}`)) {
+      // Backfill for tokens minted before OG images existed, or regenerate
+      // when the stored image predates the current layout.
       try {
         await generateWorkoutOgImage(existing.id, workoutData);
       } catch (err) {
         console.warn('[createShareToken] OG image backfill failed:', err);
       }
+    }
+    if (typeof data.ogVideoUrl !== 'string' || !data.ogVideoUrl.includes(`-${OG_VIDEO_VERSION}`)) {
+      generateWorkoutOgVideo(existing.id, workoutData).catch((err) =>
+        console.warn('[createShareToken] OG video regeneration failed:', err));
     }
     return {
       shareId: existing.id,
