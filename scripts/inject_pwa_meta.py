@@ -158,8 +158,12 @@ HEAD_INJECT = SOCIAL_META + """
         -webkit-overflow-scrolling: touch !important;
       }
 
-      /* Inner ScrollView (direct child of outer): grow to natural content height */
-      .r-1p0dtai.r-1d2f490.r-u8s1d.r-zchlnj.r-ipm5af .r-agouwx > .r-agouwx {
+      /* Inner ScrollViews (any depth): grow to natural content height.
+         Must be a descendant selector, not `>`: nested scrollers like the
+         admin tab-pill ScrollView sit deeper than one level and were being
+         forced to calc(100dvh - 53px) tall by the rule above (iOS-only,
+         since Chromium drops this style block at hydration). */
+      .r-1p0dtai.r-1d2f490.r-u8s1d.r-zchlnj.r-ipm5af .r-agouwx .r-agouwx {
         flex: 0 0 auto !important;
         height: auto !important;
         max-height: none !important;
