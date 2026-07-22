@@ -43,6 +43,9 @@ import {
   addDoc,
   serverTimestamp,
   writeBatch,
+  arrayUnion,
+  arrayRemove,
+  getDocs,
 } from 'firebase/firestore';
 import { useNavigation } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
@@ -106,12 +109,12 @@ const NO_MOVEMENT_BLOCKS = ['Water Break', 'Rest', 'Follow-Along Video'];
 // ── Drag auto-scroll + drop tray constants ─────────────────────────────────
 const AUTO_SCROLL_MAX_PX = 15;       // max px scrolled per frame at edge proximity
 const AUTO_SCROLL_BAND_PCT = 0.18;  // edge band = 18% of the list height (at top/bottom where scroll fires)
-const AUTO_SCROLL_HOTSPOT_W = 90;    // down-scroll only fires within this many px of the right edge (over the chevron-down target)
 const TRAY_SHOW_DELAY_MS = 200;      // delay before tray slides up — avoids flashing on accidental long presses
 const TRAY_HEIGHT = 96;              // content height of the drop tray (excl. safe-area inset)
 const TRAY_SLIDE_DISTANCE = 220;     // translateY when hidden — guaranteed offscreen incl. inset
 const TRAY_MAX_RECENTS = 5;
 const TRAY_NEW_FOLDER_KEY = 'tray:new';
+const TRAY_NEW_PLAYBOOK_KEY = 'tray:new-playbook';
 
 // Firestore rejects `undefined` values. Mirror the stripUndefined pattern
 // from components/WorkoutFolderPage.tsx so writes from drag/drop never throw.
@@ -188,14 +191,16 @@ function calcDurationMin(blocks: any[]): number {
 }
 
 // Drop target eligibility. Folders accept every asset type. A Movement
-// dropped on a Workout appends to it. Any other asset-on-asset drop opens
-// the combine modal (create a folder containing both).
+// dropped on a Workout appends to it. Playbooks are workouts-only — they
+// reject movements, folders, plans, and other playbooks. Any other
+// asset-on-asset drop opens the combine modal (create a folder containing both).
 function isDropTarget(
   item: { type?: string } | null | undefined,
   dragged: { type?: string } | null | undefined,
 ): boolean {
   if (!item || !dragged) return false;
   if (dragged.type === 'Folder') return false;
+  if (item.type === 'Playbooks') return dragged.type === 'Workouts';
   return true;
 }
 
@@ -390,7 +395,14 @@ function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle 
 /** Folder card preview — a miniature of the folder's contents. Each cell is a
  *  tiny workout card rendered with STILL photos (posterUrl, never GIFs), so
  *  the folder reads as a shrunken version of the view you get by tapping in. */
-type FolderPreviewEntry = { id: string; name: string; thumbs: (string | { name: string })[] };
+type FolderPreviewEntry = {
+  id: string;
+  name: string;
+  thumbs: (string | { name: string })[];
+  // Playbook-inside-folder: mosaic-inside-mosaic. Each inner array is one
+  // workout's stills (≤4). Per-workout titles are dropped at this size.
+  playbookWorkouts?: (string | { name: string })[][];
+};
 
 function FolderMiniCard({ entry, width, height, scrollIdle }: { entry: FolderPreviewEntry; width: number; height: number; scrollIdle: boolean }) {
   const nameH = Math.max(12, Math.round(height * 0.16));
@@ -408,6 +420,49 @@ function FolderMiniCard({ entry, width, height, scrollIdle }: { entry: FolderPre
   const maxCellH = (innerH - gap * (rows - 1)) / rows;
   const cellH = Math.max(1, Math.min(cellW * (5 / 4), maxCellH));
   const finalCellW = Math.max(1, Math.min(cellW, cellH * (4 / 5)));
+  // Playbook mini-card: up to 4 workout cells (2x2), each cell its own 2x2 of
+  // ≤4 movement stills — mosaic inside mosaic. Playbook name label only.
+  if (entry.playbookWorkouts && entry.playbookWorkouts.length > 0) {
+    const wks = entry.playbookWorkouts.slice(0, 4);
+    const wCols = wks.length <= 1 ? 1 : 2;
+    const wRows = Math.ceil(wks.length / wCols);
+    const wCellW = (innerW - gap * (wCols - 1)) / wCols;
+    const wCellH = (innerH - gap * (wRows - 1)) / wRows;
+    return (
+      <View style={{ width, height, borderRadius: 5, overflow: 'hidden', backgroundColor: '#141024', borderWidth: StyleSheet.hairlineWidth, borderColor: '#4C3D8F' }}>
+        <View style={{ width, height: mediaH, padding: inset, gap, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignContent: 'center', overflow: 'hidden' }}>
+          {wks.map((wThumbs, wi) => {
+            const t = wThumbs.slice(0, 4);
+            const tCols = t.length <= 1 ? 1 : 2;
+            const tRows = Math.ceil(Math.max(t.length, 1) / tCols);
+            const tGap = 1;
+            const tW = (wCellW - 2 - tGap * (tCols - 1)) / tCols;
+            const tH = (wCellH - 2 - tGap * (tRows - 1)) / tRows;
+            return (
+              <View key={wi} style={{ width: wCellW, height: wCellH, borderRadius: 3, overflow: 'hidden', backgroundColor: '#10151F', padding: 1, gap: tGap, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignContent: 'center' }}>
+                {t.length === 0 ? (
+                  <Icon name="workouts" size={8} color="#2D3B4E" />
+                ) : (
+                  t.map((slot, i) =>
+                    typeof slot === 'string' ? (
+                      <MosaicPreviewTile key={i} uri={slot} width={Math.max(1, tW)} height={Math.max(1, tH)} parentIsAnimating={false} scrollIdle={scrollIdle} index={i} borderRadius={1} />
+                    ) : (
+                      <MosaicPlaceholderCell key={i} width={Math.max(1, tW)} height={Math.max(1, tH)} borderRadius={1} name={undefined} />
+                    ),
+                  )
+                )}
+              </View>
+            );
+          })}
+        </View>
+        <View style={{ height: nameH, justifyContent: 'center', paddingHorizontal: 3 }}>
+          <Text numberOfLines={1} style={{ color: '#C4B5FD', fontSize: Math.max(7, Math.round(nameH * 0.58)), fontWeight: '600', fontFamily: FB }}>
+            {entry.name}
+          </Text>
+        </View>
+      </View>
+    );
+  }
   return (
     <View style={{ width, height, borderRadius: 5, overflow: 'hidden', backgroundColor: '#10151F' }}>
       <View style={{ width, height: mediaH, padding: inset, gap, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignContent: 'center', overflow: 'hidden' }}>
@@ -483,6 +538,10 @@ function BuildScreenInner() {
 
   // ── State ──────────────────────────────────────────────────────────────
   const [items, setItems] = useState<BuildItem[]>([]);
+  // Live items for drag callbacks (created once) — e.g. playbook reorder needs
+  // the current workoutIds without re-creating executeDrop on every snapshot.
+  const itemsRef = useRef<BuildItem[]>([]);
+  itemsRef.current = items;
   const [variationBadges, setVariationBadges] = useState<Record<string, 'running' | 'ready'>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -508,6 +567,15 @@ function BuildScreenInner() {
   const folderHeaderRectRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
   const folderHeaderRef = useRef<View>(null);
 
+  // Playbook drill-in — same grid/header experience as folders, but membership
+  // and order come from the playbook's workoutIds array (never parentId, since
+  // one workout can live in many playbooks and order matters for rotation).
+  const [currentPlaybook, setCurrentPlaybook] = useState<{ id: string; name: string } | null>(null);
+  const [editingPlaybookTitle, setEditingPlaybookTitle] = useState(false);
+  const [playbookTitleDraft, setPlaybookTitleDraft] = useState('');
+  const currentPlaybookRef = useRef<{ id: string; name: string } | null>(null);
+  currentPlaybookRef.current = currentPlaybook;
+
   // Modals
   const [selectedMovement, setSelectedMovement] = useState<any | null>(null);
   const [editMovement, setEditMovement] = useState<any | null>(null);
@@ -532,8 +600,15 @@ function BuildScreenInner() {
   const [showPlaybookCreate, setShowPlaybookCreate] = useState(false);
   const [newPlaybookName, setNewPlaybookName] = useState('');
   const [newPlaybookDesc, setNewPlaybookDesc] = useState('');
+  // Workout-on-workout combine → Create Playbook seeds both IDs here, then
+  // the create modal collects title + member assignment before writing.
+  const [playbookSeedWorkoutIds, setPlaybookSeedWorkoutIds] = useState<string[]>([]);
+  const [pbMembers, setPbMembers] = useState<{ id: string; name: string; email: string }[]>([]);
+  const [pbAssignMemberId, setPbAssignMemberId] = useState<string | null>(null);
+  const [pbAddByEmail, setPbAddByEmail] = useState(false);
+  const [pbNewMemberName, setPbNewMemberName] = useState('');
+  const [pbNewMemberEmail, setPbNewMemberEmail] = useState('');
   const [selectedPlan, setSelectedPlan] = useState<any | null>(null);
-  const [selectedPlaybook, setSelectedPlaybook] = useState<any | null>(null);
 
   const tenantId = claims?.tenantId ?? '';
 
@@ -573,6 +648,12 @@ function BuildScreenInner() {
   const [trayVisible, setTrayVisible] = useState(false);
   const [trayMounted, setTrayMounted] = useState(false);
   const trayVisibleRef = useRef(false);
+  // Measured absolute top of the tray row. iOS Safari's visual viewport can be
+  // shorter than Dimensions.get('window').height (toolbar collapse), which
+  // made the math-derived band miss and drops silently no-op. Prefer the
+  // measured value; the math stays as fallback until layout resolves.
+  const trayRowTopRef = useRef<number | null>(null);
+  const trayRowRef = useRef<View>(null);
   const trayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const trayTranslate = useSharedValue(TRAY_SLIDE_DISTANCE);
   // Tray drop rects come from onLayout (relative to trayRow) + math for the
@@ -581,6 +662,8 @@ function BuildScreenInner() {
   const trayItemLayoutsRef = useRef(new Map<string, { x: number; y: number; w: number; h: number; item: BuildItem | null }>());
   const [recentDropFolderIds, setRecentDropFolderIds] = useState<string[]>([]);
   const [pendingFolderDropItem, setPendingFolderDropItem] = useState<BuildItem | null>(null);
+  // Workout dropped on the tray "New Playbook" target — seeds the new playbook.
+  const [pendingPlaybookDropItem, setPendingPlaybookDropItem] = useState<BuildItem | null>(null);
   // Movement dropped on the tray "New" target — chooser asks Folder vs Workout.
   const [trayDropChooserItem, setTrayDropChooserItem] = useState<BuildItem | null>(null);
   const navigation = useNavigation();
@@ -864,11 +947,33 @@ function BuildScreenInner() {
     } catch (e) { console.error('[Build] Folder rename error:', e); }
   }, [folderTitleDraft]);
 
+  // ── Playbook helpers ───────────────────────────────────────────────────
+  const enterPlaybook = useCallback((pb: BuildItem) => {
+    setCurrentPlaybook({ id: pb.id, name: pb.name });
+  }, []);
+
+  const exitPlaybook = useCallback(() => {
+    setCurrentPlaybook(null);
+    setEditingPlaybookTitle(false);
+  }, []);
+
+  const savePlaybookTitle = useCallback(async () => {
+    setEditingPlaybookTitle(false);
+    const pb = currentPlaybookRef.current;
+    const name = playbookTitleDraft.trim();
+    if (!pb || !name || name === pb.name) return;
+    try {
+      await updateDoc(doc(db, 'playbooks', pb.id), { name, updatedAt: serverTimestamp() });
+      setCurrentPlaybook(prev => (prev ? { ...prev, name } : prev));
+    } catch (e) { console.error('[Build] Playbook rename error:', e); }
+  }, [playbookTitleDraft]);
+
   // Drop zone on the folder header: dragging an asset onto "Build / …" moves
   // it up one level — to the parent folder, or to the Build root at depth 1.
+  // Inside a playbook, the same zone removes the workout from the playbook.
   const isOverFolderHeader = useCallback((ax: number, ay: number): boolean => {
     const rect = folderHeaderRectRef.current;
-    if (!rect || folderStackRef.current.length === 0) return false;
+    if (!rect || (folderStackRef.current.length === 0 && !currentPlaybookRef.current)) return false;
     return ax >= rect.x && ax <= rect.x + rect.w && ay >= rect.y && ay <= rect.y + rect.h;
   }, []);
 
@@ -972,25 +1077,98 @@ function BuildScreenInner() {
     } catch (e) { console.error('[Build] Create plan error:', e); }
   }, [coachId, tenantId, currentFolderId, newPlanName, newPlanDesc, newPlanWeeks]);
 
+  const resetPlaybookCreateState = useCallback(() => {
+    setNewPlaybookName(''); setNewPlaybookDesc('');
+    setShowPlaybookCreate(false);
+    setPendingPlaybookDropItem(null);
+    setPlaybookSeedWorkoutIds([]);
+    setPbAssignMemberId(null);
+    setPbAddByEmail(false);
+    setPbNewMemberName(''); setPbNewMemberEmail('');
+  }, []);
+
+  // Load the coach's members whenever the create modal opens, for the
+  // assignment picker. One-shot fetch — the list is small and modal-scoped.
+  useEffect(() => {
+    if (!showPlaybookCreate || !coachId) return;
+    getDocs(query(collection(db, 'members'), where('coachId', '==', coachId)))
+      .then(snap => {
+        setPbMembers(
+          snap.docs
+            .filter(d => !d.data().isArchived)
+            .map(d => {
+              const x = d.data();
+              return {
+                id: d.id,
+                name: x.name || x.displayName || (x.firstName ? `${x.firstName} ${x.lastName || ''}`.trim() : '') || x.email || 'Unnamed',
+                email: x.email || '',
+              };
+            })
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        );
+      })
+      .catch(e => console.error('[Build] Load members error:', e));
+  }, [showPlaybookCreate, coachId]);
+
   const createPlaybook = useCallback(async () => {
     const name = newPlaybookName.trim();
     if (!name) return;
+    const pendingDrop = pendingPlaybookDropItem;
     try {
+      // Assignment: an existing member, or a brand-new one added by email.
+      let assignedMemberId: string | null = pbAssignMemberId;
+      let assignedMemberName: string | null =
+        pbMembers.find(m => m.id === pbAssignMemberId)?.name ?? null;
+      if (pbAddByEmail && pbNewMemberEmail.trim()) {
+        const emailNorm = pbNewMemberEmail.trim().toLowerCase();
+        const memberName = pbNewMemberName.trim() || emailNorm;
+        const dupSnap = await getDocs(query(
+          collection(db, 'members'),
+          where('coachId', '==', coachId),
+          where('email', '==', emailNorm),
+        ));
+        const active = dupSnap.docs.find(d => !d.data().isArchived);
+        if (active) {
+          assignedMemberId = active.id;
+          assignedMemberName = active.data().name || memberName;
+        } else {
+          const memberRef = await addDoc(collection(db, 'members'), {
+            coachId,
+            tenantId,
+            name: memberName,
+            email: emailNorm,
+            phone: '',
+            notes: '',
+            isArchived: false,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+          assignedMemberId = memberRef.id;
+          assignedMemberName = memberName;
+        }
+      }
+      const seedIds = pendingDrop && pendingDrop.type === 'Workouts'
+        ? [pendingDrop.id]
+        : playbookSeedWorkoutIds;
       await addDoc(collection(db, 'playbooks'), {
         coachId,
         tenantId,
         name,
         description: newPlaybookDesc.trim(),
-        workoutIds: [],
+        workoutIds: seedIds,
         isArchived: false,
         parentId: currentFolderId || null,
+        assignedMemberId: assignedMemberId || null,
+        assignedMemberName: assignedMemberName || null,
+        assignedAt: assignedMemberId ? serverTimestamp() : null,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      setNewPlaybookName(''); setNewPlaybookDesc('');
-      setShowPlaybookCreate(false);
+      resetPlaybookCreateState();
+      scrollOffsetRef.current = 0;
+      requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: false }));
     } catch (e) { console.error('[Build] Create playbook error:', e); }
-  }, [coachId, tenantId, currentFolderId, newPlaybookName, newPlaybookDesc]);
+  }, [coachId, tenantId, currentFolderId, newPlaybookName, newPlaybookDesc, pendingPlaybookDropItem, playbookSeedWorkoutIds, pbAssignMemberId, pbAddByEmail, pbNewMemberName, pbNewMemberEmail, pbMembers, resetPlaybookCreateState]);
 
   // ── Drag & Drop handlers (filteredItems-independent) ──────────────────
   // The grid sorts by updatedAt desc, so a drop target jumps to the top of
@@ -1049,7 +1227,8 @@ function BuildScreenInner() {
     if (!trayVisibleRef.current || trayItemLayoutsRef.current.size === 0) return null;
     const windowH = Dimensions.get('window').height;
     // trayRow top = window bottom − bottom padding (inset + 12) − row height.
-    const rowTop = windowH - (insets.bottom + 12) - (TRAY_HEIGHT - 24);
+    // Prefer the measured absolute top (iOS visual-viewport safe); math fallback.
+    const rowTop = trayRowTopRef.current ?? (windowH - (insets.bottom + 12) - (TRAY_HEIGHT - 24));
     if (ay < rowTop - 10) return null; // above the tray band (10px grace)
     let best: { key: string; item: BuildItem | null } | null = null;
     let bestDist = Infinity;
@@ -1094,6 +1273,38 @@ function BuildScreenInner() {
     const dragged = _dragItemRef.current;
     if (!dragged) return;
 
+    // Inside a playbook: drags only reorder workoutIds (drop on another
+    // workout) or remove from the playbook (drop on the header). No
+    // parentId writes, folder drops, or combine modals in this context.
+    const pb = currentPlaybookRef.current;
+    if (pb) {
+      if (dragged.type !== 'Workouts') return;
+      try {
+        if (isOverFolderHeader(ax, ay)) {
+          await updateDoc(doc(db, 'playbooks', pb.id), {
+            workoutIds: arrayRemove(dragged.id),
+            updatedAt: serverTimestamp(),
+          });
+          return;
+        }
+        const target = findTarget(ax, ay);
+        if (!target || target.id === dragged.id || target.type !== 'Workouts') return;
+        const pbDoc = itemsRef.current.find(i => i.type === 'Playbooks' && i.id === pb.id);
+        const ids: string[] = Array.isArray(pbDoc?.workoutIds) ? [...pbDoc!.workoutIds] : [];
+        const from = ids.indexOf(dragged.id);
+        const to = ids.indexOf(target.id);
+        if (from === -1 || to === -1 || from === to) return;
+        ids.splice(from, 1);
+        const ti = ids.indexOf(target.id);
+        ids.splice(from < to ? ti + 1 : ti, 0, dragged.id);
+        await updateDoc(doc(db, 'playbooks', pb.id), {
+          workoutIds: ids,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (e) { console.error('[Build] Playbook drag error:', e); }
+      return;
+    }
+
     // Header "Build / …" zone: move the asset up one level.
     if (isOverFolderHeader(ax, ay)) {
       await moveItemUpOneLevel(dragged);
@@ -1105,6 +1316,13 @@ function BuildScreenInner() {
     if (tray) {
       if (tray.item) {
         await dropItemIntoFolder(dragged, tray.item.id);
+      } else if (tray.key === TRAY_NEW_PLAYBOOK_KEY) {
+        // Tray "New Playbook" target (workouts only): open the create modal
+        // seeded with the dragged workout.
+        if (dragged.type === 'Workouts') {
+          setPendingPlaybookDropItem(dragged);
+          setShowPlaybookCreate(true);
+        }
       } else {
         // Tray "New" target: ask Folder vs Workout, then run the matching flow.
         setTrayDropChooserItem(dragged);
@@ -1121,6 +1339,17 @@ function BuildScreenInner() {
 
     if (target.type === 'Folder') {
       await dropItemIntoFolder(dragged, target.id);
+    } else if (target.type === 'Playbooks') {
+      // Workouts-only membership — isDropTarget already rejects everything
+      // else. arrayUnion dedupes if the workout is already in the playbook.
+      if (dragged.type !== 'Workouts') return;
+      try {
+        await updateDoc(doc(db, 'playbooks', target.id), {
+          workoutIds: arrayUnion(dragged.id),
+          updatedAt: serverTimestamp(),
+        });
+        scrollListToTop();
+      } catch (e) { console.error('[Build] Drop into playbook error:', e); }
     } else if (target.type === 'Workouts' && dragged.type === 'Movements') {
       const blockMov = toBlockMov(dragged);
       const existingBlocks: any[] = Array.isArray(target.blocks) ? target.blocks : [];
@@ -1261,19 +1490,15 @@ function BuildScreenInner() {
         delta = -Math.min(1, proximity) * AUTO_SCROLL_MAX_PX;
       }
       // Scroll down anywhere in the bottom zone — including past listBottom
-      // over the tray area — full width. The old version only scrolled inside
-      // a narrow band above the tray plus a 90px right-corner hotspot, which
-      // left most of the bottom (and the bottom-right on phones) dead.
+      // over the tray area — full width. No suppression over tray targets:
+      // they're bottom-anchored overlays that don't move with list scroll,
+      // and with a full recents row the targets span the entire width, so
+      // suppressing over them killed down-scroll across the whole bottom
+      // edge (the bug Devin hit). Aiming a tray drop is unaffected by the
+      // list scrolling underneath.
       else if (y > listBottom - band) {
-        // Exception: hovering an actual tray drop target means the user is
-        // aiming a drop, not scrolling — hold still so the target stays put.
-        // The right-edge chevron column always scrolls, even over a target.
-        const windowW = Dimensions.get('window').width;
-        const inChevronColumn = x > windowW - AUTO_SCROLL_HOTSPOT_W;
-        if (inChevronColumn || !findTrayTarget(x, y)) {
-          const proximity = Math.min(1, (y - (listBottom - band)) / band);
-          delta = proximity * AUTO_SCROLL_MAX_PX;
-        }
+        const proximity = Math.min(1, (y - (listBottom - band)) / band);
+        delta = proximity * AUTO_SCROLL_MAX_PX;
       }
       const node = getListScrollNode();
       if (delta !== 0) {
@@ -1368,6 +1593,19 @@ function BuildScreenInner() {
       scrollListToTop();
     } catch (e) { console.error('[Build] Create workout from drop error:', e); }
   }, [dropModal, coachId, tenantId, currentFolderId, scrollListToTop]);
+
+  // Workout dropped on workout → user chose Playbook: open the create modal
+  // seeded with both workouts so the coach titles and assigns it before the
+  // playbook is written.
+  const createPlaybookFromDrop = useCallback(() => {
+    if (!dropModal) return;
+    const { drag, target } = dropModal;
+    if (drag.type !== 'Workouts' || target.type !== 'Workouts') return;
+    setDropModal(null);
+    setPlaybookSeedWorkoutIds([drag.id, target.id]);
+    setNewPlaybookName(`${drag.name} & ${target.name}`);
+    setShowPlaybookCreate(true);
+  }, [dropModal]);
 
   // Tray "New" drop → user chose Workout: create a one-movement workout.
   const createWorkoutFromTrayDrop = useCallback(async () => {
@@ -1473,6 +1711,30 @@ function BuildScreenInner() {
       );
     };
 
+    // Shared mini-card mapping for a workout inside a folder or playbook
+    // preview — still photos preferred, name placeholder otherwise.
+    const workoutPreviewEntry = (child: any): FolderPreviewEntry => {
+      const thumbs: (string | { name: string })[] = [];
+      const seen = new Set<string>();
+      outer: for (const block of (child.blocks ?? [])) {
+        for (const mov of (block?.movements ?? [])) {
+          if (thumbs.length >= 16) break outer;
+          const still = stillForBlockMov(mov);
+          if (still) {
+            if (!seen.has(still)) { seen.add(still); thumbs.push(still); }
+          } else {
+            thumbs.push({ name: mov.movementName || mov.name || 'Movement' });
+          }
+        }
+      }
+      return { id: child.id, name: child.name || 'Workout', thumbs };
+    };
+
+    const workoutsById = new Map<string, any>();
+    for (const i of withWorkouts) {
+      if (i.type === 'Workouts') workoutsById.set(i.id, i);
+    }
+
     // Editing anything inside a folder must surface the folder in the grid
     // the same way editing a loose asset surfaces it. Firestore only bumps
     // the folder doc on create/drop, so compute an effective sort timestamp
@@ -1498,10 +1760,21 @@ function BuildScreenInner() {
     };
 
     return withWorkouts.map(item => {
+      // Playbook tiles render the same mini-library mosaic as folders, but
+      // sourced from workoutIds (ordered) instead of parentId children.
+      if (item.type === 'Playbooks') {
+        const ids: string[] = Array.isArray(item.workoutIds) ? item.workoutIds : [];
+        const children = ids
+          .map(id => workoutsById.get(id))
+          .filter(c => c && !c.isArchived)
+          .slice(0, 9);
+        if (children.length === 0) return item;
+        return { ...item, folderPreview: children.map(workoutPreviewEntry) };
+      }
       if (item.type !== 'Folder') return item;
       const sortSeconds = effectiveSeconds(item);
       const children = withWorkouts
-        .filter(i => i.parentId === item.id && !i.isArchived && (i.type === 'Workouts' || i.type === 'Movements' || i.type === 'Follow-Alongs'))
+        .filter(i => i.parentId === item.id && !i.isArchived && (i.type === 'Workouts' || i.type === 'Movements' || i.type === 'Follow-Alongs' || i.type === 'Playbooks'))
         .sort((a, b) => (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0))
         .slice(0, 9);
       if (children.length === 0) return { ...item, sortSeconds };
@@ -1510,20 +1783,18 @@ function BuildScreenInner() {
           const still = (child.posterUrl || child.thumbnailImageUrl || child.thumbnailUrl || child.mediaUrl) as string | undefined;
           return { id: child.id, name: child.name || 'Movement', thumbs: still ? [still] : [{ name: child.name || 'Movement' }] };
         }
-        const thumbs: (string | { name: string })[] = [];
-        const seen = new Set<string>();
-        outer: for (const block of (child.blocks ?? [])) {
-          for (const mov of (block?.movements ?? [])) {
-            if (thumbs.length >= 16) break outer;
-            const still = stillForBlockMov(mov);
-            if (still) {
-              if (!seen.has(still)) { seen.add(still); thumbs.push(still); }
-            } else {
-              thumbs.push({ name: mov.movementName || mov.name || 'Movement' });
-            }
-          }
+        if (child.type === 'Playbooks') {
+          // Mosaic inside mosaic: each workout in the playbook contributes a
+          // tiny cell of ≤4 stills; per-workout titles dropped at this size.
+          const ids: string[] = Array.isArray(child.workoutIds) ? child.workoutIds : [];
+          const playbookWorkouts = ids
+            .map(id => workoutsById.get(id))
+            .filter(w => w && !w.isArchived)
+            .slice(0, 4)
+            .map(w => workoutPreviewEntry(w).thumbs.slice(0, 4));
+          return { id: child.id, name: child.name || 'Playbook', thumbs: [], playbookWorkouts };
         }
-        return { id: child.id, name: child.name || 'Workout', thumbs };
+        return workoutPreviewEntry(child);
       });
       return { ...item, folderPreview, sortSeconds };
     });
@@ -1531,6 +1802,21 @@ function BuildScreenInner() {
 
   // ── Filtering ──────────────────────────────────────────────────────────────────
   const filteredItems = useMemo(() => {
+    // Playbook view: ONLY the playbook's workouts, in workoutIds order —
+    // the array is the source of truth for membership and sequence.
+    if (currentPlaybook) {
+      const pbDoc = enrichedItems.find(i => i.type === 'Playbooks' && i.id === currentPlaybook.id);
+      const ids: string[] = Array.isArray(pbDoc?.workoutIds) ? pbDoc!.workoutIds : [];
+      const workoutsById = new Map(
+        enrichedItems.filter(i => i.type === 'Workouts' && !i.isArchived).map(i => [i.id, i]),
+      );
+      let list = ids.map(id => workoutsById.get(id)).filter(Boolean) as BuildItem[];
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        list = list.filter(i => i.name?.toLowerCase().includes(q));
+      }
+      return list;
+    }
     let list = enrichedItems;
     // Client-side archive filter
     list = list.filter(i => !!i.isArchived === showArchived);
@@ -1581,7 +1867,7 @@ function BuildScreenInner() {
       list = rankByPrimaryMuscle(list as any[], movMuscleGroupFilter) as typeof list;
     }
     return list;
-  }, [enrichedItems, search, activeType, showArchived, currentFolderId, movEquipmentFilter, movMuscleGroupFilter, movDifficultyFilter]);
+  }, [enrichedItems, search, activeType, showArchived, currentFolderId, currentPlaybook, movEquipmentFilter, movMuscleGroupFilter, movDifficultyFilter]);
 
   // ── Drag & Drop handlers (require filteredItems) ───────────────────────
   const snapshotLayouts = useCallback(() => {
@@ -1615,7 +1901,7 @@ function BuildScreenInner() {
   // Drop rects for tray items that left the tray — onLayout only fires for
   // mounted views, so removed folders would otherwise leave stale rects.
   useEffect(() => {
-    const valid = new Set([TRAY_NEW_FOLDER_KEY, ...trayFolders.map(f => `tray:${f.id}`)]);
+    const valid = new Set([TRAY_NEW_FOLDER_KEY, TRAY_NEW_PLAYBOOK_KEY, ...trayFolders.map(f => `tray:${f.id}`)]);
     trayItemLayoutsRef.current.forEach((_v, k) => {
       if (!valid.has(k)) trayItemLayoutsRef.current.delete(k);
     });
@@ -1654,7 +1940,11 @@ function BuildScreenInner() {
     lockPageScroll();
     startAutoScroll();
     if (trayTimerRef.current) clearTimeout(trayTimerRef.current);
-    trayTimerRef.current = setTimeout(() => setTrayVisible(true), TRAY_SHOW_DELAY_MS);
+    // No folder tray inside a playbook — drags there only reorder or remove,
+    // never reparent into folders.
+    if (!currentPlaybookRef.current) {
+      trayTimerRef.current = setTimeout(() => setTrayVisible(true), TRAY_SHOW_DELAY_MS);
+    }
   }, [snapshotLayouts, measureListWindow, _startDragById, lockPageScroll, startAutoScroll, navigation]);
 
   // ALL teardown lives here — called from onFinalize, which fires on both
@@ -1804,9 +2094,10 @@ function BuildScreenInner() {
       // Prefer thumbnailUrl (GIF), then first-frame image, then low-quality GIF, then mediaUrl
       const singleThumbUri = item.thumbnailUrl || item.thumbnailImageUrl || item.gifLowUrl || item.mediaUrl || null;
 
-      // Workout and playbook cards use the mosaic (mini-library) layout when they have coverThumbs
+      // Workout and playbook cards use the mosaic (mini-library) layout when they have contents
       const isWorkoutCard = isWorkout;
-      const hasMosaic = (isWorkoutCard || isPlaybook) && (item.coverThumbs ?? []).length > 0;
+      const hasMosaic = (isWorkoutCard || isPlaybook) &&
+        ((item.coverThumbs ?? []).length > 0 || (item.folderPreview?.length ?? 0) > 0);
 
       // Preview engine: register tile and check if promoted
       const tilePriority = isMovement ? 1 as const : 2 as const;
@@ -1816,7 +2107,14 @@ function BuildScreenInner() {
       // Shared tile content (media + overlays)
       const tileMedia = (
         <>
-          {(isWorkoutCard || hasMosaic) ? (
+          {isPlaybook && (item.folderPreview?.length ?? 0) > 0 ? (
+            <FolderMosaic
+              previews={item.folderPreview!}
+              width={cardWidth}
+              height={cardHeight}
+              scrollIdle={previewEngine.scrollState !== 'scrolling'}
+            />
+          ) : (isWorkoutCard || hasMosaic) ? (
             <WorkoutMosaic
               thumbs={item.coverThumbs ?? []}
               width={cardWidth}
@@ -1862,6 +2160,13 @@ function BuildScreenInner() {
           <View style={[styles.nameOverlay, isWorkoutCard && { backgroundColor: 'rgba(26, 35, 50, 0.92)' }]}>
             <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
           </View>
+          {/* Playbook badge — mirrors the folder badge so playbook tiles stay
+              distinguishable from workout tiles now that both render mosaics. */}
+          {isPlaybook && (
+            <View style={styles.folderBadge}>
+              <Icon name="playbook" size={12} color="#A78BFA" />
+            </View>
+          )}
           {isMovement && !item.videoUrl && !item.mediaUrl && !item.gifLoopUrl && !item.gifLowUrl && (
             <View style={styles.videoNeededPill}>
               <Text style={styles.videoNeededText}>Video needed</Text>
@@ -1946,7 +2251,7 @@ function BuildScreenInner() {
                 if (Date.now() < suppressPressUntilRef.current) return;
                 if (isMovement) setSelectedMovement(item);
                 else if (isPlan) setSelectedPlan(item);
-                else if (isPlaybook) setSelectedPlaybook(item);
+                else if (isPlaybook) enterPlaybook(item);
                 else if (isFollowAlong) setSelectedFollowAlong(item);
                 else setOpenWorkoutId(item.id);
               }}
@@ -1965,7 +2270,7 @@ function BuildScreenInner() {
         onPress={() => {
           if (item.type === 'Movements') setSelectedMovement(item);
           else if (item.type === 'Plans') setSelectedPlan(item);
-          else if (item.type === 'Playbooks') setSelectedPlaybook(item);
+          else if (item.type === 'Playbooks') enterPlaybook(item);
           else if (item.type === 'Follow-Alongs') setSelectedFollowAlong(item);
           else setOpenWorkoutId(item.id);
         }}
@@ -2079,10 +2384,11 @@ function BuildScreenInner() {
     >
       <AppHeader />
 
-      {/* Folder header — mirrors the workout screen: back arrow, Build / crumbs,
-          tappable title to rename. Also a drag drop-zone: dropping an asset
-          here moves it up one level. */}
-      {folderStack.length > 0 && (
+      {/* Folder / playbook header — mirrors the workout screen: back arrow,
+          Build / crumbs, tappable title to rename. Also a drag drop-zone:
+          dropping an asset here moves it up one level (folders) or removes
+          the workout from the playbook. */}
+      {(folderStack.length > 0 || currentPlaybook) && (
         <View
           ref={folderHeaderRef}
           onLayout={() => {
@@ -2092,17 +2398,20 @@ function BuildScreenInner() {
           }}
           style={[s.folderHeader, hoveredId === '__parent__' && s.folderHeaderHover]}
         >
-          <Pressable onPress={goBackFolder} style={s.folderBackBtn}>
+          <Pressable onPress={currentPlaybook ? exitPlaybook : goBackFolder} style={s.folderBackBtn}>
             <Icon name="arrow-left" size={20} color="#F0F4F8" />
           </Pressable>
           <View style={s.folderCrumb}>
-            <Pressable onPress={() => { setCurrentFolderId(null); setFolderStack([]); }}>
+            <Pressable onPress={() => { setCurrentPlaybook(null); setCurrentFolderId(null); setFolderStack([]); }}>
               <Text style={s.folderCrumbRoot}>Build</Text>
             </Pressable>
-            {folderStack.slice(0, -1).map((f, i) => (
+            {/* Inside a playbook every folder in the stack is an ancestor
+                crumb; in a folder the last entry is the editable title. */}
+            {(currentPlaybook ? folderStack : folderStack.slice(0, -1)).map((f, i) => (
               <React.Fragment key={f.id}>
                 <Text style={s.folderCrumbSep}>/</Text>
                 <Pressable onPress={() => {
+                  setCurrentPlaybook(null);
                   const next = folderStack.slice(0, i + 1);
                   setFolderStack(next);
                   setCurrentFolderId(f.id);
@@ -2112,7 +2421,28 @@ function BuildScreenInner() {
               </React.Fragment>
             ))}
             <Text style={s.folderCrumbSep}>/</Text>
-            {editingFolderTitle ? (
+            {currentPlaybook ? (
+              editingPlaybookTitle ? (
+                <TextInput
+                  style={s.folderTitleInput}
+                  value={playbookTitleDraft}
+                  onChangeText={setPlaybookTitleDraft}
+                  onBlur={savePlaybookTitle}
+                  onSubmitEditing={savePlaybookTitle}
+                  autoFocus
+                  selectTextOnFocus
+                />
+              ) : (
+                <Pressable onPress={() => {
+                  setPlaybookTitleDraft(currentPlaybook.name);
+                  setEditingPlaybookTitle(true);
+                }}>
+                  <Text style={[s.folderTitleText, { color: '#A78BFA' }]} numberOfLines={1}>
+                    {currentPlaybook.name}
+                  </Text>
+                </Pressable>
+              )
+            ) : editingFolderTitle ? (
               <TextInput
                 style={s.folderTitleInput}
                 value={folderTitleDraft}
@@ -2136,25 +2466,31 @@ function BuildScreenInner() {
         </View>
       )}
 
-      <View style={s.toolbar}>
-        <View style={s.searchWrap}>
-          <Icon name="search" size={18} color="#8A95A3" style={s.searchIcon} />
-          <TextInput
-            style={s.searchInput}
-            placeholder="Search Build..."
-            placeholderTextColor="#4A5568"
-            value={search}
-            onChangeText={setSearch}
-            clearButtonMode="while-editing"
-          />
-        </View>
+      {/* Inside a playbook the toolbar is just the plus button — search and
+          filters don't apply to a short ordered workout sequence. */}
+      <View style={[s.toolbar, currentPlaybook && { justifyContent: 'flex-end' }]}>
+        {!currentPlaybook && (
+          <>
+            <View style={s.searchWrap}>
+              <Icon name="search" size={18} color="#8A95A3" style={s.searchIcon} />
+              <TextInput
+                style={s.searchInput}
+                placeholder="Search Build..."
+                placeholderTextColor="#4A5568"
+                value={search}
+                onChangeText={setSearch}
+                clearButtonMode="while-editing"
+              />
+            </View>
 
-        <Pressable
-          style={[s.toolBtn, isFilterOpen && s.toolBtnActive]}
-          onPress={() => setIsFilterOpen(!isFilterOpen)}
-        >
-          <Icon name="filter" size={20} color={isFilterOpen ? '#F5A623' : '#F0F4F8'} />
-        </Pressable>
+            <Pressable
+              style={[s.toolBtn, isFilterOpen && s.toolBtnActive]}
+              onPress={() => setIsFilterOpen(!isFilterOpen)}
+            >
+              <Icon name="filter" size={20} color={isFilterOpen ? '#F5A623' : '#F0F4F8'} />
+            </Pressable>
+          </>
+        )}
 
         <Pressable
           style={s.plusBtn}
@@ -2164,7 +2500,7 @@ function BuildScreenInner() {
         </Pressable>
       </View>
 
-      {isFilterOpen && (
+      {!currentPlaybook && isFilterOpen && (
         <View style={s.filterPanel}>
           <Text style={s.filterTitle}>Filter by Type</Text>
           <ScrollView
@@ -2304,10 +2640,12 @@ function BuildScreenInner() {
         </View>
       ) : (
         <View style={s.centered}>
-          <Icon name="build" size={48} color="#1E2A3A" />
-          <Text style={s.emptyTitle}>Nothing Found</Text>
+          <Icon name={currentPlaybook ? 'playbook' : 'build'} size={48} color="#1E2A3A" />
+          <Text style={s.emptyTitle}>{currentPlaybook ? 'No Workouts Yet' : 'Nothing Found'}</Text>
           <Text style={s.emptyDesc}>
-            Try adjusting your search or filters.
+            {currentPlaybook
+              ? 'Drag workouts onto this playbook from the Build grid to add them.'
+              : 'Try adjusting your search or filters.'}
           </Text>
         </View>
       )}
@@ -2396,35 +2734,40 @@ function BuildScreenInner() {
         <Pressable style={s.modalBackdrop} onPress={() => setIsPlusOpen(false)}>
           <View style={s.plusMenu}>
             <Text style={s.plusMenuTitle}>Create New</Text>
-            <Pressable style={s.plusMenuItem} onPress={() => { setIsPlusOpen(false); setShowPlanCreate(true); }}>
-              <Icon name="plan" size={20} color="#60A5FA" />
-              <Text style={s.plusMenuItemText}>Plan</Text>
-            </Pressable>
-            <Pressable 
-              style={s.plusMenuItem} 
-              onPress={() => {
-                setIsPlusOpen(false);
-                setEditMovement(null);
-                setIsMovementFormOpen(true);
-              }}
-            >
-              <Icon name="movements" size={20} color="#F0F4F8" />
-              <Text style={s.plusMenuItemText}>Movement</Text>
-            </Pressable>
-            <Pressable 
-              style={s.plusMenuItem} 
-              onPress={() => {
-                setIsPlusOpen(false);
-                setIsBulkUploadOpen(true);
-              }}
-            >
-              <Icon name="movements" size={20} color="#22C55E" />
-              <Text style={s.plusMenuItemText}>Bulk Upload Movements</Text>
-            </Pressable>
-            <Pressable 
-              style={s.plusMenuItem} 
+            {!currentPlaybook && (
+              <>
+                <Pressable style={s.plusMenuItem} onPress={() => { setIsPlusOpen(false); setShowPlanCreate(true); }}>
+                  <Icon name="plan" size={20} color="#60A5FA" />
+                  <Text style={s.plusMenuItemText}>Plan</Text>
+                </Pressable>
+                <Pressable
+                  style={s.plusMenuItem}
+                  onPress={() => {
+                    setIsPlusOpen(false);
+                    setEditMovement(null);
+                    setIsMovementFormOpen(true);
+                  }}
+                >
+                  <Icon name="movements" size={20} color="#F0F4F8" />
+                  <Text style={s.plusMenuItemText}>Movement</Text>
+                </Pressable>
+                <Pressable
+                  style={s.plusMenuItem}
+                  onPress={() => {
+                    setIsPlusOpen(false);
+                    setIsBulkUploadOpen(true);
+                  }}
+                >
+                  <Icon name="movements" size={20} color="#22C55E" />
+                  <Text style={s.plusMenuItemText}>Bulk Upload Movements</Text>
+                </Pressable>
+              </>
+            )}
+            <Pressable
+              style={s.plusMenuItem}
               onPress={async () => {
                 setIsPlusOpen(false);
+                const pb = currentPlaybookRef.current;
                 try {
                   // Create an empty workout in Firestore and navigate into it
                   const newWorkoutRef = await addDoc(collection(db, 'workouts'), {
@@ -2455,6 +2798,14 @@ function BuildScreenInner() {
                      createdAt: serverTimestamp(),
                      updatedAt: serverTimestamp(),
                    });
+                  // Inside a playbook: the new workout joins the sequence,
+                  // then the coach lands straight in it to add movements.
+                  if (pb) {
+                    await updateDoc(doc(db, 'playbooks', pb.id), {
+                      workoutIds: arrayUnion(newWorkoutRef.id),
+                      updatedAt: serverTimestamp(),
+                    });
+                  }
                   setOpenWorkoutId(newWorkoutRef.id);
                 } catch (e) {
                   console.error('Create workout error:', e);
@@ -2464,30 +2815,34 @@ function BuildScreenInner() {
               <Icon name="workouts" size={20} color="#F0F4F8" />
               <Text style={s.plusMenuItemText}>Workout</Text>
             </Pressable>
-            <Pressable
-              style={s.plusMenuItem}
-              onPress={() => {
-                setIsPlusOpen(false);
-                setIsFollowAlongOpen(true);
-              }}
-            >
-              <Icon name="video" size={20} color="#22D3EE" />
-              <Text style={s.plusMenuItemText}>Follow-Along Video</Text>
-            </Pressable>
-            <Pressable style={s.plusMenuItem} onPress={() => { setIsPlusOpen(false); setShowPlaybookCreate(true); }}>
-              <Icon name="playbook" size={20} color="#A78BFA" />
-              <Text style={s.plusMenuItemText}>Playbook</Text>
-            </Pressable>
-            <Pressable 
-              style={s.plusMenuItem} 
-              onPress={() => {
-                setIsPlusOpen(false);
-                setShowFolderCreate(true);
-              }}
-            >
-              <Icon name="folder" size={20} color="#F5A623" />
-              <Text style={s.plusMenuItemText}>Folder</Text>
-            </Pressable>
+            {!currentPlaybook && (
+              <>
+                <Pressable
+                  style={s.plusMenuItem}
+                  onPress={() => {
+                    setIsPlusOpen(false);
+                    setIsFollowAlongOpen(true);
+                  }}
+                >
+                  <Icon name="video" size={20} color="#22D3EE" />
+                  <Text style={s.plusMenuItemText}>Follow-Along Video</Text>
+                </Pressable>
+                <Pressable style={s.plusMenuItem} onPress={() => { setIsPlusOpen(false); setShowPlaybookCreate(true); }}>
+                  <Icon name="playbook" size={20} color="#A78BFA" />
+                  <Text style={s.plusMenuItemText}>Playbook</Text>
+                </Pressable>
+                <Pressable
+                  style={s.plusMenuItem}
+                  onPress={() => {
+                    setIsPlusOpen(false);
+                    setShowFolderCreate(true);
+                  }}
+                >
+                  <Icon name="folder" size={20} color="#F5A623" />
+                  <Text style={s.plusMenuItemText}>Folder</Text>
+                </Pressable>
+              </>
+            )}
           </View>
         </Pressable>
       </Modal>
@@ -2495,7 +2850,7 @@ function BuildScreenInner() {
       {/* Folder Create Modal */}
       <Modal transparent visible={showFolderCreate} animationType="fade" onRequestClose={() => { setShowFolderCreate(false); setPendingFolderDropItem(null); }}>
         <Pressable style={s.modalBackdrop} onPress={() => { setShowFolderCreate(false); setPendingFolderDropItem(null); }}>
-          <View style={s.plusMenu} onStartShouldSetResponder={() => true}>
+          <Pressable style={s.plusMenu} onPress={e => e.stopPropagation()}>
             <Text style={s.plusMenuTitle}>New Folder</Text>
             <TextInput
               style={s.folderInput}
@@ -2520,14 +2875,14 @@ function BuildScreenInner() {
                 <Text style={{ color: '#0E1117', fontWeight: '700', fontFamily: FH }}>Create</Text>
               </Pressable>
             </View>
-          </View>
+          </Pressable>
         </Pressable>
       </Modal>
 
       {/* Plan Create Modal */}
       <Modal transparent visible={showPlanCreate} animationType="fade" onRequestClose={() => setShowPlanCreate(false)}>
         <Pressable style={s.modalBackdrop} onPress={() => setShowPlanCreate(false)}>
-          <View style={s.plusMenu} onStartShouldSetResponder={() => true}>
+          <Pressable style={s.plusMenu} onPress={e => e.stopPropagation()}>
             <Text style={s.plusMenuTitle}>New Plan</Text>
             <TextInput
               style={s.folderInput}
@@ -2570,46 +2925,92 @@ function BuildScreenInner() {
                 <Text style={{ color: '#0E1117', fontWeight: '700', fontFamily: FH }}>Create Plan</Text>
               </Pressable>
             </View>
-          </View>
+          </Pressable>
         </Pressable>
       </Modal>
 
-      {/* Playbook Create Modal */}
-      <Modal transparent visible={showPlaybookCreate} animationType="fade" onRequestClose={() => setShowPlaybookCreate(false)}>
-        <Pressable style={s.modalBackdrop} onPress={() => setShowPlaybookCreate(false)}>
-          <View style={s.plusMenu} onStartShouldSetResponder={() => true}>
-            <Text style={s.plusMenuTitle}>New Playbook</Text>
-            <TextInput
-              style={s.folderInput}
-              placeholder="Playbook name..."
-              placeholderTextColor="#4A5568"
-              value={newPlaybookName}
-              onChangeText={setNewPlaybookName}
-              autoFocus
-            />
-            <TextInput
-              style={[s.folderInput, { marginTop: 10 }]}
-              placeholder="Description (optional)"
-              placeholderTextColor="#4A5568"
-              value={newPlaybookDesc}
-              onChangeText={setNewPlaybookDesc}
-              multiline
-            />
-            <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
-              <Pressable
-                style={[s.folderBtn, { backgroundColor: '#1E2A3A' }]}
-                onPress={() => { setShowPlaybookCreate(false); setNewPlaybookName(''); setNewPlaybookDesc(''); }}
-              >
-                <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={[s.folderBtn, { backgroundColor: '#A78BFA', flex: 1 }]}
-                onPress={createPlaybook}
-              >
-                <Text style={{ color: '#0E1117', fontWeight: '700', fontFamily: FH }}>Create Playbook</Text>
-              </Pressable>
-            </View>
-          </View>
+      {/* Playbook Create Modal — title + description, then assignment: pick
+          an existing member or add a new one by name + email. */}
+      <Modal transparent visible={showPlaybookCreate} animationType="fade" onRequestClose={resetPlaybookCreateState}>
+        <Pressable style={s.modalBackdrop} onPress={resetPlaybookCreateState}>
+          <Pressable style={[s.plusMenu, { maxHeight: '85%' }]} onPress={e => e.stopPropagation()}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <Text style={s.plusMenuTitle}>New Playbook</Text>
+              <TextInput
+                style={s.folderInput}
+                placeholder="Playbook name..."
+                placeholderTextColor="#4A5568"
+                value={newPlaybookName}
+                onChangeText={setNewPlaybookName}
+                autoFocus
+              />
+              <TextInput
+                style={[s.folderInput, { marginTop: 10 }]}
+                placeholder="Description (optional)"
+                placeholderTextColor="#4A5568"
+                value={newPlaybookDesc}
+                onChangeText={setNewPlaybookDesc}
+                multiline
+              />
+              <Text style={[s.filterTitle, { marginTop: 16 }]}>Assign to Member</Text>
+              {!pbAddByEmail && pbMembers.map(m => (
+                <Pressable
+                  key={m.id}
+                  style={[s.plusMenuItem, pbAssignMemberId === m.id && { backgroundColor: '#1E2A3A', borderRadius: 8 }]}
+                  onPress={() => setPbAssignMemberId(prev => (prev === m.id ? null : m.id))}
+                >
+                  <Icon name={pbAssignMemberId === m.id ? 'check' : 'members'} size={18} color={pbAssignMemberId === m.id ? '#A78BFA' : '#8A95A3'} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.plusMenuItemText} numberOfLines={1}>{m.name}</Text>
+                    {!!m.email && <Text style={{ color: '#4A5568', fontSize: 12, fontFamily: FB }} numberOfLines={1}>{m.email}</Text>}
+                  </View>
+                </Pressable>
+              ))}
+              {!pbAddByEmail ? (
+                <Pressable style={s.plusMenuItem} onPress={() => { setPbAddByEmail(true); setPbAssignMemberId(null); }}>
+                  <Icon name="plus" size={18} color="#A78BFA" />
+                  <Text style={[s.plusMenuItemText, { color: '#A78BFA' }]}>Add a member by email</Text>
+                </Pressable>
+              ) : (
+                <>
+                  <TextInput
+                    style={[s.folderInput, { marginTop: 8 }]}
+                    placeholder="Member name..."
+                    placeholderTextColor="#4A5568"
+                    value={pbNewMemberName}
+                    onChangeText={setPbNewMemberName}
+                  />
+                  <TextInput
+                    style={[s.folderInput, { marginTop: 10 }]}
+                    placeholder="Member email address..."
+                    placeholderTextColor="#4A5568"
+                    value={pbNewMemberEmail}
+                    onChangeText={setPbNewMemberEmail}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                  />
+                  <Pressable style={s.plusMenuItem} onPress={() => { setPbAddByEmail(false); setPbNewMemberName(''); setPbNewMemberEmail(''); }}>
+                    <Icon name="members" size={18} color="#8A95A3" />
+                    <Text style={[s.plusMenuItemText, { color: '#8A95A3' }]}>Pick an existing member instead</Text>
+                  </Pressable>
+                </>
+              )}
+              <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
+                <Pressable
+                  style={[s.folderBtn, { backgroundColor: '#1E2A3A' }]}
+                  onPress={resetPlaybookCreateState}
+                >
+                  <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[s.folderBtn, { backgroundColor: '#A78BFA', flex: 1 }]}
+                  onPress={createPlaybook}
+                >
+                  <Text style={{ color: '#0E1117', fontWeight: '700', fontFamily: FH }}>Create Playbook</Text>
+                </Pressable>
+              </View>
+            </ScrollView>
+          </Pressable>
         </Pressable>
       </Modal>
 
@@ -2643,30 +3044,6 @@ function BuildScreenInner() {
         </View>
       </Modal>
 
-      {/* Playbook Detail Modal */}
-      <Modal transparent visible={!!selectedPlaybook} animationType="slide" onRequestClose={() => setSelectedPlaybook(null)}>
-        <View style={s.modalBackdrop}>
-          <View style={[s.plusMenu, { maxHeight: '80%' }]}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <Text style={[s.plusMenuTitle, { marginBottom: 0, color: '#A78BFA' }]}>{selectedPlaybook?.name}</Text>
-              <Pressable onPress={() => setSelectedPlaybook(null)}>
-                <Icon name="close" size={22} color="#8A95A3" />
-              </Pressable>
-            </View>
-            {selectedPlaybook?.description ? (
-              <Text style={{ color: '#8A95A3', fontSize: 14, fontFamily: FB, marginBottom: 12 }}>{selectedPlaybook.description}</Text>
-            ) : null}
-            <View style={{ backgroundColor: '#1E2A3A', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, alignSelf: 'flex-start', marginBottom: 16 }}>
-              <Text style={{ color: '#A78BFA', fontSize: 20, fontWeight: '700', fontFamily: FH }}>{selectedPlaybook?.workoutIds?.length || 0}</Text>
-              <Text style={{ color: '#4A5568', fontSize: 11, fontFamily: FB }}>Workouts</Text>
-            </View>
-            <Text style={{ color: '#4A5568', fontSize: 12, fontFamily: FB, textAlign: 'center', marginTop: 8 }}>
-              Add workouts to this playbook to create a reusable template library. Coming soon.
-            </Text>
-          </View>
-        </View>
-      </Modal>
-
       {/* Drop action modal: Movement dropped on another Movement */}
       <Modal transparent visible={!!dropModal} animationType="fade" onRequestClose={() => setDropModal(null)}>
         <Pressable style={s.modalBackdrop} onPress={() => setDropModal(null)}>
@@ -2693,6 +3070,17 @@ function BuildScreenInner() {
               >
                 <Icon name="workouts" size={22} color="#60A5FA" />
                 <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>Create Workout</Text>
+              </Pressable>
+            )}
+            {/* New Playbook only applies to two workouts — playbooks are
+                workouts-only membership. */}
+            {dropModal?.drag.type === 'Workouts' && dropModal?.target.type === 'Workouts' && (
+              <Pressable
+                style={[s.plusMenuItem, { backgroundColor: '#1E2A3A', borderRadius: 10, paddingVertical: 14 }]}
+                onPress={createPlaybookFromDrop}
+              >
+                <Icon name="playbook" size={22} color="#A78BFA" />
+                <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>Create Playbook</Text>
               </Pressable>
             )}
           </View>
@@ -2732,6 +3120,24 @@ function BuildScreenInner() {
                 <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>New Workout</Text>
               </Pressable>
             )}
+            {/* New Playbook only applies to a dragged workout — playbooks are
+                workouts-only membership. */}
+            {trayDropChooserItem?.type === 'Workouts' && (
+              <Pressable
+                style={[s.plusMenuItem, { backgroundColor: '#1E2A3A', borderRadius: 10, paddingVertical: 14 }]}
+                onPress={() => {
+                  const item = trayDropChooserItem;
+                  setTrayDropChooserItem(null);
+                  if (item) {
+                    setPendingPlaybookDropItem(item);
+                    setShowPlaybookCreate(true);
+                  }
+                }}
+              >
+                <Icon name="playbook" size={22} color="#A78BFA" />
+                <Text style={[s.plusMenuItemText, { fontSize: 15 }]}>New Playbook</Text>
+              </Pressable>
+            )}
           </View>
         </Pressable>
       </Modal>
@@ -2744,7 +3150,25 @@ function BuildScreenInner() {
           style={[s.tray, trayAnimStyle, { paddingBottom: insets.bottom + 12 }]}
           pointerEvents="none"
         >
-          <View style={s.trayRow}>
+          <View
+            ref={trayRowRef}
+            style={s.trayRow}
+            collapsable={false}
+            onLayout={() => {
+              // Measure after the slide-in settles so pageY reflects rest position.
+              setTimeout(() => {
+                // Skip if the tray is already hiding — a mid-slide-down
+                // measurement would store a too-large top and break the
+                // next drag's tray drops.
+                if (!trayVisibleRef.current) return;
+                trayRowRef.current?.measureInWindow((_x, y) => {
+                  if (!trayVisibleRef.current) return;
+                  const windowH = Dimensions.get('window').height;
+                  if (Number.isFinite(y) && y > 0 && y < windowH) trayRowTopRef.current = y;
+                });
+              }, 300);
+            }}
+          >
             {trayFolders.map(f => {
               const trayKey = `tray:${f.id}`;
               return (
@@ -2767,6 +3191,18 @@ function BuildScreenInner() {
               <Icon name="plus" size={18} color="#F5A623" />
               <Text style={s.trayItemText} numberOfLines={1}>New…</Text>
             </View>
+            {/* Playbooks are workouts-only, so the target only appears when a
+                workout is being dragged. */}
+            {dragItem?.type === 'Workouts' && (
+              <View
+                onLayout={registerTrayLayout(TRAY_NEW_PLAYBOOK_KEY, null)}
+                collapsable={false}
+                style={[s.trayItem, hoveredId === TRAY_NEW_PLAYBOOK_KEY && s.trayItemHovered]}
+              >
+                <Icon name="playbook" size={18} color="#A78BFA" />
+                <Text style={s.trayItemText} numberOfLines={1}>New Playbook</Text>
+              </View>
+            )}
             {/* Scroll-down target on bottom-right of tray: visible during drag,
                 scales and brightens as user approaches the right edge. */}
             {dragItem && (
