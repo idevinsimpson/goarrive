@@ -219,6 +219,11 @@ export default function PlaybookSchedulePanel({
   const [results, setResults] = useState<BookResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const prefilledRef = useRef(false);
+  // Auto-save dirty flags: set only by user edits, never by snapshot prefill,
+  // so hydration can't trigger a write-back loop.
+  const dayDirtyRef = useRef(false);
+  const availDirtyRef = useRef(false);
+  const [availSaved, setAvailSaved] = useState(false);
 
   // Inline title + description editing (A5 / C10)
   const [titleDraft, setTitleDraft] = useState('');
@@ -264,6 +269,9 @@ export default function PlaybookSchedulePanel({
       setBooking(false);
       setError(null);
       setResults(null);
+      dayDirtyRef.current = false;
+      availDirtyRef.current = false;
+      setAvailSaved(false);
     }
   }, [visible]);
 
@@ -495,6 +503,7 @@ export default function PlaybookSchedulePanel({
   );
 
   const toggleDay = useCallback((d: number) => {
+    dayDirtyRef.current = true;
     setDays((prev) => {
       if (prev.includes(d)) return prev.filter((x) => x !== d);
       return [...prev, d].sort((a, b) => a - b);
@@ -504,6 +513,7 @@ export default function PlaybookSchedulePanel({
   }, []);
 
   const setDayTime = useCallback((d: number, raw: string) => {
+    dayDirtyRef.current = true;
     setDayConfigs((prev) => ({
       ...prev,
       [d]: { ...(prev[d] || DEFAULT_CONFIG), raw, time: parseFlexTime(raw) },
@@ -520,17 +530,50 @@ export default function PlaybookSchedulePanel({
   }, []);
 
   const setDayKind = useCallback((d: number, kind: PlaybookSessionKind) => {
+    dayDirtyRef.current = true;
     setDayConfigs((prev) => ({ ...prev, [d]: { ...(prev[d] || DEFAULT_CONFIG), kind } }));
     setResults(null);
   }, []);
 
   const setDayDuration = useCallback((d: number, v: string) => {
+    dayDirtyRef.current = true;
     setDayConfigs((prev) => ({
       ...prev,
       [d]: { ...(prev[d] || DEFAULT_CONFIG), duration: v.replace(/[^0-9]/g, '') },
     }));
     setResults(null);
   }, []);
+
+  // Auto-save per-day settings: any user edit (day toggle, time, duration,
+  // kind) debounces ~800ms then persists to the playbook doc. Previously these
+  // only saved when Book Sessions ran, so edits vanished on reload.
+  useEffect(() => {
+    if (!dayDirtyRef.current || !playbookId) return;
+    const t = setTimeout(() => {
+      dayDirtyRef.current = false;
+      const valid = days.filter(
+        (d) => !!dayConfigs[d]?.time && parseDuration(dayConfigs[d]?.duration ?? '') !== null,
+      );
+      // Mid-edit (nothing parseable yet) — wait for the next valid change.
+      if (valid.length === 0 && days.length > 0) return;
+      const daySettings = valid.map((d) => ({
+        dayOfWeek: d,
+        startTime: dayConfigs[d]!.time as string,
+        sessionKind: dayConfigs[d]!.kind,
+        durationMinutes: parseDuration(dayConfigs[d]!.duration) as number,
+      }));
+      const payload: Record<string, unknown> = {
+        scheduleDaySettings: daySettings,
+        scheduleDaysOfWeek: valid,
+        updatedAt: serverTimestamp(),
+      };
+      if (daySettings.length) payload.scheduleStartTime = daySettings[0].startTime;
+      updateDoc(doc(db, 'playbooks', playbookId), payload).catch((e) => {
+        console.error('[PlaybookSchedulePanel] day settings auto-save error:', e);
+      });
+    }, 800);
+    return () => clearTimeout(t);
+  }, [days, dayConfigs, playbookId]);
 
   // Day k (in sorted selected days) → workout index in playbook order.
   const workoutForModule = useCallback((k: number): string | null => {
@@ -652,6 +695,7 @@ export default function PlaybookSchedulePanel({
   // Enable a day (adds the default interval) or append another interval —
   // the new interval starts where the last one ends, one hour long.
   const addDaySlot = useCallback((d: number) => {
+    availDirtyRef.current = true;
     setDaySlots((prev) => prev.map((list, idx) => {
       if (idx !== d) return list;
       if (list.length === 0) return [makeSlot(DEFAULT_DAY_SLOT.start, DEFAULT_DAY_SLOT.end)];
@@ -665,11 +709,13 @@ export default function PlaybookSchedulePanel({
   }, []);
 
   const removeDaySlot = useCallback((d: number, i: number) => {
+    availDirtyRef.current = true;
     setDaySlots((prev) => prev.map((list, idx) => (idx === d ? list.filter((_, j) => j !== i) : list)));
     setLinkError(null);
   }, []);
 
   const setSlotTime = useCallback((d: number, i: number, field: 'start' | 'end', raw: string) => {
+    availDirtyRef.current = true;
     setDaySlots((prev) => prev.map((list, idx) => (idx === d
       ? list.map((sl, j) => (j === i
         ? { ...sl, [`${field}Raw`]: raw, [field]: parseFlexTime(raw) }
@@ -738,6 +784,7 @@ export default function PlaybookSchedulePanel({
 
   const applyOverrides = useCallback(() => {
     if (!canApplyOv) return;
+    availDirtyRef.current = true;
     const intervals = ovSlots.map((sl) => ({ start: sl.start as string, end: sl.end as string }));
     setDateOverrides((prev) => {
       const next = prev.filter((o) => !ovDates.includes(o.date));
@@ -749,6 +796,7 @@ export default function PlaybookSchedulePanel({
   }, [canApplyOv, ovSlots, ovDates]);
 
   const removeOverride = useCallback((dateStr: string) => {
+    availDirtyRef.current = true;
     setDateOverrides((prev) => prev.filter((o) => o.date !== dateStr));
     setLinkError(null);
   }, []);
@@ -775,6 +823,33 @@ export default function PlaybookSchedulePanel({
       setLinkBusy(false);
     }
   }, [windowsValid, linkBusy, playbookId, daySlots, timezone, locations, dateOverrides]);
+
+  // Auto-save availability once a booking link exists. booking_windows is
+  // Cloud-Functions-write-only (rules), so this reuses the same callable the
+  // old Update Availability button invoked — it returns the existing token.
+  // First-time link creation stays behind the explicit Create Booking Link tap.
+  useEffect(() => {
+    if (!availDirtyRef.current || !linkToken || !windowsValid) return;
+    const t = setTimeout(async () => {
+      availDirtyRef.current = false;
+      try {
+        const fn = httpsCallable(functions, 'createPlaybookBookingLink');
+        await fn({
+          playbookId,
+          windows: daySlotsToWindows(daySlots),
+          timezone,
+          locations: locations.map((l) => l.trim()).filter(Boolean),
+          dateOverrides,
+        });
+        setAvailSaved(true);
+        setTimeout(() => setAvailSaved(false), 2000);
+      } catch (e: any) {
+        console.error('[PlaybookSchedulePanel] availability auto-save error:', e);
+        setLinkError(e?.message || 'Could not save availability');
+      }
+    }, 800);
+    return () => clearTimeout(t);
+  }, [daySlots, dateOverrides, locations, linkToken, windowsValid, playbookId, timezone]);
 
   const openPreview = useCallback(() => {
     if (!linkToken) return;
@@ -1154,9 +1229,12 @@ export default function PlaybookSchedulePanel({
                 );
               })}
             </View>
-            <Text style={s.hint}>
-              Times shown in {timezone}. Overlapping ranges on a day are merged when you save.
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={[s.hint, { flex: 1 }]}>
+                Times shown in {timezone}. Overlapping ranges on a day are merged when saved.
+              </Text>
+              {availSaved && <Text style={s.savedNote}>Saved</Text>}
+            </View>
 
             {/* Date-specific hours (Calendly pattern) */}
             <View style={s.ovEntryRow}>
@@ -1184,7 +1262,7 @@ export default function PlaybookSchedulePanel({
             {dateOverrides.length > 0 && (
               <Text style={s.hint}>
                 These dates replace your weekly hours. Unavailable = no bookings that day.
-                Tap {linkToken ? 'Update Availability' : 'Create Booking Link'} to save.
+                {linkToken ? ' Changes save automatically.' : ' Tap Create Booking Link to save.'}
               </Text>
             )}
 
@@ -1197,14 +1275,14 @@ export default function PlaybookSchedulePanel({
                 <TextInput
                   style={[s.timeInput, { flex: 1, width: undefined, textAlign: 'left' }]}
                   value={loc}
-                  onChangeText={(v) => { setLocations((prev) => prev.map((x, idx) => (idx === i ? v : x))); setLinkError(null); }}
+                  onChangeText={(v) => { availDirtyRef.current = true; setLocations((prev) => prev.map((x, idx) => (idx === i ? v : x))); setLinkError(null); }}
                   placeholder="Condo gym"
                   placeholderTextColor="#4A5568"
                   maxLength={80}
                 />
                 <Pressable
                   style={s.windowRemove}
-                  onPress={() => setLocations((prev) => prev.filter((_, idx) => idx !== i))}
+                  onPress={() => { availDirtyRef.current = true; setLocations((prev) => prev.filter((_, idx) => idx !== i)); }}
                 >
                   <Text style={s.windowRemoveText}>×</Text>
                 </Pressable>
@@ -1215,14 +1293,14 @@ export default function PlaybookSchedulePanel({
                 <Text style={s.addWindowText}>+ Add location option</Text>
               </Pressable>
             )}
-            {hasAnySlot && (
+            {hasAnySlot && !linkToken && (
               <Pressable
                 style={[s.btn, { backgroundColor: windowsValid && !linkBusy ? '#1E2A3A' : '#161D29', borderWidth: 1, borderColor: '#A78BFA', marginTop: 10 }]}
                 onPress={createLink}
                 disabled={!windowsValid || linkBusy}
               >
                 <Text style={{ color: '#A78BFA', fontWeight: '700', fontFamily: FH }}>
-                  {linkBusy ? 'Saving…' : linkToken ? 'Update Availability' : 'Create Booking Link'}
+                  {linkBusy ? 'Saving…' : 'Create Booking Link'}
                 </Text>
               </Pressable>
             )}
@@ -1596,6 +1674,13 @@ const s = StyleSheet.create({
     fontSize: 12,
     fontFamily: FB,
     marginTop: 6,
+  },
+  savedNote: {
+    color: '#6EE7B7',
+    fontSize: 12,
+    fontFamily: FB,
+    marginTop: 6,
+    marginLeft: 8,
   },
   switchRow: {
     flexDirection: 'row',
