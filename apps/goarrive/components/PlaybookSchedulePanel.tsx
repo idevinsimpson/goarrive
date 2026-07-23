@@ -13,7 +13,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View,
+  Keyboard, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View,
 } from 'react-native';
 import {
   collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query,
@@ -41,6 +41,32 @@ const DURATIONS = [30, 45, 60];
 // dies without settling (e.g. iOS PWA suspended mid-flight), the footer must
 // never stay stuck on "Booking…".
 const BOOKING_TIMEOUT_MS = 45000;
+
+// Sentinel for the 45s client deadline — distinguishes "request may still be
+// running server-side" (retry same clientRequestId) from real failures.
+const BOOKING_TIMEOUT_SENTINEL = 'booking-client-timeout';
+
+// Crypto-random idempotency key for booking calls.
+export function makeRequestId(): string {
+  const bytes = new Uint8Array(16);
+  const c = typeof globalThis !== 'undefined' ? (globalThis as any).crypto : undefined;
+  if (c?.getRandomValues) c.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// A bad saved timezone (corrupt doc, renamed zone) would make every
+// Intl call downstream throw — fall back to the device timezone.
+export function safeTimezone(tz: unknown): string {
+  const fallback = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (typeof tz !== 'string' || !tz) return fallback;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return tz;
+  } catch {
+    return fallback;
+  }
+}
 
 export function parseDuration(v: string): number | null {
   const n = parseInt(v, 10);
@@ -216,8 +242,12 @@ export default function PlaybookSchedulePanel({
   const [horizonWeeks, setHorizonWeeks] = useState(4);
   const [weeklyCap, setWeeklyCap] = useState<number | null>(null);
   const [booking, setBooking] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(false);
   const [results, setResults] = useState<BookResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Survives close/reopen on purpose: an unresolved (timed-out) booking must
+  // keep its idempotency key so any retry can't double-book.
+  const pendingRequestIdRef = useRef<string | null>(null);
   const prefilledRef = useRef(false);
   // Auto-save dirty flags: set only by user edits, never by snapshot prefill,
   // so hydration can't trigger a write-back loop.
@@ -269,6 +299,10 @@ export default function PlaybookSchedulePanel({
       setBooking(false);
       setError(null);
       setResults(null);
+      // Drag state too — closing mid-drag otherwise leaves dragFromIdx set,
+      // which keeps scrollEnabled false and freezes scrolling on reopen.
+      setDragFromIdx(null);
+      setDragOverIdx(null);
       dayDirtyRef.current = false;
       availDirtyRef.current = false;
       setAvailSaved(false);
@@ -497,10 +531,7 @@ export default function PlaybookSchedulePanel({
 
   const memberName = playbook?.assignedMemberName || null;
   const hasMember = playbookMemberIds.length > 0;
-  const timezone = useMemo(
-    () => playbook?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-    [playbook?.timezone],
-  );
+  const timezone = useMemo(() => safeTimezone(playbook?.timezone), [playbook?.timezone]);
 
   const toggleDay = useCallback((d: number) => {
     dayDirtyRef.current = true;
@@ -641,6 +672,12 @@ export default function PlaybookSchedulePanel({
     setBooking(true);
     setError(null);
     setResults(null);
+    setCheckingStatus(false);
+    // Reuse the request ID from a timed-out attempt: the server dedupes on
+    // clientRequestId, so the retry either returns the stored result (the
+    // first attempt actually landed) or books fresh — never double-books.
+    const clientRequestId = pendingRequestIdRef.current || makeRequestId();
+    pendingRequestIdRef.current = clientRequestId;
     try {
       const daySettings = sortedDays.map((d) => ({
         dayOfWeek: d,
@@ -649,7 +686,7 @@ export default function PlaybookSchedulePanel({
         durationMinutes: parseDuration(dayConfigs[d]!.duration) as number,
       }));
       const fn = httpsCallable(functions, 'bookPlaybookSession');
-      const call = fn({
+      const payload = {
         playbookId,
         daysOfWeek: sortedDays,
         startTime: daySettings[0].startTime,
@@ -661,20 +698,40 @@ export default function PlaybookSchedulePanel({
         repeatFrequency: 'weekly',
         repeatHorizonWeeks: horizonWeeks,
         weeklySessionCap: weeklyCap,
-      });
-      const res = await Promise.race([
-        call,
-        new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error('Booking timed out — check your connection and try again')), BOOKING_TIMEOUT_MS);
-        }),
-      ]);
-      const data = (res as { data: { results: BookResult[] } }).data;
-      setResults(data.results || []);
+        clientRequestId,
+      };
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const res = await Promise.race([
+            fn(payload),
+            new Promise<never>((_, reject) => {
+              setTimeout(() => reject(new Error(BOOKING_TIMEOUT_SENTINEL)), BOOKING_TIMEOUT_MS);
+            }),
+          ]);
+          const data = (res as { data: { results: BookResult[] } }).data;
+          pendingRequestIdRef.current = null;
+          setResults(data.results || []);
+          return;
+        } catch (e: any) {
+          const timedOut = e?.message === BOOKING_TIMEOUT_SENTINEL;
+          if (timedOut && attempt === 0) {
+            // The request may have landed server-side — retry with the SAME
+            // clientRequestId to fetch the stored result instead of rebooking.
+            setCheckingStatus(true);
+            continue;
+          }
+          if (!timedOut) pendingRequestIdRef.current = null;
+          throw timedOut
+            ? new Error('Booking timed out — tap Book Sessions again to check status (it will not double-book)')
+            : e;
+        }
+      }
     } catch (e: any) {
       console.error('[PlaybookSchedulePanel] booking error:', e);
       setError(e?.message || 'Booking failed');
     } finally {
       setBooking(false);
+      setCheckingStatus(false);
     }
   }, [canBook, playbookId, sortedDays, dayConfigs, timezone, recordingEnabled, horizonWeeks, weeklyCap]);
 
@@ -872,6 +929,8 @@ export default function PlaybookSchedulePanel({
 
   const bookedCount = results?.filter((r) => r.status === 'booked').length ?? 0;
   const problems = results?.filter((r) => r.status !== 'booked') ?? [];
+  const conflictCount = problems.filter((r) => r.status === 'conflict').length;
+  const capCount = problems.filter((r) => r.status === 'cap_reached').length;
 
   const dragTileStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: dragTY.value }],
@@ -1051,6 +1110,8 @@ export default function PlaybookSchedulePanel({
                         placeholder="7:00 AM"
                         placeholderTextColor="#4A5568"
                         autoCapitalize="none"
+                        returnKeyType="done"
+                        onSubmitEditing={Keyboard.dismiss}
                       />
                       {cfg.time && cfg.raw !== formatTime12(cfg.time) && (
                         <Text style={s.dayTimePreview}>{formatTime12(cfg.time)}</Text>
@@ -1073,6 +1134,8 @@ export default function PlaybookSchedulePanel({
                         keyboardType="numeric"
                         placeholder="min"
                         placeholderTextColor="#4A5568"
+                        returnKeyType="done"
+                        onSubmitEditing={Keyboard.dismiss}
                       />
                       <Text style={s.durationUnit}>min</Text>
                       {estMin ? <Text style={s.durationUnit}>· workout est. ~{estMin} min</Text> : null}
@@ -1204,6 +1267,8 @@ export default function PlaybookSchedulePanel({
                               placeholder="9:00 AM"
                               placeholderTextColor="#4A5568"
                               autoCapitalize="none"
+                              returnKeyType="done"
+                              onSubmitEditing={Keyboard.dismiss}
                             />
                             <Text style={s.windowDash}>–</Text>
                             <TextInput
@@ -1214,6 +1279,8 @@ export default function PlaybookSchedulePanel({
                               placeholder="5:00 PM"
                               placeholderTextColor="#4A5568"
                               autoCapitalize="none"
+                              returnKeyType="done"
+                              onSubmitEditing={Keyboard.dismiss}
                             />
                             <Pressable style={s.windowRemove} onPress={() => removeDaySlot(d, i)}>
                               <Text style={s.windowRemoveText}>×</Text>
@@ -1308,7 +1375,10 @@ export default function PlaybookSchedulePanel({
             {bookingUrl && (
               <View style={s.linkBox}>
                 <Text style={s.linkUrl} numberOfLines={1}>{bookingUrl}</Text>
-                <Pressable style={s.copyBtn} onPress={copyLink}>
+                <Pressable
+                  style={({ pressed }) => [s.copyBtn, pressed && { opacity: 0.55, transform: [{ scale: 0.96 }] }]}
+                  onPress={copyLink}
+                >
                   <Text style={s.copyBtnText}>{linkCopied ? 'Copied' : 'Copy'}</Text>
                 </Pressable>
                 <Pressable style={s.previewBtn} onPress={openPreview}>
@@ -1321,7 +1391,9 @@ export default function PlaybookSchedulePanel({
             {results && (
               <View style={s.resultBox}>
                 <Text style={s.resultTitle}>
-                  {bookedCount} session{bookedCount === 1 ? '' : 's'} booked
+                  {bookedCount} of {results.length} session{results.length === 1 ? '' : 's'} created
+                  {conflictCount > 0 ? ` — ${conflictCount} conflict${conflictCount === 1 ? '' : 's'}` : ''}
+                  {capCount > 0 ? ` — ${capCount} at weekly cap` : ''}
                 </Text>
                 {problems.map((p) => (
                   <Text key={p.date} style={s.resultProblem}>
@@ -1341,7 +1413,7 @@ export default function PlaybookSchedulePanel({
                 disabled={!canBook}
               >
                 <Text style={{ color: '#0E1117', fontWeight: '700', fontFamily: FH }}>
-                  {booking ? 'Booking…' : 'Book Sessions'}
+                  {booking ? (checkingStatus ? 'Checking status…' : 'Booking…') : 'Book Sessions'}
                 </Text>
               </Pressable>
             </View>
@@ -1443,6 +1515,8 @@ export default function PlaybookSchedulePanel({
                           placeholder="9:00 AM"
                           placeholderTextColor="#4A5568"
                           autoCapitalize="none"
+                          returnKeyType="done"
+                          onSubmitEditing={Keyboard.dismiss}
                         />
                         <Text style={s.windowDash}>–</Text>
                         <TextInput
@@ -1453,6 +1527,8 @@ export default function PlaybookSchedulePanel({
                           placeholder="5:00 PM"
                           placeholderTextColor="#4A5568"
                           autoCapitalize="none"
+                          returnKeyType="done"
+                          onSubmitEditing={Keyboard.dismiss}
                         />
                         <Pressable style={s.windowRemove} onPress={() => removeOvSlot(i)}>
                           <Text style={s.windowRemoveText}>×</Text>

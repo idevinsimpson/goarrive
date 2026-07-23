@@ -26,7 +26,11 @@ import { defineSecret } from 'firebase-functions/params';
 import { Timestamp, FieldValue } from 'firebase-admin/firestore';
 import {
   bookOccurrence,
+  claimBookingRequest,
   memberWeekWindowUtc,
+  releaseBookingRequest,
+  storeBookingRequestResult,
+  validClientRequestId,
   wallTimeToUtc,
   PlaybookSessionKind,
 } from './playbookScheduling';
@@ -412,8 +416,8 @@ export const bookViaBookingToken = onCall(
   { region: 'us-central1', invoker: 'public', secrets: [emailApiKey] },
   async (request) => {
     const db = getDb();
-    const { token, date, startTime, guestEmail: rawGuestEmail, location: rawLocation } = request.data as {
-      token: string; date: string; startTime: string; guestEmail?: string; location?: string;
+    const { token, date, startTime, guestEmail: rawGuestEmail, location: rawLocation, clientRequestId: rawClientRequestId } = request.data as {
+      token: string; date: string; startTime: string; guestEmail?: string; location?: string; clientRequestId?: string;
     };
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       throw new HttpsError('invalid-argument', 'date must be YYYY-MM-DD');
@@ -526,24 +530,48 @@ export const bookViaBookingToken = onCall(
       typeof playbook.weeklySessionCap === 'number' && playbook.weeklySessionCap > 0
         ? playbook.weeklySessionCap : null;
 
-    const { instanceId } = await bookOccurrence({
-      playbookId: tokenData.playbookId,
-      playbook,
-      coachId: tokenData.coachId,
-      memberKey,
-      memberId,
-      guestEmail,
-      memberName,
-      dateStr: date,
-      startTime,
-      timezone,
-      durationMinutes,
-      sessionKind: playbook.sessionKind === 'coach_guided' ? 'coach_guided' : 'coach_review',
-      recordingEnabled: playbook.recordingEnabled !== false,
-      weeklySessionCap,
-      bookedVia: 'booking_link',
-      location,
-    });
+    // Idempotency: a retry carrying the same clientRequestId (e.g. after a
+    // client-side timeout) returns the stored result of the original attempt
+    // instead of booking a second session.
+    const clientRequestId = validClientRequestId(rawClientRequestId);
+    if (clientRequestId) {
+      const prior = await claimBookingRequest(clientRequestId, {
+        fn: 'bookViaBookingToken',
+        coachId: tokenData.coachId,
+        memberKey,
+        playbookId: tokenData.playbookId,
+      });
+      if (prior) {
+        console.log(`[bookViaBookingToken] idempotent replay for request ${clientRequestId}`);
+        return prior;
+      }
+    }
+
+    let bookedOccurrence: { instanceId: string };
+    try {
+      bookedOccurrence = await bookOccurrence({
+        playbookId: tokenData.playbookId,
+        playbook,
+        coachId: tokenData.coachId,
+        memberKey,
+        memberId,
+        guestEmail,
+        memberName,
+        dateStr: date,
+        startTime,
+        timezone,
+        durationMinutes,
+        sessionKind: playbook.sessionKind === 'coach_guided' ? 'coach_guided' : 'coach_review',
+        recordingEnabled: playbook.recordingEnabled !== false,
+        weeklySessionCap,
+        bookedVia: 'booking_link',
+        location,
+      });
+    } catch (err) {
+      if (clientRequestId) await releaseBookingRequest(clientRequestId);
+      throw err;
+    }
+    const { instanceId } = bookedOccurrence;
 
     await db.collection('scheduling_audit_log').add({
       coachId: tokenData.coachId,
@@ -603,7 +631,7 @@ export const bookViaBookingToken = onCall(
       }
     }
 
-    return {
+    const response = {
       success: true,
       instanceId,
       date,
@@ -619,6 +647,8 @@ export const bookViaBookingToken = onCall(
       googleCalUrl,
       confirmationEmailSent: !!bookerEmail,
     };
+    if (clientRequestId) await storeBookingRequestResult(clientRequestId, response);
+    return response;
   }
 );
 
