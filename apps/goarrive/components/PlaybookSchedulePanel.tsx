@@ -22,7 +22,7 @@ import {
 import { router } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { useAnimatedStyle, useSharedValue, runOnJS } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, runOnJS, withSpring } from 'react-native-reanimated';
 import { db, functions } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import {
@@ -30,12 +30,19 @@ import {
   PLAYBOOK_SESSION_KIND_LABELS,
   PlaybookSessionKind,
   formatDateShort,
+  todayInTz,
 } from '../lib/schedulingTypes';
+import { WorkoutMosaic, WORKOUT_CARD_BG } from './WorkoutMosaic';
 
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
 const DURATIONS = [30, 45, 60];
+
+// Day-module workout tile — 4:5 aspect ratio, same as workout cards on Build.
+// Sized to fill the module's full height (left column runs ~150px tall).
+const TILE_W = 124;
+const TILE_H = 155;
 
 // Hard client-side deadline on the booking callable: if the underlying request
 // dies without settling (e.g. iOS PWA suspended mid-flight), the footer must
@@ -175,10 +182,6 @@ export interface DateOverride {
   intervals: Array<{ start: string; end: string }>; // HH:mm
 }
 
-export function localDateStr(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
 const MONTH_LABELS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -253,6 +256,7 @@ export default function PlaybookSchedulePanel({
   // so hydration can't trigger a write-back loop.
   const dayDirtyRef = useRef(false);
   const availDirtyRef = useRef(false);
+  const sessionCfgDirtyRef = useRef(false);
   const [availSaved, setAvailSaved] = useState(false);
 
   // Inline title + description editing (A5 / C10)
@@ -264,6 +268,9 @@ export default function PlaybookSchedulePanel({
   // Workouts on this playbook — powers the per-day mosaic tiles
   const [workoutNames, setWorkoutNames] = useState<Record<string, string>>({});
   const [workoutDurations, setWorkoutDurations] = useState<Record<string, number | null>>({});
+  // Still-image slots per workout (same shape as Build's coverThumbs):
+  // URL string for movements with media, { name } placeholder otherwise.
+  const [workoutThumbs, setWorkoutThumbs] = useState<Record<string, (string | { name: string })[]>>({});
 
   // Booking link (Phase 3b): weekly-hours availability + public token URL
   const [daySlots, setDaySlots] = useState<AvailSlot[][]>(() => Array.from({ length: 7 }, () => []));
@@ -303,8 +310,12 @@ export default function PlaybookSchedulePanel({
       // which keeps scrollEnabled false and freezes scrolling on reopen.
       setDragFromIdx(null);
       setDragOverIdx(null);
+      dragTY.value = 0;
+      displacedTY.value = 0;
+      lastOverRef.current = null;
       dayDirtyRef.current = false;
       availDirtyRef.current = false;
+      sessionCfgDirtyRef.current = false;
       setAvailSaved(false);
     }
   }, [visible]);
@@ -320,9 +331,13 @@ export default function PlaybookSchedulePanel({
         setPlaybook(data);
         if (!titleDirty.current) setTitleDraft(data.name || '');
         if (!descDirty.current) setDescDraft(data.description || '');
-        if (data.recordingEnabled !== undefined) setRecordingEnabled(data.recordingEnabled !== false);
-        if (data.repeatHorizonWeeks) setHorizonWeeks(data.repeatHorizonWeeks);
-        if (data.weeklySessionCap !== undefined) setWeeklyCap(data.weeklySessionCap ?? null);
+        // Skip while dirty — a snapshot echo from another auto-save write
+        // would otherwise revert an unsaved toggle/stepper change.
+        if (!sessionCfgDirtyRef.current) {
+          if (data.recordingEnabled !== undefined) setRecordingEnabled(data.recordingEnabled !== false);
+          if (data.repeatHorizonWeeks) setHorizonWeeks(data.repeatHorizonWeeks);
+          if (data.weeklySessionCap !== undefined) setWeeklyCap(data.weeklySessionCap ?? null);
+        }
         if (!prefilledRef.current) {
           prefilledRef.current = true;
           const fallbackDuration = String(data.sessionDurationMinutes || 45);
@@ -380,6 +395,60 @@ export default function PlaybookSchedulePanel({
           });
           return next;
         });
+
+        // Mosaic slots: still image per movement (poster preferred), name
+        // placeholder otherwise. Movements whose embedded block entry lacks a
+        // URL get one lookup in the movements collection.
+        const movementIdFallbacks = new Set<string>();
+        const rawSlots: Record<string, Array<string | { name: string; movementId?: string }>> = {};
+        snaps.forEach((snapDoc, i) => {
+          const data = snapDoc?.data();
+          const slots: Array<string | { name: string; movementId?: string }> = [];
+          const seen = new Set<string>();
+          outer: for (const block of (data?.blocks ?? [])) {
+            for (const mov of (block?.movements ?? [])) {
+              if (slots.length >= 16) break outer;
+              const still = mov.posterUrl || mov.thumbnailImageUrl || mov.thumbnailUrl || mov.gifUrl || null;
+              if (still) {
+                if (!seen.has(still)) { seen.add(still); slots.push(still); }
+              } else {
+                const movId = mov.movementId || mov.id || null;
+                if (movId) movementIdFallbacks.add(movId);
+                slots.push({ name: mov.movementName || mov.name || 'Movement', movementId: movId || undefined });
+              }
+            }
+          }
+          rawSlots[missing[i]] = slots;
+        });
+        const fallbackIds = [...movementIdFallbacks];
+        Promise.all(fallbackIds.map((id) => getDoc(doc(db, 'movements', id)).catch(() => null)))
+          .then((movSnaps) => {
+            const stillById: Record<string, string> = {};
+            movSnaps.forEach((s2, i) => {
+              const d = s2?.data();
+              const still = d?.posterUrl || d?.thumbnailImageUrl || d?.thumbnailUrl;
+              if (still) stillById[fallbackIds[i]] = still;
+            });
+            setWorkoutThumbs((prev) => {
+              const next = { ...prev };
+              for (const [wid, slots] of Object.entries(rawSlots)) {
+                const seen = new Set<string>();
+                next[wid] = slots
+                  .map((slot) => {
+                    if (typeof slot === 'string') return slot;
+                    const resolved = slot.movementId ? stillById[slot.movementId] : undefined;
+                    return resolved || { name: slot.name };
+                  })
+                  .filter((slot) => {
+                    if (typeof slot !== 'string') return true;
+                    if (seen.has(slot)) return false;
+                    seen.add(slot);
+                    return true;
+                  });
+              }
+              return next;
+            });
+          });
       });
   }, [visible, workoutIds, workoutNames]);
 
@@ -578,33 +647,58 @@ export default function PlaybookSchedulePanel({
   // Auto-save per-day settings: any user edit (day toggle, time, duration,
   // kind) debounces ~800ms then persists to the playbook doc. Previously these
   // only saved when Book Sessions ran, so edits vanished on reload.
+  const saveDaySettings = useCallback(() => {
+    if (!dayDirtyRef.current || !playbookId) return;
+    dayDirtyRef.current = false;
+    const valid = days.filter(
+      (d) => !!dayConfigs[d]?.time && parseDuration(dayConfigs[d]?.duration ?? '') !== null,
+    );
+    // Mid-edit (nothing parseable yet) — wait for the next valid change.
+    if (valid.length === 0 && days.length > 0) return;
+    const daySettings = valid.map((d) => ({
+      dayOfWeek: d,
+      startTime: dayConfigs[d]!.time as string,
+      sessionKind: dayConfigs[d]!.kind,
+      durationMinutes: parseDuration(dayConfigs[d]!.duration) as number,
+    }));
+    const payload: Record<string, unknown> = {
+      scheduleDaySettings: daySettings,
+      scheduleDaysOfWeek: valid,
+      updatedAt: serverTimestamp(),
+    };
+    if (daySettings.length) payload.scheduleStartTime = daySettings[0].startTime;
+    updateDoc(doc(db, 'playbooks', playbookId), payload).catch((e) => {
+      console.error('[PlaybookSchedulePanel] day settings auto-save error:', e);
+    });
+  }, [days, dayConfigs, playbookId]);
+
   useEffect(() => {
     if (!dayDirtyRef.current || !playbookId) return;
-    const t = setTimeout(() => {
-      dayDirtyRef.current = false;
-      const valid = days.filter(
-        (d) => !!dayConfigs[d]?.time && parseDuration(dayConfigs[d]?.duration ?? '') !== null,
-      );
-      // Mid-edit (nothing parseable yet) — wait for the next valid change.
-      if (valid.length === 0 && days.length > 0) return;
-      const daySettings = valid.map((d) => ({
-        dayOfWeek: d,
-        startTime: dayConfigs[d]!.time as string,
-        sessionKind: dayConfigs[d]!.kind,
-        durationMinutes: parseDuration(dayConfigs[d]!.duration) as number,
-      }));
-      const payload: Record<string, unknown> = {
-        scheduleDaySettings: daySettings,
-        scheduleDaysOfWeek: valid,
-        updatedAt: serverTimestamp(),
-      };
-      if (daySettings.length) payload.scheduleStartTime = daySettings[0].startTime;
-      updateDoc(doc(db, 'playbooks', playbookId), payload).catch((e) => {
-        console.error('[PlaybookSchedulePanel] day settings auto-save error:', e);
-      });
-    }, 800);
+    const t = setTimeout(saveDaySettings, 800);
     return () => clearTimeout(t);
-  }, [days, dayConfigs, playbookId]);
+  }, [days, dayConfigs, playbookId, saveDaySettings]);
+
+  // Auto-save session settings (recording toggle, book-ahead horizon, weekly
+  // cap). Previously these only persisted when Book Sessions ran, so changing
+  // them and closing the panel silently lost the edit.
+  const saveSessionSettings = useCallback(() => {
+    if (!sessionCfgDirtyRef.current || !playbookId) return;
+    sessionCfgDirtyRef.current = false;
+    updateDoc(doc(db, 'playbooks', playbookId), {
+      recordingEnabled,
+      repeatHorizonWeeks: horizonWeeks,
+      weeklySessionCap: weeklyCap,
+      updatedAt: serverTimestamp(),
+    }).catch((e) => {
+      console.error('[PlaybookSchedulePanel] session settings auto-save error:', e);
+    });
+  }, [recordingEnabled, horizonWeeks, weeklyCap, playbookId]);
+
+  useEffect(() => {
+    if (!sessionCfgDirtyRef.current || !playbookId) return;
+    const t = setTimeout(saveSessionSettings, 800);
+    return () => clearTimeout(t);
+  }, [recordingEnabled, horizonWeeks, weeklyCap, playbookId, saveSessionSettings]);
 
   // Day k (in sorted selected days) → workout index in playbook order.
   const workoutForModule = useCallback((k: number): string | null => {
@@ -619,47 +713,85 @@ export default function PlaybookSchedulePanel({
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const dragTY = useSharedValue(0);
   const dragActiveIdx = useSharedValue(-1);
+  // Swap preview: while the dragged tile hovers a module, that module's own
+  // workout slides toward the source slot so the coach SEES the swap; on drop
+  // the dragged tile springs into the destination slot before data commits.
+  const displacedTY = useSharedValue(0);
+  const lastOverRef = useRef<number | null>(null);
 
-  const moveWorkout = useCallback(async (fromModule: number, toModule: number) => {
+  const SPRING_CFG = { damping: 22, stiffness: 240, mass: 0.7 };
+
+  const endDrag = useCallback(() => {
+    lastOverRef.current = null;
     setDragFromIdx(null);
     setDragOverIdx(null);
-    if (fromModule === toModule) return;
+    dragTY.value = 0;
+    displacedTY.value = 0;
+    dragActiveIdx.value = -1;
+  }, [dragTY, displacedTY, dragActiveIdx]);
+
+  const moveWorkout = useCallback((fromModule: number, toModule: number) => {
     const n = workoutIds.length;
-    if (n === 0) return;
+    if (fromModule === toModule || n === 0) return;
     const fromPos = fromModule < n ? fromModule : (ROTATE_AT_END ? fromModule % n : -1);
     const toPos = toModule < n ? toModule : (ROTATE_AT_END ? toModule % n : -1);
     if (fromPos < 0 || toPos < 0 || fromPos === toPos) return;
     const next = [...workoutIds];
     const [moved] = next.splice(fromPos, 1);
     next.splice(toPos, 0, moved);
-    try {
-      await updateDoc(doc(db, 'playbooks', playbookId), { workoutIds: next, updatedAt: serverTimestamp() });
-    } catch (e) {
-      console.error('[PlaybookSchedulePanel] workout reorder error:', e);
-    }
+    updateDoc(doc(db, 'playbooks', playbookId), { workoutIds: next, updatedAt: serverTimestamp() })
+      .catch((e) => console.error('[PlaybookSchedulePanel] workout reorder error:', e));
   }, [workoutIds, playbookId]);
 
-  const hoverModule = useCallback((fromIdx: number, ty: number) => {
+  const commitMove = useCallback((fromModule: number, toModule: number) => {
+    moveWorkout(fromModule, toModule);
+    // Reset transforms on the next frame — Firestore's latency-compensated
+    // local write has swapped the tile contents by then, so the snap lands
+    // exactly where the reordered data renders.
+    requestAnimationFrame(() => endDrag());
+  }, [moveWorkout, endDrag]);
+
+  const findTarget = (fromIdx: number, ty: number): number | null => {
     const from = moduleLayouts.current[fromIdx];
-    if (!from) return;
+    if (!from) return null;
     const centerY = from.y + from.h / 2 + ty;
-    let target: number | null = null;
     for (const [k, r] of Object.entries(moduleLayouts.current)) {
-      if (centerY >= r.y && centerY < r.y + r.h) { target = Number(k); break; }
+      if (centerY >= r.y && centerY < r.y + r.h) return Number(k);
     }
+    return null;
+  };
+
+  const hoverModule = useCallback((fromIdx: number, ty: number) => {
+    let target = findTarget(fromIdx, ty);
+    if (target === fromIdx) target = null;
+    if (target === lastOverRef.current) return;
+    lastOverRef.current = target;
     setDragOverIdx(target);
-  }, []);
+    const from = moduleLayouts.current[fromIdx];
+    const dest = target !== null ? moduleLayouts.current[target] : null;
+    if (from && dest) {
+      displacedTY.value = 0;
+      displacedTY.value = withSpring(from.y - dest.y, SPRING_CFG);
+    } else {
+      displacedTY.value = withSpring(0, SPRING_CFG);
+    }
+  }, [displacedTY]);
 
   const finishDrag = useCallback((fromIdx: number, ty: number) => {
+    const target = findTarget(fromIdx, ty);
     const from = moduleLayouts.current[fromIdx];
-    if (!from) { setDragFromIdx(null); setDragOverIdx(null); return; }
-    const centerY = from.y + from.h / 2 + ty;
-    let target = fromIdx;
-    for (const [k, r] of Object.entries(moduleLayouts.current)) {
-      if (centerY >= r.y && centerY < r.y + r.h) { target = Number(k); break; }
+    const dest = target !== null ? moduleLayouts.current[target] : null;
+    if (!from || !dest || target === null || target === fromIdx) {
+      // No move — spring the tile back home, then clear state.
+      displacedTY.value = withSpring(0, SPRING_CFG);
+      dragTY.value = withSpring(0, SPRING_CFG, () => { runOnJS(endDrag)(); });
+      return;
     }
-    moveWorkout(fromIdx, target);
-  }, [moveWorkout]);
+    // Snap into the destination slot; the displaced tile settles in the
+    // source slot; data commits when the snap lands.
+    displacedTY.value = withSpring(from.y - dest.y, SPRING_CFG);
+    dragTY.value = withSpring(dest.y - from.y, SPRING_CFG, () => { runOnJS(commitMove)(fromIdx, target); });
+  }, [displacedTY, dragTY, endDrag, commitMove]);
 
   const sortedDays = days;
 
@@ -793,12 +925,12 @@ export default function PlaybookSchedulePanel({
 
   // ── Date-specific hours modal ─────────────────────────────────────────────
   const openOverrideModal = useCallback(() => {
-    const n = new Date();
-    setOvMonth({ y: n.getFullYear(), m: n.getMonth() });
+    const [y, m] = todayInTz(timezone).split('-').map(Number);
+    setOvMonth({ y, m: m - 1 });
     setOvDates([]);
     setOvSlots([makeSlot('09:00', '17:00')]);
     setOvOpen(true);
-  }, []);
+  }, [timezone]);
 
   const toggleOvDate = useCallback((dateStr: string) => {
     setOvDates((prev) => (prev.includes(dateStr)
@@ -885,28 +1017,50 @@ export default function PlaybookSchedulePanel({
   // Cloud-Functions-write-only (rules), so this reuses the same callable the
   // old Update Availability button invoked — it returns the existing token.
   // First-time link creation stays behind the explicit Create Booking Link tap.
+  const saveAvailability = useCallback(async () => {
+    if (!availDirtyRef.current || !linkToken || !windowsValid) return;
+    availDirtyRef.current = false;
+    try {
+      const fn = httpsCallable(functions, 'createPlaybookBookingLink');
+      await fn({
+        playbookId,
+        windows: daySlotsToWindows(daySlots),
+        timezone,
+        locations: locations.map((l) => l.trim()).filter(Boolean),
+        dateOverrides,
+      });
+      setAvailSaved(true);
+      setTimeout(() => setAvailSaved(false), 2000);
+    } catch (e: any) {
+      console.error('[PlaybookSchedulePanel] availability auto-save error:', e);
+      setLinkError(e?.message || 'Could not save availability');
+    }
+  }, [daySlots, dateOverrides, locations, linkToken, windowsValid, playbookId, timezone]);
+
   useEffect(() => {
     if (!availDirtyRef.current || !linkToken || !windowsValid) return;
-    const t = setTimeout(async () => {
-      availDirtyRef.current = false;
-      try {
-        const fn = httpsCallable(functions, 'createPlaybookBookingLink');
-        await fn({
-          playbookId,
-          windows: daySlotsToWindows(daySlots),
-          timezone,
-          locations: locations.map((l) => l.trim()).filter(Boolean),
-          dateOverrides,
-        });
-        setAvailSaved(true);
-        setTimeout(() => setAvailSaved(false), 2000);
-      } catch (e: any) {
-        console.error('[PlaybookSchedulePanel] availability auto-save error:', e);
-        setLinkError(e?.message || 'Could not save availability');
-      }
-    }, 800);
+    const t = setTimeout(() => { void saveAvailability(); }, 800);
     return () => clearTimeout(t);
-  }, [daySlots, dateOverrides, locations, linkToken, windowsValid, playbookId, timezone]);
+  }, [daySlots, dateOverrides, locations, linkToken, windowsValid, playbookId, timezone, saveAvailability]);
+
+  // Closing the panel inside the 800ms debounce window used to clear the
+  // timer and silently drop the last edit — flush pending saves on close and
+  // unmount. The dirty-flag guards inside the save fns keep snapshot prefill
+  // from ever triggering a write.
+  const flushPendingSavesRef = useRef<() => void>(() => {});
+  flushPendingSavesRef.current = () => {
+    if (dayDirtyRef.current) saveDaySettings();
+    if (availDirtyRef.current) void saveAvailability();
+    if (sessionCfgDirtyRef.current) saveSessionSettings();
+    // Title/description normally save on blur, but closing the panel (or the
+    // Modal unmounting) doesn't fire blur — flush those too.
+    if (titleDirty.current) void saveTitle();
+    if (descDirty.current) void saveDescription();
+  };
+  useEffect(() => {
+    if (!visible) flushPendingSavesRef.current();
+  }, [visible]);
+  useEffect(() => () => flushPendingSavesRef.current(), []);
 
   const openPreview = useCallback(() => {
     if (!linkToken) return;
@@ -935,17 +1089,21 @@ export default function PlaybookSchedulePanel({
   const dragTileStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: dragTY.value }],
   }));
+  const displacedTileStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: displacedTY.value }],
+  }));
 
   const renderWorkoutTile = (moduleIdx: number) => {
     const wid = workoutForModule(moduleIdx);
     if (!wid) {
       return (
-        <View style={[s.workoutTile, { opacity: 0.4 }]}>
+        <View style={[s.workoutTile, { opacity: 0.4, alignItems: 'center', justifyContent: 'center' }]}>
           <Text style={s.workoutTileText} numberOfLines={2}>No workout</Text>
         </View>
       );
     }
     const isDragging = dragFromIdx === moduleIdx;
+    const isDisplaced = dragOverIdx === moduleIdx && dragFromIdx !== null && dragFromIdx !== moduleIdx;
     const pan = Gesture.Pan()
       .activateAfterLongPress(250)
       .onStart(() => {
@@ -958,13 +1116,12 @@ export default function PlaybookSchedulePanel({
         runOnJS(hoverModule)(moduleIdx, e.translationY);
       })
       .onEnd((e) => {
+        // Snap/settle animations own the shared values from here — finishDrag
+        // resets them when the animation lands.
         runOnJS(finishDrag)(moduleIdx, e.translationY);
-        dragTY.value = 0;
-        dragActiveIdx.value = -1;
       })
-      .onFinalize(() => {
-        dragTY.value = 0;
-        dragActiveIdx.value = -1;
+      .onFinalize((_e, success) => {
+        if (!success) runOnJS(endDrag)();
       });
     return (
       <GestureDetector gesture={pan}>
@@ -973,12 +1130,16 @@ export default function PlaybookSchedulePanel({
             s.workoutTile,
             isDragging && dragTileStyle,
             isDragging && { zIndex: 10, elevation: 10, borderColor: '#A78BFA', borderWidth: 1 },
+            isDisplaced && displacedTileStyle,
           ]}
         >
-          <Text style={s.workoutTileText} numberOfLines={2}>
-            {workoutNames[wid] || 'Workout'}
-          </Text>
-          <Text style={s.workoutTileHint}>hold + drag</Text>
+          <WorkoutMosaic thumbs={workoutThumbs[wid] ?? []} width={TILE_W} height={TILE_H} scrollIdle center />
+          <View style={s.workoutTileNameBar}>
+            <Text style={s.workoutTileText} numberOfLines={1}>
+              {workoutNames[wid] || 'Workout'}
+            </Text>
+            <Text style={s.workoutTileHint}>hold + drag</Text>
+          </View>
         </Animated.View>
       </GestureDetector>
     );
@@ -1091,7 +1252,16 @@ export default function PlaybookSchedulePanel({
               return (
                 <View
                   key={d}
-                  style={[s.dayModule, isOver && { borderColor: '#A78BFA', borderWidth: 1 }]}
+                  style={[
+                    s.dayModule,
+                    isOver && { borderColor: '#A78BFA', borderWidth: 1 },
+                    // Dragged tile must float over LATER sibling modules, not
+                    // slide behind them — lift its whole module while dragging.
+                    dragFromIdx === k && { zIndex: 20, elevation: 20 },
+                    // Hovered module's tile animates toward the source slot —
+                    // lift it too so the swap preview isn't hidden by siblings.
+                    dragOverIdx === k && dragFromIdx !== null && { zIndex: 15, elevation: 15 },
+                  ]}
                   onLayout={(e) => {
                     moduleLayouts.current[k] = {
                       y: e.nativeEvent.layout.y,
@@ -1171,7 +1341,7 @@ export default function PlaybookSchedulePanel({
               <Text style={s.switchLabel}>Record sessions</Text>
               <Switch
                 value={recordingEnabled}
-                onValueChange={setRecordingEnabled}
+                onValueChange={(v) => { sessionCfgDirtyRef.current = true; setRecordingEnabled(v); }}
                 trackColor={{ false: '#4A5568', true: '#A78BFA' }}
                 thumbColor="#F0F4F8"
               />
@@ -1180,11 +1350,11 @@ export default function PlaybookSchedulePanel({
             <View style={s.stepperRow}>
               <Text style={s.switchLabel}>Book ahead</Text>
               <View style={s.stepper}>
-                <Pressable style={s.stepBtn} onPress={() => setHorizonWeeks((w) => Math.max(2, w - 1))}>
+                <Pressable style={s.stepBtn} onPress={() => { sessionCfgDirtyRef.current = true; setHorizonWeeks((w) => Math.max(2, w - 1)); }}>
                   <Text style={s.stepBtnText}>−</Text>
                 </Pressable>
                 <Text style={s.stepValue}>{horizonWeeks} wks</Text>
-                <Pressable style={s.stepBtn} onPress={() => setHorizonWeeks((w) => Math.min(8, w + 1))}>
+                <Pressable style={s.stepBtn} onPress={() => { sessionCfgDirtyRef.current = true; setHorizonWeeks((w) => Math.min(8, w + 1)); }}>
                   <Text style={s.stepBtnText}>+</Text>
                 </Pressable>
               </View>
@@ -1195,14 +1365,14 @@ export default function PlaybookSchedulePanel({
               <View style={s.stepper}>
                 <Pressable
                   style={s.stepBtn}
-                  onPress={() => setWeeklyCap((c) => (c === null || c <= 1 ? null : c - 1))}
+                  onPress={() => { sessionCfgDirtyRef.current = true; setWeeklyCap((c) => (c === null || c <= 1 ? null : c - 1)); }}
                 >
                   <Text style={s.stepBtnText}>−</Text>
                 </Pressable>
                 <Text style={s.stepValue}>{weeklyCap === null ? 'Off' : weeklyCap}</Text>
                 <Pressable
                   style={s.stepBtn}
-                  onPress={() => setWeeklyCap((c) => Math.min(7, (c ?? 0) + 1))}
+                  onPress={() => { sessionCfgDirtyRef.current = true; setWeeklyCap((c) => Math.min(7, (c ?? 0) + 1)); }}
                 >
                   <Text style={s.stepBtnText}>+</Text>
                 </Pressable>
@@ -1421,9 +1591,9 @@ export default function PlaybookSchedulePanel({
 
           {/* Date-specific hours modal — overlay (not a nested Modal) */}
           {ovOpen && (() => {
-            const today = localDateStr(new Date());
-            const now = new Date();
-            const atCurrentMonth = ovMonth.y === now.getFullYear() && ovMonth.m === now.getMonth();
+            const today = todayInTz(timezone);
+            const [ty, tm] = today.split('-').map(Number);
+            const atCurrentMonth = ovMonth.y === ty && ovMonth.m === tm - 1;
             const firstDow = new Date(ovMonth.y, ovMonth.m, 1).getDay();
             const daysInMonth = new Date(ovMonth.y, ovMonth.m + 1, 0).getDate();
             const cells: Array<number | null> = [
@@ -1715,13 +1885,21 @@ const s = StyleSheet.create({
     fontFamily: FB,
   },
   workoutTile: {
-    width: 86,
-    height: 86,
+    width: TILE_W,
+    height: TILE_H,
     borderRadius: 12,
-    backgroundColor: 'rgba(167,139,250,0.12)',
+    backgroundColor: WORKOUT_CARD_BG,
+    overflow: 'hidden',
+  },
+  workoutTileNameBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(14,17,23,0.78)',
+    paddingVertical: 3,
+    paddingHorizontal: 6,
     alignItems: 'center',
-    justifyContent: 'center',
-    padding: 8,
   },
   workoutTileText: {
     color: '#F0F4F8',
@@ -1731,10 +1909,10 @@ const s = StyleSheet.create({
     textAlign: 'center',
   },
   workoutTileHint: {
-    color: '#4A5568',
+    color: '#8A95A3',
     fontSize: 9,
     fontFamily: FB,
-    marginTop: 4,
+    marginTop: 1,
   },
   chip: {
     paddingHorizontal: 14,
