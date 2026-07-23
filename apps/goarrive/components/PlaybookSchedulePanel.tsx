@@ -32,11 +32,16 @@ import {
   formatDateShort,
   todayInTz,
 } from '../lib/schedulingTypes';
+import { WorkoutMosaic, WORKOUT_CARD_BG } from './WorkoutMosaic';
 
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
 const DURATIONS = [30, 45, 60];
+
+// Day-module workout tile — 4:5 aspect ratio, same as workout cards on Build.
+const TILE_W = 108;
+const TILE_H = 135;
 
 // Hard client-side deadline on the booking callable: if the underlying request
 // dies without settling (e.g. iOS PWA suspended mid-flight), the footer must
@@ -261,6 +266,9 @@ export default function PlaybookSchedulePanel({
   // Workouts on this playbook — powers the per-day mosaic tiles
   const [workoutNames, setWorkoutNames] = useState<Record<string, string>>({});
   const [workoutDurations, setWorkoutDurations] = useState<Record<string, number | null>>({});
+  // Still-image slots per workout (same shape as Build's coverThumbs):
+  // URL string for movements with media, { name } placeholder otherwise.
+  const [workoutThumbs, setWorkoutThumbs] = useState<Record<string, (string | { name: string })[]>>({});
 
   // Booking link (Phase 3b): weekly-hours availability + public token URL
   const [daySlots, setDaySlots] = useState<AvailSlot[][]>(() => Array.from({ length: 7 }, () => []));
@@ -377,6 +385,60 @@ export default function PlaybookSchedulePanel({
           });
           return next;
         });
+
+        // Mosaic slots: still image per movement (poster preferred), name
+        // placeholder otherwise. Movements whose embedded block entry lacks a
+        // URL get one lookup in the movements collection.
+        const movementIdFallbacks = new Set<string>();
+        const rawSlots: Record<string, Array<string | { name: string; movementId?: string }>> = {};
+        snaps.forEach((snapDoc, i) => {
+          const data = snapDoc?.data();
+          const slots: Array<string | { name: string; movementId?: string }> = [];
+          const seen = new Set<string>();
+          outer: for (const block of (data?.blocks ?? [])) {
+            for (const mov of (block?.movements ?? [])) {
+              if (slots.length >= 16) break outer;
+              const still = mov.posterUrl || mov.thumbnailImageUrl || mov.thumbnailUrl || mov.gifUrl || null;
+              if (still) {
+                if (!seen.has(still)) { seen.add(still); slots.push(still); }
+              } else {
+                const movId = mov.movementId || mov.id || null;
+                if (movId) movementIdFallbacks.add(movId);
+                slots.push({ name: mov.movementName || mov.name || 'Movement', movementId: movId || undefined });
+              }
+            }
+          }
+          rawSlots[missing[i]] = slots;
+        });
+        const fallbackIds = [...movementIdFallbacks];
+        Promise.all(fallbackIds.map((id) => getDoc(doc(db, 'movements', id)).catch(() => null)))
+          .then((movSnaps) => {
+            const stillById: Record<string, string> = {};
+            movSnaps.forEach((s2, i) => {
+              const d = s2?.data();
+              const still = d?.posterUrl || d?.thumbnailImageUrl || d?.thumbnailUrl;
+              if (still) stillById[fallbackIds[i]] = still;
+            });
+            setWorkoutThumbs((prev) => {
+              const next = { ...prev };
+              for (const [wid, slots] of Object.entries(rawSlots)) {
+                const seen = new Set<string>();
+                next[wid] = slots
+                  .map((slot) => {
+                    if (typeof slot === 'string') return slot;
+                    const resolved = slot.movementId ? stillById[slot.movementId] : undefined;
+                    return resolved || { name: slot.name };
+                  })
+                  .filter((slot) => {
+                    if (typeof slot !== 'string') return true;
+                    if (seen.has(slot)) return false;
+                    seen.add(slot);
+                    return true;
+                  });
+              }
+              return next;
+            });
+          });
       });
   }, [visible, workoutIds, workoutNames]);
 
@@ -957,7 +1019,7 @@ export default function PlaybookSchedulePanel({
     const wid = workoutForModule(moduleIdx);
     if (!wid) {
       return (
-        <View style={[s.workoutTile, { opacity: 0.4 }]}>
+        <View style={[s.workoutTile, { opacity: 0.4, alignItems: 'center', justifyContent: 'center' }]}>
           <Text style={s.workoutTileText} numberOfLines={2}>No workout</Text>
         </View>
       );
@@ -992,10 +1054,13 @@ export default function PlaybookSchedulePanel({
             isDragging && { zIndex: 10, elevation: 10, borderColor: '#A78BFA', borderWidth: 1 },
           ]}
         >
-          <Text style={s.workoutTileText} numberOfLines={2}>
-            {workoutNames[wid] || 'Workout'}
-          </Text>
-          <Text style={s.workoutTileHint}>hold + drag</Text>
+          <WorkoutMosaic thumbs={workoutThumbs[wid] ?? []} width={TILE_W} height={TILE_H} />
+          <View style={s.workoutTileNameBar}>
+            <Text style={s.workoutTileText} numberOfLines={1}>
+              {workoutNames[wid] || 'Workout'}
+            </Text>
+            <Text style={s.workoutTileHint}>hold + drag</Text>
+          </View>
         </Animated.View>
       </GestureDetector>
     );
@@ -1108,7 +1173,13 @@ export default function PlaybookSchedulePanel({
               return (
                 <View
                   key={d}
-                  style={[s.dayModule, isOver && { borderColor: '#A78BFA', borderWidth: 1 }]}
+                  style={[
+                    s.dayModule,
+                    isOver && { borderColor: '#A78BFA', borderWidth: 1 },
+                    // Dragged tile must float over LATER sibling modules, not
+                    // slide behind them — lift its whole module while dragging.
+                    dragFromIdx === k && { zIndex: 20, elevation: 20 },
+                  ]}
                   onLayout={(e) => {
                     moduleLayouts.current[k] = {
                       y: e.nativeEvent.layout.y,
@@ -1732,13 +1803,21 @@ const s = StyleSheet.create({
     fontFamily: FB,
   },
   workoutTile: {
-    width: 86,
-    height: 86,
+    width: TILE_W,
+    height: TILE_H,
     borderRadius: 12,
-    backgroundColor: 'rgba(167,139,250,0.12)',
+    backgroundColor: WORKOUT_CARD_BG,
+    overflow: 'hidden',
+  },
+  workoutTileNameBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(14,17,23,0.78)',
+    paddingVertical: 3,
+    paddingHorizontal: 6,
     alignItems: 'center',
-    justifyContent: 'center',
-    padding: 8,
   },
   workoutTileText: {
     color: '#F0F4F8',
@@ -1748,10 +1827,10 @@ const s = StyleSheet.create({
     textAlign: 'center',
   },
   workoutTileHint: {
-    color: '#4A5568',
+    color: '#8A95A3',
     fontSize: 9,
     fontFamily: FB,
-    marginTop: 4,
+    marginTop: 1,
   },
   chip: {
     paddingHorizontal: 14,
