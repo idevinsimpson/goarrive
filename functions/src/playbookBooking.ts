@@ -193,8 +193,9 @@ export const createPlaybookBookingLink = onCall(
     const coachId = (callerToken.coachId as string) || request.auth.uid;
     const isAdmin = callerToken.role === 'platformAdmin' || !!callerToken.admin;
 
-    const { playbookId, windows, timezone, locations, dateOverrides } = request.data as {
+    const { playbookId, windows, timezone, locations, dateOverrides, saveOnly } = request.data as {
       playbookId: string; windows: unknown; timezone: string; locations?: unknown; dateOverrides?: unknown;
+      saveOnly?: boolean;
     };
     if (!playbookId) throw new HttpsError('invalid-argument', 'playbookId is required');
     if (typeof timezone !== 'string' || !timezone) {
@@ -235,6 +236,10 @@ export const createPlaybookBookingLink = onCall(
     if (!existing.empty) {
       return { token: existing.docs[0].id, alreadyExists: true };
     }
+
+    // saveOnly: persist availability without minting a shareable link — used
+    // by the panel's auto-save before the coach explicitly creates the link.
+    if (saveOnly) return { token: null, alreadyExists: false };
 
     const token = crypto.randomBytes(16).toString('hex');
     await db.collection('playbook_booking_tokens').doc(token).set({

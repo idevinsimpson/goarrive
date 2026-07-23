@@ -1013,22 +1013,28 @@ export default function PlaybookSchedulePanel({
     }
   }, [windowsValid, linkBusy, playbookId, daySlots, timezone, locations, dateOverrides]);
 
-  // Auto-save availability once a booking link exists. booking_windows is
-  // Cloud-Functions-write-only (rules), so this reuses the same callable the
-  // old Update Availability button invoked — it returns the existing token.
-  // First-time link creation stays behind the explicit Create Booking Link tap.
+  // Auto-save availability whether or not a booking link exists yet.
+  // booking_windows is Cloud-Functions-write-only (rules), so this reuses the
+  // createPlaybookBookingLink callable with saveOnly — it persists windows/
+  // locations/overrides but never mints a token. First-time link creation
+  // stays behind the explicit Create Booking Link tap.
   const saveAvailability = useCallback(async () => {
-    if (!availDirtyRef.current || !linkToken || !windowsValid) return;
+    if (!availDirtyRef.current || !windowsValid) return;
     availDirtyRef.current = false;
     try {
       const fn = httpsCallable(functions, 'createPlaybookBookingLink');
-      await fn({
+      // saveOnly: persist availability without minting a booking link — the
+      // shareable link is still only created by the explicit button tap.
+      const res = await fn({
         playbookId,
         windows: daySlotsToWindows(daySlots),
         timezone,
         locations: locations.map((l) => l.trim()).filter(Boolean),
         dateOverrides,
+        saveOnly: true,
       });
+      const tok = (res.data as { token: string | null })?.token;
+      if (tok && !linkToken) setLinkToken(tok);
       setAvailSaved(true);
       setTimeout(() => setAvailSaved(false), 2000);
     } catch (e: any) {
@@ -1038,10 +1044,10 @@ export default function PlaybookSchedulePanel({
   }, [daySlots, dateOverrides, locations, linkToken, windowsValid, playbookId, timezone]);
 
   useEffect(() => {
-    if (!availDirtyRef.current || !linkToken || !windowsValid) return;
+    if (!availDirtyRef.current || !windowsValid) return;
     const t = setTimeout(() => { void saveAvailability(); }, 800);
     return () => clearTimeout(t);
-  }, [daySlots, dateOverrides, locations, linkToken, windowsValid, playbookId, timezone, saveAvailability]);
+  }, [daySlots, dateOverrides, locations, windowsValid, playbookId, timezone, saveAvailability]);
 
   // Closing the panel inside the 800ms debounce window used to clear the
   // timer and silently drop the last edit — flush pending saves on close and
