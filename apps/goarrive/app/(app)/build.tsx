@@ -55,7 +55,8 @@ import {
 import { useNavigation, router } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { ModuleGate } from '../../lib/useCoachModules';
-import { db } from '../../lib/firebase';
+import { db, functions } from '../../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
 import { TAB_BAR_STYLE } from '../../lib/tabBarStyle';
 import { AppHeader } from '../../components/AppHeader';
 import { Icon } from '../../components/Icon';
@@ -471,6 +472,8 @@ function BuildScreenInner() {
   const [pbDescDraft, setPbDescDraft] = useState('');
   const [showPbMoveTo, setShowPbMoveTo] = useState(false);
   const [showPbManageMembers, setShowPbManageMembers] = useState(false);
+  const [showPbRevokeConfirm, setShowPbRevokeConfirm] = useState(false);
+  const [pbRevokeBusy, setPbRevokeBusy] = useState(false);
   const currentPlaybookRef = useRef<{ id: string; name: string } | null>(null);
   currentPlaybookRef.current = currentPlaybook;
   // A1: plus-button chooser sheets inside the playbook drill-in
@@ -863,6 +866,7 @@ function BuildScreenInner() {
     setShowPbDescEdit(false);
     setShowPbMoveTo(false);
     setShowPbManageMembers(false);
+    setShowPbRevokeConfirm(false);
   }, []);
 
   const savePlaybookTitle = useCallback(async () => {
@@ -948,6 +952,38 @@ function BuildScreenInner() {
     if (!token) { setShowPlaybookSchedule(true); return; }
     router.push(`/book/${token}?preview=1`);
   }, [fetchPbBookingToken]);
+
+  const revokePbBookingLink = useCallback(async (regenerate: boolean) => {
+    const pb = currentPlaybookRef.current;
+    if (!pb || pbRevokeBusy) return;
+    setPbRevokeBusy(true);
+    try {
+      const fn = httpsCallable<{ playbookId: string; regenerate: boolean }, { revoked: number; token: string | null }>(
+        functions, 'revokePlaybookBookingLink',
+      );
+      const res = await fn({ playbookId: pb.id, regenerate });
+      setShowPbRevokeConfirm(false);
+      const { revoked, token } = res.data;
+      if (regenerate && token) {
+        const origin = Platform.OS === 'web' && typeof window !== 'undefined'
+          ? window.location.origin : 'https://goarrive.fit';
+        const url = `${origin}/book/${token}`;
+        if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+          await navigator.clipboard.writeText(url);
+          if (typeof window !== 'undefined') window.alert('Old link revoked. New booking link copied to clipboard.');
+        } else {
+          try { await Share.share({ message: url }); } catch { Alert.alert('New Booking Link', url); }
+        }
+      } else if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(revoked > 0 ? 'Booking link revoked.' : 'No active booking link to revoke.');
+      }
+    } catch (e) {
+      console.error('[Build] Revoke booking link error:', e);
+      setShowPbRevokeConfirm(false);
+    } finally {
+      setPbRevokeBusy(false);
+    }
+  }, [pbRevokeBusy]);
 
   const movePlaybookToFolder = useCallback(async (folderId: string | null) => {
     const pb = currentPlaybookRef.current;
@@ -2676,6 +2712,13 @@ function BuildScreenInner() {
               <Icon name="eye" size={16} color="#FBBF24" />
               <Text style={[s.pbMenuItemText, { color: '#FBBF24' }]}>Preview Booking Page</Text>
             </Pressable>
+            <Pressable
+              style={s.pbMenuItem}
+              onPress={() => { setShowPbMenu(false); setShowPbRevokeConfirm(true); }}
+            >
+              <Icon name="block" size={16} color="#F5A623" />
+              <Text style={[s.pbMenuItemText, { color: '#F5A623' }]}>Revoke Booking Link</Text>
+            </Pressable>
             <View style={s.pbMenuDivider} />
             <Pressable
               style={s.pbMenuItem}
@@ -2785,6 +2828,31 @@ function BuildScreenInner() {
                 </Pressable>
                 <Pressable style={s.pbConfirmSave} onPress={savePlaybookDescription}>
                   <Text style={s.pbConfirmDeleteText}>Save</Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* Playbook revoke-booking-link confirm */}
+      {currentPlaybook && (
+        <Modal transparent visible={showPbRevokeConfirm} animationType="fade" onRequestClose={() => setShowPbRevokeConfirm(false)}>
+          <Pressable style={s.pbConfirmBackdrop} onPress={() => !pbRevokeBusy && setShowPbRevokeConfirm(false)}>
+            <Pressable style={s.pbConfirmCard} onPress={(e) => e.stopPropagation()}>
+              <Text style={s.pbConfirmTitle}>Revoke Booking Link?</Text>
+              <Text style={s.pbConfirmBody}>
+                Anyone with the current link will no longer be able to book. Existing booked sessions are not affected.
+              </Text>
+              <View style={s.pbConfirmRow}>
+                <Pressable style={s.pbConfirmCancel} onPress={() => setShowPbRevokeConfirm(false)} disabled={pbRevokeBusy}>
+                  <Text style={s.pbConfirmCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={s.pbConfirmCancel} onPress={() => revokePbBookingLink(false)} disabled={pbRevokeBusy}>
+                  <Text style={s.pbConfirmCancelText}>{pbRevokeBusy ? 'Working...' : 'Revoke Only'}</Text>
+                </Pressable>
+                <Pressable style={s.pbConfirmSave} onPress={() => revokePbBookingLink(true)} disabled={pbRevokeBusy}>
+                  <Text style={s.pbConfirmDeleteText}>{pbRevokeBusy ? 'Working...' : 'Revoke + New Link'}</Text>
                 </Pressable>
               </View>
             </Pressable>

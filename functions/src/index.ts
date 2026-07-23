@@ -90,6 +90,7 @@ export { bookPlaybookSession, cleanupExpiredBookingRequests } from './playbookSc
 // Calendly-style token page + guest-by-email bookings.
 export {
   createPlaybookBookingLink,
+  revokePlaybookBookingLink,
   resolvePlaybookBookingToken,
   bookViaBookingToken,
   playbookBookingIcs,
