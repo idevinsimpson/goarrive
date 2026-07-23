@@ -1363,7 +1363,12 @@ export default function PlaybookSchedulePanel({
             for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
             return (
               <View style={s.ovOverlay}>
-                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                <ScrollView
+                  style={{ flex: 1 }}
+                  contentContainerStyle={{ paddingBottom: 12 }}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                >
                   <Text style={s.ovModalTitle}>
                     Select the date(s) you want to assign specific hours
                   </Text>
@@ -1456,8 +1461,12 @@ export default function PlaybookSchedulePanel({
                     );
                   })}
 
+                </ScrollView>
+                {/* Fixed footer — Apply/Cancel stay reachable no matter how many
+                    interval rows the scrollable body grows to. */}
+                <View style={s.ovFooter}>
                   <Pressable
-                    style={[s.btn, { backgroundColor: canApplyOv ? '#A78BFA' : '#4A5568', marginTop: 20 }]}
+                    style={[s.btn, { backgroundColor: canApplyOv ? '#A78BFA' : '#4A5568' }]}
                     onPress={applyOverrides}
                     disabled={!canApplyOv}
                   >
@@ -1469,7 +1478,7 @@ export default function PlaybookSchedulePanel({
                   >
                     <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
                   </Pressable>
-                </ScrollView>
+                </View>
               </View>
             );
           })()}
@@ -2031,6 +2040,12 @@ const s = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
+    overflow: 'hidden',
+  },
+  ovFooter: {
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#2A3648',
   },
   ovModalTitle: {
     color: '#F0F4F8',
