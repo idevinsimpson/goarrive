@@ -25,6 +25,7 @@
 
 import * as admin from 'firebase-admin';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { Timestamp, FieldValue, Transaction } from 'firebase-admin/firestore';
 
 const getDb = () => admin.firestore();
@@ -321,6 +322,30 @@ export async function releaseBookingRequest(clientRequestId: string): Promise<vo
     console.warn(`[playbookScheduling] Failed to release booking request ${clientRequestId}: ${err.message}`);
   }
 }
+
+export const cleanupExpiredBookingRequests = onSchedule(
+  { schedule: '30 3 * * *', timeZone: 'UTC' },
+  async () => {
+    const db = getDb();
+    const batchSize = 400;
+    let deletedCount = 0;
+
+    const expiredQuery = db
+      .collection('booking_requests')
+      .where('expiresAt', '<', Timestamp.now())
+      .limit(batchSize);
+    let snap = await expiredQuery.get();
+    while (!snap.empty) {
+      const batch = db.batch();
+      snap.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+      deletedCount += snap.size;
+      snap = await expiredQuery.get();
+    }
+
+    console.log(`[cleanupExpiredBookingRequests] Deleted ${deletedCount} expired booking request(s)`);
+  }
+);
 
 // ── Shared single-occurrence booking (coach path + public token path) ───────
 
