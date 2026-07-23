@@ -1151,7 +1151,9 @@ export default function PlaybookSchedulePanel({
             <View style={[s.workoutTile, StyleSheet.absoluteFillObject, { opacity: 0.25 }]} />
           )
         )}
-        <GestureDetector gesture={pan}>
+        {/* touchAction pan-y: without it RNGH web sets touch-action:none and
+            the page can't scroll when a touch starts on a workout tile. */}
+        <GestureDetector gesture={pan} touchAction="pan-y">
           <Animated.View
             style={[
               s.workoutTile,
@@ -1229,7 +1231,7 @@ export default function PlaybookSchedulePanel({
               <Text style={s.addWindowText}>{memberPickerOpen ? 'Close member list' : '+ Add member'}</Text>
             </Pressable>
             {memberPickerOpen && (
-              <View style={s.memberPicker}>
+              <ScrollView style={s.memberPicker} nestedScrollEnabled>
                 {coachMembers.filter((m) => !playbookMemberIds.includes(m.id)).length === 0 && (
                   <Text style={s.hint}>All your members are already on this playbook.</Text>
                 )}
@@ -1246,7 +1248,7 @@ export default function PlaybookSchedulePanel({
                       <Text style={s.memberPickAdd}>Add</Text>
                     </Pressable>
                   ))}
-              </View>
+              </ScrollView>
             )}
 
             {/* B6: day chips reveal per-day modules */}
@@ -2235,6 +2237,7 @@ const s = StyleSheet.create({
     padding: 8,
     marginTop: 8,
     maxHeight: 220,
+    overflow: 'hidden',
   },
   memberPickRow: {
     flexDirection: 'row',
