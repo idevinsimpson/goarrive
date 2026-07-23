@@ -36,6 +36,16 @@ const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
 const DURATIONS = [30, 45, 60];
 
+// Hard client-side deadline on the booking callable: if the underlying request
+// dies without settling (e.g. iOS PWA suspended mid-flight), the footer must
+// never stay stuck on "Booking…".
+const BOOKING_TIMEOUT_MS = 45000;
+
+export function parseDuration(v: string): number | null {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n >= 5 && n <= 240 ? n : null;
+}
+
 // DECISION PENDING (rotate vs stop): when there are more scheduled days than
 // workouts, ROTATE_AT_END=true wraps back to the first workout; false leaves
 // extra days without a mapped workout. Mirrors ROTATE_AT_PLAYBOOK_END in
@@ -99,6 +109,7 @@ interface DayConfig {
   raw: string;           // what the coach typed / formatted display
   time: string | null;   // canonical HH:mm (null = unparseable)
   kind: PlaybookSessionKind;
+  duration: string;      // free text minutes, validated 5-240
 }
 
 interface PlaybookDocLite {
@@ -115,7 +126,7 @@ interface PlaybookDocLite {
   timezone?: string;
   scheduleDaysOfWeek?: number[];
   scheduleStartTime?: string;
-  scheduleDaySettings?: Array<{ dayOfWeek: number; startTime: string; sessionKind?: PlaybookSessionKind }>;
+  scheduleDaySettings?: Array<{ dayOfWeek: number; startTime: string; sessionKind?: PlaybookSessionKind; durationMinutes?: number | null }>;
   repeatHorizonWeeks?: number;
 }
 
@@ -127,7 +138,7 @@ interface UpcomingSession {
   startUtcMillis: number;
 }
 
-const DEFAULT_CONFIG: DayConfig = { raw: '7:00 AM', time: '07:00', kind: 'coach_review' };
+const DEFAULT_CONFIG: DayConfig = { raw: '7:00 AM', time: '07:00', kind: 'coach_review', duration: '45' };
 
 export default function PlaybookSchedulePanel({
   playbookId,
@@ -144,7 +155,6 @@ export default function PlaybookSchedulePanel({
 
   const [days, setDays] = useState<number[]>([]);
   const [dayConfigs, setDayConfigs] = useState<Record<number, DayConfig>>({});
-  const [duration, setDuration] = useState(45);
   const [recordingEnabled, setRecordingEnabled] = useState(true);
   const [horizonWeeks, setHorizonWeeks] = useState(4);
   const [weeklyCap, setWeeklyCap] = useState<number | null>(null);
@@ -161,6 +171,7 @@ export default function PlaybookSchedulePanel({
 
   // Workouts on this playbook — powers the per-day mosaic tiles
   const [workoutNames, setWorkoutNames] = useState<Record<string, string>>({});
+  const [workoutDurations, setWorkoutDurations] = useState<Record<string, number | null>>({});
 
   // Booking link (Phase 3b): availability windows + public token URL
   const [windows, setWindows] = useState<BookingWindowRow[]>([]);
@@ -179,6 +190,17 @@ export default function PlaybookSchedulePanel({
   const [upcoming, setUpcoming] = useState<UpcomingSession[]>([]);
   const [cancelBusyId, setCancelBusyId] = useState<string | null>(null);
 
+  // Reset transient state every time the panel opens. The component stays
+  // mounted behind the Modal, so without this a stuck `booking` (e.g. a fetch
+  // that died while the PWA was backgrounded) persisted across close/reopen.
+  useEffect(() => {
+    if (visible) {
+      setBooking(false);
+      setError(null);
+      setResults(null);
+    }
+  }, [visible]);
+
   // Live playbook doc — pre-fills the form from previously saved settings.
   useEffect(() => {
     if (!visible || !playbookId || !effectiveUid) return;
@@ -190,12 +212,12 @@ export default function PlaybookSchedulePanel({
         setPlaybook(data);
         if (!titleDirty.current) setTitleDraft(data.name || '');
         if (!descDirty.current) setDescDraft(data.description || '');
-        if (data.sessionDurationMinutes) setDuration(data.sessionDurationMinutes);
         if (data.recordingEnabled !== undefined) setRecordingEnabled(data.recordingEnabled !== false);
         if (data.repeatHorizonWeeks) setHorizonWeeks(data.repeatHorizonWeeks);
         if (data.weeklySessionCap !== undefined) setWeeklyCap(data.weeklySessionCap ?? null);
         if (!prefilledRef.current) {
           prefilledRef.current = true;
+          const fallbackDuration = String(data.sessionDurationMinutes || 45);
           const saved = data.scheduleDaySettings;
           if (Array.isArray(saved) && saved.length) {
             const ds = saved.map((x) => x.dayOfWeek).sort((a, b) => a - b);
@@ -206,6 +228,7 @@ export default function PlaybookSchedulePanel({
                 raw: formatTime12(x.startTime),
                 time: x.startTime,
                 kind: x.sessionKind || data.sessionKind || 'coach_review',
+                duration: x.durationMinutes ? String(x.durationMinutes) : fallbackDuration,
               };
             }
             setDayConfigs(cfg);
@@ -215,7 +238,7 @@ export default function PlaybookSchedulePanel({
             const t = data.scheduleStartTime || '07:00';
             const cfg: Record<number, DayConfig> = {};
             for (const d of ds) {
-              cfg[d] = { raw: formatTime12(t), time: t, kind: data.sessionKind || 'coach_review' };
+              cfg[d] = { raw: formatTime12(t), time: t, kind: data.sessionKind || 'coach_review', duration: fallbackDuration };
             }
             setDayConfigs(cfg);
           }
@@ -238,6 +261,14 @@ export default function PlaybookSchedulePanel({
           const next = { ...prev };
           snaps.forEach((snapDoc, i) => {
             next[missing[i]] = (snapDoc?.data()?.name as string) || 'Workout';
+          });
+          return next;
+        });
+        setWorkoutDurations((prev) => {
+          const next = { ...prev };
+          snaps.forEach((snapDoc, i) => {
+            const v = snapDoc?.data()?.estimatedDurationMin;
+            next[missing[i]] = typeof v === 'number' ? v : null;
           });
           return next;
         });
@@ -421,6 +452,14 @@ export default function PlaybookSchedulePanel({
     setResults(null);
   }, []);
 
+  const setDayDuration = useCallback((d: number, v: string) => {
+    setDayConfigs((prev) => ({
+      ...prev,
+      [d]: { ...(prev[d] || DEFAULT_CONFIG), duration: v.replace(/[^0-9]/g, '') },
+    }));
+    setResults(null);
+  }, []);
+
   // Day k (in sorted selected days) → workout index in playbook order.
   const workoutForModule = useCallback((k: number): string | null => {
     if (workoutIds.length === 0) return null;
@@ -478,7 +517,8 @@ export default function PlaybookSchedulePanel({
 
   const sortedDays = days;
 
-  const timesValid = sortedDays.length > 0 && sortedDays.every((d) => !!dayConfigs[d]?.time);
+  const timesValid = sortedDays.length > 0
+    && sortedDays.every((d) => !!dayConfigs[d]?.time && parseDuration(dayConfigs[d]?.duration ?? '') !== null);
   const canBook = hasMember && timesValid && !booking;
 
   const book = useCallback(async () => {
@@ -491,22 +531,29 @@ export default function PlaybookSchedulePanel({
         dayOfWeek: d,
         startTime: dayConfigs[d]!.time as string,
         sessionKind: dayConfigs[d]!.kind,
+        durationMinutes: parseDuration(dayConfigs[d]!.duration) as number,
       }));
       const fn = httpsCallable(functions, 'bookPlaybookSession');
-      const res = await fn({
+      const call = fn({
         playbookId,
         daysOfWeek: sortedDays,
         startTime: daySettings[0].startTime,
         daySettings,
         timezone,
-        durationMinutes: duration,
+        durationMinutes: daySettings[0].durationMinutes,
         sessionKind: daySettings[0].sessionKind,
         recordingEnabled,
         repeatFrequency: 'weekly',
         repeatHorizonWeeks: horizonWeeks,
         weeklySessionCap: weeklyCap,
       });
-      const data = res.data as { results: BookResult[] };
+      const res = await Promise.race([
+        call,
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('Booking timed out — check your connection and try again')), BOOKING_TIMEOUT_MS);
+        }),
+      ]);
+      const data = (res as { data: { results: BookResult[] } }).data;
       setResults(data.results || []);
     } catch (e: any) {
       console.error('[PlaybookSchedulePanel] booking error:', e);
@@ -514,7 +561,7 @@ export default function PlaybookSchedulePanel({
     } finally {
       setBooking(false);
     }
-  }, [canBook, playbookId, sortedDays, dayConfigs, timezone, duration, recordingEnabled, horizonWeeks, weeklyCap]);
+  }, [canBook, playbookId, sortedDays, dayConfigs, timezone, recordingEnabled, horizonWeeks, weeklyCap]);
 
   const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
   const windowsValid = windows.length > 0 && windows.every(
@@ -732,6 +779,9 @@ export default function PlaybookSchedulePanel({
             {sortedDays.map((d, k) => {
               const cfg = dayConfigs[d] || DEFAULT_CONFIG;
               const isOver = dragOverIdx === k && dragFromIdx !== null && dragFromIdx !== k;
+              const dur = parseDuration(cfg.duration);
+              const moduleWorkoutId = workoutForModule(k);
+              const estMin = moduleWorkoutId ? workoutDurations[moduleWorkoutId] : null;
               return (
                 <View
                   key={d}
@@ -759,6 +809,27 @@ export default function PlaybookSchedulePanel({
                         <Text style={s.dayTimePreview}>{formatTime12(cfg.time)}</Text>
                       )}
                     </View>
+                    <View style={[s.chipRow, { marginTop: 8, alignItems: 'center' }]}>
+                      {DURATIONS.map((preset) => (
+                        <Pressable
+                          key={preset}
+                          style={[s.miniChip, dur === preset && s.chipActive]}
+                          onPress={() => setDayDuration(d, String(preset))}
+                        >
+                          <Text style={[s.miniChipText, dur === preset && s.chipTextActive]}>{preset}</Text>
+                        </Pressable>
+                      ))}
+                      <TextInput
+                        style={[s.durationInput, dur === null && s.inputBad]}
+                        value={cfg.duration}
+                        onChangeText={(v) => setDayDuration(d, v)}
+                        keyboardType="numeric"
+                        placeholder="min"
+                        placeholderTextColor="#4A5568"
+                      />
+                      <Text style={s.durationUnit}>min</Text>
+                      {estMin ? <Text style={s.durationUnit}>· workout est. ~{estMin} min</Text> : null}
+                    </View>
                     <View style={[s.chipRow, { marginTop: 8 }]}>
                       {(Object.keys(PLAYBOOK_SESSION_KIND_LABELS) as PlaybookSessionKind[]).map((kind) => (
                         <Pressable
@@ -785,19 +856,6 @@ export default function PlaybookSchedulePanel({
                   : ''}
               </Text>
             )}
-
-            <Text style={s.sectionLabel}>Duration</Text>
-            <View style={s.chipRow}>
-              {DURATIONS.map((d) => (
-                <Pressable
-                  key={d}
-                  style={[s.chip, duration === d && s.chipActive]}
-                  onPress={() => setDuration(d)}
-                >
-                  <Text style={[s.chipText, duration === d && s.chipTextActive]}>{d} min</Text>
-                </Pressable>
-              ))}
-            </View>
 
             <View style={s.switchRow}>
               <Text style={s.switchLabel}>Record sessions</Text>
@@ -1119,6 +1177,33 @@ const s = StyleSheet.create({
   dayTimePreview: {
     color: '#A78BFA',
     fontSize: 12,
+    fontFamily: FB,
+  },
+  miniChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#1E2A3A',
+    borderRadius: 14,
+  },
+  miniChipText: {
+    color: '#8A95A3',
+    fontSize: 11,
+    fontWeight: '600',
+    fontFamily: FB,
+  },
+  durationInput: {
+    backgroundColor: '#1E2A3A',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    color: '#F0F4F8',
+    fontSize: 13,
+    fontFamily: FB,
+    width: 56,
+  },
+  durationUnit: {
+    color: '#4A5568',
+    fontSize: 11,
     fontFamily: FB,
   },
   kindChip: {
