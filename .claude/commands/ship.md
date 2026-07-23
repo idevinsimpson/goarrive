@@ -43,7 +43,9 @@ If verified, deploy the build to the staging environment so Devin can review it 
 cd apps/goarrive && npm run deploy:staging
 ```
 
-Staging URL: `https://goarrive--staging.web.app`
+Staging URL: `https://goarrive--staging-gurfzjak.web.app`
+
+**Combined-staging rule (2026-07-15):** staging must carry main + EVERY open PR branch, not just your feature. Before deploying, merge `origin/main` and all open PR head branches (`gh pr list --state open`) into a throwaway integration branch and deploy from that — a single-feature deploy wipes other features off staging mid-review.
 
 ## Step 4a: Update the Briefing Doc (MANDATORY — do not skip)
 
@@ -93,7 +95,7 @@ Relay's Slack ID: `U0B1YQS8L12`. Always use the ID, not the display name.
 - Push to a new feature branch — never push directly to `main`
 - Create a PR on GitHub using `gh pr create` with:
   - **Title:** short and descriptive (under 70 characters)
-  - **Body:** summary of changes, what was tested, and the staging URL (`https://goarrive--staging.web.app`)
+  - **Body:** summary of changes, what was tested, and the staging URL (`https://goarrive--staging-gurfzjak.web.app`)
   - **Base branch:** `main`
   - **Do NOT merge the PR** — only create it
 
@@ -107,7 +109,7 @@ Report back with:
 - Confirmation that staging is updated and ready to review
 
 Example message:
-> "✅ /ship complete. Tests passed, build succeeded, staging updated at `https://goarrive--staging.web.app`. PR #[number] is open for your review — let me know when to merge."
+> "✅ /ship complete. Tests passed, build succeeded, staging updated at `https://goarrive--staging-gurfzjak.web.app`. PR #[number] is open for your review — let me know when to merge."
 
 ## Hard Rules
 

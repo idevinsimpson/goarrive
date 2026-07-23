@@ -8,8 +8,8 @@ To provide a safe environment for testing changes before they impact the live `g
 
 ### How it Works:
 
-1.  **Dedicated Staging URL:** A permanent staging URL, `https://goarrive--staging.web.app`, has been established. This URL will always reflect the latest changes deployed to the staging channel.
-2.  **Deployment by AI Agent:** When an AI agent (e.g., Manus or Claude) completes a task involving code changes, it will deploy these changes to the staging channel using a specific script.
+1.  **Dedicated Staging URL:** The staging URL is `https://goarrive--staging-gurfzjak.web.app` (Firebase Hosting preview channel `staging` on the single `goarrive` project). This URL will always reflect the latest changes deployed to the staging channel.
+2.  **Deployment by AI Agent:** When an AI agent completes a task involving code changes, it deploys to the staging channel with `firebase hosting:channel:deploy staging --expires 7d` (via `npx -y firebase-tools`, service-account credentials in `.secrets/`). **Combined-staging rule (2026-07-15): every staging deploy must be built from main + ALL open PR branches merged into an integration branch** — never a single-feature build, which would wipe other in-review features off the shared channel.
 3.  **User Review:** You, as the user, can keep the staging URL open in a dedicated tab on your iPad or iPhone. After an AI agent notifies you of a staging deployment, you simply refresh the page to see the updated application.
 4.  **Service Worker Bypass:** The staging deployment is configured to automatically bypass the service worker cache, ensuring that a simple page refresh always loads the absolute latest code.
 5.  **Approval for Production:** Once you have reviewed and approved the changes on the staging environment, the AI agent can then promote the exact same build to the live `goarrive.fit` production site.
@@ -42,7 +42,7 @@ To maintain code quality and ensure stability, a layered testing approach has be
 
 *   **Purpose:** Playwright is used for browser-based end-to-end testing of critical UI flows and user journeys, validating the application's behavior in a real browser environment.
 *   **Location:** Tests are located in the root `tests/` directory.
-*   **Configuration:** `playwright.config.ts` in the root directory. It is configured to use a base URL from the `PLAYWRIGHT_BASE_URL` environment variable, defaulting to the staging URL (`https://goarrive--staging.web.app`).
+*   **Configuration:** `playwright.config.ts` in the root directory. It is configured to use a base URL from the `PLAYWRIGHT_BASE_URL` environment variable, defaulting to the staging URL (`https://goarrive--staging-gurfzjak.web.app`).
 *   **Scripts (within root `package.json`):**
 
     | Script | Command | Purpose |
@@ -59,8 +59,8 @@ To enable seamless collaboration between human developers and AI agents (like Ma
 *   **Codebase:** The GitHub repository (`idevinsimpson/goarrive`) serves as the single source of truth for all code, documentation, and configuration.
 *   **AI Agent Access:** Both Manus and Claude (or any other AI agent) will interact directly with this repository for:
     *   **Fetching latest code:** `git pull origin main`
-    *   **Committing changes:** `git commit -m "Descriptive commit message"`
-    *   **Pushing changes:** `git push origin main`
+    *   **Committing changes:** `git commit -m "Descriptive commit message"` on a feature branch
+    *   **Pushing changes:** push the feature branch and open a PR — never push directly to `main`; merges are approval-gated
 *   **Documentation:** All critical knowledge, including this guide and the `testing-policy.md` file, resides in the `.claude/` directory within the repository. AI agents are instructed to read these documents to understand the project's context, architecture, and workflows.
 
 ### 3.2. Slack: Real-time Communication and Notifications
@@ -84,7 +84,7 @@ Here's a typical workflow for an AI agent like Claude:
 2.  **Fetch Code:** Claude pulls the latest code from GitHub (`git pull origin main`).
 3.  **Implement Changes:** Claude makes the necessary code modifications.
 4.  **Run Tests:** Claude runs relevant Vitest tests (`npm run test:vitest`) to ensure local correctness.
-5.  **Deploy to Staging:** Claude executes `npm run deploy:staging` from `apps/goarrive/` to push changes to `https://goarrive--staging.web.app`.
+5.  **Deploy to Staging:** Claude builds the combined branch (main + all open PRs) and deploys the staging preview channel, updating `https://goarrive--staging-gurfzjak.web.app`.
 6.  **Notify User:** Claude sends a Slack message to you, providing the staging URL and a summary of changes, requesting your review.
 7.  **Run E2E Tests (if applicable):** If the changes involve critical UI flows, Claude runs Playwright tests (`npm run test:e2e`) against the staging URL.
 8.  **Await Feedback:** Claude monitors Slack for your approval or further instructions.
