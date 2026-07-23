@@ -238,6 +238,7 @@ export interface SessionInstance {
   endUtc?: Timestamp;
   reservationId?: string;             // member_time_reservations doc backing this booking
   guestEmail?: string | null;         // Guest-by-email booking hook (Phase B)
+  location?: string | null;           // Member-picked location option (Phase B.1)
 
   // Allocation fields
   zoomRoomId?: string;              // Assigned Zoom room doc ID
@@ -650,7 +651,8 @@ export type PlaybookSessionKind = 'coach_guided' | 'coach_review';
 
 export const PLAYBOOK_SESSION_KIND_LABELS: Record<PlaybookSessionKind, string> = {
   coach_guided: 'Live with Coach',
-  coach_review: 'Coach Review',
+  // Backend kind stays coach_review; label renamed per Phase B.2 UX pass.
+  coach_review: 'Self-Guided',
 };
 
 export type PlaybookRepeatFrequency = 'weekly' | 'every_2_weeks' | 'none';
