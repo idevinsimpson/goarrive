@@ -175,8 +175,13 @@ export interface DateOverride {
   intervals: Array<{ start: string; end: string }>; // HH:mm
 }
 
-export function localDateStr(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// "Today" as YYYY-MM-DD in the coach timezone from the booking window — the
+// override calendar gates past dates against the coach's day, not the
+// device's, so a coach traveling across timezones can't pick a passed date.
+export function todayInTz(tz: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
 }
 
 const MONTH_LABELS = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -578,33 +583,36 @@ export default function PlaybookSchedulePanel({
   // Auto-save per-day settings: any user edit (day toggle, time, duration,
   // kind) debounces ~800ms then persists to the playbook doc. Previously these
   // only saved when Book Sessions ran, so edits vanished on reload.
+  const saveDaySettings = useCallback(() => {
+    if (!dayDirtyRef.current || !playbookId) return;
+    dayDirtyRef.current = false;
+    const valid = days.filter(
+      (d) => !!dayConfigs[d]?.time && parseDuration(dayConfigs[d]?.duration ?? '') !== null,
+    );
+    // Mid-edit (nothing parseable yet) — wait for the next valid change.
+    if (valid.length === 0 && days.length > 0) return;
+    const daySettings = valid.map((d) => ({
+      dayOfWeek: d,
+      startTime: dayConfigs[d]!.time as string,
+      sessionKind: dayConfigs[d]!.kind,
+      durationMinutes: parseDuration(dayConfigs[d]!.duration) as number,
+    }));
+    const payload: Record<string, unknown> = {
+      scheduleDaySettings: daySettings,
+      scheduleDaysOfWeek: valid,
+      updatedAt: serverTimestamp(),
+    };
+    if (daySettings.length) payload.scheduleStartTime = daySettings[0].startTime;
+    updateDoc(doc(db, 'playbooks', playbookId), payload).catch((e) => {
+      console.error('[PlaybookSchedulePanel] day settings auto-save error:', e);
+    });
+  }, [days, dayConfigs, playbookId]);
+
   useEffect(() => {
     if (!dayDirtyRef.current || !playbookId) return;
-    const t = setTimeout(() => {
-      dayDirtyRef.current = false;
-      const valid = days.filter(
-        (d) => !!dayConfigs[d]?.time && parseDuration(dayConfigs[d]?.duration ?? '') !== null,
-      );
-      // Mid-edit (nothing parseable yet) — wait for the next valid change.
-      if (valid.length === 0 && days.length > 0) return;
-      const daySettings = valid.map((d) => ({
-        dayOfWeek: d,
-        startTime: dayConfigs[d]!.time as string,
-        sessionKind: dayConfigs[d]!.kind,
-        durationMinutes: parseDuration(dayConfigs[d]!.duration) as number,
-      }));
-      const payload: Record<string, unknown> = {
-        scheduleDaySettings: daySettings,
-        scheduleDaysOfWeek: valid,
-        updatedAt: serverTimestamp(),
-      };
-      if (daySettings.length) payload.scheduleStartTime = daySettings[0].startTime;
-      updateDoc(doc(db, 'playbooks', playbookId), payload).catch((e) => {
-        console.error('[PlaybookSchedulePanel] day settings auto-save error:', e);
-      });
-    }, 800);
+    const t = setTimeout(saveDaySettings, 800);
     return () => clearTimeout(t);
-  }, [days, dayConfigs, playbookId]);
+  }, [days, dayConfigs, playbookId, saveDaySettings]);
 
   // Day k (in sorted selected days) → workout index in playbook order.
   const workoutForModule = useCallback((k: number): string | null => {
@@ -793,12 +801,12 @@ export default function PlaybookSchedulePanel({
 
   // ── Date-specific hours modal ─────────────────────────────────────────────
   const openOverrideModal = useCallback(() => {
-    const n = new Date();
-    setOvMonth({ y: n.getFullYear(), m: n.getMonth() });
+    const [y, m] = todayInTz(timezone).split('-').map(Number);
+    setOvMonth({ y, m: m - 1 });
     setOvDates([]);
     setOvSlots([makeSlot('09:00', '17:00')]);
     setOvOpen(true);
-  }, []);
+  }, [timezone]);
 
   const toggleOvDate = useCallback((dateStr: string) => {
     setOvDates((prev) => (prev.includes(dateStr)
@@ -885,28 +893,45 @@ export default function PlaybookSchedulePanel({
   // Cloud-Functions-write-only (rules), so this reuses the same callable the
   // old Update Availability button invoked — it returns the existing token.
   // First-time link creation stays behind the explicit Create Booking Link tap.
+  const saveAvailability = useCallback(async () => {
+    if (!availDirtyRef.current || !linkToken || !windowsValid) return;
+    availDirtyRef.current = false;
+    try {
+      const fn = httpsCallable(functions, 'createPlaybookBookingLink');
+      await fn({
+        playbookId,
+        windows: daySlotsToWindows(daySlots),
+        timezone,
+        locations: locations.map((l) => l.trim()).filter(Boolean),
+        dateOverrides,
+      });
+      setAvailSaved(true);
+      setTimeout(() => setAvailSaved(false), 2000);
+    } catch (e: any) {
+      console.error('[PlaybookSchedulePanel] availability auto-save error:', e);
+      setLinkError(e?.message || 'Could not save availability');
+    }
+  }, [daySlots, dateOverrides, locations, linkToken, windowsValid, playbookId, timezone]);
+
   useEffect(() => {
     if (!availDirtyRef.current || !linkToken || !windowsValid) return;
-    const t = setTimeout(async () => {
-      availDirtyRef.current = false;
-      try {
-        const fn = httpsCallable(functions, 'createPlaybookBookingLink');
-        await fn({
-          playbookId,
-          windows: daySlotsToWindows(daySlots),
-          timezone,
-          locations: locations.map((l) => l.trim()).filter(Boolean),
-          dateOverrides,
-        });
-        setAvailSaved(true);
-        setTimeout(() => setAvailSaved(false), 2000);
-      } catch (e: any) {
-        console.error('[PlaybookSchedulePanel] availability auto-save error:', e);
-        setLinkError(e?.message || 'Could not save availability');
-      }
-    }, 800);
+    const t = setTimeout(() => { void saveAvailability(); }, 800);
     return () => clearTimeout(t);
-  }, [daySlots, dateOverrides, locations, linkToken, windowsValid, playbookId, timezone]);
+  }, [daySlots, dateOverrides, locations, linkToken, windowsValid, playbookId, timezone, saveAvailability]);
+
+  // Closing the panel inside the 800ms debounce window used to clear the
+  // timer and silently drop the last edit — flush pending saves on close and
+  // unmount. The dirty-flag guards inside the save fns keep snapshot prefill
+  // from ever triggering a write.
+  const flushPendingSavesRef = useRef<() => void>(() => {});
+  flushPendingSavesRef.current = () => {
+    if (dayDirtyRef.current) saveDaySettings();
+    if (availDirtyRef.current) void saveAvailability();
+  };
+  useEffect(() => {
+    if (!visible) flushPendingSavesRef.current();
+  }, [visible]);
+  useEffect(() => () => flushPendingSavesRef.current(), []);
 
   const openPreview = useCallback(() => {
     if (!linkToken) return;
@@ -1421,9 +1446,9 @@ export default function PlaybookSchedulePanel({
 
           {/* Date-specific hours modal — overlay (not a nested Modal) */}
           {ovOpen && (() => {
-            const today = localDateStr(new Date());
-            const now = new Date();
-            const atCurrentMonth = ovMonth.y === now.getFullYear() && ovMonth.m === now.getMonth();
+            const today = todayInTz(timezone);
+            const [ty, tm] = today.split('-').map(Number);
+            const atCurrentMonth = ovMonth.y === ty && ovMonth.m === tm - 1;
             const firstDow = new Date(ovMonth.y, ovMonth.m, 1).getDay();
             const daysInMonth = new Date(ovMonth.y, ovMonth.m + 1, 0).getDate();
             const cells: Array<number | null> = [
