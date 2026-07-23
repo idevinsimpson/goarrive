@@ -302,8 +302,42 @@ BODY_INJECT = """
         clearTimeout(appLoadTimeout);
       });
       
-      // Service Worker registration - DISABLED for Safari compatibility
-      console.log('[SW] Service Worker registration disabled for Safari compatibility');
+      // Service Worker registration + auto-reload on new deploy.
+      // An already-open SPA tab keeps its in-memory JS bundle forever (iOS
+      // Safari resume/bfcache makes this constant), so when a new SW takes
+      // control after a deploy we do a one-time reload to pick up new code.
+      if ('serviceWorker' in navigator) {
+        var swHadController = !!navigator.serviceWorker.controller;
+        var swReloading = false;
+        navigator.serviceWorker.addEventListener('controllerchange', function() {
+          // Only reload if a previous controller existed (i.e. this is an
+          // update taking over, not the very first registration claiming).
+          if (swHadController && !swReloading) {
+            swReloading = true;
+            console.log('[SW] New service worker took control — reloading for fresh bundle');
+            window.location.reload();
+          }
+          swHadController = true;
+        });
+
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/service-worker.js').then(function(reg) {
+            console.log('[SW] Registered', reg.scope);
+            // When the tab wakes from iOS background/bfcache, immediately
+            // check for a newer SW so a post-deploy resume triggers the
+            // controllerchange reload above.
+            var swCheckUpdate = function() { reg.update().catch(function() {}); };
+            document.addEventListener('visibilitychange', function() {
+              if (document.visibilityState === 'visible') swCheckUpdate();
+            });
+            window.addEventListener('pageshow', function(e) {
+              if (e.persisted) swCheckUpdate();
+            });
+          }).catch(function(err) {
+            console.warn('[SW] Registration failed', err);
+          });
+        });
+      }
     </script>
 """
 
