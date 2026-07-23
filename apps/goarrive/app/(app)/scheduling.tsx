@@ -42,6 +42,7 @@ import {
   deriveRecordingStatus,
   deriveAttendanceOutcome,
   todayInTz,
+  dateStrInTz,
   type RecurringSlot,
   type SessionInstance,
   type HostingMode,
@@ -221,7 +222,7 @@ function SchedulingScreenInner() {
     for (let i = 0; i < 7; i++) {
       const d = new Date(startOfWeek);
       d.setDate(startOfWeek.getDate() + i);
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = dateStrInTz(d, deviceTz);
       days.push({
         date: d,
         dateStr,
