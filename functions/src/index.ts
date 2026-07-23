@@ -3237,26 +3237,63 @@ export const allocateSessionInstance = onCall(
 
     // Phase-aware room routing:
     //   coach_personal → use coach's personal Zoom room (tagged isPersonal: true)
-    //   shared_pool    → round-robin from shared pool rooms (isPersonal !== true)
+    //   shared_pool    → platform HMTI pool rooms (poolId == 'hmti'), LRU round-robin;
+    //                    falls back to per-coach shared rooms until pool rooms exist
     //   (no roomSource) → legacy behavior: try all active rooms
+    // Member-only sessions (coachExpectedLive === false) also prefer the platform
+    // bot pool, and within the pool bot-host rooms (isBot === true) go first.
+    // All candidate lists are LRU-sorted by lastUsedAt so the earliest-available
+    // (least recently used) room is tried first — true round-robin.
     const roomSource = (instance.roomSource as string) || '';
+    const memberOnly = instance.coachExpectedLive === false;
 
-    let roomQuery = db.collection('zoom_rooms')
-      .where('coachId', '==', callerUid)
-      .where('status', '==', 'active');
+    // lastAllocatedAt kept as tie-break for pool rooms written before lastUsedAt existed
+    const lruMillis = (d: FirebaseFirestore.QueryDocumentSnapshot) => {
+      const x = d.data();
+      return x.lastUsedAt?.toMillis?.() ?? x.lastAllocatedAt?.toMillis?.() ?? 0;
+    };
+    const sortLru = (docs: FirebaseFirestore.QueryDocumentSnapshot[]) =>
+      docs.slice().sort((a, b) => lruMillis(a) - lruMillis(b));
 
-    const roomsSnap = await roomQuery.get();
+    let candidateRooms: FirebaseFirestore.QueryDocumentSnapshot[] = [];
 
-    // Filter rooms based on roomSource
-    let candidateRooms = roomsSnap.docs;
-    if (roomSource === 'coach_personal') {
-      // Prefer rooms tagged as personal; fall back to all if none tagged
-      const personalRooms = candidateRooms.filter(d => d.data().isPersonal === true);
-      if (personalRooms.length > 0) candidateRooms = personalRooms;
-    } else if (roomSource === 'shared_pool') {
-      // Prefer rooms NOT tagged as personal; fall back to all if none
-      const poolRooms = candidateRooms.filter(d => d.data().isPersonal !== true);
-      if (poolRooms.length > 0) candidateRooms = poolRooms;
+    if (roomSource === 'shared_pool' || (memberOnly && roomSource !== 'coach_personal')) {
+      // Platform-wide HMTI agent pool — not scoped to the calling coach
+      const poolSnap = await db.collection('zoom_rooms')
+        .where('poolId', '==', 'hmti')
+        .where('status', '==', 'active')
+        .get();
+
+      if (poolSnap.docs.length > 0) {
+        candidateRooms = sortLru(poolSnap.docs);
+        if (memberOnly) {
+          // Bot-host rooms first for member-only sessions, LRU order within each group
+          candidateRooms = [
+            ...candidateRooms.filter(d => d.data().isBot === true),
+            ...candidateRooms.filter(d => d.data().isBot !== true),
+          ];
+        }
+      }
+    }
+
+    if (candidateRooms.length === 0) {
+      const roomsSnap = await db.collection('zoom_rooms')
+        .where('coachId', '==', callerUid)
+        .where('status', '==', 'active')
+        .get();
+
+      // Filter rooms based on roomSource
+      candidateRooms = roomsSnap.docs;
+      if (roomSource === 'coach_personal') {
+        // Prefer rooms tagged as personal; fall back to all if none tagged
+        const personalRooms = candidateRooms.filter(d => d.data().isPersonal === true);
+        if (personalRooms.length > 0) candidateRooms = personalRooms;
+      } else if (roomSource === 'shared_pool') {
+        // No hmti-pool rooms provisioned yet — legacy per-coach shared behavior
+        const poolRooms = candidateRooms.filter(d => d.data().isPersonal !== true);
+        if (poolRooms.length > 0) candidateRooms = poolRooms;
+      }
+      candidateRooms = sortLru(candidateRooms);
     }
 
     // Personal room missing → provision one from the coach's login email
@@ -3391,10 +3428,16 @@ export const allocateSessionInstance = onCall(
       zoomMeetingUuid: meeting.uuid || null,
       zoomJoinUrl: meeting.joinUrl,
       zoomStartUrl: meeting.startUrl,
-      zoomMeetingPassword: meeting.password,
+      zoomMeetingPassword: meeting.password ?? null,
       zoomProviderMode: zoomProvider.mode,
       allocatedAt: FieldValue.serverTimestamp(),
       allocationAttempts: (instance.allocationAttempts || 0) + 1,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    // Advance the round-robin cursor: every successful allocation stamps lastUsedAt
+    await db.collection('zoom_rooms').doc(allocatedRoom.id).update({
+      lastUsedAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     });
 
