@@ -253,6 +253,49 @@ export const createPlaybookBookingLink = onCall(
   }
 );
 
+// ── revokePlaybookBookingLink (coach) ───────────────────────────────────────
+
+export const revokePlaybookBookingLink = onCall(
+  { region: 'us-central1', invoker: 'public' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Must be signed in');
+    const db = getDb();
+    const callerToken = request.auth.token as Record<string, any>;
+    const coachId = (callerToken.coachId as string) || request.auth.uid;
+    const isAdmin = callerToken.role === 'platformAdmin' || !!callerToken.admin;
+
+    const { playbookId, regenerate } = request.data as { playbookId: string; regenerate?: boolean };
+    if (!playbookId) throw new HttpsError('invalid-argument', 'playbookId is required');
+
+    const playbookSnap = await db.collection('playbooks').doc(playbookId).get();
+    if (!playbookSnap.exists) throw new HttpsError('not-found', 'Playbook not found');
+    const playbook = playbookSnap.data()!;
+    if (playbook.coachId !== coachId && !isAdmin) {
+      throw new HttpsError('permission-denied', 'This playbook does not belong to you');
+    }
+
+    const active = await db.collection('playbook_booking_tokens')
+      .where('playbookId', '==', playbookId)
+      .where('revokedAt', '==', null)
+      .get();
+    const batch = db.batch();
+    active.docs.forEach((d) => batch.update(d.ref, { revokedAt: FieldValue.serverTimestamp() }));
+    await batch.commit();
+
+    if (!regenerate) return { revoked: active.size, token: null };
+
+    const token = crypto.randomBytes(16).toString('hex');
+    await db.collection('playbook_booking_tokens').doc(token).set({
+      playbookId,
+      coachId: playbook.coachId,
+      memberId: playbook.assignedMemberId || null,
+      revokedAt: null,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    return { revoked: active.size, token };
+  }
+);
+
 // ── resolvePlaybookBookingToken (public, Admin SDK projection) ──────────────
 
 export const resolvePlaybookBookingToken = onRequest(
