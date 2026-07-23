@@ -22,7 +22,7 @@ import {
 import { router } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { useAnimatedStyle, useSharedValue, runOnJS } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, runOnJS, withSpring } from 'react-native-reanimated';
 import { db, functions } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import {
@@ -40,8 +40,9 @@ const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 const DURATIONS = [30, 45, 60];
 
 // Day-module workout tile — 4:5 aspect ratio, same as workout cards on Build.
-const TILE_W = 108;
-const TILE_H = 135;
+// Sized to fill the module's full height (left column runs ~150px tall).
+const TILE_W = 124;
+const TILE_H = 155;
 
 // Hard client-side deadline on the booking callable: if the underlying request
 // dies without settling (e.g. iOS PWA suspended mid-flight), the footer must
@@ -309,6 +310,9 @@ export default function PlaybookSchedulePanel({
       // which keeps scrollEnabled false and freezes scrolling on reopen.
       setDragFromIdx(null);
       setDragOverIdx(null);
+      dragTY.value = 0;
+      displacedTY.value = 0;
+      lastOverRef.current = null;
       dayDirtyRef.current = false;
       availDirtyRef.current = false;
       sessionCfgDirtyRef.current = false;
@@ -709,47 +713,85 @@ export default function PlaybookSchedulePanel({
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const dragTY = useSharedValue(0);
   const dragActiveIdx = useSharedValue(-1);
+  // Swap preview: while the dragged tile hovers a module, that module's own
+  // workout slides toward the source slot so the coach SEES the swap; on drop
+  // the dragged tile springs into the destination slot before data commits.
+  const displacedTY = useSharedValue(0);
+  const lastOverRef = useRef<number | null>(null);
 
-  const moveWorkout = useCallback(async (fromModule: number, toModule: number) => {
+  const SPRING_CFG = { damping: 22, stiffness: 240, mass: 0.7 };
+
+  const endDrag = useCallback(() => {
+    lastOverRef.current = null;
     setDragFromIdx(null);
     setDragOverIdx(null);
-    if (fromModule === toModule) return;
+    dragTY.value = 0;
+    displacedTY.value = 0;
+    dragActiveIdx.value = -1;
+  }, [dragTY, displacedTY, dragActiveIdx]);
+
+  const moveWorkout = useCallback((fromModule: number, toModule: number) => {
     const n = workoutIds.length;
-    if (n === 0) return;
+    if (fromModule === toModule || n === 0) return;
     const fromPos = fromModule < n ? fromModule : (ROTATE_AT_END ? fromModule % n : -1);
     const toPos = toModule < n ? toModule : (ROTATE_AT_END ? toModule % n : -1);
     if (fromPos < 0 || toPos < 0 || fromPos === toPos) return;
     const next = [...workoutIds];
     const [moved] = next.splice(fromPos, 1);
     next.splice(toPos, 0, moved);
-    try {
-      await updateDoc(doc(db, 'playbooks', playbookId), { workoutIds: next, updatedAt: serverTimestamp() });
-    } catch (e) {
-      console.error('[PlaybookSchedulePanel] workout reorder error:', e);
-    }
+    updateDoc(doc(db, 'playbooks', playbookId), { workoutIds: next, updatedAt: serverTimestamp() })
+      .catch((e) => console.error('[PlaybookSchedulePanel] workout reorder error:', e));
   }, [workoutIds, playbookId]);
 
-  const hoverModule = useCallback((fromIdx: number, ty: number) => {
+  const commitMove = useCallback((fromModule: number, toModule: number) => {
+    moveWorkout(fromModule, toModule);
+    // Reset transforms on the next frame — Firestore's latency-compensated
+    // local write has swapped the tile contents by then, so the snap lands
+    // exactly where the reordered data renders.
+    requestAnimationFrame(() => endDrag());
+  }, [moveWorkout, endDrag]);
+
+  const findTarget = (fromIdx: number, ty: number): number | null => {
     const from = moduleLayouts.current[fromIdx];
-    if (!from) return;
+    if (!from) return null;
     const centerY = from.y + from.h / 2 + ty;
-    let target: number | null = null;
     for (const [k, r] of Object.entries(moduleLayouts.current)) {
-      if (centerY >= r.y && centerY < r.y + r.h) { target = Number(k); break; }
+      if (centerY >= r.y && centerY < r.y + r.h) return Number(k);
     }
+    return null;
+  };
+
+  const hoverModule = useCallback((fromIdx: number, ty: number) => {
+    let target = findTarget(fromIdx, ty);
+    if (target === fromIdx) target = null;
+    if (target === lastOverRef.current) return;
+    lastOverRef.current = target;
     setDragOverIdx(target);
-  }, []);
+    const from = moduleLayouts.current[fromIdx];
+    const dest = target !== null ? moduleLayouts.current[target] : null;
+    if (from && dest) {
+      displacedTY.value = 0;
+      displacedTY.value = withSpring(from.y - dest.y, SPRING_CFG);
+    } else {
+      displacedTY.value = withSpring(0, SPRING_CFG);
+    }
+  }, [displacedTY]);
 
   const finishDrag = useCallback((fromIdx: number, ty: number) => {
+    const target = findTarget(fromIdx, ty);
     const from = moduleLayouts.current[fromIdx];
-    if (!from) { setDragFromIdx(null); setDragOverIdx(null); return; }
-    const centerY = from.y + from.h / 2 + ty;
-    let target = fromIdx;
-    for (const [k, r] of Object.entries(moduleLayouts.current)) {
-      if (centerY >= r.y && centerY < r.y + r.h) { target = Number(k); break; }
+    const dest = target !== null ? moduleLayouts.current[target] : null;
+    if (!from || !dest || target === null || target === fromIdx) {
+      // No move — spring the tile back home, then clear state.
+      displacedTY.value = withSpring(0, SPRING_CFG);
+      dragTY.value = withSpring(0, SPRING_CFG, () => { runOnJS(endDrag)(); });
+      return;
     }
-    moveWorkout(fromIdx, target);
-  }, [moveWorkout]);
+    // Snap into the destination slot; the displaced tile settles in the
+    // source slot; data commits when the snap lands.
+    displacedTY.value = withSpring(from.y - dest.y, SPRING_CFG);
+    dragTY.value = withSpring(dest.y - from.y, SPRING_CFG, () => { runOnJS(commitMove)(fromIdx, target); });
+  }, [displacedTY, dragTY, endDrag, commitMove]);
 
   const sortedDays = days;
 
@@ -1047,6 +1089,9 @@ export default function PlaybookSchedulePanel({
   const dragTileStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: dragTY.value }],
   }));
+  const displacedTileStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: displacedTY.value }],
+  }));
 
   const renderWorkoutTile = (moduleIdx: number) => {
     const wid = workoutForModule(moduleIdx);
@@ -1058,6 +1103,7 @@ export default function PlaybookSchedulePanel({
       );
     }
     const isDragging = dragFromIdx === moduleIdx;
+    const isDisplaced = dragOverIdx === moduleIdx && dragFromIdx !== null && dragFromIdx !== moduleIdx;
     const pan = Gesture.Pan()
       .activateAfterLongPress(250)
       .onStart(() => {
@@ -1070,13 +1116,12 @@ export default function PlaybookSchedulePanel({
         runOnJS(hoverModule)(moduleIdx, e.translationY);
       })
       .onEnd((e) => {
+        // Snap/settle animations own the shared values from here — finishDrag
+        // resets them when the animation lands.
         runOnJS(finishDrag)(moduleIdx, e.translationY);
-        dragTY.value = 0;
-        dragActiveIdx.value = -1;
       })
-      .onFinalize(() => {
-        dragTY.value = 0;
-        dragActiveIdx.value = -1;
+      .onFinalize((_e, success) => {
+        if (!success) runOnJS(endDrag)();
       });
     return (
       <GestureDetector gesture={pan}>
@@ -1085,9 +1130,10 @@ export default function PlaybookSchedulePanel({
             s.workoutTile,
             isDragging && dragTileStyle,
             isDragging && { zIndex: 10, elevation: 10, borderColor: '#A78BFA', borderWidth: 1 },
+            isDisplaced && displacedTileStyle,
           ]}
         >
-          <WorkoutMosaic thumbs={workoutThumbs[wid] ?? []} width={TILE_W} height={TILE_H} />
+          <WorkoutMosaic thumbs={workoutThumbs[wid] ?? []} width={TILE_W} height={TILE_H} scrollIdle center />
           <View style={s.workoutTileNameBar}>
             <Text style={s.workoutTileText} numberOfLines={1}>
               {workoutNames[wid] || 'Workout'}
@@ -1212,6 +1258,9 @@ export default function PlaybookSchedulePanel({
                     // Dragged tile must float over LATER sibling modules, not
                     // slide behind them — lift its whole module while dragging.
                     dragFromIdx === k && { zIndex: 20, elevation: 20 },
+                    // Hovered module's tile animates toward the source slot —
+                    // lift it too so the swap preview isn't hidden by siblings.
+                    dragOverIdx === k && dragFromIdx !== null && { zIndex: 15, elevation: 15 },
                   ]}
                   onLayout={(e) => {
                     moduleLayouts.current[k] = {

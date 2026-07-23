@@ -37,7 +37,7 @@ export function MosaicPlaceholderCell({ width, height, borderRadius, name }: { w
   );
 }
 
-export function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle = false, reserveNameSpace = true }: { thumbs: (string | { name: string })[]; width: number; height: number; isAnimating?: boolean; scrollIdle?: boolean; reserveNameSpace?: boolean }) {
+export function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle = false, reserveNameSpace = true, center = false }: { thumbs: (string | { name: string })[]; width: number; height: number; isAnimating?: boolean; scrollIdle?: boolean; reserveNameSpace?: boolean; center?: boolean }) {
   const gap = 2; // tight gap between mini GIFs
   const inset = 6; // small padding inside the card
   const innerW = width - inset * 2;
@@ -99,6 +99,14 @@ export function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scro
         paddingTop: inset + 2,
         width,
         overflow: 'hidden',
+        // Centered mode: rows are centered horizontally and the block is
+        // centered vertically, so clamped 4:5 cells don't leave a lopsided
+        // gap on the right/bottom.
+        ...(center ? {
+          height: height - (reserveNameSpace ? 28 : 0),
+          justifyContent: 'center',
+          alignContent: 'center',
+        } : {}),
       }}>
         {thumbs.slice(0, maxShow).map((slot, i) => (
           typeof slot === 'string' ? (
