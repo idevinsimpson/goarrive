@@ -945,6 +945,17 @@ function BuildScreenInner() {
     router.push(`/book/${token}?preview=1`);
   }, [fetchPbBookingToken]);
 
+  const toggleArchivePlaybook = useCallback(async () => {
+    const pbDoc = getCurrentPlaybookDoc();
+    const pb = currentPlaybookRef.current;
+    if (!pbDoc || !pb) return;
+    const next = !pbDoc.isArchived;
+    try {
+      await updateDoc(doc(db, 'playbooks', pb.id), { isArchived: next, updatedAt: serverTimestamp() });
+      if (next) exitPlaybook();
+    } catch (e) { console.error('[Build] Archive playbook error:', e); }
+  }, [getCurrentPlaybookDoc, exitPlaybook]);
+
   const confirmDeletePlaybook = useCallback(async () => {
     const pb = currentPlaybookRef.current;
     setShowPbDeleteConfirm(false);
@@ -2660,6 +2671,16 @@ function BuildScreenInner() {
               <Text style={s.pbMenuItemText}>Duplicate Playbook</Text>
             </Pressable>
             <View style={s.pbMenuDivider} />
+            <Pressable
+              style={s.pbMenuItem}
+              onPress={() => { setShowPbMenu(false); toggleArchivePlaybook(); }}
+            >
+              <Icon name="archive" size={16} color="#8A95A3" />
+              <Text style={s.pbMenuItemText}>
+                {items.find(i => i.type === 'Playbooks' && i.id === currentPlaybook.id)?.isArchived
+                  ? 'Unarchive Playbook' : 'Archive Playbook'}
+              </Text>
+            </Pressable>
             <Pressable
               style={s.pbMenuItem}
               onPress={() => { setShowPbMenu(false); setShowPbDeleteConfirm(true); }}
