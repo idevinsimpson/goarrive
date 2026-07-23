@@ -231,10 +231,19 @@ export async function moveReservationForInstance(
 
 // ── bookPlaybookSession ──────────────────────────────────────────────────────
 
+interface BookPlaybookDayModule {
+  dayOfWeek: number;             // 0–6
+  startTime: string;             // HH:mm (member-local wall clock)
+  durationMinutes?: number;      // per-day; default 45
+  sessionKind?: PlaybookSessionKind;  // per-day; default coach_review
+  workoutId?: string | null;     // workout landing on this day (pinned per occurrence)
+}
+
 interface BookPlaybookSessionData {
   playbookId: string;
-  daysOfWeek: number[];          // 0–6, at least one
-  startTime: string;             // HH:mm (member-local wall clock)
+  daysOfWeek: number[];          // 0–6, at least one (legacy path)
+  startTime: string;             // HH:mm (legacy global start)
+  dayModules?: BookPlaybookDayModule[];  // per-day modules — overrides daysOfWeek/startTime when present
   timezone: string;              // IANA — the member's timezone
   durationMinutes?: number;      // default 45
   sessionKind?: PlaybookSessionKind;      // default coach_review
@@ -255,14 +264,33 @@ export const bookPlaybookSession = onCall(
     const db = getDb();
 
     const d = request.data as BookPlaybookSessionData;
-    if (!d.playbookId || !Array.isArray(d.daysOfWeek) || d.daysOfWeek.length === 0 || !d.startTime || !d.timezone) {
-      throw new HttpsError('invalid-argument', 'playbookId, daysOfWeek, startTime, and timezone are required');
+    const hasModules = Array.isArray(d.dayModules) && d.dayModules.length > 0;
+    if (!d.playbookId || !d.timezone) {
+      throw new HttpsError('invalid-argument', 'playbookId and timezone are required');
     }
-    if (d.daysOfWeek.some((x) => typeof x !== 'number' || x < 0 || x > 6)) {
-      throw new HttpsError('invalid-argument', 'daysOfWeek entries must be 0-6');
+    if (!hasModules && (!Array.isArray(d.daysOfWeek) || d.daysOfWeek.length === 0 || !d.startTime)) {
+      throw new HttpsError('invalid-argument', 'dayModules, or daysOfWeek + startTime, are required');
     }
-    if (!/^\d{2}:\d{2}$/.test(d.startTime)) {
-      throw new HttpsError('invalid-argument', 'startTime must be HH:mm');
+    if (hasModules) {
+      for (const m of d.dayModules!) {
+        if (typeof m.dayOfWeek !== 'number' || m.dayOfWeek < 0 || m.dayOfWeek > 6) {
+          throw new HttpsError('invalid-argument', 'dayModules dayOfWeek entries must be 0-6');
+        }
+        if (typeof m.startTime !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(m.startTime)) {
+          throw new HttpsError('invalid-argument', 'dayModules startTime must be HH:mm');
+        }
+      }
+      const dows = d.dayModules!.map((m) => m.dayOfWeek);
+      if (new Set(dows).size !== dows.length) {
+        throw new HttpsError('invalid-argument', 'dayModules must have at most one module per day');
+      }
+    } else {
+      if (d.daysOfWeek.some((x) => typeof x !== 'number' || x < 0 || x > 6)) {
+        throw new HttpsError('invalid-argument', 'daysOfWeek entries must be 0-6');
+      }
+      if (!/^\d{2}:\d{2}$/.test(d.startTime)) {
+        throw new HttpsError('invalid-argument', 'startTime must be HH:mm');
+      }
     }
 
     const playbookRef = db.collection('playbooks').doc(d.playbookId);
@@ -297,9 +325,32 @@ export const bookPlaybookSession = onCall(
     }
     const memberName = memberSnap.data()!.name || playbook.assignedMemberName || 'Member';
 
-    const sessionKind: PlaybookSessionKind = d.sessionKind === 'coach_guided' ? 'coach_guided' : 'coach_review';
+    const normKind = (k: unknown): PlaybookSessionKind => (k === 'coach_guided' ? 'coach_guided' : 'coach_review');
+    const normDuration = (n: unknown): number =>
+      typeof n === 'number' && n > 0 && n <= 240 ? Math.round(n) : 45;
+
+    // Per-day modules are the unit of truth; the legacy global shape maps to
+    // one identical module per selected day.
+    const modules = (hasModules
+      ? d.dayModules!.map((m) => ({
+          dayOfWeek: m.dayOfWeek,
+          startTime: m.startTime,
+          durationMinutes: normDuration(m.durationMinutes ?? d.durationMinutes),
+          sessionKind: normKind(m.sessionKind ?? d.sessionKind),
+          workoutId: typeof m.workoutId === 'string' && m.workoutId ? m.workoutId : null,
+        }))
+      : [...new Set(d.daysOfWeek)].sort().map((dow) => ({
+          dayOfWeek: dow,
+          startTime: d.startTime,
+          durationMinutes: normDuration(d.durationMinutes),
+          sessionKind: normKind(d.sessionKind),
+          workoutId: null as string | null,
+        }))
+    ).sort((a, b) => a.dayOfWeek - b.dayOfWeek);
+
+    const sessionKind: PlaybookSessionKind = modules[0].sessionKind;
     const recordingEnabled = d.recordingEnabled !== false;
-    const durationMinutes = d.durationMinutes && d.durationMinutes > 0 && d.durationMinutes <= 240 ? d.durationMinutes : 45;
+    const durationMinutes = modules[0].durationMinutes;
     const repeatFrequency = d.repeatFrequency === 'every_2_weeks' ? 'every_2_weeks' : d.repeatFrequency === 'none' ? 'none' : 'weekly';
     const repeatHorizonWeeks = Math.min(8, Math.max(2, Math.round(d.repeatHorizonWeeks || 4)));
     const weeklySessionCap = typeof d.weeklySessionCap === 'number' && d.weeklySessionCap > 0
@@ -315,8 +366,9 @@ export const bookPlaybookSession = onCall(
       sessionDurationMinutes: durationMinutes,
       weeklySessionCap,
       timezone,
-      scheduleDaysOfWeek: d.daysOfWeek,
-      scheduleStartTime: d.startTime,
+      scheduleDaysOfWeek: modules.map((m) => m.dayOfWeek),
+      scheduleStartTime: modules[0].startTime,
+      scheduleDayModules: modules,
       repeatFrequency,
       repeatHorizonWeeks,
       memberIds,
@@ -333,28 +385,29 @@ export const bookPlaybookSession = onCall(
     const horizonEnd = addDaysToDateStr(firstDate, repeatHorizonWeeks * 7);
     const stepDays = repeatFrequency === 'every_2_weeks' ? 14 : 7;
 
-    const occurrenceDates: string[] = [];
-    for (const dow of [...new Set(d.daysOfWeek)].sort()) {
+    type DayModule = (typeof modules)[number];
+    const occurrences: Array<{ dateStr: string; mod: DayModule }> = [];
+    for (const mod of modules) {
       let cursor = firstDate;
-      while (wallDateOf(wallTimeToUtc(cursor, '12:00', timezone), timezone).dow !== dow) {
+      while (wallDateOf(wallTimeToUtc(cursor, '12:00', timezone), timezone).dow !== mod.dayOfWeek) {
         cursor = addDaysToDateStr(cursor, 1);
       }
-      // Same-day booking only if the start time hasn't passed yet
-      if (cursor === todayStr && wallTimeToUtc(cursor, d.startTime, timezone) <= now) {
+      // Same-day booking only if this day's start time hasn't passed yet
+      if (cursor === todayStr && wallTimeToUtc(cursor, mod.startTime, timezone) <= now) {
         cursor = addDaysToDateStr(cursor, stepDays);
       }
       if (repeatFrequency === 'none') {
-        if (cursor <= horizonEnd) occurrenceDates.push(cursor);
+        if (cursor <= horizonEnd) occurrences.push({ dateStr: cursor, mod });
         continue;
       }
       while (cursor <= horizonEnd) {
-        occurrenceDates.push(cursor);
+        occurrences.push({ dateStr: cursor, mod });
         cursor = addDaysToDateStr(cursor, stepDays);
       }
     }
-    occurrenceDates.sort();
+    occurrences.sort((a, b) => (a.dateStr < b.dateStr ? -1 : a.dateStr > b.dateStr ? 1 : 0));
 
-    if (occurrenceDates.length === 0) {
+    if (occurrences.length === 0) {
       throw new HttpsError('invalid-argument', 'No bookable occurrences in the selected window');
     }
 
@@ -362,17 +415,17 @@ export const bookPlaybookSession = onCall(
     // Zoom room; coach_review rides the shared bot-room pool (round-robin in
     // allocateSessionInstance). Copy is member-facing elsewhere — these are
     // internal routing fields.
-    const hostingFields = sessionKind === 'coach_guided'
+    const hostingFieldsFor = (kind: PlaybookSessionKind) => kind === 'coach_guided'
       ? { roomSource: 'coach_personal', hostingMode: 'coach_led', coachExpectedLive: true, personalZoomRequired: true, guidancePhase: 'coach_guided' }
       : { roomSource: 'shared_pool', hostingMode: 'hosted', coachExpectedLive: false, personalZoomRequired: false, guidancePhase: 'self_guided' };
 
     const memberKey = memberId; // guests (Phase B): `guest:<sha256(email)>`
     const results: Array<{ date: string; status: 'booked' | 'conflict' | 'cap_reached'; reason?: string; instanceId?: string }> = [];
 
-    for (const dateStr of occurrenceDates) {
-      const startUtc = wallTimeToUtc(dateStr, d.startTime, timezone);
-      const endUtc = new Date(startUtc.getTime() + durationMinutes * 60 * 1000);
-      const endMinutesTotal = Number(d.startTime.split(':')[0]) * 60 + Number(d.startTime.split(':')[1]) + durationMinutes;
+    for (const { dateStr, mod } of occurrences) {
+      const startUtc = wallTimeToUtc(dateStr, mod.startTime, timezone);
+      const endUtc = new Date(startUtc.getTime() + mod.durationMinutes * 60 * 1000);
+      const endMinutesTotal = Number(mod.startTime.split(':')[0]) * 60 + Number(mod.startTime.split(':')[1]) + mod.durationMinutes;
       const scheduledEndTime = `${String(Math.floor(endMinutesTotal / 60) % 24).padStart(2, '0')}:${String(endMinutesTotal % 60).padStart(2, '0')}`;
       const resId = reservationId(memberKey, startUtc);
       const instRef = db.collection('session_instances').doc();
@@ -420,12 +473,12 @@ export const bookPlaybookSession = onCall(
             memberName,
             playbookId: d.playbookId,
             playbookTitle: playbook.name || 'Playbook',
-            sessionKind,
+            sessionKind: mod.sessionKind,
             recordingEnabled,
             scheduledDate: dateStr,
-            scheduledStartTime: d.startTime,
+            scheduledStartTime: mod.startTime,
             scheduledEndTime,
-            durationMinutes,
+            durationMinutes: mod.durationMinutes,
             timezone,
             startUtc: Timestamp.fromDate(startUtc),
             endUtc: Timestamp.fromDate(endUtc),
@@ -433,11 +486,12 @@ export const bookPlaybookSession = onCall(
             status: 'scheduled',
             allocationAttempts: 0,
             guestEmail: null,
-            ...hostingFields,
+            ...hostingFieldsFor(mod.sessionKind),
             createdAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
           };
-          const pinned = d.pinnedWorkoutIds?.[dateStr];
+          // Per-date pin wins over the day module's workout mapping.
+          const pinned = d.pinnedWorkoutIds?.[dateStr] || mod.workoutId;
           if (pinned && Array.isArray(playbook.workoutIds) && playbook.workoutIds.includes(pinned)) {
             inst.pinnedWorkoutId = pinned;
           }

@@ -655,6 +655,16 @@ export const PLAYBOOK_SESSION_KIND_LABELS: Record<PlaybookSessionKind, string> =
 
 export type PlaybookRepeatFrequency = 'weekly' | 'every_2_weeks' | 'none';
 
+/** Per-day schedule module — each selected day carries its own time, duration,
+ *  session kind, and workout assignment. */
+export interface PlaybookDayModule {
+  dayOfWeek: number;                    // 0-6 (Sun-Sat)
+  startTime: string;                    // HH:mm member-local
+  durationMinutes: number;
+  sessionKind: PlaybookSessionKind;
+  workoutId?: string | null;            // workout landing on this day (pinned per occurrence)
+}
+
 /** Scheduling fields persisted on the playbook doc by bookPlaybookSession. */
 export interface PlaybookSchedulingSettings {
   schedulingEnabled?: boolean;
@@ -664,7 +674,8 @@ export interface PlaybookSchedulingSettings {
   weeklySessionCap?: number | null;     // per-playbook; overlap guard is global
   timezone?: string;                    // member's IANA timezone (cap weeks start Monday here)
   scheduleDaysOfWeek?: number[];        // 0-6
-  scheduleStartTime?: string;           // HH:mm
+  scheduleStartTime?: string;           // HH:mm (legacy global; per-day truth lives in scheduleDayModules)
+  scheduleDayModules?: PlaybookDayModule[]; // per-day time/duration/kind/workout modules
   repeatFrequency?: PlaybookRepeatFrequency;
   repeatHorizonWeeks?: number;          // 2-8, default 4
   nextWorkoutIndex?: number;            // auto next-in-sequence pointer (advances on signed-in member completion)
