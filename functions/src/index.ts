@@ -78,6 +78,14 @@ import {
   type RtmsSessionDoc,
 } from './zoomRtms';
 import WebSocket from 'ws';
+import {
+  releaseReservationForInstance,
+  moveReservationForInstance,
+} from './playbookScheduling';
+
+// Playbook scheduling (Phase 3a): transactional booking with the
+// member-level double-booking guard + per-playbook weekly cap.
+export { bookPlaybookSession } from './playbookScheduling';
 import { CloudTasksClient } from '@google-cloud/tasks';
 import { sanitizePlayerWorkout } from './workoutPlayerSanitizer';
 
@@ -2126,6 +2134,10 @@ export const claimMemberAccount = onCall(
   }
 );
 
+// sendMemberInvite: an earlier duplicate declaration (added in a parallel
+// branch the same day) lived here and broke `tsc` for the whole functions
+// package. Removed in favor of the fuller implementation below, which is
+// what module evaluation order would have exported anyway.
 
 /**
  * sendMemberInvite – Coach-initiated: ensure a Firebase Auth account exists
@@ -2283,6 +2295,30 @@ async function writeAuditLog(entry: {
     ...entry,
     createdAt: FieldValue.serverTimestamp(),
   });
+}
+
+/**
+ * Playbook self-service cancel/reschedule reuses the skip auto-approval
+ * window: when the coach has configured autoApproveSkipLeadDays and the
+ * session is closer than that, the member must submit a skip request instead
+ * of acting directly. No lead-days setting = no gate (matches skip policy).
+ */
+async function assertWithinSkipAutoApprovalWindow(instance: Record<string, any>, verb: string): Promise<void> {
+  try {
+    const coachSnap = await db.collection('coaches').doc(instance.coachId).get();
+    const autoLeadDays = coachSnap.exists ? coachSnap.data()!.autoApproveSkipLeadDays as number | undefined : undefined;
+    if (typeof autoLeadDays !== 'number' || autoLeadDays <= 0) return;
+    const [year, month, day] = (instance.scheduledDate as string).split('-').map(Number);
+    const [h, m] = ((instance.scheduledStartTime || '00:00') as string).split(':').map(Number);
+    const sessionTime = new Date(year, month - 1, day, h, m);
+    const hoursUntil = (sessionTime.getTime() - Date.now()) / (1000 * 60 * 60);
+    if (hoursUntil < autoLeadDays * 24) {
+      throw new HttpsError('failed-precondition', `This session is too close to ${verb} directly — please send your coach a skip request instead.`);
+    }
+  } catch (err: any) {
+    if (err instanceof HttpsError) throw err;
+    console.warn(`[assertWithinSkipAutoApprovalWindow] Policy check failed open: ${err.message}`);
+  }
 }
 
 // ─── 13. manageZoomRoom — Add/update/deactivate Zoom room resources ─────────
@@ -3323,6 +3359,7 @@ export const allocateSessionInstance = onCall(
         duration: instance.durationMinutes as number,
         timezone: 'America/New_York',
         hostEmail: allocatedRoom.zoomAccountEmail,
+        autoRecording: instance.recordingEnabled === false ? 'none' : 'cloud',
       });
     } catch (err: any) {
       // Meeting creation failed — log event and mark allocation failed
@@ -3490,6 +3527,7 @@ export const allocateAllPendingInstances = onCall(
               duration: instance.durationMinutes,
               timezone: 'America/New_York',
               hostEmail: room.zoomAccountEmail,
+              autoRecording: instance.recordingEnabled === false ? 'none' : 'cloud',
             });
 
             await db.collection('session_instances').doc(instance.id).update({
@@ -3588,6 +3626,17 @@ export const rescheduleInstance = onCall(
       throw new HttpsError('failed-precondition', `Cannot reschedule instance in status "${instance.status}"`);
     }
 
+    // Playbook sessions: member self-reschedule reuses the skip auto-approval
+    // window — inside the window the member must go through a skip request.
+    if (instance.playbookId && rescheduleSource === 'member_action') {
+      await assertWithinSkipAutoApprovalWindow(instance, 'reschedule');
+    }
+
+    // Playbook sessions hold a member_time_reservations doc. Move it first —
+    // transactionally re-runs the overlap guard, throws already-exists on
+    // conflict — so a failed reschedule never tears down the Zoom meeting.
+    const movedReservation = await moveReservationForInstance(instanceId, instance, newDate, newStartTime);
+
     const originalDate = instance.scheduledDate;
     const originalTime = instance.scheduledStartTime;
     const existingMeetingId = instance.zoomMeetingId as string | undefined;
@@ -3633,6 +3682,11 @@ export const rescheduleInstance = onCall(
       zoomProviderMode: FieldValue.delete(),
       allocatedAt: FieldValue.delete(),
       rescheduledFrom: `${originalDate} ${originalTime}`,
+      ...(movedReservation ? {
+        reservationId: movedReservation.reservationId,
+        startUtc: Timestamp.fromDate(movedReservation.startUtc),
+        endUtc: Timestamp.fromDate(movedReservation.endUtc),
+      } : {}),
       updatedAt: FieldValue.serverTimestamp(),
     });
 
@@ -3685,6 +3739,12 @@ export const cancelInstance = onCall(
     }
     const cancelSource = (instance.memberId === callerUid) ? 'member_action' : 'coach_action';
 
+    // Playbook sessions: member self-cancel reuses the skip auto-approval
+    // window — inside the window the member must go through a skip request.
+    if (instance.playbookId && cancelSource === 'member_action') {
+      await assertWithinSkipAutoApprovalWindow(instance, 'cancel');
+    }
+
     // Delete existing Zoom meeting if one was allocated
     const cancelMeetingId = instance.zoomMeetingId as string | undefined;
     if (cancelMeetingId) {
@@ -3709,6 +3769,9 @@ export const cancelInstance = onCall(
       status: 'cancelled',
       updatedAt: FieldValue.serverTimestamp(),
     });
+
+    // Playbook sessions: free the member's time window for rebooking
+    await releaseReservationForInstance(instance);
 
     await writeSessionEvent({
       occurrenceId: instanceId,
@@ -6311,6 +6374,8 @@ export const requestSkipInstance = onCall(
         skipApprovedAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
+      // Playbook sessions: skipped = time window freed for rebooking
+      await releaseReservationForInstance(inst);
       await writeAuditLog({
         coachId: inst.coachId,
         action: 'skip_auto_approved',
