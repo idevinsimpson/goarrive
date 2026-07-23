@@ -41,6 +41,7 @@ import {
   SESSION_TYPE_LABELS,
   deriveRecordingStatus,
   deriveAttendanceOutcome,
+  todayInTz,
   type RecurringSlot,
   type SessionInstance,
   type HostingMode,
@@ -115,6 +116,10 @@ function SchedulingScreenInner() {
   const { user, claims, effectiveUid } = useAuth();
   const router = useRouter();
   const coachId = effectiveUid || claims?.coachId || user?.uid || '';
+  // No coach profile timezone is loaded on this page, so group Today/Tomorrow
+  // by the device's local calendar day (via Intl — never toISOString, which
+  // is UTC and shifts the day for evening/morning use across timezones).
+  const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   // ── State ────────────────────────────────────────────────────────────────
   const [slots, setSlots] = useState<RecurringSlot[]>([]);
@@ -141,7 +146,7 @@ function SchedulingScreenInner() {
       (err) => { console.warn('recurring_slots error:', err); checkDone(); }
     );
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = todayInTz(deviceTz);
     const unsubInstances = onSnapshot(
       query(collection(db, 'session_instances'), where('coachId', '==', coachId)),
       (snap) => {
@@ -159,7 +164,7 @@ function SchedulingScreenInner() {
     );
 
     return () => { unsubSlots(); unsubInstances(); };
-  }, [coachId]);
+  }, [coachId, deviceTz]);
 
   // ── Actions ──────────────────────────────────────────────────────────────
   const handleCancelInstance = useCallback(async (instanceId: string) => {
@@ -173,10 +178,9 @@ function SchedulingScreenInner() {
   }, []);
 
   // ── Computed ──────────────────────────────────────────────────────────────
-  const todayStr = new Date().toISOString().split('T')[0];
-  const tomorrowDate = new Date();
-  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-  const tomorrowStr = tomorrowDate.toISOString().split('T')[0];
+  const todayStr = todayInTz(deviceTz);
+  const [ty, tm, td] = todayStr.split('-').map(Number);
+  const tomorrowStr = new Date(Date.UTC(ty, tm - 1, td + 1)).toISOString().split('T')[0];
 
   const liveSessions = instances.filter(i => i.status !== 'cancelled');
   const todaySessions = liveSessions.filter(i => i.scheduledDate === todayStr);

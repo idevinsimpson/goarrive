@@ -30,6 +30,7 @@ import {
   PLAYBOOK_SESSION_KIND_LABELS,
   PlaybookSessionKind,
   formatDateShort,
+  todayInTz,
 } from '../lib/schedulingTypes';
 
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -173,15 +174,6 @@ export function daySlotsToWindows(byDay: AvailSlot[][]): Array<{ days: number[];
 export interface DateOverride {
   date: string;                                     // YYYY-MM-DD (coach timezone)
   intervals: Array<{ start: string; end: string }>; // HH:mm
-}
-
-// "Today" as YYYY-MM-DD in the coach timezone from the booking window — the
-// override calendar gates past dates against the coach's day, not the
-// device's, so a coach traveling across timezones can't pick a passed date.
-export function todayInTz(tz: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(new Date());
 }
 
 const MONTH_LABELS = ['January', 'February', 'March', 'April', 'May', 'June',
