@@ -67,8 +67,10 @@ function normalizeEmail(raw: unknown): string | null {
 }
 
 function validateWindows(raw: unknown): BookingWindow[] {
-  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 21) {
-    throw new HttpsError('invalid-argument', 'Provide 1-21 booking windows');
+  // Weekly-hours UI writes one window per day-interval: 7 days × up to 6
+  // intervals each.
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 42) {
+    throw new HttpsError('invalid-argument', 'Provide 1-42 booking windows');
   }
   return raw.map((w: any) => {
     const days = [...new Set(windowDays(w))].sort();
@@ -278,6 +280,9 @@ export const resolvePlaybookBookingToken = onRequest(
       }
 
       const slots: Array<{ date: string; startTime: string; startUtcMillis: number; capReached: boolean }> = [];
+      // Multiple windows may cover the same day (weekly-hours UI writes one
+      // window per day-interval); dedupe identical date+time slots.
+      const seenSlots = new Set<string>();
       for (const { dateStr, dow } of days) {
         for (const w of windowsDoc.windows) {
           if (!windowDays(w).includes(dow)) continue;
@@ -289,6 +294,9 @@ export const resolvePlaybookBookingToken = onRequest(
             if (startUtc.getTime() <= now.getTime()) continue;
             const endUtcMs = startUtc.getTime() + durationMinutes * 60 * 1000;
             if (busy.some((b) => b.start < endUtcMs && b.end > startUtc.getTime())) continue;
+            const slotKey = `${dateStr}_${hhmm}`;
+            if (seenSlots.has(slotKey)) continue;
+            seenSlots.add(slotKey);
             const wk = memberWeekWindowUtc(startUtc, timezone).weekStartUtc.getTime();
             const capReached = weeklySessionCap !== null && (weekCounts.get(wk) || 0) >= weeklySessionCap;
             slots.push({ date: dateStr, startTime: hhmm, startUtcMillis: startUtc.getTime(), capReached });

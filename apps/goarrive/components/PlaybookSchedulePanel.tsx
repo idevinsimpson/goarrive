@@ -84,19 +84,60 @@ export function formatTime12(hhmm: string): string {
   return `${h12}:${m[2]} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
-interface BookingWindowRow {
-  days: number[];
-  startTime: string;
-  endTime: string;
+// ── Weekly-hours availability (Calendly pattern) ────────────────────────────
+// One slot = one start–end interval on one day. The coach edits per-day slot
+// lists; on save they serialize back to booking_windows.windows as one
+// { days:[d], startTime, endTime } entry per interval (server shape unchanged).
+interface AvailSlot {
+  startRaw: string;         // what the coach typed / 12-hour display
+  start: string | null;     // canonical HH:mm (null = unparseable)
+  endRaw: string;
+  end: string | null;
 }
 
-// booking_windows docs written before multi-day support carry dayOfWeek.
-function normalizeWindow(w: any): BookingWindowRow {
-  return {
-    days: Array.isArray(w?.days) ? w.days : (typeof w?.dayOfWeek === 'number' ? [w.dayOfWeek] : []),
-    startTime: w?.startTime || '09:00',
-    endTime: w?.endTime || '12:00',
-  };
+const DEFAULT_DAY_SLOT = { start: '06:00', end: '22:00' };
+
+function makeSlot(start: string, end: string): AvailSlot {
+  return { startRaw: formatTime12(start), start, endRaw: formatTime12(end), end };
+}
+
+// booking_windows docs written before multi-day support carry dayOfWeek;
+// multi-day windows expand into one slot per covered day.
+export function windowsToDaySlots(raw: any[]): AvailSlot[][] {
+  const byDay: AvailSlot[][] = Array.from({ length: 7 }, () => []);
+  for (const w of raw) {
+    const days: number[] = Array.isArray(w?.days)
+      ? w.days.filter((d: any) => Number.isInteger(d) && d >= 0 && d <= 6)
+      : (typeof w?.dayOfWeek === 'number' ? [w.dayOfWeek] : []);
+    const start = typeof w?.startTime === 'string' ? w.startTime : '09:00';
+    const end = typeof w?.endTime === 'string' ? w.endTime : '12:00';
+    for (const d of days) byDay[d].push(makeSlot(start, end));
+  }
+  for (const list of byDay) list.sort((a, b) => (a.start || '').localeCompare(b.start || ''));
+  return byDay;
+}
+
+// Serialize per-day slots to server windows, merging overlapping/adjacent
+// intervals within a day (overlap policy: merge, never reject).
+export function daySlotsToWindows(byDay: AvailSlot[][]): Array<{ days: number[]; startTime: string; endTime: string }> {
+  const out: Array<{ days: number[]; startTime: string; endTime: string }> = [];
+  for (let d = 0; d < 7; d++) {
+    const iv = byDay[d]
+      .filter((s) => s.start && s.end && s.start < s.end)
+      .map((s) => ({ start: s.start as string, end: s.end as string }))
+      .sort((a, b) => a.start.localeCompare(b.start));
+    const merged: Array<{ start: string; end: string }> = [];
+    for (const cur of iv) {
+      const last = merged[merged.length - 1];
+      if (last && cur.start <= last.end) {
+        if (cur.end > last.end) last.end = cur.end;
+      } else {
+        merged.push({ ...cur });
+      }
+    }
+    for (const m of merged) out.push({ days: [d], startTime: m.start, endTime: m.end });
+  }
+  return out;
 }
 
 interface BookResult {
@@ -173,8 +214,8 @@ export default function PlaybookSchedulePanel({
   const [workoutNames, setWorkoutNames] = useState<Record<string, string>>({});
   const [workoutDurations, setWorkoutDurations] = useState<Record<string, number | null>>({});
 
-  // Booking link (Phase 3b): availability windows + public token URL
-  const [windows, setWindows] = useState<BookingWindowRow[]>([]);
+  // Booking link (Phase 3b): weekly-hours availability + public token URL
+  const [daySlots, setDaySlots] = useState<AvailSlot[][]>(() => Array.from({ length: 7 }, () => []));
   const [locations, setLocations] = useState<string[]>([]);
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [linkBusy, setLinkBusy] = useState(false);
@@ -281,7 +322,7 @@ export default function PlaybookSchedulePanel({
     getDoc(doc(db, 'booking_windows', playbookId))
       .then((snap) => {
         const w = snap.data()?.windows;
-        if (Array.isArray(w) && w.length) setWindows(w.map(normalizeWindow));
+        if (Array.isArray(w) && w.length) setDaySlots(windowsToDaySlots(w));
         const locs = snap.data()?.locations;
         if (Array.isArray(locs)) setLocations(locs);
       })
@@ -563,10 +604,10 @@ export default function PlaybookSchedulePanel({
     }
   }, [canBook, playbookId, sortedDays, dayConfigs, timezone, recordingEnabled, horizonWeeks, weeklyCap]);
 
-  const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
-  const windowsValid = windows.length > 0 && windows.every(
-    (w) => w.days.length > 0 && timeRe.test(w.startTime) && timeRe.test(w.endTime) && w.startTime < w.endTime,
-  );
+  const hasAnySlot = daySlots.some((list) => list.length > 0);
+  const windowsValid = hasAnySlot && daySlots.every((list) => list.every(
+    (sl) => !!sl.start && !!sl.end && sl.start < sl.end,
+  ));
 
   const bookingUrl = useMemo(() => {
     if (!linkToken) return null;
@@ -577,9 +618,43 @@ export default function PlaybookSchedulePanel({
     return `${origin}/book/${linkToken}`;
   }, [linkToken]);
 
-  const updateWindow = useCallback((i: number, patch: Partial<BookingWindowRow>) => {
-    setWindows((prev) => prev.map((w, idx) => (idx === i ? { ...w, ...patch } : w)));
+  // Enable a day (adds the default interval) or append another interval —
+  // the new interval starts where the last one ends, one hour long.
+  const addDaySlot = useCallback((d: number) => {
+    setDaySlots((prev) => prev.map((list, idx) => {
+      if (idx !== d) return list;
+      if (list.length === 0) return [makeSlot(DEFAULT_DAY_SLOT.start, DEFAULT_DAY_SLOT.end)];
+      const lastEnd = [...list].map((sl) => sl.end).filter(Boolean).sort().pop() || '17:00';
+      const [h, m] = lastEnd.split(':').map(Number);
+      if (h >= 23) return [...list, makeSlot('09:00', '12:00')];
+      const endH = Math.min(23, h + 1);
+      return [...list, makeSlot(lastEnd, `${String(endH).padStart(2, '0')}:${String(m).padStart(2, '0')}`)];
+    }));
     setLinkError(null);
+  }, []);
+
+  const removeDaySlot = useCallback((d: number, i: number) => {
+    setDaySlots((prev) => prev.map((list, idx) => (idx === d ? list.filter((_, j) => j !== i) : list)));
+    setLinkError(null);
+  }, []);
+
+  const setSlotTime = useCallback((d: number, i: number, field: 'start' | 'end', raw: string) => {
+    setDaySlots((prev) => prev.map((list, idx) => (idx === d
+      ? list.map((sl, j) => (j === i
+        ? { ...sl, [`${field}Raw`]: raw, [field]: parseFlexTime(raw) }
+        : sl))
+      : list)));
+    setLinkError(null);
+  }, []);
+
+  const blurSlotTime = useCallback((d: number, i: number, field: 'start' | 'end') => {
+    setDaySlots((prev) => prev.map((list, idx) => (idx === d
+      ? list.map((sl, j) => {
+        if (j !== i) return sl;
+        const v = sl[field];
+        return v ? { ...sl, [`${field}Raw`]: formatTime12(v) } : sl;
+      })
+      : list)));
   }, []);
 
   const createLink = useCallback(async () => {
@@ -590,7 +665,7 @@ export default function PlaybookSchedulePanel({
       const fn = httpsCallable(functions, 'createPlaybookBookingLink');
       const res = await fn({
         playbookId,
-        windows,
+        windows: daySlotsToWindows(daySlots),
         timezone,
         locations: locations.map((l) => l.trim()).filter(Boolean),
       });
@@ -602,7 +677,7 @@ export default function PlaybookSchedulePanel({
     } finally {
       setLinkBusy(false);
     }
-  }, [windowsValid, linkBusy, playbookId, windows, timezone, locations]);
+  }, [windowsValid, linkBusy, playbookId, daySlots, timezone, locations]);
 
   const openPreview = useCallback(() => {
     if (!linkToken) return;
@@ -931,56 +1006,60 @@ export default function PlaybookSchedulePanel({
               Let the member pick their own times from your availability. The public page shows the
               playbook title only — never workout details.
             </Text>
-            {windows.map((w, i) => (
-              <View key={i} style={s.windowRow}>
-                <View style={s.windowDays}>
-                  {DAY_SHORT_LABELS.map((label, d) => (
-                    <Pressable
-                      key={label}
-                      style={[s.miniDayChip, w.days.includes(d) && s.dayChipActive]}
-                      onPress={() => updateWindow(i, {
-                        days: w.days.includes(d)
-                          ? w.days.filter((x) => x !== d)
-                          : [...w.days, d].sort((a, b) => a - b),
-                      })}
-                    >
-                      <Text style={[s.miniDayChipText, w.days.includes(d) && s.dayChipTextActive]}>
+            {/* Weekly hours — one row per day, Calendly pattern */}
+            <View style={s.weeklyHours}>
+              {DAY_SHORT_LABELS.map((label, d) => {
+                const slots = daySlots[d];
+                const enabled = slots.length > 0;
+                return (
+                  <View key={label} style={s.whDayRow}>
+                    <View style={[s.whDayCircle, enabled && s.whDayCircleActive]}>
+                      <Text style={[s.whDayCircleText, enabled && s.whDayCircleTextActive]}>
                         {label[0]}
                       </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      {!enabled && <Text style={s.whUnavailable}>Unavailable</Text>}
+                      {slots.map((sl, i) => {
+                        const rangeBad = !!sl.start && !!sl.end && sl.start >= sl.end;
+                        return (
+                          <View key={i} style={[s.whSlotRow, i > 0 && { marginTop: 6 }]}>
+                            <TextInput
+                              style={[s.whTimeInput, (!sl.start || rangeBad) && s.inputBad]}
+                              value={sl.startRaw}
+                              onChangeText={(v) => setSlotTime(d, i, 'start', v)}
+                              onBlur={() => blurSlotTime(d, i, 'start')}
+                              placeholder="9:00 AM"
+                              placeholderTextColor="#4A5568"
+                              autoCapitalize="none"
+                            />
+                            <Text style={s.windowDash}>–</Text>
+                            <TextInput
+                              style={[s.whTimeInput, (!sl.end || rangeBad) && s.inputBad]}
+                              value={sl.endRaw}
+                              onChangeText={(v) => setSlotTime(d, i, 'end', v)}
+                              onBlur={() => blurSlotTime(d, i, 'end')}
+                              placeholder="5:00 PM"
+                              placeholderTextColor="#4A5568"
+                              autoCapitalize="none"
+                            />
+                            <Pressable style={s.windowRemove} onPress={() => removeDaySlot(d, i)}>
+                              <Text style={s.windowRemoveText}>×</Text>
+                            </Pressable>
+                          </View>
+                        );
+                      })}
+                    </View>
+                    <Pressable style={s.whPlusBtn} onPress={() => addDaySlot(d)}>
+                      <Text style={s.whPlusText}>+</Text>
                     </Pressable>
-                  ))}
-                </View>
-                <TextInput
-                  style={[s.timeInput, !timeRe.test(w.startTime) && s.inputBad]}
-                  value={w.startTime}
-                  onChangeText={(v) => updateWindow(i, { startTime: v })}
-                  placeholder="09:00"
-                  placeholderTextColor="#4A5568"
-                  autoCapitalize="none"
-                />
-                <Text style={s.windowDash}>–</Text>
-                <TextInput
-                  style={[s.timeInput, !timeRe.test(w.endTime) && s.inputBad]}
-                  value={w.endTime}
-                  onChangeText={(v) => updateWindow(i, { endTime: v })}
-                  placeholder="12:00"
-                  placeholderTextColor="#4A5568"
-                  autoCapitalize="none"
-                />
-                <Pressable
-                  style={s.windowRemove}
-                  onPress={() => setWindows((prev) => prev.filter((_, idx) => idx !== i))}
-                >
-                  <Text style={s.windowRemoveText}>×</Text>
-                </Pressable>
-              </View>
-            ))}
-            <Pressable
-              style={s.addWindowBtn}
-              onPress={() => setWindows((prev) => [...prev, { days: [1], startTime: '09:00', endTime: '12:00' }])}
-            >
-              <Text style={s.addWindowText}>+ Add availability window</Text>
-            </Pressable>
+                  </View>
+                );
+              })}
+            </View>
+            <Text style={s.hint}>
+              Times shown in {timezone}. Overlapping ranges on a day are merged when you save.
+            </Text>
 
             <Text style={s.sectionLabel}>Locations</Text>
             <Text style={s.hint}>
@@ -1009,7 +1088,7 @@ export default function PlaybookSchedulePanel({
                 <Text style={s.addWindowText}>+ Add location option</Text>
               </Pressable>
             )}
-            {windows.length > 0 && (
+            {hasAnySlot && (
               <Pressable
                 style={[s.btn, { backgroundColor: windowsValid && !linkBusy ? '#1E2A3A' : '#161D29', borderWidth: 1, borderColor: '#A78BFA', marginTop: 10 }]}
                 onPress={createLink}
@@ -1361,23 +1440,72 @@ const s = StyleSheet.create({
     marginTop: 10,
     flexWrap: 'wrap',
   },
-  windowDays: {
-    flexDirection: 'row',
-    gap: 4,
+  weeklyHours: {
+    marginTop: 10,
+    gap: 10,
   },
-  miniDayChip: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+  whDayRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  whDayCircle: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     backgroundColor: '#0E1117',
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 2,
   },
-  miniDayChipText: {
+  whDayCircleActive: {
+    backgroundColor: '#A78BFA',
+  },
+  whDayCircleText: {
     color: '#8A95A3',
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
     fontFamily: FB,
+  },
+  whDayCircleTextActive: {
+    color: '#0E1117',
+  },
+  whUnavailable: {
+    color: '#4A5568',
+    fontSize: 13,
+    fontFamily: FB,
+    paddingVertical: 8,
+  },
+  whSlotRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  whTimeInput: {
+    backgroundColor: '#0E1117',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    color: '#F0F4F8',
+    fontSize: 13,
+    fontFamily: FB,
+    width: 84,
+    textAlign: 'center',
+  },
+  whPlusBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#0E1117',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  whPlusText: {
+    color: '#A78BFA',
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: FH,
   },
   timeInput: {
     backgroundColor: '#0E1117',
