@@ -29,6 +29,7 @@ import {
   DAY_SHORT_LABELS,
   PLAYBOOK_SESSION_KIND_LABELS,
   PlaybookSessionKind,
+  formatDateShort,
 } from '../lib/schedulingTypes';
 
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
@@ -140,6 +141,21 @@ export function daySlotsToWindows(byDay: AvailSlot[][]): Array<{ days: number[];
   return out;
 }
 
+// ── Date-specific hours (Calendly pattern) ──────────────────────────────────
+// An override REPLACES the weekly pattern on one calendar date; zero
+// intervals means the date is fully unavailable (doubles as blackout dates).
+export interface DateOverride {
+  date: string;                                     // YYYY-MM-DD (coach timezone)
+  intervals: Array<{ start: string; end: string }>; // HH:mm
+}
+
+export function localDateStr(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+const MONTH_LABELS = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+
 interface BookResult {
   date: string;
   status: 'booked' | 'conflict' | 'cap_reached';
@@ -217,6 +233,15 @@ export default function PlaybookSchedulePanel({
   // Booking link (Phase 3b): weekly-hours availability + public token URL
   const [daySlots, setDaySlots] = useState<AvailSlot[][]>(() => Array.from({ length: 7 }, () => []));
   const [locations, setLocations] = useState<string[]>([]);
+  // Date-specific hours: saved overrides + the add-hours modal state
+  const [dateOverrides, setDateOverrides] = useState<DateOverride[]>([]);
+  const [ovOpen, setOvOpen] = useState(false);
+  const [ovDates, setOvDates] = useState<string[]>([]);
+  const [ovSlots, setOvSlots] = useState<AvailSlot[]>([]);
+  const [ovMonth, setOvMonth] = useState<{ y: number; m: number }>(() => {
+    const n = new Date();
+    return { y: n.getFullYear(), m: n.getMonth() };
+  });
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -325,6 +350,12 @@ export default function PlaybookSchedulePanel({
         if (Array.isArray(w) && w.length) setDaySlots(windowsToDaySlots(w));
         const locs = snap.data()?.locations;
         if (Array.isArray(locs)) setLocations(locs);
+        const ov = snap.data()?.dateOverrides;
+        if (Array.isArray(ov)) {
+          setDateOverrides(ov.filter(
+            (o: any) => typeof o?.date === 'string' && Array.isArray(o?.intervals),
+          ));
+        }
       })
       .catch(() => {});
     getDocs(query(
@@ -657,6 +688,71 @@ export default function PlaybookSchedulePanel({
       : list)));
   }, []);
 
+  // ── Date-specific hours modal ─────────────────────────────────────────────
+  const openOverrideModal = useCallback(() => {
+    const n = new Date();
+    setOvMonth({ y: n.getFullYear(), m: n.getMonth() });
+    setOvDates([]);
+    setOvSlots([makeSlot('09:00', '17:00')]);
+    setOvOpen(true);
+  }, []);
+
+  const toggleOvDate = useCallback((dateStr: string) => {
+    setOvDates((prev) => (prev.includes(dateStr)
+      ? prev.filter((d) => d !== dateStr)
+      : [...prev, dateStr].sort()));
+  }, []);
+
+  const addOvSlot = useCallback(() => {
+    setOvSlots((prev) => {
+      if (prev.length === 0) return [makeSlot('09:00', '17:00')];
+      const lastEnd = [...prev].map((sl) => sl.end).filter(Boolean).sort().pop() || '17:00';
+      const [h, m] = lastEnd.split(':').map(Number);
+      if (h >= 23) return [...prev, makeSlot('09:00', '12:00')];
+      const endH = Math.min(23, h + 1);
+      return [...prev, makeSlot(lastEnd, `${String(endH).padStart(2, '0')}:${String(m).padStart(2, '0')}`)];
+    });
+  }, []);
+
+  const removeOvSlot = useCallback((i: number) => {
+    setOvSlots((prev) => prev.filter((_, j) => j !== i));
+  }, []);
+
+  const setOvSlotTime = useCallback((i: number, field: 'start' | 'end', raw: string) => {
+    setOvSlots((prev) => prev.map((sl, j) => (j === i
+      ? { ...sl, [`${field}Raw`]: raw, [field]: parseFlexTime(raw) }
+      : sl)));
+  }, []);
+
+  const blurOvSlotTime = useCallback((i: number, field: 'start' | 'end') => {
+    setOvSlots((prev) => prev.map((sl, j) => {
+      if (j !== i) return sl;
+      const v = sl[field];
+      return v ? { ...sl, [`${field}Raw`]: formatTime12(v) } : sl;
+    }));
+  }, []);
+
+  // Zero interval rows is valid — it marks the selected dates unavailable.
+  const ovSlotsValid = ovSlots.every((sl) => !!sl.start && !!sl.end && (sl.start as string) < (sl.end as string));
+  const canApplyOv = ovDates.length > 0 && ovSlotsValid;
+
+  const applyOverrides = useCallback(() => {
+    if (!canApplyOv) return;
+    const intervals = ovSlots.map((sl) => ({ start: sl.start as string, end: sl.end as string }));
+    setDateOverrides((prev) => {
+      const next = prev.filter((o) => !ovDates.includes(o.date));
+      for (const d of ovDates) next.push({ date: d, intervals });
+      return next.sort((a, b) => a.date.localeCompare(b.date));
+    });
+    setOvOpen(false);
+    setLinkError(null);
+  }, [canApplyOv, ovSlots, ovDates]);
+
+  const removeOverride = useCallback((dateStr: string) => {
+    setDateOverrides((prev) => prev.filter((o) => o.date !== dateStr));
+    setLinkError(null);
+  }, []);
+
   const createLink = useCallback(async () => {
     if (!windowsValid || linkBusy) return;
     setLinkBusy(true);
@@ -668,6 +764,7 @@ export default function PlaybookSchedulePanel({
         windows: daySlotsToWindows(daySlots),
         timezone,
         locations: locations.map((l) => l.trim()).filter(Boolean),
+        dateOverrides,
       });
       const data = res.data as { token: string };
       setLinkToken(data.token);
@@ -677,7 +774,7 @@ export default function PlaybookSchedulePanel({
     } finally {
       setLinkBusy(false);
     }
-  }, [windowsValid, linkBusy, playbookId, daySlots, timezone, locations]);
+  }, [windowsValid, linkBusy, playbookId, daySlots, timezone, locations, dateOverrides]);
 
   const openPreview = useCallback(() => {
     if (!linkToken) return;
@@ -1061,6 +1158,36 @@ export default function PlaybookSchedulePanel({
               Times shown in {timezone}. Overlapping ranges on a day are merged when you save.
             </Text>
 
+            {/* Date-specific hours (Calendly pattern) */}
+            <View style={s.ovEntryRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.ovEntryTitle}>Date-specific hours</Text>
+                <Text style={s.hint}>Adjust hours for specific days</Text>
+              </View>
+              <Pressable style={s.ovHoursBtn} onPress={openOverrideModal}>
+                <Text style={s.ovHoursBtnText}>+ Hours</Text>
+              </Pressable>
+            </View>
+            {dateOverrides.map((o) => (
+              <View key={o.date} style={s.ovRow}>
+                <Text style={s.ovRowDate}>{formatDateShort(o.date)}</Text>
+                <Text style={s.ovRowHours} numberOfLines={2}>
+                  {o.intervals.length === 0
+                    ? 'Unavailable'
+                    : o.intervals.map((iv) => `${formatTime12(iv.start)} – ${formatTime12(iv.end)}`).join(', ')}
+                </Text>
+                <Pressable style={s.windowRemove} onPress={() => removeOverride(o.date)}>
+                  <Text style={s.windowRemoveText}>×</Text>
+                </Pressable>
+              </View>
+            ))}
+            {dateOverrides.length > 0 && (
+              <Text style={s.hint}>
+                These dates replace your weekly hours. Unavailable = no bookings that day.
+                Tap {linkToken ? 'Update Availability' : 'Create Booking Link'} to save.
+              </Text>
+            )}
+
             <Text style={s.sectionLabel}>Locations</Text>
             <Text style={s.hint}>
               Optional — where sessions can happen (e.g. Condo gym, Hotel). The member picks one when booking.
@@ -1141,6 +1268,133 @@ export default function PlaybookSchedulePanel({
               </Pressable>
             </View>
           </ScrollView>
+
+          {/* Date-specific hours modal — overlay (not a nested Modal) */}
+          {ovOpen && (() => {
+            const today = localDateStr(new Date());
+            const now = new Date();
+            const atCurrentMonth = ovMonth.y === now.getFullYear() && ovMonth.m === now.getMonth();
+            const firstDow = new Date(ovMonth.y, ovMonth.m, 1).getDay();
+            const daysInMonth = new Date(ovMonth.y, ovMonth.m + 1, 0).getDate();
+            const cells: Array<number | null> = [
+              ...Array.from({ length: firstDow }, () => null),
+              ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+            ];
+            while (cells.length % 7 !== 0) cells.push(null);
+            const weeks: Array<Array<number | null>> = [];
+            for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+            return (
+              <View style={s.ovOverlay}>
+                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                  <Text style={s.ovModalTitle}>
+                    Select the date(s) you want to assign specific hours
+                  </Text>
+                  <View style={s.ovMonthHeader}>
+                    <Pressable
+                      style={[s.ovNavBtn, atCurrentMonth && { opacity: 0.3 }]}
+                      disabled={atCurrentMonth}
+                      onPress={() => setOvMonth((p) => (p.m === 0 ? { y: p.y - 1, m: 11 } : { y: p.y, m: p.m - 1 }))}
+                    >
+                      <Text style={s.ovNavText}>‹</Text>
+                    </Pressable>
+                    <Text style={s.ovMonthLabel}>{MONTH_LABELS[ovMonth.m]} {ovMonth.y}</Text>
+                    <Pressable
+                      style={s.ovNavBtn}
+                      onPress={() => setOvMonth((p) => (p.m === 11 ? { y: p.y + 1, m: 0 } : { y: p.y, m: p.m + 1 }))}
+                    >
+                      <Text style={s.ovNavText}>›</Text>
+                    </Pressable>
+                  </View>
+                  <View style={s.ovWeekRow}>
+                    {DAY_SHORT_LABELS.map((l) => (
+                      <Text key={l} style={s.ovWeekday}>{l[0]}</Text>
+                    ))}
+                  </View>
+                  {weeks.map((week, wi) => (
+                    <View key={wi} style={s.ovWeekRow}>
+                      {week.map((dayNum, ci) => {
+                        if (dayNum === null) return <View key={ci} style={s.ovDayCell} />;
+                        const dateStr = `${ovMonth.y}-${String(ovMonth.m + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                        const past = dateStr < today;
+                        const selected = ovDates.includes(dateStr);
+                        const hasOverride = dateOverrides.some((o) => o.date === dateStr);
+                        return (
+                          <Pressable
+                            key={ci}
+                            style={[s.ovDayCell, selected && s.ovDayCellSelected]}
+                            disabled={past}
+                            onPress={() => toggleOvDate(dateStr)}
+                          >
+                            <Text style={[
+                              s.ovDayText,
+                              past && { color: '#4A5568' },
+                              selected && { color: '#0E1117', fontWeight: '700' },
+                            ]}>
+                              {dayNum}
+                            </Text>
+                            {hasOverride && !selected && <View style={s.ovDayDot} />}
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  ))}
+
+                  <View style={s.ovHoursHeader}>
+                    <Text style={s.ovHoursTitle}>What hours are you available?</Text>
+                    <Pressable style={s.whPlusBtn} onPress={addOvSlot}>
+                      <Text style={s.whPlusText}>+</Text>
+                    </Pressable>
+                  </View>
+                  {ovSlots.length === 0 && (
+                    <Text style={s.hint}>No hours — the selected dates will be unavailable.</Text>
+                  )}
+                  {ovSlots.map((sl, i) => {
+                    const rangeBad = !!sl.start && !!sl.end && sl.start >= sl.end;
+                    return (
+                      <View key={i} style={[s.whSlotRow, { marginTop: 8 }]}>
+                        <TextInput
+                          style={[s.whTimeInput, (!sl.start || rangeBad) && s.inputBad]}
+                          value={sl.startRaw}
+                          onChangeText={(v) => setOvSlotTime(i, 'start', v)}
+                          onBlur={() => blurOvSlotTime(i, 'start')}
+                          placeholder="9:00 AM"
+                          placeholderTextColor="#4A5568"
+                          autoCapitalize="none"
+                        />
+                        <Text style={s.windowDash}>–</Text>
+                        <TextInput
+                          style={[s.whTimeInput, (!sl.end || rangeBad) && s.inputBad]}
+                          value={sl.endRaw}
+                          onChangeText={(v) => setOvSlotTime(i, 'end', v)}
+                          onBlur={() => blurOvSlotTime(i, 'end')}
+                          placeholder="5:00 PM"
+                          placeholderTextColor="#4A5568"
+                          autoCapitalize="none"
+                        />
+                        <Pressable style={s.windowRemove} onPress={() => removeOvSlot(i)}>
+                          <Text style={s.windowRemoveText}>×</Text>
+                        </Pressable>
+                      </View>
+                    );
+                  })}
+
+                  <Pressable
+                    style={[s.btn, { backgroundColor: canApplyOv ? '#A78BFA' : '#4A5568', marginTop: 20 }]}
+                    onPress={applyOverrides}
+                    disabled={!canApplyOv}
+                  >
+                    <Text style={{ color: '#0E1117', fontWeight: '700', fontFamily: FH }}>Apply</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[s.btn, { backgroundColor: '#0E1117', marginTop: 10 }]}
+                    onPress={() => setOvOpen(false)}
+                  >
+                    <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
+                  </Pressable>
+                </ScrollView>
+              </View>
+            );
+          })()}
         </Pressable>
       </Pressable>
     </Modal>
@@ -1633,6 +1887,144 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     fontFamily: FB,
+  },
+  ovEntryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 16,
+  },
+  ovEntryTitle: {
+    color: '#F0F4F8',
+    fontSize: 14,
+    fontWeight: '700',
+    fontFamily: FH,
+  },
+  ovHoursBtn: {
+    borderColor: '#A78BFA',
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  ovHoursBtnText: {
+    color: '#A78BFA',
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: FB,
+  },
+  ovRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0E1117',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginTop: 6,
+    gap: 10,
+  },
+  ovRowDate: {
+    color: '#F0F4F8',
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: FB,
+    width: 92,
+  },
+  ovRowHours: {
+    flex: 1,
+    color: '#8A95A3',
+    fontSize: 12,
+    fontFamily: FB,
+  },
+  ovOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#1E2A3A',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+  },
+  ovModalTitle: {
+    color: '#F0F4F8',
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: FH,
+  },
+  ovMonthHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 16,
+  },
+  ovNavBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#0E1117',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ovNavText: {
+    color: '#A78BFA',
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: FH,
+  },
+  ovMonthLabel: {
+    color: '#F0F4F8',
+    fontSize: 14,
+    fontWeight: '700',
+    fontFamily: FH,
+  },
+  ovWeekRow: {
+    flexDirection: 'row',
+    marginTop: 6,
+  },
+  ovWeekday: {
+    flex: 1,
+    textAlign: 'center',
+    color: '#4A5568',
+    fontSize: 11,
+    fontWeight: '700',
+    fontFamily: FB,
+  },
+  ovDayCell: {
+    flex: 1,
+    aspectRatio: 1,
+    maxHeight: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ovDayCellSelected: {
+    backgroundColor: '#A78BFA',
+  },
+  ovDayText: {
+    color: '#F0F4F8',
+    fontSize: 13,
+    fontFamily: FB,
+  },
+  ovDayDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#A78BFA',
+    marginTop: 2,
+  },
+  ovHoursHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 18,
+  },
+  ovHoursTitle: {
+    color: '#F0F4F8',
+    fontSize: 14,
+    fontWeight: '700',
+    fontFamily: FH,
   },
   resultBox: {
     backgroundColor: '#0E1117',
