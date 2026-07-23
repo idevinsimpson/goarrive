@@ -658,6 +658,22 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
+    // MEMBER TIME RESERVATIONS (Playbook scheduling — Phase 3a)
+    // One doc per member per booked time window; the transactional
+    // double-booking guard. Written exclusively by Cloud Functions
+    // (bookPlaybookSession / cancel / reschedule) via Admin SDK.
+    // ─────────────────────────────────────────────
+
+    match /member_time_reservations/{reservationId} {
+      allow read: if isAuthenticated() && (
+        isCoachOrBootstrap(resource.data.coachId)
+        || isOwnDoc(resource.data.memberId)
+        || isPlatformAdmin()
+      );
+      allow write: if false; // Cloud Functions only (Admin SDK)
+    }
+
+    // ─────────────────────────────────────────────
     // SCHEDULING AUDIT LOG (Scheduling backbone)
     // Append-only audit trail for scheduling decisions.
     // Coach can read their own entries.

@@ -225,6 +225,20 @@ export interface SessionInstance {
   // Prompt 2: Commit to Save
   commitToSaveEnabled?: boolean;      // Whether CTS applies to this session
 
+  // Playbook scheduling (Phase 3a) — playbook bookings reuse this state
+  // machine; instances born from bookPlaybookSession carry these instead of
+  // recurringSlotId. Scheduling surfaces show playbookTitle ONLY (never
+  // workout names or sequence details).
+  playbookId?: string;
+  playbookTitle?: string;             // Denormalized playbook name for display
+  sessionKind?: PlaybookSessionKind;
+  recordingEnabled?: boolean;         // false = Zoom auto-recording off
+  pinnedWorkoutId?: string;           // Coach-pinned workout for this occurrence (else auto next-in-sequence)
+  startUtc?: Timestamp;               // UTC instant (DST-safe overlap math)
+  endUtc?: Timestamp;
+  reservationId?: string;             // member_time_reservations doc backing this booking
+  guestEmail?: string | null;         // Guest-by-email booking hook (Phase B)
+
   // Allocation fields
   zoomRoomId?: string;              // Assigned Zoom room doc ID
   zoomRoomLabel?: string;           // Denormalized room label
@@ -626,3 +640,50 @@ export const SESSION_EVENT_SOURCE_LABELS: Record<string, string> = {
   coach_action: 'Coach Action',
   member_action: 'Member Action',
 };
+
+// ─── Playbook Scheduling (Phase 3a) ──────────────────────────────────────────
+// Session kinds: coach_guided = live in the coach's own Zoom room;
+// coach_review = member trains in a hosted room and the coach reviews the
+// recording afterward. Member/coach copy never mentions room pools.
+
+export type PlaybookSessionKind = 'coach_guided' | 'coach_review';
+
+export const PLAYBOOK_SESSION_KIND_LABELS: Record<PlaybookSessionKind, string> = {
+  coach_guided: 'Live with Coach',
+  coach_review: 'Coach Review',
+};
+
+export type PlaybookRepeatFrequency = 'weekly' | 'every_2_weeks' | 'none';
+
+/** Scheduling fields persisted on the playbook doc by bookPlaybookSession. */
+export interface PlaybookSchedulingSettings {
+  schedulingEnabled?: boolean;
+  sessionKind?: PlaybookSessionKind;
+  recordingEnabled?: boolean;           // per-playbook toggle; false = no session recording
+  sessionDurationMinutes?: number;
+  weeklySessionCap?: number | null;     // per-playbook; overlap guard is global
+  timezone?: string;                    // member's IANA timezone (cap weeks start Monday here)
+  scheduleDaysOfWeek?: number[];        // 0-6
+  scheduleStartTime?: string;           // HH:mm
+  repeatFrequency?: PlaybookRepeatFrequency;
+  repeatHorizonWeeks?: number;          // 2-8, default 4
+  nextWorkoutIndex?: number;            // auto next-in-sequence pointer (advances on signed-in member completion)
+  memberIds?: string[];                 // group-proofed membership list (single-member UI writes [assignedMemberId])
+}
+
+/**
+ * member_time_reservations doc — the member-level double-booking guard.
+ * Deterministic ID `${memberKey}_${startUtcMillis}`; written only by Cloud
+ * Functions inside the booking transaction.
+ */
+export interface MemberTimeReservation {
+  memberKey: string;                    // memberId, or `guest:<sha256(email)>` for guest bookings (Phase B)
+  memberId: string | null;
+  guestEmail: string | null;
+  coachId: string;
+  playbookId: string | null;
+  sessionInstanceId: string;
+  startUtc: Timestamp;
+  endUtc: Timestamp;
+  createdAt: Timestamp;
+}
