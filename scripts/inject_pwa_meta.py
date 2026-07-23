@@ -302,6 +302,13 @@ BODY_INJECT = """
         clearTimeout(appLoadTimeout);
       });
       
+    </script>
+"""
+
+# ── SW registration + auto-reload (injected into EVERY exported .html page,
+#    since Expo static export emits one HTML file per route) ─────────────────
+SW_INJECT = """
+    <script>
       // Service Worker registration + auto-reload on new deploy.
       // An already-open SPA tab keeps its in-memory JS bundle forever (iOS
       // Safari resume/bfcache makes this constant), so when a new SW takes
@@ -362,10 +369,30 @@ def main():
     html = html.replace('</head>', HEAD_INJECT + '\n  </head>', 1)
 
     # Inject before </body>
-    html = html.replace('</body>', BODY_INJECT + '\n  </body>', 1)
+    html = html.replace('</body>', BODY_INJECT + SW_INJECT + '\n  </body>', 1)
 
     with open(INDEX, 'w') as f:
         f.write(html)
+
+    # Expo static export emits one HTML file per route — inject the SW
+    # registration script into every page so any entry route gets auto-reload.
+    patched = 0
+    for root, _dirs, files in os.walk(DIST_DIR):
+        for name in files:
+            if not name.endswith('.html'):
+                continue
+            path = os.path.join(root, name)
+            if os.path.abspath(path) == os.path.abspath(INDEX):
+                continue
+            with open(path, 'r') as f:
+                page = f.read()
+            if 'controllerchange' in page:
+                continue
+            page = page.replace('</body>', SW_INJECT + '\n  </body>', 1)
+            with open(path, 'w') as f:
+                f.write(page)
+            patched += 1
+    print(f'[inject_pwa_meta] SW auto-reload injected into {patched} route pages')
 
     # Write manifest.json
     manifest_path = os.path.join(DIST_DIR, 'manifest.json')
