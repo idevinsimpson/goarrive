@@ -425,9 +425,14 @@ export function addMinutesToTime(time24: string, minutes: number): string {
 // toISOString().split('T')[0] for calendar dates — that is UTC and shifts the
 // day for anyone west of Greenwich in the evening (or east in the morning).
 export function todayInTz(tz: string): string {
+  return dateStrInTz(new Date(), tz);
+}
+
+// A Date's calendar day as YYYY-MM-DD in the given IANA timezone.
+export function dateStrInTz(date: Date, tz: string): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(new Date());
+  }).format(date);
 }
 
 // ─── Helper: Format date for display ─────────────────────────────────────────
