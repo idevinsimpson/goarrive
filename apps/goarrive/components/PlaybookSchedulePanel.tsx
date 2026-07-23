@@ -255,6 +255,7 @@ export default function PlaybookSchedulePanel({
   // so hydration can't trigger a write-back loop.
   const dayDirtyRef = useRef(false);
   const availDirtyRef = useRef(false);
+  const sessionCfgDirtyRef = useRef(false);
   const [availSaved, setAvailSaved] = useState(false);
 
   // Inline title + description editing (A5 / C10)
@@ -310,6 +311,7 @@ export default function PlaybookSchedulePanel({
       setDragOverIdx(null);
       dayDirtyRef.current = false;
       availDirtyRef.current = false;
+      sessionCfgDirtyRef.current = false;
       setAvailSaved(false);
     }
   }, [visible]);
@@ -325,9 +327,13 @@ export default function PlaybookSchedulePanel({
         setPlaybook(data);
         if (!titleDirty.current) setTitleDraft(data.name || '');
         if (!descDirty.current) setDescDraft(data.description || '');
-        if (data.recordingEnabled !== undefined) setRecordingEnabled(data.recordingEnabled !== false);
-        if (data.repeatHorizonWeeks) setHorizonWeeks(data.repeatHorizonWeeks);
-        if (data.weeklySessionCap !== undefined) setWeeklyCap(data.weeklySessionCap ?? null);
+        // Skip while dirty — a snapshot echo from another auto-save write
+        // would otherwise revert an unsaved toggle/stepper change.
+        if (!sessionCfgDirtyRef.current) {
+          if (data.recordingEnabled !== undefined) setRecordingEnabled(data.recordingEnabled !== false);
+          if (data.repeatHorizonWeeks) setHorizonWeeks(data.repeatHorizonWeeks);
+          if (data.weeklySessionCap !== undefined) setWeeklyCap(data.weeklySessionCap ?? null);
+        }
         if (!prefilledRef.current) {
           prefilledRef.current = true;
           const fallbackDuration = String(data.sessionDurationMinutes || 45);
@@ -668,6 +674,28 @@ export default function PlaybookSchedulePanel({
     return () => clearTimeout(t);
   }, [days, dayConfigs, playbookId, saveDaySettings]);
 
+  // Auto-save session settings (recording toggle, book-ahead horizon, weekly
+  // cap). Previously these only persisted when Book Sessions ran, so changing
+  // them and closing the panel silently lost the edit.
+  const saveSessionSettings = useCallback(() => {
+    if (!sessionCfgDirtyRef.current || !playbookId) return;
+    sessionCfgDirtyRef.current = false;
+    updateDoc(doc(db, 'playbooks', playbookId), {
+      recordingEnabled,
+      repeatHorizonWeeks: horizonWeeks,
+      weeklySessionCap: weeklyCap,
+      updatedAt: serverTimestamp(),
+    }).catch((e) => {
+      console.error('[PlaybookSchedulePanel] session settings auto-save error:', e);
+    });
+  }, [recordingEnabled, horizonWeeks, weeklyCap, playbookId]);
+
+  useEffect(() => {
+    if (!sessionCfgDirtyRef.current || !playbookId) return;
+    const t = setTimeout(saveSessionSettings, 800);
+    return () => clearTimeout(t);
+  }, [recordingEnabled, horizonWeeks, weeklyCap, playbookId, saveSessionSettings]);
+
   // Day k (in sorted selected days) → workout index in playbook order.
   const workoutForModule = useCallback((k: number): string | null => {
     if (workoutIds.length === 0) return null;
@@ -981,6 +1009,11 @@ export default function PlaybookSchedulePanel({
   flushPendingSavesRef.current = () => {
     if (dayDirtyRef.current) saveDaySettings();
     if (availDirtyRef.current) void saveAvailability();
+    if (sessionCfgDirtyRef.current) saveSessionSettings();
+    // Title/description normally save on blur, but closing the panel (or the
+    // Modal unmounting) doesn't fire blur — flush those too.
+    if (titleDirty.current) void saveTitle();
+    if (descDirty.current) void saveDescription();
   };
   useEffect(() => {
     if (!visible) flushPendingSavesRef.current();
@@ -1259,7 +1292,7 @@ export default function PlaybookSchedulePanel({
               <Text style={s.switchLabel}>Record sessions</Text>
               <Switch
                 value={recordingEnabled}
-                onValueChange={setRecordingEnabled}
+                onValueChange={(v) => { sessionCfgDirtyRef.current = true; setRecordingEnabled(v); }}
                 trackColor={{ false: '#4A5568', true: '#A78BFA' }}
                 thumbColor="#F0F4F8"
               />
@@ -1268,11 +1301,11 @@ export default function PlaybookSchedulePanel({
             <View style={s.stepperRow}>
               <Text style={s.switchLabel}>Book ahead</Text>
               <View style={s.stepper}>
-                <Pressable style={s.stepBtn} onPress={() => setHorizonWeeks((w) => Math.max(2, w - 1))}>
+                <Pressable style={s.stepBtn} onPress={() => { sessionCfgDirtyRef.current = true; setHorizonWeeks((w) => Math.max(2, w - 1)); }}>
                   <Text style={s.stepBtnText}>−</Text>
                 </Pressable>
                 <Text style={s.stepValue}>{horizonWeeks} wks</Text>
-                <Pressable style={s.stepBtn} onPress={() => setHorizonWeeks((w) => Math.min(8, w + 1))}>
+                <Pressable style={s.stepBtn} onPress={() => { sessionCfgDirtyRef.current = true; setHorizonWeeks((w) => Math.min(8, w + 1)); }}>
                   <Text style={s.stepBtnText}>+</Text>
                 </Pressable>
               </View>
@@ -1283,14 +1316,14 @@ export default function PlaybookSchedulePanel({
               <View style={s.stepper}>
                 <Pressable
                   style={s.stepBtn}
-                  onPress={() => setWeeklyCap((c) => (c === null || c <= 1 ? null : c - 1))}
+                  onPress={() => { sessionCfgDirtyRef.current = true; setWeeklyCap((c) => (c === null || c <= 1 ? null : c - 1)); }}
                 >
                   <Text style={s.stepBtnText}>−</Text>
                 </Pressable>
                 <Text style={s.stepValue}>{weeklyCap === null ? 'Off' : weeklyCap}</Text>
                 <Pressable
                   style={s.stepBtn}
-                  onPress={() => setWeeklyCap((c) => Math.min(7, (c ?? 0) + 1))}
+                  onPress={() => { sessionCfgDirtyRef.current = true; setWeeklyCap((c) => Math.min(7, (c ?? 0) + 1)); }}
                 >
                   <Text style={s.stepBtnText}>+</Text>
                 </Pressable>
