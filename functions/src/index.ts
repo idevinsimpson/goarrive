@@ -3204,11 +3204,24 @@ export const allocateSessionInstance = onCall(
     //   shared_pool    → platform HMTI pool rooms (poolId == 'hmti'), LRU round-robin;
     //                    falls back to per-coach shared rooms until pool rooms exist
     //   (no roomSource) → legacy behavior: try all active rooms
+    // Member-only sessions (coachExpectedLive === false) also prefer the platform
+    // bot pool, and within the pool bot-host rooms (isBot === true) go first.
+    // All candidate lists are LRU-sorted by lastUsedAt so the earliest-available
+    // (least recently used) room is tried first — true round-robin.
     const roomSource = (instance.roomSource as string) || '';
+    const memberOnly = instance.coachExpectedLive === false;
+
+    // lastAllocatedAt kept as tie-break for pool rooms written before lastUsedAt existed
+    const lruMillis = (d: FirebaseFirestore.QueryDocumentSnapshot) => {
+      const x = d.data();
+      return x.lastUsedAt?.toMillis?.() ?? x.lastAllocatedAt?.toMillis?.() ?? 0;
+    };
+    const sortLru = (docs: FirebaseFirestore.QueryDocumentSnapshot[]) =>
+      docs.slice().sort((a, b) => lruMillis(a) - lruMillis(b));
 
     let candidateRooms: FirebaseFirestore.QueryDocumentSnapshot[] = [];
 
-    if (roomSource === 'shared_pool') {
+    if (roomSource === 'shared_pool' || (memberOnly && roomSource !== 'coach_personal')) {
       // Platform-wide HMTI agent pool — not scoped to the calling coach
       const poolSnap = await db.collection('zoom_rooms')
         .where('poolId', '==', 'hmti')
@@ -3216,12 +3229,14 @@ export const allocateSessionInstance = onCall(
         .get();
 
       if (poolSnap.docs.length > 0) {
-        // LRU round-robin: least recently allocated first, never-allocated first of all
-        candidateRooms = poolSnap.docs.slice().sort((a, b) => {
-          const aTs = a.data().lastAllocatedAt?.toMillis?.() ?? 0;
-          const bTs = b.data().lastAllocatedAt?.toMillis?.() ?? 0;
-          return aTs - bTs;
-        });
+        candidateRooms = sortLru(poolSnap.docs);
+        if (memberOnly) {
+          // Bot-host rooms first for member-only sessions, LRU order within each group
+          candidateRooms = [
+            ...candidateRooms.filter(d => d.data().isBot === true),
+            ...candidateRooms.filter(d => d.data().isBot !== true),
+          ];
+        }
       }
     }
 
@@ -3242,6 +3257,7 @@ export const allocateSessionInstance = onCall(
         const poolRooms = candidateRooms.filter(d => d.data().isPersonal !== true);
         if (poolRooms.length > 0) candidateRooms = poolRooms;
       }
+      candidateRooms = sortLru(candidateRooms);
     }
 
     // Personal room missing → provision one from the coach's login email
@@ -3375,20 +3391,20 @@ export const allocateSessionInstance = onCall(
       zoomMeetingUuid: meeting.uuid || null,
       zoomJoinUrl: meeting.joinUrl,
       zoomStartUrl: meeting.startUrl,
-      zoomMeetingPassword: meeting.password,
+      zoomMeetingPassword: meeting.password ?? null,
       zoomProviderMode: zoomProvider.mode,
       allocatedAt: FieldValue.serverTimestamp(),
       allocationAttempts: (instance.allocationAttempts || 0) + 1,
       updatedAt: FieldValue.serverTimestamp(),
     });
 
-    // Advance LRU cursor for platform pool rooms
-    if (allocatedRoom.poolId) {
-      await db.collection('zoom_rooms').doc(allocatedRoom.id).update({
-        lastAllocatedAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-    }
+    // Advance the round-robin cursor: every successful allocation stamps
+    // lastUsedAt; pool rooms also keep lastAllocatedAt for older readers.
+    await db.collection('zoom_rooms').doc(allocatedRoom.id).update({
+      lastUsedAt: FieldValue.serverTimestamp(),
+      ...(allocatedRoom.poolId ? { lastAllocatedAt: FieldValue.serverTimestamp() } : {}),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
 
     // Write session event for traceability
     await writeSessionEvent({
