@@ -311,7 +311,6 @@ export default function PlaybookSchedulePanel({
       setDragFromIdx(null);
       setDragOverIdx(null);
       dragTY.value = 0;
-      displacedTY.value = 0;
       lastOverRef.current = null;
       dayDirtyRef.current = false;
       availDirtyRef.current = false;
@@ -713,10 +712,6 @@ export default function PlaybookSchedulePanel({
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const dragTY = useSharedValue(0);
   const dragActiveIdx = useSharedValue(-1);
-  // Swap preview: while the dragged tile hovers a module, that module's own
-  // workout slides toward the source slot so the coach SEES the swap; on drop
-  // the dragged tile springs into the destination slot before data commits.
-  const displacedTY = useSharedValue(0);
   const lastOverRef = useRef<number | null>(null);
 
   const SPRING_CFG = { damping: 22, stiffness: 240, mass: 0.7 };
@@ -726,30 +721,29 @@ export default function PlaybookSchedulePanel({
     setDragFromIdx(null);
     setDragOverIdx(null);
     dragTY.value = 0;
-    displacedTY.value = 0;
     dragActiveIdx.value = -1;
-  }, [dragTY, displacedTY, dragActiveIdx]);
+  }, [dragTY, dragActiveIdx]);
 
-  const moveWorkout = useCallback((fromModule: number, toModule: number) => {
+  // Commit = SWAP the two positions (matches the live preview exactly).
+  const swapWorkouts = useCallback((fromModule: number, toModule: number) => {
     const n = workoutIds.length;
     if (fromModule === toModule || n === 0) return;
     const fromPos = fromModule < n ? fromModule : (ROTATE_AT_END ? fromModule % n : -1);
     const toPos = toModule < n ? toModule : (ROTATE_AT_END ? toModule % n : -1);
     if (fromPos < 0 || toPos < 0 || fromPos === toPos) return;
     const next = [...workoutIds];
-    const [moved] = next.splice(fromPos, 1);
-    next.splice(toPos, 0, moved);
+    [next[fromPos], next[toPos]] = [next[toPos], next[fromPos]];
     updateDoc(doc(db, 'playbooks', playbookId), { workoutIds: next, updatedAt: serverTimestamp() })
       .catch((e) => console.error('[PlaybookSchedulePanel] workout reorder error:', e));
   }, [workoutIds, playbookId]);
 
-  const commitMove = useCallback((fromModule: number, toModule: number) => {
-    moveWorkout(fromModule, toModule);
-    // Reset transforms on the next frame — Firestore's latency-compensated
-    // local write has swapped the tile contents by then, so the snap lands
-    // exactly where the reordered data renders.
+  const commitSwap = useCallback((fromModule: number, toModule: number) => {
+    swapWorkouts(fromModule, toModule);
+    // Firestore's latency-compensated local write has already re-rendered the
+    // swapped data by the next frame, so clearing drag state (which drops the
+    // preview mapping) leaves the exact same tiles on screen.
     requestAnimationFrame(() => endDrag());
-  }, [moveWorkout, endDrag]);
+  }, [swapWorkouts, endDrag]);
 
   const findTarget = (fromIdx: number, ty: number): number | null => {
     const from = moduleLayouts.current[fromIdx];
@@ -761,37 +755,37 @@ export default function PlaybookSchedulePanel({
     return null;
   };
 
+  // Live swap preview: while dragging from F over T, the module slots render
+  // as if the swap already happened — T's workout shows in F's slot instantly,
+  // and swaps back instantly if the coach drags back home. No translated
+  // tiles, so nothing can get stranded mid-animation.
   const hoverModule = useCallback((fromIdx: number, ty: number) => {
     let target = findTarget(fromIdx, ty);
     if (target === fromIdx) target = null;
+    if (target !== null && workoutForModule(target) === null) target = null;
     if (target === lastOverRef.current) return;
     lastOverRef.current = target;
     setDragOverIdx(target);
-    const from = moduleLayouts.current[fromIdx];
-    const dest = target !== null ? moduleLayouts.current[target] : null;
-    if (from && dest) {
-      displacedTY.value = 0;
-      displacedTY.value = withSpring(from.y - dest.y, SPRING_CFG);
-    } else {
-      displacedTY.value = withSpring(0, SPRING_CFG);
-    }
-  }, [displacedTY]);
+  }, [workoutForModule]);
 
   const finishDrag = useCallback((fromIdx: number, ty: number) => {
-    const target = findTarget(fromIdx, ty);
+    let target = findTarget(fromIdx, ty);
+    if (target === fromIdx) target = null;
+    if (target !== null && workoutForModule(target) === null) target = null;
     const from = moduleLayouts.current[fromIdx];
     const dest = target !== null ? moduleLayouts.current[target] : null;
-    if (!from || !dest || target === null || target === fromIdx) {
+    if (!from || !dest || target === null) {
       // No move — spring the tile back home, then clear state.
-      displacedTY.value = withSpring(0, SPRING_CFG);
       dragTY.value = withSpring(0, SPRING_CFG, () => { runOnJS(endDrag)(); });
       return;
     }
-    // Snap into the destination slot; the displaced tile settles in the
-    // source slot; data commits when the snap lands.
-    displacedTY.value = withSpring(from.y - dest.y, SPRING_CFG);
-    dragTY.value = withSpring(dest.y - from.y, SPRING_CFG, () => { runOnJS(commitMove)(fromIdx, target); });
-  }, [displacedTY, dragTY, endDrag, commitMove]);
+    const commitTarget = target;
+    lastOverRef.current = commitTarget;
+    setDragOverIdx(commitTarget);
+    // In-hand tile springs onto its ghost slot; the swap commits when it
+    // lands (preview already shows the swapped layout, so nothing jumps).
+    dragTY.value = withSpring(dest.y - from.y, SPRING_CFG, () => { runOnJS(commitSwap)(fromIdx, commitTarget); });
+  }, [dragTY, commitSwap, workoutForModule]);
 
   const sortedDays = days;
 
@@ -1095,9 +1089,18 @@ export default function PlaybookSchedulePanel({
   const dragTileStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: dragTY.value }],
   }));
-  const displacedTileStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: displacedTY.value }],
-  }));
+
+  const tileBody = (w: string) => (
+    <>
+      <WorkoutMosaic thumbs={workoutThumbs[w] ?? []} width={TILE_W} height={TILE_H} scrollIdle center />
+      <View style={s.workoutTileNameBar}>
+        <Text style={s.workoutTileText} numberOfLines={1}>
+          {workoutNames[w] || 'Workout'}
+        </Text>
+        <Text style={s.workoutTileHint}>hold + drag</Text>
+      </View>
+    </>
+  );
 
   const renderWorkoutTile = (moduleIdx: number) => {
     const wid = workoutForModule(moduleIdx);
@@ -1109,7 +1112,15 @@ export default function PlaybookSchedulePanel({
       );
     }
     const isDragging = dragFromIdx === moduleIdx;
-    const isDisplaced = dragOverIdx === moduleIdx && dragFromIdx !== null && dragFromIdx !== moduleIdx;
+    const isGhostTarget = dragFromIdx !== null && dragFromIdx !== moduleIdx && dragOverIdx === moduleIdx;
+    // Live swap preview: the hovered target's workout renders in the SOURCE
+    // slot instantly (underlay below), and the target slot shows a ghost of
+    // the in-hand workout. Dragging back home reverses both instantly.
+    const shownWid = isGhostTarget && dragFromIdx !== null
+      ? (workoutForModule(dragFromIdx) ?? wid)
+      : wid;
+    // What the source slot shows underneath the floating tile.
+    const underWid = isDragging && dragOverIdx !== null ? workoutForModule(dragOverIdx) : null;
     const pan = Gesture.Pan()
       .activateAfterLongPress(250)
       .onStart(() => {
@@ -1122,32 +1133,38 @@ export default function PlaybookSchedulePanel({
         runOnJS(hoverModule)(moduleIdx, e.translationY);
       })
       .onEnd((e) => {
-        // Snap/settle animations own the shared values from here — finishDrag
-        // resets them when the animation lands.
+        // Snap animation owns dragTY from here — finishDrag/commitSwap clear
+        // state when it lands.
         runOnJS(finishDrag)(moduleIdx, e.translationY);
       })
       .onFinalize((_e, success) => {
         if (!success) runOnJS(endDrag)();
       });
     return (
-      <GestureDetector gesture={pan}>
-        <Animated.View
-          style={[
-            s.workoutTile,
-            isDragging && dragTileStyle,
-            isDragging && { zIndex: 10, elevation: 10, borderColor: '#A78BFA', borderWidth: 1 },
-            isDisplaced && displacedTileStyle,
-          ]}
-        >
-          <WorkoutMosaic thumbs={workoutThumbs[wid] ?? []} width={TILE_W} height={TILE_H} scrollIdle center />
-          <View style={s.workoutTileNameBar}>
-            <Text style={s.workoutTileText} numberOfLines={1}>
-              {workoutNames[wid] || 'Workout'}
-            </Text>
-            <Text style={s.workoutTileHint}>hold + drag</Text>
-          </View>
-        </Animated.View>
-      </GestureDetector>
+      <View style={{ width: TILE_W, height: TILE_H }}>
+        {isDragging && (
+          underWid ? (
+            <View style={[s.workoutTile, StyleSheet.absoluteFillObject]}>
+              {tileBody(underWid)}
+            </View>
+          ) : (
+            <View style={[s.workoutTile, StyleSheet.absoluteFillObject, { opacity: 0.25 }]} />
+          )
+        )}
+        <GestureDetector gesture={pan}>
+          <Animated.View
+            style={[
+              s.workoutTile,
+              isDragging && StyleSheet.absoluteFillObject,
+              isDragging && dragTileStyle,
+              isDragging && { zIndex: 10, elevation: 10, borderColor: '#A78BFA', borderWidth: 1 },
+              isGhostTarget && { opacity: 0.45, borderColor: '#A78BFA', borderWidth: 1 },
+            ]}
+          >
+            {tileBody(shownWid)}
+          </Animated.View>
+        </GestureDetector>
+      </View>
     );
   };
 
@@ -1264,9 +1281,6 @@ export default function PlaybookSchedulePanel({
                     // Dragged tile must float over LATER sibling modules, not
                     // slide behind them — lift its whole module while dragging.
                     dragFromIdx === k && { zIndex: 20, elevation: 20 },
-                    // Hovered module's tile animates toward the source slot —
-                    // lift it too so the swap preview isn't hidden by siblings.
-                    dragOverIdx === k && dragFromIdx !== null && { zIndex: 15, elevation: 15 },
                   ]}
                   onLayout={(e) => {
                     moduleLayouts.current[k] = {
