@@ -25,6 +25,7 @@
 
 import * as admin from 'firebase-admin';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { Timestamp, FieldValue, Transaction } from 'firebase-admin/firestore';
 
 const getDb = () => admin.firestore();
@@ -237,6 +238,115 @@ export async function moveReservationForInstance(
   return { reservationId: newResId, startUtc, endUtc };
 }
 
+// ── Idempotent booking requests (optional client-supplied clientRequestId) ──
+// booking_requests/{clientRequestId}: dedupe guard so a client retry after a
+// timeout can never double-book. Requests without a clientRequestId behave
+// exactly as before (fully backward compatible).
+
+const CLIENT_REQUEST_ID_RE = /^[A-Za-z0-9_-]{16,64}$/;
+const PENDING_CLAIM_STALE_MS = 5 * 60 * 1000;
+const CLAIM_EXPIRY_MS = 24 * 60 * 60 * 1000;
+
+export function validClientRequestId(raw: unknown): string | null {
+  return typeof raw === 'string' && CLIENT_REQUEST_ID_RE.test(raw) ? raw : null;
+}
+
+export interface BookingRequestScope {
+  fn: 'bookPlaybookSession' | 'bookViaBookingToken';
+  coachId: string;
+  memberKey: string;
+  playbookId: string;
+}
+
+/**
+ * Transactionally claim booking_requests/{clientRequestId}. Returns the
+ * stored result when this exact request already completed (idempotent
+ * replay); otherwise writes a pending claim and returns null. Scope fields
+ * must match on replay — a request ID can never cross coach/member/function.
+ */
+export async function claimBookingRequest(
+  clientRequestId: string,
+  scope: BookingRequestScope,
+): Promise<Record<string, any> | null> {
+  const db = getDb();
+  const ref = db.collection('booking_requests').doc(clientRequestId);
+  let prior: Record<string, any> | null = null;
+  await db.runTransaction(async (txn) => {
+    const snap = await txn.get(ref);
+    if (snap.exists) {
+      const data = snap.data()!;
+      if (data.fn !== scope.fn || data.coachId !== scope.coachId
+        || data.memberKey !== scope.memberKey || data.playbookId !== scope.playbookId) {
+        throw new HttpsError('permission-denied', 'This request ID belongs to a different booking');
+      }
+      if (data.result) {
+        prior = data.result;
+        return;
+      }
+      const createdMs = (data.createdAt as Timestamp | undefined)?.toMillis?.() ?? 0;
+      if (Date.now() - createdMs < PENDING_CLAIM_STALE_MS) {
+        throw new HttpsError('aborted', 'This booking is still processing — try again in a moment');
+      }
+      // Stale pending claim from a crashed run — reclaim it.
+    }
+    txn.set(ref, {
+      ...scope,
+      result: null,
+      createdAt: FieldValue.serverTimestamp(),
+      // TTL-style cleanup guard: anything past expiresAt is safe to delete.
+      expiresAt: Timestamp.fromMillis(Date.now() + CLAIM_EXPIRY_MS),
+    });
+  });
+  return prior;
+}
+
+export async function storeBookingRequestResult(
+  clientRequestId: string,
+  result: Record<string, any>,
+): Promise<void> {
+  try {
+    await getDb().collection('booking_requests').doc(clientRequestId).set(
+      { result, completedAt: FieldValue.serverTimestamp() },
+      { merge: true },
+    );
+  } catch (err: any) {
+    console.warn(`[playbookScheduling] Failed to store booking request result ${clientRequestId}: ${err.message}`);
+  }
+}
+
+/** Release a pending claim after a failed run so a retry can book fresh. */
+export async function releaseBookingRequest(clientRequestId: string): Promise<void> {
+  try {
+    await getDb().collection('booking_requests').doc(clientRequestId).delete();
+  } catch (err: any) {
+    console.warn(`[playbookScheduling] Failed to release booking request ${clientRequestId}: ${err.message}`);
+  }
+}
+
+export const cleanupExpiredBookingRequests = onSchedule(
+  { schedule: '30 3 * * *', timeZone: 'UTC' },
+  async () => {
+    const db = getDb();
+    const batchSize = 400;
+    let deletedCount = 0;
+
+    const expiredQuery = db
+      .collection('booking_requests')
+      .where('expiresAt', '<', Timestamp.now())
+      .limit(batchSize);
+    let snap = await expiredQuery.get();
+    while (!snap.empty) {
+      const batch = db.batch();
+      snap.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+      deletedCount += snap.size;
+      snap = await expiredQuery.get();
+    }
+
+    console.log(`[cleanupExpiredBookingRequests] Deleted ${deletedCount} expired booking request(s)`);
+  }
+);
+
 // ── Shared single-occurrence booking (coach path + public token path) ───────
 
 export interface BookOccurrenceParams {
@@ -376,6 +486,9 @@ interface BookPlaybookSessionData {
   // Phase B.2: per-day time + kind. When present, overrides startTime /
   // sessionKind for that day; daysOfWeek/startTime stay as the legacy shape.
   daySettings?: Array<{ dayOfWeek: number; startTime: string; sessionKind?: PlaybookSessionKind; durationMinutes?: number }>;
+  // Optional idempotency key — a retry with the same ID returns the stored
+  // result of the original attempt instead of booking again.
+  clientRequestId?: string;
 }
 
 export const bookPlaybookSession = onCall(
@@ -517,6 +630,24 @@ export const bookPlaybookSession = onCall(
     }
 
     const memberKey = memberId; // guests book via bookViaBookingToken with `guest:<sha256(email)>`
+
+    // Idempotency: a retry carrying the same clientRequestId returns the
+    // stored result of the attempt that already ran (e.g. client timed out
+    // at 45s while the server finished booking).
+    const clientRequestId = validClientRequestId(d.clientRequestId);
+    if (clientRequestId) {
+      const prior = await claimBookingRequest(clientRequestId, {
+        fn: 'bookPlaybookSession',
+        coachId,
+        memberKey,
+        playbookId: d.playbookId,
+      });
+      if (prior) {
+        console.log(`[bookPlaybookSession] idempotent replay for request ${clientRequestId}`);
+        return prior;
+      }
+    }
+
     const results: Array<{ date: string; status: 'booked' | 'conflict' | 'cap_reached'; reason?: string; instanceId?: string }> = [];
 
     for (const occ of occurrences) {
@@ -550,6 +681,7 @@ export const bookPlaybookSession = onCall(
           // Firestore ALREADY_EXISTS from txn.create() racing another booking
           results.push({ date: dateStr, status: 'conflict', reason: 'booked concurrently' });
         } else {
+          if (clientRequestId) await releaseBookingRequest(clientRequestId);
           throw err;
         }
       }
@@ -566,6 +698,8 @@ export const bookPlaybookSession = onCall(
     });
 
     console.log(`[bookPlaybookSession] ${bookedCount}/${results.length} booked for playbook ${d.playbookId} member ${memberId}`);
-    return { success: true, bookedCount, results };
+    const response = { success: true, bookedCount, results };
+    if (clientRequestId) await storeBookingRequestResult(clientRequestId, response);
+    return response;
   }
 );

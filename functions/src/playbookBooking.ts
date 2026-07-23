@@ -6,8 +6,11 @@
  *
  * Collections:
  *  - booking_windows/{playbookId}: coach-defined availability — IANA timezone
- *    plus [{ dayOfWeek 0-6, startTime HH:mm, endTime HH:mm }]. Written only by
- *    createPlaybookBookingLink (Admin SDK); coach-readable via rules.
+ *    plus [{ dayOfWeek 0-6, startTime HH:mm, endTime HH:mm }] and optional
+ *    dateOverrides [{ date YYYY-MM-DD, intervals: [{ start, end }] }] that
+ *    REPLACE the weekly pattern on that calendar date (empty intervals = the
+ *    date is fully unavailable). Written only by createPlaybookBookingLink
+ *    (Admin SDK); coach-readable via rules.
  *  - playbook_booking_tokens/{token}: 32-hex crypto-random token →
  *    { playbookId, coachId, memberId | null }. No client writes; resolver and
  *    booking run through Admin SDK, so rules never expose playbook internals.
@@ -23,7 +26,11 @@ import { defineSecret } from 'firebase-functions/params';
 import { Timestamp, FieldValue } from 'firebase-admin/firestore';
 import {
   bookOccurrence,
+  claimBookingRequest,
   memberWeekWindowUtc,
+  releaseBookingRequest,
+  storeBookingRequestResult,
+  validClientRequestId,
   wallTimeToUtc,
   PlaybookSessionKind,
 } from './playbookScheduling';
@@ -67,8 +74,10 @@ function normalizeEmail(raw: unknown): string | null {
 }
 
 function validateWindows(raw: unknown): BookingWindow[] {
-  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 21) {
-    throw new HttpsError('invalid-argument', 'Provide 1-21 booking windows');
+  // Weekly-hours UI writes one window per day-interval: 7 days × up to 6
+  // intervals each.
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 42) {
+    throw new HttpsError('invalid-argument', 'Provide 1-42 booking windows');
   }
   return raw.map((w: any) => {
     const days = [...new Set(windowDays(w))].sort();
@@ -84,6 +93,50 @@ function validateWindows(raw: unknown): BookingWindow[] {
     }
     return { days, startTime: w.startTime, endTime: w.endTime };
   });
+}
+
+interface DateOverride {
+  date: string;                                    // YYYY-MM-DD in the coach timezone
+  intervals: Array<{ start: string; end: string }>; // HH:mm; empty = date unavailable
+}
+
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+
+function validateDateOverrides(raw: unknown): DateOverride[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw) || raw.length > 90) {
+    throw new HttpsError('invalid-argument', 'Provide at most 90 date-specific overrides');
+  }
+  const byDate = new Map<string, DateOverride>();
+  for (const o of raw) {
+    if (typeof o?.date !== 'string' || !YMD.test(o.date)) {
+      throw new HttpsError('invalid-argument', 'override date must be YYYY-MM-DD');
+    }
+    const rawIntervals = o?.intervals ?? [];
+    if (!Array.isArray(rawIntervals) || rawIntervals.length > 6) {
+      throw new HttpsError('invalid-argument', 'each override allows 0-6 intervals');
+    }
+    const intervals = rawIntervals.map((iv: any) => {
+      if (typeof iv?.start !== 'string' || !HHMM.test(iv.start)
+        || typeof iv?.end !== 'string' || !HHMM.test(iv.end)) {
+        throw new HttpsError('invalid-argument', 'override times must be HH:mm');
+      }
+      if (minutesOf(iv.end) <= minutesOf(iv.start)) {
+        throw new HttpsError('invalid-argument', 'override end must be after start');
+      }
+      return { start: iv.start, end: iv.end };
+    }).sort((a: { start: string }, b: { start: string }) => a.start.localeCompare(b.start));
+    byDate.set(o.date, { date: o.date, intervals });
+  }
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function overrideMap(doc: { dateOverrides?: DateOverride[] }): Map<string, Array<{ start: string; end: string }>> {
+  const map = new Map<string, Array<{ start: string; end: string }>>();
+  for (const o of doc.dateOverrides || []) {
+    if (typeof o?.date === 'string' && Array.isArray(o?.intervals)) map.set(o.date, o.intervals);
+  }
+  return map;
 }
 
 function validateLocations(raw: unknown): string[] {
@@ -140,8 +193,8 @@ export const createPlaybookBookingLink = onCall(
     const coachId = (callerToken.coachId as string) || request.auth.uid;
     const isAdmin = callerToken.role === 'platformAdmin' || !!callerToken.admin;
 
-    const { playbookId, windows, timezone, locations } = request.data as {
-      playbookId: string; windows: unknown; timezone: string; locations?: unknown;
+    const { playbookId, windows, timezone, locations, dateOverrides } = request.data as {
+      playbookId: string; windows: unknown; timezone: string; locations?: unknown; dateOverrides?: unknown;
     };
     if (!playbookId) throw new HttpsError('invalid-argument', 'playbookId is required');
     if (typeof timezone !== 'string' || !timezone) {
@@ -154,6 +207,7 @@ export const createPlaybookBookingLink = onCall(
     }
     const validated = validateWindows(windows);
     const validatedLocations = validateLocations(locations);
+    const validatedOverrides = validateDateOverrides(dateOverrides);
 
     const playbookSnap = await db.collection('playbooks').doc(playbookId).get();
     if (!playbookSnap.exists) throw new HttpsError('not-found', 'Playbook not found');
@@ -168,6 +222,7 @@ export const createPlaybookBookingLink = onCall(
       timezone,
       windows: validated,
       locations: validatedLocations,
+      dateOverrides: validatedOverrides,
       updatedAt: FieldValue.serverTimestamp(),
     });
 
@@ -216,9 +271,12 @@ export const resolvePlaybookBookingToken = onRequest(
         res.status(409).json({ error: 'The coach has not opened booking for this playbook yet.' });
         return;
       }
-      const windowsDoc = windowsSnap.data() as { timezone: string; windows: BookingWindow[]; locations?: string[] };
+      const windowsDoc = windowsSnap.data() as {
+        timezone: string; windows: BookingWindow[]; locations?: string[]; dateOverrides?: DateOverride[];
+      };
       const timezone = windowsDoc.timezone;
       const locations = Array.isArray(windowsDoc.locations) ? windowsDoc.locations : [];
+      const overrides = overrideMap(windowsDoc);
       const durationMinutes = playbook.sessionDurationMinutes || 45;
       const weeklySessionCap: number | null =
         typeof playbook.weeklySessionCap === 'number' && playbook.weeklySessionCap > 0
@@ -278,17 +336,30 @@ export const resolvePlaybookBookingToken = onRequest(
       }
 
       const slots: Array<{ date: string; startTime: string; startUtcMillis: number; capReached: boolean }> = [];
+      // Multiple windows may cover the same day (weekly-hours UI writes one
+      // window per day-interval); dedupe identical date+time slots.
+      const seenSlots = new Set<string>();
       for (const { dateStr, dow } of days) {
-        for (const w of windowsDoc.windows) {
-          if (!windowDays(w).includes(dow)) continue;
-          const startMin = minutesOf(w.startTime);
-          const endMin = minutesOf(w.endTime);
+        // Date-specific override REPLACES the weekly pattern for that date;
+        // zero override intervals = the whole date is unavailable.
+        const ov = overrides.get(dateStr);
+        const intervals: Array<{ start: string; end: string }> = ov !== undefined
+          ? ov
+          : windowsDoc.windows
+            .filter((w) => windowDays(w).includes(dow))
+            .map((w) => ({ start: w.startTime, end: w.endTime }));
+        for (const iv of intervals) {
+          const startMin = minutesOf(iv.start);
+          const endMin = minutesOf(iv.end);
           for (let m = startMin; m + durationMinutes <= endMin; m += durationMinutes) {
             const hhmm = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
             const startUtc = wallTimeToUtc(dateStr, hhmm, timezone);
             if (startUtc.getTime() <= now.getTime()) continue;
             const endUtcMs = startUtc.getTime() + durationMinutes * 60 * 1000;
             if (busy.some((b) => b.start < endUtcMs && b.end > startUtc.getTime())) continue;
+            const slotKey = `${dateStr}_${hhmm}`;
+            if (seenSlots.has(slotKey)) continue;
+            seenSlots.add(slotKey);
             const wk = memberWeekWindowUtc(startUtc, timezone).weekStartUtc.getTime();
             const capReached = weeklySessionCap !== null && (weekCounts.get(wk) || 0) >= weeklySessionCap;
             slots.push({ date: dateStr, startTime: hhmm, startUtcMillis: startUtc.getTime(), capReached });
@@ -345,8 +416,8 @@ export const bookViaBookingToken = onCall(
   { region: 'us-central1', invoker: 'public', secrets: [emailApiKey] },
   async (request) => {
     const db = getDb();
-    const { token, date, startTime, guestEmail: rawGuestEmail, location: rawLocation } = request.data as {
-      token: string; date: string; startTime: string; guestEmail?: string; location?: string;
+    const { token, date, startTime, guestEmail: rawGuestEmail, location: rawLocation, clientRequestId: rawClientRequestId } = request.data as {
+      token: string; date: string; startTime: string; guestEmail?: string; location?: string; clientRequestId?: string;
     };
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       throw new HttpsError('invalid-argument', 'date must be YYYY-MM-DD');
@@ -364,7 +435,9 @@ export const bookViaBookingToken = onCall(
     if (!playbookSnap.exists) throw new HttpsError('not-found', 'This playbook no longer exists');
     if (!windowsSnap.exists) throw new HttpsError('failed-precondition', 'Booking is not open for this playbook');
     const playbook = playbookSnap.data()!;
-    const windowsDoc = windowsSnap.data() as { timezone: string; windows: BookingWindow[]; locations?: string[] };
+    const windowsDoc = windowsSnap.data() as {
+      timezone: string; windows: BookingWindow[]; locations?: string[]; dateOverrides?: DateOverride[];
+    };
     const timezone = windowsDoc.timezone;
     const durationMinutes = playbook.sessionDurationMinutes || 45;
 
@@ -390,11 +463,18 @@ export const bookViaBookingToken = onCall(
     const dowMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
     const slotDow = dowMap[dowFmt.format(wallTimeToUtc(date, '12:00', timezone))] ?? -1;
     const startMin = minutesOf(startTime);
-    const inWindow = windowsDoc.windows.some((w) =>
-      windowDays(w).includes(slotDow)
-      && startMin >= minutesOf(w.startTime)
-      && startMin + durationMinutes <= minutesOf(w.endTime)
-      && (startMin - minutesOf(w.startTime)) % durationMinutes === 0
+    // Same override semantics as the resolver: an override for this date is
+    // the ONLY availability on that date (empty = fully blocked).
+    const bookOv = overrideMap(windowsDoc).get(date);
+    const bookIntervals: Array<{ start: string; end: string }> = bookOv !== undefined
+      ? bookOv
+      : windowsDoc.windows
+        .filter((w) => windowDays(w).includes(slotDow))
+        .map((w) => ({ start: w.startTime, end: w.endTime }));
+    const inWindow = bookIntervals.some((iv) =>
+      startMin >= minutesOf(iv.start)
+      && startMin + durationMinutes <= minutesOf(iv.end)
+      && (startMin - minutesOf(iv.start)) % durationMinutes === 0
     );
     if (!inWindow) {
       throw new HttpsError('invalid-argument', 'That time is not an available slot');
@@ -450,24 +530,48 @@ export const bookViaBookingToken = onCall(
       typeof playbook.weeklySessionCap === 'number' && playbook.weeklySessionCap > 0
         ? playbook.weeklySessionCap : null;
 
-    const { instanceId } = await bookOccurrence({
-      playbookId: tokenData.playbookId,
-      playbook,
-      coachId: tokenData.coachId,
-      memberKey,
-      memberId,
-      guestEmail,
-      memberName,
-      dateStr: date,
-      startTime,
-      timezone,
-      durationMinutes,
-      sessionKind: playbook.sessionKind === 'coach_guided' ? 'coach_guided' : 'coach_review',
-      recordingEnabled: playbook.recordingEnabled !== false,
-      weeklySessionCap,
-      bookedVia: 'booking_link',
-      location,
-    });
+    // Idempotency: a retry carrying the same clientRequestId (e.g. after a
+    // client-side timeout) returns the stored result of the original attempt
+    // instead of booking a second session.
+    const clientRequestId = validClientRequestId(rawClientRequestId);
+    if (clientRequestId) {
+      const prior = await claimBookingRequest(clientRequestId, {
+        fn: 'bookViaBookingToken',
+        coachId: tokenData.coachId,
+        memberKey,
+        playbookId: tokenData.playbookId,
+      });
+      if (prior) {
+        console.log(`[bookViaBookingToken] idempotent replay for request ${clientRequestId}`);
+        return prior;
+      }
+    }
+
+    let bookedOccurrence: { instanceId: string };
+    try {
+      bookedOccurrence = await bookOccurrence({
+        playbookId: tokenData.playbookId,
+        playbook,
+        coachId: tokenData.coachId,
+        memberKey,
+        memberId,
+        guestEmail,
+        memberName,
+        dateStr: date,
+        startTime,
+        timezone,
+        durationMinutes,
+        sessionKind: playbook.sessionKind === 'coach_guided' ? 'coach_guided' : 'coach_review',
+        recordingEnabled: playbook.recordingEnabled !== false,
+        weeklySessionCap,
+        bookedVia: 'booking_link',
+        location,
+      });
+    } catch (err) {
+      if (clientRequestId) await releaseBookingRequest(clientRequestId);
+      throw err;
+    }
+    const { instanceId } = bookedOccurrence;
 
     await db.collection('scheduling_audit_log').add({
       coachId: tokenData.coachId,
@@ -527,7 +631,7 @@ export const bookViaBookingToken = onCall(
       }
     }
 
-    return {
+    const response = {
       success: true,
       instanceId,
       date,
@@ -543,6 +647,8 @@ export const bookViaBookingToken = onCall(
       googleCalUrl,
       confirmationEmailSent: !!bookerEmail,
     };
+    if (clientRequestId) await storeBookingRequestResult(clientRequestId, response);
+    return response;
   }
 );
 

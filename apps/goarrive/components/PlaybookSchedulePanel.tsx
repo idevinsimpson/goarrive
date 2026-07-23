@@ -13,7 +13,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View,
+  Keyboard, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View,
 } from 'react-native';
 import {
   collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query,
@@ -29,6 +29,8 @@ import {
   DAY_SHORT_LABELS,
   PLAYBOOK_SESSION_KIND_LABELS,
   PlaybookSessionKind,
+  formatDateShort,
+  todayInTz,
 } from '../lib/schedulingTypes';
 import { WorkoutMosaic, WORKOUT_CARD_BG } from './WorkoutMosaic';
 
@@ -45,6 +47,32 @@ const TILE_H = 135;
 // dies without settling (e.g. iOS PWA suspended mid-flight), the footer must
 // never stay stuck on "Booking…".
 const BOOKING_TIMEOUT_MS = 45000;
+
+// Sentinel for the 45s client deadline — distinguishes "request may still be
+// running server-side" (retry same clientRequestId) from real failures.
+const BOOKING_TIMEOUT_SENTINEL = 'booking-client-timeout';
+
+// Crypto-random idempotency key for booking calls.
+export function makeRequestId(): string {
+  const bytes = new Uint8Array(16);
+  const c = typeof globalThis !== 'undefined' ? (globalThis as any).crypto : undefined;
+  if (c?.getRandomValues) c.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// A bad saved timezone (corrupt doc, renamed zone) would make every
+// Intl call downstream throw — fall back to the device timezone.
+export function safeTimezone(tz: unknown): string {
+  const fallback = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (typeof tz !== 'string' || !tz) return fallback;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return tz;
+  } catch {
+    return fallback;
+  }
+}
 
 export function parseDuration(v: string): number | null {
   const n = parseInt(v, 10);
@@ -89,20 +117,72 @@ export function formatTime12(hhmm: string): string {
   return `${h12}:${m[2]} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
-interface BookingWindowRow {
-  days: number[];
-  startTime: string;
-  endTime: string;
+// ── Weekly-hours availability (Calendly pattern) ────────────────────────────
+// One slot = one start–end interval on one day. The coach edits per-day slot
+// lists; on save they serialize back to booking_windows.windows as one
+// { days:[d], startTime, endTime } entry per interval (server shape unchanged).
+interface AvailSlot {
+  startRaw: string;         // what the coach typed / 12-hour display
+  start: string | null;     // canonical HH:mm (null = unparseable)
+  endRaw: string;
+  end: string | null;
 }
 
-// booking_windows docs written before multi-day support carry dayOfWeek.
-function normalizeWindow(w: any): BookingWindowRow {
-  return {
-    days: Array.isArray(w?.days) ? w.days : (typeof w?.dayOfWeek === 'number' ? [w.dayOfWeek] : []),
-    startTime: w?.startTime || '09:00',
-    endTime: w?.endTime || '12:00',
-  };
+const DEFAULT_DAY_SLOT = { start: '06:00', end: '22:00' };
+
+function makeSlot(start: string, end: string): AvailSlot {
+  return { startRaw: formatTime12(start), start, endRaw: formatTime12(end), end };
 }
+
+// booking_windows docs written before multi-day support carry dayOfWeek;
+// multi-day windows expand into one slot per covered day.
+export function windowsToDaySlots(raw: any[]): AvailSlot[][] {
+  const byDay: AvailSlot[][] = Array.from({ length: 7 }, () => []);
+  for (const w of raw) {
+    const days: number[] = Array.isArray(w?.days)
+      ? w.days.filter((d: any) => Number.isInteger(d) && d >= 0 && d <= 6)
+      : (typeof w?.dayOfWeek === 'number' ? [w.dayOfWeek] : []);
+    const start = typeof w?.startTime === 'string' ? w.startTime : '09:00';
+    const end = typeof w?.endTime === 'string' ? w.endTime : '12:00';
+    for (const d of days) byDay[d].push(makeSlot(start, end));
+  }
+  for (const list of byDay) list.sort((a, b) => (a.start || '').localeCompare(b.start || ''));
+  return byDay;
+}
+
+// Serialize per-day slots to server windows, merging overlapping/adjacent
+// intervals within a day (overlap policy: merge, never reject).
+export function daySlotsToWindows(byDay: AvailSlot[][]): Array<{ days: number[]; startTime: string; endTime: string }> {
+  const out: Array<{ days: number[]; startTime: string; endTime: string }> = [];
+  for (let d = 0; d < 7; d++) {
+    const iv = byDay[d]
+      .filter((s) => s.start && s.end && s.start < s.end)
+      .map((s) => ({ start: s.start as string, end: s.end as string }))
+      .sort((a, b) => a.start.localeCompare(b.start));
+    const merged: Array<{ start: string; end: string }> = [];
+    for (const cur of iv) {
+      const last = merged[merged.length - 1];
+      if (last && cur.start <= last.end) {
+        if (cur.end > last.end) last.end = cur.end;
+      } else {
+        merged.push({ ...cur });
+      }
+    }
+    for (const m of merged) out.push({ days: [d], startTime: m.start, endTime: m.end });
+  }
+  return out;
+}
+
+// ── Date-specific hours (Calendly pattern) ──────────────────────────────────
+// An override REPLACES the weekly pattern on one calendar date; zero
+// intervals means the date is fully unavailable (doubles as blackout dates).
+export interface DateOverride {
+  date: string;                                     // YYYY-MM-DD (coach timezone)
+  intervals: Array<{ start: string; end: string }>; // HH:mm
+}
+
+const MONTH_LABELS = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
 
 interface BookResult {
   date: string;
@@ -164,9 +244,18 @@ export default function PlaybookSchedulePanel({
   const [horizonWeeks, setHorizonWeeks] = useState(4);
   const [weeklyCap, setWeeklyCap] = useState<number | null>(null);
   const [booking, setBooking] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(false);
   const [results, setResults] = useState<BookResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Survives close/reopen on purpose: an unresolved (timed-out) booking must
+  // keep its idempotency key so any retry can't double-book.
+  const pendingRequestIdRef = useRef<string | null>(null);
   const prefilledRef = useRef(false);
+  // Auto-save dirty flags: set only by user edits, never by snapshot prefill,
+  // so hydration can't trigger a write-back loop.
+  const dayDirtyRef = useRef(false);
+  const availDirtyRef = useRef(false);
+  const [availSaved, setAvailSaved] = useState(false);
 
   // Inline title + description editing (A5 / C10)
   const [titleDraft, setTitleDraft] = useState('');
@@ -181,9 +270,18 @@ export default function PlaybookSchedulePanel({
   // URL string for movements with media, { name } placeholder otherwise.
   const [workoutThumbs, setWorkoutThumbs] = useState<Record<string, (string | { name: string })[]>>({});
 
-  // Booking link (Phase 3b): availability windows + public token URL
-  const [windows, setWindows] = useState<BookingWindowRow[]>([]);
+  // Booking link (Phase 3b): weekly-hours availability + public token URL
+  const [daySlots, setDaySlots] = useState<AvailSlot[][]>(() => Array.from({ length: 7 }, () => []));
   const [locations, setLocations] = useState<string[]>([]);
+  // Date-specific hours: saved overrides + the add-hours modal state
+  const [dateOverrides, setDateOverrides] = useState<DateOverride[]>([]);
+  const [ovOpen, setOvOpen] = useState(false);
+  const [ovDates, setOvDates] = useState<string[]>([]);
+  const [ovSlots, setOvSlots] = useState<AvailSlot[]>([]);
+  const [ovMonth, setOvMonth] = useState<{ y: number; m: number }>(() => {
+    const n = new Date();
+    return { y: n.getFullYear(), m: n.getMonth() };
+  });
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -206,6 +304,13 @@ export default function PlaybookSchedulePanel({
       setBooking(false);
       setError(null);
       setResults(null);
+      // Drag state too — closing mid-drag otherwise leaves dragFromIdx set,
+      // which keeps scrollEnabled false and freezes scrolling on reopen.
+      setDragFromIdx(null);
+      setDragOverIdx(null);
+      dayDirtyRef.current = false;
+      availDirtyRef.current = false;
+      setAvailSaved(false);
     }
   }, [visible]);
 
@@ -343,9 +448,15 @@ export default function PlaybookSchedulePanel({
     getDoc(doc(db, 'booking_windows', playbookId))
       .then((snap) => {
         const w = snap.data()?.windows;
-        if (Array.isArray(w) && w.length) setWindows(w.map(normalizeWindow));
+        if (Array.isArray(w) && w.length) setDaySlots(windowsToDaySlots(w));
         const locs = snap.data()?.locations;
         if (Array.isArray(locs)) setLocations(locs);
+        const ov = snap.data()?.dateOverrides;
+        if (Array.isArray(ov)) {
+          setDateOverrides(ov.filter(
+            (o: any) => typeof o?.date === 'string' && Array.isArray(o?.intervals),
+          ));
+        }
       })
       .catch(() => {});
     getDocs(query(
@@ -479,12 +590,10 @@ export default function PlaybookSchedulePanel({
 
   const memberName = playbook?.assignedMemberName || null;
   const hasMember = playbookMemberIds.length > 0;
-  const timezone = useMemo(
-    () => playbook?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-    [playbook?.timezone],
-  );
+  const timezone = useMemo(() => safeTimezone(playbook?.timezone), [playbook?.timezone]);
 
   const toggleDay = useCallback((d: number) => {
+    dayDirtyRef.current = true;
     setDays((prev) => {
       if (prev.includes(d)) return prev.filter((x) => x !== d);
       return [...prev, d].sort((a, b) => a - b);
@@ -494,6 +603,7 @@ export default function PlaybookSchedulePanel({
   }, []);
 
   const setDayTime = useCallback((d: number, raw: string) => {
+    dayDirtyRef.current = true;
     setDayConfigs((prev) => ({
       ...prev,
       [d]: { ...(prev[d] || DEFAULT_CONFIG), raw, time: parseFlexTime(raw) },
@@ -510,17 +620,53 @@ export default function PlaybookSchedulePanel({
   }, []);
 
   const setDayKind = useCallback((d: number, kind: PlaybookSessionKind) => {
+    dayDirtyRef.current = true;
     setDayConfigs((prev) => ({ ...prev, [d]: { ...(prev[d] || DEFAULT_CONFIG), kind } }));
     setResults(null);
   }, []);
 
   const setDayDuration = useCallback((d: number, v: string) => {
+    dayDirtyRef.current = true;
     setDayConfigs((prev) => ({
       ...prev,
       [d]: { ...(prev[d] || DEFAULT_CONFIG), duration: v.replace(/[^0-9]/g, '') },
     }));
     setResults(null);
   }, []);
+
+  // Auto-save per-day settings: any user edit (day toggle, time, duration,
+  // kind) debounces ~800ms then persists to the playbook doc. Previously these
+  // only saved when Book Sessions ran, so edits vanished on reload.
+  const saveDaySettings = useCallback(() => {
+    if (!dayDirtyRef.current || !playbookId) return;
+    dayDirtyRef.current = false;
+    const valid = days.filter(
+      (d) => !!dayConfigs[d]?.time && parseDuration(dayConfigs[d]?.duration ?? '') !== null,
+    );
+    // Mid-edit (nothing parseable yet) — wait for the next valid change.
+    if (valid.length === 0 && days.length > 0) return;
+    const daySettings = valid.map((d) => ({
+      dayOfWeek: d,
+      startTime: dayConfigs[d]!.time as string,
+      sessionKind: dayConfigs[d]!.kind,
+      durationMinutes: parseDuration(dayConfigs[d]!.duration) as number,
+    }));
+    const payload: Record<string, unknown> = {
+      scheduleDaySettings: daySettings,
+      scheduleDaysOfWeek: valid,
+      updatedAt: serverTimestamp(),
+    };
+    if (daySettings.length) payload.scheduleStartTime = daySettings[0].startTime;
+    updateDoc(doc(db, 'playbooks', playbookId), payload).catch((e) => {
+      console.error('[PlaybookSchedulePanel] day settings auto-save error:', e);
+    });
+  }, [days, dayConfigs, playbookId]);
+
+  useEffect(() => {
+    if (!dayDirtyRef.current || !playbookId) return;
+    const t = setTimeout(saveDaySettings, 800);
+    return () => clearTimeout(t);
+  }, [days, dayConfigs, playbookId, saveDaySettings]);
 
   // Day k (in sorted selected days) → workout index in playbook order.
   const workoutForModule = useCallback((k: number): string | null => {
@@ -588,6 +734,12 @@ export default function PlaybookSchedulePanel({
     setBooking(true);
     setError(null);
     setResults(null);
+    setCheckingStatus(false);
+    // Reuse the request ID from a timed-out attempt: the server dedupes on
+    // clientRequestId, so the retry either returns the stored result (the
+    // first attempt actually landed) or books fresh — never double-books.
+    const clientRequestId = pendingRequestIdRef.current || makeRequestId();
+    pendingRequestIdRef.current = clientRequestId;
     try {
       const daySettings = sortedDays.map((d) => ({
         dayOfWeek: d,
@@ -596,7 +748,7 @@ export default function PlaybookSchedulePanel({
         durationMinutes: parseDuration(dayConfigs[d]!.duration) as number,
       }));
       const fn = httpsCallable(functions, 'bookPlaybookSession');
-      const call = fn({
+      const payload = {
         playbookId,
         daysOfWeek: sortedDays,
         startTime: daySettings[0].startTime,
@@ -608,27 +760,47 @@ export default function PlaybookSchedulePanel({
         repeatFrequency: 'weekly',
         repeatHorizonWeeks: horizonWeeks,
         weeklySessionCap: weeklyCap,
-      });
-      const res = await Promise.race([
-        call,
-        new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error('Booking timed out — check your connection and try again')), BOOKING_TIMEOUT_MS);
-        }),
-      ]);
-      const data = (res as { data: { results: BookResult[] } }).data;
-      setResults(data.results || []);
+        clientRequestId,
+      };
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const res = await Promise.race([
+            fn(payload),
+            new Promise<never>((_, reject) => {
+              setTimeout(() => reject(new Error(BOOKING_TIMEOUT_SENTINEL)), BOOKING_TIMEOUT_MS);
+            }),
+          ]);
+          const data = (res as { data: { results: BookResult[] } }).data;
+          pendingRequestIdRef.current = null;
+          setResults(data.results || []);
+          return;
+        } catch (e: any) {
+          const timedOut = e?.message === BOOKING_TIMEOUT_SENTINEL;
+          if (timedOut && attempt === 0) {
+            // The request may have landed server-side — retry with the SAME
+            // clientRequestId to fetch the stored result instead of rebooking.
+            setCheckingStatus(true);
+            continue;
+          }
+          if (!timedOut) pendingRequestIdRef.current = null;
+          throw timedOut
+            ? new Error('Booking timed out — tap Book Sessions again to check status (it will not double-book)')
+            : e;
+        }
+      }
     } catch (e: any) {
       console.error('[PlaybookSchedulePanel] booking error:', e);
       setError(e?.message || 'Booking failed');
     } finally {
       setBooking(false);
+      setCheckingStatus(false);
     }
   }, [canBook, playbookId, sortedDays, dayConfigs, timezone, recordingEnabled, horizonWeeks, weeklyCap]);
 
-  const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
-  const windowsValid = windows.length > 0 && windows.every(
-    (w) => w.days.length > 0 && timeRe.test(w.startTime) && timeRe.test(w.endTime) && w.startTime < w.endTime,
-  );
+  const hasAnySlot = daySlots.some((list) => list.length > 0);
+  const windowsValid = hasAnySlot && daySlots.every((list) => list.every(
+    (sl) => !!sl.start && !!sl.end && sl.start < sl.end,
+  ));
 
   const bookingUrl = useMemo(() => {
     if (!linkToken) return null;
@@ -639,8 +811,112 @@ export default function PlaybookSchedulePanel({
     return `${origin}/book/${linkToken}`;
   }, [linkToken]);
 
-  const updateWindow = useCallback((i: number, patch: Partial<BookingWindowRow>) => {
-    setWindows((prev) => prev.map((w, idx) => (idx === i ? { ...w, ...patch } : w)));
+  // Enable a day (adds the default interval) or append another interval —
+  // the new interval starts where the last one ends, one hour long.
+  const addDaySlot = useCallback((d: number) => {
+    availDirtyRef.current = true;
+    setDaySlots((prev) => prev.map((list, idx) => {
+      if (idx !== d) return list;
+      if (list.length === 0) return [makeSlot(DEFAULT_DAY_SLOT.start, DEFAULT_DAY_SLOT.end)];
+      const lastEnd = [...list].map((sl) => sl.end).filter(Boolean).sort().pop() || '17:00';
+      const [h, m] = lastEnd.split(':').map(Number);
+      if (h >= 23) return [...list, makeSlot('09:00', '12:00')];
+      const endH = Math.min(23, h + 1);
+      return [...list, makeSlot(lastEnd, `${String(endH).padStart(2, '0')}:${String(m).padStart(2, '0')}`)];
+    }));
+    setLinkError(null);
+  }, []);
+
+  const removeDaySlot = useCallback((d: number, i: number) => {
+    availDirtyRef.current = true;
+    setDaySlots((prev) => prev.map((list, idx) => (idx === d ? list.filter((_, j) => j !== i) : list)));
+    setLinkError(null);
+  }, []);
+
+  const setSlotTime = useCallback((d: number, i: number, field: 'start' | 'end', raw: string) => {
+    availDirtyRef.current = true;
+    setDaySlots((prev) => prev.map((list, idx) => (idx === d
+      ? list.map((sl, j) => (j === i
+        ? { ...sl, [`${field}Raw`]: raw, [field]: parseFlexTime(raw) }
+        : sl))
+      : list)));
+    setLinkError(null);
+  }, []);
+
+  const blurSlotTime = useCallback((d: number, i: number, field: 'start' | 'end') => {
+    setDaySlots((prev) => prev.map((list, idx) => (idx === d
+      ? list.map((sl, j) => {
+        if (j !== i) return sl;
+        const v = sl[field];
+        return v ? { ...sl, [`${field}Raw`]: formatTime12(v) } : sl;
+      })
+      : list)));
+  }, []);
+
+  // ── Date-specific hours modal ─────────────────────────────────────────────
+  const openOverrideModal = useCallback(() => {
+    const [y, m] = todayInTz(timezone).split('-').map(Number);
+    setOvMonth({ y, m: m - 1 });
+    setOvDates([]);
+    setOvSlots([makeSlot('09:00', '17:00')]);
+    setOvOpen(true);
+  }, [timezone]);
+
+  const toggleOvDate = useCallback((dateStr: string) => {
+    setOvDates((prev) => (prev.includes(dateStr)
+      ? prev.filter((d) => d !== dateStr)
+      : [...prev, dateStr].sort()));
+  }, []);
+
+  const addOvSlot = useCallback(() => {
+    setOvSlots((prev) => {
+      if (prev.length === 0) return [makeSlot('09:00', '17:00')];
+      const lastEnd = [...prev].map((sl) => sl.end).filter(Boolean).sort().pop() || '17:00';
+      const [h, m] = lastEnd.split(':').map(Number);
+      if (h >= 23) return [...prev, makeSlot('09:00', '12:00')];
+      const endH = Math.min(23, h + 1);
+      return [...prev, makeSlot(lastEnd, `${String(endH).padStart(2, '0')}:${String(m).padStart(2, '0')}`)];
+    });
+  }, []);
+
+  const removeOvSlot = useCallback((i: number) => {
+    setOvSlots((prev) => prev.filter((_, j) => j !== i));
+  }, []);
+
+  const setOvSlotTime = useCallback((i: number, field: 'start' | 'end', raw: string) => {
+    setOvSlots((prev) => prev.map((sl, j) => (j === i
+      ? { ...sl, [`${field}Raw`]: raw, [field]: parseFlexTime(raw) }
+      : sl)));
+  }, []);
+
+  const blurOvSlotTime = useCallback((i: number, field: 'start' | 'end') => {
+    setOvSlots((prev) => prev.map((sl, j) => {
+      if (j !== i) return sl;
+      const v = sl[field];
+      return v ? { ...sl, [`${field}Raw`]: formatTime12(v) } : sl;
+    }));
+  }, []);
+
+  // Zero interval rows is valid — it marks the selected dates unavailable.
+  const ovSlotsValid = ovSlots.every((sl) => !!sl.start && !!sl.end && (sl.start as string) < (sl.end as string));
+  const canApplyOv = ovDates.length > 0 && ovSlotsValid;
+
+  const applyOverrides = useCallback(() => {
+    if (!canApplyOv) return;
+    availDirtyRef.current = true;
+    const intervals = ovSlots.map((sl) => ({ start: sl.start as string, end: sl.end as string }));
+    setDateOverrides((prev) => {
+      const next = prev.filter((o) => !ovDates.includes(o.date));
+      for (const d of ovDates) next.push({ date: d, intervals });
+      return next.sort((a, b) => a.date.localeCompare(b.date));
+    });
+    setOvOpen(false);
+    setLinkError(null);
+  }, [canApplyOv, ovSlots, ovDates]);
+
+  const removeOverride = useCallback((dateStr: string) => {
+    availDirtyRef.current = true;
+    setDateOverrides((prev) => prev.filter((o) => o.date !== dateStr));
     setLinkError(null);
   }, []);
 
@@ -652,9 +928,10 @@ export default function PlaybookSchedulePanel({
       const fn = httpsCallable(functions, 'createPlaybookBookingLink');
       const res = await fn({
         playbookId,
-        windows,
+        windows: daySlotsToWindows(daySlots),
         timezone,
         locations: locations.map((l) => l.trim()).filter(Boolean),
+        dateOverrides,
       });
       const data = res.data as { token: string };
       setLinkToken(data.token);
@@ -664,7 +941,51 @@ export default function PlaybookSchedulePanel({
     } finally {
       setLinkBusy(false);
     }
-  }, [windowsValid, linkBusy, playbookId, windows, timezone, locations]);
+  }, [windowsValid, linkBusy, playbookId, daySlots, timezone, locations, dateOverrides]);
+
+  // Auto-save availability once a booking link exists. booking_windows is
+  // Cloud-Functions-write-only (rules), so this reuses the same callable the
+  // old Update Availability button invoked — it returns the existing token.
+  // First-time link creation stays behind the explicit Create Booking Link tap.
+  const saveAvailability = useCallback(async () => {
+    if (!availDirtyRef.current || !linkToken || !windowsValid) return;
+    availDirtyRef.current = false;
+    try {
+      const fn = httpsCallable(functions, 'createPlaybookBookingLink');
+      await fn({
+        playbookId,
+        windows: daySlotsToWindows(daySlots),
+        timezone,
+        locations: locations.map((l) => l.trim()).filter(Boolean),
+        dateOverrides,
+      });
+      setAvailSaved(true);
+      setTimeout(() => setAvailSaved(false), 2000);
+    } catch (e: any) {
+      console.error('[PlaybookSchedulePanel] availability auto-save error:', e);
+      setLinkError(e?.message || 'Could not save availability');
+    }
+  }, [daySlots, dateOverrides, locations, linkToken, windowsValid, playbookId, timezone]);
+
+  useEffect(() => {
+    if (!availDirtyRef.current || !linkToken || !windowsValid) return;
+    const t = setTimeout(() => { void saveAvailability(); }, 800);
+    return () => clearTimeout(t);
+  }, [daySlots, dateOverrides, locations, linkToken, windowsValid, playbookId, timezone, saveAvailability]);
+
+  // Closing the panel inside the 800ms debounce window used to clear the
+  // timer and silently drop the last edit — flush pending saves on close and
+  // unmount. The dirty-flag guards inside the save fns keep snapshot prefill
+  // from ever triggering a write.
+  const flushPendingSavesRef = useRef<() => void>(() => {});
+  flushPendingSavesRef.current = () => {
+    if (dayDirtyRef.current) saveDaySettings();
+    if (availDirtyRef.current) void saveAvailability();
+  };
+  useEffect(() => {
+    if (!visible) flushPendingSavesRef.current();
+  }, [visible]);
+  useEffect(() => () => flushPendingSavesRef.current(), []);
 
   const openPreview = useCallback(() => {
     if (!linkToken) return;
@@ -687,6 +1008,8 @@ export default function PlaybookSchedulePanel({
 
   const bookedCount = results?.filter((r) => r.status === 'booked').length ?? 0;
   const problems = results?.filter((r) => r.status !== 'booked') ?? [];
+  const conflictCount = problems.filter((r) => r.status === 'conflict').length;
+  const capCount = problems.filter((r) => r.status === 'cap_reached').length;
 
   const dragTileStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: dragTY.value }],
@@ -875,6 +1198,8 @@ export default function PlaybookSchedulePanel({
                         placeholder="7:00 AM"
                         placeholderTextColor="#4A5568"
                         autoCapitalize="none"
+                        returnKeyType="done"
+                        onSubmitEditing={Keyboard.dismiss}
                       />
                       {cfg.time && cfg.raw !== formatTime12(cfg.time) && (
                         <Text style={s.dayTimePreview}>{formatTime12(cfg.time)}</Text>
@@ -897,6 +1222,8 @@ export default function PlaybookSchedulePanel({
                         keyboardType="numeric"
                         placeholder="min"
                         placeholderTextColor="#4A5568"
+                        returnKeyType="done"
+                        onSubmitEditing={Keyboard.dismiss}
                       />
                       <Text style={s.durationUnit}>min</Text>
                       {estMin ? <Text style={s.durationUnit}>· workout est. ~{estMin} min</Text> : null}
@@ -1002,56 +1329,97 @@ export default function PlaybookSchedulePanel({
               Let the member pick their own times from your availability. The public page shows the
               playbook title only — never workout details.
             </Text>
-            {windows.map((w, i) => (
-              <View key={i} style={s.windowRow}>
-                <View style={s.windowDays}>
-                  {DAY_SHORT_LABELS.map((label, d) => (
-                    <Pressable
-                      key={label}
-                      style={[s.miniDayChip, w.days.includes(d) && s.dayChipActive]}
-                      onPress={() => updateWindow(i, {
-                        days: w.days.includes(d)
-                          ? w.days.filter((x) => x !== d)
-                          : [...w.days, d].sort((a, b) => a - b),
-                      })}
-                    >
-                      <Text style={[s.miniDayChipText, w.days.includes(d) && s.dayChipTextActive]}>
+            {/* Weekly hours — one row per day, Calendly pattern */}
+            <View style={s.weeklyHours}>
+              {DAY_SHORT_LABELS.map((label, d) => {
+                const slots = daySlots[d];
+                const enabled = slots.length > 0;
+                return (
+                  <View key={label} style={s.whDayRow}>
+                    <View style={[s.whDayCircle, enabled && s.whDayCircleActive]}>
+                      <Text style={[s.whDayCircleText, enabled && s.whDayCircleTextActive]}>
                         {label[0]}
                       </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      {!enabled && <Text style={s.whUnavailable}>Unavailable</Text>}
+                      {slots.map((sl, i) => {
+                        const rangeBad = !!sl.start && !!sl.end && sl.start >= sl.end;
+                        return (
+                          <View key={i} style={[s.whSlotRow, i > 0 && { marginTop: 6 }]}>
+                            <TextInput
+                              style={[s.whTimeInput, (!sl.start || rangeBad) && s.inputBad]}
+                              value={sl.startRaw}
+                              onChangeText={(v) => setSlotTime(d, i, 'start', v)}
+                              onBlur={() => blurSlotTime(d, i, 'start')}
+                              placeholder="9:00 AM"
+                              placeholderTextColor="#4A5568"
+                              autoCapitalize="none"
+                              returnKeyType="done"
+                              onSubmitEditing={Keyboard.dismiss}
+                            />
+                            <Text style={s.windowDash}>–</Text>
+                            <TextInput
+                              style={[s.whTimeInput, (!sl.end || rangeBad) && s.inputBad]}
+                              value={sl.endRaw}
+                              onChangeText={(v) => setSlotTime(d, i, 'end', v)}
+                              onBlur={() => blurSlotTime(d, i, 'end')}
+                              placeholder="5:00 PM"
+                              placeholderTextColor="#4A5568"
+                              autoCapitalize="none"
+                              returnKeyType="done"
+                              onSubmitEditing={Keyboard.dismiss}
+                            />
+                            <Pressable style={s.windowRemove} onPress={() => removeDaySlot(d, i)}>
+                              <Text style={s.windowRemoveText}>×</Text>
+                            </Pressable>
+                          </View>
+                        );
+                      })}
+                    </View>
+                    <Pressable style={s.whPlusBtn} onPress={() => addDaySlot(d)}>
+                      <Text style={s.whPlusText}>+</Text>
                     </Pressable>
-                  ))}
-                </View>
-                <TextInput
-                  style={[s.timeInput, !timeRe.test(w.startTime) && s.inputBad]}
-                  value={w.startTime}
-                  onChangeText={(v) => updateWindow(i, { startTime: v })}
-                  placeholder="09:00"
-                  placeholderTextColor="#4A5568"
-                  autoCapitalize="none"
-                />
-                <Text style={s.windowDash}>–</Text>
-                <TextInput
-                  style={[s.timeInput, !timeRe.test(w.endTime) && s.inputBad]}
-                  value={w.endTime}
-                  onChangeText={(v) => updateWindow(i, { endTime: v })}
-                  placeholder="12:00"
-                  placeholderTextColor="#4A5568"
-                  autoCapitalize="none"
-                />
-                <Pressable
-                  style={s.windowRemove}
-                  onPress={() => setWindows((prev) => prev.filter((_, idx) => idx !== i))}
-                >
+                  </View>
+                );
+              })}
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={[s.hint, { flex: 1 }]}>
+                Times shown in {timezone}. Overlapping ranges on a day are merged when saved.
+              </Text>
+              {availSaved && <Text style={s.savedNote}>Saved</Text>}
+            </View>
+
+            {/* Date-specific hours (Calendly pattern) */}
+            <View style={s.ovEntryRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.ovEntryTitle}>Date-specific hours</Text>
+                <Text style={s.hint}>Adjust hours for specific days</Text>
+              </View>
+              <Pressable style={s.ovHoursBtn} onPress={openOverrideModal}>
+                <Text style={s.ovHoursBtnText}>+ Hours</Text>
+              </Pressable>
+            </View>
+            {dateOverrides.map((o) => (
+              <View key={o.date} style={s.ovRow}>
+                <Text style={s.ovRowDate}>{formatDateShort(o.date)}</Text>
+                <Text style={s.ovRowHours} numberOfLines={2}>
+                  {o.intervals.length === 0
+                    ? 'Unavailable'
+                    : o.intervals.map((iv) => `${formatTime12(iv.start)} – ${formatTime12(iv.end)}`).join(', ')}
+                </Text>
+                <Pressable style={s.windowRemove} onPress={() => removeOverride(o.date)}>
                   <Text style={s.windowRemoveText}>×</Text>
                 </Pressable>
               </View>
             ))}
-            <Pressable
-              style={s.addWindowBtn}
-              onPress={() => setWindows((prev) => [...prev, { days: [1], startTime: '09:00', endTime: '12:00' }])}
-            >
-              <Text style={s.addWindowText}>+ Add availability window</Text>
-            </Pressable>
+            {dateOverrides.length > 0 && (
+              <Text style={s.hint}>
+                These dates replace your weekly hours. Unavailable = no bookings that day.
+                {linkToken ? ' Changes save automatically.' : ' Tap Create Booking Link to save.'}
+              </Text>
+            )}
 
             <Text style={s.sectionLabel}>Locations</Text>
             <Text style={s.hint}>
@@ -1062,14 +1430,14 @@ export default function PlaybookSchedulePanel({
                 <TextInput
                   style={[s.timeInput, { flex: 1, width: undefined, textAlign: 'left' }]}
                   value={loc}
-                  onChangeText={(v) => { setLocations((prev) => prev.map((x, idx) => (idx === i ? v : x))); setLinkError(null); }}
+                  onChangeText={(v) => { availDirtyRef.current = true; setLocations((prev) => prev.map((x, idx) => (idx === i ? v : x))); setLinkError(null); }}
                   placeholder="Condo gym"
                   placeholderTextColor="#4A5568"
                   maxLength={80}
                 />
                 <Pressable
                   style={s.windowRemove}
-                  onPress={() => setLocations((prev) => prev.filter((_, idx) => idx !== i))}
+                  onPress={() => { availDirtyRef.current = true; setLocations((prev) => prev.filter((_, idx) => idx !== i)); }}
                 >
                   <Text style={s.windowRemoveText}>×</Text>
                 </Pressable>
@@ -1080,14 +1448,14 @@ export default function PlaybookSchedulePanel({
                 <Text style={s.addWindowText}>+ Add location option</Text>
               </Pressable>
             )}
-            {windows.length > 0 && (
+            {hasAnySlot && !linkToken && (
               <Pressable
                 style={[s.btn, { backgroundColor: windowsValid && !linkBusy ? '#1E2A3A' : '#161D29', borderWidth: 1, borderColor: '#A78BFA', marginTop: 10 }]}
                 onPress={createLink}
                 disabled={!windowsValid || linkBusy}
               >
                 <Text style={{ color: '#A78BFA', fontWeight: '700', fontFamily: FH }}>
-                  {linkBusy ? 'Saving…' : linkToken ? 'Update Availability' : 'Create Booking Link'}
+                  {linkBusy ? 'Saving…' : 'Create Booking Link'}
                 </Text>
               </Pressable>
             )}
@@ -1095,7 +1463,10 @@ export default function PlaybookSchedulePanel({
             {bookingUrl && (
               <View style={s.linkBox}>
                 <Text style={s.linkUrl} numberOfLines={1}>{bookingUrl}</Text>
-                <Pressable style={s.copyBtn} onPress={copyLink}>
+                <Pressable
+                  style={({ pressed }) => [s.copyBtn, pressed && { opacity: 0.55, transform: [{ scale: 0.96 }] }]}
+                  onPress={copyLink}
+                >
                   <Text style={s.copyBtnText}>{linkCopied ? 'Copied' : 'Copy'}</Text>
                 </Pressable>
                 <Pressable style={s.previewBtn} onPress={openPreview}>
@@ -1108,7 +1479,9 @@ export default function PlaybookSchedulePanel({
             {results && (
               <View style={s.resultBox}>
                 <Text style={s.resultTitle}>
-                  {bookedCount} session{bookedCount === 1 ? '' : 's'} booked
+                  {bookedCount} of {results.length} session{results.length === 1 ? '' : 's'} created
+                  {conflictCount > 0 ? ` — ${conflictCount} conflict${conflictCount === 1 ? '' : 's'}` : ''}
+                  {capCount > 0 ? ` — ${capCount} at weekly cap` : ''}
                 </Text>
                 {problems.map((p) => (
                   <Text key={p.date} style={s.resultProblem}>
@@ -1128,11 +1501,151 @@ export default function PlaybookSchedulePanel({
                 disabled={!canBook}
               >
                 <Text style={{ color: '#0E1117', fontWeight: '700', fontFamily: FH }}>
-                  {booking ? 'Booking…' : 'Book Sessions'}
+                  {booking ? (checkingStatus ? 'Checking status…' : 'Booking…') : 'Book Sessions'}
                 </Text>
               </Pressable>
             </View>
           </ScrollView>
+
+          {/* Date-specific hours modal — overlay (not a nested Modal) */}
+          {ovOpen && (() => {
+            const today = todayInTz(timezone);
+            const [ty, tm] = today.split('-').map(Number);
+            const atCurrentMonth = ovMonth.y === ty && ovMonth.m === tm - 1;
+            const firstDow = new Date(ovMonth.y, ovMonth.m, 1).getDay();
+            const daysInMonth = new Date(ovMonth.y, ovMonth.m + 1, 0).getDate();
+            const cells: Array<number | null> = [
+              ...Array.from({ length: firstDow }, () => null),
+              ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+            ];
+            while (cells.length % 7 !== 0) cells.push(null);
+            const weeks: Array<Array<number | null>> = [];
+            for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+            return (
+              <View style={s.ovOverlay}>
+                <ScrollView
+                  style={{ flex: 1 }}
+                  contentContainerStyle={{ paddingBottom: 12 }}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  <Text style={s.ovModalTitle}>
+                    Select the date(s) you want to assign specific hours
+                  </Text>
+                  <View style={s.ovMonthHeader}>
+                    <Pressable
+                      style={[s.ovNavBtn, atCurrentMonth && { opacity: 0.3 }]}
+                      disabled={atCurrentMonth}
+                      onPress={() => setOvMonth((p) => (p.m === 0 ? { y: p.y - 1, m: 11 } : { y: p.y, m: p.m - 1 }))}
+                    >
+                      <Text style={s.ovNavText}>‹</Text>
+                    </Pressable>
+                    <Text style={s.ovMonthLabel}>{MONTH_LABELS[ovMonth.m]} {ovMonth.y}</Text>
+                    <Pressable
+                      style={s.ovNavBtn}
+                      onPress={() => setOvMonth((p) => (p.m === 11 ? { y: p.y + 1, m: 0 } : { y: p.y, m: p.m + 1 }))}
+                    >
+                      <Text style={s.ovNavText}>›</Text>
+                    </Pressable>
+                  </View>
+                  <View style={s.ovWeekRow}>
+                    {DAY_SHORT_LABELS.map((l) => (
+                      <Text key={l} style={s.ovWeekday}>{l[0]}</Text>
+                    ))}
+                  </View>
+                  {weeks.map((week, wi) => (
+                    <View key={wi} style={s.ovWeekRow}>
+                      {week.map((dayNum, ci) => {
+                        if (dayNum === null) return <View key={ci} style={s.ovDayCell} />;
+                        const dateStr = `${ovMonth.y}-${String(ovMonth.m + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                        const past = dateStr < today;
+                        const selected = ovDates.includes(dateStr);
+                        const hasOverride = dateOverrides.some((o) => o.date === dateStr);
+                        return (
+                          <Pressable
+                            key={ci}
+                            style={[s.ovDayCell, selected && s.ovDayCellSelected]}
+                            disabled={past}
+                            onPress={() => toggleOvDate(dateStr)}
+                          >
+                            <Text style={[
+                              s.ovDayText,
+                              past && { color: '#4A5568' },
+                              selected && { color: '#0E1117', fontWeight: '700' },
+                            ]}>
+                              {dayNum}
+                            </Text>
+                            {hasOverride && !selected && <View style={s.ovDayDot} />}
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  ))}
+
+                  <View style={s.ovHoursHeader}>
+                    <Text style={s.ovHoursTitle}>What hours are you available?</Text>
+                    <Pressable style={s.whPlusBtn} onPress={addOvSlot}>
+                      <Text style={s.whPlusText}>+</Text>
+                    </Pressable>
+                  </View>
+                  {ovSlots.length === 0 && (
+                    <Text style={s.hint}>No hours — the selected dates will be unavailable.</Text>
+                  )}
+                  {ovSlots.map((sl, i) => {
+                    const rangeBad = !!sl.start && !!sl.end && sl.start >= sl.end;
+                    return (
+                      <View key={i} style={[s.whSlotRow, { marginTop: 8 }]}>
+                        <TextInput
+                          style={[s.whTimeInput, (!sl.start || rangeBad) && s.inputBad]}
+                          value={sl.startRaw}
+                          onChangeText={(v) => setOvSlotTime(i, 'start', v)}
+                          onBlur={() => blurOvSlotTime(i, 'start')}
+                          placeholder="9:00 AM"
+                          placeholderTextColor="#4A5568"
+                          autoCapitalize="none"
+                          returnKeyType="done"
+                          onSubmitEditing={Keyboard.dismiss}
+                        />
+                        <Text style={s.windowDash}>–</Text>
+                        <TextInput
+                          style={[s.whTimeInput, (!sl.end || rangeBad) && s.inputBad]}
+                          value={sl.endRaw}
+                          onChangeText={(v) => setOvSlotTime(i, 'end', v)}
+                          onBlur={() => blurOvSlotTime(i, 'end')}
+                          placeholder="5:00 PM"
+                          placeholderTextColor="#4A5568"
+                          autoCapitalize="none"
+                          returnKeyType="done"
+                          onSubmitEditing={Keyboard.dismiss}
+                        />
+                        <Pressable style={s.windowRemove} onPress={() => removeOvSlot(i)}>
+                          <Text style={s.windowRemoveText}>×</Text>
+                        </Pressable>
+                      </View>
+                    );
+                  })}
+
+                </ScrollView>
+                {/* Fixed footer — Apply/Cancel stay reachable no matter how many
+                    interval rows the scrollable body grows to. */}
+                <View style={s.ovFooter}>
+                  <Pressable
+                    style={[s.btn, { backgroundColor: canApplyOv ? '#A78BFA' : '#4A5568' }]}
+                    onPress={applyOverrides}
+                    disabled={!canApplyOv}
+                  >
+                    <Text style={{ color: '#0E1117', fontWeight: '700', fontFamily: FH }}>Apply</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[s.btn, { backgroundColor: '#0E1117', marginTop: 10 }]}
+                    onPress={() => setOvOpen(false)}
+                  >
+                    <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          })()}
         </Pressable>
       </Pressable>
     </Modal>
@@ -1343,6 +1856,13 @@ const s = StyleSheet.create({
     fontFamily: FB,
     marginTop: 6,
   },
+  savedNote: {
+    color: '#6EE7B7',
+    fontSize: 12,
+    fontFamily: FB,
+    marginTop: 6,
+    marginLeft: 8,
+  },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1440,23 +1960,72 @@ const s = StyleSheet.create({
     marginTop: 10,
     flexWrap: 'wrap',
   },
-  windowDays: {
-    flexDirection: 'row',
-    gap: 4,
+  weeklyHours: {
+    marginTop: 10,
+    gap: 10,
   },
-  miniDayChip: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+  whDayRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  whDayCircle: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     backgroundColor: '#0E1117',
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 2,
   },
-  miniDayChipText: {
+  whDayCircleActive: {
+    backgroundColor: '#A78BFA',
+  },
+  whDayCircleText: {
     color: '#8A95A3',
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
     fontFamily: FB,
+  },
+  whDayCircleTextActive: {
+    color: '#0E1117',
+  },
+  whUnavailable: {
+    color: '#4A5568',
+    fontSize: 13,
+    fontFamily: FB,
+    paddingVertical: 8,
+  },
+  whSlotRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  whTimeInput: {
+    backgroundColor: '#0E1117',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    color: '#F0F4F8',
+    fontSize: 13,
+    fontFamily: FB,
+    width: 84,
+    textAlign: 'center',
+  },
+  whPlusBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#0E1117',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  whPlusText: {
+    color: '#A78BFA',
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: FH,
   },
   timeInput: {
     backgroundColor: '#0E1117',
@@ -1584,6 +2153,150 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     fontFamily: FB,
+  },
+  ovEntryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 16,
+  },
+  ovEntryTitle: {
+    color: '#F0F4F8',
+    fontSize: 14,
+    fontWeight: '700',
+    fontFamily: FH,
+  },
+  ovHoursBtn: {
+    borderColor: '#A78BFA',
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  ovHoursBtnText: {
+    color: '#A78BFA',
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: FB,
+  },
+  ovRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0E1117',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginTop: 6,
+    gap: 10,
+  },
+  ovRowDate: {
+    color: '#F0F4F8',
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: FB,
+    width: 92,
+  },
+  ovRowHours: {
+    flex: 1,
+    color: '#8A95A3',
+    fontSize: 12,
+    fontFamily: FB,
+  },
+  ovOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#1E2A3A',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    overflow: 'hidden',
+  },
+  ovFooter: {
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#2A3648',
+  },
+  ovModalTitle: {
+    color: '#F0F4F8',
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: FH,
+  },
+  ovMonthHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 16,
+  },
+  ovNavBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#0E1117',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ovNavText: {
+    color: '#A78BFA',
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: FH,
+  },
+  ovMonthLabel: {
+    color: '#F0F4F8',
+    fontSize: 14,
+    fontWeight: '700',
+    fontFamily: FH,
+  },
+  ovWeekRow: {
+    flexDirection: 'row',
+    marginTop: 6,
+  },
+  ovWeekday: {
+    flex: 1,
+    textAlign: 'center',
+    color: '#4A5568',
+    fontSize: 11,
+    fontWeight: '700',
+    fontFamily: FB,
+  },
+  ovDayCell: {
+    flex: 1,
+    aspectRatio: 1,
+    maxHeight: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ovDayCellSelected: {
+    backgroundColor: '#A78BFA',
+  },
+  ovDayText: {
+    color: '#F0F4F8',
+    fontSize: 13,
+    fontFamily: FB,
+  },
+  ovDayDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#A78BFA',
+    marginTop: 2,
+  },
+  ovHoursHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 18,
+  },
+  ovHoursTitle: {
+    color: '#F0F4F8',
+    fontSize: 14,
+    fontWeight: '700',
+    fontFamily: FH,
   },
   resultBox: {
     backgroundColor: '#0E1117',

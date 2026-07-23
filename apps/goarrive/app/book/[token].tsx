@@ -11,7 +11,7 @@
  * disabled.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
@@ -81,6 +81,33 @@ function ymKey(y: number, m: number): string {
   return `${y}-${String(m + 1).padStart(2, '0')}`;
 }
 
+// Hard client deadline on the booking callable — a request that dies without
+// settling must never leave the button stuck on "Booking…".
+const BOOKING_TIMEOUT_MS = 45000;
+const BOOKING_TIMEOUT_SENTINEL = 'booking-client-timeout';
+
+// Crypto-random idempotency key for the booking call.
+function makeRequestId(): string {
+  const bytes = new Uint8Array(16);
+  const c = typeof globalThis !== 'undefined' ? (globalThis as any).crypto : undefined;
+  if (c?.getRandomValues) c.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// A bad timezone from the server would make every Intl call downstream
+// throw — fall back to the device timezone.
+function safeTimezone(tz: unknown): string {
+  const fallback = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (typeof tz !== 'string' || !tz) return fallback;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return tz;
+  } catch {
+    return fallback;
+  }
+}
+
 function openUrl(url: string) {
   if (Platform.OS === 'web' && typeof window !== 'undefined') window.open(url, '_blank');
   else Linking.openURL(url).catch(() => {});
@@ -100,7 +127,11 @@ export default function BookingPage() {
   const [location, setLocation] = useState<string | null>(null);
   const [monthIdx, setMonthIdx] = useState(0);
   const [booking, setBooking] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(false);
   const [bookError, setBookError] = useState('');
+  // Kept across attempts on purpose: an unresolved (timed-out) booking must
+  // keep its idempotency key so any retry can't double-book.
+  const pendingRequestIdRef = useRef<string | null>(null);
   const [booked, setBooked] = useState<BookedResult | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -118,7 +149,11 @@ export default function BookingPage() {
         setError(json.error || 'This booking link is not available.');
         return;
       }
-      setInfo({ ...json, locations: Array.isArray(json.locations) ? json.locations : [] });
+      setInfo({
+        ...json,
+        timezone: safeTimezone(json.timezone),
+        locations: Array.isArray(json.locations) ? json.locations : [],
+      });
     } catch (err) {
       console.error('[BookingPage] resolve error:', err);
       setError('Something went wrong loading this booking page.');
@@ -203,32 +238,69 @@ export default function BookingPage() {
     if (!selected || !canBook) return;
     setBooking(true);
     setBookError('');
+    setCheckingStatus(false);
+    // Reuse the request ID from a timed-out attempt: the server dedupes on
+    // clientRequestId, so the retry either returns the stored result (the
+    // first attempt actually landed) or books fresh — never double-books.
+    const clientRequestId = pendingRequestIdRef.current || makeRequestId();
+    pendingRequestIdRef.current = clientRequestId;
     try {
       const fn = httpsCallable(functions, 'bookViaBookingToken');
-      const res = await fn({
+      const payload = {
         token,
         date: selected.date,
         startTime: selected.startTime,
         ...(needsEmail ? { guestEmail: guestEmail.trim() } : {}),
         ...(location ? { location } : {}),
-      });
-      const data = res.data as { guest: boolean; icsUrl?: string; googleCalUrl?: string; location?: string | null };
-      setBooked({
-        date: selected.date,
-        startTime: selected.startTime,
-        guest: data.guest,
-        location: data.location || null,
-        icsUrl: data.icsUrl || null,
-        googleCalUrl: data.googleCalUrl || null,
-      });
+        clientRequestId,
+      };
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const res = await Promise.race([
+            fn(payload),
+            new Promise<never>((_, reject) => {
+              setTimeout(() => reject(new Error(BOOKING_TIMEOUT_SENTINEL)), BOOKING_TIMEOUT_MS);
+            }),
+          ]);
+          const data = res.data as {
+            guest: boolean; icsUrl?: string; googleCalUrl?: string; location?: string | null;
+            date?: string; startTime?: string;
+          };
+          pendingRequestIdRef.current = null;
+          setBooked({
+            // Prefer the server's stored occurrence — an idempotent replay
+            // returns the originally booked slot.
+            date: data.date || selected.date,
+            startTime: data.startTime || selected.startTime,
+            guest: data.guest,
+            location: data.location || null,
+            icsUrl: data.icsUrl || null,
+            googleCalUrl: data.googleCalUrl || null,
+          });
+          return;
+        } catch (e: any) {
+          const timedOut = e?.message === BOOKING_TIMEOUT_SENTINEL;
+          if (timedOut && attempt === 0) {
+            // May have landed server-side — retry with the SAME
+            // clientRequestId to fetch the stored result instead of rebooking.
+            setCheckingStatus(true);
+            continue;
+          }
+          if (!timedOut) pendingRequestIdRef.current = null;
+          throw timedOut
+            ? new Error('Booking timed out — tap Book again to check status (it will not double-book)')
+            : e;
+        }
+      }
     } catch (e: any) {
       console.error('[BookingPage] booking error:', e);
       setBookError(e?.message || 'Booking failed — that time may have just been taken.');
       load(needsEmail && emailValid ? guestEmail.trim() : undefined);
     } finally {
       setBooking(false);
+      setCheckingStatus(false);
     }
-  }, [selected, canBook, token, needsEmail, guestEmail, location, load]);
+  }, [selected, canBook, token, needsEmail, guestEmail, emailValid, location, load]);
 
   if (loading || authLoading) {
     return (
@@ -407,7 +479,7 @@ export default function BookingPage() {
               {previewMode && !isCoach
                 ? 'Preview — booking disabled'
                 : booking
-                  ? 'Booking…'
+                  ? (checkingStatus ? 'Checking status…' : 'Booking…')
                   : selected
                     ? needsLocation && !location
                       ? 'Pick a location'
@@ -447,7 +519,11 @@ export default function BookingPage() {
           {previewMode && (
             <View style={s.previewPill}><Text style={s.previewPillText}>Preview</Text></View>
           )}
-          <Pressable style={s.headerBtn} onPress={copyPageLink} accessibilityLabel="Copy link">
+          <Pressable
+            style={({ pressed }) => [s.headerBtn, pressed && { opacity: 0.55, transform: [{ scale: 0.96 }] }]}
+            onPress={copyPageLink}
+            accessibilityLabel="Copy link"
+          >
             <Text style={s.copyBtnText}>{linkCopied ? 'Copied!' : 'Copy link'}</Text>
           </Pressable>
         </View>

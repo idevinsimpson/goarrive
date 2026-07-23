@@ -419,6 +419,17 @@ export function addMinutesToTime(time24: string, minutes: number): string {
   return `${newH.toString().padStart(2, '0')}:${newM.toString().padStart(2, '0')}`;
 }
 
+// ─── Helper: Today in a timezone ─────────────────────────────────────────────
+
+// "Today" as YYYY-MM-DD in the given IANA timezone. Never use
+// toISOString().split('T')[0] for calendar dates — that is UTC and shifts the
+// day for anyone west of Greenwich in the evening (or east in the morning).
+export function todayInTz(tz: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+}
+
 // ─── Helper: Format date for display ─────────────────────────────────────────
 
 export function formatDateShort(dateStr: string): string {
