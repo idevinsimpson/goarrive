@@ -207,6 +207,14 @@ export default function MySessionsScreen() {
     router.push(`/join/${inst.id}` as any);
   }
 
+  // ─── Start the session's workout (playbook live view) ────────────────────
+  // Opens the full-screen WorkoutPlayer with the session's Zoom meeting riding
+  // along as a camera-on PiP tile, and streams player state to the coach.
+  function handleStartWorkout(inst: SessionInstance) {
+    if (!canJoin(inst) || !inst.pinnedWorkoutId) return;
+    router.push(`/live-session/${inst.id}` as any);
+  }
+
   // ─── Cancel handler ───────────────────────────────────────────────────────
   async function handleCancel(inst: SessionInstance) {
     Alert.alert(
@@ -336,6 +344,10 @@ export default function MySessionsScreen() {
           onJoinInApp={() => {
             setSelectedSession(null);
             handleJoinInApp(selectedSession);
+          }}
+          onStartWorkout={() => {
+            setSelectedSession(null);
+            handleStartWorkout(selectedSession);
           }}
           onCancel={() => handleCancel(selectedSession)}
           onReschedule={() => {
@@ -613,6 +625,7 @@ function SessionDetailModal({
   onClose,
   onJoin,
   onJoinInApp,
+  onStartWorkout,
   onCancel,
   onReschedule,
   onSkipRequest,
@@ -621,6 +634,7 @@ function SessionDetailModal({
   onClose: () => void;
   onJoin: () => void;
   onJoinInApp: () => void;
+  onStartWorkout: () => void;
   onCancel: () => void;
   onReschedule: () => void;
   onSkipRequest: () => void;
@@ -770,6 +784,12 @@ function SessionDetailModal({
 
             {/* Actions */}
             <View style={s.actionSection}>
+              {showJoin && inst.pinnedWorkoutId && (
+                <Pressable style={s.primaryBtn} onPress={onStartWorkout}>
+                  <Icon name="play" size={18} color="#FFF" />
+                  <Text style={s.primaryBtnText}>Start Workout</Text>
+                </Pressable>
+              )}
               {showJoin && (
                 <Pressable style={s.primaryBtn} onPress={onJoin}>
                   <Icon name="video" size={18} color="#FFF" />

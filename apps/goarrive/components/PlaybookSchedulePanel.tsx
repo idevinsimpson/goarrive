@@ -12,8 +12,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View,
 } from 'react-native';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
+import { useRouter } from 'expo-router';
 import { db, functions } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import {
@@ -62,7 +63,9 @@ export default function PlaybookSchedulePanel({
 }) {
   // effectiveUid keeps admin impersonation intact (never user.uid directly)
   const { effectiveUid } = useAuth();
+  const router = useRouter();
   const [playbook, setPlaybook] = useState<PlaybookDocLite | null>(null);
+  const [upcomingSessions, setUpcomingSessions] = useState<any[]>([]);
 
   const [days, setDays] = useState<number[]>([]);
   const [startTime, setStartTime] = useState('07:00');
@@ -97,6 +100,48 @@ export default function PlaybookSchedulePanel({
     );
     return unsub;
   }, [visible, playbookId, effectiveUid]);
+
+  // Upcoming/live session instances for this playbook — powers the View
+  // (live-view split screen) entry point. Equality-only filters avoid a new
+  // composite index; sort + status filter happen client-side (small list).
+  useEffect(() => {
+    if (!visible || !playbookId || !effectiveUid) return;
+    const q = query(
+      collection(db, 'session_instances'),
+      where('coachId', '==', effectiveUid),
+      where('playbookId', '==', playbookId),
+    );
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const rows = snap.docs
+          .map((d) => ({ id: d.id, ...(d.data() as any) }))
+          .filter(
+            (r) =>
+              (r.status === 'scheduled' || r.status === 'allocated' || r.status === 'in_progress')
+              && r.scheduledDate >= today,
+          )
+          .sort((a, b) =>
+            `${a.scheduledDate} ${a.scheduledStartTime}`.localeCompare(
+              `${b.scheduledDate} ${b.scheduledStartTime}`,
+            ),
+          )
+          .slice(0, 10);
+        setUpcomingSessions(rows);
+      },
+      (err) => console.error('[PlaybookSchedulePanel] sessions listener error:', err),
+    );
+    return unsub;
+  }, [visible, playbookId, effectiveUid]);
+
+  const openLiveView = useCallback(
+    (instanceId: string) => {
+      onClose();
+      router.push(`/live-view/${instanceId}` as any);
+    },
+    [onClose, router],
+  );
 
   const memberName = playbook?.assignedMemberName || null;
   const hasMember = !!(playbook?.assignedMemberId || playbook?.memberIds?.length);
@@ -282,6 +327,28 @@ export default function PlaybookSchedulePanel({
                 </Pressable>
               </View>
             </View>
+
+            {upcomingSessions.length > 0 && (
+              <>
+                <Text style={s.sectionLabel}>Upcoming Sessions</Text>
+                {upcomingSessions.map((inst) => (
+                  <View key={inst.id} style={s.sessionRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.sessionRowDate}>
+                        {inst.scheduledDate} · {inst.scheduledStartTime}
+                      </Text>
+                      <Text style={s.sessionRowMeta} numberOfLines={1}>
+                        {inst.memberName || 'Member'}
+                        {inst.status === 'in_progress' ? '  ·  LIVE' : ''}
+                      </Text>
+                    </View>
+                    <Pressable style={s.viewBtn} onPress={() => openLiveView(inst.id)}>
+                      <Text style={s.viewBtnText}>View</Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </>
+            )}
 
             {error && <Text style={s.error}>{error}</Text>}
             {results && (
@@ -486,5 +553,39 @@ const s = StyleSheet.create({
     fontSize: 12,
     fontFamily: FB,
     marginTop: 4,
+  },
+  sessionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#0E1117',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+  },
+  sessionRowDate: {
+    color: '#F0F4F8',
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: FH,
+  },
+  sessionRowMeta: {
+    color: '#8A95A3',
+    fontSize: 12,
+    fontFamily: FB,
+    marginTop: 2,
+  },
+  viewBtn: {
+    backgroundColor: '#A78BFA',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  viewBtnText: {
+    color: '#0E1117',
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: FH,
   },
 });
