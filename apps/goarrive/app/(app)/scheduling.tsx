@@ -623,6 +623,7 @@ function SessionCard({
             {showDate ? `${formatDateShort(inst.scheduledDate)} · ` : ''}
             {formatTime(inst.scheduledStartTime)} – {formatTime(inst.scheduledEndTime)}
             {sessionLabel ? ` · ${sessionLabel}` : ''}
+            {inst.location ? ` · ${inst.location}` : ''}
           </Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
             <Text style={[s.hostingLabel, { color: hosting.color }]}>{hosting.label}</Text>
@@ -695,6 +696,9 @@ function SessionDetailSheet({
         )}
         {sessionLabel && (
           <DetailRow label="Session Type" value={sessionLabel} />
+        )}
+        {inst.location && (
+          <DetailRow label="Location" value={inst.location} />
         )}
         <DetailRow label="Hosting" value={hosting.label} valueColor={hosting.color} />
         <DetailRow

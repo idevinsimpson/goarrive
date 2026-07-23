@@ -46,6 +46,7 @@ export default function RootLayout() {
             <Stack.Screen name="shared-plan/[memberId]" />
             <Stack.Screen name="join/[sessionInstanceId]" />
             <Stack.Screen name="share/[shareId]" />
+            <Stack.Screen name="book/[token]" />
           </Stack>
         </AuthProvider>
       </GestureHandlerRootView>

@@ -86,6 +86,14 @@ import {
 // Playbook scheduling (Phase 3a): transactional booking with the
 // member-level double-booking guard + per-playbook weekly cap.
 export { bookPlaybookSession } from './playbookScheduling';
+// Playbook booking links (Phase 3b): coach availability windows + public
+// Calendly-style token page + guest-by-email bookings.
+export {
+  createPlaybookBookingLink,
+  resolvePlaybookBookingToken,
+  bookViaBookingToken,
+  playbookBookingIcs,
+} from './playbookBooking';
 import { CloudTasksClient } from '@google-cloud/tasks';
 import { sanitizePlayerWorkout } from './workoutPlayerSanitizer';
 
