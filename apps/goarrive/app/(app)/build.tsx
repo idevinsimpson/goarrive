@@ -469,6 +469,8 @@ function BuildScreenInner() {
   const [showPbDeleteConfirm, setShowPbDeleteConfirm] = useState(false);
   const [showPbDescEdit, setShowPbDescEdit] = useState(false);
   const [pbDescDraft, setPbDescDraft] = useState('');
+  const [showPbMoveTo, setShowPbMoveTo] = useState(false);
+  const [showPbManageMembers, setShowPbManageMembers] = useState(false);
   const currentPlaybookRef = useRef<{ id: string; name: string } | null>(null);
   currentPlaybookRef.current = currentPlaybook;
   // A1: plus-button chooser sheets inside the playbook drill-in
@@ -859,6 +861,8 @@ function BuildScreenInner() {
     setShowPbMenu(false);
     setShowPbDeleteConfirm(false);
     setShowPbDescEdit(false);
+    setShowPbMoveTo(false);
+    setShowPbManageMembers(false);
   }, []);
 
   const savePlaybookTitle = useCallback(async () => {
@@ -944,6 +948,18 @@ function BuildScreenInner() {
     if (!token) { setShowPlaybookSchedule(true); return; }
     router.push(`/book/${token}?preview=1`);
   }, [fetchPbBookingToken]);
+
+  const movePlaybookToFolder = useCallback(async (folderId: string | null) => {
+    const pb = currentPlaybookRef.current;
+    setShowPbMoveTo(false);
+    if (!pb) return;
+    try {
+      await updateDoc(doc(db, 'playbooks', pb.id), {
+        parentId: folderId,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) { console.error('[Build] Move playbook error:', e); }
+  }, []);
 
   const toggleArchivePlaybook = useCallback(async () => {
     const pbDoc = getCurrentPlaybookDoc();
@@ -1140,6 +1156,26 @@ function BuildScreenInner() {
       }
       await updateDoc(doc(db, 'playbooks', pb.id), patch);
     } catch (e) { console.error('[Build] Add member to playbook error:', e); }
+  }, [pbMembers]);
+
+  const removeMemberFromPlaybook = useCallback(async (memberId: string) => {
+    const pb = currentPlaybookRef.current;
+    if (!pb || !memberId) return;
+    try {
+      const pbDoc = itemsRef.current.find(i => i.type === 'Playbooks' && i.id === pb.id);
+      const existing: string[] = Array.isArray(pbDoc?.memberIds) && pbDoc!.memberIds.length
+        ? pbDoc!.memberIds
+        : (pbDoc?.assignedMemberId ? [pbDoc.assignedMemberId] : []);
+      const next = existing.filter(id => id !== memberId);
+      const patch: any = { memberIds: next, updatedAt: serverTimestamp() };
+      if (pbDoc?.assignedMemberId === memberId) {
+        patch.assignedMemberId = next[0] ?? null;
+        patch.assignedMemberName = next[0]
+          ? (pbMembers.find(m => m.id === next[0])?.name ?? null)
+          : null;
+      }
+      await updateDoc(doc(db, 'playbooks', pb.id), patch);
+    } catch (e) { console.error('[Build] Remove member from playbook error:', e); }
   }, [pbMembers]);
 
   const addWorkoutToPlaybook = useCallback(async (workoutId: string) => {
@@ -2670,6 +2706,20 @@ function BuildScreenInner() {
               <Icon name="copy" size={16} color="#8A95A3" />
               <Text style={s.pbMenuItemText}>Duplicate Playbook</Text>
             </Pressable>
+            <Pressable
+              style={s.pbMenuItem}
+              onPress={() => { setShowPbMenu(false); setShowPbMoveTo(true); }}
+            >
+              <Icon name="arrow-right" size={16} color="#8A95A3" />
+              <Text style={s.pbMenuItemText}>Move to Folder</Text>
+            </Pressable>
+            <Pressable
+              style={s.pbMenuItem}
+              onPress={() => { setShowPbMenu(false); setShowPbManageMembers(true); }}
+            >
+              <Icon name="members" size={16} color="#8A95A3" />
+              <Text style={s.pbMenuItemText}>Manage Members</Text>
+            </Pressable>
             <View style={s.pbMenuDivider} />
             <Pressable
               style={s.pbMenuItem}
@@ -2737,6 +2787,91 @@ function BuildScreenInner() {
                   <Text style={s.pbConfirmDeleteText}>Save</Text>
                 </Pressable>
               </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* Playbook move-to-folder sheet */}
+      {currentPlaybook && (
+        <Modal transparent visible={showPbMoveTo} animationType="slide" onRequestClose={() => setShowPbMoveTo(false)}>
+          <Pressable style={s.pbSheetBackdrop} onPress={() => setShowPbMoveTo(false)}>
+            <Pressable style={s.pbSheet} onPress={(e) => e.stopPropagation()}>
+              <Text style={s.pbSheetTitle}>Move to Folder</Text>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {(() => {
+                  const pbDoc = items.find(i => i.type === 'Playbooks' && i.id === currentPlaybook.id);
+                  const currentParent = pbDoc?.parentId || null;
+                  const folders = items
+                    .filter(i => (i.type as any) === 'Folder' && !i.isArchived)
+                    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                  return (
+                    <>
+                      <Pressable
+                        style={s.pbSheetMemberRow}
+                        onPress={() => movePlaybookToFolder(null)}
+                        disabled={!currentParent}
+                      >
+                        <Icon name="build" size={16} color="#8A95A3" />
+                        <Text style={[s.pbSheetMemberName, { flex: 1, marginLeft: 10 }]}>Build (top level)</Text>
+                        <Text style={s.pbSheetMemberAdd}>{currentParent ? 'Move' : 'Current'}</Text>
+                      </Pressable>
+                      {folders.length === 0 && (
+                        <Text style={s.pbSheetEmpty}>No folders yet — create one from the Build grid.</Text>
+                      )}
+                      {folders.map(f => (
+                        <Pressable
+                          key={f.id}
+                          style={s.pbSheetMemberRow}
+                          onPress={() => movePlaybookToFolder(f.id)}
+                          disabled={currentParent === f.id}
+                        >
+                          <Icon name="plan" size={16} color="#60A5FA" />
+                          <Text style={[s.pbSheetMemberName, { flex: 1, marginLeft: 10 }]} numberOfLines={1}>{f.name}</Text>
+                          <Text style={s.pbSheetMemberAdd}>{currentParent === f.id ? 'Current' : 'Move'}</Text>
+                        </Pressable>
+                      ))}
+                    </>
+                  );
+                })()}
+              </ScrollView>
+              <Pressable style={s.pbSheetDone} onPress={() => setShowPbMoveTo(false)}>
+                <Text style={s.pbSheetDoneText}>Done</Text>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* Playbook manage-members sheet */}
+      {currentPlaybook && (
+        <Modal transparent visible={showPbManageMembers} animationType="slide" onRequestClose={() => setShowPbManageMembers(false)}>
+          <Pressable style={s.pbSheetBackdrop} onPress={() => setShowPbManageMembers(false)}>
+            <Pressable style={s.pbSheet} onPress={(e) => e.stopPropagation()}>
+              <Text style={s.pbSheetTitle}>Members</Text>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {playbookMemberChips.length === 0 ? (
+                  <Text style={s.pbSheetEmpty}>No members on this playbook yet.</Text>
+                ) : (
+                  playbookMemberChips.map(m => (
+                    <View key={m.id} style={s.pbSheetMemberRow}>
+                      <Text style={[s.pbSheetMemberName, { flex: 1 }]} numberOfLines={1}>{m.name}</Text>
+                      <Pressable onPress={() => removeMemberFromPlaybook(m.id)}>
+                        <Text style={[s.pbSheetMemberAdd, { color: '#EF4444' }]}>Remove</Text>
+                      </Pressable>
+                    </View>
+                  ))
+                )}
+              </ScrollView>
+              <Pressable
+                style={[s.pbSheetDone, { backgroundColor: '#2A3544', marginTop: 10 }]}
+                onPress={() => { setShowPbManageMembers(false); setPbAddMemberOpen(true); }}
+              >
+                <Text style={[s.pbSheetDoneText, { color: '#F0F4F8' }]}>Add Member</Text>
+              </Pressable>
+              <Pressable style={s.pbSheetDone} onPress={() => setShowPbManageMembers(false)}>
+                <Text style={s.pbSheetDoneText}>Done</Text>
+              </Pressable>
             </Pressable>
           </Pressable>
         </Modal>
