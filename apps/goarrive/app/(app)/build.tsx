@@ -897,6 +897,7 @@ function BuildScreenInner() {
         name: `${pbDoc.name} (Copy)`,
         description: pbDoc.description || '',
         workoutIds: Array.isArray(pbDoc.workoutIds) ? pbDoc.workoutIds : [],
+        parentId: pbDoc.parentId ?? null,
         memberIds: [],
         isArchived: false,
         createdAt: serverTimestamp(),
@@ -980,6 +981,11 @@ function BuildScreenInner() {
     } catch (e) {
       console.error('[Build] Revoke booking link error:', e);
       setShowPbRevokeConfirm(false);
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert('Could not revoke the booking link. Please try again.');
+      } else {
+        Alert.alert('Revoke Failed', 'Could not revoke the booking link. Please try again.');
+      }
     } finally {
       setPbRevokeBusy(false);
     }
@@ -1013,6 +1019,12 @@ function BuildScreenInner() {
     setShowPbDeleteConfirm(false);
     if (!pb) return;
     try {
+      // Best-effort: revoke live booking links + drop booking windows before
+      // the playbook doc goes away (tokens/windows are server-write-only).
+      try {
+        const fn = httpsCallable(functions, 'revokePlaybookBookingLink');
+        await fn({ playbookId: pb.id, regenerate: false, deleteWindows: true });
+      } catch (e) { console.warn('[Build] Booking cleanup on delete failed:', e); }
       await deleteDoc(doc(db, 'playbooks', pb.id));
       exitPlaybook();
     } catch (e) { console.error('[Build] Delete playbook error:', e); }
