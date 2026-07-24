@@ -182,6 +182,118 @@ function dateStrsAhead(timezone: string, days: number): Array<{ dateStr: string;
   return out;
 }
 
+/**
+ * Shared slot computation for the public booking resolver and the member
+ * session-page reschedule picker. Expands coach windows over the horizon,
+ * subtracts the member's busy reservations, and flags weekly-cap-reached
+ * slots. `excludeInstanceId` lets a reschedule ignore the session being
+ * moved (its own reservation must not block, and it must not count toward
+ * the weekly cap it already occupies).
+ */
+async function computeMemberSlots(opts: {
+  playbookId: string;
+  playbook: FirebaseFirestore.DocumentData;
+  windowsDoc: { timezone: string; windows: BookingWindow[]; locations?: string[]; dateOverrides?: DateOverride[] };
+  memberKey: string | null;
+  memberId: string | null;
+  guestEmail: string | null;
+  excludeInstanceId?: string;
+}): Promise<{
+  slots: Array<{ date: string; startTime: string; startUtcMillis: number; capReached: boolean }>;
+  bookedThisWeek: number;
+  weeklySessionCap: number | null;
+  durationMinutes: number;
+}> {
+  const db = getDb();
+  const { playbookId, playbook, windowsDoc, memberKey, memberId, guestEmail, excludeInstanceId } = opts;
+  const timezone = windowsDoc.timezone;
+  const overrides = overrideMap(windowsDoc);
+  const durationMinutes = playbook.sessionDurationMinutes || 45;
+  const weeklySessionCap: number | null =
+    typeof playbook.weeklySessionCap === 'number' && playbook.weeklySessionCap > 0
+      ? playbook.weeklySessionCap : null;
+
+  const now = new Date();
+  const days = dateStrsAhead(timezone, BOOKING_HORIZON_DAYS);
+  const horizonEndUtc = new Date(now.getTime() + (BOOKING_HORIZON_DAYS + 2) * 24 * 60 * 60 * 1000);
+
+  // Existing reservations for this member/guest (any playbook) — busy windows.
+  const busy: Array<{ start: number; end: number }> = [];
+  if (memberKey) {
+    const resSnap = await db.collection('member_time_reservations')
+      .where('memberKey', '==', memberKey)
+      .where('startUtc', '>', Timestamp.fromMillis(now.getTime() - 4 * 60 * 60 * 1000))
+      .where('startUtc', '<', Timestamp.fromDate(horizonEndUtc))
+      .get();
+    for (const doc of resSnap.docs) {
+      const r = doc.data();
+      if (excludeInstanceId && r.sessionInstanceId === excludeInstanceId) continue;
+      busy.push({ start: (r.startUtc as Timestamp).toMillis(), end: (r.endUtc as Timestamp).toMillis() });
+    }
+  }
+
+  // Per-week booked counts toward this playbook's cap.
+  const weekCounts = new Map<number, number>();
+  if (memberKey && weeklySessionCap !== null) {
+    const { weekStartUtc } = memberWeekWindowUtc(now, timezone);
+    const base = db.collection('session_instances')
+      .where('playbookId', '==', playbookId);
+    const capQuery = guestEmail
+      ? base.where('memberKey', '==', memberKey)
+      : base.where('memberId', '==', memberId);
+    const instSnap = await capQuery
+      .where('startUtc', '>=', Timestamp.fromDate(weekStartUtc))
+      .where('startUtc', '<', Timestamp.fromDate(horizonEndUtc))
+      .get();
+    for (const doc of instSnap.docs) {
+      if (excludeInstanceId && doc.id === excludeInstanceId) continue;
+      const inst = doc.data();
+      if (!BLOCKING_OR_DONE.includes(inst.status)) continue;
+      const instStart = (inst.startUtc as Timestamp).toDate();
+      const wk = memberWeekWindowUtc(instStart, timezone).weekStartUtc.getTime();
+      weekCounts.set(wk, (weekCounts.get(wk) || 0) + 1);
+    }
+  }
+
+  const slots: Array<{ date: string; startTime: string; startUtcMillis: number; capReached: boolean }> = [];
+  // Multiple windows may cover the same day (weekly-hours UI writes one
+  // window per day-interval); dedupe identical date+time slots.
+  const seenSlots = new Set<string>();
+  for (const { dateStr, dow } of days) {
+    // Date-specific override REPLACES the weekly pattern for that date;
+    // zero override intervals = the whole date is unavailable.
+    const ov = overrides.get(dateStr);
+    const intervals: Array<{ start: string; end: string }> = ov !== undefined
+      ? ov
+      : windowsDoc.windows
+        .filter((w) => windowDays(w).includes(dow))
+        .map((w) => ({ start: w.startTime, end: w.endTime }));
+    for (const iv of intervals) {
+      const startMin = minutesOf(iv.start);
+      const endMin = minutesOf(iv.end);
+      for (let m = startMin; m + durationMinutes <= endMin; m += durationMinutes) {
+        const hhmm = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+        const startUtc = wallTimeToUtc(dateStr, hhmm, timezone);
+        if (startUtc.getTime() <= now.getTime()) continue;
+        const endUtcMs = startUtc.getTime() + durationMinutes * 60 * 1000;
+        if (busy.some((b) => b.start < endUtcMs && b.end > startUtc.getTime())) continue;
+        const slotKey = `${dateStr}_${hhmm}`;
+        if (seenSlots.has(slotKey)) continue;
+        seenSlots.add(slotKey);
+        const wk = memberWeekWindowUtc(startUtc, timezone).weekStartUtc.getTime();
+        const capReached = weeklySessionCap !== null && (weekCounts.get(wk) || 0) >= weeklySessionCap;
+        slots.push({ date: dateStr, startTime: hhmm, startUtcMillis: startUtc.getTime(), capReached });
+      }
+    }
+  }
+  slots.sort((a, b) => a.startUtcMillis - b.startUtcMillis);
+
+  const currentWeekStart = memberWeekWindowUtc(now, timezone).weekStartUtc.getTime();
+  const bookedThisWeek = weekCounts.get(currentWeekStart) || 0;
+
+  return { slots, bookedThisWeek, weeklySessionCap, durationMinutes };
+}
+
 // ── createPlaybookBookingLink (coach) ───────────────────────────────────────
 
 export const createPlaybookBookingLink = onCall(
@@ -281,11 +393,6 @@ export const resolvePlaybookBookingToken = onRequest(
       };
       const timezone = windowsDoc.timezone;
       const locations = Array.isArray(windowsDoc.locations) ? windowsDoc.locations : [];
-      const overrides = overrideMap(windowsDoc);
-      const durationMinutes = playbook.sessionDurationMinutes || 45;
-      const weeklySessionCap: number | null =
-        typeof playbook.weeklySessionCap === 'number' && playbook.weeklySessionCap > 0
-          ? playbook.weeklySessionCap : null;
 
       let coachName: string | null = null;
       try {
@@ -300,81 +407,14 @@ export const resolvePlaybookBookingToken = onRequest(
       const memberId = tokenData.memberId;
       const memberKey = guestEmail ? guestMemberKey(guestEmail) : memberId;
 
-      const now = new Date();
-      const days = dateStrsAhead(timezone, BOOKING_HORIZON_DAYS);
-      const horizonEndUtc = new Date(now.getTime() + (BOOKING_HORIZON_DAYS + 2) * 24 * 60 * 60 * 1000);
-
-      // Existing reservations for this member/guest (any playbook) — busy windows.
-      const busy: Array<{ start: number; end: number }> = [];
-      if (memberKey) {
-        const resSnap = await db.collection('member_time_reservations')
-          .where('memberKey', '==', memberKey)
-          .where('startUtc', '>', Timestamp.fromMillis(now.getTime() - 4 * 60 * 60 * 1000))
-          .where('startUtc', '<', Timestamp.fromDate(horizonEndUtc))
-          .get();
-        for (const doc of resSnap.docs) {
-          const r = doc.data();
-          busy.push({ start: (r.startUtc as Timestamp).toMillis(), end: (r.endUtc as Timestamp).toMillis() });
-        }
-      }
-
-      // Per-week booked counts toward this playbook's cap.
-      const weekCounts = new Map<number, number>();
-      if (memberKey && weeklySessionCap !== null) {
-        const { weekStartUtc } = memberWeekWindowUtc(now, timezone);
-        const base = db.collection('session_instances')
-          .where('playbookId', '==', tokenData.playbookId);
-        const capQuery = guestEmail
-          ? base.where('memberKey', '==', memberKey)
-          : base.where('memberId', '==', memberId);
-        const instSnap = await capQuery
-          .where('startUtc', '>=', Timestamp.fromDate(weekStartUtc))
-          .where('startUtc', '<', Timestamp.fromDate(horizonEndUtc))
-          .get();
-        for (const doc of instSnap.docs) {
-          const inst = doc.data();
-          if (!BLOCKING_OR_DONE.includes(inst.status)) continue;
-          const instStart = (inst.startUtc as Timestamp).toDate();
-          const wk = memberWeekWindowUtc(instStart, timezone).weekStartUtc.getTime();
-          weekCounts.set(wk, (weekCounts.get(wk) || 0) + 1);
-        }
-      }
-
-      const slots: Array<{ date: string; startTime: string; startUtcMillis: number; capReached: boolean }> = [];
-      // Multiple windows may cover the same day (weekly-hours UI writes one
-      // window per day-interval); dedupe identical date+time slots.
-      const seenSlots = new Set<string>();
-      for (const { dateStr, dow } of days) {
-        // Date-specific override REPLACES the weekly pattern for that date;
-        // zero override intervals = the whole date is unavailable.
-        const ov = overrides.get(dateStr);
-        const intervals: Array<{ start: string; end: string }> = ov !== undefined
-          ? ov
-          : windowsDoc.windows
-            .filter((w) => windowDays(w).includes(dow))
-            .map((w) => ({ start: w.startTime, end: w.endTime }));
-        for (const iv of intervals) {
-          const startMin = minutesOf(iv.start);
-          const endMin = minutesOf(iv.end);
-          for (let m = startMin; m + durationMinutes <= endMin; m += durationMinutes) {
-            const hhmm = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-            const startUtc = wallTimeToUtc(dateStr, hhmm, timezone);
-            if (startUtc.getTime() <= now.getTime()) continue;
-            const endUtcMs = startUtc.getTime() + durationMinutes * 60 * 1000;
-            if (busy.some((b) => b.start < endUtcMs && b.end > startUtc.getTime())) continue;
-            const slotKey = `${dateStr}_${hhmm}`;
-            if (seenSlots.has(slotKey)) continue;
-            seenSlots.add(slotKey);
-            const wk = memberWeekWindowUtc(startUtc, timezone).weekStartUtc.getTime();
-            const capReached = weeklySessionCap !== null && (weekCounts.get(wk) || 0) >= weeklySessionCap;
-            slots.push({ date: dateStr, startTime: hhmm, startUtcMillis: startUtc.getTime(), capReached });
-          }
-        }
-      }
-      slots.sort((a, b) => a.startUtcMillis - b.startUtcMillis);
-
-      const currentWeekStart = memberWeekWindowUtc(now, timezone).weekStartUtc.getTime();
-      const bookedThisWeek = weekCounts.get(currentWeekStart) || 0;
+      const { slots, bookedThisWeek, weeklySessionCap, durationMinutes } = await computeMemberSlots({
+        playbookId: tokenData.playbookId,
+        playbook,
+        windowsDoc,
+        memberKey,
+        memberId,
+        guestEmail,
+      });
 
       let memberName: string | null = null;
       if (memberId) {
@@ -741,5 +781,114 @@ export const playbookBookingIcs = onRequest(
       console.error('[playbookBookingIcs] error:', err);
       res.status(500).json({ error: 'Something went wrong.' });
     }
+  }
+);
+
+// ── Member session-page callables (live-session route) ──────────────────────
+
+async function loadInstanceForCaller(instanceId: string, auth: { uid: string; token: Record<string, any> }) {
+  if (typeof instanceId !== 'string' || !instanceId) {
+    throw new HttpsError('invalid-argument', 'instanceId is required');
+  }
+  const snap = await getDb().collection('session_instances').doc(instanceId).get();
+  if (!snap.exists) throw new HttpsError('not-found', 'Session not found');
+  const inst = snap.data()!;
+  const claims = auth.token || {};
+  const isCoach = auth.uid === inst.coachId || claims.coachId === inst.coachId;
+  const isAdmin = claims.role === 'platformAdmin' || claims.admin === true;
+  if (auth.uid !== inst.memberId && !isCoach && !isAdmin) {
+    throw new HttpsError('permission-denied', 'This session does not belong to you');
+  }
+  return inst;
+}
+
+/**
+ * getPlaybookRescheduleSlots — available slots for moving a booked playbook
+ * session, computed with the same engine as the public booking page. The
+ * session's own reservation is excluded so its current time doesn't block
+ * or count against the weekly cap.
+ */
+export const getPlaybookRescheduleSlots = onCall(
+  { region: 'us-central1', invoker: 'public' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Must be signed in');
+    const { instanceId } = request.data as { instanceId: string };
+    const inst = await loadInstanceForCaller(instanceId, request.auth as any);
+    if (!inst.playbookId) {
+      throw new HttpsError('failed-precondition', 'This session was not booked through a booking link');
+    }
+    const db = getDb();
+    const [playbookSnap, windowsSnap] = await Promise.all([
+      db.collection('playbooks').doc(inst.playbookId).get(),
+      db.collection('booking_windows').doc(inst.playbookId).get(),
+    ]);
+    if (!playbookSnap.exists) throw new HttpsError('not-found', 'This playbook no longer exists');
+    if (!windowsSnap.exists) {
+      throw new HttpsError('failed-precondition', 'The coach has not opened booking for this playbook');
+    }
+    const playbook = playbookSnap.data()!;
+    const windowsDoc = windowsSnap.data() as {
+      timezone: string; windows: BookingWindow[]; locations?: string[]; dateOverrides?: DateOverride[];
+    };
+    const { slots, durationMinutes } = await computeMemberSlots({
+      playbookId: inst.playbookId,
+      playbook,
+      windowsDoc,
+      memberKey: (inst.memberKey as string) || (inst.memberId as string) || null,
+      memberId: (inst.memberId as string) || null,
+      guestEmail: (inst.guestEmail as string) || null,
+      excludeInstanceId: instanceId,
+    });
+    return {
+      playbookTitle: playbook.name || 'Playbook',
+      timezone: windowsDoc.timezone,
+      durationMinutes,
+      slots,
+    };
+  }
+);
+
+/**
+ * getSessionWorkout — resolves and returns the workout for a session so the
+ * member session page can launch the normal WorkoutPlayer. Members cannot
+ * read workouts/playbooks/coaches directly (rules), so this Admin-SDK
+ * projection is scoped to the session's own member (or the coach/admin).
+ * Resolution: pinnedWorkoutId, else the playbook's next-in-sequence
+ * (workoutIds[nextWorkoutIndex % length]).
+ */
+export const getSessionWorkout = onCall(
+  { region: 'us-central1', invoker: 'public' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Must be signed in');
+    const { sessionInstanceId } = request.data as { sessionInstanceId: string };
+    const inst = await loadInstanceForCaller(sessionInstanceId, request.auth as any);
+    const db = getDb();
+
+    let coachName: string | null = null;
+    try {
+      const coachSnap = await db.collection('coaches').doc(inst.coachId).get();
+      const c = coachSnap.data() || {};
+      coachName = c.displayName || c.name || null;
+    } catch { /* branding only */ }
+
+    let workoutId: string | null = (inst.pinnedWorkoutId as string) || null;
+    if (!workoutId && inst.playbookId) {
+      try {
+        const playbookSnap = await db.collection('playbooks').doc(inst.playbookId).get();
+        const p = playbookSnap.data() || {};
+        const ids: string[] = Array.isArray(p.workoutIds) ? p.workoutIds : [];
+        if (ids.length > 0) {
+          const idx = Number.isInteger(p.nextWorkoutIndex) ? p.nextWorkoutIndex : 0;
+          workoutId = ids[((idx % ids.length) + ids.length) % ids.length];
+        }
+      } catch (err: any) {
+        console.warn(`[getSessionWorkout] playbook lookup failed for ${sessionInstanceId}: ${err.message}`);
+      }
+    }
+    if (!workoutId) return { workout: null, coachName };
+
+    const workoutSnap = await db.collection('workouts').doc(workoutId).get();
+    if (!workoutSnap.exists) return { workout: null, coachName };
+    return { workout: { id: workoutSnap.id, ...workoutSnap.data() }, coachName };
   }
 );

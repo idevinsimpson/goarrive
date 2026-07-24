@@ -337,6 +337,11 @@ export default function MySessionsScreen() {
             setSelectedSession(null);
             handleJoinInApp(selectedSession);
           }}
+          onOpenSessionPage={() => {
+            const id = selectedSession.id;
+            setSelectedSession(null);
+            router.push(`/live-session/${id}` as any);
+          }}
           onCancel={() => handleCancel(selectedSession)}
           onReschedule={() => {
             setShowReschedule(true);
@@ -613,6 +618,7 @@ function SessionDetailModal({
   onClose,
   onJoin,
   onJoinInApp,
+  onOpenSessionPage,
   onCancel,
   onReschedule,
   onSkipRequest,
@@ -621,6 +627,7 @@ function SessionDetailModal({
   onClose: () => void;
   onJoin: () => void;
   onJoinInApp: () => void;
+  onOpenSessionPage: () => void;
   onCancel: () => void;
   onReschedule: () => void;
   onSkipRequest: () => void;
@@ -770,6 +777,12 @@ function SessionDetailModal({
 
             {/* Actions */}
             <View style={s.actionSection}>
+              {(showJoin || showReschedule) && (
+                <Pressable style={s.primaryBtn} onPress={onOpenSessionPage}>
+                  <Icon name="play-circle" size={18} color="#FFF" />
+                  <Text style={s.primaryBtnText}>Open Session Page</Text>
+                </Pressable>
+              )}
               {showJoin && (
                 <Pressable style={s.primaryBtn} onPress={onJoin}>
                   <Icon name="video" size={18} color="#FFF" />

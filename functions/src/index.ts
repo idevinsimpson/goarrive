@@ -93,6 +93,8 @@ export {
   resolvePlaybookBookingToken,
   bookViaBookingToken,
   playbookBookingIcs,
+  getPlaybookRescheduleSlots,
+  getSessionWorkout,
 } from './playbookBooking';
 import { CloudTasksClient } from '@google-cloud/tasks';
 import { sanitizePlayerWorkout } from './workoutPlayerSanitizer';

@@ -58,6 +58,7 @@ interface BookedResult {
   location: string | null;
   icsUrl: string | null;
   googleCalUrl: string | null;
+  instanceId: string | null;
 }
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -264,7 +265,7 @@ export default function BookingPage() {
           ]);
           const data = res.data as {
             guest: boolean; icsUrl?: string; googleCalUrl?: string; location?: string | null;
-            date?: string; startTime?: string;
+            date?: string; startTime?: string; instanceId?: string;
           };
           pendingRequestIdRef.current = null;
           setBooked({
@@ -276,6 +277,7 @@ export default function BookingPage() {
             location: data.location || null,
             icsUrl: data.icsUrl || null,
             googleCalUrl: data.googleCalUrl || null,
+            instanceId: data.instanceId || null,
           });
           return;
         } catch (e: any) {
@@ -358,9 +360,16 @@ export default function BookingPage() {
               </Pressable>
             </>
           ) : (
-            <Pressable style={s.primaryBtn} onPress={() => router.push('/(member)/my-sessions')}>
-              <Text style={s.primaryBtnText}>View My Sessions</Text>
-            </Pressable>
+            <>
+              {booked.instanceId && (
+                <Pressable style={s.primaryBtn} onPress={() => router.push(`/live-session/${booked.instanceId}` as any)}>
+                  <Text style={s.primaryBtnText}>Go to Session Page</Text>
+                </Pressable>
+              )}
+              <Pressable style={booked.instanceId ? s.ghostBtn : s.primaryBtn} onPress={() => router.push('/(member)/my-sessions')}>
+                <Text style={booked.instanceId ? s.ghostBtnText : s.primaryBtnText}>View My Sessions</Text>
+              </Pressable>
+            </>
           )}
           <Pressable
             style={s.ghostBtn}
