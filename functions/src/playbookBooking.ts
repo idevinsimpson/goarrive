@@ -264,7 +264,9 @@ export const revokePlaybookBookingLink = onCall(
     const coachId = (callerToken.coachId as string) || request.auth.uid;
     const isAdmin = callerToken.role === 'platformAdmin' || !!callerToken.admin;
 
-    const { playbookId, regenerate } = request.data as { playbookId: string; regenerate?: boolean };
+    const { playbookId, regenerate, deleteWindows } = request.data as {
+      playbookId: string; regenerate?: boolean; deleteWindows?: boolean;
+    };
     if (!playbookId) throw new HttpsError('invalid-argument', 'playbookId is required');
 
     const playbookSnap = await db.collection('playbooks').doc(playbookId).get();
@@ -280,6 +282,7 @@ export const revokePlaybookBookingLink = onCall(
       .get();
     const batch = db.batch();
     active.docs.forEach((d) => batch.update(d.ref, { revokedAt: FieldValue.serverTimestamp() }));
+    if (deleteWindows) batch.delete(db.collection('booking_windows').doc(playbookId));
     await batch.commit();
 
     if (!regenerate) return { revoked: active.size, token: null };
@@ -315,6 +318,10 @@ export const resolvePlaybookBookingToken = onRequest(
         return;
       }
       const playbook = playbookSnap.data()!;
+      if (playbook.isArchived) {
+        res.status(410).json({ error: 'Booking is closed for this playbook.' });
+        return;
+      }
       if (!windowsSnap.exists) {
         res.status(409).json({ error: 'The coach has not opened booking for this playbook yet.' });
         return;
@@ -483,6 +490,7 @@ export const bookViaBookingToken = onCall(
     if (!playbookSnap.exists) throw new HttpsError('not-found', 'This playbook no longer exists');
     if (!windowsSnap.exists) throw new HttpsError('failed-precondition', 'Booking is not open for this playbook');
     const playbook = playbookSnap.data()!;
+    if (playbook.isArchived) throw new HttpsError('failed-precondition', 'Booking is closed for this playbook');
     const windowsDoc = windowsSnap.data() as {
       timezone: string; windows: BookingWindow[]; locations?: string[]; dateOverrides?: DateOverride[];
     };
