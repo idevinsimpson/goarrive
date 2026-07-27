@@ -85,17 +85,7 @@ import {
 
 // Playbook scheduling (Phase 3a): transactional booking with the
 // member-level double-booking guard + per-playbook weekly cap.
-export { bookPlaybookSession, cleanupExpiredBookingRequests } from './playbookScheduling';
-// Playbook booking links (Phase 3b): coach availability windows + public
-// Calendly-style token page + guest-by-email bookings.
-export {
-  createPlaybookBookingLink,
-  resolvePlaybookBookingToken,
-  bookViaBookingToken,
-  playbookBookingIcs,
-  getPlaybookRescheduleSlots,
-  getSessionWorkout,
-} from './playbookBooking';
+export { bookPlaybookSession } from './playbookScheduling';
 import { CloudTasksClient } from '@google-cloud/tasks';
 import { sanitizePlayerWorkout } from './workoutPlayerSanitizer';
 
@@ -2144,6 +2134,10 @@ export const claimMemberAccount = onCall(
   }
 );
 
+// sendMemberInvite: an earlier duplicate declaration (added in a parallel
+// branch the same day) lived here and broke `tsc` for the whole functions
+// package. Removed in favor of the fuller implementation below, which is
+// what module evaluation order would have exported anyway.
 
 /**
  * sendMemberInvite – Coach-initiated: ensure a Firebase Auth account exists
@@ -3184,41 +3178,6 @@ export const generateUpcomingInstances = onSchedule(
 );
 
 // ─── 17. allocateSessionInstance — Assign a Zoom room to a session instance ──
-// Coach Zoom identity is hardcoded to the coach's login email (goa.fit
-// workspace account) — coaches no longer add/remove their own Zoom account.
-// If the coach has no personal zoom_room yet, provision one from their auth
-// email so allocation keeps working without the removed Settings UI.
-async function ensurePersonalZoomRoom(coachId: string): Promise<FirebaseFirestore.DocumentSnapshot | null> {
-  let email: string | undefined;
-  try {
-    email = (await admin.auth().getUser(coachId)).email;
-  } catch {
-    return null;
-  }
-  if (!email) return null;
-
-  const roomRef = await db.collection('zoom_rooms').add({
-    coachId,
-    label: 'My Zoom',
-    zoomAccountEmail: email,
-    isPersonal: true,
-    status: 'active',
-    maxConcurrentMeetings: 1,
-    autoProvisioned: true,
-    createdAt: FieldValue.serverTimestamp(),
-    updatedAt: FieldValue.serverTimestamp(),
-  });
-
-  await writeAuditLog({
-    coachId,
-    action: 'zoom_room_auto_provisioned',
-    zoomRoomId: roomRef.id,
-    details: `Personal Zoom room auto-provisioned from coach login email ${email}`,
-  });
-
-  return roomRef.get();
-}
-
 export const allocateSessionInstance = onCall(
   { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber], invoker: 'public' },
   async (request) => {
@@ -3302,15 +3261,9 @@ export const allocateSessionInstance = onCall(
       candidateRooms = sortLru(candidateRooms);
     }
 
-    // Personal room missing → provision one from the coach's login email
-    if (candidateRooms.length === 0 && roomSource !== 'shared_pool') {
-      const autoRoom = await ensurePersonalZoomRoom(callerUid);
-      if (autoRoom && autoRoom.exists) candidateRooms = [autoRoom as FirebaseFirestore.QueryDocumentSnapshot];
-    }
-
     if (candidateRooms.length === 0) {
       const reason = roomSource === 'coach_personal'
-        ? 'No personal Zoom room could be provisioned for this coach.'
+        ? 'No personal Zoom room configured. Add your Zoom in Settings.'
         : roomSource === 'shared_pool'
         ? 'No shared pool rooms available.'
         : 'No active Zoom rooms available.';
@@ -3512,21 +3465,10 @@ export const allocateAllPendingInstances = onCall(
     }
 
     // Get all active Zoom rooms for this coach
-    let roomsSnap = await db.collection('zoom_rooms')
+    const roomsSnap = await db.collection('zoom_rooms')
       .where('coachId', '==', callerUid)
       .where('status', '==', 'active')
       .get();
-
-    // No rooms → provision a personal room from the coach's login email
-    if (roomsSnap.empty) {
-      const autoRoom = await ensurePersonalZoomRoom(callerUid);
-      if (autoRoom && autoRoom.exists) {
-        roomsSnap = await db.collection('zoom_rooms')
-          .where('coachId', '==', callerUid)
-          .where('status', '==', 'active')
-          .get();
-      }
-    }
 
     if (roomsSnap.empty) {
       return { success: false, allocated: 0, failed: pendingSnap.size, message: 'No active Zoom rooms available' };
@@ -10027,10 +9969,14 @@ export const getEmbeddedSessionJoinConfig = onCall(
     const callerToken = request.auth?.token as Record<string, any> | undefined;
     const callerIsAdmin =
       callerToken?.role === 'platformAdmin' || callerToken?.admin === true;
-    if (!callerIsAdmin && callerUid !== instance.memberId) {
+    // Coach live-view: the session's coach may also join as a participant to
+    // observe the member (still role 0 — host-start remains future work).
+    const callerIsCoach = callerUid === instance.coachId;
+    const callerIsMember = callerUid === instance.memberId;
+    if (!callerIsAdmin && !callerIsMember && !callerIsCoach) {
       throw new HttpsError(
         'permission-denied',
-        'Only the assigned member can join this session'
+        'Only the assigned member or coach can join this session'
       );
     }
 
@@ -10048,21 +9994,26 @@ export const getEmbeddedSessionJoinConfig = onCall(
       );
     }
 
-    let userName = (instance.memberName as string) || '';
+    // Display identity: coach callers join under their own name so the member
+    // sees "Coach <name>" — everyone else keeps the member identity.
+    const identityUid =
+      callerIsCoach && !callerIsMember
+        ? (instance.coachId as string)
+        : (instance.memberId as string);
+    const identityFallback = callerIsCoach && !callerIsMember ? 'Coach' : 'Member';
+    let userName =
+      callerIsCoach && !callerIsMember ? '' : (instance.memberName as string) || '';
     let userEmail = '';
     try {
-      const userDoc = await db
-        .collection('users')
-        .doc(instance.memberId as string)
-        .get();
+      const userDoc = await db.collection('users').doc(identityUid).get();
       const udata = userDoc.data() || {};
       if (!userName) {
         userName =
-          (udata.displayName as string) || (udata.name as string) || 'Member';
+          (udata.displayName as string) || (udata.name as string) || identityFallback;
       }
       userEmail = (udata.email as string) || '';
     } catch {
-      if (!userName) userName = 'Member';
+      if (!userName) userName = identityFallback;
     }
 
     const sdkKey = zoomMeetingSdkKey.value().trim();
@@ -10555,19 +10506,6 @@ function slugify(text: string): string {
     .slice(0, 80);
 }
 
-// The equipment library is weight-agnostic: a 15lb and a 35lb dumbbell share
-// one image, so weights/sizes are stripped from slugs and labels.
-const EQUIP_WEIGHT_TOKEN_RE = /^(?:\d+(?:\.\d+)?|lb|lbs|pound|pounds|kg|kgs|kilo|kilos|kilogram|kilograms)$/;
-
-export function stripEquipmentWeightTokens(slug: string): string {
-  const tokens = slug.split('-').filter(t => t && !EQUIP_WEIGHT_TOKEN_RE.test(t));
-  // Drop dangling/duplicate "and" connectors left behind by removed weights.
-  const cleaned = tokens.filter((t, i) =>
-    t !== 'and' || (i > 0 && i < tokens.length - 1 && tokens[i - 1] !== 'and'));
-  const stripped = cleaned.join('-');
-  return stripped || slug;
-}
-
 async function extractEquipmentSlug(text: string, apiKey: string): Promise<{ slug: string; label: string }> {
   try {
     const resp = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -10578,7 +10516,7 @@ async function extractEquipmentSlug(text: string, apiKey: string): Promise<{ slu
         messages: [
           {
             role: 'system',
-            content: 'Extract only the fitness equipment item name(s) from the workout instruction. Return just the equipment name(s) in lowercase, comma-separated if multiple (e.g. "straight bar, dumbbells"). EXCLUDE all weights, numbers, and size descriptors entirely — "35 pound dumbbells" becomes "dumbbells", "24 inch box" becomes "box". No other words.',
+            content: 'Extract only the fitness equipment item name(s) from the workout instruction. Return just the equipment name(s) in lowercase, comma-separated if multiple (e.g. "straight bar, dumbbells"). Include weight/size descriptors. No other words.',
           },
           { role: 'user', content: text },
         ],
@@ -10591,15 +10529,13 @@ async function extractEquipmentSlug(text: string, apiKey: string): Promise<{ slu
       const extracted = json.choices?.[0]?.message?.content?.trim();
       if (extracted) {
         const items = extracted.split(',').map(s => s.trim()).filter(Boolean);
-        const slugs = items.map(s => stripEquipmentWeightTokens(slugify(s))).filter(Boolean);
-        const slug = stripEquipmentWeightTokens(slugs.join('-and-'));
-        const label = slug.replace(/-and-/g, ' and ').replace(/-/g, ' ');
-        if (slug) return { slug, label };
+        const label = items.join(' and ');
+        const slug = items.map(slugify).join('-and-');
+        return { slug, label };
       }
     }
   } catch { /* fall through to full-text slug */ }
-  const fallbackSlug = stripEquipmentWeightTokens(slugify(text));
-  return { slug: fallbackSlug, label: fallbackSlug.replace(/-and-/g, ' and ').replace(/-/g, ' ') };
+  return { slug: slugify(text), label: text };
 }
 
 export const generateEquipmentImage = onCall(
@@ -10716,67 +10652,11 @@ export const saveEquipmentImageChoice = onCall(
     const bucket = admin.storage().bucket();
     const srcPath = `equipment_images/${equipmentSlug}/v${choiceIndex + 1}.png`;
     const destPath = `equipment_images/${equipmentSlug}/default.png`;
-    const thumbPath = `equipment_images/${equipmentSlug}/thumb.png`;
     const [srcBuf] = await bucket.file(srcPath).download();
     await bucket.file(destPath).save(srcBuf, { contentType: 'image/png' });
-    try {
-      const sharp = require('sharp');
-      const thumbBuf = await sharp(srcBuf).resize(256, 256, { fit: 'inside' }).png().toBuffer();
-      await bucket.file(thumbPath).save(thumbBuf, { contentType: 'image/png' });
-    } catch (err) {
-      console.warn('[saveEquipmentImageChoice] thumb generation failed', { equipmentSlug, err: String(err) });
-    }
     const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media`;
     console.info('[saveEquipmentImageChoice] Saved default', { equipmentSlug, choiceIndex });
     return { imageUrl };
-  },
-);
-
-// ─── listEquipmentImages — platform-wide shared equipment image library ──────
-// Lists every equipment_images/{slug}/default.png in Storage. Shared across
-// ALL coaches by explicit product decision (cross-coach image reuse).
-export const listEquipmentImages = onCall(
-  { region: 'us-central1', timeoutSeconds: 60, invoker: 'public' },
-  async (request) => {
-    if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Authentication required');
-    const bucket = admin.storage().bucket();
-    const [files] = await bucket.getFiles({ prefix: 'equipment_images/' });
-    const fileNames = new Set(files.map(f => f.name));
-    const url = (path: string) =>
-      `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media`;
-    const images = files
-      .filter(f => f.name.endsWith('/default.png'))
-      .map(f => {
-        const slug = f.name.slice('equipment_images/'.length, -'/default.png'.length);
-        const label = slug.replace(/-and-/g, ' and ').replace(/-/g, ' ');
-        const thumbName = `equipment_images/${slug}/thumb.png`;
-        return {
-          slug,
-          label,
-          imageUrl: url(f.name),
-          thumbUrl: fileNames.has(thumbName) ? url(thumbName) : url(f.name),
-        };
-      });
-    console.info('[listEquipmentImages] Listed', { count: images.length });
-    return { images };
-  },
-);
-
-// ─── deleteEquipmentImage — remove a slug from the shared equipment library ──
-// Deletes ALL files under equipment_images/{slug}/. The library is platform-
-// wide, so deletion affects every coach — explicit product decision (Devin).
-export const deleteEquipmentImage = onCall(
-  { region: 'us-central1', timeoutSeconds: 60, invoker: 'public' },
-  async (request) => {
-    if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Authentication required');
-    const { equipmentSlug } = request.data as { equipmentSlug?: string };
-    if (!equipmentSlug || !/^[a-z0-9][a-z0-9-]{0,119}$/.test(equipmentSlug)) {
-      throw new HttpsError('invalid-argument', 'Valid equipmentSlug is required');
-    }
-    const bucket = admin.storage().bucket();
-    await bucket.deleteFiles({ prefix: `equipment_images/${equipmentSlug}/` });
-    console.info('[deleteEquipmentImage] Deleted', { equipmentSlug, by: request.auth.uid });
-    return { ok: true };
   },
 );
 
