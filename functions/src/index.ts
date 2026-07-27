@@ -10657,6 +10657,28 @@ export const saveEquipmentImageChoice = onCall(
   },
 );
 
+// ─── listEquipmentImages — platform-wide shared equipment image library ──────
+// Lists every equipment_images/{slug}/default.png in Storage. Shared across
+// ALL coaches by explicit product decision (cross-coach image reuse).
+export const listEquipmentImages = onCall(
+  { region: 'us-central1', timeoutSeconds: 60, invoker: 'public' },
+  async (request) => {
+    if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Authentication required');
+    const bucket = admin.storage().bucket();
+    const [files] = await bucket.getFiles({ prefix: 'equipment_images/' });
+    const images = files
+      .filter(f => f.name.endsWith('/default.png'))
+      .map(f => {
+        const slug = f.name.slice('equipment_images/'.length, -'/default.png'.length);
+        const label = slug.replace(/-and-/g, ' and ').replace(/-/g, ' ');
+        const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(f.name)}?alt=media`;
+        return { slug, label, imageUrl };
+      });
+    console.info('[listEquipmentImages] Listed', { count: images.length });
+    return { images };
+  },
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AI Movement Variation (Runway video-to-video)
 //
