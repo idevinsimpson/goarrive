@@ -323,7 +323,7 @@ export default function WorkoutFolderPage({
   const [equipHistory, setEquipHistory] = useState<{ id: string; text: string; imageUrl: string | null }[]>([]);
   const [equipHistoryLoading, setEquipHistoryLoading] = useState(false);
   const [equipLibraryOpenIdx, setEquipLibraryOpenIdx] = useState<number | null>(null);
-  const [equipLibrary, setEquipLibrary] = useState<{ slug: string; label: string; imageUrl: string; thumbUrl?: string }[] | null>(null);
+  const [equipLibrary, setEquipLibrary] = useState<{ slug: string; label: string; imageUrl: string; thumbUrl?: string; createdBy?: string | null }[] | null>(null);
   const [equipLibraryLoading, setEquipLibraryLoading] = useState(false);
   const [equipLibraryError, setEquipLibraryError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'icon' | 'list'>('icon');
@@ -1626,31 +1626,39 @@ export default function WorkoutFolderPage({
   // ── Grab Equipment shared image library ──────────────────────────────────
   const listEquipImagesFn = httpsCallable<
     Record<string, never>,
-    { images: { slug: string; label: string; imageUrl: string; thumbUrl?: string }[] }
+    { images: { slug: string; label: string; imageUrl: string; thumbUrl?: string; createdBy?: string | null }[] }
   >(functions, 'listEquipmentImages');
 
-  const deleteEquipImageFn = httpsCallable<{ equipmentSlug: string }, { ok: boolean }>(
+  const deleteEquipImageFn = httpsCallable<{ equipmentSlug: string }, { ok: boolean; scope?: 'platform' | 'hidden' }>(
     functions, 'deleteEquipmentImage');
 
-  const deleteLibraryImage = useCallback((item: { slug: string; label: string }) => {
-    const doDelete = async () => {
-      setEquipLibrary(prev => (prev ?? []).filter(i => i.slug !== item.slug));
+  const removeLibrarySlugLocally = useCallback((slug: string) => {
+    setEquipLibrary(prev => (prev ?? []).filter(i => i.slug !== slug));
+  }, []);
+
+  const handleDeleteLibraryImage = useCallback((item: { slug: string; label: string }, mode: 'platform' | 'hide') => {
+    const doAction = async () => {
+      removeLibrarySlugLocally(item.slug);
       try {
         await deleteEquipImageFn({ equipmentSlug: item.slug });
       } catch (err) {
         console.warn('[WorkoutFolder] deleteEquipmentImage failed', err);
       }
     };
-    const msg = `Delete "${item.label}" from the equipment library? This removes it for all coaches.`;
+    const title = mode === 'platform' ? 'Delete image' : 'Hide image';
+    const msg = mode === 'platform'
+      ? `Remove "${item.label}" for ALL coaches?`
+      : `Hide "${item.label}" from your library?`;
+    const confirmLabel = mode === 'platform' ? 'Delete' : 'Hide';
     if (Platform.OS === 'web') {
-      if (window.confirm(msg)) doDelete();
+      if (window.confirm(msg)) doAction();
     } else {
-      Alert.alert('Delete Image', msg, [
+      Alert.alert(title, msg, [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: doDelete },
+        { text: confirmLabel, style: 'destructive', onPress: doAction },
       ]);
     }
-  }, [deleteEquipImageFn]);
+  }, [deleteEquipImageFn, removeLibrarySlugLocally]);
 
   const openEquipLibrary = useCallback(async (blockIdx: number) => {
     setEquipLibraryOpenIdx(blockIdx);
@@ -3734,50 +3742,56 @@ export default function WorkoutFolderPage({
                       ) : (
                         <ScrollView style={{ paddingHorizontal: 20 }} contentContainerStyle={{ paddingBottom: 40 }}>
                           <View style={{ flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 10 }}>
-                            {(equipLibrary ?? []).map((item) => (
-                              <TouchableOpacity
-                                key={item.slug}
-                                onPress={() => selectLibraryImage(bi, item)}
-                                style={{
-                                  width: '31%' as any,
-                                  borderRadius: 10,
-                                  borderWidth: 1,
-                                  borderColor: '#2A3347',
-                                  backgroundColor: '#1E2A3A',
-                                  overflow: 'hidden' as const,
-                                }}
-                              >
-                                <Image
-                                  source={{ uri: item.thumbUrl ?? item.imageUrl }}
-                                  style={{ width: '100%' as any, aspectRatio: 1 }}
-                                  resizeMode="cover"
-                                />
+                            {(equipLibrary ?? []).map((item) => {
+                              const isOwner = !!item.createdBy && item.createdBy === coachId;
+                              const affIcon = isOwner ? 'trash-2' : 'eye-off';
+                              const affColor = isOwner ? '#F87171' : '#CBD5E1';
+                              const affMode: 'platform' | 'hide' = isOwner ? 'platform' : 'hide';
+                              return (
                                 <TouchableOpacity
-                                  onPress={(e: any) => { e?.stopPropagation?.(); deleteLibraryImage(item)}}
-                                  hitSlop={6}
+                                  key={item.slug}
+                                  onPress={() => selectLibraryImage(bi, item)}
                                   style={{
-                                    position: 'absolute' as const,
-                                    top: 4,
-                                    right: 4,
-                                    width: 22,
-                                    height: 22,
-                                    borderRadius: 11,
-                                    backgroundColor: 'rgba(14,17,23,0.75)',
-                                    alignItems: 'center' as const,
-                                    justifyContent: 'center' as const,
+                                    width: '31%' as any,
+                                    borderRadius: 10,
+                                    borderWidth: 1,
+                                    borderColor: '#2A3347',
+                                    backgroundColor: '#1E2A3A',
+                                    overflow: 'hidden' as const,
                                   }}
                                 >
-                                  <Icon name="x" size={13} color="#F0F4F8" />
+                                  <Image
+                                    source={{ uri: item.thumbUrl ?? item.imageUrl }}
+                                    style={{ width: '100%' as any, aspectRatio: 1 }}
+                                    resizeMode="cover"
+                                  />
+                                  <TouchableOpacity
+                                    onPress={(e: any) => { e?.stopPropagation?.(); handleDeleteLibraryImage(item, affMode); }}
+                                    hitSlop={6}
+                                    style={{
+                                      position: 'absolute' as const,
+                                      top: 4,
+                                      right: 4,
+                                      width: 22,
+                                      height: 22,
+                                      borderRadius: 11,
+                                      backgroundColor: 'rgba(14,17,23,0.85)',
+                                      alignItems: 'center' as const,
+                                      justifyContent: 'center' as const,
+                                    }}
+                                  >
+                                    <Icon name={affIcon as any} size={12} color={affColor} />
+                                  </TouchableOpacity>
+                                  <Text
+                                    style={{ color: '#F0F4F8', fontSize: 10, lineHeight: 13, fontFamily: FB, padding: 6, textTransform: 'capitalize' as const }}
+                                    numberOfLines={2}
+                                    ellipsizeMode="tail"
+                                  >
+                                    {item.label}
+                                  </Text>
                                 </TouchableOpacity>
-                                <Text
-                                  style={{ color: '#F0F4F8', fontSize: 10, lineHeight: 13, fontFamily: FB, padding: 6, textTransform: 'capitalize' as const }}
-                                  numberOfLines={2}
-                                  ellipsizeMode="tail"
-                                >
-                                  {item.label}
-                                </Text>
-                              </TouchableOpacity>
-                            ))}
+                              );
+                            })}
                           </View>
                         </ScrollView>
                       )}
