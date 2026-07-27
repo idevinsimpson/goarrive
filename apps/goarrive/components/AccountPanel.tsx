@@ -20,7 +20,6 @@ import {
   Modal,
   Animated,
   Dimensions,
-  TextInput,
   ScrollView,
   Image,
 } from 'react-native';
@@ -30,9 +29,6 @@ import { HiddenFromCoachTag } from './HiddenFromCoachTag';
 import { useAuth } from '../lib/AuthContext';
 import { useEffectiveProfile } from '../lib/useEffectiveProfile';
 import { useHiddenSettings } from '../lib/useHiddenSettings';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
-import { getFunctions, httpsCallable } from 'firebase/functions';
 import { router } from 'expo-router';
 import { FB, FH } from '../lib/theme';
 
@@ -91,64 +87,6 @@ export default function AccountPanel({ visible, onClose }: Props) {
     }
   }, [visible]);
 
-  const [zoomEmail, setZoomEmail] = useState('');
-  const [zoomLabel, setZoomLabel] = useState('');
-  const [zoomSaved, setZoomSaved] = useState(false);
-  const [zoomLoading, setZoomLoading] = useState(false);
-  const [showZoom, setShowZoom] = useState(false);
-
-  // Load coach's personal Zoom from coach_brands on mount
-  useEffect(() => {
-    if (!effectiveUid) return;
-    (async () => {
-      try {
-        const brandDoc = await getDoc(doc(db, 'coach_brands', effectiveUid));
-        if (brandDoc.exists()) {
-          const data = brandDoc.data();
-          if (data.personalZoom) {
-            setZoomEmail(data.personalZoom.email || '');
-            setZoomLabel(data.personalZoom.label || '');
-            setZoomSaved(!!data.personalZoom.email);
-          }
-        }
-      } catch (e) {
-        console.warn('Failed to load personal Zoom:', e);
-      }
-    })();
-  }, [effectiveUid]);
-
-  async function handleSaveZoom() {
-    if (!effectiveUid || !zoomEmail.trim()) return;
-    setZoomLoading(true);
-    try {
-      // Save to coach_brands
-      await setDoc(doc(db, 'coach_brands', effectiveUid), {
-        personalZoom: {
-          email: zoomEmail.trim(),
-          label: zoomLabel.trim() || 'My Zoom',
-        },
-      }, { merge: true });
-
-      // Also register as a zoom_room with isPersonal: true via Cloud Function
-      const functions = getFunctions();
-      const manageZoomRoom = httpsCallable(functions, 'manageZoomRoom');
-      await manageZoomRoom({
-        action: 'add',
-        label: zoomLabel.trim() || 'My Zoom',
-        zoomAccountEmail: zoomEmail.trim(),
-        isPersonal: true,
-      });
-
-      setZoomSaved(true);
-      showToast('Personal Zoom saved!');
-    } catch (e: any) {
-      console.error('Failed to save Zoom:', e);
-      showToast('Failed to save — try again');
-    } finally {
-      setZoomLoading(false);
-    }
-  }
-
   const role = claims?.role ?? 'coach';
   const roleLabel = 
     role === 'platformAdmin' ? 'Platform Admin' : 
@@ -192,7 +130,6 @@ export default function AccountPanel({ visible, onClose }: Props) {
   }
 
   const myPageHidden = isHidden('myPage');
-  const myZoomHidden = isHidden('myZoomAccount');
 
   const menuItems: MenuItem[] = [
     // Hidden sections: skipped for the coach, tagged for an impersonating admin
@@ -307,70 +244,6 @@ export default function AccountPanel({ visible, onClose }: Props) {
             </Pressable>
           ))}
         </View>
-
-        {/* Divider */}
-        <View style={s.divider} />
-
-        {/* My Zoom Account */}
-        {(!myZoomHidden || impersonating) && (
-        <Pressable
-          style={({ pressed }) => [s.menuItem, pressed && s.menuItemPressed]}
-          onPress={() => setShowZoom(!showZoom)}
-        >
-          <View style={s.menuIconWrap}>
-            <Icon name="video" size={20} color={zoomSaved ? '#6EBB7A' : '#8A95A3'} />
-          </View>
-          <View style={s.menuTextWrap}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={s.menuLabel}>My Zoom Account</Text>
-              {myZoomHidden && <HiddenFromCoachTag />}
-            </View>
-            <Text style={s.menuSublabel}>
-              {zoomSaved ? zoomEmail : 'Connect your personal Zoom'}
-            </Text>
-          </View>
-          <Icon name={showZoom ? 'chevron-down' : 'chevron-right'} size={16} color="#4A5568" />
-        </Pressable>
-        )}
-
-        {showZoom && (!myZoomHidden || impersonating) && (
-          <View style={s.zoomSection}>
-            <Text style={s.zoomHint}>
-              This Zoom is used for Coach Guided sessions where you join live with your member.
-            </Text>
-            <TextInput
-              style={s.zoomInput}
-              placeholder="Zoom account email"
-              placeholderTextColor="#5A6478"
-              value={zoomEmail}
-              onChangeText={setZoomEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-            <TextInput
-              style={s.zoomInput}
-              placeholder='Label (e.g. "My Zoom")'
-              placeholderTextColor="#5A6478"
-              value={zoomLabel}
-              onChangeText={setZoomLabel}
-            />
-            {impersonating ? (
-              // manageZoomRoom runs as the signed-in user (the admin), so
-              // saving here would write to the admin's own Zoom record.
-              <Text style={s.zoomHint}>Available to the coach only</Text>
-            ) : (
-              <Pressable
-                style={[s.zoomSaveBtn, zoomLoading && { opacity: 0.5 }]}
-                onPress={handleSaveZoom}
-                disabled={zoomLoading || !zoomEmail.trim()}
-              >
-                <Text style={s.zoomSaveBtnText}>
-                  {zoomLoading ? 'Saving...' : zoomSaved ? 'Update Zoom' : 'Connect Zoom'}
-                </Text>
-              </Pressable>
-            )}
-          </View>
-        )}
 
         {/* Admin link — only visible to platformAdmin */}
         {(claims?.admin === true || claims?.role === 'platformAdmin') && (
@@ -602,40 +475,5 @@ const s = StyleSheet.create({
     ...(Platform.OS === 'web'
       ? ({ height: 'max(16px, env(safe-area-inset-bottom, 16px))' as any } as any)
       : {}),
-  },
-  zoomSection: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    backgroundColor: 'rgba(110,187,122,0.04)',
-    gap: 10,
-  },
-  zoomHint: {
-    fontSize: 12,
-    color: '#6A7585',
-    fontFamily: FB,
-    lineHeight: 17,
-  },
-  zoomInput: {
-    backgroundColor: '#1A2035',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: '#F0F4F8',
-    fontFamily: FB,
-    borderWidth: 1,
-    borderColor: '#2A3548',
-  },
-  zoomSaveBtn: {
-    backgroundColor: '#6EBB7A',
-    borderRadius: 8,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  zoomSaveBtnText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#0A0F1A',
-    fontFamily: FB,
   },
 });
