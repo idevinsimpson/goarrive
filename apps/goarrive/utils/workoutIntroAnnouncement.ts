@@ -66,20 +66,23 @@ export function buildDefaultIntroScript(
   workout: { name?: string; blocks?: any[] } | null | undefined,
   musclesByMovementId?: Record<string, string[] | undefined>,
 ): string {
-  const name = (workout?.name || '').trim() || 'your workout';
+  const rawName = (workout?.name || '').trim();
+  // Untitled workouts skip the name entirely — the member just hears
+  // "Welcome to your workout."
+  const isUntitled = !rawName || /^untitled(\s+workout)?$/i.test(rawName);
+  const greeting = isUntitled
+    ? 'Welcome to your workout.'
+    : `Welcome to your ${rawName}${/workout\s*$/i.test(rawName) ? '' : ' Workout'}.`;
   const workBlocks = (workout?.blocks || []).filter(
     (b: any) => b && !NON_WORK_BLOCK_TYPES.has(b.type) && (b.movements || []).length > 0,
   );
 
   const muscles: string[] = [];
-  const movementNames: string[] = [];
   let totalMovements = 0;
   for (const b of workBlocks) {
     for (const m of b.movements || []) {
       if (!m || m.hidden) continue;
       totalMovements += 1;
-      const mName = String(m.displayName || m.movementName || m.name || '').trim();
-      if (mName && !movementNames.includes(mName)) movementNames.push(mName);
       const mMuscles = (m.movementId && musclesByMovementId?.[m.movementId]) || [];
       for (const raw of mMuscles) {
         const muscle = String(raw || '').trim().toLowerCase();
@@ -88,7 +91,7 @@ export function buildDefaultIntroScript(
     }
   }
 
-  const parts: string[] = [`Welcome to ${name}.`];
+  const parts: string[] = [greeting];
   if (muscles.length > 0) {
     parts.push(`Today you'll be working your ${joinList(muscles.slice(0, 4))}.`);
   }
@@ -100,10 +103,6 @@ export function buildDefaultIntroScript(
     parts.push(
       `You've got ${totalMovements} ${totalMovements === 1 ? 'movement' : 'movements'}${blockPart}${roundsPart}.`,
     );
-    const featured = movementNames.slice(0, 3);
-    if (featured.length > 0) {
-      parts.push(`That includes ${joinList(featured)}${movementNames.length > 3 ? ', and more' : ''}.`);
-    }
   }
   parts.push(`Let's get started!`);
 

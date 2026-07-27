@@ -88,8 +88,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.listPublicCoaches = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = void 0;
-exports.pollMovementVariationJobs = exports.finalizeMovementVariation = exports.getMovementVariationStatus = exports.startMovementVariation = exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.submitGuestReflection = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.onCoachFeedbackStatusChanged = exports.onCoachFeedbackCreated = exports.sendWeeklyDigest = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.onMemberCreated = exports.onCoachCreated = exports.getWorkoutMusic = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = void 0;
+exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.sendMemberInvite = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.listPublicCoaches = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = void 0;
+exports.pollMovementVariationJobs = exports.dismissMovementVariation = exports.finalizeMovementVariation = exports.getMovementVariationStatus = exports.startMovementVariation = exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.submitGuestReflection = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.onCoachFeedbackStatusChanged = exports.onCoachFeedbackCreated = exports.sendWeeklyDigest = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.batchGenerateVoice = exports.onMemberCreated = exports.onCoachCreated = exports.getWorkoutMusic = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -1819,6 +1819,95 @@ exports.claimMemberAccount = (0, https_1.onCall)({ region: 'us-central1' }, asyn
     });
     console.log('[claimMemberAccount] Member claimed:', callerUid, memberId);
     return { success: true };
+});
+/**
+ * sendMemberInvite – Coach-initiated: ensure a Firebase Auth account exists
+ * for a coach-created member and return a password-reset / first-time-setup
+ * link they can share.
+ *
+ * Handles both cases:
+ *   - Member has no Auth user yet → creates one, sets member claims, links
+ *     the member doc, returns a reset link for the member to set a password.
+ *   - Member already has an Auth user → just returns a fresh reset link.
+ *
+ * Tenant isolation: caller must be the member's coach (or a platformAdmin).
+ *
+ * Input:  { memberId: string }
+ * Output: { success, resetLink, email, authCreated }
+ */
+exports.sendMemberInvite = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
+    var _a, _b, _c, _d, _e, _f;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const token = (_b = request.auth) === null || _b === void 0 ? void 0 : _b.token;
+    const callerRole = token === null || token === void 0 ? void 0 : token.role;
+    const callerCoachId = (_c = token === null || token === void 0 ? void 0 : token.coachId) !== null && _c !== void 0 ? _c : callerUid;
+    const isAdmin = (token === null || token === void 0 ? void 0 : token.admin) === true || callerRole === 'platformAdmin';
+    if (callerRole !== 'coach' && !isAdmin) {
+        throw new https_1.HttpsError('permission-denied', 'Only coaches can send member invites');
+    }
+    const { memberId } = request.data;
+    if (!memberId)
+        throw new https_1.HttpsError('invalid-argument', 'memberId is required');
+    const memberRef = db.collection('members').doc(memberId);
+    const memberSnap = await memberRef.get();
+    if (!memberSnap.exists) {
+        throw new https_1.HttpsError('not-found', 'Member record not found');
+    }
+    const member = memberSnap.data();
+    if (!isAdmin && member.coachId !== callerCoachId) {
+        throw new https_1.HttpsError('permission-denied', 'This member belongs to a different coach');
+    }
+    const email = String((_d = member.email) !== null && _d !== void 0 ? _d : '').trim().toLowerCase();
+    if (!email) {
+        throw new https_1.HttpsError('failed-precondition', 'This member has no email on file. Add one before sending an invite.');
+    }
+    // Ensure a Firebase Auth user exists for this email
+    let userRecord;
+    let authCreated = false;
+    try {
+        userRecord = await admin.auth().getUserByEmail(email);
+    }
+    catch (err) {
+        if (err.code !== 'auth/user-not-found') {
+            throw new https_1.HttpsError('internal', (_e = err.message) !== null && _e !== void 0 ? _e : 'Failed to look up user');
+        }
+        const cryptoMod = require('crypto');
+        const tempPassword = cryptoMod.randomBytes(24).toString('base64');
+        userRecord = await admin.auth().createUser({
+            email,
+            password: tempPassword,
+            displayName: member.displayName || member.name || '',
+        });
+        authCreated = true;
+    }
+    // Set member custom claims so role-gated UI and rules resolve correctly
+    await admin.auth().setCustomUserClaims(userRecord.uid, {
+        role: 'member',
+        coachId: member.coachId,
+        tenantId: (_f = member.tenantId) !== null && _f !== void 0 ? _f : member.coachId,
+        memberId: memberId,
+    });
+    // Link the auth account to the member doc if not already linked
+    if (!member.uid || member.uid !== userRecord.uid || member.hasAccount !== true) {
+        await memberRef.update({
+            uid: userRecord.uid,
+            hasAccount: true,
+            email,
+            updatedAt: firestore_2.FieldValue.serverTimestamp(),
+        });
+    }
+    const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
+    const actionCodeSettings = { url: appUrl, handleCodeInApp: false };
+    const resetLink = await admin.auth().generatePasswordResetLink(email, actionCodeSettings);
+    console.log(`[sendMemberInvite] ${authCreated ? 'Created' : 'Found'} auth for ${email} memberId=${memberId} by ${callerUid}`);
+    return {
+        success: true,
+        resetLink,
+        email,
+        authCreated,
+    };
 });
 // ═══════════════════════════════════════════════════════════════════════════════
 // SCHEDULING BACKBONE — Recurring Slots, Session Instances, Zoom Allocation
@@ -5817,7 +5906,7 @@ exports.googleCalendarCallback = (0, https_1.onRequest)({ secrets: [googleClient
             details: 'Google Calendar OAuth2 connected successfully',
         });
         // Redirect to the app's account page
-        res.redirect('https://goarrive.web.app/account?gcal=connected');
+        res.redirect('https://goarrive.fit/account?gcal=connected');
     }
     catch (err) {
         console.error('[googleCalendarCallback] Error:', err);
@@ -5866,11 +5955,19 @@ exports.syncToGoogleCalendar = (0, https_1.onCall)({ secrets: [googleClientId, g
             continue;
         }
         try {
-            const startDateTime = `${inst.scheduledDate}T${inst.scheduledStartTime || '09:00'}:00`;
+            const timeStr = inst.scheduledStartTime || '09:00';
+            const startDateTime = `${inst.scheduledDate}T${timeStr}:00`;
             const durationMin = inst.durationMinutes || 30;
-            const endDate = new Date(startDateTime);
-            endDate.setMinutes(endDate.getMinutes() + durationMin);
-            const endDateTime = endDate.toISOString();
+            // Compute end time using local integer arithmetic to avoid UTC timezone shift
+            const [startH, startM] = timeStr.split(':').map(Number);
+            const endTotalMin = startH * 60 + startM + durationMin;
+            const endH = Math.floor(endTotalMin / 60) % 24;
+            const endM = endTotalMin % 60;
+            // Handle sessions that run past midnight
+            const endDateStr = endTotalMin >= 24 * 60
+                ? new Date(new Date(inst.scheduledDate + 'T00:00:00Z').getTime() + 86400000).toISOString().slice(0, 10)
+                : inst.scheduledDate;
+            const endDateTime = `${endDateStr}T${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}:00`;
             const event = await calendar.events.insert({
                 calendarId: 'primary',
                 requestBody: {
@@ -6017,7 +6114,7 @@ exports.gcalConflictCallback = (0, https_1.onRequest)({ secrets: [googleClientId
             action: 'gcal_conflict_account_connected',
             details: `Conflict-check Google account connected: ${email}`,
         });
-        res.redirect(`https://goarrive.web.app/account?gcal=conflict_connected&email=${encodeURIComponent(email)}`);
+        res.redirect(`https://goarrive.fit/account?gcal=conflict_connected&email=${encodeURIComponent(email)}`);
     }
     catch (err) {
         console.error('[gcalConflictCallback] Error:', err);
@@ -8371,6 +8468,71 @@ exports.onMemberCreated = (0, firestore_1.onDocumentCreated)('members/{memberId}
         console.error(TAG, 'Error notifying coach:', err);
     }
 });
+// ─── batchGenerateVoice — Batch TTS for workout phrase preloading ────────────
+// Accepts an array of {text, cacheKey} entries. For each entry, checks if the
+// audio already exists in Firebase Storage. If not, generates it via OpenAI TTS.
+// Returns a map of cacheKey → download URL for all entries.
+// ─────────────────────────────────────────────────────────────────────────────
+exports.batchGenerateVoice = (0, https_1.onCall)({ region: 'us-central1', secrets: [openaiApiKey], timeoutSeconds: 120, maxInstances: 10 }, async (request) => {
+    var _a;
+    const { phrases } = request.data;
+    if (!phrases || !Array.isArray(phrases) || phrases.length === 0) {
+        throw new https_1.HttpsError('invalid-argument', 'phrases array is required');
+    }
+    if (phrases.length > 100) {
+        throw new https_1.HttpsError('invalid-argument', 'Maximum 100 phrases per batch');
+    }
+    const apiKey = (_a = openaiApiKey.value()) === null || _a === void 0 ? void 0 : _a.trim();
+    if (!apiKey) {
+        throw new https_1.HttpsError('internal', 'OpenAI API key not configured');
+    }
+    const bucket = admin.storage().bucket();
+    const results = {};
+    // Process in parallel with concurrency limit of 5
+    const CONCURRENCY = 5;
+    for (let i = 0; i < phrases.length; i += CONCURRENCY) {
+        const batch = phrases.slice(i, i + CONCURRENCY);
+        await Promise.all(batch.map(async ({ text, cacheKey }) => {
+            if (!text || !cacheKey)
+                return;
+            const storagePath = `voice_cache/phrases/${cacheKey}.mp3`;
+            const file = bucket.file(storagePath);
+            // Check if already cached
+            const [exists] = await file.exists();
+            if (exists) {
+                results[cacheKey] = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+                return;
+            }
+            // Generate via OpenAI TTS
+            try {
+                const response = await fetch('https://api.openai.com/v1/audio/speech', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        model: 'tts-1',
+                        voice: 'onyx',
+                        input: text,
+                    }),
+                });
+                if (!response.ok) {
+                    console.error(`[batchGenerateVoice] OpenAI error for "${cacheKey}":`, response.status);
+                    return;
+                }
+                const audioBuffer = Buffer.from(await response.arrayBuffer());
+                await file.save(audioBuffer, { contentType: 'audio/mpeg' });
+                await file.makePublic();
+                results[cacheKey] = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+            }
+            catch (err) {
+                console.error(`[batchGenerateVoice] Failed for "${cacheKey}":`, err);
+            }
+        }));
+    }
+    return { urls: results, generated: Object.keys(results).length, total: phrases.length };
+});
 // ─────────────────────────────────────────────
 // COACH APPLICATION EMAIL NOTIFICATION
 // Email notification is handled by the VM-based coach-app-watcher service
@@ -8522,14 +8684,18 @@ exports.createShareToken = (0, https_1.onCall)({ memory: '512MiB' }, async (requ
     if (!existingTokens.empty) {
         const existing = existingTokens.docs[0];
         const data = existing.data();
-        if (!data.ogImageUrl) {
-            // Backfill OG image for tokens minted before OG images existed.
+        if (!data.ogImageUrl || !data.ogImageUrl.includes(`-${ogImage_1.OG_IMAGE_VERSION}`)) {
+            // Backfill for tokens minted before OG images existed, or regenerate
+            // when the stored image predates the current layout.
             try {
                 await (0, ogImage_1.generateWorkoutOgImage)(existing.id, workoutData);
             }
             catch (err) {
                 console.warn('[createShareToken] OG image backfill failed:', err);
             }
+        }
+        if (typeof data.ogVideoUrl !== 'string' || !data.ogVideoUrl.includes(`-${ogVideo_1.OG_VIDEO_VERSION}`)) {
+            (0, ogVideo_1.generateWorkoutOgVideo)(existing.id, workoutData).catch((err) => console.warn('[createShareToken] OG video regeneration failed:', err));
         }
         return {
             shareId: existing.id,
@@ -9496,6 +9662,26 @@ exports.finalizeMovementVariation = (0, https_1.onCall)({ region: 'us-central1',
         instruction: job.instruction,
         jobId,
     };
+});
+exports.dismissMovementVariation = (0, https_1.onCall)({ region: 'us-central1', timeoutSeconds: 30, maxInstances: 10, invoker: 'public' }, async (request) => {
+    const { isAdmin, callerCoachIds } = requireCoachOrAdmin(request);
+    const { jobId } = request.data;
+    if (!jobId || typeof jobId !== 'string') {
+        throw new https_1.HttpsError('invalid-argument', 'jobId is required');
+    }
+    const jobRef = db.doc(`movement_variation_jobs/${jobId}`);
+    const jobSnap = await jobRef.get();
+    if (!jobSnap.exists) {
+        throw new https_1.HttpsError('not-found', 'Variation job not found');
+    }
+    const job = jobSnap.data();
+    assertVariationJobOwnership(job, isAdmin, callerCoachIds);
+    if (job.finalizedVideoUrl) {
+        throw new https_1.HttpsError('failed-precondition', 'Job is already finalized');
+    }
+    await jobRef.update({ status: 'dismissed', updatedAt: firestore_2.Timestamp.now() });
+    console.info('[dismissMovementVariation] Dismissed', { jobId, coachId: job.coachId });
+    return { jobId, status: 'dismissed' };
 });
 /**
  * Download a completed Runway output and persist it to Storage before the

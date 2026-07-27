@@ -52,7 +52,7 @@ import { useNavigation } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { ModuleGate } from '../../lib/useCoachModules';
 import { db } from '../../lib/firebase';
-import { TAB_BAR_STYLE } from '../../lib/tabBarStyle';
+import { TAB_BAR_STYLE, CONTENT_BOTTOM_CLEARANCE } from '../../lib/tabBarStyle';
 import { AppHeader } from '../../components/AppHeader';
 import { Icon } from '../../components/Icon';
 import MovementDetail from '../../components/MovementDetail';
@@ -2725,7 +2725,7 @@ function BuildScreenInner() {
             contentContainerStyle={{
               paddingHorizontal: GRID_PADDING,
               paddingTop: GRID_PADDING,
-              paddingBottom: 100,
+              paddingBottom: CONTENT_BOTTOM_CLEARANCE,
             }}
             columnWrapperStyle={viewMode === 'grid' ? {
               gap: GRID_GAP,

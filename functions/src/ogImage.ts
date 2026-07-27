@@ -1,13 +1,12 @@
 // ─── Workout share-link OG images ────────────────────────────────────────────
-// Composes a 1200x2000 portrait Open Graph preview image for a shared workout,
-// mirroring the WorkoutPlayer "ready" phase: logo top, movement thumbnails
-// (4:5 portrait tiles) in segment groups. All blocks between special blocks
-// (Water Break etc.) merge into ONE segment group whose label joins the block
-// kinds it contains ("Tabata + Superset"); rounds render as per-tile gold Nx
-// pills. Column count is chosen per workout to maximize tile size. No title
-// text — og:title carries the workout name in the unfurl. A Loom-style
-// semi-transparent play button is composited last, centered over everything.
-// Uploaded to Storage at og-images/{shareId}-v4.jpg and recorded on the
+// Composes a 1290x2796 (iPhone-screen) portrait Open Graph preview image for a
+// shared workout, mirroring the WorkoutPlayer "ready" phase: logo top, movement
+// thumbnails (4:5 portrait tiles) in segment groups. All blocks between special
+// blocks (Water Break etc.) merge into ONE segment group whose label joins the
+// block kinds it contains ("Tabata + Superset"); rounds render as per-tile gold
+// Nx pills. Column count is chosen per workout to maximize tile size. No title
+// text — og:title carries the workout name in the unfurl.
+// Uploaded to Storage at og-images/{shareId}-v5.jpg and recorded on the
 // shareTokens doc.
 //
 // Text is rendered via SVG layers composited by sharp (sharp has no native
@@ -27,17 +26,21 @@ const SPECIAL_BLOCK_TYPES = new Set([
   'Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment', 'Follow-Along Video',
 ]);
 
-const CANVAS_W = 1200;
-const CANVAS_H = 2000;
+// iPhone screen dimensions (1290x2796) so the image fills the screen edge to
+// edge when opened full-screen — no letterboxing.
+// Bump when the composer layout changes: versions the Storage object name so
+// crawler caches bust, and marks stored ogImageUrl values stale so existing
+// share tokens regenerate on next resolve.
+export const OG_IMAGE_VERSION = 'v5';
+
+const CANVAS_W = 1290;
+const CANVAS_H = 2796;
 const MARGIN_X = 60;
 const CONTENT_W = CANVAS_W - MARGIN_X * 2;
 const GRID_TOP = 300;
 const GRID_BOTTOM = CANVAS_H - 60;
 const TILE_GAP = 16;
 const GROUP_LABEL_H = 140;
-// Loom-style play button: diameter/opacity of the centered overlay.
-const PLAY_BTN_R = 160;
-const PLAY_BTN_OPACITY = 0.6;
 const MAX_TILES = 16;
 const MAX_GROUPS = 5;
 const MAX_TILE_H = 700;
@@ -196,7 +199,7 @@ function loadLogo(): Buffer | null {
 }
 
 /**
- * Composes the 1200x2000 portrait OG JPEG for a workout. Returns the buffer.
+ * Composes the 1290x2796 portrait OG JPEG for a workout. Returns the buffer.
  * Throws on composition failure — callers treat OG images as best-effort.
  */
 export async function composeWorkoutOgImage(workout: Record<string, any>): Promise<Buffer> {
@@ -306,16 +309,6 @@ export async function composeWorkoutOgImage(workout: Record<string, any>): Promi
     y += rowsPerGroup[gi] * (tileH + TILE_GAP);
   }
 
-  // ── Loom-style play button — pushed last so it sits on top of everything ─
-  const pcx = CANVAS_W / 2;
-  const pcy = CANVAS_H / 2;
-  svgParts.push(
-    `<g opacity="${PLAY_BTN_OPACITY}">` +
-      `<circle cx="${pcx}" cy="${pcy}" r="${PLAY_BTN_R}" fill="#FFFFFF"/>` +
-      `<path d="M ${pcx - 44} ${pcy - 84} L ${pcx + 100} ${pcy} L ${pcx - 44} ${pcy + 84} Z" fill="${COLORS.background}"/>` +
-    `</g>`
-  );
-
   const svgOverlay = Buffer.from(
     `<svg width="${CANVAS_W}" height="${CANVAS_H}" xmlns="http://www.w3.org/2000/svg">${svgParts.join('')}</svg>`
   );
@@ -340,9 +333,7 @@ export async function generateWorkoutOgImage(
 ): Promise<string | null> {
   const jpeg = await composeWorkoutOgImage(workout);
   const bucket = admin.storage().bucket();
-  // "-v4" versions the object name so crawler caches (Slack/iMessage) bust
-  // cleanly when the composer layout changes.
-  const storagePath = `og-images/${shareId}-v4.jpg`;
+  const storagePath = `og-images/${shareId}-${OG_IMAGE_VERSION}.jpg`;
   const file = bucket.file(storagePath);
   await file.save(jpeg, {
     metadata: { contentType: 'image/jpeg', cacheControl: 'public, max-age=86400' },

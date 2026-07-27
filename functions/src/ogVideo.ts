@@ -1,9 +1,9 @@
 // ─── Workout share-link OG video ─────────────────────────────────────────────
-// Generates a 5-second looping mp4 preview: uses the v4 static OG image as the
+// Generates a 5-second looping mp4 preview: uses the v5 static OG image as the
 // background (logo, group labels, badges all preserved) and overlays animated
 // movement clips at the exact tile positions. The result looks like the static
 // preview but with animated tiles where the still thumbnails were.
-// Uploaded to og-images/{shareId}-v1.mp4, URL written to shareTokens/{shareId}.
+// Uploaded to og-images/{shareId}-v2.mp4, URL written to shareTokens/{shareId}.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import * as admin from 'firebase-admin';
@@ -15,16 +15,18 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { collectOgGroups } from './ogImage';
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const sharp = require('sharp');
 
 const execFileAsync = promisify(execFile);
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const ffmpegBin: string = require('ffmpeg-static');
 
+// Bump alongside layout changes — stored ogVideoUrl values from older versions
+// are treated as stale and suppressed/regenerated.
+export const OG_VIDEO_VERSION = 'v2';
+
 // Canvas constants must match ogImage.ts exactly.
-const CANVAS_W = 1200;
-const CANVAS_H = 2000;
+const CANVAS_W = 1290;
+const CANVAS_H = 2796;
 const MARGIN_X = 60;
 const CONTENT_W = CANVAS_W - MARGIN_X * 2;
 const GRID_TOP = 300;
@@ -35,8 +37,6 @@ const TILE_H_PER_W = 1.25;
 const MAX_TILE_H = 700;
 const CLIP_DURATION = 5;
 const MAX_TILES = 16;
-const PLAY_BTN_R = 160;
-const PLAY_BTN_OPACITY = 0.45; // slightly more transparent than the static image (was 0.6)
 
 const SPECIAL_BLOCK_TYPES = new Set([
   'Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment', 'Follow-Along Video',
@@ -151,11 +151,11 @@ export async function generateWorkoutOgVideo(
   const tileMvs = rawMovements.slice(0, MAX_TILES);
   if (tileMvs.length === 0) return null;
 
-  // Get the layout — tile positions match the v4 static image exactly.
+  // Get the layout — tile positions match the v5 static image exactly.
   const layout = computeLayout(groups);
   const positions = layout.tilePositions.slice(0, tileMvs.length);
 
-  // Fetch the v4 static image to use as background.
+  // Fetch the v5 static image to use as background.
   const db = admin.firestore();
   const tokenSnap = await db.collection('shareTokens').doc(shareId).get();
   const bgUrl: string | null = tokenSnap.exists ? tokenSnap.data()?.ogImageUrl || null : null;
@@ -175,18 +175,6 @@ export async function generateWorkoutOgVideo(
       .slice(0, positions.length);
 
     if (tiles.length === 0) return null;
-
-    // Generate play button PNG (transparent RGBA, centered overlay)
-    const pbDiam = PLAY_BTN_R * 2 + 4;
-    const pcx = PLAY_BTN_R + 2;
-    const pcy = PLAY_BTN_R + 2;
-    const playSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${pbDiam}" height="${pbDiam}">` +
-      `<g opacity="${PLAY_BTN_OPACITY}">` +
-        `<circle cx="${pcx}" cy="${pcy}" r="${PLAY_BTN_R}" fill="#FFFFFF"/>` +
-        `<path d="M ${pcx - 44} ${pcy - 84} L ${pcx + 100} ${pcy} L ${pcx - 44} ${pcy + 84} Z" fill="#0F1117"/>` +
-      `</g></svg>`;
-    const playBtnPath = path.join(tmpDir, 'playbtn.png');
-    await sharp(Buffer.from(playSvg)).png().toFile(playBtnPath);
 
     // Build ffmpeg args
     const args: string[] = ['-y'];
@@ -210,9 +198,6 @@ export async function generateWorkoutOgVideo(
       }
     }
 
-    // Input N+1: play button PNG (static, looped)
-    args.push('-loop', '1', '-framerate', '24', '-t', String(CLIP_DURATION), '-i', playBtnPath);
-
     // Build filter_complex:
     // - Scale background to CANVAS_W x CANVAS_H
     // - Convert each tile to yuv420p and scale to exact tile dims
@@ -234,12 +219,7 @@ export async function generateWorkoutOgVideo(
       filterParts.push(`${prevLabel}${scaleLabel}overlay=${pos.x}:${pos.y}:shortest=1[v${i}]`);
     }
 
-    // Play button: keep RGBA so alpha blends correctly over tile composites
-    const pbInput = tiles.length + 1;
-    const preFinalLabel = tiles.length > 0 ? `[v${tiles.length - 1}]` : '[bg0]';
-    filterParts.push(`[${pbInput}:v]format=rgba[pb]`);
-    filterParts.push(`${preFinalLabel}[pb]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2:format=auto[vfinal]`);
-    const finalLabel = '[vfinal]';
+    const finalLabel = tiles.length > 0 ? `[v${tiles.length - 1}]` : '[bg0]';
 
     const outPath = path.join(tmpDir, 'out.mp4');
     args.push(
@@ -257,7 +237,7 @@ export async function generateWorkoutOgVideo(
 
     // Upload to Storage
     const bucket = admin.storage().bucket();
-    const storageDest = `og-images/${shareId}-v1.mp4`;
+    const storageDest = `og-images/${shareId}-${OG_VIDEO_VERSION}.mp4`;
     await bucket.upload(outPath, {
       destination: storageDest,
       metadata: { contentType: 'video/mp4', cacheControl: 'public, max-age=31536000' },
