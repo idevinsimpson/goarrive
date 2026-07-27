@@ -225,6 +225,21 @@ export interface SessionInstance {
   // Prompt 2: Commit to Save
   commitToSaveEnabled?: boolean;      // Whether CTS applies to this session
 
+  // Playbook scheduling (Phase 3a) — playbook bookings reuse this state
+  // machine; instances born from bookPlaybookSession carry these instead of
+  // recurringSlotId. Scheduling surfaces show playbookTitle ONLY (never
+  // workout names or sequence details).
+  playbookId?: string;
+  playbookTitle?: string;             // Denormalized playbook name for display
+  sessionKind?: PlaybookSessionKind;
+  recordingEnabled?: boolean;         // false = Zoom auto-recording off
+  pinnedWorkoutId?: string;           // Coach-pinned workout for this occurrence (else auto next-in-sequence)
+  startUtc?: Timestamp;               // UTC instant (DST-safe overlap math)
+  endUtc?: Timestamp;
+  reservationId?: string;             // member_time_reservations doc backing this booking
+  guestEmail?: string | null;         // Guest-by-email booking hook (Phase B)
+  location?: string | null;           // Member-picked location option (Phase B.1)
+
   // Allocation fields
   zoomRoomId?: string;              // Assigned Zoom room doc ID
   zoomRoomLabel?: string;           // Denormalized room label
@@ -402,6 +417,22 @@ export function addMinutesToTime(time24: string, minutes: number): string {
   const newH = Math.floor(totalMinutes / 60) % 24;
   const newM = totalMinutes % 60;
   return `${newH.toString().padStart(2, '0')}:${newM.toString().padStart(2, '0')}`;
+}
+
+// ─── Helper: Today in a timezone ─────────────────────────────────────────────
+
+// "Today" as YYYY-MM-DD in the given IANA timezone. Never use
+// toISOString().split('T')[0] for calendar dates — that is UTC and shifts the
+// day for anyone west of Greenwich in the evening (or east in the morning).
+export function todayInTz(tz: string): string {
+  return dateStrInTz(new Date(), tz);
+}
+
+// A Date's calendar day as YYYY-MM-DD in the given IANA timezone.
+export function dateStrInTz(date: Date, tz: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(date);
 }
 
 // ─── Helper: Format date for display ─────────────────────────────────────────
@@ -626,3 +657,51 @@ export const SESSION_EVENT_SOURCE_LABELS: Record<string, string> = {
   coach_action: 'Coach Action',
   member_action: 'Member Action',
 };
+
+// ─── Playbook Scheduling (Phase 3a) ──────────────────────────────────────────
+// Session kinds: coach_guided = live in the coach's own Zoom room;
+// coach_review = member trains in a hosted room and the coach reviews the
+// recording afterward. Member/coach copy never mentions room pools.
+
+export type PlaybookSessionKind = 'coach_guided' | 'coach_review';
+
+export const PLAYBOOK_SESSION_KIND_LABELS: Record<PlaybookSessionKind, string> = {
+  coach_guided: 'Live with Coach',
+  // Backend kind stays coach_review; label renamed per Phase B.2 UX pass.
+  coach_review: 'Self-Guided',
+};
+
+export type PlaybookRepeatFrequency = 'weekly' | 'every_2_weeks' | 'none';
+
+/** Scheduling fields persisted on the playbook doc by bookPlaybookSession. */
+export interface PlaybookSchedulingSettings {
+  schedulingEnabled?: boolean;
+  sessionKind?: PlaybookSessionKind;
+  recordingEnabled?: boolean;           // per-playbook toggle; false = no session recording
+  sessionDurationMinutes?: number;
+  weeklySessionCap?: number | null;     // per-playbook; overlap guard is global
+  timezone?: string;                    // member's IANA timezone (cap weeks start Monday here)
+  scheduleDaysOfWeek?: number[];        // 0-6
+  scheduleStartTime?: string;           // HH:mm
+  repeatFrequency?: PlaybookRepeatFrequency;
+  repeatHorizonWeeks?: number;          // 2-8, default 4
+  nextWorkoutIndex?: number;            // auto next-in-sequence pointer (advances on signed-in member completion)
+  memberIds?: string[];                 // group-proofed membership list (single-member UI writes [assignedMemberId])
+}
+
+/**
+ * member_time_reservations doc — the member-level double-booking guard.
+ * Deterministic ID `${memberKey}_${startUtcMillis}`; written only by Cloud
+ * Functions inside the booking transaction.
+ */
+export interface MemberTimeReservation {
+  memberKey: string;                    // memberId, or `guest:<sha256(email)>` for guest bookings (Phase B)
+  memberId: string | null;
+  guestEmail: string | null;
+  coachId: string;
+  playbookId: string | null;
+  sessionInstanceId: string;
+  startUtc: Timestamp;
+  endUtc: Timestamp;
+  createdAt: Timestamp;
+}

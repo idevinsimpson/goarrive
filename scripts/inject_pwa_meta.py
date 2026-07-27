@@ -306,8 +306,49 @@ BODY_INJECT = """
         clearTimeout(appLoadTimeout);
       });
       
-      // Service Worker registration - DISABLED for Safari compatibility
-      console.log('[SW] Service Worker registration disabled for Safari compatibility');
+    </script>
+"""
+
+# ── SW registration + auto-reload (injected into EVERY exported .html page,
+#    since Expo static export emits one HTML file per route) ─────────────────
+SW_INJECT = """
+    <script>
+      // Service Worker registration + auto-reload on new deploy.
+      // An already-open SPA tab keeps its in-memory JS bundle forever (iOS
+      // Safari resume/bfcache makes this constant), so when a new SW takes
+      // control after a deploy we do a one-time reload to pick up new code.
+      if ('serviceWorker' in navigator) {
+        var swHadController = !!navigator.serviceWorker.controller;
+        var swReloading = false;
+        navigator.serviceWorker.addEventListener('controllerchange', function() {
+          // Only reload if a previous controller existed (i.e. this is an
+          // update taking over, not the very first registration claiming).
+          if (swHadController && !swReloading) {
+            swReloading = true;
+            console.log('[SW] New service worker took control — reloading for fresh bundle');
+            window.location.reload();
+          }
+          swHadController = true;
+        });
+
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/service-worker.js').then(function(reg) {
+            console.log('[SW] Registered', reg.scope);
+            // When the tab wakes from iOS background/bfcache, immediately
+            // check for a newer SW so a post-deploy resume triggers the
+            // controllerchange reload above.
+            var swCheckUpdate = function() { reg.update().catch(function() {}); };
+            document.addEventListener('visibilitychange', function() {
+              if (document.visibilityState === 'visible') swCheckUpdate();
+            });
+            window.addEventListener('pageshow', function(e) {
+              if (e.persisted) swCheckUpdate();
+            });
+          }).catch(function(err) {
+            console.warn('[SW] Registration failed', err);
+          });
+        });
+      }
     </script>
 """
 
@@ -332,10 +373,30 @@ def main():
     html = html.replace('</head>', HEAD_INJECT + '\n  </head>', 1)
 
     # Inject before </body>
-    html = html.replace('</body>', BODY_INJECT + '\n  </body>', 1)
+    html = html.replace('</body>', BODY_INJECT + SW_INJECT + '\n  </body>', 1)
 
     with open(INDEX, 'w') as f:
         f.write(html)
+
+    # Expo static export emits one HTML file per route — inject the SW
+    # registration script into every page so any entry route gets auto-reload.
+    patched = 0
+    for root, _dirs, files in os.walk(DIST_DIR):
+        for name in files:
+            if not name.endswith('.html'):
+                continue
+            path = os.path.join(root, name)
+            if os.path.abspath(path) == os.path.abspath(INDEX):
+                continue
+            with open(path, 'r') as f:
+                page = f.read()
+            if 'controllerchange' in page:
+                continue
+            page = page.replace('</body>', SW_INJECT + '\n  </body>', 1)
+            with open(path, 'w') as f:
+                f.write(page)
+            patched += 1
+    print(f'[inject_pwa_meta] SW auto-reload injected into {patched} route pages')
 
     # Write manifest.json
     manifest_path = os.path.join(DIST_DIR, 'manifest.json')

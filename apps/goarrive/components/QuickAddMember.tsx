@@ -130,7 +130,7 @@ const initialFormData: FormData = {
 interface QuickAddMemberProps {
   visible: boolean;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (memberId?: string) => void;
   coachId: string;
   tenantId: string;
 }
@@ -251,7 +251,7 @@ export default function QuickAddMember({
       setFormData({ ...initialFormData });
       setStep(0);
       setErrors({});
-      onSaved();
+      onSaved(memberRef.id);
       onClose();
     } catch (error: any) {
       setErrors({ submit: 'Something went wrong. Please try again.' });

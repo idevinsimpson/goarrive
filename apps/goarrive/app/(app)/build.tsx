@@ -46,6 +46,7 @@ import {
   arrayUnion,
   arrayRemove,
   getDocs,
+  getDoc,
 } from 'firebase/firestore';
 import { useNavigation } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
@@ -63,8 +64,11 @@ import WorkoutFolderPage from '../../components/WorkoutFolderPage';
 import BulkMovementUpload from '../../components/BulkMovementUpload';
 import FollowAlongVideoUploadSheet, { FollowAlongVideoPayload } from '../../components/FollowAlongVideoUploadSheet';
 import FollowAlongVideoDetail from '../../components/FollowAlongVideoDetail';
+import PlaybookSchedulePanel from '../../components/PlaybookSchedulePanel';
+import QuickAddMember from '../../components/QuickAddMember';
 import { usePreviewEngine } from '../../hooks/usePreviewEngine';
 import { AnimatedPreviewTile, MosaicPreviewTile } from '../../components/AnimatedPreviewTile';
+import { WorkoutMosaic, MosaicPlaceholderCell, WORKOUT_CARD_BG } from '../../components/WorkoutMosaic';
 import {
   EQUIPMENT_FILTER_OPTIONS,
   MUSCLE_GROUP_FILTER_OPTIONS,
@@ -274,123 +278,6 @@ function useGridLayout() {
   return { cols, cardWidth, cardHeight };
 }
 
-// ── Workout Mosaic Thumbnail ─────────────────────────────────────────────
-/** Shows a mini-library grid of movement GIF thumbnails inside a workout card.
- *  Designed to look like a small library you can glance at from the outside.
- *  Tight borders, distinct background, top-to-bottom left-to-right layout. */
-const WORKOUT_CARD_BG = '#1A2332'; // Slightly lighter than page bg so cards stand out
-
-function MosaicPlaceholderCell({ width, height, borderRadius, name }: { width: number; height: number; borderRadius: number; name?: string }) {
-  // Friction-killer for coaches: when a movement has no video yet, show its
-  // NAME big and bold in the mosaic cell instead of a generic logo, so the
-  // workout's contents are readable straight from the Build page.
-  const fontSize = Math.max(9, Math.min(22, Math.round(Math.min(width, height) * 0.18)));
-  const lineHeight = Math.round(fontSize * 1.15);
-  return (
-    <View style={{ width, height, borderRadius, overflow: 'hidden', backgroundColor: '#0E1117', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4, paddingVertical: 3 }}>
-      <Text
-        numberOfLines={4}
-        adjustsFontSizeToFit
-        minimumFontScale={0.6}
-        style={{
-          color: '#F0F4F8',
-          fontSize,
-          lineHeight,
-          fontWeight: '700',
-          textAlign: 'center',
-          fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Bold',
-        }}
-      >
-        {name || 'Movement'}
-      </Text>
-    </View>
-  );
-}
-
-function WorkoutMosaic({ thumbs, width, height, isAnimating = false, scrollIdle = false }: { thumbs: (string | { name: string })[]; width: number; height: number; isAnimating?: boolean; scrollIdle?: boolean }) {
-  const gap = 2; // tight gap between mini GIFs
-  const inset = 6; // small padding inside the card
-  const innerW = width - inset * 2;
-  const innerH = height - inset * 2 - 28; // leave room for name overlay at bottom
-
-  if (!thumbs || thumbs.length === 0) {
-    // Empty workout — still show the distinct background with subtle icon
-    return (
-      <View style={{ width, height, backgroundColor: WORKOUT_CARD_BG, justifyContent: 'center', alignItems: 'center' }}>
-        <Icon name="workouts" size={28} color="#2D3B4E" />
-      </View>
-    );
-  }
-
-  // Single movement — show it centered and larger (like a hero thumbnail)
-  if (thumbs.length === 1) {
-    const singleW = innerW * 0.6;
-    const singleH = singleW * (5 / 4); // 4:5 aspect ratio
-    const clampedH = Math.min(singleH, innerH * 0.75);
-    const clampedW = clampedH * (4 / 5);
-    return (
-      <View style={{ width, height, backgroundColor: WORKOUT_CARD_BG, justifyContent: 'center', alignItems: 'center' }}>
-        {typeof thumbs[0] === 'string' ? (
-          <MosaicPreviewTile
-            uri={thumbs[0]}
-            width={clampedW}
-            height={clampedH}
-            parentIsAnimating={isAnimating}
-            scrollIdle={scrollIdle}
-            index={0}
-            borderRadius={6}
-          />
-        ) : (
-          <MosaicPlaceholderCell width={clampedW} height={clampedH} borderRadius={6} name={thumbs[0]?.name} />
-        )}
-      </View>
-    );
-  }
-
-  // Multiple movements — dynamic grid: 2x2 → 3x3 → 4x4 (max 16)
-  const maxShow = Math.min(thumbs.length, 16);
-  const cols = maxShow <= 4 ? 2 : maxShow <= 9 ? 3 : 4;
-  const rows = Math.ceil(maxShow / cols);
-  const cellW = (innerW - gap * (cols - 1)) / cols;
-  // 4:5 aspect ratio for each thumbnail (height = width * 5/4)
-  const cellH = cellW * (5 / 4);
-  // Clamp cell height so rows don't overflow the available inner height
-  const maxCellH = (innerH - gap * (rows - 1)) / rows;
-  const finalCellH = Math.min(cellH, maxCellH);
-  const finalCellW = Math.min(cellW, finalCellH * (4 / 5)); // maintain 4:5 if clamped
-
-  return (
-    <View style={{ width, height, backgroundColor: WORKOUT_CARD_BG }}>
-      <View style={{
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap,
-        padding: inset,
-        paddingTop: inset + 2,
-        width,
-        overflow: 'hidden',
-      }}>
-        {thumbs.slice(0, maxShow).map((slot, i) => (
-          typeof slot === 'string' ? (
-            <MosaicPreviewTile
-              key={i}
-              uri={slot}
-              width={finalCellW}
-              height={finalCellH}
-              parentIsAnimating={isAnimating}
-              scrollIdle={scrollIdle}
-              index={i}
-              borderRadius={3}
-            />
-          ) : (
-            <MosaicPlaceholderCell key={i} width={finalCellW} height={finalCellH} borderRadius={3} name={slot?.name} />
-          )
-        ))}
-      </View>
-    </View>
-  );
-}
-
 // ── Folder Mosaic ────────────────────────────────────────────────────────
 /** Folder card preview — a miniature of the folder's contents. Each cell is a
  *  tiny workout card rendered with STILL photos (posterUrl, never GIFs), so
@@ -571,10 +458,15 @@ function BuildScreenInner() {
   // and order come from the playbook's workoutIds array (never parentId, since
   // one workout can live in many playbooks and order matters for rotation).
   const [currentPlaybook, setCurrentPlaybook] = useState<{ id: string; name: string } | null>(null);
+  const [showPlaybookSchedule, setShowPlaybookSchedule] = useState(false);
   const [editingPlaybookTitle, setEditingPlaybookTitle] = useState(false);
   const [playbookTitleDraft, setPlaybookTitleDraft] = useState('');
   const currentPlaybookRef = useRef<{ id: string; name: string } | null>(null);
   currentPlaybookRef.current = currentPlaybook;
+  // A1: plus-button chooser sheets inside the playbook drill-in
+  const [pbAddWorkoutOpen, setPbAddWorkoutOpen] = useState(false);
+  const [pbAddMemberOpen, setPbAddMemberOpen] = useState(false);
+  const [pbQuickAddOpen, setPbQuickAddOpen] = useState(false);
 
   // Modals
   const [selectedMovement, setSelectedMovement] = useState<any | null>(null);
@@ -954,6 +846,7 @@ function BuildScreenInner() {
 
   const exitPlaybook = useCallback(() => {
     setCurrentPlaybook(null);
+    setShowPlaybookSchedule(false);
     setEditingPlaybookTitle(false);
   }, []);
 
@@ -967,6 +860,14 @@ function BuildScreenInner() {
       setCurrentPlaybook(prev => (prev ? { ...prev, name } : prev));
     } catch (e) { console.error('[Build] Playbook rename error:', e); }
   }, [playbookTitleDraft]);
+
+  // The playbook drill-in is a focused workspace — the app tab bar stays
+  // hidden for the whole visit, not just during drags.
+  useEffect(() => {
+    navigation.setOptions({
+      tabBarStyle: currentPlaybook ? { ...TAB_BAR_STYLE, display: 'none' } : TAB_BAR_STYLE,
+    });
+  }, [currentPlaybook, navigation]);
 
   // Drop zone on the folder header: dragging an asset onto "Build / …" moves
   // it up one level — to the parent folder, or to the Build root at depth 1.
@@ -1090,7 +991,7 @@ function BuildScreenInner() {
   // Load the coach's members whenever the create modal opens, for the
   // assignment picker. One-shot fetch — the list is small and modal-scoped.
   useEffect(() => {
-    if (!showPlaybookCreate || !coachId) return;
+    if ((!showPlaybookCreate && !currentPlaybook && !pbAddMemberOpen) || !coachId) return;
     getDocs(query(collection(db, 'members'), where('coachId', '==', coachId)))
       .then(snap => {
         setPbMembers(
@@ -1108,7 +1009,59 @@ function BuildScreenInner() {
         );
       })
       .catch(e => console.error('[Build] Load members error:', e));
-  }, [showPlaybookCreate, coachId]);
+  }, [showPlaybookCreate, currentPlaybook, pbAddMemberOpen, coachId]);
+
+  // A1/A2: playbook membership helpers — memberIds is the source of truth,
+  // assignedMemberId/Name stay in sync for legacy single-member reads.
+  const addMemberToPlaybook = useCallback(async (memberId: string) => {
+    const pb = currentPlaybookRef.current;
+    if (!pb || !memberId) return;
+    try {
+      const pbDoc = itemsRef.current.find(i => i.type === 'Playbooks' && i.id === pb.id);
+      const existing: string[] = Array.isArray(pbDoc?.memberIds) && pbDoc!.memberIds.length
+        ? pbDoc!.memberIds
+        : (pbDoc?.assignedMemberId ? [pbDoc.assignedMemberId] : []);
+      if (existing.includes(memberId)) return;
+      const next = [...existing, memberId];
+      const patch: any = { memberIds: next, updatedAt: serverTimestamp() };
+      if (existing.length === 0) {
+        let name = pbMembers.find(m => m.id === memberId)?.name || null;
+        if (!name) {
+          const snap = await getDoc(doc(db, 'members', memberId));
+          name = (snap.data()?.name as string) || (snap.data()?.displayName as string) || null;
+        }
+        patch.assignedMemberId = memberId;
+        patch.assignedMemberName = name;
+      }
+      await updateDoc(doc(db, 'playbooks', pb.id), patch);
+    } catch (e) { console.error('[Build] Add member to playbook error:', e); }
+  }, [pbMembers]);
+
+  const addWorkoutToPlaybook = useCallback(async (workoutId: string) => {
+    const pb = currentPlaybookRef.current;
+    if (!pb || !workoutId) return;
+    try {
+      await updateDoc(doc(db, 'playbooks', pb.id), {
+        workoutIds: arrayUnion(workoutId),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) { console.error('[Build] Add workout to playbook error:', e); }
+  }, []);
+
+  // A2: members at-a-glance on the playbook drill-in header
+  const playbookMemberChips = useMemo(() => {
+    if (!currentPlaybook) return [] as { id: string; name: string }[];
+    const pbDoc = items.find(i => i.type === 'Playbooks' && i.id === currentPlaybook.id);
+    const ids: string[] = Array.isArray(pbDoc?.memberIds) && pbDoc!.memberIds.length
+      ? pbDoc!.memberIds
+      : (pbDoc?.assignedMemberId ? [pbDoc.assignedMemberId] : []);
+    return ids.map(id => ({
+      id,
+      name: pbMembers.find(m => m.id === id)?.name
+        || (id === pbDoc?.assignedMemberId ? pbDoc?.assignedMemberName : null)
+        || 'Member',
+    }));
+  }, [currentPlaybook, items, pbMembers]);
 
   const createPlaybook = useCallback(async () => {
     const name = newPlaybookName.trim();
@@ -1955,7 +1908,10 @@ function BuildScreenInner() {
     if (_dragItemRef.current) suppressPressUntilRef.current = Date.now() + 500;
     stopAutoScroll();
     unlockPageScroll();
-    navigation.setOptions({ tabBarStyle: TAB_BAR_STYLE });
+    // Inside a playbook the tab bar stays hidden after the drag too (A3).
+    if (!currentPlaybookRef.current) {
+      navigation.setOptions({ tabBarStyle: TAB_BAR_STYLE });
+    }
     if (trayTimerRef.current) {
       clearTimeout(trayTimerRef.current);
       trayTimerRef.current = null;
@@ -2179,13 +2135,41 @@ function BuildScreenInner() {
               </Text>
             </View>
           )}
-          {/* Drop target highlight ring — only for tiles that can accept the
-              currently dragged item (see isDropTarget). */}
-          {hoveredId === item.id && dragItem && dragItem.id !== item.id && isDropTarget(item, dragItem) && (
-            <View
-              style={[StyleSheet.absoluteFill, { borderWidth: 2, borderColor: '#F5A623', borderRadius: 10 }]}
-              pointerEvents="none"
-            />
+          {/* Drop indicator. Inside a playbook, reordering shows a directional
+              insertion LINE at the edge where the dragged workout will land:
+              dragging from a later position inserts BEFORE the target (left
+              edge); from an earlier position inserts AFTER it (right edge) —
+              mirrors executeDrop's splice logic. Elsewhere, the highlight
+              ring marks tiles that accept the dragged item. */}
+          {hoveredId === item.id && dragItem && dragItem.id !== item.id && (
+            currentPlaybook ? (
+              dragItem.type === 'Workouts' && item.type === 'Workouts' && (() => {
+                const fromIdx = filteredItems.findIndex(i => i.id === dragItem.id);
+                const toIdx = filteredItems.findIndex(i => i.id === item.id);
+                const insertBefore = fromIdx > toIdx;
+                return (
+                  <View
+                    pointerEvents="none"
+                    style={{
+                      position: 'absolute',
+                      top: 6,
+                      bottom: 6,
+                      width: 3,
+                      borderRadius: 2,
+                      backgroundColor: '#F5A623',
+                      ...(insertBefore ? { left: 0 } : { right: 0 }),
+                    }}
+                  />
+                );
+              })()
+            ) : (
+              isDropTarget(item, dragItem) && (
+                <View
+                  style={[StyleSheet.absoluteFill, { borderWidth: 2, borderColor: '#F5A623', borderRadius: 10 }]}
+                  pointerEvents="none"
+                />
+              )
+            )
           )}
         </>
       );
@@ -2463,6 +2447,23 @@ function BuildScreenInner() {
               </Pressable>
             )}
           </View>
+          {/* A2: member avatar chips — who's on this playbook, at a glance */}
+          {currentPlaybook && playbookMemberChips.length > 0 && (
+            <View style={s.memberChipRow}>
+              {playbookMemberChips.slice(0, 4).map((m) => (
+                <View key={m.id} style={s.memberChip}>
+                  <Text style={s.memberChipText}>
+                    {m.name.split(' ').map((p: string) => p[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()}
+                  </Text>
+                </View>
+              ))}
+              {playbookMemberChips.length > 4 && (
+                <View style={s.memberChip}>
+                  <Text style={s.memberChipText}>+{playbookMemberChips.length - 4}</Text>
+                </View>
+              )}
+            </View>
+          )}
         </View>
       )}
 
@@ -2492,6 +2493,14 @@ function BuildScreenInner() {
           </>
         )}
 
+        {currentPlaybook && (
+          <Pressable
+            style={[s.toolBtn, showPlaybookSchedule && s.toolBtnActive]}
+            onPress={() => setShowPlaybookSchedule(true)}
+          >
+            <Icon name="calendar" size={20} color={showPlaybookSchedule ? '#F5A623' : '#F0F4F8'} />
+          </Pressable>
+        )}
         <Pressable
           style={s.plusBtn}
           onPress={() => setIsPlusOpen(true)}
@@ -2499,6 +2508,101 @@ function BuildScreenInner() {
           <Icon name="plus" size={24} color="#0E1117" />
         </Pressable>
       </View>
+
+      {/* Playbook scheduling — dead-simple panel over the drill-in */}
+      {currentPlaybook && (
+        <PlaybookSchedulePanel
+          playbookId={currentPlaybook.id}
+          visible={showPlaybookSchedule}
+          onClose={() => setShowPlaybookSchedule(false)}
+        />
+      )}
+
+      {/* A1: add-workout sheet — mosaic grid of every coach workout not
+          already in this playbook; tap to add, sheet stays open for more. */}
+      {currentPlaybook && (
+        <Modal transparent visible={pbAddWorkoutOpen} animationType="slide" onRequestClose={() => setPbAddWorkoutOpen(false)}>
+          <Pressable style={s.pbSheetBackdrop} onPress={() => setPbAddWorkoutOpen(false)}>
+            <Pressable style={s.pbSheet} onPress={(e) => e.stopPropagation()}>
+              <Text style={s.pbSheetTitle}>Add Workout</Text>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={s.pbSheetGrid}>
+                  {(() => {
+                    const pbDoc = items.find(i => i.type === 'Playbooks' && i.id === currentPlaybook.id);
+                    const inIds: string[] = Array.isArray(pbDoc?.workoutIds) ? pbDoc!.workoutIds : [];
+                    const avail = items
+                      .filter(i => i.type === 'Workouts' && !i.isArchived && !inIds.includes(i.id))
+                      .sort((a, b) => (b.updatedAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? 0));
+                    if (avail.length === 0) {
+                      return <Text style={s.pbSheetEmpty}>All your workouts are already in this playbook.</Text>;
+                    }
+                    return avail.map(w => {
+                      const thumbs = (Array.isArray(w.coverThumbs) && w.coverThumbs.length
+                        ? w.coverThumbs
+                        : [{ name: w.name }]) as (string | { name: string })[];
+                      return (
+                        <Pressable key={w.id} style={s.pbSheetTile} onPress={() => addWorkoutToPlaybook(w.id)}>
+                          <View style={s.pbSheetTileMosaic}>
+                            <WorkoutMosaic thumbs={thumbs} width={104} height={104} />
+                          </View>
+                          <Text style={s.pbSheetTileName} numberOfLines={1}>{w.name}</Text>
+                        </Pressable>
+                      );
+                    });
+                  })()}
+                </View>
+              </ScrollView>
+              <Pressable style={s.pbSheetDone} onPress={() => setPbAddWorkoutOpen(false)}>
+                <Text style={s.pbSheetDoneText}>Done</Text>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* A1: add-member sheet — coach's member list, tap to add */}
+      {currentPlaybook && (
+        <Modal transparent visible={pbAddMemberOpen} animationType="slide" onRequestClose={() => setPbAddMemberOpen(false)}>
+          <Pressable style={s.pbSheetBackdrop} onPress={() => setPbAddMemberOpen(false)}>
+            <Pressable style={s.pbSheet} onPress={(e) => e.stopPropagation()}>
+              <Text style={s.pbSheetTitle}>Add Member</Text>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {(() => {
+                  const onIds = playbookMemberChips.map(c => c.id);
+                  const avail = pbMembers.filter(m => !onIds.includes(m.id));
+                  if (avail.length === 0) {
+                    return <Text style={s.pbSheetEmpty}>All your members are already on this playbook.</Text>;
+                  }
+                  return avail.map(m => (
+                    <Pressable
+                      key={m.id}
+                      style={s.pbSheetMemberRow}
+                      onPress={() => { addMemberToPlaybook(m.id); setPbAddMemberOpen(false); }}
+                    >
+                      <Text style={s.pbSheetMemberName} numberOfLines={1}>{m.name}</Text>
+                      <Text style={s.pbSheetMemberAdd}>Add</Text>
+                    </Pressable>
+                  ));
+                })()}
+              </ScrollView>
+              <Pressable style={s.pbSheetDone} onPress={() => setPbAddMemberOpen(false)}>
+                <Text style={s.pbSheetDoneText}>Done</Text>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* A1: create member — existing intake form; new member joins the playbook */}
+      {currentPlaybook && (
+        <QuickAddMember
+          visible={pbQuickAddOpen}
+          onClose={() => setPbQuickAddOpen(false)}
+          onSaved={(memberId) => { if (memberId) addMemberToPlaybook(memberId); }}
+          coachId={coachId || ''}
+          tenantId={tenantId}
+        />
+      )}
 
       {!currentPlaybook && isFilterOpen && (
         <View style={s.filterPanel}>
@@ -2733,7 +2837,16 @@ function BuildScreenInner() {
       <Modal transparent visible={isPlusOpen} animationType="fade" onRequestClose={() => setIsPlusOpen(false)}>
         <Pressable style={s.modalBackdrop} onPress={() => setIsPlusOpen(false)}>
           <View style={s.plusMenu}>
-            <Text style={s.plusMenuTitle}>Create New</Text>
+            <Text style={s.plusMenuTitle}>{currentPlaybook ? 'Create or Add' : 'Create New'}</Text>
+            {currentPlaybook && (
+              <Pressable
+                style={s.plusMenuItem}
+                onPress={() => { setIsPlusOpen(false); setPbAddWorkoutOpen(true); }}
+              >
+                <Icon name="workouts" size={20} color="#A78BFA" />
+                <Text style={s.plusMenuItemText}>Add Workout</Text>
+              </Pressable>
+            )}
             {!currentPlaybook && (
               <>
                 <Pressable style={s.plusMenuItem} onPress={() => { setIsPlusOpen(false); setShowPlanCreate(true); }}>
@@ -2813,8 +2926,26 @@ function BuildScreenInner() {
               }}
             >
               <Icon name="workouts" size={20} color="#F0F4F8" />
-              <Text style={s.plusMenuItemText}>Workout</Text>
+              <Text style={s.plusMenuItemText}>{currentPlaybook ? 'Create Workout' : 'Workout'}</Text>
             </Pressable>
+            {currentPlaybook && (
+              <>
+                <Pressable
+                  style={s.plusMenuItem}
+                  onPress={() => { setIsPlusOpen(false); setPbAddMemberOpen(true); }}
+                >
+                  <Icon name="members" size={20} color="#A78BFA" />
+                  <Text style={s.plusMenuItemText}>Add Member</Text>
+                </Pressable>
+                <Pressable
+                  style={s.plusMenuItem}
+                  onPress={() => { setIsPlusOpen(false); setPbQuickAddOpen(true); }}
+                >
+                  <Icon name="members" size={20} color="#22C55E" />
+                  <Text style={s.plusMenuItemText}>Create Member</Text>
+                </Pressable>
+              </>
+            )}
             {!currentPlaybook && (
               <>
                 <Pressable
@@ -3636,5 +3767,111 @@ const s = StyleSheet.create({
     fontWeight: '600',
     fontFamily: FB,
     textAlign: 'center',
+  },
+  memberChipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  memberChip: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#A78BFA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -6,
+    borderWidth: 1.5,
+    borderColor: '#0E1117',
+  },
+  memberChipText: {
+    color: '#0E1117',
+    fontSize: 10,
+    fontWeight: '800',
+    fontFamily: FH,
+  },
+  pbSheetBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  pbSheet: {
+    backgroundColor: '#1E2A3A',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    paddingBottom: Platform.OS === 'ios' ? 36 : 20,
+    maxHeight: '80%',
+  },
+  pbSheetTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FH,
+    marginBottom: 12,
+  },
+  pbSheetGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  pbSheetTile: {
+    width: 104,
+  },
+  pbSheetTileMosaic: {
+    width: 104,
+    height: 104,
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: '#0E1117',
+  },
+  pbSheetTileName: {
+    color: '#F0F4F8',
+    fontSize: 11,
+    fontWeight: '600',
+    fontFamily: FB,
+    marginTop: 4,
+  },
+  pbSheetEmpty: {
+    color: '#8A95A3',
+    fontSize: 13,
+    fontFamily: FB,
+    paddingVertical: 12,
+  },
+  pbSheetMemberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#0E1117',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+    gap: 8,
+  },
+  pbSheetMemberName: {
+    color: '#F0F4F8',
+    fontSize: 14,
+    fontFamily: FB,
+    flex: 1,
+  },
+  pbSheetMemberAdd: {
+    color: '#A78BFA',
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: FB,
+  },
+  pbSheetDone: {
+    marginTop: 14,
+    backgroundColor: '#A78BFA',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  pbSheetDoneText: {
+    color: '#0E1117',
+    fontSize: 14,
+    fontWeight: '700',
+    fontFamily: FH,
   },
 });
