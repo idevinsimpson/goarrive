@@ -30,6 +30,8 @@ import {
   Image,
   Modal,
   useWindowDimensions,
+  Share,
+  Alert,
   type LayoutChangeEvent,
 } from 'react-native';
 import {
@@ -47,11 +49,14 @@ import {
   arrayRemove,
   getDocs,
   getDoc,
+  deleteDoc,
+  limit,
 } from 'firebase/firestore';
-import { useNavigation } from 'expo-router';
+import { useNavigation, router } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { ModuleGate } from '../../lib/useCoachModules';
-import { db } from '../../lib/firebase';
+import { db, functions } from '../../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
 import { TAB_BAR_STYLE, CONTENT_BOTTOM_CLEARANCE } from '../../lib/tabBarStyle';
 import { AppHeader } from '../../components/AppHeader';
 import { Icon } from '../../components/Icon';
@@ -467,6 +472,14 @@ function BuildScreenInner() {
   const [showPlaybookSchedule, setShowPlaybookSchedule] = useState(false);
   const [editingPlaybookTitle, setEditingPlaybookTitle] = useState(false);
   const [playbookTitleDraft, setPlaybookTitleDraft] = useState('');
+  const [showPbMenu, setShowPbMenu] = useState(false);
+  const [showPbDeleteConfirm, setShowPbDeleteConfirm] = useState(false);
+  const [showPbDescEdit, setShowPbDescEdit] = useState(false);
+  const [pbDescDraft, setPbDescDraft] = useState('');
+  const [showPbMoveTo, setShowPbMoveTo] = useState(false);
+  const [showPbManageMembers, setShowPbManageMembers] = useState(false);
+  const [showPbRevokeConfirm, setShowPbRevokeConfirm] = useState(false);
+  const [pbRevokeBusy, setPbRevokeBusy] = useState(false);
   const currentPlaybookRef = useRef<{ id: string; name: string } | null>(null);
   currentPlaybookRef.current = currentPlaybook;
   // A1: plus-button chooser sheets inside the playbook drill-in
@@ -854,6 +867,12 @@ function BuildScreenInner() {
     setCurrentPlaybook(null);
     setShowPlaybookSchedule(false);
     setEditingPlaybookTitle(false);
+    setShowPbMenu(false);
+    setShowPbDeleteConfirm(false);
+    setShowPbDescEdit(false);
+    setShowPbMoveTo(false);
+    setShowPbManageMembers(false);
+    setShowPbRevokeConfirm(false);
   }, []);
 
   const savePlaybookTitle = useCallback(async () => {
@@ -866,6 +885,156 @@ function BuildScreenInner() {
       setCurrentPlaybook(prev => (prev ? { ...prev, name } : prev));
     } catch (e) { console.error('[Build] Playbook rename error:', e); }
   }, [playbookTitleDraft]);
+
+  // ── Playbook settings menu actions ─────────────────────────────────────
+  const getCurrentPlaybookDoc = useCallback((): any => {
+    const pb = currentPlaybookRef.current;
+    if (!pb) return null;
+    return itemsRef.current.find(i => i.type === 'Playbooks' && i.id === pb.id) ?? null;
+  }, []);
+
+  const duplicatePlaybook = useCallback(async () => {
+    const pbDoc = getCurrentPlaybookDoc();
+    if (!pbDoc || !coachId) return;
+    try {
+      // Members are intentionally not copied — a duplicate is a template, not a roster.
+      await addDoc(collection(db, 'playbooks'), {
+        coachId,
+        name: `${pbDoc.name} (Copy)`,
+        description: pbDoc.description || '',
+        workoutIds: Array.isArray(pbDoc.workoutIds) ? pbDoc.workoutIds : [],
+        parentId: pbDoc.parentId ?? null,
+        memberIds: [],
+        isArchived: false,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) { console.error('[Build] Duplicate playbook error:', e); }
+  }, [coachId, getCurrentPlaybookDoc]);
+
+  const savePlaybookDescription = useCallback(async () => {
+    const pb = currentPlaybookRef.current;
+    setShowPbDescEdit(false);
+    if (!pb) return;
+    try {
+      await updateDoc(doc(db, 'playbooks', pb.id), {
+        description: pbDescDraft.trim(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) { console.error('[Build] Playbook description error:', e); }
+  }, [pbDescDraft]);
+
+  // Live (unrevoked) booking token — created in the schedule panel.
+  const fetchPbBookingToken = useCallback(async (): Promise<string | null> => {
+    const pb = currentPlaybookRef.current;
+    if (!pb || !coachId) return null;
+    try {
+      const snap = await getDocs(query(
+        collection(db, 'playbook_booking_tokens'),
+        where('coachId', '==', coachId),
+        where('playbookId', '==', pb.id),
+        where('revokedAt', '==', null),
+        limit(1),
+      ));
+      return snap.empty ? null : snap.docs[0].id;
+    } catch { return null; }
+  }, [coachId]);
+
+  const copyPbBookingLink = useCallback(async () => {
+    const token = await fetchPbBookingToken();
+    if (!token) { setShowPlaybookSchedule(true); return; }
+    const origin = Platform.OS === 'web' && typeof window !== 'undefined'
+      ? window.location.origin : 'https://goarrive.fit';
+    const url = `${origin}/book/${token}`;
+    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+      await navigator.clipboard.writeText(url);
+      if (typeof window !== 'undefined') window.alert('Booking link copied to clipboard.');
+    } else {
+      try { await Share.share({ message: url }); } catch { Alert.alert('Booking Link', url); }
+    }
+  }, [fetchPbBookingToken]);
+
+  const previewPbBookingPage = useCallback(async () => {
+    const token = await fetchPbBookingToken();
+    if (!token) { setShowPlaybookSchedule(true); return; }
+    router.push(`/book/${token}?preview=1`);
+  }, [fetchPbBookingToken]);
+
+  const revokePbBookingLink = useCallback(async (regenerate: boolean) => {
+    const pb = currentPlaybookRef.current;
+    if (!pb || pbRevokeBusy) return;
+    setPbRevokeBusy(true);
+    try {
+      const fn = httpsCallable<{ playbookId: string; regenerate: boolean }, { revoked: number; token: string | null }>(
+        functions, 'revokePlaybookBookingLink',
+      );
+      const res = await fn({ playbookId: pb.id, regenerate });
+      setShowPbRevokeConfirm(false);
+      const { revoked, token } = res.data;
+      if (regenerate && token) {
+        const origin = Platform.OS === 'web' && typeof window !== 'undefined'
+          ? window.location.origin : 'https://goarrive.fit';
+        const url = `${origin}/book/${token}`;
+        if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+          await navigator.clipboard.writeText(url);
+          if (typeof window !== 'undefined') window.alert('Old link revoked. New booking link copied to clipboard.');
+        } else {
+          try { await Share.share({ message: url }); } catch { Alert.alert('New Booking Link', url); }
+        }
+      } else if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(revoked > 0 ? 'Booking link revoked.' : 'No active booking link to revoke.');
+      }
+    } catch (e) {
+      console.error('[Build] Revoke booking link error:', e);
+      setShowPbRevokeConfirm(false);
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert('Could not revoke the booking link. Please try again.');
+      } else {
+        Alert.alert('Revoke Failed', 'Could not revoke the booking link. Please try again.');
+      }
+    } finally {
+      setPbRevokeBusy(false);
+    }
+  }, [pbRevokeBusy]);
+
+  const movePlaybookToFolder = useCallback(async (folderId: string | null) => {
+    const pb = currentPlaybookRef.current;
+    setShowPbMoveTo(false);
+    if (!pb) return;
+    try {
+      await updateDoc(doc(db, 'playbooks', pb.id), {
+        parentId: folderId,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) { console.error('[Build] Move playbook error:', e); }
+  }, []);
+
+  const toggleArchivePlaybook = useCallback(async () => {
+    const pbDoc = getCurrentPlaybookDoc();
+    const pb = currentPlaybookRef.current;
+    if (!pbDoc || !pb) return;
+    const next = !pbDoc.isArchived;
+    try {
+      await updateDoc(doc(db, 'playbooks', pb.id), { isArchived: next, updatedAt: serverTimestamp() });
+      if (next) exitPlaybook();
+    } catch (e) { console.error('[Build] Archive playbook error:', e); }
+  }, [getCurrentPlaybookDoc, exitPlaybook]);
+
+  const confirmDeletePlaybook = useCallback(async () => {
+    const pb = currentPlaybookRef.current;
+    setShowPbDeleteConfirm(false);
+    if (!pb) return;
+    try {
+      // Best-effort: revoke live booking links + drop booking windows before
+      // the playbook doc goes away (tokens/windows are server-write-only).
+      try {
+        const fn = httpsCallable(functions, 'revokePlaybookBookingLink');
+        await fn({ playbookId: pb.id, regenerate: false, deleteWindows: true });
+      } catch (e) { console.warn('[Build] Booking cleanup on delete failed:', e); }
+      await deleteDoc(doc(db, 'playbooks', pb.id));
+      exitPlaybook();
+    } catch (e) { console.error('[Build] Delete playbook error:', e); }
+  }, [exitPlaybook]);
 
   // The playbook drill-in is a focused workspace — the app tab bar stays
   // hidden for the whole visit, not just during drags.
@@ -1041,6 +1210,26 @@ function BuildScreenInner() {
       }
       await updateDoc(doc(db, 'playbooks', pb.id), patch);
     } catch (e) { console.error('[Build] Add member to playbook error:', e); }
+  }, [pbMembers]);
+
+  const removeMemberFromPlaybook = useCallback(async (memberId: string) => {
+    const pb = currentPlaybookRef.current;
+    if (!pb || !memberId) return;
+    try {
+      const pbDoc = itemsRef.current.find(i => i.type === 'Playbooks' && i.id === pb.id);
+      const existing: string[] = Array.isArray(pbDoc?.memberIds) && pbDoc!.memberIds.length
+        ? pbDoc!.memberIds
+        : (pbDoc?.assignedMemberId ? [pbDoc.assignedMemberId] : []);
+      const next = existing.filter(id => id !== memberId);
+      const patch: any = { memberIds: next, updatedAt: serverTimestamp() };
+      if (pbDoc?.assignedMemberId === memberId) {
+        patch.assignedMemberId = next[0] ?? null;
+        patch.assignedMemberName = next[0]
+          ? (pbMembers.find(m => m.id === next[0])?.name ?? null)
+          : null;
+      }
+      await updateDoc(doc(db, 'playbooks', pb.id), patch);
+    } catch (e) { console.error('[Build] Remove member from playbook error:', e); }
   }, [pbMembers]);
 
   const addWorkoutToPlaybook = useCallback(async (workoutId: string) => {
@@ -2507,6 +2696,14 @@ function BuildScreenInner() {
             <Icon name="calendar" size={20} color={showPlaybookSchedule ? '#F5A623' : '#F0F4F8'} />
           </Pressable>
         )}
+        {currentPlaybook && (
+          <Pressable
+            style={[s.toolBtn, showPbMenu && s.toolBtnActive]}
+            onPress={() => setShowPbMenu(v => !v)}
+          >
+            <Icon name="more-vertical" size={20} color={showPbMenu ? '#F5A623' : '#F0F4F8'} />
+          </Pressable>
+        )}
         <Pressable
           style={s.plusBtn}
           onPress={() => setIsPlusOpen(true)}
@@ -2514,6 +2711,257 @@ function BuildScreenInner() {
           <Icon name="plus" size={24} color="#0E1117" />
         </Pressable>
       </View>
+
+      {/* Playbook settings menu — mirrors the workout three-dot dropdown */}
+      {currentPlaybook && showPbMenu && (
+        <Pressable style={s.pbMenuOverlay} onPress={() => setShowPbMenu(false)}>
+          <View style={s.pbMenuDropdown} onStartShouldSetResponder={() => true}>
+            <Pressable
+              style={s.pbMenuItem}
+              onPress={() => { setShowPbMenu(false); copyPbBookingLink(); }}
+            >
+              <Icon name="share" size={16} color="#6EBB7A" />
+              <Text style={[s.pbMenuItemText, { color: '#6EBB7A' }]}>Copy Booking Link</Text>
+            </Pressable>
+            <Pressable
+              style={s.pbMenuItem}
+              onPress={() => { setShowPbMenu(false); previewPbBookingPage(); }}
+            >
+              <Icon name="eye" size={16} color="#FBBF24" />
+              <Text style={[s.pbMenuItemText, { color: '#FBBF24' }]}>Preview Booking Page</Text>
+            </Pressable>
+            <Pressable
+              style={s.pbMenuItem}
+              onPress={() => { setShowPbMenu(false); setShowPbRevokeConfirm(true); }}
+            >
+              <Icon name="block" size={16} color="#F5A623" />
+              <Text style={[s.pbMenuItemText, { color: '#F5A623' }]}>Revoke Booking Link</Text>
+            </Pressable>
+            <View style={s.pbMenuDivider} />
+            <Pressable
+              style={s.pbMenuItem}
+              onPress={() => {
+                setShowPbMenu(false);
+                setPlaybookTitleDraft(currentPlaybook.name);
+                setEditingPlaybookTitle(true);
+              }}
+            >
+              <Icon name="edit" size={16} color="#8A95A3" />
+              <Text style={s.pbMenuItemText}>Rename Playbook</Text>
+            </Pressable>
+            <Pressable
+              style={s.pbMenuItem}
+              onPress={() => {
+                setShowPbMenu(false);
+                setPbDescDraft(getCurrentPlaybookDoc()?.description || '');
+                setShowPbDescEdit(true);
+              }}
+            >
+              <Icon name="edit" size={16} color="#8A95A3" />
+              <Text style={s.pbMenuItemText}>Edit Description</Text>
+            </Pressable>
+            <Pressable
+              style={s.pbMenuItem}
+              onPress={() => { setShowPbMenu(false); duplicatePlaybook(); }}
+            >
+              <Icon name="copy" size={16} color="#8A95A3" />
+              <Text style={s.pbMenuItemText}>Duplicate Playbook</Text>
+            </Pressable>
+            <Pressable
+              style={s.pbMenuItem}
+              onPress={() => { setShowPbMenu(false); setShowPbMoveTo(true); }}
+            >
+              <Icon name="arrow-right" size={16} color="#8A95A3" />
+              <Text style={s.pbMenuItemText}>Move to Folder</Text>
+            </Pressable>
+            <Pressable
+              style={s.pbMenuItem}
+              onPress={() => { setShowPbMenu(false); setShowPbManageMembers(true); }}
+            >
+              <Icon name="members" size={16} color="#8A95A3" />
+              <Text style={s.pbMenuItemText}>Manage Members</Text>
+            </Pressable>
+            <View style={s.pbMenuDivider} />
+            <Pressable
+              style={s.pbMenuItem}
+              onPress={() => { setShowPbMenu(false); toggleArchivePlaybook(); }}
+            >
+              <Icon name="archive" size={16} color="#8A95A3" />
+              <Text style={s.pbMenuItemText}>
+                {items.find(i => i.type === 'Playbooks' && i.id === currentPlaybook.id)?.isArchived
+                  ? 'Unarchive Playbook' : 'Archive Playbook'}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={s.pbMenuItem}
+              onPress={() => { setShowPbMenu(false); setShowPbDeleteConfirm(true); }}
+            >
+              <Icon name="trash-2" size={16} color="#EF4444" />
+              <Text style={[s.pbMenuItemText, { color: '#EF4444' }]}>Delete Playbook</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      )}
+
+      {/* Playbook delete confirm */}
+      {currentPlaybook && (
+        <Modal transparent visible={showPbDeleteConfirm} animationType="fade" onRequestClose={() => setShowPbDeleteConfirm(false)}>
+          <Pressable style={s.pbConfirmBackdrop} onPress={() => setShowPbDeleteConfirm(false)}>
+            <Pressable style={s.pbConfirmCard} onPress={(e) => e.stopPropagation()}>
+              <Text style={s.pbConfirmTitle}>Delete Playbook?</Text>
+              <Text style={s.pbConfirmBody}>
+                "{currentPlaybook.name}" will be permanently deleted. The workouts inside it are not deleted.
+              </Text>
+              <View style={s.pbConfirmRow}>
+                <Pressable style={s.pbConfirmCancel} onPress={() => setShowPbDeleteConfirm(false)}>
+                  <Text style={s.pbConfirmCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={s.pbConfirmDelete} onPress={confirmDeletePlaybook}>
+                  <Text style={s.pbConfirmDeleteText}>Delete</Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* Playbook description edit */}
+      {currentPlaybook && (
+        <Modal transparent visible={showPbDescEdit} animationType="fade" onRequestClose={() => setShowPbDescEdit(false)}>
+          <Pressable style={s.pbConfirmBackdrop} onPress={() => setShowPbDescEdit(false)}>
+            <Pressable style={s.pbConfirmCard} onPress={(e) => e.stopPropagation()}>
+              <Text style={s.pbConfirmTitle}>Edit Description</Text>
+              <TextInput
+                style={s.pbDescInput}
+                value={pbDescDraft}
+                onChangeText={setPbDescDraft}
+                placeholder="What is this playbook for?"
+                placeholderTextColor="#4A5568"
+                multiline
+                autoFocus
+              />
+              <View style={s.pbConfirmRow}>
+                <Pressable style={s.pbConfirmCancel} onPress={() => setShowPbDescEdit(false)}>
+                  <Text style={s.pbConfirmCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={s.pbConfirmSave} onPress={savePlaybookDescription}>
+                  <Text style={s.pbConfirmDeleteText}>Save</Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* Playbook revoke-booking-link confirm */}
+      {currentPlaybook && (
+        <Modal transparent visible={showPbRevokeConfirm} animationType="fade" onRequestClose={() => setShowPbRevokeConfirm(false)}>
+          <Pressable style={s.pbConfirmBackdrop} onPress={() => !pbRevokeBusy && setShowPbRevokeConfirm(false)}>
+            <Pressable style={s.pbConfirmCard} onPress={(e) => e.stopPropagation()}>
+              <Text style={s.pbConfirmTitle}>Revoke Booking Link?</Text>
+              <Text style={s.pbConfirmBody}>
+                Anyone with the current link will no longer be able to book. Existing booked sessions are not affected.
+              </Text>
+              <View style={s.pbConfirmRow}>
+                <Pressable style={s.pbConfirmCancel} onPress={() => setShowPbRevokeConfirm(false)} disabled={pbRevokeBusy}>
+                  <Text style={s.pbConfirmCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={s.pbConfirmCancel} onPress={() => revokePbBookingLink(false)} disabled={pbRevokeBusy}>
+                  <Text style={s.pbConfirmCancelText}>{pbRevokeBusy ? 'Working...' : 'Revoke Only'}</Text>
+                </Pressable>
+                <Pressable style={s.pbConfirmSave} onPress={() => revokePbBookingLink(true)} disabled={pbRevokeBusy}>
+                  <Text style={s.pbConfirmDeleteText}>{pbRevokeBusy ? 'Working...' : 'Revoke + New Link'}</Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* Playbook move-to-folder sheet */}
+      {currentPlaybook && (
+        <Modal transparent visible={showPbMoveTo} animationType="slide" onRequestClose={() => setShowPbMoveTo(false)}>
+          <Pressable style={s.pbSheetBackdrop} onPress={() => setShowPbMoveTo(false)}>
+            <Pressable style={s.pbSheet} onPress={(e) => e.stopPropagation()}>
+              <Text style={s.pbSheetTitle}>Move to Folder</Text>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {(() => {
+                  const pbDoc = items.find(i => i.type === 'Playbooks' && i.id === currentPlaybook.id);
+                  const currentParent = pbDoc?.parentId || null;
+                  const folders = items
+                    .filter(i => (i.type as any) === 'Folder' && !i.isArchived)
+                    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                  return (
+                    <>
+                      <Pressable
+                        style={s.pbSheetMemberRow}
+                        onPress={() => movePlaybookToFolder(null)}
+                        disabled={!currentParent}
+                      >
+                        <Icon name="build" size={16} color="#8A95A3" />
+                        <Text style={[s.pbSheetMemberName, { flex: 1, marginLeft: 10 }]}>Build (top level)</Text>
+                        <Text style={s.pbSheetMemberAdd}>{currentParent ? 'Move' : 'Current'}</Text>
+                      </Pressable>
+                      {folders.length === 0 && (
+                        <Text style={s.pbSheetEmpty}>No folders yet — create one from the Build grid.</Text>
+                      )}
+                      {folders.map(f => (
+                        <Pressable
+                          key={f.id}
+                          style={s.pbSheetMemberRow}
+                          onPress={() => movePlaybookToFolder(f.id)}
+                          disabled={currentParent === f.id}
+                        >
+                          <Icon name="plan" size={16} color="#60A5FA" />
+                          <Text style={[s.pbSheetMemberName, { flex: 1, marginLeft: 10 }]} numberOfLines={1}>{f.name}</Text>
+                          <Text style={s.pbSheetMemberAdd}>{currentParent === f.id ? 'Current' : 'Move'}</Text>
+                        </Pressable>
+                      ))}
+                    </>
+                  );
+                })()}
+              </ScrollView>
+              <Pressable style={s.pbSheetDone} onPress={() => setShowPbMoveTo(false)}>
+                <Text style={s.pbSheetDoneText}>Done</Text>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* Playbook manage-members sheet */}
+      {currentPlaybook && (
+        <Modal transparent visible={showPbManageMembers} animationType="slide" onRequestClose={() => setShowPbManageMembers(false)}>
+          <Pressable style={s.pbSheetBackdrop} onPress={() => setShowPbManageMembers(false)}>
+            <Pressable style={s.pbSheet} onPress={(e) => e.stopPropagation()}>
+              <Text style={s.pbSheetTitle}>Members</Text>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {playbookMemberChips.length === 0 ? (
+                  <Text style={s.pbSheetEmpty}>No members on this playbook yet.</Text>
+                ) : (
+                  playbookMemberChips.map(m => (
+                    <View key={m.id} style={s.pbSheetMemberRow}>
+                      <Text style={[s.pbSheetMemberName, { flex: 1 }]} numberOfLines={1}>{m.name}</Text>
+                      <Pressable onPress={() => removeMemberFromPlaybook(m.id)}>
+                        <Text style={[s.pbSheetMemberAdd, { color: '#EF4444' }]}>Remove</Text>
+                      </Pressable>
+                    </View>
+                  ))
+                )}
+              </ScrollView>
+              <Pressable
+                style={[s.pbSheetDone, { backgroundColor: '#2A3544', marginTop: 10 }]}
+                onPress={() => { setShowPbManageMembers(false); setPbAddMemberOpen(true); }}
+              >
+                <Text style={[s.pbSheetDoneText, { color: '#F0F4F8' }]}>Add Member</Text>
+              </Pressable>
+              <Pressable style={s.pbSheetDone} onPress={() => setShowPbManageMembers(false)}>
+                <Text style={s.pbSheetDoneText}>Done</Text>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
 
       {/* Playbook scheduling — dead-simple panel over the drill-in */}
       {currentPlaybook && (
@@ -3795,6 +4243,123 @@ const s = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
     fontFamily: FH,
+  },
+  // Playbook settings menu (mirrors WorkoutFolderPage title menu)
+  pbMenuOverlay: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    zIndex: 100,
+  },
+  pbMenuDropdown: {
+    position: 'absolute',
+    top: 168,
+    right: 72,
+    backgroundColor: '#1E2A3A',
+    borderRadius: 12,
+    padding: 8,
+    minWidth: 220,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
+    zIndex: 101,
+  },
+  pbMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  pbMenuItemText: {
+    fontSize: 14,
+    color: '#F0F4F8',
+    fontFamily: FB,
+    fontWeight: '500',
+  },
+  pbMenuDivider: {
+    height: 1,
+    backgroundColor: '#2A3544',
+    marginVertical: 4,
+    marginHorizontal: 8,
+  },
+  pbConfirmBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  pbConfirmCard: {
+    backgroundColor: '#1E2A3A',
+    borderRadius: 16,
+    padding: 20,
+    width: '100%',
+    maxWidth: 420,
+  },
+  pbConfirmTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#F0F4F8',
+    fontFamily: FH,
+    marginBottom: 8,
+  },
+  pbConfirmBody: {
+    fontSize: 14,
+    color: '#8A95A3',
+    fontFamily: FB,
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  pbConfirmRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  pbConfirmCancel: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: '#2A3544',
+  },
+  pbConfirmCancelText: {
+    fontSize: 14,
+    color: '#F0F4F8',
+    fontFamily: FB,
+    fontWeight: '600',
+  },
+  pbConfirmDelete: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: '#EF4444',
+  },
+  pbConfirmSave: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: '#A78BFA',
+  },
+  pbConfirmDeleteText: {
+    fontSize: 14,
+    color: '#0E1117',
+    fontFamily: FB,
+    fontWeight: '700',
+  },
+  pbDescInput: {
+    backgroundColor: '#0E1117',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2A3544',
+    color: '#F0F4F8',
+    fontFamily: FB,
+    fontSize: 14,
+    padding: 12,
+    minHeight: 90,
+    textAlignVertical: 'top',
+    marginBottom: 16,
   },
   pbSheetBackdrop: {
     flex: 1,

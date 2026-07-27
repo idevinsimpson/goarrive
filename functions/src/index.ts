@@ -85,7 +85,16 @@ import {
 
 // Playbook scheduling (Phase 3a): transactional booking with the
 // member-level double-booking guard + per-playbook weekly cap.
-export { bookPlaybookSession } from './playbookScheduling';
+export { bookPlaybookSession, cleanupExpiredBookingRequests } from './playbookScheduling';
+// Playbook booking links (Phase 3b): coach availability windows + public
+// Calendly-style token page + guest-by-email bookings.
+export {
+  createPlaybookBookingLink,
+  revokePlaybookBookingLink,
+  resolvePlaybookBookingToken,
+  bookViaBookingToken,
+  playbookBookingIcs,
+} from './playbookBooking';
 import { CloudTasksClient } from '@google-cloud/tasks';
 import { sanitizePlayerWorkout } from './workoutPlayerSanitizer';
 
@@ -3178,6 +3187,41 @@ export const generateUpcomingInstances = onSchedule(
 );
 
 // ─── 17. allocateSessionInstance — Assign a Zoom room to a session instance ──
+// Coach Zoom identity is hardcoded to the coach's login email (goa.fit
+// workspace account) — coaches no longer add/remove their own Zoom account.
+// If the coach has no personal zoom_room yet, provision one from their auth
+// email so allocation keeps working without the removed Settings UI.
+async function ensurePersonalZoomRoom(coachId: string): Promise<FirebaseFirestore.DocumentSnapshot | null> {
+  let email: string | undefined;
+  try {
+    email = (await admin.auth().getUser(coachId)).email;
+  } catch {
+    return null;
+  }
+  if (!email) return null;
+
+  const roomRef = await db.collection('zoom_rooms').add({
+    coachId,
+    label: 'My Zoom',
+    zoomAccountEmail: email,
+    isPersonal: true,
+    status: 'active',
+    maxConcurrentMeetings: 1,
+    autoProvisioned: true,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  await writeAuditLog({
+    coachId,
+    action: 'zoom_room_auto_provisioned',
+    zoomRoomId: roomRef.id,
+    details: `Personal Zoom room auto-provisioned from coach login email ${email}`,
+  });
+
+  return roomRef.get();
+}
+
 export const allocateSessionInstance = onCall(
   { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber], invoker: 'public' },
   async (request) => {
@@ -3261,9 +3305,15 @@ export const allocateSessionInstance = onCall(
       candidateRooms = sortLru(candidateRooms);
     }
 
+    // Personal room missing → provision one from the coach's login email
+    if (candidateRooms.length === 0 && roomSource !== 'shared_pool') {
+      const autoRoom = await ensurePersonalZoomRoom(callerUid);
+      if (autoRoom && autoRoom.exists) candidateRooms = [autoRoom as FirebaseFirestore.QueryDocumentSnapshot];
+    }
+
     if (candidateRooms.length === 0) {
       const reason = roomSource === 'coach_personal'
-        ? 'No personal Zoom room configured. Add your Zoom in Settings.'
+        ? 'No personal Zoom room could be provisioned for this coach.'
         : roomSource === 'shared_pool'
         ? 'No shared pool rooms available.'
         : 'No active Zoom rooms available.';
@@ -3394,9 +3444,11 @@ export const allocateSessionInstance = onCall(
       updatedAt: FieldValue.serverTimestamp(),
     });
 
-    // Advance the round-robin cursor: every successful allocation stamps lastUsedAt
+    // Advance the round-robin cursor: every successful allocation stamps
+    // lastUsedAt; pool rooms also keep lastAllocatedAt for older readers.
     await db.collection('zoom_rooms').doc(allocatedRoom.id).update({
       lastUsedAt: FieldValue.serverTimestamp(),
+      ...(allocatedRoom.poolId ? { lastAllocatedAt: FieldValue.serverTimestamp() } : {}),
       updatedAt: FieldValue.serverTimestamp(),
     });
 
@@ -3465,10 +3517,21 @@ export const allocateAllPendingInstances = onCall(
     }
 
     // Get all active Zoom rooms for this coach
-    const roomsSnap = await db.collection('zoom_rooms')
+    let roomsSnap = await db.collection('zoom_rooms')
       .where('coachId', '==', callerUid)
       .where('status', '==', 'active')
       .get();
+
+    // No rooms → provision a personal room from the coach's login email
+    if (roomsSnap.empty) {
+      const autoRoom = await ensurePersonalZoomRoom(callerUid);
+      if (autoRoom && autoRoom.exists) {
+        roomsSnap = await db.collection('zoom_rooms')
+          .where('coachId', '==', callerUid)
+          .where('status', '==', 'active')
+          .get();
+      }
+    }
 
     if (roomsSnap.empty) {
       return { success: false, allocated: 0, failed: pendingSnap.size, message: 'No active Zoom rooms available' };
@@ -10657,6 +10720,28 @@ export const saveEquipmentImageChoice = onCall(
     const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media`;
     console.info('[saveEquipmentImageChoice] Saved default', { equipmentSlug, choiceIndex });
     return { imageUrl };
+  },
+);
+
+// ─── listEquipmentImages — platform-wide shared equipment image library ──────
+// Lists every equipment_images/{slug}/default.png in Storage. Shared across
+// ALL coaches by explicit product decision (cross-coach image reuse).
+export const listEquipmentImages = onCall(
+  { region: 'us-central1', timeoutSeconds: 60, invoker: 'public' },
+  async (request) => {
+    if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Authentication required');
+    const bucket = admin.storage().bucket();
+    const [files] = await bucket.getFiles({ prefix: 'equipment_images/' });
+    const images = files
+      .filter(f => f.name.endsWith('/default.png'))
+      .map(f => {
+        const slug = f.name.slice('equipment_images/'.length, -'/default.png'.length);
+        const label = slug.replace(/-and-/g, ' and ').replace(/-/g, ' ');
+        const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(f.name)}?alt=media`;
+        return { slug, label, imageUrl };
+      });
+    console.info('[listEquipmentImages] Listed', { count: images.length });
+    return { images };
   },
 );
 
