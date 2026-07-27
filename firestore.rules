@@ -346,6 +346,18 @@ service cloud.firestore {
     // coach (or admin) can read/write; a coach can delete their own folder.
     // ─────────────────────────────────────────────
 
+    // ─────────────────────────────────────────────
+    // EQUIPMENT INPUT HISTORY — per-coach grab-equipment text history
+    // Doc id: {coachId}_{slug}. Coach-scoped read/write; admin full access.
+    // ─────────────────────────────────────────────
+
+    match /equipmentInputHistory/{entryId} {
+      allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+      allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
+      allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+      allow delete: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+    }
+
     match /build_folders/{folderId} {
       allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
       allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
