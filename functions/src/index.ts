@@ -3189,6 +3189,41 @@ export const generateUpcomingInstances = onSchedule(
 );
 
 // ─── 17. allocateSessionInstance — Assign a Zoom room to a session instance ──
+// Coach Zoom identity is hardcoded to the coach's login email (goa.fit
+// workspace account) — coaches no longer add/remove their own Zoom account.
+// If the coach has no personal zoom_room yet, provision one from their auth
+// email so allocation keeps working without the removed Settings UI.
+async function ensurePersonalZoomRoom(coachId: string): Promise<FirebaseFirestore.DocumentSnapshot | null> {
+  let email: string | undefined;
+  try {
+    email = (await admin.auth().getUser(coachId)).email;
+  } catch {
+    return null;
+  }
+  if (!email) return null;
+
+  const roomRef = await db.collection('zoom_rooms').add({
+    coachId,
+    label: 'My Zoom',
+    zoomAccountEmail: email,
+    isPersonal: true,
+    status: 'active',
+    maxConcurrentMeetings: 1,
+    autoProvisioned: true,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  await writeAuditLog({
+    coachId,
+    action: 'zoom_room_auto_provisioned',
+    zoomRoomId: roomRef.id,
+    details: `Personal Zoom room auto-provisioned from coach login email ${email}`,
+  });
+
+  return roomRef.get();
+}
+
 export const allocateSessionInstance = onCall(
   { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber], invoker: 'public' },
   async (request) => {
@@ -3272,9 +3307,15 @@ export const allocateSessionInstance = onCall(
       candidateRooms = sortLru(candidateRooms);
     }
 
+    // Personal room missing → provision one from the coach's login email
+    if (candidateRooms.length === 0 && roomSource !== 'shared_pool') {
+      const autoRoom = await ensurePersonalZoomRoom(callerUid);
+      if (autoRoom && autoRoom.exists) candidateRooms = [autoRoom as FirebaseFirestore.QueryDocumentSnapshot];
+    }
+
     if (candidateRooms.length === 0) {
       const reason = roomSource === 'coach_personal'
-        ? 'No personal Zoom room configured. Add your Zoom in Settings.'
+        ? 'No personal Zoom room could be provisioned for this coach.'
         : roomSource === 'shared_pool'
         ? 'No shared pool rooms available.'
         : 'No active Zoom rooms available.';
@@ -3476,10 +3517,21 @@ export const allocateAllPendingInstances = onCall(
     }
 
     // Get all active Zoom rooms for this coach
-    const roomsSnap = await db.collection('zoom_rooms')
+    let roomsSnap = await db.collection('zoom_rooms')
       .where('coachId', '==', callerUid)
       .where('status', '==', 'active')
       .get();
+
+    // No rooms → provision a personal room from the coach's login email
+    if (roomsSnap.empty) {
+      const autoRoom = await ensurePersonalZoomRoom(callerUid);
+      if (autoRoom && autoRoom.exists) {
+        roomsSnap = await db.collection('zoom_rooms')
+          .where('coachId', '==', callerUid)
+          .where('status', '==', 'active')
+          .get();
+      }
+    }
 
     if (roomsSnap.empty) {
       return { success: false, allocated: 0, failed: pendingSnap.size, message: 'No active Zoom rooms available' };

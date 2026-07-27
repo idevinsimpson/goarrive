@@ -16,26 +16,22 @@ import { useAuth } from './AuthContext';
 
 export const HIDEABLE_SETTINGS = [
   'stripe',
-  'zoom',
   'noShowGrace',
   'skipAutoApproval',
   'icalSync',
   'googleCalendar',
   'myPage',
-  'myZoomAccount',
 ] as const;
 
 export type HideableSettingKey = (typeof HIDEABLE_SETTINGS)[number];
 
 export const HIDEABLE_SETTING_LABELS: Record<HideableSettingKey, string> = {
   stripe: 'Stripe Payments',
-  zoom: 'Personal Zoom',
   noShowGrace: 'No-Show Grace Period',
   skipAutoApproval: 'Skip Auto-Approval',
   icalSync: 'Sync to Calendar (iCal)',
   googleCalendar: 'Google Calendar Sync',
   myPage: 'My Page',
-  myZoomAccount: 'My Zoom Account',
 };
 
 export function useHiddenSettings(): {
