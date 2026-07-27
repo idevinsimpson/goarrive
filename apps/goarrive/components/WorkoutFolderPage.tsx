@@ -36,6 +36,7 @@ import {
   updateDoc,
   deleteDoc,
   addDoc,
+  setDoc,
   collection,
   query,
   where,
@@ -274,6 +275,21 @@ interface WorkoutFolderPageProps {
   onDuplicated?: (newWorkoutId: string) => void;
 }
 
+// Renders the 256px thumb.png for an equipment default.png URL, falling back
+// to the full image if the thumb doesn't exist yet.
+function EquipThumbImage({ url, style }: { url: string; style: any }) {
+  const [failed, setFailed] = useState(false);
+  const thumb = url.includes('default.png') ? url.replace('default.png', 'thumb.png') : url;
+  return (
+    <Image
+      source={{ uri: failed ? url : thumb }}
+      style={style}
+      resizeMode="cover"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 export default function WorkoutFolderPage({
   workoutId,
   coachId,
@@ -303,6 +319,13 @@ export default function WorkoutFolderPage({
   const [equipImgError, setEquipImgError] = useState<Record<number, string>>({});
   const [equipImgChoices, setEquipImgChoices] = useState<Record<number, string[]>>({});
   const [equipImgSlug, setEquipImgSlug] = useState<Record<number, string>>({});
+  const [equipHistoryOpenIdx, setEquipHistoryOpenIdx] = useState<number | null>(null);
+  const [equipHistory, setEquipHistory] = useState<{ id: string; text: string; imageUrl: string | null }[]>([]);
+  const [equipHistoryLoading, setEquipHistoryLoading] = useState(false);
+  const [equipLibraryOpenIdx, setEquipLibraryOpenIdx] = useState<number | null>(null);
+  const [equipLibrary, setEquipLibrary] = useState<{ slug: string; label: string; imageUrl: string; thumbUrl?: string }[] | null>(null);
+  const [equipLibraryLoading, setEquipLibraryLoading] = useState(false);
+  const [equipLibraryError, setEquipLibraryError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'icon' | 'list'>('icon');
 
   // Intro / Outro — workout-level fields
@@ -1537,6 +1560,135 @@ export default function WorkoutFolderPage({
     updateBlocks(newBlocks);
   }, [blocks, updateBlocks]);
 
+  // ── Grab Equipment input history (equipmentInputHistory collection) ──────
+  const slugifyEquipText = (text: string): string =>
+    text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
+
+  const upsertEquipHistory = useCallback(async (text: string, imageUrl?: string) => {
+    const trimmed = text.trim();
+    if (!coachId || !trimmed) return;
+    const slug = slugifyEquipText(trimmed);
+    if (!slug) return;
+    try {
+      const payload: Record<string, any> = { coachId, text: trimmed, updatedAt: serverTimestamp() };
+      if (imageUrl !== undefined) payload.imageUrl = imageUrl;
+      await setDoc(doc(db, 'equipmentInputHistory', `${coachId}_${slug}`), payload, { merge: true });
+    } catch (err) {
+      console.warn('[WorkoutFolder] equipmentInputHistory upsert failed', err);
+    }
+  }, [coachId]);
+
+  const toggleEquipHistory = useCallback(async (blockIdx: number) => {
+    if (equipHistoryOpenIdx === blockIdx) { setEquipHistoryOpenIdx(null); return; }
+    setEquipHistoryOpenIdx(blockIdx);
+    setEquipHistoryLoading(true);
+    try {
+      const snap = await getDocs(query(collection(db, 'equipmentInputHistory'), where('coachId', '==', coachId)));
+      const entries = snap.docs
+        .map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            text: (data.text as string) ?? '',
+            imageUrl: (data.imageUrl as string | null) ?? null,
+            updatedAtMs: data.updatedAt?.toMillis?.() ?? 0,
+          };
+        })
+        .filter(e => e.text)
+        .sort((a, b) => b.updatedAtMs - a.updatedAtMs)
+        .map(({ id, text, imageUrl }) => ({ id, text, imageUrl }));
+      setEquipHistory(entries);
+    } catch (err) {
+      console.warn('[WorkoutFolder] equipmentInputHistory load failed', err);
+      setEquipHistory([]);
+    } finally {
+      setEquipHistoryLoading(false);
+    }
+  }, [coachId, equipHistoryOpenIdx]);
+
+  const applyEquipHistoryEntry = useCallback((blockIdx: number, entry: { text: string; imageUrl: string | null }) => {
+    const newBlocks = [...blocks];
+    (newBlocks[blockIdx] as any).grabEquipmentText = entry.text;
+    if (entry.imageUrl) (newBlocks[blockIdx] as any).grabEquipmentImageUrl = entry.imageUrl;
+    updateBlocks(newBlocks);
+    setEquipHistoryOpenIdx(null);
+  }, [blocks, updateBlocks]);
+
+  const deleteEquipHistoryEntry = useCallback(async (entryId: string) => {
+    setEquipHistory(prev => prev.filter(e => e.id !== entryId));
+    try {
+      await deleteDoc(doc(db, 'equipmentInputHistory', entryId));
+    } catch (err) {
+      console.warn('[WorkoutFolder] equipmentInputHistory delete failed', err);
+    }
+  }, []);
+
+  // ── Grab Equipment shared image library ──────────────────────────────────
+  const listEquipImagesFn = httpsCallable<
+    Record<string, never>,
+    { images: { slug: string; label: string; imageUrl: string; thumbUrl?: string }[] }
+  >(functions, 'listEquipmentImages');
+
+  const deleteEquipImageFn = httpsCallable<{ equipmentSlug: string }, { ok: boolean }>(
+    functions, 'deleteEquipmentImage');
+
+  const deleteLibraryImage = useCallback((item: { slug: string; label: string }) => {
+    const doDelete = async () => {
+      setEquipLibrary(prev => (prev ?? []).filter(i => i.slug !== item.slug));
+      try {
+        await deleteEquipImageFn({ equipmentSlug: item.slug });
+      } catch (err) {
+        console.warn('[WorkoutFolder] deleteEquipmentImage failed', err);
+      }
+    };
+    const msg = `Delete "${item.label}" from the equipment library? This removes it for all coaches.`;
+    if (Platform.OS === 'web') {
+      if (window.confirm(msg)) doDelete();
+    } else {
+      Alert.alert('Delete Image', msg, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: doDelete },
+      ]);
+    }
+  }, [deleteEquipImageFn]);
+
+  const openEquipLibrary = useCallback(async (blockIdx: number) => {
+    setEquipLibraryOpenIdx(blockIdx);
+    setEquipLibraryError(null);
+    setEquipLibraryLoading(true);
+    try {
+      const result = await listEquipImagesFn({});
+      setEquipLibrary(result.data.images ?? []);
+    } catch (err: any) {
+      console.warn('[WorkoutFolder] listEquipmentImages failed', err);
+      setEquipLibraryError(String(err?.details ?? err?.message ?? 'Failed to load library'));
+      setEquipLibrary([]);
+    } finally {
+      setEquipLibraryLoading(false);
+    }
+  }, [listEquipImagesFn]);
+
+  const selectLibraryImage = useCallback((blockIdx: number, item: { slug: string; label: string; imageUrl: string }) => {
+    const newBlocks = [...blocks];
+    const currentText = (newBlocks[blockIdx].grabEquipmentText ?? '').trim();
+    const text = currentText || item.label;
+    (newBlocks[blockIdx] as any).grabEquipmentText = text;
+    (newBlocks[blockIdx] as any).grabEquipmentImageUrl = item.imageUrl;
+    updateBlocks(newBlocks);
+    setEquipLibraryOpenIdx(null);
+    upsertEquipHistory(text, item.imageUrl);
+  }, [blocks, updateBlocks, upsertEquipHistory]);
+
+  const closeBlockOverlay = useCallback(() => {
+    if (blockOverlayIndex != null) {
+      const t = blocks[blockOverlayIndex]?.grabEquipmentText;
+      if (t?.trim()) upsertEquipHistory(t);
+    }
+    setEquipHistoryOpenIdx(null);
+    setEquipLibraryOpenIdx(null);
+    setBlockOverlayIndex(null);
+  }, [blockOverlayIndex, blocks, upsertEquipHistory]);
+
   // ── Grab Equipment image generation ──────────────────────────────────────
   const generateEquipImgFn = httpsCallable<
     { grabEquipmentText: string; forceRegenerate?: boolean },
@@ -1561,6 +1713,7 @@ export default function WorkoutFolderPage({
         (newBlocks[blockIdx] as any).grabEquipmentImageUrl = result.data.imageUrl;
         updateBlocks(newBlocks);
         setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'done' }));
+        upsertEquipHistory(text, result.data.imageUrl);
       } else if (result.data.choices?.length) {
         // 3 variants returned — show picker
         setEquipImgChoices(prev => ({ ...prev, [blockIdx]: result.data.choices! }));
@@ -1575,7 +1728,7 @@ export default function WorkoutFolderPage({
       setEquipImgError(prev => ({ ...prev, [blockIdx]: String(msg) }));
       setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'error' }));
     }
-  }, [blocks, generateEquipImgFn, updateBlocks]);
+  }, [blocks, generateEquipImgFn, updateBlocks, upsertEquipHistory]);
 
   const selectEquipmentImageChoice = useCallback(async (blockIdx: number, choiceIndex: number) => {
     const slug = equipImgSlug[blockIdx];
@@ -1588,13 +1741,14 @@ export default function WorkoutFolderPage({
       updateBlocks(newBlocks);
       setEquipImgChoices(prev => { const next = { ...prev }; delete next[blockIdx]; return next; });
       setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'done' }));
+      upsertEquipHistory(blocks[blockIdx]?.grabEquipmentText ?? '', result.data.imageUrl);
     } catch (err: any) {
       console.warn('[WorkoutFolder] saveEquipmentImageChoice failed', err);
       const msg = err?.details ?? err?.message ?? 'Unknown error';
       setEquipImgError(prev => ({ ...prev, [blockIdx]: String(msg) }));
       setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'choosing' }));
     }
-  }, [blocks, equipImgSlug, saveEquipImgChoiceFn, updateBlocks]);
+  }, [blocks, equipImgSlug, saveEquipImgChoiceFn, updateBlocks, upsertEquipHistory]);
 
   // ── Movement operations ───────────────────────────────────────────────────
   const addMovementToBlock = useCallback((blockIdx: number, movement: MovementOption) => {
@@ -3121,20 +3275,20 @@ export default function WorkoutFolderPage({
       </Modal>
 
       {/* ── Block Settings Overlay ──────────────────────────────────────── */}
-      <Modal visible={blockOverlayIndex != null} transparent animationType="slide" onRequestClose={() => setBlockOverlayIndex(null)}>
+      <Modal visible={blockOverlayIndex != null} transparent animationType="slide" onRequestClose={closeBlockOverlay}>
         {(() => {
           const bi = blockOverlayIndex ?? 0;
           const block = blocks[bi];
           if (blockOverlayIndex == null || !block) return null;
           const blockColor = BLOCK_COLORS[isTabata(block) ? 'Tabata' : block.type] || '#4A5568';
           return (
-            <Pressable style={st.modalBackdrop} onPress={() => setBlockOverlayIndex(null)}>
+            <Pressable style={st.modalBackdrop} onPress={closeBlockOverlay}>
               <Pressable style={st.overlaySheet} onPress={(e) => e.stopPropagation()}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 }}>
                   <Text style={{ fontSize: 18, fontWeight: '700', color: '#F0F4F8', fontFamily: FH }}>
                     {isTabata(block) ? 'Tabata' : (block.label || block.type)} Settings
                   </Text>
-                  <TouchableOpacity onPress={() => setBlockOverlayIndex(null)} hitSlop={8}>
+                  <TouchableOpacity onPress={closeBlockOverlay} hitSlop={8}>
                     <Icon name="x" size={22} color="#8A95A3" />
                   </TouchableOpacity>
                 </View>
@@ -3206,13 +3360,87 @@ export default function WorkoutFolderPage({
                             <Text style={st.stepperBtnText}>+</Text>
                           </TouchableOpacity>
                         </View>
-                        <TextInput
-                          style={st.overlayTextInput}
-                          value={block.grabEquipmentText ?? ''}
-                          onChangeText={(t) => updateBlockField(bi, 'grabEquipmentText', t)}
-                          placeholder="e.g. Grab a pair of dumbbells"
-                          placeholderTextColor="#4A5568"
-                        />
+                        <View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <TextInput
+                              style={[st.overlayTextInput, { flex: 1 }]}
+                              value={block.grabEquipmentText ?? ''}
+                              onChangeText={(t) => updateBlockField(bi, 'grabEquipmentText', t)}
+                              onBlur={() => upsertEquipHistory(block.grabEquipmentText ?? '')}
+                              placeholder="e.g. Grab a pair of dumbbells"
+                              placeholderTextColor="#4A5568"
+                            />
+                            <TouchableOpacity
+                              onPress={() => toggleEquipHistory(bi)}
+                              hitSlop={8}
+                              style={{
+                                width: 40,
+                                height: 40,
+                                borderRadius: 10,
+                                backgroundColor: equipHistoryOpenIdx === bi ? '#7C3AED' : '#1E2A3A',
+                                alignItems: 'center' as const,
+                                justifyContent: 'center' as const,
+                              }}
+                            >
+                              <Icon name="clock" size={18} color={equipHistoryOpenIdx === bi ? '#F0F4F8' : '#8A95A3'} />
+                            </TouchableOpacity>
+                          </View>
+                          {equipHistoryOpenIdx === bi && (
+                            <View style={{
+                              marginTop: 6,
+                              backgroundColor: '#1E2A3A',
+                              borderRadius: 10,
+                              borderWidth: 1,
+                              borderColor: '#2A3347',
+                              maxHeight: 220,
+                              overflow: 'hidden' as const,
+                            }}>
+                              {equipHistoryLoading ? (
+                                <View style={{ padding: 14, alignItems: 'center' as const }}>
+                                  <ActivityIndicator size="small" color="#A0AEC0" />
+                                </View>
+                              ) : equipHistory.length === 0 ? (
+                                <Text style={{ color: '#8A95A3', fontSize: 13, fontFamily: FB, padding: 14 }}>
+                                  No past equipment inputs yet
+                                </Text>
+                              ) : (
+                                <ScrollView style={{ maxHeight: 220 }} nestedScrollEnabled>
+                                  {equipHistory.map((entry, idx) => (
+                                    <TouchableOpacity
+                                      key={idx}
+                                      onPress={() => applyEquipHistoryEntry(bi, entry)}
+                                      style={{
+                                        flexDirection: 'row' as const,
+                                        alignItems: 'center' as const,
+                                        gap: 10,
+                                        paddingVertical: 10,
+                                        paddingHorizontal: 12,
+                                        borderTopWidth: idx === 0 ? 0 : 1,
+                                        borderTopColor: '#2A3347',
+                                      }}
+                                    >
+                                      {entry.imageUrl ? (
+                                        <EquipThumbImage url={entry.imageUrl} style={{ width: 32, height: 32, borderRadius: 6 }} />
+                                      ) : (
+                                        <View style={{ width: 32, height: 32, borderRadius: 6, backgroundColor: '#2A3347' }} />
+                                      )}
+                                      <Text style={{ color: '#F0F4F8', fontSize: 14, fontFamily: FB, flex: 1 }} numberOfLines={1}>
+                                        {entry.text}
+                                      </Text>
+                                      <TouchableOpacity
+                                        onPress={(e: any) => { e?.stopPropagation?.(); deleteEquipHistoryEntry(entry.id); }}
+                                        hitSlop={8}
+                                        style={{ padding: 4 }}
+                                      >
+                                        <Icon name="trash-2" size={14} color="#8A95A3" />
+                                      </TouchableOpacity>
+                                    </TouchableOpacity>
+                                  ))}
+                                </ScrollView>
+                              )}
+                            </View>
+                          )}
+                        </View>
                         {/* Generate AI equipment image — 3-choice picker */}
                         <View style={{ marginTop: 8 }}>
                           {equipImgStatus[bi] === 'choosing' || equipImgStatus[bi] === 'saving' ? (
@@ -3276,10 +3504,10 @@ export default function WorkoutFolderPage({
                                   alignItems: 'center' as const,
                                   justifyContent: 'center' as const,
                                   gap: 8,
-                                  opacity: (equipImgStatus[bi] === 'generating' || !block.grabEquipmentText?.trim()) ? 0.6 : 1,
+                                  opacity: equipImgStatus[bi] === 'generating' ? 0.6 : 1,
                                 }}
-                                disabled={equipImgStatus[bi] === 'generating' || !block.grabEquipmentText?.trim()}
-                                onPress={() => triggerEquipmentImageGen(bi, block.grabEquipmentText ?? '')}
+                                disabled={equipImgStatus[bi] === 'generating'}
+                                onPress={() => openEquipLibrary(bi)}
                               >
                                 {equipImgStatus[bi] === 'generating' ? (
                                   <>
@@ -3290,7 +3518,7 @@ export default function WorkoutFolderPage({
                                   </>
                                 ) : (
                                   <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8', fontFamily: FH }}>
-                                    {block.grabEquipmentImageUrl ? 'Regenerate image' : 'Generate AI image'}
+                                    {block.grabEquipmentImageUrl ? 'Change image' : 'Add an image'}
                                   </Text>
                                 )}
                               </TouchableOpacity>
@@ -3453,6 +3681,109 @@ export default function WorkoutFolderPage({
                   </View>
 
                 </ScrollView>
+
+                {/* ── Equipment image library modal (shared across all coaches) ── */}
+                <Modal
+                  visible={equipLibraryOpenIdx === bi}
+                  transparent
+                  animationType="fade"
+                  onRequestClose={() => setEquipLibraryOpenIdx(null)}
+                >
+                  <Pressable style={st.modalBackdrop} onPress={() => setEquipLibraryOpenIdx(null)}>
+                    <Pressable style={st.overlaySheet} onPress={(e) => e.stopPropagation()}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 }}>
+                        <Text style={{ fontSize: 18, fontWeight: '700', color: '#F0F4F8', fontFamily: FH }}>
+                          Equipment Library
+                        </Text>
+                        <TouchableOpacity onPress={() => setEquipLibraryOpenIdx(null)} hitSlop={8}>
+                          <Icon name="x" size={22} color="#8A95A3" />
+                        </TouchableOpacity>
+                      </View>
+                      <TouchableOpacity
+                        style={{
+                          marginHorizontal: 20,
+                          marginBottom: 12,
+                          backgroundColor: '#7C3AED',
+                          borderRadius: 10,
+                          paddingVertical: 12,
+                          alignItems: 'center' as const,
+                          opacity: !block.grabEquipmentText?.trim() ? 0.6 : 1,
+                        }}
+                        disabled={!block.grabEquipmentText?.trim()}
+                        onPress={() => {
+                          setEquipLibraryOpenIdx(null);
+                          triggerEquipmentImageGen(bi, block.grabEquipmentText ?? '');
+                        }}
+                      >
+                        <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8', fontFamily: FH }}>
+                          Generate AI image
+                        </Text>
+                      </TouchableOpacity>
+                      {equipLibraryLoading ? (
+                        <View style={{ padding: 30, alignItems: 'center' as const }}>
+                          <ActivityIndicator size="large" color="#7C3AED" />
+                        </View>
+                      ) : equipLibraryError ? (
+                        <Text style={{ color: '#F87171', fontSize: 13, fontFamily: FB, paddingHorizontal: 20, paddingBottom: 20 }}>
+                          {equipLibraryError}
+                        </Text>
+                      ) : (equipLibrary?.length ?? 0) === 0 ? (
+                        <Text style={{ color: '#8A95A3', fontSize: 14, fontFamily: FB, paddingHorizontal: 20, paddingBottom: 20 }}>
+                          No equipment images yet. Generate the first one!
+                        </Text>
+                      ) : (
+                        <ScrollView style={{ paddingHorizontal: 20 }} contentContainerStyle={{ paddingBottom: 40 }}>
+                          <View style={{ flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 10 }}>
+                            {(equipLibrary ?? []).map((item) => (
+                              <TouchableOpacity
+                                key={item.slug}
+                                onPress={() => selectLibraryImage(bi, item)}
+                                style={{
+                                  width: '31%' as any,
+                                  borderRadius: 10,
+                                  borderWidth: 1,
+                                  borderColor: '#2A3347',
+                                  backgroundColor: '#1E2A3A',
+                                  overflow: 'hidden' as const,
+                                }}
+                              >
+                                <Image
+                                  source={{ uri: item.thumbUrl ?? item.imageUrl }}
+                                  style={{ width: '100%' as any, aspectRatio: 1 }}
+                                  resizeMode="cover"
+                                />
+                                <TouchableOpacity
+                                  onPress={(e: any) => { e?.stopPropagation?.(); deleteLibraryImage(item)}}
+                                  hitSlop={6}
+                                  style={{
+                                    position: 'absolute' as const,
+                                    top: 4,
+                                    right: 4,
+                                    width: 22,
+                                    height: 22,
+                                    borderRadius: 11,
+                                    backgroundColor: 'rgba(14,17,23,0.75)',
+                                    alignItems: 'center' as const,
+                                    justifyContent: 'center' as const,
+                                  }}
+                                >
+                                  <Icon name="x" size={13} color="#F0F4F8" />
+                                </TouchableOpacity>
+                                <Text
+                                  style={{ color: '#F0F4F8', fontSize: 10, lineHeight: 13, fontFamily: FB, padding: 6, textTransform: 'capitalize' as const }}
+                                  numberOfLines={2}
+                                  ellipsizeMode="tail"
+                                >
+                                  {item.label}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        </ScrollView>
+                      )}
+                    </Pressable>
+                  </Pressable>
+                </Modal>
               </Pressable>
             </Pressable>
           );

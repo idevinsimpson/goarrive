@@ -10503,6 +10503,19 @@ function slugify(text: string): string {
     .slice(0, 80);
 }
 
+// The equipment library is weight-agnostic: a 15lb and a 35lb dumbbell share
+// one image, so weights/sizes are stripped from slugs and labels.
+const EQUIP_WEIGHT_TOKEN_RE = /^(?:\d+(?:\.\d+)?|lb|lbs|pound|pounds|kg|kgs|kilo|kilos|kilogram|kilograms)$/;
+
+export function stripEquipmentWeightTokens(slug: string): string {
+  const tokens = slug.split('-').filter(t => t && !EQUIP_WEIGHT_TOKEN_RE.test(t));
+  // Drop dangling/duplicate "and" connectors left behind by removed weights.
+  const cleaned = tokens.filter((t, i) =>
+    t !== 'and' || (i > 0 && i < tokens.length - 1 && tokens[i - 1] !== 'and'));
+  const stripped = cleaned.join('-');
+  return stripped || slug;
+}
+
 async function extractEquipmentSlug(text: string, apiKey: string): Promise<{ slug: string; label: string }> {
   try {
     const resp = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -10513,7 +10526,7 @@ async function extractEquipmentSlug(text: string, apiKey: string): Promise<{ slu
         messages: [
           {
             role: 'system',
-            content: 'Extract only the fitness equipment item name(s) from the workout instruction. Return just the equipment name(s) in lowercase, comma-separated if multiple (e.g. "straight bar, dumbbells"). Include weight/size descriptors. No other words.',
+            content: 'Extract only the fitness equipment item name(s) from the workout instruction. Return just the equipment name(s) in lowercase, comma-separated if multiple (e.g. "straight bar, dumbbells"). EXCLUDE all weights, numbers, and size descriptors entirely — "35 pound dumbbells" becomes "dumbbells", "24 inch box" becomes "box". No other words.',
           },
           { role: 'user', content: text },
         ],
@@ -10526,13 +10539,15 @@ async function extractEquipmentSlug(text: string, apiKey: string): Promise<{ slu
       const extracted = json.choices?.[0]?.message?.content?.trim();
       if (extracted) {
         const items = extracted.split(',').map(s => s.trim()).filter(Boolean);
-        const label = items.join(' and ');
-        const slug = items.map(slugify).join('-and-');
-        return { slug, label };
+        const slugs = items.map(s => stripEquipmentWeightTokens(slugify(s))).filter(Boolean);
+        const slug = stripEquipmentWeightTokens(slugs.join('-and-'));
+        const label = slug.replace(/-and-/g, ' and ').replace(/-/g, ' ');
+        if (slug) return { slug, label };
       }
     }
   } catch { /* fall through to full-text slug */ }
-  return { slug: slugify(text), label: text };
+  const fallbackSlug = stripEquipmentWeightTokens(slugify(text));
+  return { slug: fallbackSlug, label: fallbackSlug.replace(/-and-/g, ' and ').replace(/-/g, ' ') };
 }
 
 export const generateEquipmentImage = onCall(
@@ -10649,11 +10664,67 @@ export const saveEquipmentImageChoice = onCall(
     const bucket = admin.storage().bucket();
     const srcPath = `equipment_images/${equipmentSlug}/v${choiceIndex + 1}.png`;
     const destPath = `equipment_images/${equipmentSlug}/default.png`;
+    const thumbPath = `equipment_images/${equipmentSlug}/thumb.png`;
     const [srcBuf] = await bucket.file(srcPath).download();
     await bucket.file(destPath).save(srcBuf, { contentType: 'image/png' });
+    try {
+      const sharp = require('sharp');
+      const thumbBuf = await sharp(srcBuf).resize(256, 256, { fit: 'inside' }).png().toBuffer();
+      await bucket.file(thumbPath).save(thumbBuf, { contentType: 'image/png' });
+    } catch (err) {
+      console.warn('[saveEquipmentImageChoice] thumb generation failed', { equipmentSlug, err: String(err) });
+    }
     const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media`;
     console.info('[saveEquipmentImageChoice] Saved default', { equipmentSlug, choiceIndex });
     return { imageUrl };
+  },
+);
+
+// ─── listEquipmentImages — platform-wide shared equipment image library ──────
+// Lists every equipment_images/{slug}/default.png in Storage. Shared across
+// ALL coaches by explicit product decision (cross-coach image reuse).
+export const listEquipmentImages = onCall(
+  { region: 'us-central1', timeoutSeconds: 60, invoker: 'public' },
+  async (request) => {
+    if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Authentication required');
+    const bucket = admin.storage().bucket();
+    const [files] = await bucket.getFiles({ prefix: 'equipment_images/' });
+    const fileNames = new Set(files.map(f => f.name));
+    const url = (path: string) =>
+      `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media`;
+    const images = files
+      .filter(f => f.name.endsWith('/default.png'))
+      .map(f => {
+        const slug = f.name.slice('equipment_images/'.length, -'/default.png'.length);
+        const label = slug.replace(/-and-/g, ' and ').replace(/-/g, ' ');
+        const thumbName = `equipment_images/${slug}/thumb.png`;
+        return {
+          slug,
+          label,
+          imageUrl: url(f.name),
+          thumbUrl: fileNames.has(thumbName) ? url(thumbName) : url(f.name),
+        };
+      });
+    console.info('[listEquipmentImages] Listed', { count: images.length });
+    return { images };
+  },
+);
+
+// ─── deleteEquipmentImage — remove a slug from the shared equipment library ──
+// Deletes ALL files under equipment_images/{slug}/. The library is platform-
+// wide, so deletion affects every coach — explicit product decision (Devin).
+export const deleteEquipmentImage = onCall(
+  { region: 'us-central1', timeoutSeconds: 60, invoker: 'public' },
+  async (request) => {
+    if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Authentication required');
+    const { equipmentSlug } = request.data as { equipmentSlug?: string };
+    if (!equipmentSlug || !/^[a-z0-9][a-z0-9-]{0,119}$/.test(equipmentSlug)) {
+      throw new HttpsError('invalid-argument', 'Valid equipmentSlug is required');
+    }
+    const bucket = admin.storage().bucket();
+    await bucket.deleteFiles({ prefix: `equipment_images/${equipmentSlug}/` });
+    console.info('[deleteEquipmentImage] Deleted', { equipmentSlug, by: request.auth.uid });
+    return { ok: true };
   },
 );
 
