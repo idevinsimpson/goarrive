@@ -1,27 +1,23 @@
 /**
- * SessionZoomTile — embedded Zoom Meeting SDK tile for the member session page.
+ * SessionZoomTile — embedded Zoom Meeting SDK Component View for live sessions.
  *
- * Recorded sessions gate the workout player behind an in-app Zoom join
- * (locked decision: the session is captured on Zoom cloud recording, so the
- * member must be in the meeting before the workout starts). This component
- * owns the full join lifecycle — CDN SDK load, getEmbeddedSessionJoinConfig,
- * client.init/join, camera+mic auto-start — and then floats as a
- * picture-in-picture tile above the WorkoutPlayer modal during playback.
+ * Reusable across the two playbook live-view surfaces:
+ *   - variant="pip":  small corner tile the member sees while the WorkoutPlayer
+ *     stays full-screen. Camera auto-starts after join so the coach can see them.
+ *   - variant="pane": larger pane the coach sees in the live-view split screen,
+ *     showing the member's camera feed.
  *
- * Web only (Meeting SDK Phase 1). Native renders a browser-join fallback.
- * The core join flow mirrors app/join/[sessionInstanceId].tsx (the beta
- * standalone join route), trimmed of its debug overlay.
+ * Join flow mirrors app/join/[sessionInstanceId].tsx (the standalone beta page):
+ * getEmbeddedSessionJoinConfig callable → CDN-load Web Meeting SDK → init into a
+ * local container → join → auto-start camera/mic via toolbar aria-label clicks
+ * (the Web SDK has no public startVideo API for self). The standalone page is
+ * intentionally left untouched — it remains the my-sessions beta entry point.
+ *
+ * Web only. On native the tile renders a placeholder (Meeting SDK for RN needs
+ * a dev-client build; see docs/ZOOM_MEETING_SDK_SETUP.md "Future-only").
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ActivityIndicator,
-  Pressable,
-  Platform,
-  Linking,
-} from 'react-native';
+import { View, Text, StyleSheet, Pressable, Platform, ActivityIndicator } from 'react-native';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
 
@@ -34,10 +30,12 @@ const TEXT_SECONDARY = '#A0AEC0';
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
+// Keep in sync with app/join/[sessionInstanceId].tsx and
+// docs/ZOOM_MEETING_SDK_SETUP.md. Pinned 3.x release.
 const ZOOM_SDK_VERSION = '3.11.2';
 const ZOOM_SDK_BASE = `https://source.zoom.us/${ZOOM_SDK_VERSION}`;
 
-type JoinConfig = {
+export type JoinConfig = {
   meetingNumber: string;
   signature: string;
   sdkKey: string;
@@ -47,6 +45,8 @@ type JoinConfig = {
   role: 0 | 1;
   zak: string | null;
 };
+
+// ── CDN loader (web only) ────────────────────────────────────────────────────
 
 function ensureScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -95,6 +95,8 @@ async function loadZoomEmbedded(): Promise<any> {
   return ZoomMtgEmbedded;
 }
 
+// ── Toolbar auto-click (Web SDK has no public self startVideo API) ──────────
+
 function findToolbarButton(
   root: ParentNode,
   includeAny: string[],
@@ -109,19 +111,17 @@ function findToolbarButton(
   return null;
 }
 
-// Zoom's Web SDK has no public startVideo/startAudio for self — click its
-// toolbar buttons by aria-label after join (same workaround as the beta
-// join route; validated on iOS Safari + desktop labels).
-function autoStartMediaViaToolbar(rootId: string): void {
+function autoStartMediaViaToolbar(container: HTMLElement, startCamera: boolean): void {
   if (typeof document === 'undefined') return;
-  let videoClicked = false;
+  let videoClicked = !startCamera;
   let audioClicked = false;
   let attempts = 0;
-  const MAX_ATTEMPTS = 32;
+  const MAX_ATTEMPTS = 32; // 32 × 250ms = 8s window
 
   const tick = () => {
     attempts += 1;
-    const root = document.getElementById(rootId) || document.body;
+    const root = container;
+
     if (!videoClicked) {
       const camBtn = findToolbarButton(
         root,
@@ -129,9 +129,13 @@ function autoStartMediaViaToolbar(rootId: string): void {
         ['video on', 'stop video', 'stop my video', 'turn off camera'],
       );
       if (camBtn) {
-        try { camBtn.click(); videoClicked = true; } catch {}
+        try {
+          camBtn.click();
+          videoClicked = true;
+        } catch {}
       }
     }
+
     if (!audioClicked) {
       const audBtn = findToolbarButton(
         root,
@@ -139,55 +143,60 @@ function autoStartMediaViaToolbar(rootId: string): void {
         ['mute meeting', 'mute my', 'mute microphone', 'turn off microphone'],
       );
       if (audBtn) {
-        try { audBtn.click(); audioClicked = true; } catch {}
+        try {
+          audBtn.click();
+          audioClicked = true;
+        } catch {}
       }
     }
+
     if ((videoClicked && audioClicked) || attempts >= MAX_ATTEMPTS) return;
     setTimeout(tick, 250);
   };
+
   setTimeout(tick, 250);
 }
 
-const CONTAINER_ID = 'session-zoom-tile-root';
-
-export type SessionZoomPhase = 'idle' | 'joining' | 'in-meeting' | 'error' | 'unsupported';
-
-interface SessionZoomTileProps {
-  sessionInstanceId: string;
-  zoomJoinUrl?: string | null;
-  /** Float as a small fixed tile above the workout player (web). */
-  pip: boolean;
-  onJoined: () => void;
-  /** Continue without the in-app Zoom join (error/native escape hatch). */
-  onSkip?: () => void;
-}
+// ── Component ────────────────────────────────────────────────────────────────
 
 export default function SessionZoomTile({
   sessionInstanceId,
-  zoomJoinUrl,
-  pip,
-  onJoined,
-  onSkip,
-}: SessionZoomTileProps) {
-  const [phase, setPhase] = useState<SessionZoomPhase>('idle');
+  variant,
+  autoStartCamera = true,
+  joinLabel,
+}: {
+  sessionInstanceId: string;
+  variant: 'pip' | 'pane';
+  /** Auto-click Zoom's start-video button after join (member PiP default). */
+  autoStartCamera?: boolean;
+  joinLabel?: string;
+}) {
+  const [phase, setPhase] = useState<'idle' | 'joining' | 'in-meeting' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const containerRef = useRef<HTMLDivElement | null>(null);
   const clientRef = useRef<any>(null);
 
-  const fallbackToBrowser = useCallback(async () => {
-    if (!zoomJoinUrl) return;
-    try {
-      await Linking.openURL(zoomJoinUrl);
-    } catch {}
-  }, [zoomJoinUrl]);
+  // Leave the meeting when the tile unmounts so the participant doesn't
+  // linger as a ghost in the room.
+  useEffect(() => {
+    return () => {
+      const client = clientRef.current;
+      if (client) {
+        try {
+          client.leaveMeeting?.();
+        } catch {}
+        clientRef.current = null;
+      }
+    };
+  }, []);
 
   const handleJoin = useCallback(async () => {
-    if (Platform.OS !== 'web') {
-      setPhase('unsupported');
-      return;
-    }
-    // iOS Safari: getUserMedia must run inside the user-gesture window —
-    // pre-warm permission before the multi-second SDK load chain.
+    if (Platform.OS !== 'web') return;
+    setPhase('joining');
+    setErrorMsg('');
+
+    // iOS Safari: getUserMedia must run inside the click's gesture window.
+    // Pre-warm permission, then release tracks for Zoom to claim.
     let prewarmStream: MediaStream | null = null;
     try {
       if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
@@ -197,25 +206,31 @@ export default function SessionZoomTile({
       console.warn('[SessionZoomTile] camera/mic pre-warm failed:', err);
     }
 
-    setPhase('joining');
     try {
       const getConfig = httpsCallable<{ sessionInstanceId: string }, JoinConfig>(
         functions,
         'getEmbeddedSessionJoinConfig',
       );
-      const res = await getConfig({ sessionInstanceId });
-      const joinConfig = res.data;
+      const [{ data: joinConfig }, ZoomMtgEmbedded] = await Promise.all([
+        getConfig({ sessionInstanceId }),
+        loadZoomEmbedded(),
+      ]);
 
-      const ZoomMtgEmbedded = await loadZoomEmbedded();
       if (prewarmStream) {
-        try { prewarmStream.getTracks().forEach((t) => t.stop()); } catch {}
+        try {
+          prewarmStream.getTracks().forEach((t) => t.stop());
+        } catch {}
         prewarmStream = null;
       }
 
-      const client = ZoomMtgEmbedded.createClient();
-      clientRef.current = client;
       const root = containerRef.current;
       if (!root) throw new Error('Zoom container not mounted');
+
+      const client = ZoomMtgEmbedded.createClient();
+      clientRef.current = client;
+
+      const size =
+        variant === 'pip' ? { width: 210, height: 128 } : { width: 640, height: 420 };
 
       await client.init({
         zoomAppRoot: root,
@@ -227,11 +242,8 @@ export default function SessionZoomTile({
         disableReport: true,
         screenShare: false,
         customize: {
-          video: {
-            isResizable: false,
-            viewSizes: { default: { width: 320, height: 220 } },
-          },
-          meetingInfo: ['topic'],
+          video: { isResizable: false, viewSizes: { default: size } },
+          meetingInfo: [],
         },
       });
 
@@ -240,208 +252,123 @@ export default function SessionZoomTile({
         signature: joinConfig.signature,
         meetingNumber: joinConfig.meetingNumber,
         password: joinConfig.password || '',
-        userName: joinConfig.userName || 'Member',
+        userName: joinConfig.userName || 'GoArrive',
         userEmail: joinConfig.userEmail || '',
         ...(joinConfig.zak ? { zak: joinConfig.zak } : {}),
       });
 
-      autoStartMediaViaToolbar(CONTAINER_ID);
+      autoStartMediaViaToolbar(root, autoStartCamera);
       setPhase('in-meeting');
-      onJoined();
     } catch (err: any) {
-      console.error('[SessionZoomTile] Zoom join failed:', err);
       if (prewarmStream) {
-        try { prewarmStream.getTracks().forEach((t) => t.stop()); } catch {}
+        try {
+          prewarmStream.getTracks().forEach((t) => t.stop());
+        } catch {}
       }
-      setErrorMsg(err?.reason || err?.message || 'The in-app join failed.');
+      console.error('[SessionZoomTile] join failed:', err);
+      setErrorMsg(err?.reason || err?.message || 'Could not join the video session.');
       setPhase('error');
     }
-  }, [sessionInstanceId, onJoined]);
+  }, [sessionInstanceId, variant, autoStartCamera]);
 
-  // Strip Zoom toolbar controls that don't belong in a coaching session.
-  useEffect(() => {
-    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
-    const STYLE_ID = 'session-zoom-tile-toolbar-strip';
-    if (document.getElementById(STYLE_ID)) return;
-    const style = document.createElement('style');
-    style.id = STYLE_ID;
-    style.textContent = `
-      #${CONTAINER_ID} [aria-label="Chat"],
-      #${CONTAINER_ID} [aria-label="Open chat panel"],
-      #${CONTAINER_ID} [aria-label="Participants"],
-      #${CONTAINER_ID} [aria-label="Manage participants"],
-      #${CONTAINER_ID} [aria-label="Open the participants list pane"],
-      #${CONTAINER_ID} [aria-label="Reactions"],
-      #${CONTAINER_ID} [aria-label="More meeting controls"],
-      #${CONTAINER_ID} [aria-label="More"],
-      #${CONTAINER_ID} [aria-label="Settings"],
-      #${CONTAINER_ID} [aria-label="Apps"],
-      #${CONTAINER_ID} [aria-label="Open Apps"],
-      #${CONTAINER_ID} [aria-label="AI Companion"],
-      #${CONTAINER_ID} [aria-label="Companion mode"],
-      #${CONTAINER_ID} [aria-label*="Security"],
-      #${CONTAINER_ID} [aria-label*="Encryption"],
-      #${CONTAINER_ID} [aria-label*="Share Screen"],
-      #${CONTAINER_ID} [aria-label*="Share screen"],
-      #${CONTAINER_ID} [aria-label*="share screen"],
-      #${CONTAINER_ID} [aria-label*="Share Content"],
-      #${CONTAINER_ID} [aria-label*="Record"],
-      #${CONTAINER_ID} [aria-label*="record"] {
-        display: none !important;
-      }
-    `;
-    document.head.appendChild(style);
-    return () => { style.remove(); };
-  }, []);
+  const isPip = variant === 'pip';
 
-  useEffect(() => {
-    return () => {
-      const client = clientRef.current;
-      if (client) {
-        try { client.leaveMeeting?.(); } catch {}
-        try { (globalThis as any).ZoomMtgEmbedded?.destroyClient?.(); } catch {}
-      }
-    };
-  }, []);
-
-  const inMeeting = phase === 'in-meeting';
+  if (Platform.OS !== 'web') {
+    return (
+      <View style={[s.frame, isPip ? s.framePip : s.framePane]}>
+        <Text style={s.placeholderText}>Live video is available on web for now.</Text>
+      </View>
+    );
+  }
 
   return (
-    <>
-      {phase === 'idle' && (
-        <View style={s.card}>
-          <Text style={s.cardLabel}>Step 1 — Start your session</Text>
-          <Text style={s.cardSub}>
-            This session is recorded for you and your coach. Join the session
-            room first — your workout starts right after.
-          </Text>
-          {Platform.OS === 'web' ? (
-            <Pressable style={s.primaryBtn} onPress={handleJoin}>
-              <Text style={s.primaryBtnText}>Start Session</Text>
-            </Pressable>
-          ) : (
+    <View style={[s.frame, isPip ? s.framePip : s.framePane]}>
+      {/* Zoom mounts its Component View into this div. */}
+      <div
+        ref={containerRef as any}
+        style={{ width: '100%', height: '100%', overflow: 'hidden' }}
+      />
+      {phase !== 'in-meeting' && (
+        <View style={s.overlay}>
+          {phase === 'joining' ? (
             <>
-              <Text style={s.cardSub}>
-                In-app session join is web-only for now. Join in your browser,
-                then come back and continue to your workout.
-              </Text>
-              {!!zoomJoinUrl && (
-                <Pressable style={s.primaryBtn} onPress={fallbackToBrowser}>
-                  <Text style={s.primaryBtnText}>Join in browser</Text>
-                </Pressable>
-              )}
-              {onSkip && (
-                <Pressable style={s.secondaryBtn} onPress={onSkip}>
-                  <Text style={s.secondaryBtnText}>Continue to workout</Text>
-                </Pressable>
-              )}
+              <ActivityIndicator color={GOLD} />
+              <Text style={s.overlayText}>Connecting…</Text>
             </>
-          )}
-        </View>
-      )}
-
-      {phase === 'joining' && (
-        <View style={s.card}>
-          <ActivityIndicator color={GOLD} />
-          <Text style={s.cardSub}>Connecting to your session room…</Text>
-        </View>
-      )}
-
-      {phase === 'error' && (
-        <View style={[s.card, { borderColor: RED }]}>
-          <Text style={[s.cardLabel, { color: RED }]}>Couldn&apos;t start the session room</Text>
-          {!!errorMsg && <Text style={s.cardSub}>{errorMsg}</Text>}
-          <Pressable style={s.primaryBtn} onPress={handleJoin}>
-            <Text style={s.primaryBtnText}>Try again</Text>
-          </Pressable>
-          {!!zoomJoinUrl && (
-            <Pressable style={s.secondaryBtn} onPress={fallbackToBrowser}>
-              <Text style={s.secondaryBtnText}>Join in browser instead</Text>
-            </Pressable>
-          )}
-          {onSkip && (
-            <Pressable style={s.secondaryBtn} onPress={onSkip}>
-              <Text style={s.secondaryBtnText}>Continue to workout anyway</Text>
+          ) : phase === 'error' ? (
+            <>
+              <Text style={s.errorText} numberOfLines={isPip ? 2 : 4}>
+                {errorMsg}
+              </Text>
+              <Pressable style={s.joinBtn} onPress={handleJoin}>
+                <Text style={s.joinBtnText}>Retry</Text>
+              </Pressable>
+            </>
+          ) : (
+            <Pressable style={s.joinBtn} onPress={handleJoin}>
+              <Text style={s.joinBtnText}>
+                {joinLabel || (isPip ? 'Turn Camera On' : 'Join Video')}
+              </Text>
             </Pressable>
           )}
         </View>
       )}
-
-      {phase === 'unsupported' && (
-        <View style={s.card}>
-          <Text style={s.cardLabel}>Not supported on this device yet</Text>
-          {!!zoomJoinUrl && (
-            <Pressable style={s.primaryBtn} onPress={fallbackToBrowser}>
-              <Text style={s.primaryBtnText}>Join in browser</Text>
-            </Pressable>
-          )}
-          {onSkip && (
-            <Pressable style={s.secondaryBtn} onPress={onSkip}>
-              <Text style={s.secondaryBtnText}>Continue to workout</Text>
-            </Pressable>
-          )}
-        </View>
-      )}
-
-      {/* Zoom renders into this div. In PiP mode it floats fixed above the
-          WorkoutPlayer modal (higher z-index than RN-web's modal layer). */}
-      {Platform.OS === 'web' && (
-        <div
-          ref={containerRef as any}
-          id={CONTAINER_ID}
-          style={{
-            display: inMeeting ? 'block' : 'none',
-            ...(pip
-              ? {
-                  position: 'fixed' as const,
-                  bottom: 16,
-                  right: 16,
-                  width: 320,
-                  zIndex: 100000,
-                  borderRadius: 12,
-                  overflow: 'hidden',
-                  boxShadow: '0 4px 24px rgba(0,0,0,0.6)',
-                }
-              : {
-                  width: '100%',
-                  maxWidth: 480,
-                  alignSelf: 'center' as const,
-                  margin: '16px auto',
-                }),
-          }}
-        />
-      )}
-    </>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
-  card: {
+  frame: {
     backgroundColor: CARD_BG,
-    borderColor: BORDER,
     borderWidth: 1,
-    borderRadius: 14,
-    padding: 20,
-    gap: 12,
-    marginBottom: 16,
-    width: '100%',
+    borderColor: BORDER,
+    borderRadius: 12,
+    overflow: 'hidden',
   },
-  cardLabel: { color: TEXT_PRIMARY, fontSize: 16, fontFamily: FH, fontWeight: '700' },
-  cardSub: { color: TEXT_SECONDARY, fontSize: 14, fontFamily: FB, lineHeight: 20 },
-  primaryBtn: {
+  framePip: {
+    width: 214,
+    height: 132,
+  },
+  framePane: {
+    flex: 1,
+    minHeight: 320,
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    padding: 10,
+    backgroundColor: 'rgba(14,17,23,0.85)',
+  },
+  overlayText: {
+    color: TEXT_SECONDARY,
+    fontFamily: FB,
+    fontSize: 12,
+  },
+  errorText: {
+    color: RED,
+    fontFamily: FB,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  joinBtn: {
     backgroundColor: GOLD,
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
   },
-  primaryBtnText: { color: '#0E1117', fontSize: 15, fontFamily: FH, fontWeight: '700' },
-  secondaryBtn: {
-    backgroundColor: 'transparent',
-    borderColor: BORDER,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 11,
-    alignItems: 'center',
+  joinBtnText: {
+    color: '#0E1117',
+    fontFamily: FH,
+    fontSize: 13,
+    fontWeight: '700',
   },
-  secondaryBtnText: { color: TEXT_PRIMARY, fontSize: 14, fontFamily: FH, fontWeight: '600' },
+  placeholderText: {
+    color: TEXT_SECONDARY,
+    fontFamily: FB,
+    fontSize: 12,
+    textAlign: 'center',
+    padding: 12,
+  },
 });

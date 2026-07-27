@@ -90,11 +90,10 @@ export { bookPlaybookSession, cleanupExpiredBookingRequests } from './playbookSc
 // Calendly-style token page + guest-by-email bookings.
 export {
   createPlaybookBookingLink,
+  revokePlaybookBookingLink,
   resolvePlaybookBookingToken,
   bookViaBookingToken,
   playbookBookingIcs,
-  getPlaybookRescheduleSlots,
-  getSessionWorkout,
 } from './playbookBooking';
 import { CloudTasksClient } from '@google-cloud/tasks';
 import { sanitizePlayerWorkout } from './workoutPlayerSanitizer';
@@ -2144,6 +2143,10 @@ export const claimMemberAccount = onCall(
   }
 );
 
+// sendMemberInvite: an earlier duplicate declaration (added in a parallel
+// branch the same day) lived here and broke `tsc` for the whole functions
+// package. Removed in favor of the fuller implementation below, which is
+// what module evaluation order would have exported anyway.
 
 /**
  * sendMemberInvite – Coach-initiated: ensure a Firebase Auth account exists
@@ -3441,9 +3444,11 @@ export const allocateSessionInstance = onCall(
       updatedAt: FieldValue.serverTimestamp(),
     });
 
-    // Advance the round-robin cursor: every successful allocation stamps lastUsedAt
+    // Advance the round-robin cursor: every successful allocation stamps
+    // lastUsedAt; pool rooms also keep lastAllocatedAt for older readers.
     await db.collection('zoom_rooms').doc(allocatedRoom.id).update({
       lastUsedAt: FieldValue.serverTimestamp(),
+      ...(allocatedRoom.poolId ? { lastAllocatedAt: FieldValue.serverTimestamp() } : {}),
       updatedAt: FieldValue.serverTimestamp(),
     });
 
@@ -10027,10 +10032,14 @@ export const getEmbeddedSessionJoinConfig = onCall(
     const callerToken = request.auth?.token as Record<string, any> | undefined;
     const callerIsAdmin =
       callerToken?.role === 'platformAdmin' || callerToken?.admin === true;
-    if (!callerIsAdmin && callerUid !== instance.memberId) {
+    // Coach live-view: the session's coach may also join as a participant to
+    // observe the member (still role 0 — host-start remains future work).
+    const callerIsCoach = callerUid === instance.coachId;
+    const callerIsMember = callerUid === instance.memberId;
+    if (!callerIsAdmin && !callerIsMember && !callerIsCoach) {
       throw new HttpsError(
         'permission-denied',
-        'Only the assigned member can join this session'
+        'Only the assigned member or coach can join this session'
       );
     }
 
@@ -10048,21 +10057,26 @@ export const getEmbeddedSessionJoinConfig = onCall(
       );
     }
 
-    let userName = (instance.memberName as string) || '';
+    // Display identity: coach callers join under their own name so the member
+    // sees "Coach <name>" — everyone else keeps the member identity.
+    const identityUid =
+      callerIsCoach && !callerIsMember
+        ? (instance.coachId as string)
+        : (instance.memberId as string);
+    const identityFallback = callerIsCoach && !callerIsMember ? 'Coach' : 'Member';
+    let userName =
+      callerIsCoach && !callerIsMember ? '' : (instance.memberName as string) || '';
     let userEmail = '';
     try {
-      const userDoc = await db
-        .collection('users')
-        .doc(instance.memberId as string)
-        .get();
+      const userDoc = await db.collection('users').doc(identityUid).get();
       const udata = userDoc.data() || {};
       if (!userName) {
         userName =
-          (udata.displayName as string) || (udata.name as string) || 'Member';
+          (udata.displayName as string) || (udata.name as string) || identityFallback;
       }
       userEmail = (udata.email as string) || '';
     } catch {
-      if (!userName) userName = 'Member';
+      if (!userName) userName = identityFallback;
     }
 
     const sdkKey = zoomMeetingSdkKey.value().trim();
