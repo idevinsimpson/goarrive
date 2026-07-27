@@ -275,6 +275,21 @@ interface WorkoutFolderPageProps {
   onDuplicated?: (newWorkoutId: string) => void;
 }
 
+// Renders the 256px thumb.png for an equipment default.png URL, falling back
+// to the full image if the thumb doesn't exist yet.
+function EquipThumbImage({ url, style }: { url: string; style: any }) {
+  const [failed, setFailed] = useState(false);
+  const thumb = url.includes('default.png') ? url.replace('default.png', 'thumb.png') : url;
+  return (
+    <Image
+      source={{ uri: failed ? url : thumb }}
+      style={style}
+      resizeMode="cover"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 export default function WorkoutFolderPage({
   workoutId,
   coachId,
@@ -305,10 +320,10 @@ export default function WorkoutFolderPage({
   const [equipImgChoices, setEquipImgChoices] = useState<Record<number, string[]>>({});
   const [equipImgSlug, setEquipImgSlug] = useState<Record<number, string>>({});
   const [equipHistoryOpenIdx, setEquipHistoryOpenIdx] = useState<number | null>(null);
-  const [equipHistory, setEquipHistory] = useState<{ text: string; imageUrl: string | null }[]>([]);
+  const [equipHistory, setEquipHistory] = useState<{ id: string; text: string; imageUrl: string | null }[]>([]);
   const [equipHistoryLoading, setEquipHistoryLoading] = useState(false);
   const [equipLibraryOpenIdx, setEquipLibraryOpenIdx] = useState<number | null>(null);
-  const [equipLibrary, setEquipLibrary] = useState<{ slug: string; label: string; imageUrl: string }[] | null>(null);
+  const [equipLibrary, setEquipLibrary] = useState<{ slug: string; label: string; imageUrl: string; thumbUrl?: string }[] | null>(null);
   const [equipLibraryLoading, setEquipLibraryLoading] = useState(false);
   const [equipLibraryError, setEquipLibraryError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'icon' | 'list'>('icon');
@@ -1573,6 +1588,7 @@ export default function WorkoutFolderPage({
         .map(d => {
           const data = d.data();
           return {
+            id: d.id,
             text: (data.text as string) ?? '',
             imageUrl: (data.imageUrl as string | null) ?? null,
             updatedAtMs: data.updatedAt?.toMillis?.() ?? 0,
@@ -1580,7 +1596,7 @@ export default function WorkoutFolderPage({
         })
         .filter(e => e.text)
         .sort((a, b) => b.updatedAtMs - a.updatedAtMs)
-        .map(({ text, imageUrl }) => ({ text, imageUrl }));
+        .map(({ id, text, imageUrl }) => ({ id, text, imageUrl }));
       setEquipHistory(entries);
     } catch (err) {
       console.warn('[WorkoutFolder] equipmentInputHistory load failed', err);
@@ -1598,11 +1614,43 @@ export default function WorkoutFolderPage({
     setEquipHistoryOpenIdx(null);
   }, [blocks, updateBlocks]);
 
+  const deleteEquipHistoryEntry = useCallback(async (entryId: string) => {
+    setEquipHistory(prev => prev.filter(e => e.id !== entryId));
+    try {
+      await deleteDoc(doc(db, 'equipmentInputHistory', entryId));
+    } catch (err) {
+      console.warn('[WorkoutFolder] equipmentInputHistory delete failed', err);
+    }
+  }, []);
+
   // ── Grab Equipment shared image library ──────────────────────────────────
   const listEquipImagesFn = httpsCallable<
     Record<string, never>,
-    { images: { slug: string; label: string; imageUrl: string }[] }
+    { images: { slug: string; label: string; imageUrl: string; thumbUrl?: string }[] }
   >(functions, 'listEquipmentImages');
+
+  const deleteEquipImageFn = httpsCallable<{ equipmentSlug: string }, { ok: boolean }>(
+    functions, 'deleteEquipmentImage');
+
+  const deleteLibraryImage = useCallback((item: { slug: string; label: string }) => {
+    const doDelete = async () => {
+      setEquipLibrary(prev => (prev ?? []).filter(i => i.slug !== item.slug));
+      try {
+        await deleteEquipImageFn({ equipmentSlug: item.slug });
+      } catch (err) {
+        console.warn('[WorkoutFolder] deleteEquipmentImage failed', err);
+      }
+    };
+    const msg = `Delete "${item.label}" from the equipment library? This removes it for all coaches.`;
+    if (Platform.OS === 'web') {
+      if (window.confirm(msg)) doDelete();
+    } else {
+      Alert.alert('Delete Image', msg, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: doDelete },
+      ]);
+    }
+  }, [deleteEquipImageFn]);
 
   const openEquipLibrary = useCallback(async (blockIdx: number) => {
     setEquipLibraryOpenIdx(blockIdx);
@@ -3372,13 +3420,20 @@ export default function WorkoutFolderPage({
                                       }}
                                     >
                                       {entry.imageUrl ? (
-                                        <Image source={{ uri: entry.imageUrl }} style={{ width: 32, height: 32, borderRadius: 6 }} />
+                                        <EquipThumbImage url={entry.imageUrl} style={{ width: 32, height: 32, borderRadius: 6 }} />
                                       ) : (
                                         <View style={{ width: 32, height: 32, borderRadius: 6, backgroundColor: '#2A3347' }} />
                                       )}
                                       <Text style={{ color: '#F0F4F8', fontSize: 14, fontFamily: FB, flex: 1 }} numberOfLines={1}>
                                         {entry.text}
                                       </Text>
+                                      <TouchableOpacity
+                                        onPress={(e: any) => { e?.stopPropagation?.(); deleteEquipHistoryEntry(entry.id); }}
+                                        hitSlop={8}
+                                        style={{ padding: 4 }}
+                                      >
+                                        <Icon name="trash-2" size={14} color="#8A95A3" />
+                                      </TouchableOpacity>
                                     </TouchableOpacity>
                                   ))}
                                 </ScrollView>
@@ -3463,7 +3518,7 @@ export default function WorkoutFolderPage({
                                   </>
                                 ) : (
                                   <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8', fontFamily: FH }}>
-                                    Choose from library
+                                    {block.grabEquipmentImageUrl ? 'Change image' : 'Add an image'}
                                   </Text>
                                 )}
                               </TouchableOpacity>
@@ -3693,13 +3748,31 @@ export default function WorkoutFolderPage({
                                 }}
                               >
                                 <Image
-                                  source={{ uri: item.imageUrl }}
+                                  source={{ uri: item.thumbUrl ?? item.imageUrl }}
                                   style={{ width: '100%' as any, aspectRatio: 1 }}
                                   resizeMode="cover"
                                 />
+                                <TouchableOpacity
+                                  onPress={(e: any) => { e?.stopPropagation?.(); deleteLibraryImage(item)}}
+                                  hitSlop={6}
+                                  style={{
+                                    position: 'absolute' as const,
+                                    top: 4,
+                                    right: 4,
+                                    width: 22,
+                                    height: 22,
+                                    borderRadius: 11,
+                                    backgroundColor: 'rgba(14,17,23,0.75)',
+                                    alignItems: 'center' as const,
+                                    justifyContent: 'center' as const,
+                                  }}
+                                >
+                                  <Icon name="x" size={13} color="#F0F4F8" />
+                                </TouchableOpacity>
                                 <Text
-                                  style={{ color: '#F0F4F8', fontSize: 12, fontFamily: FB, padding: 6, textTransform: 'capitalize' as const }}
+                                  style={{ color: '#F0F4F8', fontSize: 10, lineHeight: 13, fontFamily: FB, padding: 6, textTransform: 'capitalize' as const }}
                                   numberOfLines={2}
+                                  ellipsizeMode="tail"
                                 >
                                   {item.label}
                                 </Text>
