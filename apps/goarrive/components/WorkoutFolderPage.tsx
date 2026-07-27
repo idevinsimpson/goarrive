@@ -228,7 +228,15 @@ function calcDurationMin(blocks: WorkoutBlock[]): number {
       const sets = m.sets ?? 1;
       const durPerSet = m.durationSec ?? DEFAULT_DURATION_SEC;
       const restPerSet = m.restSec ?? DEFAULT_REST_SEC;
-      blockSec += sets * (durPerSet + restPerSet);
+      let workPerSet = durPerSet;
+      if (m.swapSides) {
+        // Mirrors useWorkoutTimer: split halves each side (L+R ≈ configured
+        // duration), duplicate plays full duration per side; swap window between.
+        const perSide = m.swapMode === 'split' ? Math.max(1, Math.round(durPerSet / 2)) : durPerSet;
+        const win = typeof m.swapWindowSec === 'number' && m.swapWindowSec >= 0 && m.swapWindowSec <= 15 ? m.swapWindowSec : 5;
+        workPerSet = perSide * 2 + win;
+      }
+      blockSec += sets * (workPerSet + restPerSet);
     }
     const restBetween = block.restBetweenRoundsSec ?? 0;
     totalSec += demoSec + rounds * (prepSec + blockSec) + (rounds > 1 ? (rounds - 1) * restBetween : 0);
