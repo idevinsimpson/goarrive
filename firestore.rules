@@ -358,6 +358,26 @@ service cloud.firestore {
       allow delete: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
     }
 
+    // ─────────────────────────────────────────────
+    // EQUIPMENT IMAGES META — per-slug ownership record for the shared
+    // equipment image library. All authenticated readers (for attribution
+    // in the library UI); writes only via Cloud Functions (Admin SDK).
+    // ─────────────────────────────────────────────
+    match /equipment_images_meta/{slug} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    // ─────────────────────────────────────────────
+    // EQUIPMENT LIBRARY HIDDEN — per-coach list of slugs to hide from the
+    // shared equipment library. Doc id = coach uid, fields: hiddenSlugs (array).
+    // The deleteEquipmentImage callable populates this via Admin SDK on
+    // non-owner delete; the same coach may read/write their own doc directly.
+    // ─────────────────────────────────────────────
+    match /equipmentLibraryHidden/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
     match /build_folders/{folderId} {
       allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
       allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();

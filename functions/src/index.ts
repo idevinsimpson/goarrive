@@ -10569,6 +10569,19 @@ function slugify(text: string): string {
     .slice(0, 80);
 }
 
+// The equipment library is weight-agnostic: a 15lb and a 35lb dumbbell share
+// one image, so weights/sizes are stripped from slugs and labels.
+const EQUIP_WEIGHT_TOKEN_RE = /^(?:\d+(?:\.\d+)?|lb|lbs|pound|pounds|kg|kgs|kilo|kilos|kilogram|kilograms)$/;
+
+export function stripEquipmentWeightTokens(slug: string): string {
+  const tokens = slug.split('-').filter(t => t && !EQUIP_WEIGHT_TOKEN_RE.test(t));
+  // Drop dangling/duplicate "and" connectors left behind by removed weights.
+  const cleaned = tokens.filter((t, i) =>
+    t !== 'and' || (i > 0 && i < tokens.length - 1 && tokens[i - 1] !== 'and'));
+  const stripped = cleaned.join('-');
+  return stripped || slug;
+}
+
 async function extractEquipmentSlug(text: string, apiKey: string): Promise<{ slug: string; label: string }> {
   try {
     const resp = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -10579,7 +10592,7 @@ async function extractEquipmentSlug(text: string, apiKey: string): Promise<{ slu
         messages: [
           {
             role: 'system',
-            content: 'Extract only the fitness equipment item name(s) from the workout instruction. Return just the equipment name(s) in lowercase, comma-separated if multiple (e.g. "straight bar, dumbbells"). Include weight/size descriptors. No other words.',
+            content: 'Extract only the fitness equipment item name(s) from the workout instruction. Return just the equipment name(s) in lowercase, comma-separated if multiple (e.g. "straight bar, dumbbells"). EXCLUDE all weights, numbers, and size descriptors entirely — "35 pound dumbbells" becomes "dumbbells", "24 inch box" becomes "box". No other words.',
           },
           { role: 'user', content: text },
         ],
@@ -10592,13 +10605,15 @@ async function extractEquipmentSlug(text: string, apiKey: string): Promise<{ slu
       const extracted = json.choices?.[0]?.message?.content?.trim();
       if (extracted) {
         const items = extracted.split(',').map(s => s.trim()).filter(Boolean);
-        const label = items.join(' and ');
-        const slug = items.map(slugify).join('-and-');
-        return { slug, label };
+        const slugs = items.map(s => stripEquipmentWeightTokens(slugify(s))).filter(Boolean);
+        const slug = stripEquipmentWeightTokens(slugs.join('-and-'));
+        const label = slug.replace(/-and-/g, ' and ').replace(/-/g, ' ');
+        if (slug) return { slug, label };
       }
     }
   } catch { /* fall through to full-text slug */ }
-  return { slug: slugify(text), label: text };
+  const fallbackSlug = stripEquipmentWeightTokens(slugify(text));
+  return { slug: fallbackSlug, label: fallbackSlug.replace(/-and-/g, ' and ').replace(/-/g, ' ') };
 }
 
 export const generateEquipmentImage = onCall(
@@ -10715,8 +10730,25 @@ export const saveEquipmentImageChoice = onCall(
     const bucket = admin.storage().bucket();
     const srcPath = `equipment_images/${equipmentSlug}/v${choiceIndex + 1}.png`;
     const destPath = `equipment_images/${equipmentSlug}/default.png`;
+    const thumbPath = `equipment_images/${equipmentSlug}/thumb.png`;
     const [srcBuf] = await bucket.file(srcPath).download();
     await bucket.file(destPath).save(srcBuf, { contentType: 'image/png' });
+    try {
+      const sharp = require('sharp');
+      const thumbBuf = await sharp(srcBuf).resize(256, 256, { fit: 'inside' }).png().toBuffer();
+      await bucket.file(thumbPath).save(thumbBuf, { contentType: 'image/png' });
+    } catch (err) {
+      console.warn('[saveEquipmentImageChoice] thumb generation failed', { equipmentSlug, err: String(err) });
+    }
+    // First-writer wins on ownership. merge:true never overwrites existing createdBy.
+    try {
+      await db.collection('equipment_images_meta').doc(equipmentSlug).set({
+        createdBy: request.auth.uid,
+        createdAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    } catch (err) {
+      console.warn('[saveEquipmentImageChoice] meta write failed', { equipmentSlug, err: String(err) });
+    }
     const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media`;
     console.info('[saveEquipmentImageChoice] Saved default', { equipmentSlug, choiceIndex });
     return { imageUrl };
@@ -10732,18 +10764,99 @@ export const listEquipmentImages = onCall(
     if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Authentication required');
     const bucket = admin.storage().bucket();
     const [files] = await bucket.getFiles({ prefix: 'equipment_images/' });
-    const images = files
+    const fileNames = new Set(files.map(f => f.name));
+    const url = (path: string) =>
+      `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media`;
+    const baseImages = files
       .filter(f => f.name.endsWith('/default.png'))
       .map(f => {
         const slug = f.name.slice('equipment_images/'.length, -'/default.png'.length);
         const label = slug.replace(/-and-/g, ' and ').replace(/-/g, ' ');
-        const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(f.name)}?alt=media`;
-        return { slug, label, imageUrl };
+        const thumbName = `equipment_images/${slug}/thumb.png`;
+        return {
+          slug,
+          label,
+          imageUrl: url(f.name),
+          thumbUrl: fileNames.has(thumbName) ? url(thumbName) : url(f.name),
+        };
       });
-    console.info('[listEquipmentImages] Listed', { count: images.length });
+
+    // Batch-get equipment_images_meta docs for all slugs (ownership attribution).
+    const metaRefs = baseImages.map(img => db.collection('equipment_images_meta').doc(img.slug));
+    const metaByslug = new Map<string, string | null>();
+    if (metaRefs.length > 0) {
+      try {
+        const metaSnaps = await db.getAll(...metaRefs);
+        metaSnaps.forEach(snap => {
+          const data = snap.exists ? snap.data() : null;
+          metaByslug.set(snap.id, (data?.createdBy as string) ?? null);
+        });
+      } catch (err) {
+        console.warn('[listEquipmentImages] meta batch-get failed', { err: String(err) });
+      }
+    }
+
+    // Per-coach hidden-slug filter.
+    let hiddenSlugs = new Set<string>();
+    try {
+      const hideSnap = await db.collection('equipmentLibraryHidden').doc(request.auth.uid).get();
+      if (hideSnap.exists) {
+        const arr = (hideSnap.data()?.hiddenSlugs as string[] | undefined) ?? [];
+        hiddenSlugs = new Set(arr);
+      }
+    } catch (err) {
+      console.warn('[listEquipmentImages] hidden slugs read failed', { err: String(err) });
+    }
+
+    const images = baseImages
+      .filter(img => !hiddenSlugs.has(img.slug))
+      .map(img => ({ ...img, createdBy: metaByslug.get(img.slug) ?? null }));
+    console.info('[listEquipmentImages] Listed', { count: images.length, hidden: hiddenSlugs.size });
     return { images };
   },
 );
+
+// ─── deleteEquipmentImage — ownership-scoped removal from the shared library ─
+// If the caller created the slug (or is platformAdmin), delete files + meta
+// platform-wide. Otherwise, add the slug to the caller's per-coach hidden list
+// so the image is filtered out of listEquipmentImages for this coach only.
+export const deleteEquipmentImage = onCall(
+  { region: 'us-central1', timeoutSeconds: 60, invoker: 'public' },
+  async (request) => {
+    if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Authentication required');
+    const { equipmentSlug } = request.data as { equipmentSlug?: string };
+    if (!equipmentSlug || !/^[a-z0-9][a-z0-9-]{0,119}$/.test(equipmentSlug)) {
+      throw new HttpsError('invalid-argument', 'Valid equipmentSlug is required');
+    }
+    const uid = request.auth.uid;
+    const isPlatformAdmin = request.auth.token?.platformAdmin === true
+      || request.auth.token?.role === 'platformAdmin'
+      || request.auth.token?.admin === true;
+
+    const metaRef = db.collection('equipment_images_meta').doc(equipmentSlug);
+    const metaSnap = await metaRef.get();
+    const createdBy = metaSnap.exists ? (metaSnap.data()?.createdBy as string | undefined) : undefined;
+    const isOwner = createdBy === uid;
+
+    if (isOwner || isPlatformAdmin) {
+      const bucket = admin.storage().bucket();
+      await bucket.deleteFiles({ prefix: `equipment_images/${equipmentSlug}/` });
+      try { await metaRef.delete(); } catch (err) {
+        console.warn('[deleteEquipmentImage] meta delete failed', { equipmentSlug, err: String(err) });
+      }
+      console.info('[deleteEquipmentImage] Platform delete', { equipmentSlug, by: uid, admin: isPlatformAdmin });
+      return { ok: true, scope: 'platform' as const };
+    }
+
+    // Non-owner: hide from this coach's library only.
+    await db.collection('equipmentLibraryHidden').doc(uid).set({
+      hiddenSlugs: FieldValue.arrayUnion(equipmentSlug),
+    }, { merge: true });
+    console.info('[deleteEquipmentImage] Hidden for coach', { equipmentSlug, by: uid });
+    return { ok: true, scope: 'hidden' as const };
+  },
+);
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AI Movement Variation (Runway video-to-video)
