@@ -34,6 +34,10 @@
         "destination": "/live-session/[sessionInstanceId].html"
       },
       {
+        "source": "/live-view/**",
+        "destination": "/live-view/[sessionInstanceId].html"
+      },
+      {
         "source": "/share-shell",
         "destination": "/share/[shareId].html"
       },

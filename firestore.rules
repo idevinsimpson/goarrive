@@ -655,6 +655,21 @@ service cloud.firestore {
       allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
       allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
       allow delete: if false; // cancel only
+
+      // Live workout player state (playbook live view). The member writes
+      // their in-progress player state; the coach subscribes to watch it in
+      // the live-view split screen. Parent-doc lookup enforces tenancy.
+      match /live/{docId} {
+        allow read: if isAuthenticated() && (
+          isCoachOrBootstrap(get(/databases/$(database)/documents/session_instances/$(instanceId)).data.coachId)
+          || isOwnDoc(get(/databases/$(database)/documents/session_instances/$(instanceId)).data.memberId)
+          || isPlatformAdmin()
+        );
+        allow write: if isAuthenticated() && (
+          isOwnDoc(get(/databases/$(database)/documents/session_instances/$(instanceId)).data.memberId)
+          || isPlatformAdmin()
+        );
+      }
     }
 
     // ─────────────────────────────────────────────

@@ -95,6 +95,17 @@ export { computePreloadVideoUrl, handleVideoLayerPlaybackStatus } from './Workou
 import { pickNameTier, computePlayerCanvas, nextStallRecoveryAction, type StallRecoveryState } from './WorkoutPlayer.helpers';
 
 // ── Types ──────────────────────────────────────────────────────────────────
+export interface WorkoutLiveProgress {
+  phase: string;
+  currentIndex: number;
+  total: number;
+  movementName: string | null;
+  nextMovementName: string | null;
+  isPaused: boolean;
+  timeLeft: number | null;
+  roundNumber: number | null;
+}
+
 interface WorkoutPlayerProps {
   visible: boolean;
   workout: any;
@@ -103,6 +114,10 @@ interface WorkoutPlayerProps {
   onSwapLog?: (swaps: any[]) => void;
   onHeartRateSummary?: (stats: HeartRateSessionStats | null) => void;
   isPreview?: boolean;
+  /** Fires on phase/movement/pause transitions (playbook live view). */
+  onLiveProgress?: (state: WorkoutLiveProgress) => void;
+  /** Rendered above the player inside the fullscreen modal (Zoom PiP tile). */
+  zoomOverlay?: React.ReactNode;
 }
 
 // ── Heart-rate zone color ───────────────────────────────────────────────────
@@ -141,6 +156,8 @@ export default function WorkoutPlayer({
   onSwapLog,
   onHeartRateSummary,
   isPreview = false,
+  onLiveProgress,
+  zoomOverlay,
 }: WorkoutPlayerProps) {
   // ── Hooks ────────────────────────────────────────────────────────────
   const flatFromBlocks = useWorkoutFlatten(workout);
@@ -158,6 +175,29 @@ export default function WorkoutPlayer({
   } = timer;
 
   useWakeLock(phase !== 'ready' && phase !== 'complete');
+
+  // Live progress publisher (playbook live view). Fires on transitions only —
+  // not every timer tick — so Firestore writes stay cheap for the caller.
+  const liveSnapshotRef = useRef<{ timeLeft: number | null; movementName: string | null; nextMovementName: string | null; total: number; roundNumber: number | null }>({
+    timeLeft: null, movementName: null, nextMovementName: null, total: 0, roundNumber: null,
+  });
+  liveSnapshotRef.current = {
+    timeLeft: typeof timeLeft === 'number' ? timeLeft : null,
+    movementName: current?.name ?? null,
+    nextMovementName: next?.name ?? null,
+    total,
+    roundNumber: roundNumber ?? null,
+  };
+  useEffect(() => {
+    if (!onLiveProgress) return;
+    onLiveProgress({
+      phase,
+      currentIndex,
+      isPaused,
+      ...liveSnapshotRef.current,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, currentIndex, isPaused]);
   useMediaPrefetch(
     flatMovements,
     currentIndex,
@@ -2087,6 +2127,13 @@ export default function WorkoutPlayer({
           </View>
         </View>
       </Modal>
+
+      {/* Zoom PiP overlay (playbook live view) — floats above the player. */}
+      {zoomOverlay ? (
+        <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
+          {zoomOverlay}
+        </View>
+      ) : null}
     </Modal>
   );
 }
