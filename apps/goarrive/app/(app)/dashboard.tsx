@@ -34,6 +34,7 @@ import WorkoutLogReview from '../../components/WorkoutLogReview';
 import CoachWorkoutStatsWidget from '../../components/CoachWorkoutStatsWidget';
 import OnboardingChecklist from '../../components/OnboardingChecklist';
 import CoachLaunchCard from '../../components/CoachLaunchCard';
+import CoachSetupCard from '../../components/CoachSetupCard';
 import WhatsNewCard from '../../components/WhatsNewCard';
 import { router } from 'expo-router';
 import AdminWorkoutMetrics from '../../components/AdminWorkoutMetrics';
@@ -363,6 +364,9 @@ export default function DashboardScreen() {
 
         {/* Coach Launch entry — guided journey */}
         {modules.coachLaunch && <CoachLaunchCard />}
+
+        {/* Coach Setup entry — practical post-agreement onboarding */}
+        {(role === 'coach' || role === 'platformAdmin') && <CoachSetupCard />}
 
         {/* Onboarding checklist */}
         <OnboardingChecklist />
