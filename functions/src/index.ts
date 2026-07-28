@@ -10715,6 +10715,7 @@ export const saveEquipmentImageChoice = onCall(
     const bucket = admin.storage().bucket();
     const srcPath = `equipment_images/${equipmentSlug}/v${choiceIndex + 1}.png`;
     const destPath = `equipment_images/${equipmentSlug}/default.png`;
+    const thumbPath = `equipment_images/${equipmentSlug}/thumb.png`;
     const [srcBuf] = await bucket.file(srcPath).download();
     await bucket.file(destPath).save(srcBuf, { contentType: 'image/png' });
     try {
@@ -10748,9 +10749,6 @@ export const listEquipmentImages = onCall(
     if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Authentication required');
     const bucket = admin.storage().bucket();
     const [files] = await bucket.getFiles({ prefix: 'equipment_images/' });
-    const fileNames = new Set(files.map(f => f.name));
-    const url = (path: string) =>
-      `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media`;
     const baseImages = files
       .filter(f => f.name.endsWith('/default.png'))
       .map(f => {
