@@ -314,9 +314,10 @@ function CoachSetupScreenInner() {
       quality: 0.8,
     });
     if (result.canceled || !result.assets?.[0]?.uri) return;
+    const uri = result.assets[0].uri;
+    setPhotoURL(uri); // show local preview immediately
     setUploadingPhoto(true);
     try {
-      const uri = result.assets[0].uri;
       const resp = await fetch(uri);
       const blob = await resp.blob();
       const storage = getStorage();
@@ -345,9 +346,10 @@ function CoachSetupScreenInner() {
       quality: 0.8,
     });
     if (result.canceled || !result.assets?.[0]?.uri) return;
+    const uri = result.assets[0].uri;
+    setLogoURL(uri); // show local preview immediately
     setUploadingLogo(true);
     try {
-      const uri = result.assets[0].uri;
       const resp = await fetch(uri);
       const blob = await resp.blob();
       const storage = getStorage();
@@ -835,13 +837,20 @@ function ModuleDetail({
                 Required to complete this module. Your photo appears in member-facing views throughout the app.
               </Text>
               <View style={s.photoRow}>
-                {photoURL ? (
-                  <Image source={{ uri: photoURL }} style={s.photoPreview} />
-                ) : (
-                  <View style={s.photoPlaceholder}>
-                    <Icon name="user" size={32} color={MUTED} />
-                  </View>
-                )}
+                <View style={{ position: 'relative' }}>
+                  {photoURL ? (
+                    <Image source={{ uri: photoURL }} style={s.photoPreview} />
+                  ) : (
+                    <View style={s.photoPlaceholder}>
+                      <Icon name="user" size={32} color={MUTED} />
+                    </View>
+                  )}
+                  {uploadingPhoto && (
+                    <View style={s.photoUploadOverlay}>
+                      <ActivityIndicator size="small" color="#fff" />
+                    </View>
+                  )}
+                </View>
                 <View style={{ flex: 1, gap: 8 }}>
                   <Pressable
                     style={[s.uploadBtn, uploadingPhoto && s.btnDisabled]}
@@ -874,13 +883,20 @@ function ModuleDetail({
                 Upload a personal or brand logo. Displayed in some coach-facing contexts.
               </Text>
               <View style={s.photoRow}>
-                {logoURL ? (
-                  <Image source={{ uri: logoURL }} style={[s.photoPreview, { borderRadius: 8 }]} />
-                ) : (
-                  <View style={[s.photoPlaceholder, { borderRadius: 8 }]}>
-                    <Icon name="image" size={28} color={MUTED} />
-                  </View>
-                )}
+                <View style={{ position: 'relative' }}>
+                  {logoURL ? (
+                    <Image source={{ uri: logoURL }} style={[s.photoPreview, { borderRadius: 8 }]} />
+                  ) : (
+                    <View style={[s.photoPlaceholder, { borderRadius: 8 }]}>
+                      <Icon name="image" size={28} color={MUTED} />
+                    </View>
+                  )}
+                  {uploadingLogo && (
+                    <View style={[s.photoUploadOverlay, { borderRadius: 8 }]}>
+                      <ActivityIndicator size="small" color="#fff" />
+                    </View>
+                  )}
+                </View>
                 <View style={{ flex: 1, gap: 8 }}>
                   <Pressable
                     style={[s.uploadBtn, uploadingLogo && s.btnDisabled]}
@@ -1492,6 +1508,17 @@ const s = StyleSheet.create({
     backgroundColor: '#1A2233',
     borderWidth: 1,
     borderColor: BORDER,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoUploadOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(0,0,0,0.55)',
     alignItems: 'center',
     justifyContent: 'center',
   },
