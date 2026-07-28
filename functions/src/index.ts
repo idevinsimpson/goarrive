@@ -10717,6 +10717,22 @@ export const saveEquipmentImageChoice = onCall(
     const destPath = `equipment_images/${equipmentSlug}/default.png`;
     const [srcBuf] = await bucket.file(srcPath).download();
     await bucket.file(destPath).save(srcBuf, { contentType: 'image/png' });
+    try {
+      const sharp = require('sharp');
+      const thumbBuf = await sharp(srcBuf).resize(256, 256, { fit: 'inside' }).png().toBuffer();
+      await bucket.file(thumbPath).save(thumbBuf, { contentType: 'image/png' });
+    } catch (err) {
+      console.warn('[saveEquipmentImageChoice] thumb generation failed', { equipmentSlug, err: String(err) });
+    }
+    // First-writer wins on ownership. merge:true never overwrites existing createdBy.
+    try {
+      await db.collection('equipment_images_meta').doc(equipmentSlug).set({
+        createdBy: request.auth.uid,
+        createdAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    } catch (err) {
+      console.warn('[saveEquipmentImageChoice] meta write failed', { equipmentSlug, err: String(err) });
+    }
     const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media`;
     console.info('[saveEquipmentImageChoice] Saved default', { equipmentSlug, choiceIndex });
     return { imageUrl };
@@ -10732,7 +10748,10 @@ export const listEquipmentImages = onCall(
     if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Authentication required');
     const bucket = admin.storage().bucket();
     const [files] = await bucket.getFiles({ prefix: 'equipment_images/' });
-    const images = files
+    const fileNames = new Set(files.map(f => f.name));
+    const url = (path: string) =>
+      `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media`;
+    const baseImages = files
       .filter(f => f.name.endsWith('/default.png'))
       .map(f => {
         const slug = f.name.slice('equipment_images/'.length, -'/default.png'.length);
@@ -10740,8 +10759,98 @@ export const listEquipmentImages = onCall(
         const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(f.name)}?alt=media`;
         return { slug, label, imageUrl };
       });
-    console.info('[listEquipmentImages] Listed', { count: images.length });
+
+    // Batch-get equipment_images_meta docs for all slugs (ownership attribution).
+    const metaRefs = baseImages.map(img => db.collection('equipment_images_meta').doc(img.slug));
+    const metaByslug = new Map<string, string | null>();
+    if (metaRefs.length > 0) {
+      try {
+        const metaSnaps = await db.getAll(...metaRefs);
+        metaSnaps.forEach(snap => {
+          const data = snap.exists ? snap.data() : null;
+          metaByslug.set(snap.id, (data?.createdBy as string) ?? null);
+        });
+      } catch (err) {
+        console.warn('[listEquipmentImages] meta batch-get failed', { err: String(err) });
+      }
+    }
+
+    // Per-coach hidden-slug filter.
+    let hiddenSlugs = new Set<string>();
+    try {
+      const hideSnap = await db.collection('equipmentLibraryHidden').doc(request.auth.uid).get();
+      if (hideSnap.exists) {
+        const arr = (hideSnap.data()?.hiddenSlugs as string[] | undefined) ?? [];
+        hiddenSlugs = new Set(arr);
+      }
+    } catch (err) {
+      console.warn('[listEquipmentImages] hidden slugs read failed', { err: String(err) });
+    }
+
+    const images = baseImages
+      .filter(img => !hiddenSlugs.has(img.slug))
+      .map(img => ({ ...img, createdBy: metaByslug.get(img.slug) ?? null }));
+    console.info('[listEquipmentImages] Listed', { count: images.length, hidden: hiddenSlugs.size });
     return { images };
+  },
+);
+
+// ─── deleteEquipmentImage — ownership-scoped removal from the shared library ─
+// If the caller created the slug (or is platformAdmin), delete files + meta
+// platform-wide. Otherwise, add the slug to the caller's per-coach hidden list
+// so the image is filtered out of listEquipmentImages for this coach only.
+export const deleteEquipmentImage = onCall(
+  { region: 'us-central1', timeoutSeconds: 60, invoker: 'public' },
+  async (request) => {
+    if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Authentication required');
+    const { equipmentSlug } = request.data as { equipmentSlug?: string };
+    if (!equipmentSlug || !/^[a-z0-9][a-z0-9-]{0,119}$/.test(equipmentSlug)) {
+      throw new HttpsError('invalid-argument', 'Valid equipmentSlug is required');
+    }
+    const uid = request.auth.uid;
+    const isPlatformAdmin = request.auth.token?.platformAdmin === true
+      || request.auth.token?.role === 'platformAdmin'
+      || request.auth.token?.admin === true;
+
+    const metaRef = db.collection('equipment_images_meta').doc(equipmentSlug);
+    const metaSnap = await metaRef.get();
+    const createdBy = metaSnap.exists ? (metaSnap.data()?.createdBy as string | undefined) : undefined;
+    const isOwner = createdBy === uid;
+
+    if (isOwner || isPlatformAdmin) {
+      const bucket = admin.storage().bucket();
+      await bucket.deleteFiles({ prefix: `equipment_images/${equipmentSlug}/` });
+      try { await metaRef.delete(); } catch (err) {
+        console.warn('[deleteEquipmentImage] meta delete failed', { equipmentSlug, err: String(err) });
+      }
+      // Clean up dangling references in per-coach settings docs so deleted slugs
+      // don't linger in order arrays or customNames maps.
+      const settingsSnap = await db.collection('equipmentLibrarySettings').get();
+      if (!settingsSnap.empty) {
+        const batch = db.batch();
+        for (const settingsDoc of settingsSnap.docs) {
+          const data = settingsDoc.data() as { order?: string[]; customNames?: Record<string, string> };
+          const update: Record<string, any> = {};
+          if (Array.isArray(data.order) && data.order.includes(equipmentSlug)) {
+            update.order = FieldValue.arrayRemove(equipmentSlug);
+          }
+          if (data.customNames?.[equipmentSlug]) {
+            update[`customNames.${equipmentSlug}`] = FieldValue.delete();
+          }
+          if (Object.keys(update).length > 0) batch.update(settingsDoc.ref, update);
+        }
+        await batch.commit();
+      }
+      console.info('[deleteEquipmentImage] Platform delete', { equipmentSlug, by: uid, admin: isPlatformAdmin });
+      return { ok: true, scope: 'platform' as const };
+    }
+
+    // Non-owner: hide from this coach's library only.
+    await db.collection('equipmentLibraryHidden').doc(uid).set({
+      hiddenSlugs: FieldValue.arrayUnion(equipmentSlug),
+    }, { merge: true });
+    console.info('[deleteEquipmentImage] Hidden for coach', { equipmentSlug, by: uid });
+    return { ok: true, scope: 'hidden' as const };
   },
 );
 
