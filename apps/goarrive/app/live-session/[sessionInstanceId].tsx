@@ -361,6 +361,7 @@ export default function LiveSessionScreen() {
         <WorkoutPlayer
           visible={playerVisible}
           workout={workout}
+          sessionInstanceId={sessionInstanceId}
           onClose={() => setPlayerVisible(false)}
           onComplete={() => {
             setPlayerVisible(false);

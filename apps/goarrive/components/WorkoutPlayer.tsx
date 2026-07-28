@@ -48,7 +48,7 @@ import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useWorkoutTTS, unlockAudioPlayback } from '../hooks/useWorkoutTTS';
 import { useHeartRate, HeartRateSessionStats } from '../hooks/useHeartRate';
 import { useAuth } from '../lib/AuthContext';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { setAudioMuted, unlockAudioContext } from '../lib/audioCues';
 import { httpsCallable } from 'firebase/functions';
@@ -116,6 +116,8 @@ interface WorkoutPlayerProps {
   isPreview?: boolean;
   /** Fires on phase/movement/pause transitions (playbook live view). */
   onLiveProgress?: (state: WorkoutLiveProgress) => void;
+  /** When set, writes live player state to session_instances/{id}/live/player for coach live-view. */
+  sessionInstanceId?: string;
   /** Rendered above the player inside the fullscreen modal (Zoom PiP tile). */
   zoomOverlay?: React.ReactNode;
 }
@@ -157,6 +159,7 @@ export default function WorkoutPlayer({
   onHeartRateSummary,
   isPreview = false,
   onLiveProgress,
+  sessionInstanceId,
   zoomOverlay,
 }: WorkoutPlayerProps) {
   // ── Hooks ────────────────────────────────────────────────────────────
@@ -189,13 +192,14 @@ export default function WorkoutPlayer({
     roundNumber: roundNumber ?? null,
   };
   useEffect(() => {
-    if (!onLiveProgress) return;
-    onLiveProgress({
-      phase,
-      currentIndex,
-      isPaused,
-      ...liveSnapshotRef.current,
-    });
+    const state = { phase, currentIndex, isPaused, ...liveSnapshotRef.current };
+    if (onLiveProgress) onLiveProgress(state);
+    if (sessionInstanceId) {
+      setDoc(
+        doc(db, 'session_instances', sessionInstanceId, 'live', 'player'),
+        { ...state, workoutName: workout?.title ?? workout?.name ?? null, updatedAt: serverTimestamp() },
+      ).catch((err) => console.warn('[WorkoutPlayer] live state write failed:', err));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, currentIndex, isPaused]);
   useMediaPrefetch(
