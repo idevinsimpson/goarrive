@@ -1652,17 +1652,13 @@ export default function WorkoutFolderPage({
         console.warn('[WorkoutFolder] deleteEquipmentImage failed', err);
       }
     };
-    const title = mode === 'platform' ? 'Delete for all coaches?' : 'Remove from your library?';
-    const msg = mode === 'platform'
-      ? 'This removes it from the platform.'
-      : 'It stays visible to other coaches.';
-    const confirmLabel = mode === 'platform' ? 'Delete' : 'Remove';
+    const msg = 'This will permanently delete it.';
     if (Platform.OS === 'web') {
-      if (window.confirm(`${title}\n${msg}`)) doAction();
+      if (window.confirm(`Delete?\n${msg}`)) doAction();
     } else {
-      Alert.alert(title, msg, [
+      Alert.alert('Delete?', msg, [
         { text: 'Cancel', style: 'cancel' },
-        { text: confirmLabel, style: 'destructive', onPress: doAction },
+        { text: 'Delete', style: 'destructive', onPress: doAction },
       ]);
     }
   }, [deleteEquipImageFn, removeLibrarySlugLocally]);
@@ -3782,14 +3778,14 @@ export default function WorkoutFolderPage({
                           hitSlop={8}
                           style={{ padding: 4 }}
                         >
-                          <Icon name="sliders" size={20} color={equipLibShowFilter ? '#7C3AED' : '#8A95A3'} />
+                          <Icon name="filter" size={20} color={equipLibShowFilter ? '#7C3AED' : '#8A95A3'} />
                         </TouchableOpacity>
                         <TouchableOpacity
                           onPress={() => setEquipLibIsEditMode(e => !e)}
                           hitSlop={8}
                           style={{ padding: 4 }}
                         >
-                          <Icon name="pencil" size={20} color={equipLibIsEditMode ? '#7C3AED' : '#8A95A3'} />
+                          <Icon name="edit" size={20} color={equipLibIsEditMode ? '#7C3AED' : '#8A95A3'} />
                         </TouchableOpacity>
                         <TouchableOpacity onPress={closeEquipLibrary} hitSlop={8} style={{ padding: 4 }}>
                           <Icon name="x" size={22} color="#8A95A3" />
@@ -3862,6 +3858,7 @@ export default function WorkoutFolderPage({
                           data={filteredLibrary}
                           keyExtractor={(item) => item.slug}
                           onDragEnd={({ data }) => saveEquipLibOrder(data.map(i => i.slug))}
+                          style={{ flex: 1 }}
                           contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
                           renderItem={({ item, drag, isActive }: DragRenderItemParams<typeof filteredLibrary[0]>) => {
                             const isOwner = !!item.createdBy && item.createdBy === coachId;
@@ -3882,7 +3879,7 @@ export default function WorkoutFolderPage({
                                 }}>
                                   {/* Drag handle */}
                                   <TouchableOpacity onLongPress={drag} delayLongPress={150} style={{ padding: 12 }}>
-                                    <Icon name="menu" size={18} color="#5A6478" />
+                                    <Icon name="more-horizontal" size={18} color="#5A6478" />
                                   </TouchableOpacity>
                                   {/* Thumbnail */}
                                   <Image
@@ -5386,6 +5383,7 @@ const st = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     maxHeight: '85%',
+    flex: 1,
     borderWidth: 1,
     borderColor: '#1E2A3A',
     borderBottomWidth: 0,
