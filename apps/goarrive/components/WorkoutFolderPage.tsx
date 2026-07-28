@@ -62,6 +62,7 @@ import VideoCropModal, { CropValues } from './VideoCropModal';
 import { FB, FH } from '../lib/theme';
 import { CONTENT_BOTTOM_CLEARANCE } from '../lib/tabBarStyle';
 import PosterThumb from './PosterThumb';
+import DraggableFlatList, { ScaleDecorator, RenderItemParams as DragRenderItemParams } from 'react-native-draggable-flatlist';
 import {
   filterMovements,
   rankByPrimaryMuscle,
@@ -326,6 +327,12 @@ export default function WorkoutFolderPage({
   const [equipLibrary, setEquipLibrary] = useState<{ slug: string; label: string; imageUrl: string; thumbUrl?: string; createdBy?: string | null }[] | null>(null);
   const [equipLibraryLoading, setEquipLibraryLoading] = useState(false);
   const [equipLibraryError, setEquipLibraryError] = useState<string | null>(null);
+  const [equipLibFilterText, setEquipLibFilterText] = useState('');
+  const [equipLibShowFilter, setEquipLibShowFilter] = useState(false);
+  const [equipLibIsEditMode, setEquipLibIsEditMode] = useState(false);
+  const [equipLibOrder, setEquipLibOrder] = useState<string[]>([]);
+  const [equipLibCustomNames, setEquipLibCustomNames] = useState<Record<string, string>>({});
+  const [equipLibRenaming, setEquipLibRenaming] = useState<Record<string, string>>({});
   const [viewMode, setViewMode] = useState<'icon' | 'list'>('icon');
 
   // Intro / Outro — workout-level fields
@@ -1645,13 +1652,13 @@ export default function WorkoutFolderPage({
         console.warn('[WorkoutFolder] deleteEquipmentImage failed', err);
       }
     };
-    const title = mode === 'platform' ? 'Delete image' : 'Hide image';
+    const title = mode === 'platform' ? 'Delete for all coaches?' : 'Remove from your library?';
     const msg = mode === 'platform'
-      ? `Remove "${item.label}" for ALL coaches?`
-      : `Hide "${item.label}" from your library?`;
-    const confirmLabel = mode === 'platform' ? 'Delete' : 'Hide';
+      ? 'This removes it from the platform.'
+      : 'It stays visible to other coaches.';
+    const confirmLabel = mode === 'platform' ? 'Delete' : 'Remove';
     if (Platform.OS === 'web') {
-      if (window.confirm(msg)) doAction();
+      if (window.confirm(`${title}\n${msg}`)) doAction();
     } else {
       Alert.alert(title, msg, [
         { text: 'Cancel', style: 'cancel' },
@@ -1664,9 +1671,24 @@ export default function WorkoutFolderPage({
     setEquipLibraryOpenIdx(blockIdx);
     setEquipLibraryError(null);
     setEquipLibraryLoading(true);
+    setEquipLibShowFilter(false);
+    setEquipLibFilterText('');
+    setEquipLibIsEditMode(false);
+    setEquipLibRenaming({});
     try {
-      const result = await listEquipImagesFn({});
-      setEquipLibrary(result.data.images ?? []);
+      const [imagesResult, settingsSnap] = await Promise.all([
+        listEquipImagesFn({}),
+        getDoc(doc(db, 'equipmentLibrarySettings', coachId)),
+      ]);
+      setEquipLibrary(imagesResult.data.images ?? []);
+      if (settingsSnap.exists()) {
+        const data = settingsSnap.data() as { order?: string[]; customNames?: Record<string, string> };
+        setEquipLibOrder(data.order ?? []);
+        setEquipLibCustomNames(data.customNames ?? {});
+      } else {
+        setEquipLibOrder([]);
+        setEquipLibCustomNames({});
+      }
     } catch (err: any) {
       console.warn('[WorkoutFolder] listEquipmentImages failed', err);
       setEquipLibraryError(String(err?.details ?? err?.message ?? 'Failed to load library'));
@@ -1674,7 +1696,7 @@ export default function WorkoutFolderPage({
     } finally {
       setEquipLibraryLoading(false);
     }
-  }, [listEquipImagesFn]);
+  }, [listEquipImagesFn, coachId]);
 
   const selectLibraryImage = useCallback((blockIdx: number, item: { slug: string; label: string; imageUrl: string }) => {
     const newBlocks = [...blocks];
@@ -1696,6 +1718,33 @@ export default function WorkoutFolderPage({
     setEquipLibraryOpenIdx(null);
     setBlockOverlayIndex(null);
   }, [blockOverlayIndex, blocks, upsertEquipHistory]);
+
+  const closeEquipLibrary = useCallback(() => {
+    setEquipLibraryOpenIdx(null);
+    setEquipLibShowFilter(false);
+    setEquipLibFilterText('');
+    setEquipLibIsEditMode(false);
+    setEquipLibRenaming({});
+  }, []);
+
+  const saveEquipLibOrder = useCallback(async (slugs: string[]) => {
+    setEquipLibOrder(slugs);
+    try {
+      await setDoc(doc(db, 'equipmentLibrarySettings', coachId), { order: slugs }, { merge: true });
+    } catch (err) {
+      console.warn('[WorkoutFolder] saveEquipLibOrder failed', err);
+    }
+  }, [coachId]);
+
+  const saveEquipLibCustomName = useCallback(async (slug: string, name: string) => {
+    const trimmed = name.trim();
+    setEquipLibCustomNames(prev => ({ ...prev, [slug]: trimmed }));
+    try {
+      await setDoc(doc(db, 'equipmentLibrarySettings', coachId), { customNames: { [slug]: trimmed } }, { merge: true });
+    } catch (err) {
+      console.warn('[WorkoutFolder] saveEquipLibCustomName failed', err);
+    }
+  }, [coachId]);
 
   // ── Grab Equipment image generation ──────────────────────────────────────
   const generateEquipImgFn = httpsCallable<
@@ -1757,6 +1806,30 @@ export default function WorkoutFolderPage({
       setEquipImgStatus(prev => ({ ...prev, [blockIdx]: 'choosing' }));
     }
   }, [blocks, equipImgSlug, saveEquipImgChoiceFn, updateBlocks, upsertEquipHistory]);
+
+  // ── Equipment library display (order + custom names + filter) ────────────
+  const displayedLibrary = useMemo(() => {
+    const images = equipLibrary ?? [];
+    let ordered = [...images];
+    if (equipLibOrder.length > 0) {
+      const orderMap = new Map(equipLibOrder.map((slug, i) => [slug, i]));
+      ordered.sort((a, b) => {
+        const ai = orderMap.has(a.slug) ? orderMap.get(a.slug)! : 9999;
+        const bi2 = orderMap.has(b.slug) ? orderMap.get(b.slug)! : 9999;
+        return ai - bi2;
+      });
+    }
+    return ordered.map(item => ({
+      ...item,
+      displayLabel: equipLibCustomNames[item.slug] ?? item.label,
+    }));
+  }, [equipLibrary, equipLibOrder, equipLibCustomNames]);
+
+  const filteredLibrary = useMemo(() => {
+    if (!equipLibFilterText.trim()) return displayedLibrary;
+    const lower = equipLibFilterText.toLowerCase();
+    return displayedLibrary.filter(item => item.displayLabel.toLowerCase().includes(lower));
+  }, [displayedLibrary, equipLibFilterText]);
 
   // ── Movement operations ───────────────────────────────────────────────────
   const addMovementToBlock = useCallback((blockIdx: number, movement: MovementOption) => {
@@ -3695,18 +3768,59 @@ export default function WorkoutFolderPage({
                   visible={equipLibraryOpenIdx === bi}
                   transparent
                   animationType="fade"
-                  onRequestClose={() => setEquipLibraryOpenIdx(null)}
+                  onRequestClose={closeEquipLibrary}
                 >
-                  <Pressable style={st.modalBackdrop} onPress={() => setEquipLibraryOpenIdx(null)}>
+                  <Pressable style={st.modalBackdrop} onPress={closeEquipLibrary}>
                     <Pressable style={st.overlaySheet} onPress={(e) => e.stopPropagation()}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 }}>
-                        <Text style={{ fontSize: 18, fontWeight: '700', color: '#F0F4F8', fontFamily: FH }}>
+                      {/* Header row */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8, gap: 8 }}>
+                        <Text style={{ fontSize: 18, fontWeight: '700', color: '#F0F4F8', fontFamily: FH, flex: 1 }}>
                           Equipment Library
                         </Text>
-                        <TouchableOpacity onPress={() => setEquipLibraryOpenIdx(null)} hitSlop={8}>
+                        <TouchableOpacity
+                          onPress={() => { setEquipLibShowFilter(f => !f); if (equipLibShowFilter) setEquipLibFilterText(''); }}
+                          hitSlop={8}
+                          style={{ padding: 4 }}
+                        >
+                          <Icon name="sliders" size={20} color={equipLibShowFilter ? '#7C3AED' : '#8A95A3'} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => setEquipLibIsEditMode(e => !e)}
+                          hitSlop={8}
+                          style={{ padding: 4 }}
+                        >
+                          <Icon name="pencil" size={20} color={equipLibIsEditMode ? '#7C3AED' : '#8A95A3'} />
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={closeEquipLibrary} hitSlop={8} style={{ padding: 4 }}>
                           <Icon name="x" size={22} color="#8A95A3" />
                         </TouchableOpacity>
                       </View>
+
+                      {/* Filter input */}
+                      {equipLibShowFilter && (
+                        <View style={{ paddingHorizontal: 20, paddingBottom: 8 }}>
+                          <TextInput
+                            value={equipLibFilterText}
+                            onChangeText={setEquipLibFilterText}
+                            placeholder="Filter by label..."
+                            placeholderTextColor="#5A6478"
+                            autoFocus
+                            style={{
+                              backgroundColor: '#0E1117',
+                              borderRadius: 8,
+                              borderWidth: 1,
+                              borderColor: '#2A3347',
+                              color: '#F0F4F8',
+                              fontSize: 14,
+                              fontFamily: FB,
+                              paddingHorizontal: 12,
+                              paddingVertical: 8,
+                            }}
+                          />
+                        </View>
+                      )}
+
+                      {/* Generate AI image button */}
                       <TouchableOpacity
                         style={{
                           marginHorizontal: 20,
@@ -3719,7 +3833,7 @@ export default function WorkoutFolderPage({
                         }}
                         disabled={!block.grabEquipmentText?.trim()}
                         onPress={() => {
-                          setEquipLibraryOpenIdx(null);
+                          closeEquipLibrary();
                           triggerEquipmentImageGen(bi, block.grabEquipmentText ?? '');
                         }}
                       >
@@ -3727,6 +3841,7 @@ export default function WorkoutFolderPage({
                           Generate AI image
                         </Text>
                       </TouchableOpacity>
+
                       {equipLibraryLoading ? (
                         <View style={{ padding: 30, alignItems: 'center' as const }}>
                           <ActivityIndicator size="large" color="#7C3AED" />
@@ -3735,63 +3850,124 @@ export default function WorkoutFolderPage({
                         <Text style={{ color: '#F87171', fontSize: 13, fontFamily: FB, paddingHorizontal: 20, paddingBottom: 20 }}>
                           {equipLibraryError}
                         </Text>
-                      ) : (equipLibrary?.length ?? 0) === 0 ? (
+                      ) : filteredLibrary.length === 0 ? (
                         <Text style={{ color: '#8A95A3', fontSize: 14, fontFamily: FB, paddingHorizontal: 20, paddingBottom: 20 }}>
-                          No equipment images yet. Generate the first one!
+                          {(equipLibrary?.length ?? 0) === 0
+                            ? 'No equipment images yet. Generate the first one!'
+                            : 'No results match your filter.'}
                         </Text>
-                      ) : (
-                        <ScrollView style={{ paddingHorizontal: 20 }} contentContainerStyle={{ paddingBottom: 40 }}>
-                          <View style={{ flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 10 }}>
-                            {(equipLibrary ?? []).map((item) => {
-                              const isOwner = !!item.createdBy && item.createdBy === coachId;
-                              const affIcon = isOwner ? 'trash-2' : 'eye-off';
-                              const affColor = isOwner ? '#F87171' : '#CBD5E1';
-                              const affMode: 'platform' | 'hide' = isOwner ? 'platform' : 'hide';
-                              return (
-                                <TouchableOpacity
-                                  key={item.slug}
-                                  onPress={() => selectLibraryImage(bi, item)}
-                                  style={{
-                                    width: '31%' as any,
-                                    borderRadius: 10,
-                                    borderWidth: 1,
-                                    borderColor: '#2A3347',
-                                    backgroundColor: '#1E2A3A',
-                                    overflow: 'hidden' as const,
-                                  }}
-                                >
+                      ) : equipLibIsEditMode ? (
+                        /* Edit mode — DraggableFlatList for reorder */
+                        <DraggableFlatList
+                          data={filteredLibrary}
+                          keyExtractor={(item) => item.slug}
+                          onDragEnd={({ data }) => saveEquipLibOrder(data.map(i => i.slug))}
+                          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
+                          renderItem={({ item, drag, isActive }: DragRenderItemParams<typeof filteredLibrary[0]>) => {
+                            const isOwner = !!item.createdBy && item.createdBy === coachId;
+                            const affMode: 'platform' | 'hide' = isOwner ? 'platform' : 'hide';
+                            const isRenaming = equipLibRenaming[item.slug] !== undefined;
+                            const renameText = isRenaming ? equipLibRenaming[item.slug] : item.displayLabel;
+                            return (
+                              <ScaleDecorator>
+                                <View style={{
+                                  flexDirection: 'row' as const,
+                                  alignItems: 'center' as const,
+                                  backgroundColor: isActive ? '#2A3347' : '#1E2A3A',
+                                  borderRadius: 10,
+                                  borderWidth: 1,
+                                  borderColor: '#2A3347',
+                                  marginBottom: 8,
+                                  overflow: 'hidden' as const,
+                                }}>
+                                  {/* Drag handle */}
+                                  <TouchableOpacity onLongPress={drag} delayLongPress={150} style={{ padding: 12 }}>
+                                    <Icon name="menu" size={18} color="#5A6478" />
+                                  </TouchableOpacity>
+                                  {/* Thumbnail */}
                                   <Image
                                     source={{ uri: item.thumbUrl ?? item.imageUrl }}
-                                    style={{ width: '100%' as any, aspectRatio: 1 }}
+                                    style={{ width: 48, height: 48, borderRadius: 6 }}
                                     resizeMode="cover"
                                   />
+                                  {/* Label / rename input */}
+                                  <View style={{ flex: 1, paddingHorizontal: 10 }}>
+                                    {isRenaming ? (
+                                      <TextInput
+                                        value={renameText}
+                                        onChangeText={(t) => setEquipLibRenaming(prev => ({ ...prev, [item.slug]: t }))}
+                                        onBlur={() => {
+                                          const name = (equipLibRenaming[item.slug] ?? '').trim();
+                                          if (name) saveEquipLibCustomName(item.slug, name);
+                                          setEquipLibRenaming(prev => { const n = { ...prev }; delete n[item.slug]; return n; });
+                                        }}
+                                        onSubmitEditing={() => {
+                                          const name = (equipLibRenaming[item.slug] ?? '').trim();
+                                          if (name) saveEquipLibCustomName(item.slug, name);
+                                          setEquipLibRenaming(prev => { const n = { ...prev }; delete n[item.slug]; return n; });
+                                        }}
+                                        autoFocus
+                                        style={{
+                                          color: '#F0F4F8',
+                                          fontSize: 13,
+                                          fontFamily: FB,
+                                          borderBottomWidth: 1,
+                                          borderBottomColor: '#7C3AED',
+                                          paddingVertical: 2,
+                                        }}
+                                      />
+                                    ) : (
+                                      <TouchableOpacity onPress={() => setEquipLibRenaming(prev => ({ ...prev, [item.slug]: item.displayLabel }))}>
+                                        <Text style={{ color: '#F0F4F8', fontSize: 13, fontFamily: FB }} numberOfLines={2}>
+                                          {item.displayLabel}
+                                        </Text>
+                                      </TouchableOpacity>
+                                    )}
+                                  </View>
+                                  {/* Trash */}
                                   <TouchableOpacity
-                                    onPress={(e: any) => { e?.stopPropagation?.(); handleDeleteLibraryImage(item, affMode); }}
-                                    hitSlop={6}
-                                    style={{
-                                      position: 'absolute' as const,
-                                      top: 4,
-                                      right: 4,
-                                      width: 22,
-                                      height: 22,
-                                      borderRadius: 11,
-                                      backgroundColor: 'rgba(14,17,23,0.85)',
-                                      alignItems: 'center' as const,
-                                      justifyContent: 'center' as const,
-                                    }}
+                                    onPress={() => handleDeleteLibraryImage({ slug: item.slug, label: item.displayLabel }, affMode)}
+                                    hitSlop={8}
+                                    style={{ padding: 12 }}
                                   >
-                                    <Icon name={affIcon as any} size={12} color={affColor} />
+                                    <Icon name="trash-2" size={18} color={isOwner ? '#F87171' : '#CBD5E1'} />
                                   </TouchableOpacity>
-                                  <Text
-                                    style={{ color: '#F0F4F8', fontSize: 10, lineHeight: 13, fontFamily: FB, padding: 6, textTransform: 'capitalize' as const }}
-                                    numberOfLines={2}
-                                    ellipsizeMode="tail"
-                                  >
-                                    {item.label}
-                                  </Text>
-                                </TouchableOpacity>
-                              );
-                            })}
+                                </View>
+                              </ScaleDecorator>
+                            );
+                          }}
+                        />
+                      ) : (
+                        /* View mode — 3-column grid */
+                        <ScrollView style={{ paddingHorizontal: 20 }} contentContainerStyle={{ paddingBottom: 40 }}>
+                          <View style={{ flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 10 }}>
+                            {filteredLibrary.map((item) => (
+                              <TouchableOpacity
+                                key={item.slug}
+                                onPress={() => selectLibraryImage(bi, item)}
+                                style={{
+                                  width: '31%' as any,
+                                  borderRadius: 10,
+                                  borderWidth: 1,
+                                  borderColor: '#2A3347',
+                                  backgroundColor: '#1E2A3A',
+                                  overflow: 'hidden' as const,
+                                }}
+                              >
+                                <Image
+                                  source={{ uri: item.thumbUrl ?? item.imageUrl }}
+                                  style={{ width: '100%' as any, aspectRatio: 1 }}
+                                  resizeMode="cover"
+                                />
+                                <Text
+                                  style={{ color: '#F0F4F8', fontSize: 10, lineHeight: 13, fontFamily: FB, padding: 6, textTransform: 'capitalize' as const }}
+                                  numberOfLines={2}
+                                  ellipsizeMode="tail"
+                                >
+                                  {item.displayLabel}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
                           </View>
                         </ScrollView>
                       )}
