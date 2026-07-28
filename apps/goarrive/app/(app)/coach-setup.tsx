@@ -126,6 +126,7 @@ interface CoachSetupDoc {
   profilePhotoUploaded?: boolean;
   logoUploaded?: boolean;
   certificationUploaded?: boolean;
+  coachCertEnrolled?: boolean;
   goaEmail?: string;
 }
 
@@ -178,6 +179,8 @@ function CoachSetupScreenInner() {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [uploadingCert, setUploadingCert] = useState(false);
+  const [coachCertEnrolled, setCoachCertEnrolled] = useState(false);
+  const [enrollingCert, setEnrollingCert] = useState(false);
 
   const scrollRef = useRef<ScrollView>(null);
   const moduleListYRef = useRef<number | null>(null);
@@ -206,9 +209,11 @@ function CoachSetupScreenInner() {
             profilePhotoUploaded: data.profilePhotoUploaded,
             logoUploaded: data.logoUploaded,
             certificationUploaded: data.certificationUploaded,
+            coachCertEnrolled: data.coachCertEnrolled,
             goaEmail: data.goaEmail,
           });
           if (data.goaEmail) setGoaEmailDraft(data.goaEmail);
+          if (data.coachCertEnrolled) setCoachCertEnrolled(true);
         } else {
           setProgress(emptyDoc(coachId));
         }
@@ -267,6 +272,7 @@ function CoachSetupScreenInner() {
         if (merged.profilePhotoUploaded != null) writePayload.profilePhotoUploaded = merged.profilePhotoUploaded;
         if (merged.logoUploaded != null) writePayload.logoUploaded = merged.logoUploaded;
         if (merged.certificationUploaded != null) writePayload.certificationUploaded = merged.certificationUploaded;
+        if (merged.coachCertEnrolled != null) writePayload.coachCertEnrolled = merged.coachCertEnrolled;
         if (merged.goaEmail != null) writePayload.goaEmail = merged.goaEmail;
         if (!progress.startedAt) writePayload.startedAt = serverTimestamp();
         const contentIds: ModuleId[] = ['identity', 'connectStripe', 'zoomSetup', 'goaEmail', 'certification', 'firstMember', 'launchCelebration'];
@@ -413,6 +419,19 @@ function CoachSetupScreenInner() {
     }
   }
 
+  async function handleEnrollCert() {
+    if (!coachId || coachCertEnrolled) return;
+    setEnrollingCert(true);
+    try {
+      await save({ coachCertEnrolled: true });
+      setCoachCertEnrolled(true);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to enroll.');
+    } finally {
+      setEnrollingCert(false);
+    }
+  }
+
   // Clear just-completed highlight after animation
   useEffect(() => {
     if (!justCompletedId) return;
@@ -505,9 +524,12 @@ function CoachSetupScreenInner() {
             stripeAccountId={stripeAccountId}
             goaEmailDraft={goaEmailDraft}
             setGoaEmailDraft={setGoaEmailDraft}
+            coachCertEnrolled={coachCertEnrolled}
+            enrollingCert={enrollingCert}
             onPickPhoto={handlePickPhoto}
             onPickLogo={handlePickLogo}
             onPickCert={handlePickCert}
+            onEnrollCert={handleEnrollCert}
             onSaveDisplayName={handleSaveDisplayName}
             onSaveBio={handleSaveBio}
             onComplete={() => completeModule(activeModule.id)}
@@ -730,7 +752,10 @@ interface ModuleDetailProps {
   setGoaEmailDraft: (v: string) => void;
   onPickPhoto: () => void;
   onPickLogo: () => void;
+  coachCertEnrolled: boolean;
+  enrollingCert: boolean;
   onPickCert: () => void;
+  onEnrollCert: () => void;
   onSaveDisplayName: () => void;
   onSaveBio: () => void;
   onComplete: () => void;
@@ -755,11 +780,14 @@ function ModuleDetail({
   profilePhotoUploaded,
   certificationURL,
   stripeAccountId,
+  coachCertEnrolled,
+  enrollingCert,
   goaEmailDraft,
   setGoaEmailDraft,
   onPickPhoto,
   onPickLogo,
   onPickCert,
+  onEnrollCert,
   onSaveDisplayName,
   onSaveBio,
   onComplete,
@@ -1112,26 +1140,74 @@ function ModuleDetail({
         {module.id === 'certification' && (
           <>
             <Text style={s.sectionIntro}>
-              GoArrive coaches are expected to maintain a recognized fitness certification. If you are already certified, upload your certificate below.
+              GoArrive coaches maintain a recognized coaching credential. If you already hold a certification, upload it below. If not, enroll in the GoArrive Certified Coach program.
             </Text>
 
-            <View style={s.sectionBlock}>
-              <Text style={s.sectionHeading}>Don't have a certification yet?</Text>
-              <Text style={s.sectionBody}>
-                GoArrive recommends ISSA (International Sports Sciences Association) — self-paced, respected, and fits experienced coaches and practitioners well.
-              </Text>
-              <View style={s.urlCard}>
-                <Text style={s.urlLabel}>ISSA ENROLLMENT</Text>
-                <Text style={s.urlText}>issaonline.com</Text>
+            {/* GoArrive Certified Coach hero card */}
+            <View style={s.certHeroCard}>
+              <View style={s.certBadgeRow}>
+                <View style={s.certBadge}>
+                  <Text style={s.certBadgeText}>GCC</Text>
+                </View>
+                <View style={s.certBadgeLabels}>
+                  <Text style={s.certProgramLabel}>GOARRIVE CERTIFIED COACH</Text>
+                  <Text style={s.certBadgeSub}>Level 1 · Self-Paced</Text>
+                </View>
               </View>
-              <View style={s.infoRow}>
-                <Icon name="clock" size={14} color={MUTED} />
-                <Text style={s.infoRowText}>ISSA typically takes 3–6 months to complete at your own pace</Text>
+
+              <View style={s.certFeatureList}>
+                {[
+                  '5 foundational coaching modules',
+                  'Move at your own pace — no deadlines',
+                  'Practical skills, not just theory',
+                  'Official GCC credential upon completion',
+                ].map((feature, i) => (
+                  <View key={i} style={s.certFeatureRow}>
+                    <Icon name="check-circle" size={14} color={GOLD} />
+                    <Text style={s.certFeatureText}>{feature}</Text>
+                  </View>
+                ))}
               </View>
+
+              {coachCertEnrolled ? (
+                <>
+                  <View style={s.certEnrolledBadge}>
+                    <Icon name="check-circle" size={13} color={GREEN} />
+                    <Text style={s.certEnrolledText}>Enrolled in GCC</Text>
+                  </View>
+                  <View style={s.certNextStepCard}>
+                    <Text style={s.certNextStepLabel}>YOUR NEXT STEP</Text>
+                    <Text style={s.certNextStepTitle}>Module 1: Coaching Foundations</Text>
+                    <Text style={s.certNextStepBody}>
+                      Understand the GoArrive coaching philosophy, learn the member journey, and establish your coaching identity.
+                    </Text>
+                    <View style={s.certStartRow}>
+                      <Icon name="clock" size={12} color={MUTED} />
+                      <Text style={s.certStartTime}>~45 min · Available now</Text>
+                    </View>
+                  </View>
+                </>
+              ) : (
+                <Pressable
+                  style={[s.certEnrollBtn, enrollingCert && s.btnDisabled]}
+                  onPress={onEnrollCert}
+                  disabled={enrollingCert}
+                >
+                  {enrollingCert ? (
+                    <ActivityIndicator size="small" color="#000" />
+                  ) : (
+                    <>
+                      <Text style={s.certEnrollBtnText}>Enroll in GCC</Text>
+                      <Icon name="arrow-right" size={14} color="#000" />
+                    </>
+                  )}
+                </Pressable>
+              )}
             </View>
 
+            {/* Upload existing cert */}
             <View style={s.sectionBlock}>
-              <Text style={s.sectionHeading}>Upload Certification (Optional)</Text>
+              <Text style={s.sectionHeading}>Already certified? Upload it</Text>
               <Text style={s.sectionBody}>
                 Upload your current certification document or image.
               </Text>
@@ -1787,6 +1863,136 @@ const s = StyleSheet.create({
     fontFamily: FH,
   },
   certUploadedSub: {
+    fontSize: 11,
+    color: MUTED,
+    fontFamily: FB,
+  },
+
+  // GoArrive Certified Coach hero
+  certHeroCard: {
+    backgroundColor: 'rgba(245,166,35,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.28)',
+    borderRadius: 14,
+    padding: 16,
+    gap: 14,
+  },
+  certBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  certBadge: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: GOLD,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  certBadgeText: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#000',
+    fontFamily: FH,
+    letterSpacing: 1,
+  },
+  certBadgeLabels: {
+    flex: 1,
+    gap: 3,
+  },
+  certProgramLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: GOLD,
+    fontFamily: FB,
+  },
+  certBadgeSub: {
+    fontSize: 12,
+    color: MUTED,
+    fontFamily: FB,
+  },
+  certFeatureList: {
+    gap: 9,
+  },
+  certFeatureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  certFeatureText: {
+    fontSize: 13,
+    color: FG,
+    fontFamily: FB,
+    flex: 1,
+  },
+  certEnrollBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: GOLD,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    gap: 8,
+  },
+  certEnrollBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#000',
+    fontFamily: FH,
+  },
+  certEnrolledBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(110,187,122,0.10)',
+    borderRadius: 20,
+    alignSelf: 'flex-start',
+  },
+  certEnrolledText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: GREEN,
+    fontFamily: FB,
+  },
+  certNextStepCard: {
+    backgroundColor: BG,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 10,
+    padding: 12,
+    gap: 5,
+  },
+  certNextStepLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: GOLD,
+    fontFamily: FB,
+  },
+  certNextStepTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: FG,
+    fontFamily: FH,
+  },
+  certNextStepBody: {
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 18,
+  },
+  certStartRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 2,
+  },
+  certStartTime: {
     fontSize: 11,
     color: MUTED,
     fontFamily: FB,
