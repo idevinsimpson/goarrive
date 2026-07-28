@@ -46,6 +46,7 @@ const C = {
 interface CoachOption {
   uid: string;
   displayName: string;
+  funnelPhotoUrl?: string;
 }
 
 export default function IntakeIndex() {
@@ -164,6 +165,15 @@ export default function IntakeIndex() {
                         <View style={[s.radio, selectedCoach === coach.uid && s.radioActive]}>
                           {selectedCoach === coach.uid && <View style={s.radioDot} />}
                         </View>
+                        {coach.funnelPhotoUrl ? (
+                          <Image source={{ uri: coach.funnelPhotoUrl }} style={s.coachAvatar} />
+                        ) : (
+                          <View style={s.coachAvatarFallback}>
+                            <Text style={s.coachAvatarInitial}>
+                              {coach.displayName.charAt(0).toUpperCase()}
+                            </Text>
+                          </View>
+                        )}
                         <Text style={[s.coachName, selectedCoach === coach.uid && { color: C.white }]}>
                           {coach.displayName}
                         </Text>
@@ -343,6 +353,25 @@ const s = StyleSheet.create({
     height: 10,
     borderRadius: 5,
     backgroundColor: C.green,
+  },
+  coachAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+  },
+  coachAvatarFallback: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: C.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  coachAvatarInitial: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: C.textSoft,
+    fontFamily: FONT_H,
   },
   coachName: {
     fontSize: 16,

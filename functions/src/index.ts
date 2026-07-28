@@ -94,6 +94,7 @@ export {
   resolvePlaybookBookingToken,
   bookViaBookingToken,
   playbookBookingIcs,
+  getSessionWorkout,
 } from './playbookBooking';
 import { CloudTasksClient } from '@google-cloud/tasks';
 import { sanitizePlayerWorkout } from './workoutPlayerSanitizer';
@@ -290,6 +291,7 @@ export const listPublicCoaches = onCall(
       .map((d) => ({
         uid: d.id,
         displayName: (d.data().displayName || d.data().name || '') as string,
+        funnelPhotoUrl: (d.data().funnelPhotoUrl || '') as string,
       }))
       .filter((c) => c.displayName.trim().length > 0);
     return { coaches };

@@ -57,7 +57,7 @@ export function useEffectiveProfile(): EffectiveProfile {
         setCoachProfile({
           name:
             c.displayName || c.name || u.displayName || adminCoachOverride.coachName,
-          photoURL: c.photoURL || c.photoUrl || c.avatarUrl || u.photoURL || null,
+          photoURL: c.photoURL || c.photoUrl || c.avatarUrl || c.funnelPhotoUrl || u.photoURL || null,
           email: c.email || u.email || null,
         });
       } catch (err) {

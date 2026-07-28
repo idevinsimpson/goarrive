@@ -19,7 +19,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Icon } from './Icon';
-import { collection, getDocs, query, where, limit } from 'firebase/firestore';
+import { collection, getDocs, query, where, limit, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import { FB, FH } from '../lib/theme';
@@ -36,6 +36,7 @@ const STEP_DEFS = [
   { label: 'Create a workout', sublabel: 'Design your first program' },
   { label: 'Add a member', sublabel: 'Grow your coaching roster' },
   { label: 'Assign a workout', sublabel: 'Put your member to work' },
+  { label: 'Connect Stripe to receive payments', sublabel: 'Set up payouts for your coaching' },
 ];
 
 export default function OnboardingChecklist() {
@@ -55,14 +56,25 @@ export default function OnboardingChecklist() {
   async function checkSteps() {
     setLoading(true);
     try {
-      const checks = await Promise.all([
+      const [coachSnap, ...checks] = await Promise.all([
+        getDoc(doc(db, 'coaches', coachId)),
         getDocs(query(collection(db, 'movements'), where('coachId', '==', coachId), limit(1))),
         getDocs(query(collection(db, 'workouts'), where('coachId', '==', coachId), limit(1))),
         getDocs(query(collection(db, 'members'), where('coachId', '==', coachId), limit(1))),
         getDocs(query(collection(db, 'workout_assignments'), where('coachId', '==', coachId), limit(1))),
       ]);
+      const coachData = coachSnap.exists() ? coachSnap.data() : {};
+      if (coachData.onboardingChecklistDismissed) {
+        setDismissed(true);
+        setLoading(false);
+        return;
+      }
+      const hasStripe = !!coachData.stripeAccountId;
       setSteps(
-        STEP_DEFS.map((d, i) => ({ ...d, done: !checks[i].empty }))
+        STEP_DEFS.map((d, i) => ({
+          ...d,
+          done: i < 4 ? !checks[i].empty : hasStripe,
+        }))
       );
     } catch (err) {
       console.error('[OnboardingChecklist] error:', err);
@@ -71,9 +83,19 @@ export default function OnboardingChecklist() {
     }
   }
 
+  async function handleDismiss() {
+    try {
+      await updateDoc(doc(db, 'coaches', coachId), { onboardingChecklistDismissed: true });
+    } catch (err) {
+      console.warn('[OnboardingChecklist] dismiss persist failed:', err);
+    }
+    setDismissed(true);
+  }
+
   const doneCount = steps.filter((s) => s.done).length;
   const allDone = doneCount === steps.length;
   const pct = Math.round((doneCount / steps.length) * 100);
+  const stripeStep = steps[4];
 
   if (dismissed || allDone) return null;
 
@@ -96,7 +118,7 @@ export default function OnboardingChecklist() {
           <Text style={s.title}>Getting Started</Text>
           <Text style={s.subtitle}>{doneCount} of {steps.length} steps complete</Text>
         </View>
-        <Pressable onPress={() => setDismissed(true)} hitSlop={10} style={s.dismissBtn}>
+        <Pressable onPress={handleDismiss} hitSlop={10} style={s.dismissBtn}>
           <Icon name="x" size={16} color="#4A5568" />
         </Pressable>
       </View>
@@ -145,6 +167,20 @@ export default function OnboardingChecklist() {
             hitSlop={6}
           >
             <Text style={s.hintBtnText}>Share intake link</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {/* Stripe CTA: show connect button when Stripe step not done */}
+      {stripeStep && !stripeStep.done ? (
+        <View style={s.hintRow}>
+          <Text style={s.hintText}>Connect Stripe to start receiving payments from members.</Text>
+          <Pressable
+            style={s.hintBtn}
+            onPress={() => router.push('/(app)/billing' as any)}
+            hitSlop={6}
+          >
+            <Text style={s.hintBtnText}>Connect Stripe</Text>
           </Pressable>
         </View>
       ) : null}
