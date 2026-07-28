@@ -362,6 +362,8 @@ service cloud.firestore {
     // EQUIPMENT IMAGES META — per-slug ownership record for the shared
     // equipment image library. All authenticated readers (for attribution
     // in the library UI); writes only via Cloud Functions (Admin SDK).
+    // Note: Cloud Functions use the Admin SDK and bypass client-side rules entirely —
+    // write: false here only blocks direct client writes, not function writes.
     // ─────────────────────────────────────────────
     match /equipment_images_meta/{slug} {
       allow read: if request.auth != null;

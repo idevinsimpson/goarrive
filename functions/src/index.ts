@@ -10778,6 +10778,24 @@ export const deleteEquipmentImage = onCall(
       try { await metaRef.delete(); } catch (err) {
         console.warn('[deleteEquipmentImage] meta delete failed', { equipmentSlug, err: String(err) });
       }
+      // Clean up dangling references in per-coach settings docs so deleted slugs
+      // don't linger in order arrays or customNames maps.
+      const settingsSnap = await db.collection('equipmentLibrarySettings').get();
+      if (!settingsSnap.empty) {
+        const batch = db.batch();
+        for (const settingsDoc of settingsSnap.docs) {
+          const data = settingsDoc.data() as { order?: string[]; customNames?: Record<string, string> };
+          const update: Record<string, any> = {};
+          if (Array.isArray(data.order) && data.order.includes(equipmentSlug)) {
+            update.order = FieldValue.arrayRemove(equipmentSlug);
+          }
+          if (data.customNames?.[equipmentSlug]) {
+            update[`customNames.${equipmentSlug}`] = FieldValue.delete();
+          }
+          if (Object.keys(update).length > 0) batch.update(settingsDoc.ref, update);
+        }
+        await batch.commit();
+      }
       console.info('[deleteEquipmentImage] Platform delete', { equipmentSlug, by: uid, admin: isPlatformAdmin });
       return { ok: true, scope: 'platform' as const };
     }

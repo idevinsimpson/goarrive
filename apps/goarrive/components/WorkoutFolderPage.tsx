@@ -333,6 +333,7 @@ export default function WorkoutFolderPage({
   const [equipLibOrder, setEquipLibOrder] = useState<string[]>([]);
   const [equipLibCustomNames, setEquipLibCustomNames] = useState<Record<string, string>>({});
   const [equipLibRenaming, setEquipLibRenaming] = useState<Record<string, string>>({});
+  const equipLibSettingsLoadedRef = useRef(false);
   const [viewMode, setViewMode] = useState<'icon' | 'list'>('icon');
 
   // Intro / Outro — workout-level fields
@@ -1652,13 +1653,16 @@ export default function WorkoutFolderPage({
         console.warn('[WorkoutFolder] deleteEquipmentImage failed', err);
       }
     };
-    const msg = 'This will permanently delete it.';
+    const msg = mode === 'platform'
+      ? 'This will permanently delete it. Visible to all coaches.'
+      : 'This will hide it from your library. Only hidden for you — other coaches still see it.';
+    const confirmLabel = mode === 'platform' ? 'Delete' : 'Remove';
     if (Platform.OS === 'web') {
       if (window.confirm(`Delete?\n${msg}`)) doAction();
     } else {
       Alert.alert('Delete?', msg, [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: doAction },
+        { text: confirmLabel, style: 'destructive', onPress: doAction },
       ]);
     }
   }, [deleteEquipImageFn, removeLibrarySlugLocally]);
@@ -1672,18 +1676,21 @@ export default function WorkoutFolderPage({
     setEquipLibIsEditMode(false);
     setEquipLibRenaming({});
     try {
-      const [imagesResult, settingsSnap] = await Promise.all([
-        listEquipImagesFn({}),
-        getDoc(doc(db, 'equipmentLibrarySettings', coachId)),
-      ]);
+      const settingsPromise = equipLibSettingsLoadedRef.current
+        ? Promise.resolve(null)
+        : getDoc(doc(db, 'equipmentLibrarySettings', coachId));
+      const [imagesResult, settingsSnap] = await Promise.all([listEquipImagesFn({}), settingsPromise]);
       setEquipLibrary(imagesResult.data.images ?? []);
-      if (settingsSnap.exists()) {
-        const data = settingsSnap.data() as { order?: string[]; customNames?: Record<string, string> };
-        setEquipLibOrder(data.order ?? []);
-        setEquipLibCustomNames(data.customNames ?? {});
-      } else {
-        setEquipLibOrder([]);
-        setEquipLibCustomNames({});
+      if (settingsSnap !== null) {
+        if (settingsSnap.exists()) {
+          const data = settingsSnap.data() as { order?: string[]; customNames?: Record<string, string> };
+          setEquipLibOrder(data.order ?? []);
+          setEquipLibCustomNames(data.customNames ?? {});
+        } else {
+          setEquipLibOrder([]);
+          setEquipLibCustomNames({});
+        }
+        equipLibSettingsLoadedRef.current = true;
       }
     } catch (err: any) {
       console.warn('[WorkoutFolder] listEquipmentImages failed', err);
@@ -1821,6 +1828,7 @@ export default function WorkoutFolderPage({
     }));
   }, [equipLibrary, equipLibOrder, equipLibCustomNames]);
 
+  // Client-side filter — fast now; add server-side search if the shared library grows into the hundreds
   const filteredLibrary = useMemo(() => {
     if (!equipLibFilterText.trim()) return displayedLibrary;
     const lower = equipLibFilterText.toLowerCase();
