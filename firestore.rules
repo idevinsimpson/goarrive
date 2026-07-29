@@ -109,6 +109,10 @@ service cloud.firestore {
       allow update: if (isOwnDoc(coachId)
                     && request.resource.data.diff(resource.data).affectedKeys()
                         .hasOnly(['noShowGraceMinutes', 'autoApproveSkipCategories', 'autoApproveSkipLeadDays', 'icalToken']))
+                    // Coaches can update their own profile identity fields (coach-setup flow).
+                    || (isOwnDoc(coachId)
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['photoURL', 'logoURL', 'name', 'bio', 'certificationURL']))
                     // Platform admin: module visibility, hidden settings sections,
                     // plus the coach's own scheduling keys so "View as Coach"
                     // impersonation can operate the settings panels.
@@ -123,6 +127,13 @@ service cloud.firestore {
         allow create, update: if isOwnDoc(coachId) || isPlatformAdmin();
         allow delete: if isOwnDoc(coachId) || isPlatformAdmin();
       }
+    }
+
+    // ─────────────────────────────────────────────
+    // COACH SETUP PROGRESS
+    // ─────────────────────────────────────────────
+    match /coach_setup/{coachId} {
+      allow read, write: if isOwnDoc(coachId) || isPlatformAdmin();
     }
 
     // ─────────────────────────────────────────────

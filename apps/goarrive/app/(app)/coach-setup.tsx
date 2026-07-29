@@ -32,7 +32,6 @@ import {
   getDoc,
   serverTimestamp,
   setDoc,
-  updateDoc,
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { getAuth, updateProfile } from 'firebase/auth';
@@ -281,8 +280,9 @@ function CoachSetupScreenInner() {
         }
         await setDoc(doc(db, 'coach_setup', coachId), writePayload, { merge: true });
         setProgress(merged);
-      } catch (err) {
+      } catch (err: any) {
         console.error('[CoachSetup] save error:', err);
+        Alert.alert('Error', err.message || 'Failed to save progress.');
       } finally {
         setSaving(false);
       }
@@ -334,7 +334,7 @@ function CoachSetupScreenInner() {
       if (auth.currentUser) {
         await updateProfile(auth.currentUser, { photoURL: downloadURL });
       }
-      await updateDoc(doc(db, 'coaches', coachId), { photoURL: downloadURL });
+      await setDoc(doc(db, 'coaches', coachId), { photoURL: downloadURL }, { merge: true });
       setPhotoURL(downloadURL);
       await save({ profilePhotoUploaded: true });
     } catch (err: any) {
@@ -362,7 +362,7 @@ function CoachSetupScreenInner() {
       const storageRef = ref(storage, `coaches/${coachId}/logo/${Date.now()}.jpg`);
       await uploadBytes(storageRef, blob);
       const downloadURL = await getDownloadURL(storageRef);
-      await updateDoc(doc(db, 'coaches', coachId), { logoURL: downloadURL });
+      await setDoc(doc(db, 'coaches', coachId), { logoURL: downloadURL }, { merge: true });
       setLogoURL(downloadURL);
       await save({ logoUploaded: true });
     } catch (err: any) {
@@ -376,7 +376,7 @@ function CoachSetupScreenInner() {
     const trimmed = displayNameDraft.trim();
     if (!trimmed || trimmed === displayName) return;
     try {
-      await updateDoc(doc(db, 'coaches', coachId), { name: trimmed });
+      await setDoc(doc(db, 'coaches', coachId), { name: trimmed }, { merge: true });
       setDisplayName(trimmed);
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to save name.');
@@ -386,7 +386,7 @@ function CoachSetupScreenInner() {
   async function handleSaveBio() {
     const trimmed = bioDraft.trim();
     try {
-      await updateDoc(doc(db, 'coaches', coachId), { bio: trimmed });
+      await setDoc(doc(db, 'coaches', coachId), { bio: trimmed }, { merge: true });
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to save bio.');
     }
@@ -409,7 +409,7 @@ function CoachSetupScreenInner() {
       const storageRef = ref(storage, `coaches/${coachId}/certification/${Date.now()}.${ext}`);
       await uploadBytes(storageRef, blob);
       const downloadURL = await getDownloadURL(storageRef);
-      await updateDoc(doc(db, 'coaches', coachId), { certificationURL: downloadURL });
+      await setDoc(doc(db, 'coaches', coachId), { certificationURL: downloadURL }, { merge: true });
       setCertificationURL(downloadURL);
       await save({ certificationUploaded: true });
     } catch (err: any) {
