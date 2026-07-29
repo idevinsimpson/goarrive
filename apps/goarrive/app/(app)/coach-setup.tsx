@@ -1627,6 +1627,7 @@ const s = StyleSheet.create({
     fontWeight: '700',
     color: GOLD,
     fontFamily: FH,
+    textAlign: 'center',
   },
   successRow: {
     flexDirection: 'row',
@@ -2140,6 +2141,7 @@ const s = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     fontFamily: FH,
+    textAlign: 'center',
   },
   btnDisabled: { opacity: 0.5 },
   skipBtn: {
@@ -2154,6 +2156,7 @@ const s = StyleSheet.create({
     fontSize: 14,
     color: MUTED,
     fontFamily: FB,
+    textAlign: 'center',
   },
   completedBanner: {
     flexDirection: 'row',
