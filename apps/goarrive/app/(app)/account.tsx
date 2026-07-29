@@ -18,6 +18,7 @@ import {
   Alert,
   Linking,
   Image,
+  Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../../components/Icon';
@@ -31,9 +32,13 @@ import {
   doc,
   getDoc,
   setDoc,
+  updateDoc,
   onSnapshot,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { getAuth, updateProfile } from 'firebase/auth';
+import * as ImagePicker from 'expo-image-picker';
 import { db } from '../../lib/firebase';
 
 const FONT_HEADING =
@@ -68,6 +73,7 @@ function AccountScreenInner({ onClose }: Props) {
   const { user, claims, signOut, effectiveUid } = useAuth();
   const { displayName, initials, photoURL, email, impersonating } = useEffectiveProfile();
   const { isHidden } = useHiddenSettings();
+  const [showEditProfile, setShowEditProfile] = useState(false);
 
   // Hidden sections: skipped for the coach, rendered with a tag for an
   // impersonating admin so the admin can see what is hidden.
@@ -111,7 +117,23 @@ function AccountScreenInner({ onClose }: Props) {
           </View>
           <Text style={s.name}>{displayName}</Text>
           {!!email && <Text style={s.email}>{email}</Text>}
+          {!impersonating && (
+            <Pressable style={s.editProfileBtn} onPress={() => setShowEditProfile(true)}>
+              <Icon name="edit" size={14} color={TEXT_SECONDARY} />
+              <Text style={s.editProfileBtnText}>Edit Profile</Text>
+            </Pressable>
+          )}
         </View>
+
+        {/* Edit Profile Modal */}
+        {!impersonating && coachId && (
+          <EditProfileModal
+            visible={showEditProfile}
+            onClose={() => setShowEditProfile(false)}
+            coachId={coachId}
+            currentDisplayName={displayName || ''}
+          />
+        )}
 
         {/* Stripe Connect — coaches only */}
         {coachId && showSection('stripe') && (
@@ -956,6 +978,208 @@ function GoogleCalendarSyncSection({ coachId, impersonating }: { coachId: string
   );
 }
 
+// ─── Edit Profile Modal ──────────────────────────────────────────────────────
+
+function EditProfileModal({
+  visible,
+  onClose,
+  coachId,
+  currentDisplayName,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  coachId: string;
+  currentDisplayName: string;
+}) {
+  const [name, setName] = useState(currentDisplayName);
+  const [saving, setSaving] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+
+  useEffect(() => {
+    if (visible) setName(currentDisplayName);
+  }, [visible, currentDisplayName]);
+
+  async function handleSaveName() {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setSaving(true);
+    try {
+      const auth = getAuth();
+      if (auth.currentUser) {
+        await updateProfile(auth.currentUser, { displayName: trimmed });
+      }
+      await updateDoc(doc(db, 'coaches', coachId), { name: trimmed });
+      onClose();
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to save name.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handlePickPhoto() {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets?.[0]?.uri) return;
+    setUploadingPhoto(true);
+    try {
+      const uri = result.assets[0].uri;
+      const resp = await fetch(uri);
+      const blob = await resp.blob();
+      const storage = getStorage();
+      const storageRef = ref(storage, `coaches/${coachId}/photo/${Date.now()}.jpg`);
+      await uploadBytes(storageRef, blob);
+      const downloadURL = await getDownloadURL(storageRef);
+      const auth = getAuth();
+      if (auth.currentUser) {
+        await updateProfile(auth.currentUser, { photoURL: downloadURL });
+      }
+      await updateDoc(doc(db, 'coaches', coachId), { photoURL: downloadURL });
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to upload photo.');
+    } finally {
+      setUploadingPhoto(false);
+    }
+  }
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={ep.overlay} onPress={onClose}>
+        <Pressable style={ep.sheet} onPress={(e) => e.stopPropagation()}>
+          <Text style={ep.title}>Edit Profile</Text>
+
+          <Text style={ep.label}>Display Name</Text>
+          <TextInput
+            style={ep.input}
+            value={name}
+            onChangeText={setName}
+            placeholder="Your name"
+            placeholderTextColor="#4A5568"
+            autoCapitalize="words"
+          />
+
+          <View style={ep.btnRow}>
+            <Pressable style={ep.saveBtn} onPress={handleSaveName} disabled={saving}>
+              {saving
+                ? <ActivityIndicator size="small" color="#0E1117" />
+                : <Text style={ep.saveBtnText}>Save Name</Text>
+              }
+            </Pressable>
+          </View>
+
+          <View style={ep.divider} />
+
+          <Pressable style={ep.photoBtn} onPress={handlePickPhoto} disabled={uploadingPhoto}>
+            {uploadingPhoto
+              ? <ActivityIndicator size="small" color={TEXT_PRIMARY} />
+              : <Icon name="image" size={16} color={TEXT_PRIMARY} />
+            }
+            <Text style={ep.photoBtnText}>
+              {uploadingPhoto ? 'Uploading…' : 'Change Profile Photo'}
+            </Text>
+          </Pressable>
+
+          <Pressable style={ep.cancelBtn} onPress={onClose}>
+            <Text style={ep.cancelBtnText}>Cancel</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+const ep = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  sheet: {
+    backgroundColor: '#1A2035',
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    borderWidth: 1,
+    borderColor: BORDER,
+    gap: 12,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: TEXT_PRIMARY,
+    fontFamily: FONT_HEADING,
+    marginBottom: 4,
+  },
+  label: {
+    fontSize: 13,
+    color: TEXT_SECONDARY,
+    fontFamily: FONT_BODY,
+  },
+  input: {
+    backgroundColor: '#0E1117',
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: TEXT_PRIMARY,
+    fontFamily: FONT_BODY,
+  },
+  btnRow: {
+    flexDirection: 'row',
+  },
+  saveBtn: {
+    flex: 1,
+    backgroundColor: GOLD,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0E1117',
+    fontFamily: FONT_HEADING,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: BORDER,
+  },
+  photoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#2A3347',
+    borderRadius: 10,
+    paddingVertical: 12,
+  },
+  photoBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: TEXT_PRIMARY,
+    fontFamily: FONT_BODY,
+  },
+  cancelBtn: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  cancelBtnText: {
+    fontSize: 14,
+    color: TEXT_MUTED,
+    fontFamily: FONT_BODY,
+  },
+});
+
 // ─── Styles ─────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
@@ -1023,6 +1247,23 @@ const s = StyleSheet.create({
   email: {
     fontSize: 14,
     color: '#8A95A3',
+    fontFamily: FONT_BODY,
+  },
+  editProfileBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: CARD_BG,
+    marginTop: 4,
+  },
+  editProfileBtnText: {
+    fontSize: 13,
+    color: TEXT_SECONDARY,
     fontFamily: FONT_BODY,
   },
   card: {

@@ -32,7 +32,6 @@ import {
   getDoc,
   serverTimestamp,
   setDoc,
-  updateDoc,
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { getAuth, updateProfile } from 'firebase/auth';
@@ -126,6 +125,7 @@ interface CoachSetupDoc {
   profilePhotoUploaded?: boolean;
   logoUploaded?: boolean;
   certificationUploaded?: boolean;
+  coachCertEnrolled?: boolean;
   goaEmail?: string;
 }
 
@@ -178,6 +178,8 @@ function CoachSetupScreenInner() {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [uploadingCert, setUploadingCert] = useState(false);
+  const [coachCertEnrolled, setCoachCertEnrolled] = useState(false);
+  const [enrollingCert, setEnrollingCert] = useState(false);
 
   const scrollRef = useRef<ScrollView>(null);
   const moduleListYRef = useRef<number | null>(null);
@@ -206,9 +208,11 @@ function CoachSetupScreenInner() {
             profilePhotoUploaded: data.profilePhotoUploaded,
             logoUploaded: data.logoUploaded,
             certificationUploaded: data.certificationUploaded,
+            coachCertEnrolled: data.coachCertEnrolled,
             goaEmail: data.goaEmail,
           });
           if (data.goaEmail) setGoaEmailDraft(data.goaEmail);
+          if (data.coachCertEnrolled) setCoachCertEnrolled(true);
         } else {
           setProgress(emptyDoc(coachId));
         }
@@ -267,6 +271,7 @@ function CoachSetupScreenInner() {
         if (merged.profilePhotoUploaded != null) writePayload.profilePhotoUploaded = merged.profilePhotoUploaded;
         if (merged.logoUploaded != null) writePayload.logoUploaded = merged.logoUploaded;
         if (merged.certificationUploaded != null) writePayload.certificationUploaded = merged.certificationUploaded;
+        if (merged.coachCertEnrolled != null) writePayload.coachCertEnrolled = merged.coachCertEnrolled;
         if (merged.goaEmail != null) writePayload.goaEmail = merged.goaEmail;
         if (!progress.startedAt) writePayload.startedAt = serverTimestamp();
         const contentIds: ModuleId[] = ['identity', 'connectStripe', 'zoomSetup', 'goaEmail', 'certification', 'firstMember', 'launchCelebration'];
@@ -275,8 +280,9 @@ function CoachSetupScreenInner() {
         }
         await setDoc(doc(db, 'coach_setup', coachId), writePayload, { merge: true });
         setProgress(merged);
-      } catch (err) {
+      } catch (err: any) {
         console.error('[CoachSetup] save error:', err);
+        Alert.alert('Error', err.message || 'Failed to save progress.');
       } finally {
         setSaving(false);
       }
@@ -314,9 +320,10 @@ function CoachSetupScreenInner() {
       quality: 0.8,
     });
     if (result.canceled || !result.assets?.[0]?.uri) return;
+    const uri = result.assets[0].uri;
+    setPhotoURL(uri); // show local preview immediately
     setUploadingPhoto(true);
     try {
-      const uri = result.assets[0].uri;
       const resp = await fetch(uri);
       const blob = await resp.blob();
       const storage = getStorage();
@@ -327,7 +334,7 @@ function CoachSetupScreenInner() {
       if (auth.currentUser) {
         await updateProfile(auth.currentUser, { photoURL: downloadURL });
       }
-      await updateDoc(doc(db, 'coaches', coachId), { photoURL: downloadURL });
+      await setDoc(doc(db, 'coaches', coachId), { photoURL: downloadURL }, { merge: true });
       setPhotoURL(downloadURL);
       await save({ profilePhotoUploaded: true });
     } catch (err: any) {
@@ -345,16 +352,17 @@ function CoachSetupScreenInner() {
       quality: 0.8,
     });
     if (result.canceled || !result.assets?.[0]?.uri) return;
+    const uri = result.assets[0].uri;
+    setLogoURL(uri); // show local preview immediately
     setUploadingLogo(true);
     try {
-      const uri = result.assets[0].uri;
       const resp = await fetch(uri);
       const blob = await resp.blob();
       const storage = getStorage();
       const storageRef = ref(storage, `coaches/${coachId}/logo/${Date.now()}.jpg`);
       await uploadBytes(storageRef, blob);
       const downloadURL = await getDownloadURL(storageRef);
-      await updateDoc(doc(db, 'coaches', coachId), { logoURL: downloadURL });
+      await setDoc(doc(db, 'coaches', coachId), { logoURL: downloadURL }, { merge: true });
       setLogoURL(downloadURL);
       await save({ logoUploaded: true });
     } catch (err: any) {
@@ -368,7 +376,7 @@ function CoachSetupScreenInner() {
     const trimmed = displayNameDraft.trim();
     if (!trimmed || trimmed === displayName) return;
     try {
-      await updateDoc(doc(db, 'coaches', coachId), { name: trimmed });
+      await setDoc(doc(db, 'coaches', coachId), { name: trimmed }, { merge: true });
       setDisplayName(trimmed);
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to save name.');
@@ -378,7 +386,7 @@ function CoachSetupScreenInner() {
   async function handleSaveBio() {
     const trimmed = bioDraft.trim();
     try {
-      await updateDoc(doc(db, 'coaches', coachId), { bio: trimmed });
+      await setDoc(doc(db, 'coaches', coachId), { bio: trimmed }, { merge: true });
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to save bio.');
     }
@@ -401,13 +409,26 @@ function CoachSetupScreenInner() {
       const storageRef = ref(storage, `coaches/${coachId}/certification/${Date.now()}.${ext}`);
       await uploadBytes(storageRef, blob);
       const downloadURL = await getDownloadURL(storageRef);
-      await updateDoc(doc(db, 'coaches', coachId), { certificationURL: downloadURL });
+      await setDoc(doc(db, 'coaches', coachId), { certificationURL: downloadURL }, { merge: true });
       setCertificationURL(downloadURL);
       await save({ certificationUploaded: true });
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to upload certification.');
     } finally {
       setUploadingCert(false);
+    }
+  }
+
+  async function handleEnrollCert() {
+    if (!coachId || coachCertEnrolled) return;
+    setEnrollingCert(true);
+    try {
+      await save({ coachCertEnrolled: true });
+      setCoachCertEnrolled(true);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to enroll.');
+    } finally {
+      setEnrollingCert(false);
     }
   }
 
@@ -503,9 +524,12 @@ function CoachSetupScreenInner() {
             stripeAccountId={stripeAccountId}
             goaEmailDraft={goaEmailDraft}
             setGoaEmailDraft={setGoaEmailDraft}
+            coachCertEnrolled={coachCertEnrolled}
+            enrollingCert={enrollingCert}
             onPickPhoto={handlePickPhoto}
             onPickLogo={handlePickLogo}
             onPickCert={handlePickCert}
+            onEnrollCert={handleEnrollCert}
             onSaveDisplayName={handleSaveDisplayName}
             onSaveBio={handleSaveBio}
             onComplete={() => completeModule(activeModule.id)}
@@ -728,7 +752,10 @@ interface ModuleDetailProps {
   setGoaEmailDraft: (v: string) => void;
   onPickPhoto: () => void;
   onPickLogo: () => void;
+  coachCertEnrolled: boolean;
+  enrollingCert: boolean;
   onPickCert: () => void;
+  onEnrollCert: () => void;
   onSaveDisplayName: () => void;
   onSaveBio: () => void;
   onComplete: () => void;
@@ -753,11 +780,14 @@ function ModuleDetail({
   profilePhotoUploaded,
   certificationURL,
   stripeAccountId,
+  coachCertEnrolled,
+  enrollingCert,
   goaEmailDraft,
   setGoaEmailDraft,
   onPickPhoto,
   onPickLogo,
   onPickCert,
+  onEnrollCert,
   onSaveDisplayName,
   onSaveBio,
   onComplete,
@@ -835,13 +865,20 @@ function ModuleDetail({
                 Required to complete this module. Your photo appears in member-facing views throughout the app.
               </Text>
               <View style={s.photoRow}>
-                {photoURL ? (
-                  <Image source={{ uri: photoURL }} style={s.photoPreview} />
-                ) : (
-                  <View style={s.photoPlaceholder}>
-                    <Icon name="user" size={32} color={MUTED} />
-                  </View>
-                )}
+                <View style={{ position: 'relative' }}>
+                  {photoURL ? (
+                    <Image source={{ uri: photoURL }} style={s.photoPreview} />
+                  ) : (
+                    <View style={s.photoPlaceholder}>
+                      <Icon name="user" size={32} color={MUTED} />
+                    </View>
+                  )}
+                  {uploadingPhoto && (
+                    <View style={s.photoUploadOverlay}>
+                      <ActivityIndicator size="small" color="#fff" />
+                    </View>
+                  )}
+                </View>
                 <View style={{ flex: 1, gap: 8 }}>
                   <Pressable
                     style={[s.uploadBtn, uploadingPhoto && s.btnDisabled]}
@@ -874,13 +911,20 @@ function ModuleDetail({
                 Upload a personal or brand logo. Displayed in some coach-facing contexts.
               </Text>
               <View style={s.photoRow}>
-                {logoURL ? (
-                  <Image source={{ uri: logoURL }} style={[s.photoPreview, { borderRadius: 8 }]} />
-                ) : (
-                  <View style={[s.photoPlaceholder, { borderRadius: 8 }]}>
-                    <Icon name="image" size={28} color={MUTED} />
-                  </View>
-                )}
+                <View style={{ position: 'relative' }}>
+                  {logoURL ? (
+                    <Image source={{ uri: logoURL }} style={[s.photoPreview, { borderRadius: 8 }]} />
+                  ) : (
+                    <View style={[s.photoPlaceholder, { borderRadius: 8 }]}>
+                      <Icon name="image" size={28} color={MUTED} />
+                    </View>
+                  )}
+                  {uploadingLogo && (
+                    <View style={[s.photoUploadOverlay, { borderRadius: 8 }]}>
+                      <ActivityIndicator size="small" color="#fff" />
+                    </View>
+                  )}
+                </View>
                 <View style={{ flex: 1, gap: 8 }}>
                   <Pressable
                     style={[s.uploadBtn, uploadingLogo && s.btnDisabled]}
@@ -1096,26 +1140,86 @@ function ModuleDetail({
         {module.id === 'certification' && (
           <>
             <Text style={s.sectionIntro}>
-              GoArrive coaches are expected to maintain a recognized fitness certification. If you are already certified, upload your certificate below.
+              GoArrive coaches are online fitness professionals. If you already hold a recognized certification, upload it below. If not, earn ours.
             </Text>
 
-            <View style={s.sectionBlock}>
-              <Text style={s.sectionHeading}>Don't have a certification yet?</Text>
-              <Text style={s.sectionBody}>
-                GoArrive recommends ISSA (International Sports Sciences Association) — self-paced, respected, and fits experienced coaches and practitioners well.
-              </Text>
-              <View style={s.urlCard}>
-                <Text style={s.urlLabel}>ISSA ENROLLMENT</Text>
-                <Text style={s.urlText}>issaonline.com</Text>
+            {/* GoArrive Certified Coach hero card */}
+            <View style={s.certHeroCard}>
+              {/* Academy header */}
+              <View style={s.certAcademyHeader}>
+                <Text style={s.certAcademyLabel}>G➲A ACADEMY</Text>
+                <Text style={s.certAcademyTagline}>The standard for online fitness professionals</Text>
               </View>
-              <View style={s.infoRow}>
-                <Icon name="clock" size={14} color={MUTED} />
-                <Text style={s.infoRowText}>ISSA typically takes 3–6 months to complete at your own pace</Text>
+
+              {/* Credential identity */}
+              <View style={s.certBadgeRow}>
+                <Image
+                  source={require('../../assets/gcc-logo.png')}
+                  style={s.certLogoImage}
+                  resizeMode="contain"
+                />
+                <View style={s.certBadgeLabels}>
+                  <Text style={s.certProgramLabel}>CERTIFIED ONLINE COACH</Text>
+                  <Text style={s.certCredentialLine}>GoArrive Coaching Certification</Text>
+                  <Text style={s.certBadgeSub}>Professional Credential · Self-Paced</Text>
+                </View>
               </View>
+
+              <View style={s.certDivider} />
+
+              <View style={s.certFeatureList}>
+                {[
+                  'Virtual session design and client programming',
+                  'Online client acquisition and retention',
+                  'GoArrive platform and digital tools mastery',
+                  'Official GCC credential upon completion',
+                ].map((feature, i) => (
+                  <View key={i} style={s.certFeatureRow}>
+                    <Icon name="check-circle" size={14} color={GOLD} />
+                    <Text style={s.certFeatureText}>{feature}</Text>
+                  </View>
+                ))}
+              </View>
+
+              {coachCertEnrolled ? (
+                <>
+                  <View style={s.certEnrolledBadge}>
+                    <Icon name="check-circle" size={13} color={GREEN} />
+                    <Text style={s.certEnrolledText}>Enrolled in GCC</Text>
+                  </View>
+                  <View style={s.certNextStepCard}>
+                    <Text style={s.certNextStepLabel}>YOUR NEXT STEP</Text>
+                    <Text style={s.certNextStepTitle}>Module 1: The Online Coaching Model</Text>
+                    <Text style={s.certNextStepBody}>
+                      Learn the GoArrive framework for running a thriving online coaching business — client experience, delivery systems, and your professional standard.
+                    </Text>
+                    <View style={s.certStartRow}>
+                      <Icon name="clock" size={12} color={MUTED} />
+                      <Text style={s.certStartTime}>~45 min · Available now</Text>
+                    </View>
+                  </View>
+                </>
+              ) : (
+                <Pressable
+                  style={[s.certEnrollBtn, enrollingCert && s.btnDisabled]}
+                  onPress={onEnrollCert}
+                  disabled={enrollingCert}
+                >
+                  {enrollingCert ? (
+                    <ActivityIndicator size="small" color="#000" />
+                  ) : (
+                    <>
+                      <Text style={s.certEnrollBtnText}>Enroll Now</Text>
+                      <Icon name="arrow-right" size={14} color="#000" />
+                    </>
+                  )}
+                </Pressable>
+              )}
             </View>
 
+            {/* Upload existing cert */}
             <View style={s.sectionBlock}>
-              <Text style={s.sectionHeading}>Upload Certification (Optional)</Text>
+              <Text style={s.sectionHeading}>Already certified? Upload it</Text>
               <Text style={s.sectionBody}>
                 Upload your current certification document or image.
               </Text>
@@ -1495,6 +1599,17 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  photoUploadOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   uploadBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1512,6 +1627,7 @@ const s = StyleSheet.create({
     fontWeight: '700',
     color: GOLD,
     fontFamily: FH,
+    textAlign: 'center',
   },
   successRow: {
     flexDirection: 'row',
@@ -1765,6 +1881,157 @@ const s = StyleSheet.create({
     fontFamily: FB,
   },
 
+  // GoArrive Certified Coach hero
+  certHeroCard: {
+    backgroundColor: 'rgba(245,166,35,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.30)',
+    borderRadius: 16,
+    padding: 18,
+    gap: 16,
+  },
+  certAcademyHeader: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(245,166,35,0.15)',
+    paddingBottom: 14,
+    gap: 3,
+  },
+  certAcademyLabel: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 2.5,
+    color: GOLD,
+    fontFamily: FB,
+  },
+  certAcademyTagline: {
+    fontSize: 11,
+    color: MUTED,
+    fontFamily: FB,
+    fontStyle: 'italic',
+  },
+  certBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  certLogoImage: {
+    width: 72,
+    height: 72,
+    borderRadius: 6,
+  },
+  certBadgeLabels: {
+    flex: 1,
+    gap: 2,
+  },
+  certProgramLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    color: GOLD,
+    fontFamily: FB,
+  },
+  certCredentialLine: {
+    fontSize: 12,
+    color: FG,
+    fontFamily: FB,
+    fontWeight: '600',
+  },
+  certBadgeSub: {
+    fontSize: 11,
+    color: MUTED,
+    fontFamily: FB,
+  },
+  certDivider: {
+    height: 1,
+    backgroundColor: 'rgba(245,166,35,0.12)',
+  },
+  certFeatureList: {
+    gap: 10,
+  },
+  certFeatureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  certFeatureText: {
+    fontSize: 13,
+    color: FG,
+    fontFamily: FB,
+    flex: 1,
+    lineHeight: 18,
+  },
+  certEnrollBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: GOLD,
+    borderRadius: 10,
+    paddingVertical: 13,
+    paddingHorizontal: 20,
+    gap: 8,
+  },
+  certEnrollBtnText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#000',
+    fontFamily: FH,
+    letterSpacing: 0.5,
+  },
+  certEnrolledBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(110,187,122,0.10)',
+    borderRadius: 20,
+    alignSelf: 'flex-start',
+  },
+  certEnrolledText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: GREEN,
+    fontFamily: FB,
+  },
+  certNextStepCard: {
+    backgroundColor: BG,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 10,
+    padding: 12,
+    gap: 5,
+  },
+  certNextStepLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: GOLD,
+    fontFamily: FB,
+  },
+  certNextStepTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: FG,
+    fontFamily: FH,
+  },
+  certNextStepBody: {
+    fontSize: 13,
+    color: MUTED,
+    fontFamily: FB,
+    lineHeight: 18,
+  },
+  certStartRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 2,
+  },
+  certStartTime: {
+    fontSize: 11,
+    color: MUTED,
+    fontFamily: FB,
+  },
+
   // First member step cards
   memberStepCard: {
     backgroundColor: BG,
@@ -1874,6 +2141,7 @@ const s = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     fontFamily: FH,
+    textAlign: 'center',
   },
   btnDisabled: { opacity: 0.5 },
   skipBtn: {
@@ -1888,6 +2156,7 @@ const s = StyleSheet.create({
     fontSize: 14,
     color: MUTED,
     fontFamily: FB,
+    textAlign: 'center',
   },
   completedBanner: {
     flexDirection: 'row',

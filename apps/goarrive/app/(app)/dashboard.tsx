@@ -25,6 +25,8 @@ import {
   getDocs,
   orderBy,
   limit,
+  doc,
+  onSnapshot,
 } from 'firebase/firestore';
 import { AppHeader } from '../../components/AppHeader';
 import CheckInCard from '../../components/CheckInCard';
@@ -118,6 +120,7 @@ export default function DashboardScreen() {
   const [showQuickAssign, setShowQuickAssign] = useState(false);
   const [showReviewQueue, setShowReviewQueue] = useState(false);
 
+  const [funnelSubdomain, setFunnelSubdomain] = useState<string | null | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [stats, setStats] = useState({
@@ -192,6 +195,7 @@ export default function DashboardScreen() {
       const checkinsSnap = await getDocs(
         query(
           collection(db, 'checkins'),
+          where('coachId', '==', coachId),
         ),
       ).catch(() => ({ docs: [] as any[] }));
 
@@ -229,6 +233,15 @@ export default function DashboardScreen() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    if (!coachId) return;
+    const unsub = onSnapshot(doc(db, 'coaches', coachId), (snap) => {
+      const data = snap.exists() ? snap.data() : {};
+      setFunnelSubdomain(data.funnelSubdomain || null);
+    });
+    return unsub;
+  }, [coachId]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -364,6 +377,22 @@ export default function DashboardScreen() {
 
         {/* Coach Launch entry — guided journey */}
         {modules.coachLaunch && <CoachLaunchCard />}
+
+        {/* Public profile setup nudge */}
+        {funnelSubdomain === null && (
+          <View style={s.publicProfileCard}>
+            <View style={s.publicProfileTextWrap}>
+              <Text style={s.publicProfileTitle}>Your public page isn't set up yet</Text>
+              <Text style={s.publicProfileSub}>Members won't be able to find you.</Text>
+            </View>
+            <Pressable
+              style={s.publicProfileBtn}
+              onPress={() => router.push('/(app)/my-page' as any)}
+            >
+              <Text style={s.publicProfileBtnText}>Set Up Now</Text>
+            </Pressable>
+          </View>
+        )}
 
         {/* Coach Setup entry — practical post-agreement onboarding */}
         {(role === 'coach' || role === 'platformAdmin') && <CoachSetupCard />}
@@ -727,5 +756,45 @@ const s = StyleSheet.create({
   },
   bottomPad: {
     height: 20,
+  },
+  publicProfileCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(125,211,252,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(125,211,252,0.2)',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
+    gap: 12,
+  },
+  publicProfileTextWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  publicProfileTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#7DD3FC',
+    fontFamily: FONT_HEADING,
+  },
+  publicProfileSub: {
+    fontSize: 12,
+    color: '#4A6880',
+    fontFamily: FONT_BODY,
+  },
+  publicProfileBtn: {
+    backgroundColor: '#7DD3FC',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  publicProfileBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0E1117',
+    fontFamily: FONT_HEADING,
   },
 });

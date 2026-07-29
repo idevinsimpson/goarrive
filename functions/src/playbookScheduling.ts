@@ -471,11 +471,11 @@ export async function bookOccurrence(p: BookOccurrenceParams): Promise<{ instanc
 
 interface BookPlaybookSessionData {
   playbookId: string;
-  daysOfWeek: number[];          // 0–6, at least one
-  startTime: string;             // HH:mm (member-local wall clock)
+  daysOfWeek?: number[];         // 0–6 (legacy; derived from dayModules when present)
+  startTime?: string;            // HH:mm (legacy global; per-day truth in dayModules)
   timezone: string;              // IANA — the member's timezone
-  durationMinutes?: number;      // default 45
-  sessionKind?: PlaybookSessionKind;      // default coach_review
+  durationMinutes?: number;      // default 45 (legacy global)
+  sessionKind?: PlaybookSessionKind;      // default coach_review (legacy global)
   recordingEnabled?: boolean;    // default true; per-playbook OFF toggle
   repeatFrequency?: 'weekly' | 'every_2_weeks' | 'none';  // default weekly
   repeatHorizonWeeks?: number;   // 2–8, default 4
@@ -483,6 +483,9 @@ interface BookPlaybookSessionData {
   startDate?: string;            // YYYY-MM-DD, default today (member tz)
   memberId?: string;             // default playbook.assignedMemberId
   pinnedWorkoutIds?: Record<string, string>; // date → workoutId (coach-pinned occurrences)
+  // Per-day modules — each selected day carries its own time, duration, kind,
+  // and workout. When present, completely overrides daysOfWeek/startTime/daySettings.
+  dayModules?: Array<{ dayOfWeek: number; startTime: string; durationMinutes?: number; sessionKind?: PlaybookSessionKind; workoutId?: string | null }>;
   // Phase B.2: per-day time + kind. When present, overrides startTime /
   // sessionKind for that day; daysOfWeek/startTime stay as the legacy shape.
   daySettings?: Array<{ dayOfWeek: number; startTime: string; sessionKind?: PlaybookSessionKind; durationMinutes?: number }>;
@@ -499,14 +502,29 @@ export const bookPlaybookSession = onCall(
     const db = getDb();
 
     const d = request.data as BookPlaybookSessionData;
-    if (!d.playbookId || !Array.isArray(d.daysOfWeek) || d.daysOfWeek.length === 0 || !d.startTime || !d.timezone) {
-      throw new HttpsError('invalid-argument', 'playbookId, daysOfWeek, startTime, and timezone are required');
+    const hasModules = Array.isArray(d.dayModules) && d.dayModules.length > 0;
+    if (!d.playbookId || !d.timezone) {
+      throw new HttpsError('invalid-argument', 'playbookId and timezone are required');
     }
-    if (d.daysOfWeek.some((x) => typeof x !== 'number' || x < 0 || x > 6)) {
-      throw new HttpsError('invalid-argument', 'daysOfWeek entries must be 0-6');
+    if (!hasModules && (!Array.isArray(d.daysOfWeek) || d.daysOfWeek.length === 0 || !d.startTime)) {
+      throw new HttpsError('invalid-argument', 'dayModules, or daysOfWeek + startTime, are required');
     }
-    if (!/^\d{2}:\d{2}$/.test(d.startTime)) {
-      throw new HttpsError('invalid-argument', 'startTime must be HH:mm');
+    if (hasModules) {
+      for (const m of d.dayModules!) {
+        if (typeof m.dayOfWeek !== 'number' || m.dayOfWeek < 0 || m.dayOfWeek > 6) {
+          throw new HttpsError('invalid-argument', 'dayModules dayOfWeek entries must be 0-6');
+        }
+        if (typeof m.startTime !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(m.startTime)) {
+          throw new HttpsError('invalid-argument', 'dayModules startTime must be HH:mm');
+        }
+      }
+    } else {
+      if (d.daysOfWeek!.some((x) => typeof x !== 'number' || x < 0 || x > 6)) {
+        throw new HttpsError('invalid-argument', 'daysOfWeek entries must be 0-6');
+      }
+      if (!/^\d{2}:\d{2}$/.test(d.startTime!)) {
+        throw new HttpsError('invalid-argument', 'startTime must be HH:mm');
+      }
     }
 
     const playbookRef = db.collection('playbooks').doc(d.playbookId);
@@ -541,9 +559,26 @@ export const bookPlaybookSession = onCall(
     }
     const memberName = memberSnap.data()!.name || playbook.assignedMemberName || 'Member';
 
+    // Per-day modules (new) — single source of truth when present.
+    // Builds a map dow → { startTime, sessionKind, durationMinutes, workoutId }.
+    type DayModuleResolved = { startTime: string; sessionKind: PlaybookSessionKind; durationMinutes: number; workoutId: string | null };
+    const dayModulesMap = new Map<number, DayModuleResolved>();
+    if (hasModules) {
+      const normKind = (k: unknown): PlaybookSessionKind => (k === 'coach_guided' ? 'coach_guided' : 'coach_review');
+      const normDur = (n: unknown): number => (typeof n === 'number' && n >= 5 && n <= 240 ? Math.round(n) : 45);
+      for (const m of d.dayModules!) {
+        dayModulesMap.set(m.dayOfWeek, {
+          startTime: m.startTime,
+          sessionKind: normKind(m.sessionKind),
+          durationMinutes: normDur(m.durationMinutes),
+          workoutId: typeof m.workoutId === 'string' && m.workoutId ? m.workoutId : null,
+        });
+      }
+    }
+
     // Per-day settings (Phase B.2) — validated map dow → { startTime, kind }
     const daySettingsMap = new Map<number, { startTime: string; sessionKind: PlaybookSessionKind; durationMinutes: number | null }>();
-    if (Array.isArray(d.daySettings)) {
+    if (!hasModules && Array.isArray(d.daySettings)) {
       for (const ds of d.daySettings) {
         if (typeof ds?.dayOfWeek !== 'number' || ds.dayOfWeek < 0 || ds.dayOfWeek > 6) {
           throw new HttpsError('invalid-argument', 'daySettings dayOfWeek must be 0-6');
@@ -571,6 +606,12 @@ export const bookPlaybookSession = onCall(
       ? Math.round(d.weeklySessionCap) : null;
     const timezone = d.timezone;
 
+    // Effective DOW list: from dayModules when present, else legacy daysOfWeek.
+    const effectiveDows = hasModules
+      ? [...dayModulesMap.keys()].sort()
+      : [...new Set(d.daysOfWeek!)].sort();
+    const effectiveStartTime = hasModules ? dayModulesMap.get(effectiveDows[0])!.startTime : d.startTime!;
+
     // Persist scheduling settings on the playbook (also normalizes memberIds
     // so group support later is purely additive).
     await playbookRef.update({
@@ -580,9 +621,12 @@ export const bookPlaybookSession = onCall(
       sessionDurationMinutes: durationMinutes,
       weeklySessionCap,
       timezone,
-      scheduleDaysOfWeek: d.daysOfWeek,
-      scheduleStartTime: d.startTime,
-      scheduleDaySettings: Array.isArray(d.daySettings)
+      scheduleDaysOfWeek: effectiveDows,
+      scheduleStartTime: effectiveStartTime,
+      scheduleDayModules: hasModules
+        ? [...dayModulesMap.entries()].map(([dayOfWeek, v]) => ({ dayOfWeek, ...v }))
+        : FieldValue.delete(),
+      scheduleDaySettings: !hasModules && Array.isArray(d.daySettings)
         ? [...daySettingsMap.entries()].map(([dayOfWeek, v]) => ({ dayOfWeek, ...v }))
         : FieldValue.delete(),
       repeatFrequency,
@@ -601,11 +645,13 @@ export const bookPlaybookSession = onCall(
     const horizonEnd = addDaysToDateStr(firstDate, repeatHorizonWeeks * 7);
     const stepDays = repeatFrequency === 'every_2_weeks' ? 14 : 7;
 
-    const occurrences: Array<{ dateStr: string; startTime: string; sessionKind: PlaybookSessionKind; durationMinutes: number }> = [];
-    for (const dow of [...new Set(d.daysOfWeek)].sort()) {
-      const dayStart = daySettingsMap.get(dow)?.startTime || d.startTime;
-      const dayKind = daySettingsMap.get(dow)?.sessionKind || sessionKind;
-      const dayDuration = daySettingsMap.get(dow)?.durationMinutes || durationMinutes;
+    const occurrences: Array<{ dateStr: string; startTime: string; sessionKind: PlaybookSessionKind; durationMinutes: number; workoutId: string | null }> = [];
+    for (const dow of effectiveDows) {
+      const mod = dayModulesMap.get(dow);
+      const dayStart = mod?.startTime ?? daySettingsMap.get(dow)?.startTime ?? d.startTime!;
+      const dayKind = mod?.sessionKind ?? daySettingsMap.get(dow)?.sessionKind ?? sessionKind;
+      const dayDuration = mod?.durationMinutes ?? daySettingsMap.get(dow)?.durationMinutes ?? durationMinutes;
+      const dayWorkoutId = mod?.workoutId ?? null;
       let cursor = firstDate;
       while (wallDateOf(wallTimeToUtc(cursor, '12:00', timezone), timezone).dow !== dow) {
         cursor = addDaysToDateStr(cursor, 1);
@@ -615,11 +661,11 @@ export const bookPlaybookSession = onCall(
         cursor = addDaysToDateStr(cursor, stepDays);
       }
       if (repeatFrequency === 'none') {
-        if (cursor <= horizonEnd) occurrences.push({ dateStr: cursor, startTime: dayStart, sessionKind: dayKind, durationMinutes: dayDuration });
+        if (cursor <= horizonEnd) occurrences.push({ dateStr: cursor, startTime: dayStart, sessionKind: dayKind, durationMinutes: dayDuration, workoutId: dayWorkoutId });
         continue;
       }
       while (cursor <= horizonEnd) {
-        occurrences.push({ dateStr: cursor, startTime: dayStart, sessionKind: dayKind, durationMinutes: dayDuration });
+        occurrences.push({ dateStr: cursor, startTime: dayStart, sessionKind: dayKind, durationMinutes: dayDuration, workoutId: dayWorkoutId });
         cursor = addDaysToDateStr(cursor, stepDays);
       }
     }
@@ -668,7 +714,7 @@ export const bookPlaybookSession = onCall(
           sessionKind: occ.sessionKind,
           recordingEnabled,
           weeklySessionCap,
-          pinnedWorkoutId: d.pinnedWorkoutIds?.[dateStr] || null,
+          pinnedWorkoutId: occ.workoutId || d.pinnedWorkoutIds?.[dateStr] || null,
           bookedVia: 'coach_panel',
         });
         results.push({ date: dateStr, status: 'booked', instanceId });
