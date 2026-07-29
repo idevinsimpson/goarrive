@@ -37,6 +37,7 @@ import {
 import {
   doc,
   setDoc,
+  getDoc,
   collection,
   Timestamp,
 } from 'firebase/firestore';
@@ -211,7 +212,20 @@ const initialFormData: FormData = {
 };
 
 export default function IntakeForm() {
-  const { coachId } = useLocalSearchParams<{ coachId: string }>();
+  const { coachId, ref, source } = useLocalSearchParams<{ coachId: string; ref?: string; source?: string }>();
+
+  const [coachBrand, setCoachBrand] = useState<{ displayName: string; photoUrl: string } | null>(null);
+
+  useEffect(() => {
+    if (!coachId || coachId === 'unassigned') return;
+    getDoc(doc(db, 'coaches', coachId)).then((snap) => {
+      if (!snap.exists()) return;
+      const d = snap.data();
+      const photoUrl = d.funnelPhotoUrl || d.photoURL || d.photoUrl || '';
+      const displayName = d.displayName || d.name || '';
+      if (displayName) setCoachBrand({ displayName, photoUrl });
+    }).catch(() => { /* non-blocking */ });
+  }, [coachId]);
 
   const [step, setStep] = useState<number>(0);
   const [formData, setFormData] = useState<FormData>(initialFormData);
@@ -392,6 +406,8 @@ export default function IntakeForm() {
         uid: userCred.user.uid,
         coachId: coachId || 'unassigned',
         ...formData,
+        ...(ref ? { programRef: ref } : {}),
+        ...(source ? { programSource: source } : {}),
         submittedAt: Timestamp.now(),
       });
 
@@ -972,17 +988,26 @@ export default function IntakeForm() {
     >
       {/* Progress Bar */}
       <View style={s.progressBar}>
-        {Platform.OS === 'web' && (
+        {Platform.OS === 'web' && coachBrand ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            {coachBrand.photoUrl ? (
+              <img
+                src={coachBrand.photoUrl}
+                alt={coachBrand.displayName}
+                style={{ width: 36, height: 36, borderRadius: 18, objectFit: 'cover' } as any}
+              />
+            ) : null}
+            <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8', fontFamily: "'Space Grotesk', sans-serif" }}>
+              {coachBrand.displayName}
+            </Text>
+          </View>
+        ) : Platform.OS === 'web' ? (
           <img
             src="/goarrive-logo.png"
             alt="GoArrive"
-            style={{
-              height: 40,
-              marginBottom: 12,
-              objectFit: 'contain',
-            } as any}
+            style={{ height: 40, marginBottom: 12, objectFit: 'contain' } as any}
           />
-        )}
+        ) : null}
         <View style={s.progressHeader}>
           <Text style={s.progressLabel}>{STEPS[step]}</Text>
           <Text style={s.progressCount}>
