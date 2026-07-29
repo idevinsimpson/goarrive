@@ -1153,11 +1153,11 @@ function ModuleDetail({
 
               {/* Credential identity */}
               <View style={s.certBadgeRow}>
-                <View style={s.certBadgeOuter}>
-                  <View style={s.certBadge}>
-                    <Text style={s.certBadgeText}>GCC</Text>
-                  </View>
-                </View>
+                <Image
+                  source={require('../../assets/gcc-logo.png')}
+                  style={s.certLogoImage}
+                  resizeMode="contain"
+                />
                 <View style={s.certBadgeLabels}>
                   <Text style={s.certProgramLabel}>CERTIFIED ONLINE COACH</Text>
                   <Text style={s.certCredentialLine}>GoArrive Coaching Certification</Text>
@@ -1913,29 +1913,10 @@ const s = StyleSheet.create({
     alignItems: 'center',
     gap: 14,
   },
-  certBadgeOuter: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    borderWidth: 2,
-    borderColor: GOLD,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  certBadge: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: GOLD,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  certBadgeText: {
-    fontSize: 13,
-    fontWeight: '900',
-    color: '#000',
-    fontFamily: FH,
-    letterSpacing: 1,
+  certLogoImage: {
+    width: 72,
+    height: 72,
+    borderRadius: 6,
   },
   certBadgeLabels: {
     flex: 1,
