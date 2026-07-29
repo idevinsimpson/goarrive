@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-07-28._
+_Last refreshed: 2026-07-29._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -73,6 +73,13 @@ The test suite runs on vitest; `jest.spyOn` in older player tests silently broke
 
 ### Large Feature PR Merge Conflicts Can Clobber Existing UI
 When PR #207 (playbook live view) merged, a merge conflict in `app/live-session/[sessionInstanceId].tsx` was resolved incorrectly, overwriting the existing 3-state UI (pre-session countdown / active session / post-session) with an earlier version of the file. The clobber was not caught before the prod push; a follow-up fix (2026-07-28 prod push) restored the correct 3-state logic. Lesson: after merging any large feature PR that touches a shared route file, diff the result against the pre-merge HEAD to confirm all pre-existing UI states are intact — especially for files that both the feature branch and main modified independently.
+
+### Coach Setup Persistence: Firestore Permission Denials
+The coach-setup guide's 6 modules failed to save any data because the Firestore rules for coach profile/setup documents were missing write access for the coach's own UID. All coach-setup persistence appeared to succeed client-side but silently failed at the rules layer. Fixed by adding the correct Firestore rules grants for the coach setup path. Lesson: whenever a new screen writes to a Firestore path not covered by an existing rule, verify the rules path with a rules-playground test before shipping — silent rule denials have no visible error in the UI.
+
+### Per-Day Module Cards Regressed by Global-Times Refactor
+A refactor that introduced a "global times" mode for the playbook scheduling panel accidentally replaced the per-day module card layout with a single global time field, removing the individual day configuration UI entirely. The regression was caught and reverted before coaches widely noticed, restoring the per-day cards (with day-specific time, duration, and workout slots). Lesson: the scheduling panel's per-day module card layout is the UX contract for coaches; any scheduling UI refactor must verify all per-day controls remain visible and functional in the coach scheduling panel.
+
 
 ## Known Performance Risks
 
