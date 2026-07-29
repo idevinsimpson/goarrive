@@ -36,6 +36,7 @@ import {
 } from 'firebase/auth';
 import {
   doc,
+  getDoc,
   setDoc,
   collection,
   Timestamp,
@@ -235,6 +236,25 @@ export default function IntakeForm() {
   const [submitErrorCode, setSubmitErrorCode] = useState('');
   const [hydrated, setHydrated] = useState(false);
   const scrollRef = React.useRef<ScrollView>(null);
+
+  const [coachBrand, setCoachBrand] = useState<{
+    name: string;
+    logoUrl: string | null;
+    photoUrl: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!coachId || coachId === 'unassigned') return;
+    getDoc(doc(db, 'coaches', coachId)).then((snap) => {
+      if (!snap.exists()) return;
+      const d = snap.data();
+      setCoachBrand({
+        name: d.displayName || '',
+        logoUrl: d.coachLogoUrl || null,
+        photoUrl: d.funnelPhotoUrl || null,
+      });
+    }).catch(() => {});
+  }, [coachId]);
 
   // Restore saved draft from localStorage after hydration (client-side only)
   useEffect(() => {
@@ -973,15 +993,41 @@ export default function IntakeForm() {
       {/* Progress Bar */}
       <View style={s.progressBar}>
         {Platform.OS === 'web' && (
-          <img
-            src="/goarrive-logo.png"
-            alt="GoArrive"
-            style={{
-              height: 40,
-              marginBottom: 12,
-              objectFit: 'contain',
-            } as any}
-          />
+          <View style={s.brandHeader}>
+            {coachBrand?.logoUrl ? (
+              <img
+                src={coachBrand.logoUrl}
+                alt={coachBrand.name || 'Coach'}
+                style={{ height: 52, objectFit: 'contain', marginBottom: 6 } as any}
+              />
+            ) : coachBrand?.photoUrl ? (
+              <View style={s.brandCoachRow}>
+                <img
+                  src={coachBrand.photoUrl}
+                  alt={coachBrand.name || 'Coach'}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 22,
+                    objectFit: 'cover',
+                    border: '2px solid #F5A623',
+                  } as any}
+                />
+                {coachBrand.name ? (
+                  <Text style={s.brandCoachName}>{coachBrand.name}</Text>
+                ) : null}
+              </View>
+            ) : null}
+            <img
+              src="/goarrive-logo.png"
+              alt="GoArrive"
+              style={{
+                height: coachBrand ? 28 : 40,
+                objectFit: 'contain',
+                opacity: coachBrand ? 0.7 : 1,
+              } as any}
+            />
+          </View>
         )}
         <View style={s.progressHeader}>
           <Text style={s.progressLabel}>{STEPS[step]}</Text>
@@ -1052,6 +1098,23 @@ const s: any = StyleSheet.create({
     flexDirection: 'column',
     minHeight: '100dvh' as any,
     height: '100dvh' as any,
+  },
+  brandHeader: {
+    alignItems: 'center' as const,
+    marginBottom: 12,
+    gap: 6,
+  },
+  brandCoachRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 10,
+    marginBottom: 4,
+  },
+  brandCoachName: {
+    color: '#E8EAF0',
+    fontSize: 15,
+    fontFamily: Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold',
+    fontWeight: '600' as const,
   },
   progressBar: {
     paddingHorizontal: 16,
