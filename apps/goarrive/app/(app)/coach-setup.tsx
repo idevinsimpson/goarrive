@@ -1140,26 +1140,38 @@ function ModuleDetail({
         {module.id === 'certification' && (
           <>
             <Text style={s.sectionIntro}>
-              GoArrive coaches maintain a recognized coaching credential. If you already hold a certification, upload it below. If not, enroll in the GoArrive Certified Coach program.
+              GoArrive coaches are online fitness professionals. If you already hold a recognized certification, upload it below. If not, earn ours.
             </Text>
 
             {/* GoArrive Certified Coach hero card */}
             <View style={s.certHeroCard}>
+              {/* Academy header */}
+              <View style={s.certAcademyHeader}>
+                <Text style={s.certAcademyLabel}>G➲A ACADEMY</Text>
+                <Text style={s.certAcademyTagline}>The standard for online fitness professionals</Text>
+              </View>
+
+              {/* Credential identity */}
               <View style={s.certBadgeRow}>
-                <View style={s.certBadge}>
-                  <Text style={s.certBadgeText}>GCC</Text>
+                <View style={s.certBadgeOuter}>
+                  <View style={s.certBadge}>
+                    <Text style={s.certBadgeText}>GCC</Text>
+                  </View>
                 </View>
                 <View style={s.certBadgeLabels}>
-                  <Text style={s.certProgramLabel}>GOARRIVE CERTIFIED COACH</Text>
-                  <Text style={s.certBadgeSub}>Level 1 · Self-Paced</Text>
+                  <Text style={s.certProgramLabel}>CERTIFIED ONLINE COACH</Text>
+                  <Text style={s.certCredentialLine}>GoArrive Coaching Certification</Text>
+                  <Text style={s.certBadgeSub}>Professional Credential · Self-Paced</Text>
                 </View>
               </View>
 
+              <View style={s.certDivider} />
+
               <View style={s.certFeatureList}>
                 {[
-                  '5 foundational coaching modules',
-                  'Move at your own pace — no deadlines',
-                  'Practical skills, not just theory',
+                  'Virtual session design and client programming',
+                  'Online client acquisition and retention',
+                  'GoArrive platform and digital tools mastery',
                   'Official GCC credential upon completion',
                 ].map((feature, i) => (
                   <View key={i} style={s.certFeatureRow}>
@@ -1177,9 +1189,9 @@ function ModuleDetail({
                   </View>
                   <View style={s.certNextStepCard}>
                     <Text style={s.certNextStepLabel}>YOUR NEXT STEP</Text>
-                    <Text style={s.certNextStepTitle}>Module 1: Coaching Foundations</Text>
+                    <Text style={s.certNextStepTitle}>Module 1: The Online Coaching Model</Text>
                     <Text style={s.certNextStepBody}>
-                      Understand the GoArrive coaching philosophy, learn the member journey, and establish your coaching identity.
+                      Learn the GoArrive framework for running a thriving online coaching business — client experience, delivery systems, and your professional standard.
                     </Text>
                     <View style={s.certStartRow}>
                       <Icon name="clock" size={12} color={MUTED} />
@@ -1197,7 +1209,7 @@ function ModuleDetail({
                     <ActivityIndicator size="small" color="#000" />
                   ) : (
                     <>
-                      <Text style={s.certEnrollBtnText}>Enroll in GCC</Text>
+                      <Text style={s.certEnrollBtnText}>Enroll Now</Text>
                       <Icon name="arrow-right" size={14} color="#000" />
                     </>
                   )}
@@ -1870,22 +1882,50 @@ const s = StyleSheet.create({
 
   // GoArrive Certified Coach hero
   certHeroCard: {
-    backgroundColor: 'rgba(245,166,35,0.05)',
+    backgroundColor: 'rgba(245,166,35,0.04)',
     borderWidth: 1,
-    borderColor: 'rgba(245,166,35,0.28)',
-    borderRadius: 14,
-    padding: 16,
-    gap: 14,
+    borderColor: 'rgba(245,166,35,0.30)',
+    borderRadius: 16,
+    padding: 18,
+    gap: 16,
+  },
+  certAcademyHeader: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(245,166,35,0.15)',
+    paddingBottom: 14,
+    gap: 3,
+  },
+  certAcademyLabel: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 2.5,
+    color: GOLD,
+    fontFamily: FB,
+  },
+  certAcademyTagline: {
+    fontSize: 11,
+    color: MUTED,
+    fontFamily: FB,
+    fontStyle: 'italic',
   },
   certBadgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 14,
+  },
+  certBadgeOuter: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 2,
+    borderColor: GOLD,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   certBadge: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     backgroundColor: GOLD,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1899,33 +1939,44 @@ const s = StyleSheet.create({
   },
   certBadgeLabels: {
     flex: 1,
-    gap: 3,
+    gap: 2,
   },
   certProgramLabel: {
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '800',
     letterSpacing: 1.5,
     color: GOLD,
     fontFamily: FB,
   },
-  certBadgeSub: {
+  certCredentialLine: {
     fontSize: 12,
+    color: FG,
+    fontFamily: FB,
+    fontWeight: '600',
+  },
+  certBadgeSub: {
+    fontSize: 11,
     color: MUTED,
     fontFamily: FB,
   },
+  certDivider: {
+    height: 1,
+    backgroundColor: 'rgba(245,166,35,0.12)',
+  },
   certFeatureList: {
-    gap: 9,
+    gap: 10,
   },
   certFeatureRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
   certFeatureText: {
     fontSize: 13,
     color: FG,
     fontFamily: FB,
     flex: 1,
+    lineHeight: 18,
   },
   certEnrollBtn: {
     flexDirection: 'row',
@@ -1933,15 +1984,16 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: GOLD,
     borderRadius: 10,
-    paddingVertical: 12,
+    paddingVertical: 13,
     paddingHorizontal: 20,
     gap: 8,
   },
   certEnrollBtnText: {
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '800',
     color: '#000',
     fontFamily: FH,
+    letterSpacing: 0.5,
   },
   certEnrolledBadge: {
     flexDirection: 'row',
