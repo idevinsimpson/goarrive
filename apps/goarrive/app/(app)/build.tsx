@@ -1421,6 +1421,12 @@ function BuildScreenInner() {
     setHoveredId(prev => (prev === nextId ? prev : nextId));
   }, [findTarget, findTrayTarget, isOverFolderHeader]);
 
+  const showDropToast = useCallback((msg: string) => {
+    if (dropToastTimerRef.current) clearTimeout(dropToastTimerRef.current);
+    setDropToast(msg);
+    dropToastTimerRef.current = setTimeout(() => setDropToast(null), 2500);
+  }, []);
+
   const executeDrop = useCallback(async (ax: number, ay: number) => {
     const dragged = _dragItemRef.current;
     if (!dragged) return;
@@ -1487,7 +1493,7 @@ function BuildScreenInner() {
     // pixels even when the orange-border hover was showing. Fall back to the
     // last hovered item id when the primary hit-test returns nothing.
     if (!target && hoveredIdRef.current && !hoveredIdRef.current.startsWith('tray:') && hoveredIdRef.current !== '__parent__') {
-      target = filteredItems.find(i => i.id === hoveredIdRef.current) ?? null;
+      target = tileLayoutSnap.current.get(hoveredIdRef.current)?.item ?? null;
     }
     if (!target || target.id === dragged.id) return;
     if (!isDropTarget(target, dragged)) return;
@@ -1542,7 +1548,7 @@ function BuildScreenInner() {
       // (or, for two movements, optionally a new workout).
       setDropModal({ drag: dragged, target });
     }
-  }, [findTarget, findTrayTarget, dropItemIntoFolder, scrollListToTop, isOverFolderHeader, moveItemUpOneLevel, showDropToast, filteredItems]);
+  }, [findTarget, findTrayTarget, dropItemIntoFolder, scrollListToTop, isOverFolderHeader, moveItemUpOneLevel, showDropToast]);
 
   const clearDragState = useCallback(() => {
     _dragItemRef.current = null;
@@ -1550,12 +1556,6 @@ function BuildScreenInner() {
     setDragItem(null);
     setHoveredId(null);
     tileLayoutSnap.current.clear();
-  }, []);
-
-  const showDropToast = useCallback((msg: string) => {
-    if (dropToastTimerRef.current) clearTimeout(dropToastTimerRef.current);
-    setDropToast(msg);
-    dropToastTimerRef.current = setTimeout(() => setDropToast(null), 2500);
   }, []);
 
   // ── Page scroll lock during drag (web) ─────────────────────────────────
