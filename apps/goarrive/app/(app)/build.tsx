@@ -118,12 +118,22 @@ const NO_MOVEMENT_BLOCKS = ['Water Break', 'Rest', 'Follow-Along Video'];
 // ── Drag auto-scroll + drop tray constants ─────────────────────────────────
 const AUTO_SCROLL_MAX_PX = 15;       // max px scrolled per frame at edge proximity
 const AUTO_SCROLL_BAND_PCT = 0.18;  // edge band = 18% of the list height (at top/bottom where scroll fires)
+const AUTO_SCROLL_HOTSPOT_W = 96;   // right-column width that triggers page down-scroll (rest of bottom = tray targets)
 const TRAY_SHOW_DELAY_MS = 200;      // delay before tray slides up — avoids flashing on accidental long presses
 const TRAY_HEIGHT = 96;              // content height of the drop tray (excl. safe-area inset)
 const TRAY_SLIDE_DISTANCE = 220;     // translateY when hidden — guaranteed offscreen incl. inset
-const TRAY_MAX_RECENTS = 5;
+const TRAY_MAX_RECENTS = 8;          // wider recents list — user can horizontally scroll to reach later entries
 const TRAY_NEW_FOLDER_KEY = 'tray:new';
 const TRAY_NEW_PLAYBOOK_KEY = 'tray:new-playbook';
+// Horizontal-scroll edge band inside the tray. Drag pointer inside the tray
+// zone but within this many px of the left/right edge triggers a horizontal
+// scroll of the tray items so hidden targets slide into view.
+const TRAY_HSCROLL_BAND = 64;
+const TRAY_HSCROLL_MAX_PX = 14;
+// Colors: folders = orange, playbooks = purple. Applied to tray chip borders,
+// icons, and hover glow so the coach can tell them apart at a glance.
+const FOLDER_ACCENT = '#F5A623';
+const PLAYBOOK_ACCENT = '#A78BFA';
 
 // Firestore rejects `undefined` values. Mirror the stripUndefined pattern
 // from components/WorkoutFolderPage.tsx so writes from drag/drop never throw.
@@ -426,6 +436,117 @@ function FolderMosaic({ previews, width, height, scrollIdle }: { previews: Folde
   );
 }
 
+// Chip inside the bottom drop tray. Grows slightly when the drag pointer is
+// over it so the drop target is unmistakable, and picks up an accent border.
+function TrayChip({
+  accent,
+  hovered,
+  onLayout,
+  children,
+}: {
+  accent: string;
+  hovered: boolean;
+  onLayout: (e: LayoutChangeEvent) => void;
+  children: React.ReactNode;
+}) {
+  const scale = useSharedValue(1);
+  useEffect(() => {
+    scale.value = withSpring(hovered ? 1.12 : 1, { damping: 14, stiffness: 220 });
+  }, [hovered, scale]);
+  const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  return (
+    <Reanimated.View
+      onLayout={onLayout}
+      collapsable={false}
+      style={[
+        {
+          width: 96,
+          height: TRAY_HEIGHT - 24,
+          backgroundColor: '#0E1117',
+          borderRadius: 12,
+          borderWidth: hovered ? 2 : 1,
+          borderColor: hovered ? accent : '#1E2A3A',
+          overflow: 'hidden',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 4,
+          padding: 4,
+        },
+        animStyle,
+        hovered && {
+          shadowColor: accent,
+          shadowOffset: { width: 0, height: 0 },
+          shadowOpacity: 0.6,
+          shadowRadius: 8,
+          elevation: 8,
+        },
+      ]}
+    >
+      {children}
+    </Reanimated.View>
+  );
+}
+
+// Renders the tray chip body for existing folders / playbooks: a small
+// mosaic preview of contents when available, plus the name. Falls back to
+// an icon when the folder is empty.
+function TrayChipContents({ item, accent, isPlaybook }: { item: BuildItem; accent: string; isPlaybook: boolean }) {
+  const previews = Array.isArray(item.folderPreview) ? item.folderPreview : [];
+  const hasPreview = previews.length > 0;
+  return (
+    <View style={{ flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
+      <View style={{ width: 80, height: 44, borderRadius: 6, overflow: 'hidden', backgroundColor: '#0B0E14', borderWidth: 1, borderColor: accent + '55' }}>
+        {hasPreview ? (
+          <TrayChipMosaic previews={previews} width={80} height={44} />
+        ) : (
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name={isPlaybook ? 'playbook' : 'folder'} size={18} color={accent} />
+          </View>
+        )}
+      </View>
+      <Text style={{ color: '#F0F4F8', fontSize: 10, fontWeight: '700', textAlign: 'center' }} numberOfLines={1}>
+        {item.name}
+      </Text>
+    </View>
+  );
+}
+
+// Minimal thumbnail grid for a tray chip: 2×2 first-four thumbs (or 1 if only
+// one). Uses inline Image tags rather than reusing FolderMosaic because that
+// component targets full-size tiles with ~28px chrome, which doesn't fit an
+// 80×44 chip preview.
+function TrayChipMosaic({ previews, width, height }: { previews: any[]; width: number; height: number }) {
+  const flatThumbs: string[] = [];
+  for (const p of previews) {
+    if (!p) continue;
+    if (Array.isArray(p.thumbs)) {
+      for (const t of p.thumbs) {
+        if (typeof t === 'string' && flatThumbs.length < 4) flatThumbs.push(t);
+      }
+    }
+    if (Array.isArray(p.playbookWorkouts)) {
+      for (const w of p.playbookWorkouts) {
+        if (Array.isArray(w)) for (const t of w) {
+          if (typeof t === 'string' && flatThumbs.length < 4) flatThumbs.push(t);
+        }
+      }
+    }
+    if (flatThumbs.length >= 4) break;
+  }
+  if (flatThumbs.length === 0) return null;
+  const cols = flatThumbs.length === 1 ? 1 : 2;
+  const rows = flatThumbs.length <= 2 ? 1 : 2;
+  const cellW = width / cols;
+  const cellH = height / rows;
+  return (
+    <View style={{ width, height, flexDirection: 'row', flexWrap: 'wrap' }}>
+      {flatThumbs.map((uri, i) => (
+        <Image key={i} source={{ uri }} style={{ width: cellW, height: cellH }} resizeMode="cover" />
+      ))}
+    </View>
+  );
+}
+
 function BuildScreenInner() {
   const { user, claims, effectiveUid } = useAuth();
   const coachId = effectiveUid || claims?.coachId || user?.uid || '';
@@ -530,6 +651,10 @@ function BuildScreenInner() {
   const ghostOpacity = useSharedValue(0);
   const rootOffX = useSharedValue(0);
   const rootOffY = useSharedValue(0);
+  // Tracks whether the drag pointer is currently over the tray zone. Held as a
+  // ref (not state) so updateHovered doesn't cause a render every frame — we
+  // only care about it to gate ghostScale/opacity spring transitions.
+  const ghostOverTrayRef = useRef(false);
   const [dragItem, setDragItem] = useState<BuildItem | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [dropModal, setDropModal] = useState<{ drag: BuildItem; target: BuildItem } | null>(null);
@@ -567,6 +692,12 @@ function BuildScreenInner() {
   const trayRowRef = useRef<View>(null);
   const trayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const trayTranslate = useSharedValue(TRAY_SLIDE_DISTANCE);
+  // Horizontal ScrollView wrapping tray items so the drag can pan through more
+  // recents than fit in one row.
+  const trayScrollRef = useRef<ScrollView | null>(null);
+  const trayScrollOffsetRef = useRef(0);
+  const trayContentWidthRef = useRef(0);
+  const trayViewportWidthRef = useRef(0);
   // Tray drop rects come from onLayout (relative to trayRow) + math for the
   // absolute position — NOT from async measure() calls, which raced the
   // tray's slide-up animation and left the snapshot empty on fast drops.
@@ -1381,7 +1512,9 @@ function BuildScreenInner() {
     let best: { key: string; item: BuildItem | null } | null = null;
     let bestDist = Infinity;
     trayItemLayoutsRef.current.forEach(({ x, w, item }, key) => {
-      const left = 12 + x; // tray paddingHorizontal
+      // x is relative to the horizontal ScrollView content, so subtract the
+      // live scroll offset to get the on-screen left edge.
+      const left = 12 + x - trayScrollOffsetRef.current; // tray paddingHorizontal
       const dist = ax < left ? left - ax : ax > left + w ? ax - (left + w) : 0;
       if (dist < bestDist) {
         bestDist = dist;
@@ -1415,7 +1548,27 @@ function BuildScreenInner() {
       ? '__parent__'
       : (findTrayTarget(ax, ay)?.key ?? findTarget(ax, ay)?.id ?? null);
     setHoveredId(prev => (prev === nextId ? prev : nextId));
-  }, [findTarget, findTrayTarget, isOverFolderHeader]);
+
+    // Ghost transitions: shrink + fade while the pointer is inside the tray
+    // zone so the coach can see the folder/playbook chip underneath. Only
+    // trigger springs on transitions — otherwise every frame restarts the
+    // animation and it looks choppy.
+    if (trayVisibleRef.current) {
+      const windowH = Dimensions.get('window').height;
+      const trayTop = trayRowTopRef.current ?? (windowH - TRAY_HEIGHT - insets.bottom);
+      const overTray = ay >= trayTop - 6;
+      if (overTray !== ghostOverTrayRef.current) {
+        ghostOverTrayRef.current = overTray;
+        if (overTray) {
+          ghostScale.value = withSpring(0.55, { damping: 18, stiffness: 220 });
+          ghostOpacity.value = withTiming(0.5, { duration: 160 });
+        } else {
+          ghostScale.value = withSpring(1.08, { damping: 15, stiffness: 200 });
+          ghostOpacity.value = withTiming(1, { duration: 160 });
+        }
+      }
+    }
+  }, [findTarget, findTrayTarget, isOverFolderHeader, insets.bottom, ghostOpacity, ghostScale]);
 
   const executeDrop = useCallback(async (ax: number, ay: number) => {
     const dragged = _dragItemRef.current;
@@ -1536,6 +1689,10 @@ function BuildScreenInner() {
     setDragItem(null);
     setHoveredId(null);
     tileLayoutSnap.current.clear();
+    // Reset tray-scroll and ghost-over-tray so the next drag starts fresh.
+    trayScrollOffsetRef.current = 0;
+    trayScrollRef.current?.scrollTo({ x: 0, animated: false });
+    ghostOverTrayRef.current = false;
   }, []);
 
   // ── Page scroll lock during drag (web) ─────────────────────────────────
@@ -1623,28 +1780,31 @@ function BuildScreenInner() {
         win = { top: 0, height: Dimensions.get('window').height };
       }
       const y = pointerYRef.current;
+      const x = pointerXRef.current;
+      const windowH = Dimensions.get('window').height;
+      const windowW = Dimensions.get('window').width;
       let listBottom = win.top + win.height;
       // Keep the scroll band above the drop tray once it's visible.
       if (trayVisibleRef.current) {
-        const windowH = Dimensions.get('window').height;
         listBottom = Math.min(listBottom, windowH - TRAY_HEIGHT - insets.bottom);
       }
       const band = (listBottom - win.top) * AUTO_SCROLL_BAND_PCT;
-      const x = pointerXRef.current;
+      const trayTop = trayRowTopRef.current ?? (windowH - TRAY_HEIGHT - insets.bottom);
+      const inRightHotspot = x > windowW - AUTO_SCROLL_HOTSPOT_W;
+      const inTrayZone = trayVisibleRef.current && y >= trayTop;
       let delta = 0;
-      // Scroll up if dragging near the top
+      // Scroll UP: full-width top band. Movement stays symmetric with the
+      // right-column DOWN hotspot below — top is safe because the "back"
+      // gesture doesn't live there.
       if (y < win.top + band) {
         const proximity = (win.top + band - y) / band;
         delta = -Math.min(1, proximity) * AUTO_SCROLL_MAX_PX;
       }
-      // Scroll down anywhere in the bottom zone — including past listBottom
-      // over the tray area — full width. No suppression over tray targets:
-      // they're bottom-anchored overlays that don't move with list scroll,
-      // and with a full recents row the targets span the entire width, so
-      // suppressing over them killed down-scroll across the whole bottom
-      // edge (the bug Devin hit). Aiming a tray drop is unaffected by the
-      // list scrolling underneath.
-      else if (y > listBottom - band) {
+      // Scroll DOWN: bottom-right hotspot only. A right-edge column (≈90px)
+      // that spans from the bottom edge band up. Anywhere else along the
+      // bottom is either a tray target (chip) or empty tray gutter — those
+      // shouldn't fight for the down-scroll gesture.
+      else if (inRightHotspot && y > listBottom - band) {
         const proximity = Math.min(1, (y - (listBottom - band)) / band);
         delta = proximity * AUTO_SCROLL_MAX_PX;
       }
@@ -1667,18 +1827,44 @@ function BuildScreenInner() {
           listRef.current?.scrollToOffset({ offset: next, animated: false });
         }
       }
+
+      // Horizontal tray scroll — only when pointer is over the tray zone AND
+      // not in the right-column down-scroll hotspot (which already claims the
+      // right edge for page-down). Drag toward left/right band of the tray
+      // shifts recents into view so more targets become reachable.
+      if (inTrayZone && !inRightHotspot) {
+        const maxOffset = Math.max(0, trayContentWidthRef.current - trayViewportWidthRef.current);
+        if (maxOffset > 0) {
+          let hDelta = 0;
+          const leftEdge = TRAY_HSCROLL_BAND;
+          const rightEdge = windowW - AUTO_SCROLL_HOTSPOT_W - TRAY_HSCROLL_BAND;
+          if (x < leftEdge) {
+            hDelta = -Math.min(1, (leftEdge - x) / TRAY_HSCROLL_BAND) * TRAY_HSCROLL_MAX_PX;
+          } else if (x > rightEdge) {
+            const proximity = Math.min(1, (x - rightEdge) / TRAY_HSCROLL_BAND);
+            hDelta = proximity * TRAY_HSCROLL_MAX_PX;
+          }
+          if (hDelta !== 0) {
+            const nextOff = Math.min(maxOffset, Math.max(0, trayScrollOffsetRef.current + hDelta));
+            if (nextOff !== trayScrollOffsetRef.current) {
+              trayScrollOffsetRef.current = nextOff;
+              trayScrollRef.current?.scrollTo({ x: nextOff, animated: false });
+            }
+          }
+        }
+      }
       const dbg = dragDebugEl();
       if (dbg) {
         dbg.textContent =
           `f=${frame} x=${Math.round(x)} y=${Math.round(y)}\n` +
           `winTop=${Math.round(win.top)} winH=${Math.round(win.height)} listBottom=${Math.round(listBottom)} band=${Math.round(band)}\n` +
-          `tray=${trayVisibleRef.current ? 1 : 0} overTarget=${findTrayTarget(x, y) ? 1 : 0} delta=${delta.toFixed(1)}\n` +
-          `node=${node ? 1 : 0} scrollTop=${node ? Math.round(node.scrollTop) : -1} off=${Math.round(scrollOffsetRef.current)}`;
+          `tray=${trayVisibleRef.current ? 1 : 0} inTray=${inTrayZone ? 1 : 0} rightHot=${inRightHotspot ? 1 : 0} delta=${delta.toFixed(1)}\n` +
+          `node=${node ? 1 : 0} scrollTop=${node ? Math.round(node.scrollTop) : -1} off=${Math.round(scrollOffsetRef.current)} trayOff=${Math.round(trayScrollOffsetRef.current)}`;
       }
       autoScrollRafRef.current = requestAnimationFrame(step);
     };
     autoScrollRafRef.current = requestAnimationFrame(step);
-  }, [stopAutoScroll, insets.bottom, getListScrollNode, findTrayTarget, dragDebugEl]);
+  }, [stopAutoScroll, insets.bottom, getListScrollNode, dragDebugEl]);
 
   const createFolderFromDrop = useCallback(async () => {
     if (!dropModal) return;
@@ -3735,67 +3921,95 @@ function BuildScreenInner() {
           style={[s.tray, trayAnimStyle, { paddingBottom: insets.bottom + 12 }]}
           pointerEvents="none"
         >
-          <View
-            ref={trayRowRef}
-            style={s.trayRow}
-            collapsable={false}
-            onLayout={() => {
-              // Measure after the slide-in settles so pageY reflects rest position.
-              setTimeout(() => {
-                // Skip if the tray is already hiding — a mid-slide-down
-                // measurement would store a too-large top and break the
-                // next drag's tray drops.
-                if (!trayVisibleRef.current) return;
-                trayRowRef.current?.measureInWindow((_x, y) => {
-                  if (!trayVisibleRef.current) return;
-                  const windowH = Dimensions.get('window').height;
-                  if (Number.isFinite(y) && y > 0 && y < windowH) trayRowTopRef.current = y;
-                });
-              }, 300);
-            }}
+          <ScrollView
+            ref={trayScrollRef}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            scrollEnabled={false} // drag session drives horizontal scroll via ref
+            contentContainerStyle={{ paddingRight: AUTO_SCROLL_HOTSPOT_W + 12 }}
+            onLayout={e => { trayViewportWidthRef.current = e.nativeEvent.layout.width; }}
+            onContentSizeChange={w => { trayContentWidthRef.current = w; }}
           >
-            {trayFolders.map(f => {
-              const trayKey = `tray:${f.id}`;
-              return (
-                <View
-                  key={trayKey}
-                  onLayout={registerTrayLayout(trayKey, f)}
-                  collapsable={false}
-                  style={[s.trayItem, hoveredId === trayKey && s.trayItemHovered]}
-                >
-                  <Icon name="folder" size={18} color="#F5A623" />
-                  <Text style={s.trayItemText} numberOfLines={1}>{f.name}</Text>
-                </View>
-              );
-            })}
             <View
-              onLayout={registerTrayLayout(TRAY_NEW_FOLDER_KEY, null)}
+              ref={trayRowRef}
+              style={s.trayRow}
               collapsable={false}
-              style={[s.trayItem, hoveredId === TRAY_NEW_FOLDER_KEY && s.trayItemHovered]}
+              onLayout={() => {
+                // Measure after the slide-in settles so pageY reflects rest position.
+                setTimeout(() => {
+                  // Skip if the tray is already hiding — a mid-slide-down
+                  // measurement would store a too-large top and break the
+                  // next drag's tray drops.
+                  if (!trayVisibleRef.current) return;
+                  trayRowRef.current?.measureInWindow((_x, y) => {
+                    if (!trayVisibleRef.current) return;
+                    const windowH = Dimensions.get('window').height;
+                    if (Number.isFinite(y) && y > 0 && y < windowH) trayRowTopRef.current = y;
+                  });
+                }, 300);
+              }}
             >
-              <Icon name="plus" size={18} color="#F5A623" />
-              <Text style={s.trayItemText} numberOfLines={1}>New…</Text>
-            </View>
-            {/* Playbooks are workouts-only, so the target only appears when a
-                workout is being dragged. */}
-            {dragItem?.type === 'Workouts' && (
-              <View
-                onLayout={registerTrayLayout(TRAY_NEW_PLAYBOOK_KEY, null)}
-                collapsable={false}
-                style={[s.trayItem, hoveredId === TRAY_NEW_PLAYBOOK_KEY && s.trayItemHovered]}
+              {trayFolders.map(f => {
+                const trayKey = `tray:${f.id}`;
+                const isPlaybook = f.type === 'Playbooks';
+                // Hide playbook chips in the tray unless the current drag is a
+                // workout (playbooks are workouts-only membership).
+                if (isPlaybook && dragItem?.type !== 'Workouts') return null;
+                const accent = isPlaybook ? PLAYBOOK_ACCENT : FOLDER_ACCENT;
+                const hovered = hoveredId === trayKey;
+                return (
+                  <TrayChip
+                    key={trayKey}
+                    accent={accent}
+                    hovered={hovered}
+                    onLayout={registerTrayLayout(trayKey, f)}
+                  >
+                    <TrayChipContents item={f} accent={accent} isPlaybook={isPlaybook} />
+                  </TrayChip>
+                );
+              })}
+              <TrayChip
+                accent={FOLDER_ACCENT}
+                hovered={hoveredId === TRAY_NEW_FOLDER_KEY}
+                onLayout={registerTrayLayout(TRAY_NEW_FOLDER_KEY, null)}
               >
-                <Icon name="playbook" size={18} color="#A78BFA" />
-                <Text style={s.trayItemText} numberOfLines={1}>New Playbook</Text>
-              </View>
-            )}
-            {/* Scroll-down target on bottom-right of tray: visible during drag,
-                scales and brightens as user approaches the right edge. */}
-            {dragItem && (
-              <View style={[s.trayItem, { position: 'absolute', right: 12, bottom: 12, backgroundColor: '#1E2A3A', borderWidth: 1, borderColor: '#60A5FA' }]}>
-                <Icon name="chevron-down" size={16} color="#60A5FA" />
-              </View>
-            )}
-          </View>
+                <Icon name="plus" size={22} color={FOLDER_ACCENT} />
+                <Text style={s.trayItemText} numberOfLines={1}>New Folder</Text>
+              </TrayChip>
+              {/* Playbooks are workouts-only, so the target only appears when a
+                  workout is being dragged. */}
+              {dragItem?.type === 'Workouts' && (
+                <TrayChip
+                  accent={PLAYBOOK_ACCENT}
+                  hovered={hoveredId === TRAY_NEW_PLAYBOOK_KEY}
+                  onLayout={registerTrayLayout(TRAY_NEW_PLAYBOOK_KEY, null)}
+                >
+                  <Icon name="playbook" size={22} color={PLAYBOOK_ACCENT} />
+                  <Text style={s.trayItemText} numberOfLines={1}>New Playbook</Text>
+                </TrayChip>
+              )}
+            </View>
+          </ScrollView>
+          {/* Scroll-down affordance on the tray's right edge — visible during
+              drag. Positioned outside the horizontal ScrollView so it stays
+              fixed to the viewport regardless of tray scroll. */}
+          {dragItem && (
+            <View pointerEvents="none" style={{
+              position: 'absolute',
+              right: 12,
+              top: 12,
+              bottom: 12 + insets.bottom,
+              width: AUTO_SCROLL_HOTSPOT_W - 16,
+              borderRadius: 12,
+              backgroundColor: '#1E2A3A',
+              borderWidth: 1,
+              borderColor: '#60A5FA',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+              <Icon name="chevron-down" size={20} color="#60A5FA" />
+            </View>
+          )}
         </Reanimated.View>
       )}
 
