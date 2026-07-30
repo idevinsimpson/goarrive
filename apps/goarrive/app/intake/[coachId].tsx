@@ -214,7 +214,12 @@ const initialFormData: FormData = {
 export default function IntakeForm() {
   const { coachId, ref, source } = useLocalSearchParams<{ coachId: string; ref?: string; source?: string }>();
 
-  const [coachBrand, setCoachBrand] = useState<{ displayName: string; photoUrl: string } | null>(null);
+  const [coachBrand, setCoachBrand] = useState<{
+    displayName: string;
+    photoUrl: string;
+    brandColor: string | null;
+    brandLogoUrl: string | null;
+  } | null>(null);
 
   useEffect(() => {
     if (!coachId || coachId === 'unassigned') return;
@@ -223,9 +228,16 @@ export default function IntakeForm() {
       const d = snap.data();
       const photoUrl = d.funnelPhotoUrl || d.photoURL || d.photoUrl || '';
       const displayName = d.displayName || d.name || '';
-      if (displayName) setCoachBrand({ displayName, photoUrl });
+      if (displayName) setCoachBrand({
+        displayName,
+        photoUrl,
+        brandColor: d.brandColor || null,
+        brandLogoUrl: d.brandLogoUrl || null,
+      });
     }).catch(() => { /* non-blocking */ });
   }, [coachId]);
+
+  const accent = coachBrand?.brandColor || '#F5A623';
 
   const [step, setStep] = useState<number>(0);
   const [formData, setFormData] = useState<FormData>(initialFormData);
@@ -531,7 +543,7 @@ export default function IntakeForm() {
               key={opt}
               style={[
                 s.chip,
-                selected.includes(opt) && s.chipSelected,
+                selected.includes(opt) && [s.chipSelected, { borderColor: accent, backgroundColor: accent }],
               ]}
               onPress={() => toggleArrayItem(field, opt)}
             >
@@ -562,7 +574,7 @@ export default function IntakeForm() {
               key={opt}
               style={[
                 s.yesNoBtn,
-                value === opt && s.yesNoBtnSelected,
+                value === opt && [s.yesNoBtnSelected, { borderColor: accent, backgroundColor: accent }],
               ]}
               onPress={() => updateField(field, opt as any)}
             >
@@ -592,7 +604,7 @@ export default function IntakeForm() {
       <View style={s.fieldWrap}>
         <Text style={s.fieldLabel}>{label}</Text>
         <View style={s.sliderRow}>
-          <Text style={s.sliderValue}>{value}</Text>
+          <Text style={[s.sliderValue, { color: accent }]}>{value}</Text>
           <input
             type="range"
             min={min}
@@ -664,7 +676,7 @@ export default function IntakeForm() {
                 key={g}
                 style={[
                   s.genderBtn,
-                  formData.gender === g && s.genderBtnSelected,
+                  formData.gender === g && [s.genderBtnSelected, { borderColor: accent, backgroundColor: accent }],
                 ]}
                 onPress={() => updateField('gender', g)}
               >
@@ -748,7 +760,7 @@ export default function IntakeForm() {
                 key={level}
                 style={[
                   s.activityBtn,
-                  formData.activityLevel === level && s.activityBtnSelected,
+                  formData.activityLevel === level && [s.activityBtnSelected, { borderColor: accent, backgroundColor: accent }],
                 ]}
                 onPress={() => updateField('activityLevel', level)}
               >
@@ -946,7 +958,7 @@ export default function IntakeForm() {
               {errors.submit}
               {submitErrorCode === 'auth/email-already-in-use' ? (
                 <Text
-                  style={{ color: '#F5A623', textDecorationLine: 'underline' }}
+                  style={{ color: accent, textDecorationLine: 'underline' }}
                   onPress={() => router.replace('/(auth)/login')}
                 >
                   {' Sign in instead →'}
@@ -976,7 +988,7 @@ export default function IntakeForm() {
   if (!hydrated && Platform.OS === 'web') {
     return (
       <View style={{ flex: 1, backgroundColor: '#0a0a0f', justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#F5A623" />
+        <ActivityIndicator size="large" color={accent} />
       </View>
     );
   }
@@ -990,16 +1002,24 @@ export default function IntakeForm() {
       <View style={s.progressBar}>
         {Platform.OS === 'web' && coachBrand ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            {coachBrand.photoUrl ? (
+            {coachBrand.brandLogoUrl ? (
+              <img
+                src={coachBrand.brandLogoUrl}
+                alt={coachBrand.displayName}
+                style={{ height: 36, maxWidth: 160, objectFit: 'contain' } as any}
+              />
+            ) : coachBrand.photoUrl ? (
               <img
                 src={coachBrand.photoUrl}
                 alt={coachBrand.displayName}
                 style={{ width: 36, height: 36, borderRadius: 18, objectFit: 'cover' } as any}
               />
             ) : null}
-            <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8', fontFamily: "'Space Grotesk', sans-serif" }}>
-              {coachBrand.displayName}
-            </Text>
+            {!coachBrand.brandLogoUrl && (
+              <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8', fontFamily: "'Space Grotesk', sans-serif" }}>
+                {coachBrand.displayName}
+              </Text>
+            )}
           </View>
         ) : Platform.OS === 'web' ? (
           <img
@@ -1018,7 +1038,7 @@ export default function IntakeForm() {
           <View
             style={[
               s.progressFill,
-              { width: `${((step + 1) / STEPS.length) * 100}%` },
+              { width: `${((step + 1) / STEPS.length) * 100}%`, backgroundColor: accent },
             ]}
           />
         </View>
@@ -1046,7 +1066,7 @@ export default function IntakeForm() {
           <View />
         )}
         <Pressable
-          style={[s.nextBtn, submitting && s.nextBtnDisabled]}
+          style={[s.nextBtn, { backgroundColor: accent }, submitting && s.nextBtnDisabled]}
           onPress={isLastStep ? handleSubmit : handleNext}
           disabled={submitting}
         >
