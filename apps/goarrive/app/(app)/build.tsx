@@ -532,6 +532,7 @@ function BuildScreenInner() {
   const rootOffY = useSharedValue(0);
   const [dragItem, setDragItem] = useState<BuildItem | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const hoveredIdRef = useRef<string | null>(null);
   const [dropModal, setDropModal] = useState<{ drag: BuildItem; target: BuildItem } | null>(null);
   const tileRefsMap = useRef(new Map<string, React.RefObject<View | null>>());
   const tileLayoutSnap = useRef(new Map<string, { x: number; y: number; w: number; h: number; item: BuildItem }>());
@@ -558,6 +559,8 @@ function BuildScreenInner() {
   const insets = useSafeAreaInsets();
   const [trayVisible, setTrayVisible] = useState(false);
   const [trayMounted, setTrayMounted] = useState(false);
+  const [dropToast, setDropToast] = useState<string | null>(null);
+  const dropToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const trayVisibleRef = useRef(false);
   // Measured absolute top of the tray row. iOS Safari's visual viewport can be
   // shorter than Dimensions.get('window').height (toolbar collapse), which
@@ -1414,8 +1417,15 @@ function BuildScreenInner() {
     const nextId = isOverFolderHeader(ax, ay)
       ? '__parent__'
       : (findTrayTarget(ax, ay)?.key ?? findTarget(ax, ay)?.id ?? null);
+    hoveredIdRef.current = nextId;
     setHoveredId(prev => (prev === nextId ? prev : nextId));
   }, [findTarget, findTrayTarget, isOverFolderHeader]);
+
+  const showDropToast = useCallback((msg: string) => {
+    if (dropToastTimerRef.current) clearTimeout(dropToastTimerRef.current);
+    setDropToast(msg);
+    dropToastTimerRef.current = setTimeout(() => setDropToast(null), 2500);
+  }, []);
 
   const executeDrop = useCallback(async (ax: number, ay: number) => {
     const dragged = _dragItemRef.current;
@@ -1478,12 +1488,21 @@ function BuildScreenInner() {
       return;
     }
 
-    const target = findTarget(ax, ay);
+    let target = findTarget(ax, ay);
+    // Coordinate drift at gesture release can cause findTarget to miss by a few
+    // pixels even when the orange-border hover was showing. Fall back to the
+    // last hovered item id when the primary hit-test returns nothing.
+    if (!target && hoveredIdRef.current && !hoveredIdRef.current.startsWith('tray:') && hoveredIdRef.current !== '__parent__') {
+      target = tileLayoutSnap.current.get(hoveredIdRef.current)?.item ?? null;
+    }
     if (!target || target.id === dragged.id) return;
     if (!isDropTarget(target, dragged)) return;
 
     // No-op when dropping an item onto the folder it already lives in.
-    if (target.type === 'Folder' && target.id === dragged.parentId) return;
+    if (target.type === 'Folder' && target.id === dragged.parentId) {
+      showDropToast(`Already in "${target.name}"`);
+      return;
+    }
 
     if (target.type === 'Folder') {
       await dropItemIntoFolder(dragged, target.id);
@@ -1529,10 +1548,11 @@ function BuildScreenInner() {
       // (or, for two movements, optionally a new workout).
       setDropModal({ drag: dragged, target });
     }
-  }, [findTarget, findTrayTarget, dropItemIntoFolder, scrollListToTop, isOverFolderHeader, moveItemUpOneLevel]);
+  }, [findTarget, findTrayTarget, dropItemIntoFolder, scrollListToTop, isOverFolderHeader, moveItemUpOneLevel, showDropToast]);
 
   const clearDragState = useCallback(() => {
     _dragItemRef.current = null;
+    hoveredIdRef.current = null;
     setDragItem(null);
     setHoveredId(null);
     tileLayoutSnap.current.clear();
@@ -2122,6 +2142,7 @@ function BuildScreenInner() {
     unlockPageScroll();
     navigation.setOptions({ tabBarStyle: TAB_BAR_STYLE });
     if (trayTimerRef.current) clearTimeout(trayTimerRef.current);
+    if (dropToastTimerRef.current) clearTimeout(dropToastTimerRef.current);
   }, [stopAutoScroll, unlockPageScroll, navigation]);
 
   // Compose with previewEngine.onScroll — it ignores the event payload, but
@@ -3800,13 +3821,24 @@ function BuildScreenInner() {
       )}
 
 
+      {/* Drop rejected toast — shows briefly when a drop is silently blocked */}
+      {dropToast && (
+        <View pointerEvents="none" style={{
+          position: 'absolute', bottom: 120 + insets.bottom, left: 24, right: 24,
+          backgroundColor: 'rgba(30,42,58,0.95)', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 16,
+          borderWidth: 1, borderColor: '#F5A623', alignItems: 'center',
+        }}>
+          <Text style={{ color: '#F0F4F8', fontSize: 14, fontWeight: '600', textAlign: 'center' }}>{dropToast}</Text>
+        </View>
+      )}
+
       {/* Drag ghost tile — floats above everything during drag */}
       <Reanimated.View style={[ghostAnimStyle, { width: cardWidth, height: cardHeight, borderRadius: 10 }]} pointerEvents="none">
         {dragItem && (
           <View style={{ flex: 1, borderRadius: 10, overflow: 'hidden', backgroundColor: '#0E1117' }}>
-            {(dragItem.thumbnailUrl || dragItem.mediaUrl) ? (
+            {(dragItem.thumbnailUrl || dragItem.thumbnailImageUrl || dragItem.gifLowUrl || dragItem.mediaUrl) ? (
               <Image
-                source={{ uri: (dragItem.thumbnailUrl || dragItem.mediaUrl)! }}
+                source={{ uri: (dragItem.thumbnailUrl || dragItem.thumbnailImageUrl || dragItem.gifLowUrl || dragItem.mediaUrl)! }}
                 style={{ width: cardWidth, height: cardHeight, borderRadius: 10 }}
                 resizeMode="cover"
               />
