@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-07-30._
+_Last refreshed: 2026-07-31._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -80,6 +80,9 @@ The coach-setup guide's 6 modules failed to save any data because the Firestore 
 ### Per-Day Module Cards Regressed by Global-Times Refactor
 A refactor that introduced a "global times" mode for the playbook scheduling panel accidentally replaced the per-day module card layout with a single global time field, removing the individual day configuration UI entirely. The regression was caught and reverted before coaches widely noticed, restoring the per-day cards (with day-specific time, duration, and workout slots). Lesson: the scheduling panel's per-day module card layout is the UX contract for coaches; any scheduling UI refactor must verify all per-day controls remain visible and functional in the coach scheduling panel.
 
+
+### Drag-Drop Same-Folder Drop Was Silent (Build Tab)
+Dropping a workout tile into the folder it already belongs to produced no visual or audible feedback — the drop silently no-opped, leaving coaches uncertain whether the action registered. Two related gaps also existed: the hover fallback (when no tile is under the pointer mid-drag) did not use the snapped layout position, causing jank; and the drag ghost image was rendering incorrectly. All three were fixed in the 2026-07-31 prod push by hoisting `showDropToast` so it is reachable from all drop handlers, using `tileLayoutSnap` as the hover fallback position, and correcting the ghost image source. Lesson: drag-and-drop surfaces need explicit feedback for every outcome — including same-target no-ops — so the user knows the system received the gesture.
 
 ## Known Performance Risks
 
