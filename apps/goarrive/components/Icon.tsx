@@ -131,6 +131,11 @@ const ICONS: Record<string, IconDef> = {
       'M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z',
     ],
   },
+  folder: {
+    paths: [
+      'M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z',
+    ],
+  },
   // Actions
   add: {
     paths: ['M12 5v14', 'M5 12h14'],

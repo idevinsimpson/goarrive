@@ -2472,13 +2472,9 @@ function BuildScreenInner() {
                   fallbackIcon={<Icon name="folder" size={36} color="#F5A623" />}
                 />
               )}
-              {/* Folder badge — keeps folders distinguishable from workout
-                  tiles now that both can render a mosaic. */}
-              <View style={styles.folderBadge}>
-                <Icon name="folder" size={12} color="#F5A623" />
-              </View>
-              {/* Name overlay */}
+              {/* Name overlay — folder icon sits inline to the left of the title */}
               <View style={styles.nameOverlay}>
+                <Icon name="folder" size={14} color="#F5A623" />
                 <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
               </View>
               {hoveredId === item.id && dragItem && dragItem.id !== item.id && (
@@ -2579,17 +2575,11 @@ function BuildScreenInner() {
               )}
             />
           )}
-          {/* Name overlay — transparent gradient at bottom */}
+          {/* Name overlay — playbook icon sits inline to the left of the title */}
           <View style={[styles.nameOverlay, isWorkoutCard && { backgroundColor: 'rgba(26, 35, 50, 0.92)' }]}>
+            {isPlaybook && <Icon name="playbook" size={14} color="#A78BFA" />}
             <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
           </View>
-          {/* Playbook badge — mirrors the folder badge so playbook tiles stay
-              distinguishable from workout tiles now that both render mosaics. */}
-          {isPlaybook && (
-            <View style={styles.folderBadge}>
-              <Icon name="playbook" size={12} color="#A78BFA" />
-            </View>
-          )}
           {isMovement && !item.videoUrl && !item.mediaUrl && !item.gifLoopUrl && !item.gifLowUrl && (
             <View style={styles.videoNeededPill}>
               <Text style={styles.videoNeededText}>Video needed</Text>
@@ -4169,23 +4159,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 6,
     backgroundColor: 'rgba(14, 17, 23, 0.65)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   nameText: {
     color: '#F0F4F8',
     fontSize: 12,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold',
-  },
-  folderBadge: {
-    position: 'absolute',
-    top: 6,
-    left: 6,
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    backgroundColor: 'rgba(14, 17, 23, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    flex: 1,
+    minWidth: 0,
   },
   videoNeededPill: {
     position: 'absolute',
