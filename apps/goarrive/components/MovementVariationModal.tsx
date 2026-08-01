@@ -2,7 +2,7 @@
  * MovementVariationModal — AI "Build variation" flow
  *
  * Coach opens an existing movement, describes the change they want, previews
- * AI-generated (Runway) video options, picks one, and a brand-new movement is
+ * AI-generated (Seedance via fal.ai) video options, picks one, and a brand-new movement is
  * created through the exact same processing pipeline as an uploaded video
  * (crop → GIFs → poster → AI analysis → doc → voice → one-rep loop).
  * The source movement is never modified.
@@ -35,8 +35,8 @@ import { FB, FH } from '../lib/theme';
 
 const MAX_PROMPT_CHARS = 600;
 const POLL_INTERVAL_MS = 5000;
-const VARIATION_PROVIDER = 'runway';
-const VARIATION_MODEL = 'aleph2';
+const VARIATION_PROVIDER = 'fal';
+const VARIATION_MODEL = 'seedance-v1-pro';
 
 // Default crop for AI-generated videos (full frame, standard 4:5 movement frame)
 const DEFAULT_VARIATION_CROP = {
@@ -64,20 +64,16 @@ const MSG_PATIENCE = 'This can take a bit. Feel free to close this — we keep b
 
 interface VariationCandidate {
   id: string;
-  status: 'PENDING' | 'THROTTLED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+  status: 'IN_QUEUE' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED';
   progress: number;
   videoUrl: string | null;
-  /** Durable Storage copy written by the background poller — outlives the Runway URL. */
+  /** Durable Storage copy written by the background poller — outlives the fal.ai URL. */
   storedVideoUrl?: string | null;
   error: string | null;
 }
 
 function candidatePlaybackUrl(c: VariationCandidate): string | null {
   return c.storedVideoUrl || c.videoUrl || null;
-}
-
-function remixModeLabel(mode: 'edit' | 'motion'): string {
-  return mode === 'motion' ? 'Change movement' : 'Edit look';
 }
 
 function formatGeneratedAt(d: Date): string {
@@ -121,12 +117,8 @@ export default function MovementVariationModal({
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [phase, setPhase] = useState<Phase>('compose');
-  const [remixMode, setRemixMode] = useState<'edit' | 'motion'>('edit');
   const [instruction, setInstruction] = useState('');
   const [jobId, setJobId] = useState<string | null>(null);
-  // Mode + start time of the ACTIVE job (fresh or resumed) — display truth,
-  // independent of the compose-screen toggle state.
-  const [jobRemixMode, setJobRemixMode] = useState<'edit' | 'motion' | null>(null);
   const [jobCreatedAt, setJobCreatedAt] = useState<Date | null>(null);
   const [dismissing, setDismissing] = useState(false);
   const [candidates, setCandidates] = useState<VariationCandidate[]>([]);
@@ -140,10 +132,8 @@ export default function MovementVariationModal({
 
   const resetState = useCallback(() => {
     setPhase('compose');
-    setRemixMode('edit');
     setInstruction('');
     setJobId(null);
-    setJobRemixMode(null);
     setJobCreatedAt(null);
     setDismissing(false);
     setCandidates([]);
@@ -209,9 +199,6 @@ export default function MovementVariationModal({
       if (!job) return;
       setJobId(job.id);
       setInstruction(job.instruction || '');
-      const resumedMode: 'edit' | 'motion' = job.remixMode === 'motion' ? 'motion' : 'edit';
-      setRemixMode(resumedMode);
-      setJobRemixMode(resumedMode);
       setJobCreatedAt(job.createdAt?.toDate?.() ?? (job.createdAt?.seconds ? new Date(job.createdAt.seconds * 1000) : null));
       setCandidates(Array.isArray(job.candidates) ? job.candidates : []);
       if (job.status === 'succeeded') {
@@ -253,21 +240,19 @@ export default function MovementVariationModal({
     setErrorMsg(null);
     setPhase('generating');
     setCandidates([]);
-    setJobRemixMode(remixMode);
     setJobCreatedAt(new Date());
     try {
       const functions = getFunctions(undefined, 'us-central1');
-      // Server transcodes + trims the source video before responding, which can
-      // exceed the SDK's default 70s callable timeout — match the function's 180s.
+      // Server extracts first frame before responding, which can exceed the SDK's
+      // default 70s callable timeout — match the function's 180s.
       const start = httpsCallable<
-        { sourceMovementId: string; instruction: string; outputCount?: number; remixMode?: 'edit' | 'motion' },
+        { sourceMovementId: string; instruction: string; outputCount?: number },
         { jobId: string; candidateCount: number }
       >(functions, 'startMovementVariation', { timeout: 180000 });
       const result = await start({
         sourceMovementId: sourceMovement.id,
         instruction: trimmed,
         outputCount: 2,
-        remixMode,
       });
       if (closedRef.current) return;
       const newJobId = result.data.jobId;
@@ -283,7 +268,7 @@ export default function MovementVariationModal({
       );
       setPhase('compose');
     }
-  }, [sourceMovement, instruction, remixMode, pollStatus, stopPolling]);
+  }, [sourceMovement, instruction, pollStatus, stopPolling]);
 
   // Called after the coach picks a candidate — shows crop modal first.
   const handleSelectCandidate = useCallback((candidate: VariationCandidate) => {
@@ -302,7 +287,7 @@ export default function MovementVariationModal({
     setCreatingStatus('Saving your new video...');
     setCreatingProgress(0.05);
     try {
-      // 1. Finalize: server downloads the Runway output and persists it to Storage.
+      // 1. Finalize: server downloads the fal.ai output and persists it to Storage.
       const functions = getFunctions(undefined, 'us-central1');
       const finalize = httpsCallable<
         { jobId: string; candidateId: string },
@@ -375,7 +360,7 @@ export default function MovementVariationModal({
 
   const trimmedLen = instruction.trim().length;
   const generateDisabled = trimmedLen === 0 || phase === 'generating' || phase === 'creating';
-  const succeededCandidates = candidates.filter((c) => c.status === 'SUCCEEDED' && candidatePlaybackUrl(c));
+  const succeededCandidates = candidates.filter((c) => c.status === 'COMPLETED' && candidatePlaybackUrl(c));
 
   return (
     <Modal
@@ -428,31 +413,6 @@ export default function MovementVariationModal({
 
           {(phase === 'compose' || phase === 'generating') && (
             <>
-              {/* Remix mode — two-card choice */}
-              <Text style={s.sectionLabel}>Remix type</Text>
-              <View style={s.modeRow}>
-                <Pressable
-                  style={[s.modeCard, remixMode === 'edit' && s.modeCardActive]}
-                  onPress={() => phase === 'compose' && setRemixMode('edit')}
-                >
-                  <View style={s.modeCardHeader}>
-                    <Icon name="sparkle" size={16} color={remixMode === 'edit' ? '#A78BFA' : '#8A95A3'} />
-                    <Text style={[s.modeCardTitle, remixMode === 'edit' && s.modeCardTitleActive]}>Edit look</Text>
-                  </View>
-                  <Text style={s.modeCardDesc}>Keeps the motion, changes appearance or equipment.</Text>
-                </Pressable>
-                <Pressable
-                  style={[s.modeCard, remixMode === 'motion' && s.modeCardActive]}
-                  onPress={() => phase === 'compose' && setRemixMode('motion')}
-                >
-                  <View style={s.modeCardHeader}>
-                    <Icon name="video" size={16} color={remixMode === 'motion' ? '#A78BFA' : '#8A95A3'} />
-                    <Text style={[s.modeCardTitle, remixMode === 'motion' && s.modeCardTitleActive]}>Change movement</Text>
-                  </View>
-                  <Text style={s.modeCardDesc}>Regenerates the movement from a still frame — more creative drift.</Text>
-                </Pressable>
-              </View>
-
               {/* Instruction input */}
               <Text style={s.sectionLabel}>What should change?</Text>
               <TextInput
@@ -498,15 +458,8 @@ export default function MovementVariationModal({
 
               {phase === 'generating' && (
                 <>
-                  {jobRemixMode ? (
-                    <View style={s.jobMetaRow}>
-                      <View style={s.jobMetaBadge}>
-                        <Text style={s.jobMetaBadgeText}>{remixModeLabel(jobRemixMode)}</Text>
-                      </View>
-                      {jobCreatedAt ? (
-                        <Text style={s.jobMetaTime}>Started {formatGeneratedAt(jobCreatedAt)}</Text>
-                      ) : null}
-                    </View>
+                  {jobCreatedAt ? (
+                    <Text style={s.jobMetaTime}>Started {formatGeneratedAt(jobCreatedAt)}</Text>
                   ) : null}
                   <View style={s.progressNote}>
                     <ActivityIndicator size="small" color="#A78BFA" />
@@ -520,15 +473,8 @@ export default function MovementVariationModal({
           {(phase === 'choose' || phase === 'cropping') && (
             <>
               <Text style={s.sectionLabel}>Choose a version</Text>
-              {jobRemixMode ? (
-                <View style={s.jobMetaRow}>
-                  <View style={s.jobMetaBadge}>
-                    <Text style={s.jobMetaBadgeText}>{remixModeLabel(jobRemixMode)}</Text>
-                  </View>
-                  {jobCreatedAt ? (
-                    <Text style={s.jobMetaTime}>Generated {formatGeneratedAt(jobCreatedAt)}</Text>
-                  ) : null}
-                </View>
+              {jobCreatedAt ? (
+                <Text style={s.jobMetaTime}>Generated {formatGeneratedAt(jobCreatedAt)}</Text>
               ) : null}
               <Text style={s.instructionRecap} numberOfLines={2}>"{instruction.trim()}"</Text>
               {succeededCandidates.length === 0 ? (
