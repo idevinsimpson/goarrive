@@ -120,7 +120,7 @@ const AUTO_SCROLL_MAX_PX = 15;       // max px scrolled per frame at edge proxim
 const AUTO_SCROLL_BAND_PCT = 0.18;  // edge band = 18% of the list height (at top/bottom where scroll fires)
 const AUTO_SCROLL_HOTSPOT_W = 96;   // right-column width that triggers page down-scroll (rest of bottom = tray targets)
 const TRAY_SHOW_DELAY_MS = 200;      // delay before tray slides up — avoids flashing on accidental long presses
-const TRAY_HEIGHT = 96;              // content height of the drop tray (excl. safe-area inset)
+const TRAY_HEIGHT = 148;             // content height of the drop tray (excl. safe-area inset). Sized for 80×100 (4:5) mosaic + name + chrome.
 const TRAY_SLIDE_DISTANCE = 220;     // translateY when hidden — guaranteed offscreen incl. inset
 const TRAY_MAX_RECENTS = 8;          // wider recents list — user can horizontally scroll to reach later entries
 const TRAY_NEW_FOLDER_KEY = 'tray:new';
@@ -464,7 +464,7 @@ function TrayChip({
       collapsable={false}
       style={[
         {
-          width: 96,
+          width: 88,
           height: TRAY_HEIGHT - 24,
           backgroundColor: '#0E1117',
           borderRadius: 12,
@@ -491,20 +491,23 @@ function TrayChip({
   );
 }
 
-// Renders the tray chip body for existing folders / playbooks: a small
-// mosaic preview of contents when available, plus the name. Falls back to
-// an icon when the folder is empty.
+// Renders the tray chip body for existing folders / playbooks: the same
+// FolderMosaic used in the main grid, sized to 4:5 (still images only —
+// no GIFs/videos, since FolderMiniCard uses thumbs). Name label sits below.
+// Falls back to an icon when the folder is empty.
+const TRAY_MOSAIC_W = 80;
+const TRAY_MOSAIC_H = TRAY_MOSAIC_W * (5 / 4); // 100px — matches 4:5 grid tiles
 function TrayChipContents({ item, accent, isPlaybook }: { item: BuildItem; accent: string; isPlaybook: boolean }) {
   const previews = Array.isArray(item.folderPreview) ? item.folderPreview : [];
   const hasPreview = previews.length > 0;
   return (
     <View style={{ flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
-      <View style={{ width: 80, height: 44, borderRadius: 6, overflow: 'hidden', backgroundColor: '#0B0E14', borderWidth: 1, borderColor: accent + '55' }}>
+      <View style={{ width: TRAY_MOSAIC_W, height: TRAY_MOSAIC_H, borderRadius: 6, overflow: 'hidden', backgroundColor: '#0B0E14', borderWidth: 1, borderColor: accent + '55' }}>
         {hasPreview ? (
-          <TrayChipMosaic previews={previews} width={80} height={44} />
+          <FolderMosaic previews={previews} width={TRAY_MOSAIC_W} height={TRAY_MOSAIC_H} scrollIdle={true} />
         ) : (
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name={isPlaybook ? 'playbook' : 'folder'} size={18} color={accent} />
+            <Icon name={isPlaybook ? 'playbook' : 'folder'} size={20} color={accent} />
           </View>
         )}
       </View>
@@ -2228,12 +2231,16 @@ function BuildScreenInner() {
   }, [filteredItems]);
 
   // ── Drop tray data + measurement ───────────────────────────────────────
+  // Pull from enrichedItems so tray chips get folderPreview (mosaic thumbs).
+  // items[] is the raw state; enrichedItems attaches folderPreview per folder
+  // and playbook (see workoutPreviewEntry construction ~L2100). Without this
+  // switch, chips fell back to the plain folder icon.
   const trayFolders = useMemo(
     () =>
       recentDropFolderIds
-        .map(id => items.find(i => i.type === 'Folder' && i.id === id))
+        .map(id => enrichedItems.find(i => (i.type === 'Folder' || i.type === 'Playbooks') && i.id === id))
         .filter(Boolean) as BuildItem[],
-    [recentDropFolderIds, items],
+    [recentDropFolderIds, enrichedItems],
   );
 
   // Drop rects for tray items that left the tray — onLayout only fires for
