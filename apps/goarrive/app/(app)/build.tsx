@@ -4004,7 +4004,22 @@ function BuildScreenInner() {
           hit-tested by coordinates (findTrayTarget), not touch handlers. */}
       {trayMounted && (
         <Reanimated.View
-          style={[s.tray, trayAnimStyle, { paddingBottom: insets.bottom + 16 }]}
+          // height pinned so iOS Safari can't resolve the position:absolute +
+          // bottom:0 container's intrinsic size to a viewport-relative value
+          // (observed: tray stretched to ~540px on iPhone even though children
+          // total ~196 + insets.bottom). overflow:hidden clips any residual
+          // child stretch. Breakdown of the height: 20 paddingTop + 36
+          // ScrollView paddingVertical + (TRAY_HEIGHT - 24 = 124) chip + 16
+          // paddingBottom base + insets.bottom = 196 + insets.bottom.
+          style={[
+            s.tray,
+            trayAnimStyle,
+            {
+              paddingBottom: insets.bottom + 16,
+              height: 20 + 36 + (TRAY_HEIGHT - 24) + 16 + insets.bottom,
+              overflow: 'hidden',
+            },
+          ]}
           pointerEvents="none"
         >
           <ScrollView
@@ -4014,6 +4029,10 @@ function BuildScreenInner() {
             scrollEnabled={false} // drag session drives horizontal scroll via ref
             // paddingVertical: 18 gives the hover pop (scale 1.16 + translateY -4 + 8px accent glow)
             // room to render without being sliced by RN Web's overflow-y: hidden default.
+            // flexGrow:0 stops RN Web's ScrollView outer from taking flex:1 in
+            // the tray, which paired with position:absolute parents can cascade
+            // into a viewport-height stretch on iOS Safari.
+            style={{ flexGrow: 0, flexShrink: 0 }}
             contentContainerStyle={{ paddingRight: AUTO_SCROLL_HOTSPOT_W + 12, paddingVertical: 18 }}
             onLayout={e => { trayViewportWidthRef.current = e.nativeEvent.layout.width; }}
             onContentSizeChange={w => { trayContentWidthRef.current = w; }}
