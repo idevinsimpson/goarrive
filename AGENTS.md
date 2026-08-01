@@ -66,6 +66,19 @@ cd apps/goarrive && npm run deploy
 - Never deploy to production (`goarrive.fit`) without explicit approval.
 - **After every staging deploy, you MUST trigger Relay for a smoke test before creating a PR.** See `.claude/relay-handoff.md` for the exact protocol. This is not optional.
 
+### Standing Release Policy — Staging & Production (approved by Devin, 2026-08-01)
+
+This is the standing rule for all release-scoped work. Do not ask Devin for per-PR approval on the moves defined below.
+
+1. **Staging is standing-approved.** When Devin asks for a change intended for testing, that is standing approval to merge every _release-scoped, ready_ PR in that change/batch into `main` and deploy the resulting `main` build to staging once required checks pass. No per-PR approval button.
+2. **Production stays explicit.** Production begins only when Devin explicitly says to ship/deploy production. Once he does, deploy the entire _release-scoped, staging-validated_ batch of PRs together without repeated per-PR approval prompts.
+3. **Scope guard.** "All PRs" means all PRs belonging to the named release/change batch — not every unrelated open PR in the repo. Never sweep in drafts, experiments, unrelated work, or PRs that have not passed required checks.
+4. **Stop-on-surprise.** Halt and report before merging if any of the following is true: required checks failing, unresolvable conflicts, security/data-isolation risk, migration or rollback risk, PR scope ambiguous, staging validation failed.
+5. **Batch manifest + terminal result.** Post one concise batch manifest before execution (PRs, SHAs, checks passed, rollback point) and one terminal result afterward (URLs, commit list, smoke-test outcome). This is notification, not an approval prompt, unless a stop-on-surprise condition applies.
+6. **Never applies to:** non-release-scoped experiments/spikes, force-pushes to `main`, hook-skipping (`--no-verify`), amending published commits, or Cloud Functions / Firestore rules changes that were not part of the named batch. When in doubt about scope, ask before executing.
+
+The combined-staging rule in `.claude/multi-agent-workflow-guide.md` Section 1 (2026-07-15) still applies — every staging deploy is built from `main` + all open, release-scoped PR branches merged into an integration branch.
+
 ### Do Not Build
 - MySQL, TiDB, Drizzle, S3, Fastify, JotForm, Calendly, Zoom Embedded SDK
 - CoachAssistant or Encourager roles
