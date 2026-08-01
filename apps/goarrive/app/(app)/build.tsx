@@ -219,12 +219,14 @@ function calcDurationMin(blocks: any[]): number {
 // dropped on a Workout appends to it. Playbooks are workouts-only — they
 // reject movements, folders, plans, and other playbooks. Any other
 // asset-on-asset drop opens the combine modal (create a folder containing both).
+// A dragged folder can only land on another folder (nest); combine/append
+// semantics don't apply to folder sources.
 function isDropTarget(
   item: { type?: string } | null | undefined,
   dragged: { type?: string } | null | undefined,
 ): boolean {
   if (!item || !dragged) return false;
-  if (dragged.type === 'Folder') return false;
+  if (dragged.type === 'Folder') return item.type === 'Folder';
   if (item.type === 'Playbooks') return dragged.type === 'Workouts';
   return true;
 }
@@ -1251,9 +1253,11 @@ function BuildScreenInner() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      // Tray "New Folder" drop: insert the dragged asset into the folder.
-      if (pendingDrop && pendingDrop.type !== 'Folder') {
-        await updateDoc(doc(db, COLLECTION_BY_TYPE[pendingDrop.type], pendingDrop.id), stripUndefined({
+      // Tray "New Folder" drop: nest the dragged item into the new folder.
+      // Folder sources write to build_folders; assets use COLLECTION_BY_TYPE.
+      if (pendingDrop) {
+        const coll = pendingDrop.type === 'Folder' ? 'build_folders' : COLLECTION_BY_TYPE[pendingDrop.type];
+        await updateDoc(doc(db, coll, pendingDrop.id), stripUndefined({
           parentId: folderRef.id,
           updatedAt: serverTimestamp(),
         }));
@@ -1490,13 +1494,41 @@ function BuildScreenInner() {
     tryScroll();
   }, []);
 
+  const showDropToast = useCallback((msg: string) => {
+    if (dropToastTimerRef.current) clearTimeout(dropToastTimerRef.current);
+    setDropToast(msg);
+    dropToastTimerRef.current = setTimeout(() => setDropToast(null), 2500);
+  }, []);
+
   const dropItemIntoFolder = useCallback(async (dragged: BuildItem, folderId: string) => {
-    if (dragged.type === 'Folder') return;
+    // Folder-into-folder nest: reject self-drop and cycles (target folder
+    // must not be a descendant of the dragged folder — walking the parent
+    // chain up from the target hits the dragged id iff moving would create
+    // a loop). Also no-op if already parented there.
+    if (dragged.type === 'Folder') {
+      if (dragged.id === folderId) return;
+      if (dragged.parentId === folderId) {
+        showDropToast(`Already in "${itemsRef.current.find(i => i.id === folderId)?.name ?? 'folder'}"`);
+        return;
+      }
+      const folderById = new Map(
+        itemsRef.current.filter(i => i.type === 'Folder').map(i => [i.id, i as BuildItem]),
+      );
+      let cursor: BuildItem | undefined = folderById.get(folderId);
+      while (cursor) {
+        if (cursor.id === dragged.id) {
+          showDropToast(`Can't move "${dragged.name}" into its own subfolder`);
+          return;
+        }
+        cursor = cursor.parentId ? folderById.get(cursor.parentId) : undefined;
+      }
+    }
     try {
       // Bump the folder's updatedAt too, so it resorts to the top of the
       // grid where the user is scrolled to see the result.
       const batch = writeBatch(db);
-      batch.update(doc(db, COLLECTION_BY_TYPE[dragged.type], dragged.id), stripUndefined({
+      const coll = dragged.type === 'Folder' ? 'build_folders' : COLLECTION_BY_TYPE[dragged.type];
+      batch.update(doc(db, coll, dragged.id), stripUndefined({
         parentId: folderId,
         updatedAt: serverTimestamp(),
       }));
@@ -1505,7 +1537,7 @@ function BuildScreenInner() {
       recordRecentDropFolder(folderId);
       scrollListToTop();
     } catch (e) { console.error('[Build] Drop into folder error:', e); }
-  }, [recordRecentDropFolder, scrollListToTop]);
+  }, [recordRecentDropFolder, scrollListToTop, showDropToast]);
 
   // Tray targets live OUTSIDE the FlatList and don't move with scroll. Their
   // absolute rects are deterministic: onLayout x/w within trayRow, plus the
@@ -1580,12 +1612,6 @@ function BuildScreenInner() {
       }
     }
   }, [findTarget, findTrayTarget, isOverFolderHeader, insets.bottom, ghostOpacity, ghostScale]);
-
-  const showDropToast = useCallback((msg: string) => {
-    if (dropToastTimerRef.current) clearTimeout(dropToastTimerRef.current);
-    setDropToast(msg);
-    dropToastTimerRef.current = setTimeout(() => setDropToast(null), 2500);
-  }, []);
 
   const executeDrop = useCallback(async (ax: number, ay: number) => {
     const dragged = _dragItemRef.current;
@@ -2370,13 +2396,40 @@ function BuildScreenInner() {
           tileRefsMap.current.set(item.id, React.createRef<View>());
         }
         const folderTileRef = tileRefsMap.current.get(item.id)!;
+        // Folders drag with the same long-press pan as other assets. Drop
+        // semantics are constrained by isDropTarget (folder-on-folder nest
+        // only) and dropItemIntoFolder (cycle guard).
+        const folderDragGesture = Gesture.Pan()
+          .activateAfterLongPress(600)
+          .onStart((e) => {
+            ghostX.value = e.absoluteX - cardWidth / 2 - rootOffX.value;
+            ghostY.value = e.absoluteY - cardHeight / 2 - rootOffY.value;
+            ghostScale.value = withSpring(1.08, { damping: 15, stiffness: 200 });
+            ghostOpacity.value = withSpring(1);
+            runOnJS(beginDragSession)(item.id, e.absoluteX, e.absoluteY);
+          })
+          .onUpdate((e) => {
+            ghostX.value = e.absoluteX - cardWidth / 2 - rootOffX.value;
+            ghostY.value = e.absoluteY - cardHeight / 2 - rootOffY.value;
+            runOnJS(updateHovered)(e.absoluteX, e.absoluteY);
+          })
+          .onEnd((e) => {
+            runOnJS(executeDrop)(e.absoluteX, e.absoluteY);
+          })
+          .onFinalize(() => {
+            ghostScale.value = withSpring(1, { damping: 20 });
+            ghostOpacity.value = withSpring(0);
+            runOnJS(endDragSession)();
+          });
         return (
+          <GestureDetector gesture={folderDragGesture} touchAction="manipulation" userSelect="none">
           <View
             ref={folderTileRef as any}
             style={{
               width: cardWidth,
               height: cardHeight,
               marginBottom: GRID_GAP,
+              opacity: dragItem?.id === item.id ? 0.35 : 1,
             }}
           >
             <Pressable
@@ -2419,13 +2472,9 @@ function BuildScreenInner() {
                   fallbackIcon={<Icon name="folder" size={36} color="#F5A623" />}
                 />
               )}
-              {/* Folder badge — keeps folders distinguishable from workout
-                  tiles now that both can render a mosaic. */}
-              <View style={styles.folderBadge}>
-                <Icon name="folder" size={12} color="#F5A623" />
-              </View>
-              {/* Name overlay */}
+              {/* Name overlay — folder icon sits inline to the left of the title */}
               <View style={styles.nameOverlay}>
+                <Icon name="folder" size={14} color="#F5A623" />
                 <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
               </View>
               {hoveredId === item.id && dragItem && dragItem.id !== item.id && (
@@ -2433,6 +2482,7 @@ function BuildScreenInner() {
               )}
             </Pressable>
           </View>
+          </GestureDetector>
         );
       }
       return (
@@ -2525,17 +2575,11 @@ function BuildScreenInner() {
               )}
             />
           )}
-          {/* Name overlay — transparent gradient at bottom */}
+          {/* Name overlay — playbook icon sits inline to the left of the title */}
           <View style={[styles.nameOverlay, isWorkoutCard && { backgroundColor: 'rgba(26, 35, 50, 0.92)' }]}>
+            {isPlaybook && <Icon name="playbook" size={14} color="#A78BFA" />}
             <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
           </View>
-          {/* Playbook badge — mirrors the folder badge so playbook tiles stay
-              distinguishable from workout tiles now that both render mosaics. */}
-          {isPlaybook && (
-            <View style={styles.folderBadge}>
-              <Icon name="playbook" size={12} color="#A78BFA" />
-            </View>
-          )}
           {isMovement && !item.videoUrl && !item.mediaUrl && !item.gifLoopUrl && !item.gifLowUrl && (
             <View style={styles.videoNeededPill}>
               <Text style={styles.videoNeededText}>Video needed</Text>
@@ -3950,7 +3994,22 @@ function BuildScreenInner() {
           hit-tested by coordinates (findTrayTarget), not touch handlers. */}
       {trayMounted && (
         <Reanimated.View
-          style={[s.tray, trayAnimStyle, { paddingBottom: insets.bottom + 16 }]}
+          // height pinned so iOS Safari can't resolve the position:absolute +
+          // bottom:0 container's intrinsic size to a viewport-relative value
+          // (observed: tray stretched to ~540px on iPhone even though children
+          // total ~196 + insets.bottom). overflow:hidden clips any residual
+          // child stretch. Breakdown of the height: 20 paddingTop + 36
+          // ScrollView paddingVertical + (TRAY_HEIGHT - 24 = 124) chip + 16
+          // paddingBottom base + insets.bottom = 196 + insets.bottom.
+          style={[
+            s.tray,
+            trayAnimStyle,
+            {
+              paddingBottom: insets.bottom + 16,
+              height: 20 + 36 + (TRAY_HEIGHT - 24) + 16 + insets.bottom,
+              overflow: 'hidden',
+            },
+          ]}
           pointerEvents="none"
         >
           <ScrollView
@@ -3960,6 +4019,10 @@ function BuildScreenInner() {
             scrollEnabled={false} // drag session drives horizontal scroll via ref
             // paddingVertical: 18 gives the hover pop (scale 1.16 + translateY -4 + 8px accent glow)
             // room to render without being sliced by RN Web's overflow-y: hidden default.
+            // flexGrow:0 stops RN Web's ScrollView outer from taking flex:1 in
+            // the tray, which paired with position:absolute parents can cascade
+            // into a viewport-height stretch on iOS Safari.
+            style={{ flexGrow: 0, flexShrink: 0 }}
             contentContainerStyle={{ paddingRight: AUTO_SCROLL_HOTSPOT_W + 12, paddingVertical: 18 }}
             onLayout={e => { trayViewportWidthRef.current = e.nativeEvent.layout.width; }}
             onContentSizeChange={w => { trayContentWidthRef.current = w; }}
@@ -4096,23 +4159,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 6,
     backgroundColor: 'rgba(14, 17, 23, 0.65)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   nameText: {
     color: '#F0F4F8',
     fontSize: 12,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold',
-  },
-  folderBadge: {
-    position: 'absolute',
-    top: 6,
-    left: 6,
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    backgroundColor: 'rgba(14, 17, 23, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    flex: 1,
+    minWidth: 0,
   },
   videoNeededPill: {
     position: 'absolute',
