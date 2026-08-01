@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-07-30._
+_Last refreshed: 2026-08-01._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -80,6 +80,10 @@ The coach-setup guide's 6 modules failed to save any data because the Firestore 
 ### Per-Day Module Cards Regressed by Global-Times Refactor
 A refactor that introduced a "global times" mode for the playbook scheduling panel accidentally replaced the per-day module card layout with a single global time field, removing the individual day configuration UI entirely. The regression was caught and reverted before coaches widely noticed, restoring the per-day cards (with day-specific time, duration, and workout slots). Lesson: the scheduling panel's per-day module card layout is the UX contract for coaches; any scheduling UI refactor must verify all per-day controls remain visible and functional in the coach scheduling panel.
 
+
+
+### RN Web ScrollView Clips Hover/Scale Animations (overflow-y: hidden)
+When a horizontal `ScrollView` is used for drag-and-drop tray chips in RN Web, the browser applies `overflow-y: hidden` implicitly to the scroll container. This silently clips any scale-up, translateY, or shadow/glow animations that extend outside the chip's normal bounding box (e.g. a hover-pop to 1.16x scale lifts the chip upward, but the top of the shadow gets sliced off). Fix: add `paddingVertical` to `contentContainerStyle` so the clip region contains the expanded hover size; also add vertical padding to the outer tray container. Lesson: whenever a component inside a `ScrollView` animates outside its intrinsic bounds in any axis, pre-size the content container padding in that axis — the browser's implicit overflow hidden is invisible in React Native and will silently clip it.
 
 ## Known Performance Risks
 
