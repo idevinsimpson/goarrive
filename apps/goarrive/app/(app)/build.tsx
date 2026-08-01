@@ -450,10 +450,14 @@ function TrayChip({
   children: React.ReactNode;
 }) {
   const scale = useSharedValue(1);
+  const lift = useSharedValue(0);
   useEffect(() => {
-    scale.value = withSpring(hovered ? 1.12 : 1, { damping: 14, stiffness: 220 });
-  }, [hovered, scale]);
-  const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+    scale.value = withSpring(hovered ? 1.16 : 1, { damping: 14, stiffness: 220 });
+    lift.value = withSpring(hovered ? -4 : 0, { damping: 14, stiffness: 220 });
+  }, [hovered, scale, lift]);
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: lift.value }, { scale: scale.value }],
+  }));
   return (
     <Reanimated.View
       onLayout={onLayout}
@@ -3918,7 +3922,7 @@ function BuildScreenInner() {
           hit-tested by coordinates (findTrayTarget), not touch handlers. */}
       {trayMounted && (
         <Reanimated.View
-          style={[s.tray, trayAnimStyle, { paddingBottom: insets.bottom + 12 }]}
+          style={[s.tray, trayAnimStyle, { paddingBottom: insets.bottom + 16 }]}
           pointerEvents="none"
         >
           <ScrollView
@@ -3926,7 +3930,9 @@ function BuildScreenInner() {
             horizontal
             showsHorizontalScrollIndicator={false}
             scrollEnabled={false} // drag session drives horizontal scroll via ref
-            contentContainerStyle={{ paddingRight: AUTO_SCROLL_HOTSPOT_W + 12 }}
+            // paddingVertical: 18 gives the hover pop (scale 1.16 + translateY -4 + 8px accent glow)
+            // room to render without being sliced by RN Web's overflow-y: hidden default.
+            contentContainerStyle={{ paddingRight: AUTO_SCROLL_HOTSPOT_W + 12, paddingVertical: 18 }}
             onLayout={e => { trayViewportWidthRef.current = e.nativeEvent.layout.width; }}
             onContentSizeChange={w => { trayContentWidthRef.current = w; }}
           >
@@ -3992,13 +3998,15 @@ function BuildScreenInner() {
           </ScrollView>
           {/* Scroll-down affordance on the tray's right edge — visible during
               drag. Positioned outside the horizontal ScrollView so it stays
-              fixed to the viewport regardless of tray scroll. */}
+              fixed to the viewport regardless of tray scroll. Height matches
+              a chip so it can't stretch if the tray's auto-sizing wobbles. */}
           {dragItem && (
             <View pointerEvents="none" style={{
               position: 'absolute',
               right: 12,
-              top: 12,
-              bottom: 12 + insets.bottom,
+              // Center on the chip row: tray paddingBottom (insets+16) + ScrollView paddingVertical (18)
+              bottom: insets.bottom + 16 + 18,
+              height: TRAY_HEIGHT - 24,
               width: AUTO_SCROLL_HOTSPOT_W - 16,
               borderRadius: 12,
               backgroundColor: '#1E2A3A',
@@ -4399,7 +4407,7 @@ const s = StyleSheet.create({
     borderTopRightRadius: 20,
     borderWidth: 1,
     borderColor: '#1E2A3A',
-    paddingTop: 12,
+    paddingTop: 20,
     paddingHorizontal: 12,
     zIndex: 9000,
     shadowColor: '#000',
