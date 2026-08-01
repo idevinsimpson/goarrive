@@ -219,12 +219,14 @@ function calcDurationMin(blocks: any[]): number {
 // dropped on a Workout appends to it. Playbooks are workouts-only — they
 // reject movements, folders, plans, and other playbooks. Any other
 // asset-on-asset drop opens the combine modal (create a folder containing both).
+// A dragged folder can only land on another folder (nest); combine/append
+// semantics don't apply to folder sources.
 function isDropTarget(
   item: { type?: string } | null | undefined,
   dragged: { type?: string } | null | undefined,
 ): boolean {
   if (!item || !dragged) return false;
-  if (dragged.type === 'Folder') return false;
+  if (dragged.type === 'Folder') return item.type === 'Folder';
   if (item.type === 'Playbooks') return dragged.type === 'Workouts';
   return true;
 }
@@ -1251,9 +1253,11 @@ function BuildScreenInner() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      // Tray "New Folder" drop: insert the dragged asset into the folder.
-      if (pendingDrop && pendingDrop.type !== 'Folder') {
-        await updateDoc(doc(db, COLLECTION_BY_TYPE[pendingDrop.type], pendingDrop.id), stripUndefined({
+      // Tray "New Folder" drop: nest the dragged item into the new folder.
+      // Folder sources write to build_folders; assets use COLLECTION_BY_TYPE.
+      if (pendingDrop) {
+        const coll = pendingDrop.type === 'Folder' ? 'build_folders' : COLLECTION_BY_TYPE[pendingDrop.type];
+        await updateDoc(doc(db, coll, pendingDrop.id), stripUndefined({
           parentId: folderRef.id,
           updatedAt: serverTimestamp(),
         }));
@@ -1490,13 +1494,41 @@ function BuildScreenInner() {
     tryScroll();
   }, []);
 
+  const showDropToast = useCallback((msg: string) => {
+    if (dropToastTimerRef.current) clearTimeout(dropToastTimerRef.current);
+    setDropToast(msg);
+    dropToastTimerRef.current = setTimeout(() => setDropToast(null), 2500);
+  }, []);
+
   const dropItemIntoFolder = useCallback(async (dragged: BuildItem, folderId: string) => {
-    if (dragged.type === 'Folder') return;
+    // Folder-into-folder nest: reject self-drop and cycles (target folder
+    // must not be a descendant of the dragged folder — walking the parent
+    // chain up from the target hits the dragged id iff moving would create
+    // a loop). Also no-op if already parented there.
+    if (dragged.type === 'Folder') {
+      if (dragged.id === folderId) return;
+      if (dragged.parentId === folderId) {
+        showDropToast(`Already in "${itemsRef.current.find(i => i.id === folderId)?.name ?? 'folder'}"`);
+        return;
+      }
+      const folderById = new Map(
+        itemsRef.current.filter(i => i.type === 'Folder').map(i => [i.id, i as BuildItem]),
+      );
+      let cursor: BuildItem | undefined = folderById.get(folderId);
+      while (cursor) {
+        if (cursor.id === dragged.id) {
+          showDropToast(`Can't move "${dragged.name}" into its own subfolder`);
+          return;
+        }
+        cursor = cursor.parentId ? folderById.get(cursor.parentId) : undefined;
+      }
+    }
     try {
       // Bump the folder's updatedAt too, so it resorts to the top of the
       // grid where the user is scrolled to see the result.
       const batch = writeBatch(db);
-      batch.update(doc(db, COLLECTION_BY_TYPE[dragged.type], dragged.id), stripUndefined({
+      const coll = dragged.type === 'Folder' ? 'build_folders' : COLLECTION_BY_TYPE[dragged.type];
+      batch.update(doc(db, coll, dragged.id), stripUndefined({
         parentId: folderId,
         updatedAt: serverTimestamp(),
       }));
@@ -1505,7 +1537,7 @@ function BuildScreenInner() {
       recordRecentDropFolder(folderId);
       scrollListToTop();
     } catch (e) { console.error('[Build] Drop into folder error:', e); }
-  }, [recordRecentDropFolder, scrollListToTop]);
+  }, [recordRecentDropFolder, scrollListToTop, showDropToast]);
 
   // Tray targets live OUTSIDE the FlatList and don't move with scroll. Their
   // absolute rects are deterministic: onLayout x/w within trayRow, plus the
@@ -1580,12 +1612,6 @@ function BuildScreenInner() {
       }
     }
   }, [findTarget, findTrayTarget, isOverFolderHeader, insets.bottom, ghostOpacity, ghostScale]);
-
-  const showDropToast = useCallback((msg: string) => {
-    if (dropToastTimerRef.current) clearTimeout(dropToastTimerRef.current);
-    setDropToast(msg);
-    dropToastTimerRef.current = setTimeout(() => setDropToast(null), 2500);
-  }, []);
 
   const executeDrop = useCallback(async (ax: number, ay: number) => {
     const dragged = _dragItemRef.current;
@@ -2370,13 +2396,40 @@ function BuildScreenInner() {
           tileRefsMap.current.set(item.id, React.createRef<View>());
         }
         const folderTileRef = tileRefsMap.current.get(item.id)!;
+        // Folders drag with the same long-press pan as other assets. Drop
+        // semantics are constrained by isDropTarget (folder-on-folder nest
+        // only) and dropItemIntoFolder (cycle guard).
+        const folderDragGesture = Gesture.Pan()
+          .activateAfterLongPress(600)
+          .onStart((e) => {
+            ghostX.value = e.absoluteX - cardWidth / 2 - rootOffX.value;
+            ghostY.value = e.absoluteY - cardHeight / 2 - rootOffY.value;
+            ghostScale.value = withSpring(1.08, { damping: 15, stiffness: 200 });
+            ghostOpacity.value = withSpring(1);
+            runOnJS(beginDragSession)(item.id, e.absoluteX, e.absoluteY);
+          })
+          .onUpdate((e) => {
+            ghostX.value = e.absoluteX - cardWidth / 2 - rootOffX.value;
+            ghostY.value = e.absoluteY - cardHeight / 2 - rootOffY.value;
+            runOnJS(updateHovered)(e.absoluteX, e.absoluteY);
+          })
+          .onEnd((e) => {
+            runOnJS(executeDrop)(e.absoluteX, e.absoluteY);
+          })
+          .onFinalize(() => {
+            ghostScale.value = withSpring(1, { damping: 20 });
+            ghostOpacity.value = withSpring(0);
+            runOnJS(endDragSession)();
+          });
         return (
+          <GestureDetector gesture={folderDragGesture} touchAction="manipulation" userSelect="none">
           <View
             ref={folderTileRef as any}
             style={{
               width: cardWidth,
               height: cardHeight,
               marginBottom: GRID_GAP,
+              opacity: dragItem?.id === item.id ? 0.35 : 1,
             }}
           >
             <Pressable
@@ -2433,6 +2486,7 @@ function BuildScreenInner() {
               )}
             </Pressable>
           </View>
+          </GestureDetector>
         );
       }
       return (
