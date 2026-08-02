@@ -2575,9 +2575,10 @@ function BuildScreenInner() {
               )}
             />
           )}
-          {/* Name overlay — playbook icon sits inline to the left of the title */}
+          {/* Name overlay — type icon sits inline to the left of the title */}
           <View style={[styles.nameOverlay, isWorkoutCard && { backgroundColor: 'rgba(26, 35, 50, 0.92)' }]}>
             {isPlaybook && <Icon name="playbook" size={14} color="#A78BFA" />}
+            {isWorkout && <Icon name="workouts" size={14} color="#7DD3FC" />}
             <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
           </View>
           {isMovement && !item.videoUrl && !item.mediaUrl && !item.gifLoopUrl && !item.gifLowUrl && (
