@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-07-30._
+_Last refreshed: 2026-08-02._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -79,6 +79,13 @@ The coach-setup guide's 6 modules failed to save any data because the Firestore 
 
 ### Per-Day Module Cards Regressed by Global-Times Refactor
 A refactor that introduced a "global times" mode for the playbook scheduling panel accidentally replaced the per-day module card layout with a single global time field, removing the individual day configuration UI entirely. The regression was caught and reverted before coaches widely noticed, restoring the per-day cards (with day-specific time, duration, and workout slots). Lesson: the scheduling panel's per-day module card layout is the UX contract for coaches; any scheduling UI refactor must verify all per-day controls remain visible and functional in the coach scheduling panel.
+
+
+### iOS Safari Stretches Absolute-Positioned Drop Trays
+When a drag-and-drop interaction uses an absolutely-positioned drop tray that covers the viewport, iOS Safari's rubber-band scroll can stretch the tray beyond its intended height, causing layout jitter and mis-positioned drop targets. Fix: pin the tray's height explicitly in CSS rather than letting it grow with content. Lesson: any overlay or drop target that must stay at a fixed visual height on iOS should have an explicit `height` (or `max-height`) set — do not rely on the browser respecting inferred sizes during active drag gestures.
+
+### Staging Combined Build Can Drop Open PRs
+The combined staging branch process merges all open PRs onto main before building. If a PR is open but not included in the branch list when the combined build is triggered, its changes are silently absent from staging and can be omitted from the production ship. The folder + playbook icon inline fix (PR on fix/build-folder-icon-inline) was dropped from staging-combined-08012239 this way and had to be re-landed separately. Lesson: before cutting a combined staging build, explicitly enumerate all open PRs and confirm each is included. The standing release policy in `AGENTS.md` codifies this check.
 
 
 ## Known Performance Risks
