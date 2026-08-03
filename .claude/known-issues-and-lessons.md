@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-08-02._
+_Last refreshed: 2026-08-03._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -87,6 +87,12 @@ When a drag-and-drop interaction uses an absolutely-positioned drop tray that co
 ### Staging Combined Build Can Drop Open PRs
 The combined staging branch process merges all open PRs onto main before building. If a PR is open but not included in the branch list when the combined build is triggered, its changes are silently absent from staging and can be omitted from the production ship. The folder + playbook icon inline fix (PR on fix/build-folder-icon-inline) was dropped from staging-combined-08012239 this way and had to be re-landed separately. Lesson: before cutting a combined staging build, explicitly enumerate all open PRs and confirm each is included. The standing release policy in `AGENTS.md` codifies this check.
 
+
+### Workout Player Canvas Width Must Be Derived from Height, Not Hardcoded
+`computePlayerCanvas` in `WorkoutPlayer.helpers.ts` had a hardcoded `baseMediaW = 304`. On normal phones `baseMediaH` stays at 380, so the ratio held by coincidence. On wide/tall viewports (iPad portrait, ~820 px wide) the scale grows, chrome eats vertical space, and `baseMediaH` shrinks to ~222 — but width stayed at 304, producing a landscape container (692×506) instead of the intended portrait 4:5. The fix (fix/player-media-aspect-ratio-4-5) derives `baseMediaW` as `CANVAS_BASE_MEDIA_W * (baseMediaH / CANVAS_BASE_MEDIA_H)` so the container is always exactly 4:5. Lesson: the canvas dimensions module must express width as a function of height — never hardcode width independently. Any future change to `computePlayerCanvas` that introduces a new width constant must verify the 4:5 ratio on an iPad-width viewport.
+
+### Provider Swap Should Be Validated in Staging Before Shipping
+The Runway → Seedance (fal.ai) movement variation provider swap (feat/variation-provider-seedance) shipped to production and was reverted in the same cycle. Lesson: AI provider swaps change output quality in ways that are hard to assess from code review alone — always run at least one full variation generation in staging before including a provider change in a production ship.
 
 ## Known Performance Risks
 
