@@ -1038,6 +1038,29 @@ service cloud.firestore {
       allow update, delete: if isPlatformAdmin();
     }
 
+    // ─────────────────────────────────────────────
+    // WORKOUT SESSIONS (Live View Phase 1)
+    // Member writes their own active workout session; coach reads their members'.
+    // Staleness (updatedAt > 60s) is enforced client-side, not in rules.
+    // ─────────────────────────────────────────────
+    match /workoutSessions/{sessionId} {
+      // Member can create their own session
+      allow create: if isAuthenticated()
+                    && request.auth.uid == request.resource.data.memberId;
+      // Member can read/update/delete their own session;
+      // coach can read sessions for their members (supports admin impersonation
+      // via isCoachOrBootstrap which checks both claim and UID).
+      allow read, update: if isAuthenticated() && (
+        isOwnDoc(resource.data.memberId)
+        || isCoachOrBootstrap(resource.data.coachId)
+        || isPlatformAdmin()
+      );
+      allow delete: if isAuthenticated() && (
+        isOwnDoc(resource.data.memberId)
+        || isPlatformAdmin()
+      );
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

@@ -48,7 +48,7 @@ import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useWorkoutTTS, unlockAudioPlayback } from '../hooks/useWorkoutTTS';
 import { useHeartRate, HeartRateSessionStats } from '../hooks/useHeartRate';
 import { useAuth } from '../lib/AuthContext';
-import { doc, getDoc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { setAudioMuted, unlockAudioContext } from '../lib/audioCues';
 import { httpsCallable } from 'firebase/functions';
@@ -202,6 +202,8 @@ export default function WorkoutPlayer({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, currentIndex, isPaused]);
+
+
   useMediaPrefetch(
     flatMovements,
     currentIndex,
@@ -358,6 +360,91 @@ export default function WorkoutPlayer({
   const hr = useHeartRate();
   const { user, claims } = useAuth();
   const isMember = !!user && claims?.role === 'member';
+
+  // ── Live View session writes (workoutSessions collection) ────────────────
+  // Members-only: create a session doc on open, update on state changes,
+  // throttle video position every 500ms, delete on close/complete.
+  const liveSessionIdRef = useRef<string | null>(null);
+  const liveSessionPositionRef = useRef<number>(0);
+  const isLiveEligible = isMember && !isPreview;
+
+  // Compute position ms from timer state (best-effort; 0 for non-work phases)
+  const currentPositionMs = phase === 'work' && typeof timeLeft === 'number' && typeof current?.duration === 'number'
+    ? Math.max(0, (current.duration - timeLeft) * 1000)
+    : 0;
+  liveSessionPositionRef.current = currentPositionMs;
+
+  // Create session on open; delete on close/unmount
+  useEffect(() => {
+    if (!visible || !isLiveEligible || !user) return;
+    const sessionId = `${user.uid}_${Date.now()}`;
+    liveSessionIdRef.current = sessionId;
+    const coachId = (workout?.coachId ?? claims?.coachId ?? '') as string;
+    const memberName = user.displayName || '';
+    const workoutId = workout?.id ?? '';
+    const workoutName = (workout?.title ?? workout?.name ?? '') as string;
+    setDoc(doc(db, 'workoutSessions', sessionId), {
+      sessionId,
+      memberId: user.uid,
+      memberName,
+      coachId,
+      workoutId,
+      workoutName,
+      phase: 'ready',
+      movementIndex: 0,
+      videoPositionMs: 0,
+      isPlaying: false,
+      startedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }).catch((err) => console.warn('[LiveView] session create failed:', err));
+
+    return () => {
+      const sid = liveSessionIdRef.current;
+      liveSessionIdRef.current = null;
+      if (sid) {
+        deleteDoc(doc(db, 'workoutSessions', sid))
+          .catch((err) => console.warn('[LiveView] session delete failed:', err));
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, isLiveEligible]);
+
+  // Update session on phase/index/pause changes
+  useEffect(() => {
+    const sid = liveSessionIdRef.current;
+    if (!sid || !isLiveEligible) return;
+    setDoc(doc(db, 'workoutSessions', sid), {
+      phase,
+      movementIndex: currentIndex,
+      isPlaying: !isPaused,
+      videoPositionMs: liveSessionPositionRef.current,
+      movementName: current?.name ?? null,
+      currentVideoUrl: (current as any)?.videoUrl ?? null,
+      updatedAt: serverTimestamp(),
+    }, { merge: true }).catch(() => {});
+    if (phase === 'complete') {
+      const s = sid;
+      liveSessionIdRef.current = null;
+      deleteDoc(doc(db, 'workoutSessions', s)).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, currentIndex, isPaused]);
+
+  // Throttled position update every 500ms while playing
+  useEffect(() => {
+    if (!isLiveEligible || phase !== 'work' || isPaused) return;
+    const interval = setInterval(() => {
+      const sid = liveSessionIdRef.current;
+      if (!sid) return;
+      setDoc(doc(db, 'workoutSessions', sid), {
+        videoPositionMs: liveSessionPositionRef.current,
+        updatedAt: serverTimestamp(),
+      }, { merge: true }).catch(() => {});
+    }, 500);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLiveEligible, phase, isPaused]);
+
   const [savedHrDeviceName, setSavedHrDeviceName] = useState<string | null>(null);
   const [hrEnabled, setHrEnabled] = useState(true);
   const [memberAge, setMemberAge] = useState<number | null>(null);
