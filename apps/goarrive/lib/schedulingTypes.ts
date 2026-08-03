@@ -238,7 +238,6 @@ export interface SessionInstance {
   endUtc?: Timestamp;
   reservationId?: string;             // member_time_reservations doc backing this booking
   guestEmail?: string | null;         // Guest-by-email booking hook (Phase B)
-  location?: string | null;           // Member-picked location option (Phase B.1)
 
   // Allocation fields
   zoomRoomId?: string;              // Assigned Zoom room doc ID
@@ -417,22 +416,6 @@ export function addMinutesToTime(time24: string, minutes: number): string {
   const newH = Math.floor(totalMinutes / 60) % 24;
   const newM = totalMinutes % 60;
   return `${newH.toString().padStart(2, '0')}:${newM.toString().padStart(2, '0')}`;
-}
-
-// ─── Helper: Today in a timezone ─────────────────────────────────────────────
-
-// "Today" as YYYY-MM-DD in the given IANA timezone. Never use
-// toISOString().split('T')[0] for calendar dates — that is UTC and shifts the
-// day for anyone west of Greenwich in the evening (or east in the morning).
-export function todayInTz(tz: string): string {
-  return dateStrInTz(new Date(), tz);
-}
-
-// A Date's calendar day as YYYY-MM-DD in the given IANA timezone.
-export function dateStrInTz(date: Date, tz: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(date);
 }
 
 // ─── Helper: Format date for display ─────────────────────────────────────────
@@ -667,8 +650,7 @@ export type PlaybookSessionKind = 'coach_guided' | 'coach_review';
 
 export const PLAYBOOK_SESSION_KIND_LABELS: Record<PlaybookSessionKind, string> = {
   coach_guided: 'Live with Coach',
-  // Backend kind stays coach_review; label renamed per Phase B.2 UX pass.
-  coach_review: 'Self-Guided',
+  coach_review: 'Coach Review',
 };
 
 export type PlaybookRepeatFrequency = 'weekly' | 'every_2_weeks' | 'none';
@@ -676,11 +658,11 @@ export type PlaybookRepeatFrequency = 'weekly' | 'every_2_weeks' | 'none';
 /** Per-day schedule module — each selected day carries its own time, duration,
  *  session kind, and workout assignment. */
 export interface PlaybookDayModule {
-  dayOfWeek: number;
-  startTime: string;
+  dayOfWeek: number;                    // 0-6 (Sun-Sat)
+  startTime: string;                    // HH:mm member-local
   durationMinutes: number;
   sessionKind: PlaybookSessionKind;
-  workoutId?: string | null;
+  workoutId?: string | null;            // workout landing on this day (pinned per occurrence)
 }
 
 /** Scheduling fields persisted on the playbook doc by bookPlaybookSession. */
