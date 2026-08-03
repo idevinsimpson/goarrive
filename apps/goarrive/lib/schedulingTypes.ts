@@ -238,6 +238,7 @@ export interface SessionInstance {
   endUtc?: Timestamp;
   reservationId?: string;             // member_time_reservations doc backing this booking
   guestEmail?: string | null;         // Guest-by-email booking hook (Phase B)
+  location?: string | null;           // Member-picked location option (Phase B.1)
 
   // Allocation fields
   zoomRoomId?: string;              // Assigned Zoom room doc ID
@@ -416,6 +417,19 @@ export function addMinutesToTime(time24: string, minutes: number): string {
   const newH = Math.floor(totalMinutes / 60) % 24;
   const newM = totalMinutes % 60;
   return `${newH.toString().padStart(2, '0')}:${newM.toString().padStart(2, '0')}`;
+}
+
+// ─── Helper: Timezone-aware today / date string ───────────────────────────────
+
+export function todayInTz(tz: string): string {
+  return dateStrInTz(new Date(), tz);
+}
+
+// A Date's calendar day as YYYY-MM-DD in the given IANA timezone.
+export function dateStrInTz(date: Date, tz: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(date);
 }
 
 // ─── Helper: Format date for display ─────────────────────────────────────────
