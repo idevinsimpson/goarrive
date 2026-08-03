@@ -25,7 +25,6 @@
 
 import * as admin from 'firebase-admin';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
-import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { Timestamp, FieldValue, Transaction } from 'firebase-admin/firestore';
 
 const getDb = () => admin.firestore();
@@ -35,14 +34,6 @@ const getDb = () => admin.firestore();
 const MAX_SESSION_MS = 4 * 60 * 60 * 1000;
 
 export type PlaybookSessionKind = 'coach_guided' | 'coach_review';
-
-/**
- * DECISION PENDING (Devin, Phase B.2): after the last workout in the playbook,
- * rotate back to the first workout (true) or stop assigning workouts (false).
- * Single flip point — the client-side day→workout mapping reads the same
- * default. Change here + PlaybookSchedulePanel.ROTATE_AT_END to flip.
- */
-export const ROTATE_AT_PLAYBOOK_END = true;
 
 // ── Timezone math (no tz library in functions/ — Intl only) ─────────────────
 // All conversions are done per-date in the member's IANA timezone so DST
@@ -238,244 +229,24 @@ export async function moveReservationForInstance(
   return { reservationId: newResId, startUtc, endUtc };
 }
 
-// ── Idempotent booking requests (optional client-supplied clientRequestId) ──
-// booking_requests/{clientRequestId}: dedupe guard so a client retry after a
-// timeout can never double-book. Requests without a clientRequestId behave
-// exactly as before (fully backward compatible).
-
-const CLIENT_REQUEST_ID_RE = /^[A-Za-z0-9_-]{16,64}$/;
-const PENDING_CLAIM_STALE_MS = 5 * 60 * 1000;
-const CLAIM_EXPIRY_MS = 24 * 60 * 60 * 1000;
-
-export function validClientRequestId(raw: unknown): string | null {
-  return typeof raw === 'string' && CLIENT_REQUEST_ID_RE.test(raw) ? raw : null;
-}
-
-export interface BookingRequestScope {
-  fn: 'bookPlaybookSession' | 'bookViaBookingToken';
-  coachId: string;
-  memberKey: string;
-  playbookId: string;
-}
-
-/**
- * Transactionally claim booking_requests/{clientRequestId}. Returns the
- * stored result when this exact request already completed (idempotent
- * replay); otherwise writes a pending claim and returns null. Scope fields
- * must match on replay — a request ID can never cross coach/member/function.
- */
-export async function claimBookingRequest(
-  clientRequestId: string,
-  scope: BookingRequestScope,
-): Promise<Record<string, any> | null> {
-  const db = getDb();
-  const ref = db.collection('booking_requests').doc(clientRequestId);
-  let prior: Record<string, any> | null = null;
-  await db.runTransaction(async (txn) => {
-    const snap = await txn.get(ref);
-    if (snap.exists) {
-      const data = snap.data()!;
-      if (data.fn !== scope.fn || data.coachId !== scope.coachId
-        || data.memberKey !== scope.memberKey || data.playbookId !== scope.playbookId) {
-        throw new HttpsError('permission-denied', 'This request ID belongs to a different booking');
-      }
-      if (data.result) {
-        prior = data.result;
-        return;
-      }
-      const createdMs = (data.createdAt as Timestamp | undefined)?.toMillis?.() ?? 0;
-      if (Date.now() - createdMs < PENDING_CLAIM_STALE_MS) {
-        throw new HttpsError('aborted', 'This booking is still processing — try again in a moment');
-      }
-      // Stale pending claim from a crashed run — reclaim it.
-    }
-    txn.set(ref, {
-      ...scope,
-      result: null,
-      createdAt: FieldValue.serverTimestamp(),
-      // TTL-style cleanup guard: anything past expiresAt is safe to delete.
-      expiresAt: Timestamp.fromMillis(Date.now() + CLAIM_EXPIRY_MS),
-    });
-  });
-  return prior;
-}
-
-export async function storeBookingRequestResult(
-  clientRequestId: string,
-  result: Record<string, any>,
-): Promise<void> {
-  try {
-    await getDb().collection('booking_requests').doc(clientRequestId).set(
-      { result, completedAt: FieldValue.serverTimestamp() },
-      { merge: true },
-    );
-  } catch (err: any) {
-    console.warn(`[playbookScheduling] Failed to store booking request result ${clientRequestId}: ${err.message}`);
-  }
-}
-
-/** Release a pending claim after a failed run so a retry can book fresh. */
-export async function releaseBookingRequest(clientRequestId: string): Promise<void> {
-  try {
-    await getDb().collection('booking_requests').doc(clientRequestId).delete();
-  } catch (err: any) {
-    console.warn(`[playbookScheduling] Failed to release booking request ${clientRequestId}: ${err.message}`);
-  }
-}
-
-export const cleanupExpiredBookingRequests = onSchedule(
-  { schedule: '30 3 * * *', timeZone: 'UTC' },
-  async () => {
-    const db = getDb();
-    const batchSize = 400;
-    let deletedCount = 0;
-
-    const expiredQuery = db
-      .collection('booking_requests')
-      .where('expiresAt', '<', Timestamp.now())
-      .limit(batchSize);
-    let snap = await expiredQuery.get();
-    while (!snap.empty) {
-      const batch = db.batch();
-      snap.docs.forEach((d) => batch.delete(d.ref));
-      await batch.commit();
-      deletedCount += snap.size;
-      snap = await expiredQuery.get();
-    }
-
-    console.log(`[cleanupExpiredBookingRequests] Deleted ${deletedCount} expired booking request(s)`);
-  }
-);
-
-// ── Shared single-occurrence booking (coach path + public token path) ───────
-
-export interface BookOccurrenceParams {
-  playbookId: string;
-  playbook: Record<string, any>;
-  coachId: string;
-  memberKey: string;               // memberId, or `guest:<sha256(email)>`
-  memberId: string | null;         // null for guest bookings
-  guestEmail: string | null;
-  memberName: string;
-  dateStr: string;                 // YYYY-MM-DD (member-local wall clock)
-  startTime: string;               // HH:mm
-  timezone: string;                // IANA
-  durationMinutes: number;
-  sessionKind: PlaybookSessionKind;
-  recordingEnabled: boolean;
-  weeklySessionCap: number | null;
-  pinnedWorkoutId?: string | null;
-  bookedVia?: 'coach_panel' | 'booking_link';
-  location?: string | null;
-}
-
-export function hostingFieldsFor(sessionKind: PlaybookSessionKind): Record<string, any> {
-  // coach_guided rides the coach's own Zoom room; coach_review rides the
-  // shared bot-room pool (round-robin in allocateSessionInstance).
-  return sessionKind === 'coach_guided'
-    ? { roomSource: 'coach_personal', hostingMode: 'coach_led', coachExpectedLive: true, personalZoomRequired: true, guidancePhase: 'coach_guided' }
-    : { roomSource: 'shared_pool', hostingMode: 'hosted', coachExpectedLive: false, personalZoomRequired: false, guidancePhase: 'self_guided' };
-}
-
-/**
- * One atomic booking: global overlap guard + per-playbook weekly cap +
- * reservation create + session_instance create, all in one transaction.
- * Throws HttpsError already-exists (conflict) / resource-exhausted (cap).
- */
-export async function bookOccurrence(p: BookOccurrenceParams): Promise<{ instanceId: string; reservationId: string }> {
-  const db = getDb();
-  const startUtc = wallTimeToUtc(p.dateStr, p.startTime, p.timezone);
-  const endUtc = new Date(startUtc.getTime() + p.durationMinutes * 60 * 1000);
-  const endMinutesTotal = Number(p.startTime.split(':')[0]) * 60 + Number(p.startTime.split(':')[1]) + p.durationMinutes;
-  const scheduledEndTime = `${String(Math.floor(endMinutesTotal / 60) % 24).padStart(2, '0')}:${String(endMinutesTotal % 60).padStart(2, '0')}`;
-  const resId = reservationId(p.memberKey, startUtc);
-  const instRef = db.collection('session_instances').doc();
-
-  await db.runTransaction(async (txn) => {
-    // 1. Global overlap guard — reservations (all playbooks) + legacy instances
-    const conflict = await findOverlapInTxn(txn, p.memberKey, p.memberId, startUtc, endUtc);
-    if (conflict) throw new HttpsError('already-exists', conflict);
-
-    // 2. Per-playbook weekly cap — Monday boundary in member tz. Signed-in
-    // members are counted by memberId (covers Phase A instances that predate
-    // the memberKey field); guests are counted by memberKey.
-    if (p.weeklySessionCap !== null) {
-      const { weekStartUtc, weekEndUtc } = memberWeekWindowUtc(startUtc, p.timezone);
-      const baseQuery = db.collection('session_instances')
-        .where('playbookId', '==', p.playbookId);
-      const capQuery = p.memberId
-        ? baseQuery.where('memberId', '==', p.memberId)
-        : baseQuery.where('memberKey', '==', p.memberKey);
-      const capSnap = await txn.get(
-        capQuery
-          .where('startUtc', '>=', Timestamp.fromDate(weekStartUtc))
-          .where('startUtc', '<', Timestamp.fromDate(weekEndUtc))
-      );
-      const activeCount = capSnap.docs.filter((doc) => BLOCKING_STATUSES.includes(doc.data().status) || doc.data().status === 'completed').length;
-      if (activeCount >= p.weeklySessionCap) {
-        throw new HttpsError('resource-exhausted', `weekly cap of ${p.weeklySessionCap} reached`);
-      }
-    }
-
-    // 3. Reservation — deterministic ID, create() collides on races
-    txn.create(db.collection('member_time_reservations').doc(resId), {
-      memberKey: p.memberKey,
-      memberId: p.memberId,
-      guestEmail: p.guestEmail,
-      coachId: p.coachId,
-      playbookId: p.playbookId,
-      sessionInstanceId: instRef.id,
-      startUtc: Timestamp.fromDate(startUtc),
-      endUtc: Timestamp.fromDate(endUtc),
-      createdAt: FieldValue.serverTimestamp(),
-    });
-
-    // 4. Session instance — reuses the legacy state machine end-to-end
-    const inst: Record<string, any> = {
-      id: instRef.id,
-      coachId: p.coachId,
-      memberId: p.memberId,
-      memberKey: p.memberKey,
-      memberName: p.memberName,
-      playbookId: p.playbookId,
-      playbookTitle: p.playbook.name || 'Playbook',
-      sessionKind: p.sessionKind,
-      recordingEnabled: p.recordingEnabled,
-      scheduledDate: p.dateStr,
-      scheduledStartTime: p.startTime,
-      scheduledEndTime,
-      durationMinutes: p.durationMinutes,
-      timezone: p.timezone,
-      startUtc: Timestamp.fromDate(startUtc),
-      endUtc: Timestamp.fromDate(endUtc),
-      reservationId: resId,
-      status: 'scheduled',
-      allocationAttempts: 0,
-      guestEmail: p.guestEmail,
-      bookedVia: p.bookedVia || 'coach_panel',
-      location: p.location || null,
-      ...hostingFieldsFor(p.sessionKind),
-      createdAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    };
-    if (p.pinnedWorkoutId && Array.isArray(p.playbook.workoutIds) && p.playbook.workoutIds.includes(p.pinnedWorkoutId)) {
-      inst.pinnedWorkoutId = p.pinnedWorkoutId;
-    }
-    txn.set(instRef, inst);
-  });
-
-  return { instanceId: instRef.id, reservationId: resId };
-}
-
 // ── bookPlaybookSession ──────────────────────────────────────────────────────
+
+interface BookPlaybookDayModule {
+  dayOfWeek: number;             // 0–6
+  startTime: string;             // HH:mm (member-local wall clock)
+  durationMinutes?: number;      // per-day; default 45
+  sessionKind?: PlaybookSessionKind;  // per-day; default coach_review
+  workoutId?: string | null;     // workout landing on this day (pinned per occurrence)
+}
 
 interface BookPlaybookSessionData {
   playbookId: string;
-  daysOfWeek?: number[];         // 0–6 (legacy; derived from dayModules when present)
-  startTime?: string;            // HH:mm (legacy global; per-day truth in dayModules)
+  daysOfWeek: number[];          // 0–6, at least one (legacy path)
+  startTime: string;             // HH:mm (legacy global start)
+  dayModules?: BookPlaybookDayModule[];  // per-day modules — overrides daysOfWeek/startTime when present
   timezone: string;              // IANA — the member's timezone
-  durationMinutes?: number;      // default 45 (legacy global)
-  sessionKind?: PlaybookSessionKind;      // default coach_review (legacy global)
+  durationMinutes?: number;      // default 45
+  sessionKind?: PlaybookSessionKind;      // default coach_review
   recordingEnabled?: boolean;    // default true; per-playbook OFF toggle
   repeatFrequency?: 'weekly' | 'every_2_weeks' | 'none';  // default weekly
   repeatHorizonWeeks?: number;   // 2–8, default 4
@@ -483,15 +254,6 @@ interface BookPlaybookSessionData {
   startDate?: string;            // YYYY-MM-DD, default today (member tz)
   memberId?: string;             // default playbook.assignedMemberId
   pinnedWorkoutIds?: Record<string, string>; // date → workoutId (coach-pinned occurrences)
-  // Per-day modules — each selected day carries its own time, duration, kind,
-  // and workout. When present, completely overrides daysOfWeek/startTime/daySettings.
-  dayModules?: Array<{ dayOfWeek: number; startTime: string; durationMinutes?: number; sessionKind?: PlaybookSessionKind; workoutId?: string | null }>;
-  // Phase B.2: per-day time + kind. When present, overrides startTime /
-  // sessionKind for that day; daysOfWeek/startTime stay as the legacy shape.
-  daySettings?: Array<{ dayOfWeek: number; startTime: string; sessionKind?: PlaybookSessionKind; durationMinutes?: number }>;
-  // Optional idempotency key — a retry with the same ID returns the stored
-  // result of the original attempt instead of booking again.
-  clientRequestId?: string;
 }
 
 export const bookPlaybookSession = onCall(
@@ -518,11 +280,15 @@ export const bookPlaybookSession = onCall(
           throw new HttpsError('invalid-argument', 'dayModules startTime must be HH:mm');
         }
       }
+      const dows = d.dayModules!.map((m) => m.dayOfWeek);
+      if (new Set(dows).size !== dows.length) {
+        throw new HttpsError('invalid-argument', 'dayModules must have at most one module per day');
+      }
     } else {
-      if (d.daysOfWeek!.some((x) => typeof x !== 'number' || x < 0 || x > 6)) {
+      if (d.daysOfWeek.some((x) => typeof x !== 'number' || x < 0 || x > 6)) {
         throw new HttpsError('invalid-argument', 'daysOfWeek entries must be 0-6');
       }
-      if (!/^\d{2}:\d{2}$/.test(d.startTime!)) {
+      if (!/^\d{2}:\d{2}$/.test(d.startTime)) {
         throw new HttpsError('invalid-argument', 'startTime must be HH:mm');
       }
     }
@@ -559,58 +325,37 @@ export const bookPlaybookSession = onCall(
     }
     const memberName = memberSnap.data()!.name || playbook.assignedMemberName || 'Member';
 
-    // Per-day modules (new) — single source of truth when present.
-    // Builds a map dow → { startTime, sessionKind, durationMinutes, workoutId }.
-    type DayModuleResolved = { startTime: string; sessionKind: PlaybookSessionKind; durationMinutes: number; workoutId: string | null };
-    const dayModulesMap = new Map<number, DayModuleResolved>();
-    if (hasModules) {
-      const normKind = (k: unknown): PlaybookSessionKind => (k === 'coach_guided' ? 'coach_guided' : 'coach_review');
-      const normDur = (n: unknown): number => (typeof n === 'number' && n >= 5 && n <= 240 ? Math.round(n) : 45);
-      for (const m of d.dayModules!) {
-        dayModulesMap.set(m.dayOfWeek, {
+    const normKind = (k: unknown): PlaybookSessionKind => (k === 'coach_guided' ? 'coach_guided' : 'coach_review');
+    const normDuration = (n: unknown): number =>
+      typeof n === 'number' && n > 0 && n <= 240 ? Math.round(n) : 45;
+
+    // Per-day modules are the unit of truth; the legacy global shape maps to
+    // one identical module per selected day.
+    const modules = (hasModules
+      ? d.dayModules!.map((m) => ({
+          dayOfWeek: m.dayOfWeek,
           startTime: m.startTime,
-          sessionKind: normKind(m.sessionKind),
-          durationMinutes: normDur(m.durationMinutes),
+          durationMinutes: normDuration(m.durationMinutes ?? d.durationMinutes),
+          sessionKind: normKind(m.sessionKind ?? d.sessionKind),
           workoutId: typeof m.workoutId === 'string' && m.workoutId ? m.workoutId : null,
-        });
-      }
-    }
+        }))
+      : [...new Set(d.daysOfWeek)].sort().map((dow) => ({
+          dayOfWeek: dow,
+          startTime: d.startTime,
+          durationMinutes: normDuration(d.durationMinutes),
+          sessionKind: normKind(d.sessionKind),
+          workoutId: null as string | null,
+        }))
+    ).sort((a, b) => a.dayOfWeek - b.dayOfWeek);
 
-    // Per-day settings (Phase B.2) — validated map dow → { startTime, kind }
-    const daySettingsMap = new Map<number, { startTime: string; sessionKind: PlaybookSessionKind; durationMinutes: number | null }>();
-    if (!hasModules && Array.isArray(d.daySettings)) {
-      for (const ds of d.daySettings) {
-        if (typeof ds?.dayOfWeek !== 'number' || ds.dayOfWeek < 0 || ds.dayOfWeek > 6) {
-          throw new HttpsError('invalid-argument', 'daySettings dayOfWeek must be 0-6');
-        }
-        if (typeof ds?.startTime !== 'string' || !/^\d{2}:\d{2}$/.test(ds.startTime)) {
-          throw new HttpsError('invalid-argument', 'daySettings startTime must be HH:mm');
-        }
-        if (ds.durationMinutes !== undefined && (typeof ds.durationMinutes !== 'number' || ds.durationMinutes < 5 || ds.durationMinutes > 240)) {
-          throw new HttpsError('invalid-argument', 'daySettings durationMinutes must be 5-240');
-        }
-        daySettingsMap.set(ds.dayOfWeek, {
-          startTime: ds.startTime,
-          sessionKind: ds.sessionKind === 'coach_guided' ? 'coach_guided' : 'coach_review',
-          durationMinutes: typeof ds.durationMinutes === 'number' ? Math.round(ds.durationMinutes) : null,
-        });
-      }
-    }
-
-    const sessionKind: PlaybookSessionKind = d.sessionKind === 'coach_guided' ? 'coach_guided' : 'coach_review';
+    const sessionKind: PlaybookSessionKind = modules[0].sessionKind;
     const recordingEnabled = d.recordingEnabled !== false;
-    const durationMinutes = d.durationMinutes && d.durationMinutes > 0 && d.durationMinutes <= 240 ? d.durationMinutes : 45;
+    const durationMinutes = modules[0].durationMinutes;
     const repeatFrequency = d.repeatFrequency === 'every_2_weeks' ? 'every_2_weeks' : d.repeatFrequency === 'none' ? 'none' : 'weekly';
     const repeatHorizonWeeks = Math.min(8, Math.max(2, Math.round(d.repeatHorizonWeeks || 4)));
     const weeklySessionCap = typeof d.weeklySessionCap === 'number' && d.weeklySessionCap > 0
       ? Math.round(d.weeklySessionCap) : null;
     const timezone = d.timezone;
-
-    // Effective DOW list: from dayModules when present, else legacy daysOfWeek.
-    const effectiveDows = hasModules
-      ? [...dayModulesMap.keys()].sort()
-      : [...new Set(d.daysOfWeek!)].sort();
-    const effectiveStartTime = hasModules ? dayModulesMap.get(effectiveDows[0])!.startTime : d.startTime!;
 
     // Persist scheduling settings on the playbook (also normalizes memberIds
     // so group support later is purely additive).
@@ -621,14 +366,9 @@ export const bookPlaybookSession = onCall(
       sessionDurationMinutes: durationMinutes,
       weeklySessionCap,
       timezone,
-      scheduleDaysOfWeek: effectiveDows,
-      scheduleStartTime: effectiveStartTime,
-      scheduleDayModules: hasModules
-        ? [...dayModulesMap.entries()].map(([dayOfWeek, v]) => ({ dayOfWeek, ...v }))
-        : FieldValue.delete(),
-      scheduleDaySettings: !hasModules && Array.isArray(d.daySettings)
-        ? [...daySettingsMap.entries()].map(([dayOfWeek, v]) => ({ dayOfWeek, ...v }))
-        : FieldValue.delete(),
+      scheduleDaysOfWeek: modules.map((m) => m.dayOfWeek),
+      scheduleStartTime: modules[0].startTime,
+      scheduleDayModules: modules,
       repeatFrequency,
       repeatHorizonWeeks,
       memberIds,
@@ -645,79 +385,119 @@ export const bookPlaybookSession = onCall(
     const horizonEnd = addDaysToDateStr(firstDate, repeatHorizonWeeks * 7);
     const stepDays = repeatFrequency === 'every_2_weeks' ? 14 : 7;
 
-    const occurrences: Array<{ dateStr: string; startTime: string; sessionKind: PlaybookSessionKind; durationMinutes: number; workoutId: string | null }> = [];
-    for (const dow of effectiveDows) {
-      const mod = dayModulesMap.get(dow);
-      const dayStart = mod?.startTime ?? daySettingsMap.get(dow)?.startTime ?? d.startTime!;
-      const dayKind = mod?.sessionKind ?? daySettingsMap.get(dow)?.sessionKind ?? sessionKind;
-      const dayDuration = mod?.durationMinutes ?? daySettingsMap.get(dow)?.durationMinutes ?? durationMinutes;
-      const dayWorkoutId = mod?.workoutId ?? null;
+    type DayModule = (typeof modules)[number];
+    const occurrences: Array<{ dateStr: string; mod: DayModule }> = [];
+    for (const mod of modules) {
       let cursor = firstDate;
-      while (wallDateOf(wallTimeToUtc(cursor, '12:00', timezone), timezone).dow !== dow) {
+      while (wallDateOf(wallTimeToUtc(cursor, '12:00', timezone), timezone).dow !== mod.dayOfWeek) {
         cursor = addDaysToDateStr(cursor, 1);
       }
-      // Same-day booking only if the start time hasn't passed yet
-      if (cursor === todayStr && wallTimeToUtc(cursor, dayStart, timezone) <= now) {
+      // Same-day booking only if this day's start time hasn't passed yet
+      if (cursor === todayStr && wallTimeToUtc(cursor, mod.startTime, timezone) <= now) {
         cursor = addDaysToDateStr(cursor, stepDays);
       }
       if (repeatFrequency === 'none') {
-        if (cursor <= horizonEnd) occurrences.push({ dateStr: cursor, startTime: dayStart, sessionKind: dayKind, durationMinutes: dayDuration, workoutId: dayWorkoutId });
+        if (cursor <= horizonEnd) occurrences.push({ dateStr: cursor, mod });
         continue;
       }
       while (cursor <= horizonEnd) {
-        occurrences.push({ dateStr: cursor, startTime: dayStart, sessionKind: dayKind, durationMinutes: dayDuration, workoutId: dayWorkoutId });
+        occurrences.push({ dateStr: cursor, mod });
         cursor = addDaysToDateStr(cursor, stepDays);
       }
     }
-    occurrences.sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+    occurrences.sort((a, b) => (a.dateStr < b.dateStr ? -1 : a.dateStr > b.dateStr ? 1 : 0));
 
     if (occurrences.length === 0) {
       throw new HttpsError('invalid-argument', 'No bookable occurrences in the selected window');
     }
 
-    const memberKey = memberId; // guests book via bookViaBookingToken with `guest:<sha256(email)>`
+    // Existing-hosting-pipeline mapping: coach_guided rides the coach's own
+    // Zoom room; coach_review rides the shared bot-room pool (round-robin in
+    // allocateSessionInstance). Copy is member-facing elsewhere — these are
+    // internal routing fields.
+    const hostingFieldsFor = (kind: PlaybookSessionKind) => kind === 'coach_guided'
+      ? { roomSource: 'coach_personal', hostingMode: 'coach_led', coachExpectedLive: true, personalZoomRequired: true, guidancePhase: 'coach_guided' }
+      : { roomSource: 'shared_pool', hostingMode: 'hosted', coachExpectedLive: false, personalZoomRequired: false, guidancePhase: 'self_guided' };
 
-    // Idempotency: a retry carrying the same clientRequestId returns the
-    // stored result of the attempt that already ran (e.g. client timed out
-    // at 45s while the server finished booking).
-    const clientRequestId = validClientRequestId(d.clientRequestId);
-    if (clientRequestId) {
-      const prior = await claimBookingRequest(clientRequestId, {
-        fn: 'bookPlaybookSession',
-        coachId,
-        memberKey,
-        playbookId: d.playbookId,
-      });
-      if (prior) {
-        console.log(`[bookPlaybookSession] idempotent replay for request ${clientRequestId}`);
-        return prior;
-      }
-    }
-
+    const memberKey = memberId; // guests (Phase B): `guest:<sha256(email)>`
     const results: Array<{ date: string; status: 'booked' | 'conflict' | 'cap_reached'; reason?: string; instanceId?: string }> = [];
 
-    for (const occ of occurrences) {
-      const dateStr = occ.dateStr;
+    for (const { dateStr, mod } of occurrences) {
+      const startUtc = wallTimeToUtc(dateStr, mod.startTime, timezone);
+      const endUtc = new Date(startUtc.getTime() + mod.durationMinutes * 60 * 1000);
+      const endMinutesTotal = Number(mod.startTime.split(':')[0]) * 60 + Number(mod.startTime.split(':')[1]) + mod.durationMinutes;
+      const scheduledEndTime = `${String(Math.floor(endMinutesTotal / 60) % 24).padStart(2, '0')}:${String(endMinutesTotal % 60).padStart(2, '0')}`;
+      const resId = reservationId(memberKey, startUtc);
+      const instRef = db.collection('session_instances').doc();
+
       try {
-        const { instanceId } = await bookOccurrence({
-          playbookId: d.playbookId,
-          playbook,
-          coachId,
-          memberKey,
-          memberId,
-          guestEmail: null,
-          memberName,
-          dateStr,
-          startTime: occ.startTime,
-          timezone,
-          durationMinutes: occ.durationMinutes,
-          sessionKind: occ.sessionKind,
-          recordingEnabled,
-          weeklySessionCap,
-          pinnedWorkoutId: occ.workoutId || d.pinnedWorkoutIds?.[dateStr] || null,
-          bookedVia: 'coach_panel',
+        await db.runTransaction(async (txn) => {
+          // 1. Global overlap guard — reservations (all playbooks) + legacy instances
+          const conflict = await findOverlapInTxn(txn, memberKey, memberId, startUtc, endUtc);
+          if (conflict) throw new HttpsError('already-exists', conflict);
+
+          // 2. Per-playbook weekly cap — Monday boundary in member tz
+          if (weeklySessionCap !== null) {
+            const { weekStartUtc, weekEndUtc } = memberWeekWindowUtc(startUtc, timezone);
+            const capSnap = await txn.get(
+              db.collection('session_instances')
+                .where('playbookId', '==', d.playbookId)
+                .where('memberId', '==', memberId)
+                .where('startUtc', '>=', Timestamp.fromDate(weekStartUtc))
+                .where('startUtc', '<', Timestamp.fromDate(weekEndUtc))
+            );
+            const activeCount = capSnap.docs.filter((doc) => BLOCKING_STATUSES.includes(doc.data().status) || doc.data().status === 'completed').length;
+            if (activeCount >= weeklySessionCap) {
+              throw new HttpsError('resource-exhausted', `weekly cap of ${weeklySessionCap} reached`);
+            }
+          }
+
+          // 3. Reservation — deterministic ID, create() collides on races
+          txn.create(db.collection('member_time_reservations').doc(resId), {
+            memberKey,
+            memberId,
+            guestEmail: null,
+            coachId,
+            playbookId: d.playbookId,
+            sessionInstanceId: instRef.id,
+            startUtc: Timestamp.fromDate(startUtc),
+            endUtc: Timestamp.fromDate(endUtc),
+            createdAt: FieldValue.serverTimestamp(),
+          });
+
+          // 4. Session instance — reuses the legacy state machine end-to-end
+          const inst: Record<string, any> = {
+            id: instRef.id,
+            coachId,
+            memberId,
+            memberName,
+            playbookId: d.playbookId,
+            playbookTitle: playbook.name || 'Playbook',
+            sessionKind: mod.sessionKind,
+            recordingEnabled,
+            scheduledDate: dateStr,
+            scheduledStartTime: mod.startTime,
+            scheduledEndTime,
+            durationMinutes: mod.durationMinutes,
+            timezone,
+            startUtc: Timestamp.fromDate(startUtc),
+            endUtc: Timestamp.fromDate(endUtc),
+            reservationId: resId,
+            status: 'scheduled',
+            allocationAttempts: 0,
+            guestEmail: null,
+            ...hostingFieldsFor(mod.sessionKind),
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          };
+          // Per-date pin wins over the day module's workout mapping.
+          const pinned = d.pinnedWorkoutIds?.[dateStr] || mod.workoutId;
+          if (pinned && Array.isArray(playbook.workoutIds) && playbook.workoutIds.includes(pinned)) {
+            inst.pinnedWorkoutId = pinned;
+          }
+          txn.set(instRef, inst);
         });
-        results.push({ date: dateStr, status: 'booked', instanceId });
+        results.push({ date: dateStr, status: 'booked', instanceId: instRef.id });
       } catch (err: any) {
         if (err instanceof HttpsError && err.code === 'resource-exhausted') {
           results.push({ date: dateStr, status: 'cap_reached', reason: err.message });
@@ -727,7 +507,6 @@ export const bookPlaybookSession = onCall(
           // Firestore ALREADY_EXISTS from txn.create() racing another booking
           results.push({ date: dateStr, status: 'conflict', reason: 'booked concurrently' });
         } else {
-          if (clientRequestId) await releaseBookingRequest(clientRequestId);
           throw err;
         }
       }
@@ -744,8 +523,6 @@ export const bookPlaybookSession = onCall(
     });
 
     console.log(`[bookPlaybookSession] ${bookedCount}/${results.length} booked for playbook ${d.playbookId} member ${memberId}`);
-    const response = { success: true, bookedCount, results };
-    if (clientRequestId) await storeBookingRequestResult(clientRequestId, response);
-    return response;
+    return { success: true, bookedCount, results };
   }
 );
