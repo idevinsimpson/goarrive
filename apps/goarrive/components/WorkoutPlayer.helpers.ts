@@ -116,7 +116,11 @@ export function computePlayerCanvas(
     CANVAS_BASE_MEDIA_MIN_H,
     Math.min(CANVAS_BASE_MEDIA_H, frameH / scale - CANVAS_BASE_CHROME_H),
   );
-  return { scale, frameW, frameH, baseMediaW: CANVAS_BASE_MEDIA_W, baseMediaH };
+  // Keep width proportional to height so the container is always exactly 4:5
+  // regardless of viewport. Without this, wide viewports (iPad) produce a
+  // landscape-shaped container (e.g. 692×506) instead of portrait 4:5.
+  const baseMediaW = CANVAS_BASE_MEDIA_W * (baseMediaH / CANVAS_BASE_MEDIA_H);
+  return { scale, frameW, frameH, baseMediaW, baseMediaH };
 }
 
 // Peek by index: scan currentIndex+1 through currentIndex+3 for the first
