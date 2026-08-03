@@ -57,6 +57,7 @@ import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from './Icon';
 import WorkoutPlayer from './WorkoutPlayer';
+import LiveViewPlayer from './LiveViewPlayer';
 import WorkoutIntroAnnouncementModal, { type IntroAnnouncementSaveFields } from './WorkoutIntroAnnouncementModal';
 import { buildDefaultIntroScript } from '../utils/workoutIntroAnnouncement';
 import VideoCropModal, { CropValues } from './VideoCropModal';
@@ -492,6 +493,9 @@ export default function WorkoutFolderPage({
   const [introAnnouncementText, setIntroAnnouncementText] = useState('');
   const [showMoveTo, setShowMoveTo] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [showLiveViewModal, setShowLiveViewModal] = useState(false);
+  const [liveSessions, setLiveSessions] = useState<Array<{ sessionId: string; memberName: string }>>([]);
+  const [liveViewSessionId, setLiveViewSessionId] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showDuplicateConfirm, setShowDuplicateConfirm] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
@@ -508,6 +512,27 @@ export default function WorkoutFolderPage({
   const [moveToSearch, setMoveToSearch] = useState('');
   const [movePlaybooks, setMovePlaybooks] = useState<any[]>([]);
   const [moveToBusyId, setMoveToBusyId] = useState<string | null>(null);
+
+  // Real-time subscription: active sessions for this specific workout
+  useEffect(() => {
+    if (!workoutId || !coachId) return;
+    const q = query(
+      collection(db, 'workoutSessions'),
+      where('coachId', '==', coachId),
+      where('workoutId', '==', workoutId),
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const now = Date.now();
+      const active = snap.docs
+        .filter((d) => {
+          const updatedAt = d.data().updatedAt?.toDate?.() ?? new Date(0);
+          return now - updatedAt.getTime() < 30_000;
+        })
+        .map((d) => ({ sessionId: d.id, memberName: d.data().memberName || 'Member' }));
+      setLiveSessions(active);
+    }, () => {});
+    return unsub;
+  }, [workoutId, coachId]);
 
   // Load the coach's playbooks when the Move-to page opens.
   useEffect(() => {
@@ -2320,13 +2345,15 @@ export default function WorkoutFolderPage({
           </View>
         )}
 
-        {/* Preview button */}
+        {/* LIVE VIEW / Preview button */}
         <Pressable
-          onPress={async () => { await flushSave(); setShowPreview(true); }}
-          style={st.previewBtn}
+          onPress={async () => { await flushSave(); setShowLiveViewModal(true); }}
+          style={[st.previewBtn, liveSessions.length > 0 && st.previewBtnLive]}
         >
-          <Icon name="eye" size={16} color="#FBBF24" />
-          <Text style={st.previewBtnText}>Preview</Text>
+          <View style={[st.liveStatusDot, { backgroundColor: liveSessions.length > 0 ? '#34D399' : '#4A5568' }]} />
+          <Text style={[st.previewBtnText, liveSessions.length > 0 && { color: '#34D399' }]}>
+            {liveSessions.length > 0 ? 'Live View' : 'Preview'}
+          </Text>
         </Pressable>
 
         {/* Three-dots menu */}
@@ -3969,6 +3996,77 @@ export default function WorkoutFolderPage({
         />
       )}
 
+      {/* Live View confirmation modal */}
+      {showLiveViewModal && (
+        <Modal transparent animationType="fade" onRequestClose={() => setShowLiveViewModal(false)}>
+          <Pressable
+            style={st.liveModalOverlay}
+            onPress={() => setShowLiveViewModal(false)}
+          >
+            <Pressable style={st.liveModalSheet} onStartShouldSetResponder={() => true}>
+              <Text style={st.liveModalTitle}>
+                {liveSessions.length > 0
+                  ? `${liveSessions.length} member${liveSessions.length !== 1 ? 's' : ''} live in this workout`
+                  : 'No one is currently in this workout'}
+              </Text>
+              {liveSessions.length > 1 && (
+                <View style={st.liveSessionList}>
+                  {liveSessions.map((s) => (
+                    <Pressable
+                      key={s.sessionId}
+                      style={st.liveSessionRow}
+                      onPress={() => {
+                        setShowLiveViewModal(false);
+                        setLiveViewSessionId(s.sessionId);
+                      }}
+                    >
+                      <View style={st.liveSessionDot} />
+                      <Text style={st.liveSessionName}>{s.memberName}</Text>
+                      <Icon name="chevron-right" size={14} color="#8A95A3" />
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+              <View style={st.liveModalBtns}>
+                {liveSessions.length > 0 && liveSessions.length === 1 && (
+                  <Pressable
+                    style={st.liveModalBtnPrimary}
+                    onPress={() => {
+                      setShowLiveViewModal(false);
+                      setLiveViewSessionId(liveSessions[0].sessionId);
+                    }}
+                  >
+                    <View style={st.liveSessionDot} />
+                    <Text style={st.liveModalBtnPrimaryText}>Watch Live</Text>
+                  </Pressable>
+                )}
+                <Pressable
+                  style={st.liveModalBtnSecondary}
+                  onPress={() => { setShowLiveViewModal(false); setShowPreview(true); }}
+                >
+                  <Icon name="eye" size={14} color="#FBBF24" />
+                  <Text style={st.liveModalBtnSecondaryText}>Preview Instead</Text>
+                </Pressable>
+                <Pressable
+                  style={st.liveModalBtnCancel}
+                  onPress={() => setShowLiveViewModal(false)}
+                >
+                  <Text style={st.liveModalBtnCancelText}>Cancel</Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* Live View Player */}
+      {liveViewSessionId && (
+        <LiveViewPlayer
+          sessionId={liveViewSessionId}
+          onClose={() => setLiveViewSessionId(null)}
+        />
+      )}
+
       {/* ── Intro Announcement settings ── */}
       <WorkoutIntroAnnouncementModal
         visible={showIntroAnnouncement}
@@ -4309,10 +4407,107 @@ const st = StyleSheet.create({
     borderRadius: 6,
     backgroundColor: 'rgba(251,191,36,0.12)',
   },
+  previewBtnLive: {
+    backgroundColor: 'rgba(52,211,153,0.12)',
+  },
+  liveStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
   previewBtnText: {
     fontSize: 13,
     color: '#FBBF24',
     fontWeight: '600',
+    fontFamily: FB,
+  },
+  liveModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  liveModalSheet: {
+    backgroundColor: '#1E2329',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 32,
+    gap: 12,
+  },
+  liveModalTitle: {
+    color: '#F0F4F8',
+    fontSize: 16,
+    fontWeight: '700',
+    fontFamily: FB,
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  liveSessionList: {
+    gap: 2,
+  },
+  liveSessionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(52,211,153,0.06)',
+    borderRadius: 8,
+  },
+  liveSessionDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#34D399',
+  },
+  liveSessionName: {
+    flex: 1,
+    color: '#F0F4F8',
+    fontSize: 15,
+    fontFamily: FB,
+  },
+  liveModalBtns: {
+    gap: 8,
+    marginTop: 4,
+  },
+  liveModalBtnPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(52,211,153,0.15)',
+    borderRadius: 10,
+    paddingVertical: 12,
+  },
+  liveModalBtnPrimaryText: {
+    color: '#34D399',
+    fontSize: 15,
+    fontWeight: '700',
+    fontFamily: FB,
+  },
+  liveModalBtnSecondary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(251,191,36,0.1)',
+    borderRadius: 10,
+    paddingVertical: 12,
+  },
+  liveModalBtnSecondaryText: {
+    color: '#FBBF24',
+    fontSize: 15,
+    fontWeight: '600',
+    fontFamily: FB,
+  },
+  liveModalBtnCancel: {
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  liveModalBtnCancelText: {
+    color: '#8A95A3',
+    fontSize: 14,
     fontFamily: FB,
   },
   breadcrumb: {
