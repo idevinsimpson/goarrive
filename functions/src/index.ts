@@ -10748,42 +10748,46 @@ export const listEquipmentImages = onCall(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AI Movement Variation (fal.ai Seedance image-to-video)
+// AI Movement Variation (Runway video-to-video)
 //
-// startMovementVariation     — extract first frame, kick off Seedance tasks via fal.ai queue
-// getMovementVariationStatus — poll fal.ai queue status, sync movement_variation_jobs doc
+// startMovementVariation     — kick off Runway aleph2 tasks from a source movement video
+// getMovementVariationStatus — poll Runway tasks, sync movement_variation_jobs doc
 // finalizeMovementVariation  — download chosen output, persist to Storage, return videoUrl
 //
-// ME-014: FAL_KEY must be set before these functions operate.
-//         firebase functions:secrets:set FAL_KEY
+// ME-014: RUNWAYML_API_SECRET must be set before these functions operate.
+//         firebase functions:secrets:set RUNWAYML_API_SECRET
 // ─────────────────────────────────────────────────────────────────────────────
-const falApiSecret = defineSecret('FAL_KEY');
+const runwayApiSecret = defineSecret('RUNWAYML_API_SECRET');
 
-const FAL_QUEUE_BASE = 'https://queue.fal.run';
-const FAL_SEEDANCE_MODEL = 'fal-ai/bytedance/seedance/v1/pro/image-to-video';
-const VARIATION_PROVIDER = 'fal';
-const VARIATION_MODEL = 'seedance-v1-pro';
+const RUNWAY_API_BASE = 'https://api.dev.runwayml.com';
+const RUNWAY_API_VERSION = '2024-11-06';
+const VARIATION_PROVIDER = 'runway';
+const VARIATION_MODEL = 'aleph2';
 const VARIATION_MAX_CANDIDATES = 3;
 const VARIATION_DEFAULT_CANDIDATES = 2;
 const VARIATION_MAX_INSTRUCTION_CHARS = 600;
-const VARIATION_DURATION_SEC = 10;
 
 const VARIATION_BASE_PROMPT =
-  'Keep the same person, body type, outfit, equipment, background, camera angle, framing, and lighting as the image. The coach performs this movement as a safe, realistic, controlled, instructional fitness demonstration. Do not add extra people. Do not change the face. Do not add text overlays or logos. Do not add barbells, heavy weights, or any equipment not explicitly requested. Avoid unsafe, overloaded, or high-risk positions.';
+  "Use the source workout video as the visual reference. Keep the same coach, body type, outfit, background, camera angle, framing, and lighting. Create a safe fitness demonstration variation. Do not add extra people. Do not change the coach's face. Do not add text overlays. Do not add logos. Keep it realistic, controlled, and instructional. Do not add barbells, heavy weights, or any equipment not explicitly requested. Avoid unsafe, overloaded, or high-risk positions.";
 
 interface VariationCandidate {
-  id: string; // fal.ai request_id
-  status: 'IN_QUEUE' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED';
+  id: string; // Runway task id
+  status: 'PENDING' | 'THROTTLED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
   progress: number;
-  videoUrl: string | null; // ephemeral fal.ai output URL
+  videoUrl: string | null; // ephemeral Runway output URL (expires 24-48h)
   storedVideoUrl?: string | null; // durable Storage copy written by the background poller
   error: string | null;
 }
 
 const VARIATION_JOB_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const VARIATION_MOTION_MODEL = 'gen4_turbo';
+const VARIATION_MOTION_DURATION_SEC = 10;
+
+const VARIATION_MOTION_BASE_PROMPT =
+  'Keep the same person, body type, outfit, equipment, background, camera angle, framing, and lighting as the image. The coach performs this movement as a safe, realistic, controlled, instructional fitness demonstration. Do not add extra people. Do not change the face. Do not add text overlays or logos. Do not add barbells, heavy weights, or any equipment not explicitly requested. Avoid unsafe, overloaded, or high-risk positions.';
 
 function isTerminalCandidate(c: VariationCandidate): boolean {
-  return c.status === 'COMPLETED' || c.status === 'FAILED';
+  return c.status === 'SUCCEEDED' || c.status === 'FAILED' || c.status === 'CANCELLED';
 }
 
 /** Coach/admin gate + resolve caller's coach scope for ownership checks. */
@@ -10806,54 +10810,40 @@ function assertVariationJobOwnership(jobData: FirebaseFirestore.DocumentData, is
   }
 }
 
-function falHeaders(apiKey: string): Record<string, string> {
+function runwayHeaders(apiKey: string): Record<string, string> {
   return {
-    Authorization: `Key ${apiKey}`,
+    Authorization: `Bearer ${apiKey}`,
+    'X-Runway-Version': RUNWAY_API_VERSION,
     'Content-Type': 'application/json',
   };
 }
 
-async function fetchFalStatus(apiKey: string, model: string, requestId: string): Promise<{
+async function fetchRunwayTask(apiKey: string, taskId: string): Promise<{
   status: VariationCandidate['status'];
   progress: number;
   outputUrl: string | null;
   failure: string | null;
 }> {
-  const resp = await fetch(`${FAL_QUEUE_BASE}/${model}/requests/${requestId}/status`, {
-    headers: falHeaders(apiKey),
-  });
+  const resp = await fetch(`${RUNWAY_API_BASE}/v1/tasks/${taskId}`, { headers: runwayHeaders(apiKey) });
   if (!resp.ok) {
     const body = await resp.text().catch(() => '');
-    throw new Error(`fal.ai status fetch failed (${resp.status}): ${body.slice(0, 200)}`);
+    throw new Error(`Runway task fetch failed (${resp.status}): ${body.slice(0, 200)}`);
   }
   const json: any = await resp.json();
-  const status: VariationCandidate['status'] = json.status ?? 'IN_QUEUE';
-  if (status === 'COMPLETED') {
-    const resultResp = await fetch(`${FAL_QUEUE_BASE}/${model}/requests/${requestId}`, {
-      headers: falHeaders(apiKey),
-    });
-    if (resultResp.ok) {
-      const result: any = await resultResp.json();
-      return { status, progress: 1, outputUrl: result?.video?.url ?? null, failure: null };
-    }
-  }
-  const progress = status === 'COMPLETED' ? 1 : status === 'IN_PROGRESS' ? 0.5 : 0;
   return {
-    status,
-    progress,
-    outputUrl: null,
-    failure: status === 'FAILED' ? (json.error ?? 'Generation failed') : null,
+    status: json.status,
+    progress: typeof json.progress === 'number' ? json.progress : 0,
+    outputUrl: Array.isArray(json.output) && json.output.length > 0 ? json.output[0] : null,
+    failure: json.failure ? String(json.failure) : null,
   };
 }
 
 /**
- * Extract the first frame of a video, upload it to Storage with a download token,
- * and return the frame URL plus the aspect ratio matching the source orientation.
+ * Download a video from sourceUrl, transcode to ≤30fps and trim to ≤29.5s (Runway rejects
+ * assets over 30s), upload to Storage, and return a public URL. Cleans up /tmp on both
+ * success and failure.
  */
-async function extractFirstFrame(videoUrl: string, jobId: string, coachId: string): Promise<{
-  frameUrl: string;
-  aspectRatio: '16:9' | '9:16' | '1:1';
-}> {
+async function transcodeVideoTo30fps(sourceUrl: string, jobId: string, coachId: string): Promise<string> {
   const { execSync } = await import('child_process');
   const os = await import('os');
   const path = await import('path');
@@ -10861,6 +10851,55 @@ async function extractFirstFrame(videoUrl: string, jobId: string, coachId: strin
 
   const tmpDir = os.tmpdir();
   const inputPath = path.join(tmpDir, `variation-src-${jobId}.mp4`);
+  const outputPath = path.join(tmpDir, `variation-30fps-${jobId}.mp4`);
+
+  try {
+    const resp = await fetch(sourceUrl);
+    if (!resp.ok) throw new Error(`Failed to download source video (${resp.status})`);
+    const buf = Buffer.from(await resp.arrayBuffer());
+    fs.writeFileSync(inputPath, buf);
+
+    // -loglevel error keeps stderr tiny so the pipe buffer can't deadlock execSync.
+    execSync(
+      `ffmpeg -y -loglevel error -i "${inputPath}" -t 29.5 -r 30 -vf fps=fps=30 -c:v libx264 -preset fast -crf 23 -movflags +faststart "${outputPath}"`,
+      { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 1024 * 1024 },
+    );
+
+    const bucket = admin.storage().bucket();
+    const storagePath = `movements/${coachId}/transcoded/${jobId}.mp4`;
+    // Embed a Firebase download token so the URL is publicly accessible without ACL or signBlob.
+    const downloadToken = `${jobId}-tc`;
+    await bucket.upload(outputPath, {
+      destination: storagePath,
+      metadata: {
+        contentType: 'video/mp4',
+        metadata: { firebaseStorageDownloadTokens: downloadToken },
+      },
+    });
+    const encodedPath = encodeURIComponent(storagePath);
+    return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodedPath}?alt=media&token=${downloadToken}`;
+  } finally {
+    try { const fs2 = require('fs'); fs2.unlinkSync(inputPath); } catch {}
+    try { const fs2 = require('fs'); fs2.unlinkSync(outputPath); } catch {}
+  }
+}
+
+/**
+ * Extract the first frame of a video for the "motion" remix path, upload it to
+ * Storage with a download token, and return the frame URL plus the gen4_turbo
+ * ratio matching the source orientation.
+ */
+async function extractFirstFrameForMotion(videoUrl: string, jobId: string, coachId: string): Promise<{
+  frameUrl: string;
+  ratio: '1280:720' | '720:1280' | '960:960';
+}> {
+  const { execSync } = await import('child_process');
+  const os = await import('os');
+  const path = await import('path');
+  const fs = await import('fs');
+
+  const tmpDir = os.tmpdir();
+  const inputPath = path.join(tmpDir, `variation-motion-src-${jobId}.mp4`);
   const framePath = path.join(tmpDir, `variation-frame-${jobId}.jpg`);
 
   try {
@@ -10878,7 +10917,7 @@ async function extractFirstFrame(videoUrl: string, jobId: string, coachId: strin
       { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1024 * 1024 },
     ).toString().trim();
     const [w, h] = dims.split('x').map((n) => parseInt(n, 10));
-    const aspectRatio = h > w ? '9:16' as const : w > h ? '16:9' as const : '1:1' as const;
+    const ratio = h > w ? '720:1280' as const : w > h ? '1280:720' as const : '960:960' as const;
 
     const bucket = admin.storage().bucket();
     const storagePath = `movements/${coachId}/variations/${jobId}/first-frame.jpg`;
@@ -10891,7 +10930,7 @@ async function extractFirstFrame(videoUrl: string, jobId: string, coachId: strin
       },
     });
     const frameUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
-    return { frameUrl, aspectRatio };
+    return { frameUrl, ratio };
   } finally {
     try { fs.unlinkSync(inputPath); } catch {}
     try { fs.unlinkSync(framePath); } catch {}
@@ -10899,15 +10938,17 @@ async function extractFirstFrame(videoUrl: string, jobId: string, coachId: strin
 }
 
 export const startMovementVariation = onCall(
-  { region: 'us-central1', secrets: [falApiSecret], timeoutSeconds: 180, memory: '1GiB', maxInstances: 10, invoker: 'public' },
+  { region: 'us-central1', secrets: [runwayApiSecret], timeoutSeconds: 180, memory: '1GiB', maxInstances: 10, invoker: 'public' },
   async (request) => {
     const { isAdmin, callerCoachIds } = requireCoachOrAdmin(request);
 
-    const { sourceMovementId, instruction, outputCount } = request.data as {
+    const { sourceMovementId, instruction, outputCount, remixMode: remixModeRaw } = request.data as {
       sourceMovementId?: string;
       instruction?: string;
       outputCount?: number;
+      remixMode?: string;
     };
+    const remixMode: 'edit' | 'motion' = remixModeRaw === 'motion' ? 'motion' : 'edit';
 
     if (!sourceMovementId || typeof sourceMovementId !== 'string') {
       throw new HttpsError('invalid-argument', 'sourceMovementId is required');
@@ -10924,9 +10965,9 @@ export const startMovementVariation = onCall(
       VARIATION_MAX_CANDIDATES,
     );
 
-    const apiKey = falApiSecret.value()?.trim();
+    const apiKey = runwayApiSecret.value()?.trim();
     if (!apiKey) {
-      throw new HttpsError('internal', 'fal.ai API key not configured');
+      throw new HttpsError('internal', 'Runway API key not configured');
     }
 
     const movementSnap = await db.doc(`movements/${sourceMovementId}`).get();
@@ -10952,8 +10993,8 @@ export const startMovementVariation = onCall(
       instruction: trimmedInstruction,
       status: 'queued',
       provider: VARIATION_PROVIDER,
-      model: VARIATION_MODEL,
-      remixMode: 'image_to_video',
+      model: remixMode === 'motion' ? VARIATION_MOTION_MODEL : VARIATION_MODEL,
+      remixMode,
       candidateCount,
       taskIds: [],
       candidates: [],
@@ -10965,59 +11006,87 @@ export const startMovementVariation = onCall(
       updatedAt: now,
     });
 
+    const promptText = `${VARIATION_BASE_PROMPT} Requested change: ${trimmedInstruction}`;
+
     // All post-doc-creation work is wrapped so ANY unhandled error marks the job failed
     // rather than leaving it permanently stuck in 'queued'.
     try {
-      // Extract the first frame from the source video to use as the seed image.
-      let frameResult: { frameUrl: string; aspectRatio: '16:9' | '9:16' | '1:1' };
+      // Runway requires ≤30fps. Transcode the source video first.
+      let videoUriForRunway: string;
       try {
-        console.info('[startMovementVariation] Extracting first frame', { jobId: jobRef.id });
-        frameResult = await extractFirstFrame(movement.videoUrl, jobRef.id, movement.coachId);
-        console.info('[startMovementVariation] Frame extracted', { jobId: jobRef.id });
-      } catch (ffErr: any) {
-        const ffMsg = `First-frame extraction failed: ${String(ffErr?.message || ffErr).slice(0, 300)}`;
-        console.error('[startMovementVariation] Frame extraction error', { jobId: jobRef.id, error: ffMsg });
-        await jobRef.update({ status: 'failed', errorMessage: ffMsg, updatedAt: Timestamp.now() });
-        throw new HttpsError('internal', 'Failed to prepare image for generation');
+        console.info('[startMovementVariation] Starting transcode', { jobId: jobRef.id });
+        videoUriForRunway = await transcodeVideoTo30fps(movement.videoUrl, jobRef.id, movement.coachId);
+        console.info('[startMovementVariation] Transcoded to 30fps', { jobId: jobRef.id });
+      } catch (tcErr: any) {
+        const tcMsg = `Transcoding to 30fps failed: ${String(tcErr?.message || tcErr).slice(0, 300)}`;
+        console.error('[startMovementVariation] Transcoding error', { jobId: jobRef.id, error: tcMsg });
+        await jobRef.update({ status: 'failed', errorMessage: tcMsg, updatedAt: Timestamp.now() });
+        throw new HttpsError('internal', 'Failed to prepare video for generation');
       }
 
-      const promptText = `${VARIATION_BASE_PROMPT} The coach performs: ${trimmedInstruction}`;
+      // Motion mode: aleph2 video-to-video preserves the source motion, so
+      // motion-change instructions produce near-identical output. Instead,
+      // regenerate motion from a still first frame via image_to_video.
+      let motionParams: { frameUrl: string; ratio: '1280:720' | '720:1280' | '960:960' } | null = null;
+      if (remixMode === 'motion') {
+        try {
+          console.info('[startMovementVariation] Extracting first frame for motion remix', { jobId: jobRef.id });
+          motionParams = await extractFirstFrameForMotion(videoUriForRunway, jobRef.id, movement.coachId);
+        } catch (ffErr: any) {
+          const ffMsg = `First-frame extraction failed: ${String(ffErr?.message || ffErr).slice(0, 300)}`;
+          console.error('[startMovementVariation] Frame extraction error', { jobId: jobRef.id, error: ffMsg });
+          await jobRef.update({ status: 'failed', errorMessage: ffMsg, updatedAt: Timestamp.now() });
+          throw new HttpsError('internal', 'Failed to prepare image for motion generation');
+        }
+      }
+
+      const motionPromptText = `${VARIATION_MOTION_BASE_PROMPT} The coach performs: ${trimmedInstruction}`;
 
       const candidates: VariationCandidate[] = [];
       let lastError: string | null = null;
 
       for (let i = 0; i < candidateCount; i++) {
         try {
-          console.info('[startMovementVariation] Submitting fal.ai request', { jobId: jobRef.id, attempt: i });
-          const body = {
-            image_url: frameResult.frameUrl,
-            prompt: promptText,
-            aspect_ratio: frameResult.aspectRatio,
-            resolution: '720p',
-            duration: String(VARIATION_DURATION_SEC),
-            seed: Math.floor(Math.random() * 4294967295),
-          };
-          const resp = await fetch(`${FAL_QUEUE_BASE}/${FAL_SEEDANCE_MODEL}`, {
+          console.info('[startMovementVariation] Creating Runway task', { jobId: jobRef.id, attempt: i, remixMode });
+          const endpoint = motionParams ? 'image_to_video' : 'video_to_video';
+          const body = motionParams
+            ? {
+                model: VARIATION_MOTION_MODEL,
+                promptImage: motionParams.frameUrl,
+                promptText: motionPromptText,
+                ratio: motionParams.ratio,
+                duration: VARIATION_MOTION_DURATION_SEC,
+                seed: Math.floor(Math.random() * 4294967295),
+                contentModeration: { publicFigureThreshold: 'auto' },
+              }
+            : {
+                model: VARIATION_MODEL,
+                videoUri: videoUriForRunway,
+                promptText,
+                seed: Math.floor(Math.random() * 4294967295),
+                contentModeration: { publicFigureThreshold: 'auto' },
+              };
+          const resp = await fetch(`${RUNWAY_API_BASE}/v1/${endpoint}`, {
             method: 'POST',
-            headers: falHeaders(apiKey),
+            headers: runwayHeaders(apiKey),
             body: JSON.stringify(body),
           });
           if (!resp.ok) {
-            const errBody = await resp.text().catch(() => '');
-            throw new Error(`fal.ai submit failed (${resp.status}): ${errBody.slice(0, 300)}`);
+            const body = await resp.text().catch(() => '');
+            throw new Error(`Runway create failed (${resp.status}): ${body.slice(0, 300)}`);
           }
           const json: any = await resp.json();
-          if (!json.request_id) throw new Error('fal.ai submit returned no request_id');
-          console.info('[startMovementVariation] fal.ai request submitted', { jobId: jobRef.id, requestId: json.request_id });
-          candidates.push({ id: json.request_id, status: 'IN_QUEUE', progress: 0, videoUrl: null, error: null });
+          if (!json.id) throw new Error('Runway create returned no task id');
+          console.info('[startMovementVariation] Runway task created', { jobId: jobRef.id, taskId: json.id });
+          candidates.push({ id: json.id, status: 'PENDING', progress: 0, videoUrl: null, error: null });
         } catch (err: any) {
           lastError = String(err?.message || err).slice(0, 300);
-          console.error('[startMovementVariation] Request submission failed', { jobId: jobRef.id, attempt: i, error: lastError });
+          console.error('[startMovementVariation] Task creation failed', { jobId: jobRef.id, attempt: i, error: lastError });
         }
       }
 
       if (candidates.length === 0) {
-        await jobRef.update({ status: 'failed', errorMessage: lastError || 'All fal.ai request submissions failed', updatedAt: Timestamp.now() });
+        await jobRef.update({ status: 'failed', errorMessage: lastError || 'All Runway task creations failed', updatedAt: Timestamp.now() });
         throw new HttpsError('internal', 'Failed to start video generation');
       }
 
@@ -11048,7 +11117,7 @@ export const startMovementVariation = onCall(
 );
 
 export const getMovementVariationStatus = onCall(
-  { region: 'us-central1', secrets: [falApiSecret], timeoutSeconds: 30, maxInstances: 20, invoker: 'public' },
+  { region: 'us-central1', secrets: [runwayApiSecret], timeoutSeconds: 30, maxInstances: 20, invoker: 'public' },
   async (request) => {
     const { isAdmin, callerCoachIds } = requireCoachOrAdmin(request);
 
@@ -11070,34 +11139,34 @@ export const getMovementVariationStatus = onCall(
     let errorMessage: string | null = job.errorMessage || null;
 
     const needsPoll = (status === 'running' || status === 'queued') &&
-      candidates.some((c) => !isTerminalCandidate(c));
+      candidates.some((c) => c.status !== 'SUCCEEDED' && c.status !== 'FAILED' && c.status !== 'CANCELLED');
 
     if (needsPoll) {
-      const apiKey = falApiSecret.value()?.trim();
+      const apiKey = runwayApiSecret.value()?.trim();
       if (!apiKey) {
-        throw new HttpsError('internal', 'fal.ai API key not configured');
+        throw new HttpsError('internal', 'Runway API key not configured');
       }
       candidates = await Promise.all(
         candidates.map(async (c) => {
-          if (isTerminalCandidate(c)) return c;
+          if (c.status === 'SUCCEEDED' || c.status === 'FAILED' || c.status === 'CANCELLED') return c;
           try {
-            const task = await fetchFalStatus(apiKey, FAL_SEEDANCE_MODEL, c.id);
+            const task = await fetchRunwayTask(apiKey, c.id);
             return {
               ...c,
               status: task.status,
-              progress: task.progress,
-              videoUrl: task.outputUrl ?? c.videoUrl,
+              progress: task.status === 'SUCCEEDED' ? 1 : task.progress,
+              videoUrl: task.outputUrl,
               error: task.failure,
             };
           } catch (err: any) {
-            console.warn('[getMovementVariationStatus] Poll failed', { jobId, requestId: c.id, error: String(err?.message || err).slice(0, 200) });
+            console.warn('[getMovementVariationStatus] Poll failed', { jobId, taskId: c.id, error: String(err?.message || err).slice(0, 200) });
             return c; // transient — keep previous state
           }
         }),
       );
 
-      const terminal = candidates.every(isTerminalCandidate);
-      const anySucceeded = candidates.some((c) => c.status === 'COMPLETED');
+      const terminal = candidates.every((c) => c.status === 'SUCCEEDED' || c.status === 'FAILED' || c.status === 'CANCELLED');
+      const anySucceeded = candidates.some((c) => c.status === 'SUCCEEDED');
       if (terminal) {
         status = anySucceeded ? 'succeeded' : 'failed';
         if (!anySucceeded) {
@@ -11130,7 +11199,7 @@ export const getMovementVariationStatus = onCall(
 );
 
 export const finalizeMovementVariation = onCall(
-  { region: 'us-central1', secrets: [falApiSecret], timeoutSeconds: 300, memory: '1GiB', maxInstances: 10, invoker: 'public' },
+  { region: 'us-central1', secrets: [runwayApiSecret], timeoutSeconds: 300, memory: '1GiB', maxInstances: 10, invoker: 'public' },
   async (request) => {
     const { isAdmin, callerCoachIds } = requireCoachOrAdmin(request);
 
@@ -11153,9 +11222,9 @@ export const finalizeMovementVariation = onCall(
       throw new HttpsError('not-found', 'Candidate not found on this job');
     }
 
-    const apiKey = falApiSecret.value()?.trim();
+    const apiKey = runwayApiSecret.value()?.trim();
     if (!apiKey) {
-      throw new HttpsError('internal', 'fal.ai API key not configured');
+      throw new HttpsError('internal', 'Runway API key not configured');
     }
 
     const storagePath = `movements/${job.coachId}/ai-generated-videos/${jobId}-${candidateId}.mp4`;
@@ -11165,7 +11234,7 @@ export const finalizeMovementVariation = onCall(
     const downloadToken = require('crypto').randomUUID();
 
     let persisted = false;
-    // Prefer the durable copy written by the background poller — the fal.ai URL
+    // Prefer the durable copy written by the background poller — the Runway URL
     // may already be expired by the time the coach comes back to finalize.
     if (candidate.storedVideoUrl) {
       try {
@@ -11177,18 +11246,18 @@ export const finalizeMovementVariation = onCall(
         });
         persisted = true;
       } catch (err: any) {
-        console.warn('[finalizeMovementVariation] Stored copy failed, falling back to fal.ai URL', {
+        console.warn('[finalizeMovementVariation] Stored copy failed, falling back to Runway URL', {
           jobId, candidateId, error: String(err?.message || err).slice(0, 200),
         });
       }
     }
 
     if (!persisted) {
-      // Fall back to the ephemeral fal.ai URL (re-fetch for freshness).
+      // Fall back to the ephemeral Runway URL (re-fetch for freshness).
       let outputUrl = candidate.videoUrl;
       try {
-        const task = await fetchFalStatus(apiKey, FAL_SEEDANCE_MODEL, candidateId);
-        if (task.status !== 'COMPLETED' || !task.outputUrl) {
+        const task = await fetchRunwayTask(apiKey, candidateId);
+        if (task.status !== 'SUCCEEDED' || !task.outputUrl) {
           throw new HttpsError('failed-precondition', 'Selected candidate has no completed output');
         }
         outputUrl = task.outputUrl;
@@ -11267,7 +11336,7 @@ export const dismissMovementVariation = onCall(
 );
 
 /**
- * Download a completed fal.ai output and persist it to Storage before the
+ * Download a completed Runway output and persist it to Storage before the
  * ephemeral URL expires. Returns a durable token URL.
  */
 async function persistVariationCandidateOutput(
@@ -11277,7 +11346,7 @@ async function persistVariationCandidateOutput(
   outputUrl: string,
 ): Promise<string> {
   const resp = await fetch(outputUrl);
-  if (!resp.ok) throw new Error(`Failed to download fal.ai output (${resp.status})`);
+  if (!resp.ok) throw new Error(`Failed to download Runway output (${resp.status})`);
   const buf = Buffer.from(await resp.arrayBuffer());
 
   const storagePath = `movements/${coachId}/variations/${jobId}/${candidateId}.mp4`;
@@ -11295,14 +11364,14 @@ export const pollMovementVariationJobs = onSchedule(
   {
     schedule: 'every 1 minutes',
     region: 'us-central1',
-    secrets: [falApiSecret],
+    secrets: [runwayApiSecret],
     timeoutSeconds: 300,
     memory: '1GiB',
   },
   async () => {
-    const apiKey = falApiSecret.value()?.trim();
+    const apiKey = runwayApiSecret.value()?.trim();
     if (!apiKey) {
-      console.error('[pollMovementVariationJobs] fal.ai API key not configured — skipping sweep');
+      console.error('[pollMovementVariationJobs] Runway API key not configured — skipping sweep');
       return;
     }
 
@@ -11331,21 +11400,21 @@ export const pollMovementVariationJobs = onSchedule(
         candidates = await Promise.all(
           candidates.map(async (c) => {
             // Already terminal + persisted (or unpersistable) — nothing to do.
-            if (isTerminalCandidate(c) && (c.status !== 'COMPLETED' || c.storedVideoUrl)) return c;
+            if (isTerminalCandidate(c) && (c.status !== 'SUCCEEDED' || c.storedVideoUrl)) return c;
             try {
               let next: VariationCandidate = c;
               if (!isTerminalCandidate(c)) {
-                const task = await fetchFalStatus(apiKey, FAL_SEEDANCE_MODEL, c.id);
+                const task = await fetchRunwayTask(apiKey, c.id);
                 next = {
                   ...c,
                   status: task.status,
-                  progress: task.progress,
+                  progress: task.status === 'SUCCEEDED' ? 1 : task.progress,
                   videoUrl: task.outputUrl ?? c.videoUrl,
                   error: task.failure,
                 };
                 changed = true;
               }
-              if (next.status === 'COMPLETED' && !next.storedVideoUrl && next.videoUrl) {
+              if (next.status === 'SUCCEEDED' && !next.storedVideoUrl && next.videoUrl) {
                 const storedVideoUrl = await persistVariationCandidateOutput(job.coachId, jobDoc.id, c.id, next.videoUrl);
                 next = { ...next, storedVideoUrl };
                 changed = true;
@@ -11362,7 +11431,7 @@ export const pollMovementVariationJobs = onSchedule(
         );
 
         const terminal = candidates.length > 0 && candidates.every(isTerminalCandidate);
-        const anySucceeded = candidates.some((c) => c.status === 'COMPLETED');
+        const anySucceeded = candidates.some((c) => c.status === 'SUCCEEDED');
         let status = job.status;
         let errorMessage = job.errorMessage || null;
         if (terminal) {
