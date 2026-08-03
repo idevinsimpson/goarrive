@@ -36,8 +36,8 @@ import {
 } from 'firebase/auth';
 import {
   doc,
-  setDoc,
   getDoc,
+  setDoc,
   collection,
   Timestamp,
 } from 'firebase/firestore';
@@ -212,32 +212,7 @@ const initialFormData: FormData = {
 };
 
 export default function IntakeForm() {
-  const { coachId, ref, source } = useLocalSearchParams<{ coachId: string; ref?: string; source?: string }>();
-
-  const [coachBrand, setCoachBrand] = useState<{
-    displayName: string;
-    photoUrl: string;
-    brandColor: string | null;
-    brandLogoUrl: string | null;
-  } | null>(null);
-
-  useEffect(() => {
-    if (!coachId || coachId === 'unassigned') return;
-    getDoc(doc(db, 'coaches', coachId)).then((snap) => {
-      if (!snap.exists()) return;
-      const d = snap.data();
-      const photoUrl = d.funnelPhotoUrl || d.photoURL || d.photoUrl || '';
-      const displayName = d.displayName || d.name || '';
-      if (displayName) setCoachBrand({
-        displayName,
-        photoUrl,
-        brandColor: d.brandColor || null,
-        brandLogoUrl: d.brandLogoUrl || null,
-      });
-    }).catch(() => { /* non-blocking */ });
-  }, [coachId]);
-
-  const accent = coachBrand?.brandColor || '#F5A623';
+  const { coachId } = useLocalSearchParams<{ coachId: string }>();
 
   const [step, setStep] = useState<number>(0);
   const [formData, setFormData] = useState<FormData>(initialFormData);
@@ -261,6 +236,25 @@ export default function IntakeForm() {
   const [submitErrorCode, setSubmitErrorCode] = useState('');
   const [hydrated, setHydrated] = useState(false);
   const scrollRef = React.useRef<ScrollView>(null);
+
+  const [coachBrand, setCoachBrand] = useState<{
+    name: string;
+    logoUrl: string | null;
+    photoUrl: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!coachId || coachId === 'unassigned') return;
+    getDoc(doc(db, 'coaches', coachId)).then((snap) => {
+      if (!snap.exists()) return;
+      const d = snap.data();
+      setCoachBrand({
+        name: d.displayName || '',
+        logoUrl: d.coachLogoUrl || null,
+        photoUrl: d.funnelPhotoUrl || null,
+      });
+    }).catch(() => {});
+  }, [coachId]);
 
   // Restore saved draft from localStorage after hydration (client-side only)
   useEffect(() => {
@@ -418,8 +412,6 @@ export default function IntakeForm() {
         uid: userCred.user.uid,
         coachId: coachId || 'unassigned',
         ...formData,
-        ...(ref ? { programRef: ref } : {}),
-        ...(source ? { programSource: source } : {}),
         submittedAt: Timestamp.now(),
       });
 
@@ -543,7 +535,7 @@ export default function IntakeForm() {
               key={opt}
               style={[
                 s.chip,
-                selected.includes(opt) && [s.chipSelected, { borderColor: accent, backgroundColor: accent }],
+                selected.includes(opt) && s.chipSelected,
               ]}
               onPress={() => toggleArrayItem(field, opt)}
             >
@@ -574,7 +566,7 @@ export default function IntakeForm() {
               key={opt}
               style={[
                 s.yesNoBtn,
-                value === opt && [s.yesNoBtnSelected, { borderColor: accent, backgroundColor: accent }],
+                value === opt && s.yesNoBtnSelected,
               ]}
               onPress={() => updateField(field, opt as any)}
             >
@@ -604,7 +596,7 @@ export default function IntakeForm() {
       <View style={s.fieldWrap}>
         <Text style={s.fieldLabel}>{label}</Text>
         <View style={s.sliderRow}>
-          <Text style={[s.sliderValue, { color: accent }]}>{value}</Text>
+          <Text style={s.sliderValue}>{value}</Text>
           <input
             type="range"
             min={min}
@@ -676,7 +668,7 @@ export default function IntakeForm() {
                 key={g}
                 style={[
                   s.genderBtn,
-                  formData.gender === g && [s.genderBtnSelected, { borderColor: accent, backgroundColor: accent }],
+                  formData.gender === g && s.genderBtnSelected,
                 ]}
                 onPress={() => updateField('gender', g)}
               >
@@ -760,7 +752,7 @@ export default function IntakeForm() {
                 key={level}
                 style={[
                   s.activityBtn,
-                  formData.activityLevel === level && [s.activityBtnSelected, { borderColor: accent, backgroundColor: accent }],
+                  formData.activityLevel === level && s.activityBtnSelected,
                 ]}
                 onPress={() => updateField('activityLevel', level)}
               >
@@ -958,7 +950,7 @@ export default function IntakeForm() {
               {errors.submit}
               {submitErrorCode === 'auth/email-already-in-use' ? (
                 <Text
-                  style={{ color: accent, textDecorationLine: 'underline' }}
+                  style={{ color: '#F5A623', textDecorationLine: 'underline' }}
                   onPress={() => router.replace('/(auth)/login')}
                 >
                   {' Sign in instead →'}
@@ -988,7 +980,7 @@ export default function IntakeForm() {
   if (!hydrated && Platform.OS === 'web') {
     return (
       <View style={{ flex: 1, backgroundColor: '#0a0a0f', justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color={accent} />
+        <ActivityIndicator size="large" color="#F5A623" />
       </View>
     );
   }
@@ -1000,34 +992,43 @@ export default function IntakeForm() {
     >
       {/* Progress Bar */}
       <View style={s.progressBar}>
-        {Platform.OS === 'web' && coachBrand ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            {coachBrand.brandLogoUrl ? (
+        {Platform.OS === 'web' && (
+          <View style={s.brandHeader}>
+            {coachBrand?.logoUrl ? (
               <img
-                src={coachBrand.brandLogoUrl}
-                alt={coachBrand.displayName}
-                style={{ height: 36, maxWidth: 160, objectFit: 'contain' } as any}
+                src={coachBrand.logoUrl}
+                alt={coachBrand.name || 'Coach'}
+                style={{ height: 52, objectFit: 'contain', marginBottom: 6 } as any}
               />
-            ) : coachBrand.photoUrl ? (
-              <img
-                src={coachBrand.photoUrl}
-                alt={coachBrand.displayName}
-                style={{ width: 36, height: 36, borderRadius: 18, objectFit: 'cover' } as any}
-              />
+            ) : coachBrand?.photoUrl ? (
+              <View style={s.brandCoachRow}>
+                <img
+                  src={coachBrand.photoUrl}
+                  alt={coachBrand.name || 'Coach'}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 22,
+                    objectFit: 'cover',
+                    border: '2px solid #F5A623',
+                  } as any}
+                />
+                {coachBrand.name ? (
+                  <Text style={s.brandCoachName}>{coachBrand.name}</Text>
+                ) : null}
+              </View>
             ) : null}
-            {!coachBrand.brandLogoUrl && (
-              <Text style={{ fontSize: 15, fontWeight: '700', color: '#F0F4F8', fontFamily: "'Space Grotesk', sans-serif" }}>
-                {coachBrand.displayName}
-              </Text>
-            )}
+            <img
+              src="/goarrive-logo.png"
+              alt="GoArrive"
+              style={{
+                height: coachBrand ? 28 : 40,
+                objectFit: 'contain',
+                opacity: coachBrand ? 0.7 : 1,
+              } as any}
+            />
           </View>
-        ) : Platform.OS === 'web' ? (
-          <img
-            src="/goarrive-logo.png"
-            alt="GoArrive"
-            style={{ height: 40, marginBottom: 12, objectFit: 'contain' } as any}
-          />
-        ) : null}
+        )}
         <View style={s.progressHeader}>
           <Text style={s.progressLabel}>{STEPS[step]}</Text>
           <Text style={s.progressCount}>
@@ -1038,7 +1039,7 @@ export default function IntakeForm() {
           <View
             style={[
               s.progressFill,
-              { width: `${((step + 1) / STEPS.length) * 100}%`, backgroundColor: accent },
+              { width: `${((step + 1) / STEPS.length) * 100}%` },
             ]}
           />
         </View>
@@ -1066,7 +1067,7 @@ export default function IntakeForm() {
           <View />
         )}
         <Pressable
-          style={[s.nextBtn, { backgroundColor: accent }, submitting && s.nextBtnDisabled]}
+          style={[s.nextBtn, submitting && s.nextBtnDisabled]}
           onPress={isLastStep ? handleSubmit : handleNext}
           disabled={submitting}
         >
@@ -1097,6 +1098,23 @@ const s: any = StyleSheet.create({
     flexDirection: 'column',
     minHeight: '100dvh' as any,
     height: '100dvh' as any,
+  },
+  brandHeader: {
+    alignItems: 'center' as const,
+    marginBottom: 12,
+    gap: 6,
+  },
+  brandCoachRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 10,
+    marginBottom: 4,
+  },
+  brandCoachName: {
+    color: '#E8EAF0',
+    fontSize: 15,
+    fontFamily: Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold',
+    fontWeight: '600' as const,
   },
   progressBar: {
     paddingHorizontal: 16,
