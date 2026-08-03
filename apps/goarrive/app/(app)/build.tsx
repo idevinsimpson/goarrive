@@ -51,7 +51,6 @@ import {
   getDoc,
   deleteDoc,
   limit,
-  runTransaction,
 } from 'firebase/firestore';
 import { useNavigation, router } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
@@ -126,8 +125,6 @@ const TRAY_SLIDE_DISTANCE = 220;     // translateY when hidden — guaranteed of
 const TRAY_MAX_RECENTS = 8;          // wider recents list — user can horizontally scroll to reach later entries
 const TRAY_NEW_FOLDER_KEY = 'tray:new';
 const TRAY_NEW_PLAYBOOK_KEY = 'tray:new-playbook';
-const TRAY_ARCHIVE_KEY = 'tray:archive';
-const TRAY_CANCEL_KEY = 'tray:cancel';
 // Horizontal-scroll edge band inside the tray. Drag pointer inside the tray
 // zone but within this many px of the left/right edge triggers a horizontal
 // scroll of the tray items so hidden targets slide into view.
@@ -222,14 +219,12 @@ function calcDurationMin(blocks: any[]): number {
 // dropped on a Workout appends to it. Playbooks are workouts-only — they
 // reject movements, folders, plans, and other playbooks. Any other
 // asset-on-asset drop opens the combine modal (create a folder containing both).
-// A dragged folder can only land on another folder (nest); combine/append
-// semantics don't apply to folder sources.
 function isDropTarget(
   item: { type?: string } | null | undefined,
   dragged: { type?: string } | null | undefined,
 ): boolean {
   if (!item || !dragged) return false;
-  if (dragged.type === 'Folder') return item.type === 'Folder';
+  if (dragged.type === 'Folder') return false;
   if (item.type === 'Playbooks') return dragged.type === 'Workouts';
   return true;
 }
@@ -723,12 +718,6 @@ function BuildScreenInner() {
   const [pendingPlaybookDropItem, setPendingPlaybookDropItem] = useState<BuildItem | null>(null);
   // Movement dropped on the tray "New" target — chooser asks Folder vs Workout.
   const [trayDropChooserItem, setTrayDropChooserItem] = useState<BuildItem | null>(null);
-  // Archive drop: confirmation modal + pending item.
-  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
-  const [pendingArchiveItem, setPendingArchiveItem] = useState<BuildItem | null>(null);
-  // Cancel chip: fixed position (outside scroll), separate rect ref.
-  const cancelChipRef = useRef<View>(null);
-  const cancelChipAbsRectRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
   const navigation = useNavigation();
 
   const ghostAnimStyle = useAnimatedStyle(() => ({
@@ -1188,14 +1177,13 @@ function BuildScreenInner() {
     } catch (e) { console.error('[Build] Delete playbook error:', e); }
   }, [exitPlaybook]);
 
-  // Both the playbook drill-in and workout drill-in are focused workspaces —
-  // the app tab bar stays hidden for the whole visit, not just during drags.
+  // The playbook drill-in is a focused workspace — the app tab bar stays
+  // hidden for the whole visit, not just during drags.
   useEffect(() => {
-    const hide = !!currentPlaybook || !!openWorkoutId;
     navigation.setOptions({
-      tabBarStyle: hide ? { ...TAB_BAR_STYLE, display: 'none' } : TAB_BAR_STYLE,
+      tabBarStyle: currentPlaybook ? { ...TAB_BAR_STYLE, display: 'none' } : TAB_BAR_STYLE,
     });
-  }, [currentPlaybook, openWorkoutId, navigation]);
+  }, [currentPlaybook, navigation]);
 
   // Drop zone on the folder header: dragging an asset onto "Build / …" moves
   // it up one level — to the parent folder, or to the Build root at depth 1.
@@ -1263,11 +1251,9 @@ function BuildScreenInner() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      // Tray "New Folder" drop: nest the dragged item into the new folder.
-      // Folder sources write to build_folders; assets use COLLECTION_BY_TYPE.
-      if (pendingDrop) {
-        const coll = pendingDrop.type === 'Folder' ? 'build_folders' : COLLECTION_BY_TYPE[pendingDrop.type];
-        await updateDoc(doc(db, coll, pendingDrop.id), stripUndefined({
+      // Tray "New Folder" drop: insert the dragged asset into the folder.
+      if (pendingDrop && pendingDrop.type !== 'Folder') {
+        await updateDoc(doc(db, COLLECTION_BY_TYPE[pendingDrop.type], pendingDrop.id), stripUndefined({
           parentId: folderRef.id,
           updatedAt: serverTimestamp(),
         }));
@@ -1504,81 +1490,13 @@ function BuildScreenInner() {
     tryScroll();
   }, []);
 
-  const showDropToast = useCallback((msg: string) => {
-    if (dropToastTimerRef.current) clearTimeout(dropToastTimerRef.current);
-    setDropToast(msg);
-    dropToastTimerRef.current = setTimeout(() => setDropToast(null), 2500);
-  }, []);
-
-  // Archive via tray drop: soft-archive the dragged item, re-parenting folder
-  // children up one level first (spec default A).
-  const confirmArchiveItem = useCallback(async () => {
-    const item = pendingArchiveItem;
-    setShowArchiveConfirm(false);
-    setPendingArchiveItem(null);
-    if (!item) return;
-    try {
-      if (item.type === 'Playbooks') {
-        // Soft-only: revoke booking links then flag isArchived. No deleteDoc.
-        try {
-          const fn = httpsCallable(functions, 'revokePlaybookBookingLink');
-          await fn({ playbookId: item.id, regenerate: false, deleteWindows: true });
-        } catch (e) { console.warn('[Build] Booking cleanup on archive failed:', e); }
-        await updateDoc(doc(db, 'playbooks', item.id), { isArchived: true, updatedAt: serverTimestamp() });
-      } else if (item.type === 'Folder') {
-        // Re-parent children up one level then flag the folder archived.
-        const batch = writeBatch(db);
-        const parentId = item.parentId ?? null;
-        const childSnap = await Promise.all([
-          getDocs(query(collection(db, 'movements'), where('parentId', '==', item.id))),
-          getDocs(query(collection(db, 'workouts'), where('parentId', '==', item.id))),
-          getDocs(query(collection(db, 'build_folders'), where('parentId', '==', item.id))),
-          getDocs(query(collection(db, 'playbooks'), where('parentId', '==', item.id))),
-        ]);
-        for (const snap of childSnap) {
-          for (const d of snap.docs) {
-            batch.update(d.ref, { parentId, updatedAt: serverTimestamp() });
-          }
-        }
-        batch.update(doc(db, 'build_folders', item.id), { isArchived: true, updatedAt: serverTimestamp() });
-        await batch.commit();
-      } else {
-        const coll = COLLECTION_BY_TYPE[item.type as BuildType];
-        await updateDoc(doc(db, coll, item.id), { isArchived: true, updatedAt: serverTimestamp() });
-      }
-      showDropToast(`Archived "${item.name}"`);
-    } catch (e) { console.error('[Build] Archive item error:', e); }
-  }, [pendingArchiveItem, showDropToast]);
-
   const dropItemIntoFolder = useCallback(async (dragged: BuildItem, folderId: string) => {
-    // Folder-into-folder nest: reject self-drop and cycles (target folder
-    // must not be a descendant of the dragged folder — walking the parent
-    // chain up from the target hits the dragged id iff moving would create
-    // a loop). Also no-op if already parented there.
-    if (dragged.type === 'Folder') {
-      if (dragged.id === folderId) return;
-      if (dragged.parentId === folderId) {
-        showDropToast(`Already in "${itemsRef.current.find(i => i.id === folderId)?.name ?? 'folder'}"`);
-        return;
-      }
-      const folderById = new Map(
-        itemsRef.current.filter(i => i.type === 'Folder').map(i => [i.id, i as BuildItem]),
-      );
-      let cursor: BuildItem | undefined = folderById.get(folderId);
-      while (cursor) {
-        if (cursor.id === dragged.id) {
-          showDropToast(`Can't move "${dragged.name}" into its own subfolder`);
-          return;
-        }
-        cursor = cursor.parentId ? folderById.get(cursor.parentId) : undefined;
-      }
-    }
+    if (dragged.type === 'Folder') return;
     try {
       // Bump the folder's updatedAt too, so it resorts to the top of the
       // grid where the user is scrolled to see the result.
       const batch = writeBatch(db);
-      const coll = dragged.type === 'Folder' ? 'build_folders' : COLLECTION_BY_TYPE[dragged.type];
-      batch.update(doc(db, coll, dragged.id), stripUndefined({
+      batch.update(doc(db, COLLECTION_BY_TYPE[dragged.type], dragged.id), stripUndefined({
         parentId: folderId,
         updatedAt: serverTimestamp(),
       }));
@@ -1587,7 +1505,7 @@ function BuildScreenInner() {
       recordRecentDropFolder(folderId);
       scrollListToTop();
     } catch (e) { console.error('[Build] Drop into folder error:', e); }
-  }, [recordRecentDropFolder, scrollListToTop, showDropToast]);
+  }, [recordRecentDropFolder, scrollListToTop]);
 
   // Tray targets live OUTSIDE the FlatList and don't move with scroll. Their
   // absolute rects are deterministic: onLayout x/w within trayRow, plus the
@@ -1595,18 +1513,12 @@ function BuildScreenInner() {
   // to the nearest target horizontally so near-miss drops still land.
   // item === null means the "New Folder" target.
   const findTrayTarget = useCallback((ax: number, ay: number): { key: string; item: BuildItem | null } | null => {
-    if (!trayVisibleRef.current) return null;
+    if (!trayVisibleRef.current || trayItemLayoutsRef.current.size === 0) return null;
     const windowH = Dimensions.get('window').height;
     // trayRow top = window bottom − bottom padding (inset + 12) − row height.
     // Prefer the measured absolute top (iOS visual-viewport safe); math fallback.
     const rowTop = trayRowTopRef.current ?? (windowH - (insets.bottom + 12) - (TRAY_HEIGHT - 24));
     if (ay < rowTop - 10) return null; // above the tray band (10px grace)
-    // Cancel chip is pinned outside the scroll view — check via absolute rect.
-    const cc = cancelChipAbsRectRef.current;
-    if (cc && ax >= cc.x - 10 && ax <= cc.x + cc.w + 10 && ay >= cc.y - 10 && ay <= cc.y + cc.h + 10) {
-      return { key: TRAY_CANCEL_KEY, item: null };
-    }
-    if (trayItemLayoutsRef.current.size === 0) return null;
     let best: { key: string; item: BuildItem | null } | null = null;
     let bestDist = Infinity;
     trayItemLayoutsRef.current.forEach(({ x, w, item }, key) => {
@@ -1669,6 +1581,12 @@ function BuildScreenInner() {
     }
   }, [findTarget, findTrayTarget, isOverFolderHeader, insets.bottom, ghostOpacity, ghostScale]);
 
+  const showDropToast = useCallback((msg: string) => {
+    if (dropToastTimerRef.current) clearTimeout(dropToastTimerRef.current);
+    setDropToast(msg);
+    dropToastTimerRef.current = setTimeout(() => setDropToast(null), 2500);
+  }, []);
+
   const executeDrop = useCallback(async (ax: number, ay: number) => {
     const dragged = _dragItemRef.current;
     if (!dragged) return;
@@ -1714,15 +1632,7 @@ function BuildScreenInner() {
     // Tray targets first — they float above the list.
     const tray = findTrayTarget(ax, ay);
     if (tray) {
-      if (tray.key === TRAY_CANCEL_KEY) {
-        // No-op: drag session ends normally, tray slides down via cleanup.
-        return;
-      } else if (tray.key === TRAY_ARCHIVE_KEY) {
-        // Open archive confirmation modal — write happens on confirm, not here.
-        setPendingArchiveItem(dragged);
-        setShowArchiveConfirm(true);
-        return;
-      } else if (tray.item) {
+      if (tray.item) {
         await dropItemIntoFolder(dragged, tray.item.id);
       } else if (tray.key === TRAY_NEW_PLAYBOOK_KEY) {
         // Tray "New Playbook" target (workouts only): open the create modal
@@ -1768,23 +1678,31 @@ function BuildScreenInner() {
         scrollListToTop();
       } catch (e) { console.error('[Build] Drop into playbook error:', e); }
     } else if (target.type === 'Workouts' && dragged.type === 'Movements') {
-      // Stage the movement into the workout's dock (not into a block directly).
-      // Use a transaction so order-preserving dedup is race-safe.
+      const blockMov = toBlockMov(dragged);
+      const existingBlocks: any[] = Array.isArray(target.blocks) ? target.blocks : [];
+      const updatedBlocks = existingBlocks.length > 0
+        ? existingBlocks.map((b: any, i: number) =>
+            i === 0 ? { ...b, movements: [...(b.movements ?? []), blockMov] } : b
+          )
+        : [{
+            type: 'circuit',
+            label: 'Block 1',
+            rounds: DEFAULT_ROUNDS,
+            firstMovementPrepSec: DEFAULT_REST_SEC,
+            showDemo: false,
+            demoDurationSec: DEFAULT_DEMO_DURATION_SEC,
+            showGrabEquipment: false,
+            movements: [blockMov],
+          }];
       try {
-        const workoutRef = doc(db, 'workouts', target.id);
-        await runTransaction(db, async (tx) => {
-          const snap = await tx.get(workoutRef);
-          const existing: string[] = Array.isArray(snap.data()?.dockMovementIds)
-            ? snap.data()!.dockMovementIds
-            : [];
-          if (existing.includes(dragged.id)) return; // already staged, skip
-          tx.update(workoutRef, {
-            dockMovementIds: [...existing, dragged.id],
-            updatedAt: serverTimestamp(),
-          });
-        });
+        await updateDoc(doc(db, 'workouts', target.id), stripUndefined({
+          blocks: updatedBlocks,
+          coverThumbs: computeCoverThumbs(updatedBlocks),
+          estimatedDurationMin: calcDurationMin(updatedBlocks),
+          updatedAt: serverTimestamp(),
+        }));
         scrollListToTop();
-      } catch (e) { console.error('[Build] Drop into workout dock error:', e); }
+      } catch (e) { console.error('[Build] Drop into workout error:', e); }
     } else {
       // Asset dropped onto another asset — combine them into a new folder
       // (or, for two movements, optionally a new workout).
@@ -2348,8 +2266,7 @@ function BuildScreenInner() {
   // Drop rects for tray items that left the tray — onLayout only fires for
   // mounted views, so removed folders would otherwise leave stale rects.
   useEffect(() => {
-    const valid = new Set([TRAY_NEW_FOLDER_KEY, TRAY_NEW_PLAYBOOK_KEY, TRAY_ARCHIVE_KEY, ...trayFolders.map(f => `tray:${f.id}`)]);
-    // TRAY_CANCEL_KEY is stored separately (cancelChipAbsRectRef), not in trayItemLayoutsRef.
+    const valid = new Set([TRAY_NEW_FOLDER_KEY, TRAY_NEW_PLAYBOOK_KEY, ...trayFolders.map(f => `tray:${f.id}`)]);
     trayItemLayoutsRef.current.forEach((_v, k) => {
       if (!valid.has(k)) trayItemLayoutsRef.current.delete(k);
     });
@@ -2367,7 +2284,6 @@ function BuildScreenInner() {
     }
     trayTranslate.value = withTiming(TRAY_SLIDE_DISTANCE, { duration: 180 });
     trayItemLayoutsRef.current.clear();
-    cancelChipAbsRectRef.current = null;
     const t = setTimeout(() => setTrayMounted(false), 200);
     return () => clearTimeout(t);
   }, [trayVisible, trayTranslate]);
@@ -2454,40 +2370,13 @@ function BuildScreenInner() {
           tileRefsMap.current.set(item.id, React.createRef<View>());
         }
         const folderTileRef = tileRefsMap.current.get(item.id)!;
-        // Folders drag with the same long-press pan as other assets. Drop
-        // semantics are constrained by isDropTarget (folder-on-folder nest
-        // only) and dropItemIntoFolder (cycle guard).
-        const folderDragGesture = Gesture.Pan()
-          .activateAfterLongPress(600)
-          .onStart((e) => {
-            ghostX.value = e.absoluteX - cardWidth / 2 - rootOffX.value;
-            ghostY.value = e.absoluteY - cardHeight / 2 - rootOffY.value;
-            ghostScale.value = withSpring(1.08, { damping: 15, stiffness: 200 });
-            ghostOpacity.value = withSpring(1);
-            runOnJS(beginDragSession)(item.id, e.absoluteX, e.absoluteY);
-          })
-          .onUpdate((e) => {
-            ghostX.value = e.absoluteX - cardWidth / 2 - rootOffX.value;
-            ghostY.value = e.absoluteY - cardHeight / 2 - rootOffY.value;
-            runOnJS(updateHovered)(e.absoluteX, e.absoluteY);
-          })
-          .onEnd((e) => {
-            runOnJS(executeDrop)(e.absoluteX, e.absoluteY);
-          })
-          .onFinalize(() => {
-            ghostScale.value = withSpring(1, { damping: 20 });
-            ghostOpacity.value = withSpring(0);
-            runOnJS(endDragSession)();
-          });
         return (
-          <GestureDetector gesture={folderDragGesture} touchAction="manipulation" userSelect="none">
           <View
             ref={folderTileRef as any}
             style={{
               width: cardWidth,
               height: cardHeight,
               marginBottom: GRID_GAP,
-              opacity: dragItem?.id === item.id ? 0.35 : 1,
             }}
           >
             <Pressable
@@ -2535,30 +2424,11 @@ function BuildScreenInner() {
                 <Icon name="folder" size={14} color="#F5A623" />
                 <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
               </View>
-              {item.isArchived && showArchived && (
-                <>
-                  <View style={styles.archivedPill}>
-                    <Text style={styles.archivedPillText}>Archived</Text>
-                  </View>
-                  <Pressable
-                    style={styles.restoreBtn}
-                    onPress={async (e) => {
-                      e.stopPropagation();
-                      try {
-                        await updateDoc(doc(db, 'build_folders', item.id), { isArchived: false, updatedAt: serverTimestamp() });
-                      } catch (err) { console.error('[Build] Restore folder error:', err); }
-                    }}
-                  >
-                    <Text style={styles.restoreBtnText}>Restore</Text>
-                  </Pressable>
-                </>
-              )}
               {hoveredId === item.id && dragItem && dragItem.id !== item.id && (
                 <View style={[StyleSheet.absoluteFill, { borderWidth: 2, borderColor: '#F5A623', borderRadius: 10 }]} pointerEvents="none" />
               )}
             </Pressable>
           </View>
-          </GestureDetector>
         );
       }
       return (
@@ -2651,31 +2521,11 @@ function BuildScreenInner() {
               )}
             />
           )}
-          {/* Name overlay — type icon sits inline to the left of the title */}
+          {/* Name overlay — playbook icon sits inline to the left of the title */}
           <View style={[styles.nameOverlay, isWorkoutCard && { backgroundColor: 'rgba(26, 35, 50, 0.92)' }]}>
             {isPlaybook && <Icon name="playbook" size={14} color="#A78BFA" />}
-            {isWorkout && <Icon name="workouts" size={14} color="#7DD3FC" />}
             <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
           </View>
-          {item.isArchived && showArchived && (
-            <>
-              <View style={styles.archivedPill}>
-                <Text style={styles.archivedPillText}>Archived</Text>
-              </View>
-              <Pressable
-                style={styles.restoreBtn}
-                onPress={async (e) => {
-                  e.stopPropagation();
-                  try {
-                    const coll = item.type === 'Folder' ? 'build_folders' : COLLECTION_BY_TYPE[item.type as BuildType];
-                    await updateDoc(doc(db, coll, item.id), { isArchived: false, updatedAt: serverTimestamp() });
-                  } catch (err) { console.error('[Build] Restore error:', err); }
-                }}
-              >
-                <Text style={styles.restoreBtnText}>Restore</Text>
-              </Pressable>
-            </>
-          )}
           {isMovement && !item.videoUrl && !item.mediaUrl && !item.gifLoopUrl && !item.gifLowUrl && (
             <View style={styles.videoNeededPill}>
               <Text style={styles.videoNeededText}>Video needed</Text>
@@ -4090,22 +3940,7 @@ function BuildScreenInner() {
           hit-tested by coordinates (findTrayTarget), not touch handlers. */}
       {trayMounted && (
         <Reanimated.View
-          // height pinned so iOS Safari can't resolve the position:absolute +
-          // bottom:0 container's intrinsic size to a viewport-relative value
-          // (observed: tray stretched to ~540px on iPhone even though children
-          // total ~196 + insets.bottom). overflow:hidden clips any residual
-          // child stretch. Breakdown of the height: 20 paddingTop + 36
-          // ScrollView paddingVertical + (TRAY_HEIGHT - 24 = 124) chip + 16
-          // paddingBottom base + insets.bottom = 196 + insets.bottom.
-          style={[
-            s.tray,
-            trayAnimStyle,
-            {
-              paddingBottom: insets.bottom + 16,
-              height: 20 + 36 + (TRAY_HEIGHT - 24) + 16 + insets.bottom,
-              overflow: 'hidden',
-            },
-          ]}
+          style={[s.tray, trayAnimStyle, { paddingBottom: insets.bottom + 16 }]}
           pointerEvents="none"
         >
           <ScrollView
@@ -4115,10 +3950,6 @@ function BuildScreenInner() {
             scrollEnabled={false} // drag session drives horizontal scroll via ref
             // paddingVertical: 18 gives the hover pop (scale 1.16 + translateY -4 + 8px accent glow)
             // room to render without being sliced by RN Web's overflow-y: hidden default.
-            // flexGrow:0 stops RN Web's ScrollView outer from taking flex:1 in
-            // the tray, which paired with position:absolute parents can cascade
-            // into a viewport-height stretch on iOS Safari.
-            style={{ flexGrow: 0, flexShrink: 0 }}
             contentContainerStyle={{ paddingRight: AUTO_SCROLL_HOTSPOT_W + 12, paddingVertical: 18 }}
             onLayout={e => { trayViewportWidthRef.current = e.nativeEvent.layout.width; }}
             onContentSizeChange={w => { trayContentWidthRef.current = w; }}
@@ -4138,12 +3969,6 @@ function BuildScreenInner() {
                     if (!trayVisibleRef.current) return;
                     const windowH = Dimensions.get('window').height;
                     if (Number.isFinite(y) && y > 0 && y < windowH) trayRowTopRef.current = y;
-                  });
-                  // Measure the Cancel chip absolute position for hit-testing.
-                  cancelChipRef.current?.measureInWindow((cx, cy, cw, ch) => {
-                    if (Number.isFinite(cx) && cw > 0) {
-                      cancelChipAbsRectRef.current = { x: cx, y: cy, w: cw, h: ch };
-                    }
                   });
                 }, 300);
               }}
@@ -4187,73 +4012,33 @@ function BuildScreenInner() {
                   <Text style={s.trayItemText} numberOfLines={1}>New Playbook</Text>
                 </TrayChip>
               )}
-              {/* Archive chip — always visible during any drag. Red-outlined. */}
-              <TrayChip
-                accent="#E05252"
-                hovered={hoveredId === TRAY_ARCHIVE_KEY}
-                onLayout={registerTrayLayout(TRAY_ARCHIVE_KEY, null)}
-              >
-                <Icon name="archive" size={22} color="#E05252" />
-                <Text style={[s.trayItemText, { color: '#E05252' }]} numberOfLines={1}>Archive</Text>
-              </TrayChip>
             </View>
           </ScrollView>
-          {/* Cancel chip — pinned to the far right, fixed position outside the
-              horizontal ScrollView so it stays visible regardless of scroll.
-              Replaces the old chevron-down affordance visually. The auto-scroll
-              hotspot logic (pointer > windowW - AUTO_SCROLL_HOTSPOT_W) is purely
-              coordinate-based and is unaffected by this visual change. */}
+          {/* Scroll-down affordance on the tray's right edge — visible during
+              drag. Positioned outside the horizontal ScrollView so it stays
+              fixed to the viewport regardless of tray scroll. Height matches
+              a chip so it can't stretch if the tray's auto-sizing wobbles. */}
           {dragItem && (
-            <View
-              ref={cancelChipRef}
-              pointerEvents="none"
-              style={{
-                position: 'absolute',
-                right: 12,
-                bottom: insets.bottom + 16 + 18,
-                height: TRAY_HEIGHT - 24,
-                width: AUTO_SCROLL_HOTSPOT_W - 16,
-                borderRadius: 12,
-                backgroundColor: '#0E1117',
-                borderWidth: hoveredId === TRAY_CANCEL_KEY ? 2 : 1,
-                borderColor: hoveredId === TRAY_CANCEL_KEY ? '#94A3B8' : '#2D3B4E',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 4,
-                ...(hoveredId === TRAY_CANCEL_KEY ? {
-                  shadowColor: '#94A3B8',
-                  shadowOffset: { width: 0, height: 0 },
-                  shadowOpacity: 0.5,
-                  shadowRadius: 6,
-                  elevation: 6,
-                } : {}),
-              }}
-            >
-              <Icon name="close" size={20} color={hoveredId === TRAY_CANCEL_KEY ? '#94A3B8' : '#4A5568'} />
-              <Text style={{ color: hoveredId === TRAY_CANCEL_KEY ? '#94A3B8' : '#4A5568', fontSize: 10, fontWeight: '700' }}>Cancel</Text>
+            <View pointerEvents="none" style={{
+              position: 'absolute',
+              right: 12,
+              // Center on the chip row: tray paddingBottom (insets+16) + ScrollView paddingVertical (18)
+              bottom: insets.bottom + 16 + 18,
+              height: TRAY_HEIGHT - 24,
+              width: AUTO_SCROLL_HOTSPOT_W - 16,
+              borderRadius: 12,
+              backgroundColor: '#1E2A3A',
+              borderWidth: 1,
+              borderColor: '#60A5FA',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+              <Icon name="chevron-down" size={20} color="#60A5FA" />
             </View>
           )}
         </Reanimated.View>
       )}
 
-
-      {/* Archive confirmation modal — triggered by dropping an item on the Archive tray chip */}
-      <Modal transparent visible={showArchiveConfirm} animationType="fade" onRequestClose={() => { setShowArchiveConfirm(false); setPendingArchiveItem(null); }}>
-        <Pressable style={s.pbConfirmBackdrop} onPress={() => { setShowArchiveConfirm(false); setPendingArchiveItem(null); }}>
-          <Pressable style={s.pbConfirmCard} onPress={(e) => e.stopPropagation()}>
-            <Text style={[s.pbConfirmTitle, { color: '#E05252' }]}>Archive {pendingArchiveItem?.name ? `"${pendingArchiveItem.name}"` : 'item'}?</Text>
-            <Text style={s.pbConfirmBody}>You can restore it later from the Archived view.</Text>
-            <View style={s.pbConfirmRow}>
-              <Pressable style={s.pbConfirmCancel} onPress={() => { setShowArchiveConfirm(false); setPendingArchiveItem(null); }}>
-                <Text style={s.pbConfirmCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={s.pbConfirmDelete} onPress={confirmArchiveItem}>
-                <Text style={s.pbConfirmDeleteText}>Archive</Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
 
       {/* Drop rejected toast — shows briefly when a drop is silently blocked */}
       {dropToast && (
@@ -4348,39 +4133,6 @@ const styles = StyleSheet.create({
   },
   remixPillTextReady: {
     color: '#34D399',
-  },
-  archivedPill: {
-    position: 'absolute',
-    top: 6,
-    left: 6,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 4,
-    backgroundColor: 'rgba(224,82,82,0.18)',
-  },
-  archivedPillText: {
-    fontSize: 8,
-    color: '#E05252',
-    fontWeight: '600',
-    fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-SemiBold',
-  },
-  restoreBtn: {
-    position: 'absolute',
-    bottom: 30,
-    left: 8,
-    right: 8,
-    paddingVertical: 5,
-    borderRadius: 6,
-    backgroundColor: 'rgba(30,42,58,0.88)',
-    borderWidth: 1,
-    borderColor: '#94A3B8',
-    alignItems: 'center',
-  },
-  restoreBtnText: {
-    fontSize: 10,
-    color: '#94A3B8',
-    fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-SemiBold',
   },
   placeholderLogo: {
     width: '100%',
