@@ -44,6 +44,7 @@ import {
   serverTimestamp,
   onSnapshot,
   arrayUnion,
+  runTransaction,
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, storage, functions } from '../lib/firebase';
@@ -460,7 +461,11 @@ export default function WorkoutFolderPage({
   const [showAddBlockMenu, setShowAddBlockMenu] = useState(false);
   const [addBlockAtIndex, setAddBlockAtIndex] = useState<number | null>(null);
   const [showMovementPicker, setShowMovementPicker] = useState(false);
+  // -1 = adding to dock; >= 0 = adding to that block index; null = not open
   const [movementPickerBlockIdx, setMovementPickerBlockIdx] = useState<number | null>(null);
+  // Dock state — movement ids staged below the block canvas
+  const [dockMovementIds, setDockMovementIds] = useState<string[]>([]);
+  const [dockChooserMovId, setDockChooserMovId] = useState<string | null>(null);
   const [movementSearch, setMovementSearch] = useState('');
   const [pickerEquipmentFilter, setPickerEquipmentFilter] = useState('All');
   const [pickerMuscleGroupFilter, setPickerMuscleGroupFilter] = useState('All');
@@ -842,6 +847,8 @@ export default function WorkoutFolderPage({
           cropFrameHeight: data.outroCropFrameHeight ?? 0,
         });
         setOriginalData(data);
+        // dockMovementIds is always synced (not gated on dirtyRef)
+        setDockMovementIds(Array.isArray(data.dockMovementIds) ? data.dockMovementIds : []);
       }
       setLoading(false);
     });
@@ -1776,6 +1783,76 @@ export default function WorkoutFolderPage({
     newBlocks[blockIdx].movements.push(next);
     updateBlocks(newBlocks);
   }, [blocks, updateBlocks]);
+
+  // ── Dock helpers ──────────────────────────────────────────────────────────
+
+  const addToDock = useCallback(async (movId: string) => {
+    if (!workoutId) return;
+    const workoutRef = doc(db, 'workouts', workoutId);
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(workoutRef);
+      const existing: string[] = Array.isArray(snap.data()?.dockMovementIds)
+        ? snap.data()!.dockMovementIds
+        : [];
+      if (existing.includes(movId)) return;
+      tx.update(workoutRef, {
+        dockMovementIds: [...existing, movId],
+        updatedAt: serverTimestamp(),
+      });
+    });
+  }, [workoutId]);
+
+  const removeFromDock = useCallback(async (movId: string) => {
+    if (!workoutId) return;
+    const workoutRef = doc(db, 'workouts', workoutId);
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(workoutRef);
+      const existing: string[] = Array.isArray(snap.data()?.dockMovementIds)
+        ? snap.data()!.dockMovementIds
+        : [];
+      tx.update(workoutRef, {
+        dockMovementIds: existing.filter((id) => id !== movId),
+        updatedAt: serverTimestamp(),
+      });
+    });
+  }, [workoutId]);
+
+  const moveDockItemToBlock = useCallback(async (movId: string, blockIdx: number | 'new') => {
+    const movement = availableMovements.find((m) => m.id === movId);
+    if (!movement) return;
+    if (blockIdx === 'new') {
+      // Build the movement entry
+      const blockMov: BlockMovement = {
+        movementId: movement.id,
+        movementName: movement.name,
+        durationSec: DEFAULT_DURATION_SEC,
+        restSec: DEFAULT_REST_SEC,
+        sets: 1,
+        thumbnailUrl: movement.thumbnailUrl ?? movement.mediaUrl ?? undefined,
+        posterUrl: movement.posterUrl ?? undefined,
+        swapSides: movement.swapSides ?? false,
+        swapMode: movement.swapMode ?? 'split',
+        swapWindowSec: movement.swapWindowSec ?? 5,
+      };
+      const newBlock: WorkoutBlock = {
+        type: 'Circuit',
+        label: `Block ${blocks.length + 1}`,
+        rounds: DEFAULT_ROUNDS,
+        restBetweenRoundsSec: 0,
+        restBetweenMovementsSec: 0,
+        firstMovementPrepSec: DEFAULT_REST_SEC,
+        showDemo: false,
+        demoDurationSec: DEFAULT_DEMO_DURATION_SEC,
+        showGrabEquipment: false,
+        movements: [blockMov],
+      };
+      updateBlocks([...blocks, newBlock]);
+    } else {
+      addMovementToBlock(blockIdx, movement);
+    }
+    await removeFromDock(movId);
+    setDockChooserMovId(null);
+  }, [availableMovements, blocks, updateBlocks, addMovementToBlock, removeFromDock]);
 
   const removeMovementFromBlock = useCallback((blockIdx: number, movIdx: number) => {
     const newBlocks = [...blocks];
@@ -2992,6 +3069,86 @@ export default function WorkoutFolderPage({
         </Pressable>
       </ScrollView>
 
+      {/* ── Movement Dock ────────────────────────────────────────────────── */}
+      <View style={st.dock}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.dockScroll}>
+          {/* + button */}
+          <Pressable
+            style={st.dockAddBtn}
+            onPress={() => {
+              setMovementPickerBlockIdx(-1);
+              setShowMovementPicker(true);
+              setMovementSearch('');
+            }}
+          >
+            <Icon name="plus" size={24} color="#F5A623" />
+          </Pressable>
+          {dockMovementIds.length === 0 ? (
+            <View style={st.dockEmpty}>
+              <Text style={st.dockEmptyText}>Drag movements here or tap +</Text>
+            </View>
+          ) : (
+            dockMovementIds.map((movId) => {
+              const mov = availableMovements.find((m) => m.id === movId);
+              if (!mov) return null;
+              return (
+                <Pressable
+                  key={movId}
+                  style={st.dockThumb}
+                  onPress={() => setDockChooserMovId(movId)}
+                  onLongPress={() => {
+                    Alert.alert('Remove from dock?', mov.name, [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Remove', style: 'destructive', onPress: () => removeFromDock(movId).catch(console.error) },
+                    ]);
+                  }}
+                >
+                  <PosterThumb
+                    posterUrl={mov.posterUrl}
+                    gifUrl={mov.thumbnailUrl || mov.mediaUrl}
+                    containerStyle={st.dockThumbImg}
+                    resizeMode="cover"
+                  />
+                  <Text style={st.dockThumbName} numberOfLines={1}>{mov.name}</Text>
+                </Pressable>
+              );
+            })
+          )}
+        </ScrollView>
+      </View>
+
+      {/* ── Dock Block Chooser ───────────────────────────────────────────── */}
+      {dockChooserMovId !== null && (
+        <Modal transparent visible animationType="fade" onRequestClose={() => setDockChooserMovId(null)}>
+          <Pressable style={st.modalBackdrop} onPress={() => setDockChooserMovId(null)}>
+            <View style={st.addBlockSheet} onStartShouldSetResponder={() => true}>
+              <Text style={st.addBlockTitle}>Add to which block?</Text>
+              {blocks.map((block, idx) => (
+                <Pressable
+                  key={idx}
+                  style={st.addBlockOption}
+                  onPress={() => moveDockItemToBlock(dockChooserMovId!, idx).catch(console.error)}
+                >
+                  <View style={[st.addBlockIcon, { backgroundColor: (BLOCK_COLORS[isTabata(block) ? 'Tabata' : block.type] || '#4A5568') + '20' }]}>
+                    <Text style={{ color: BLOCK_COLORS[isTabata(block) ? 'Tabata' : block.type] || '#4A5568', fontWeight: '700', fontSize: 12 }}>{idx + 1}</Text>
+                  </View>
+                  <Text style={st.addBlockOptionText}>{block.label || `Block ${idx + 1}`}</Text>
+                </Pressable>
+              ))}
+              <Pressable
+                style={st.addBlockOption}
+                onPress={() => moveDockItemToBlock(dockChooserMovId!, 'new').catch(console.error)}
+              >
+                <View style={[st.addBlockIcon, { backgroundColor: '#F5A62320' }]}>
+                  <Icon name="plus" size={20} color="#F5A623" />
+                </View>
+                <Text style={st.addBlockOptionText}>New block</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Modal>
+      )}
+
       {/* ── Add Block Menu (modal) — only 2 options: Movement, Water Break ── */}
       <Modal transparent visible={showAddBlockMenu} animationType="fade" onRequestClose={() => setShowAddBlockMenu(false)}>
         <Pressable style={st.modalBackdrop} onPress={() => setShowAddBlockMenu(false)}>
@@ -3126,7 +3283,10 @@ export default function WorkoutFolderPage({
                   key={mov.id}
                   style={st.pickerItem}
                   onPress={() => {
-                    if (movementPickerBlockIdx !== null) {
+                    if (movementPickerBlockIdx === -1) {
+                      // Adding to dock
+                      addToDock(mov.id).catch(console.error);
+                    } else if (movementPickerBlockIdx !== null) {
                       addMovementToBlock(movementPickerBlockIdx, mov);
                     }
                     setShowMovementPicker(false);
@@ -5484,5 +5644,61 @@ const st = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     fontFamily: FB,
+  },
+
+  // Movement Dock
+  dock: {
+    height: 92,
+    backgroundColor: '#0E1117',
+    borderTopWidth: 1,
+    borderTopColor: '#1E2A3A',
+  },
+  dockScroll: {
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    alignItems: 'flex-start',
+    gap: 8,
+    flexDirection: 'row',
+  },
+  dockAddBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#F5A623',
+    borderStyle: 'dashed',
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  dockEmpty: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    height: 64,
+  },
+  dockEmptyText: {
+    color: '#4A5568',
+    fontSize: 12,
+    fontFamily: FB,
+  },
+  dockThumb: {
+    width: 64,
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  dockThumbImg: {
+    width: 64,
+    height: 64,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  dockThumbName: {
+    color: '#8A95A3',
+    fontSize: 9,
+    fontFamily: FB,
+    marginTop: 2,
+    width: 64,
+    textAlign: 'center',
   },
 });
