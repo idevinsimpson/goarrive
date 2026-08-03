@@ -494,7 +494,7 @@ export default function WorkoutFolderPage({
   const [showMoveTo, setShowMoveTo] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showLiveViewModal, setShowLiveViewModal] = useState(false);
-  const [liveSessions, setLiveSessions] = useState<Array<{ sessionId: string; memberName: string }>>([]);
+  const [liveSessions, setLiveSessions] = useState<Array<{ sessionId: string; memberName: string; isGuest: boolean }>>([]);
   const [liveViewSessionId, setLiveViewSessionId] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showDuplicateConfirm, setShowDuplicateConfirm] = useState(false);
@@ -528,7 +528,7 @@ export default function WorkoutFolderPage({
           const updatedAt = d.data().updatedAt?.toDate?.() ?? new Date(0);
           return now - updatedAt.getTime() < 30_000;
         })
-        .map((d) => ({ sessionId: d.id, memberName: d.data().memberName || 'Member' }));
+        .map((d) => ({ sessionId: d.id, memberName: d.data().memberName || 'Member', isGuest: !!d.data().isGuest }));
       setLiveSessions(active);
     }, () => {});
     return unsub;
@@ -4021,7 +4021,12 @@ export default function WorkoutFolderPage({
                       }}
                     >
                       <View style={st.liveSessionDot} />
-                      <Text style={st.liveSessionName}>{s.memberName}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={st.liveSessionName}>{s.memberName}</Text>
+                        {s.isGuest && (
+                          <Text style={{ fontSize: 10, color: '#8A95A3', fontFamily: FB }}>guest</Text>
+                        )}
+                      </View>
                       <Icon name="chevron-right" size={14} color="#8A95A3" />
                     </Pressable>
                   ))}

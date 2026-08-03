@@ -251,7 +251,9 @@ export default function DashboardScreen() {
     const unsub = onSnapshot(q, (snap) => {
       const now = Date.now();
       const count = snap.docs.filter((d) => {
-        const updatedAt = d.data().updatedAt?.toDate?.() ?? new Date(0);
+        const data = d.data();
+        if (data.isGuest) return false;
+        const updatedAt = data.updatedAt?.toDate?.() ?? new Date(0);
         return now - updatedAt.getTime() < 30_000;
       }).length;
       setLiveMemberCount(count);

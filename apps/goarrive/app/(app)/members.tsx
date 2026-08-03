@@ -239,6 +239,7 @@ function MembersScreenInner() {
       const active: Record<string, string> = {};
       snap.docs.forEach((d) => {
         const data = d.data();
+        if (data.isGuest) return; // guests are excluded from the Members list live dot
         const updatedAt = data.updatedAt?.toDate?.() ?? new Date(0);
         if (now - updatedAt.getTime() < LIVE_STALE_MS) {
           active[data.memberId] = d.id;

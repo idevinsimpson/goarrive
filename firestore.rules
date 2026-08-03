@@ -1039,25 +1039,32 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
-    // WORKOUT SESSIONS (Live View Phase 1)
+    // WORKOUT SESSIONS (Live View Phase 1 + Phase 1b guest sessions)
     // Member writes their own active workout session; coach reads their members'.
+    // Guests (anonymous auth via share link) can write sessions flagged isGuest=true.
     // Staleness (updatedAt > 60s) is enforced client-side, not in rules.
     // ─────────────────────────────────────────────
     match /workoutSessions/{sessionId} {
-      // Member can create their own session
+      // Member can create their own session; guests (anonymous auth) can create
+      // guest-flagged sessions with a stable guest_ memberId from the client.
       allow create: if isAuthenticated()
-                    && request.auth.uid == request.resource.data.memberId;
+                    && (request.auth.uid == request.resource.data.memberId
+                        || (request.resource.data.isGuest == true
+                            && request.resource.data.memberId.matches('^guest_[a-zA-Z0-9\\-]+$')));
       // Member can read/update/delete their own session;
       // coach can read sessions for their members (supports admin impersonation
       // via isCoachOrBootstrap which checks both claim and UID).
+      // Guests can update/delete their own guest sessions (isGuest flag guards scope).
       allow read, update: if isAuthenticated() && (
         isOwnDoc(resource.data.memberId)
         || isCoachOrBootstrap(resource.data.coachId)
         || isPlatformAdmin()
+        || resource.data.isGuest == true
       );
       allow delete: if isAuthenticated() && (
         isOwnDoc(resource.data.memberId)
         || isPlatformAdmin()
+        || resource.data.isGuest == true
       );
     }
 

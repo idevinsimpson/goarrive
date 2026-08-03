@@ -120,6 +120,8 @@ interface WorkoutPlayerProps {
   sessionInstanceId?: string;
   /** Rendered above the player inside the fullscreen modal (Zoom PiP tile). */
   zoomOverlay?: React.ReactNode;
+  /** When set, treat this as a guest session (share link visitor). Enables live session writes for non-members. */
+  guestSession?: { guestId: string; guestName: string };
 }
 
 // ── Heart-rate zone color ───────────────────────────────────────────────────
@@ -161,6 +163,7 @@ export default function WorkoutPlayer({
   onLiveProgress,
   sessionInstanceId,
   zoomOverlay,
+  guestSession,
 }: WorkoutPlayerProps) {
   // ── Hooks ────────────────────────────────────────────────────────────
   const flatFromBlocks = useWorkoutFlatten(workout);
@@ -366,7 +369,7 @@ export default function WorkoutPlayer({
   // throttle video position every 500ms, delete on close/complete.
   const liveSessionIdRef = useRef<string | null>(null);
   const liveSessionPositionRef = useRef<number>(0);
-  const isLiveEligible = isMember && !isPreview;
+  const isLiveEligible = (isMember || !!guestSession) && !isPreview;
 
   // Compute position ms from timer state (best-effort; 0 for non-work phases)
   const currentPositionMs = phase === 'work' && typeof timeLeft === 'number' && typeof current?.duration === 'number'
@@ -376,20 +379,22 @@ export default function WorkoutPlayer({
 
   // Create session on open; delete on close/unmount
   useEffect(() => {
-    if (!visible || !isLiveEligible || !user) return;
-    const sessionId = `${user.uid}_${Date.now()}`;
+    if (!visible || !isLiveEligible || (!user && !guestSession)) return;
+    const memberId = guestSession ? guestSession.guestId : (user?.uid ?? '');
+    const sessionId = `${memberId}_${Date.now()}`;
     liveSessionIdRef.current = sessionId;
     const coachId = (workout?.coachId ?? claims?.coachId ?? '') as string;
-    const memberName = user.displayName || '';
+    const memberName = guestSession ? guestSession.guestName : (user?.displayName || '');
     const workoutId = workout?.id ?? '';
     const workoutName = (workout?.title ?? workout?.name ?? '') as string;
     setDoc(doc(db, 'workoutSessions', sessionId), {
       sessionId,
-      memberId: user.uid,
+      memberId,
       memberName,
       coachId,
       workoutId,
       workoutName,
+      isGuest: !!guestSession,
       phase: 'ready',
       movementIndex: 0,
       videoPositionMs: 0,

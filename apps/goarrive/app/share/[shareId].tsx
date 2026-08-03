@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { auth } from '../../lib/firebase';
+import { signInAnonymously } from 'firebase/auth';
 import { Icon } from '../../components/Icon';
 import WorkoutPlayer from '../../components/WorkoutPlayer';
 import PostWorkoutJournal, { JournalEntry } from '../../components/PostWorkoutJournal';
@@ -61,12 +62,38 @@ export default function SharePage() {
   const [showPlayer, setShowPlayer] = useState(false);
   const [postFlow, setPostFlow] = useState<'none' | 'journal' | 'nudge'>('none');
   const [playStartedAt, setPlayStartedAt] = useState<number | null>(null);
+  const [guestSession, setGuestSession] = useState<{ guestId: string; guestName: string } | null>(null);
 
   useEffect(() => {
     if (!shareId) return;
     if (authLoading) return;
     resolveToken();
   }, [shareId, authLoading, user]);
+
+  // For guests (no signed-in member/coach): sign in anonymously so Firestore
+  // writes in the player have a valid auth token, then set up a stable guest ID.
+  useEffect(() => {
+    if (authLoading) return;
+    const isMember = !!user && claims?.role === 'member';
+    if (isMember) return; // real member — no guest session needed
+
+    // Sign in anonymously if there is no current Firebase user at all
+    if (!user) {
+      signInAnonymously(auth).catch((err) => {
+        console.warn('[SharePage] anonymous sign-in failed:', err);
+      });
+    }
+
+    // Generate or reuse a stable guest ID for this browser tab session
+    if (typeof window !== 'undefined') {
+      let guestId = sessionStorage.getItem('goarrive_guest_id');
+      if (!guestId) {
+        guestId = 'guest_' + crypto.randomUUID();
+        sessionStorage.setItem('goarrive_guest_id', guestId);
+      }
+      setGuestSession({ guestId, guestName: 'Guest via share link' });
+    }
+  }, [authLoading, user, claims]);
 
   async function resolveToken() {
     setLoading(true);
@@ -301,6 +328,7 @@ export default function SharePage() {
             workout={workout}
             onClose={() => setShowPlayer(false)}
             onComplete={handlePlayerComplete}
+            guestSession={guestSession ?? undefined}
           />
         )}
       </View>
