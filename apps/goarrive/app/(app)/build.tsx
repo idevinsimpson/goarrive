@@ -51,6 +51,7 @@ import {
   getDoc,
   deleteDoc,
   limit,
+  runTransaction,
 } from 'firebase/firestore';
 import { useNavigation, router } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
@@ -1179,13 +1180,14 @@ function BuildScreenInner() {
     } catch (e) { console.error('[Build] Delete playbook error:', e); }
   }, [exitPlaybook]);
 
-  // The playbook drill-in is a focused workspace — the app tab bar stays
-  // hidden for the whole visit, not just during drags.
+  // Both the playbook drill-in and workout drill-in are focused workspaces —
+  // the app tab bar stays hidden for the whole visit, not just during drags.
   useEffect(() => {
+    const hide = !!currentPlaybook || !!openWorkoutId;
     navigation.setOptions({
-      tabBarStyle: currentPlaybook ? { ...TAB_BAR_STYLE, display: 'none' } : TAB_BAR_STYLE,
+      tabBarStyle: hide ? { ...TAB_BAR_STYLE, display: 'none' } : TAB_BAR_STYLE,
     });
-  }, [currentPlaybook, navigation]);
+  }, [currentPlaybook, openWorkoutId, navigation]);
 
   // Drop zone on the folder header: dragging an asset onto "Build / …" moves
   // it up one level — to the parent folder, or to the Build root at depth 1.
@@ -1704,31 +1706,23 @@ function BuildScreenInner() {
         scrollListToTop();
       } catch (e) { console.error('[Build] Drop into playbook error:', e); }
     } else if (target.type === 'Workouts' && dragged.type === 'Movements') {
-      const blockMov = toBlockMov(dragged);
-      const existingBlocks: any[] = Array.isArray(target.blocks) ? target.blocks : [];
-      const updatedBlocks = existingBlocks.length > 0
-        ? existingBlocks.map((b: any, i: number) =>
-            i === 0 ? { ...b, movements: [...(b.movements ?? []), blockMov] } : b
-          )
-        : [{
-            type: 'circuit',
-            label: 'Block 1',
-            rounds: DEFAULT_ROUNDS,
-            firstMovementPrepSec: DEFAULT_REST_SEC,
-            showDemo: false,
-            demoDurationSec: DEFAULT_DEMO_DURATION_SEC,
-            showGrabEquipment: false,
-            movements: [blockMov],
-          }];
+      // Stage the movement into the workout's dock (not into a block directly).
+      // Use a transaction so order-preserving dedup is race-safe.
       try {
-        await updateDoc(doc(db, 'workouts', target.id), stripUndefined({
-          blocks: updatedBlocks,
-          coverThumbs: computeCoverThumbs(updatedBlocks),
-          estimatedDurationMin: calcDurationMin(updatedBlocks),
-          updatedAt: serverTimestamp(),
-        }));
+        const workoutRef = doc(db, 'workouts', target.id);
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(workoutRef);
+          const existing: string[] = Array.isArray(snap.data()?.dockMovementIds)
+            ? snap.data()!.dockMovementIds
+            : [];
+          if (existing.includes(dragged.id)) return; // already staged, skip
+          tx.update(workoutRef, {
+            dockMovementIds: [...existing, dragged.id],
+            updatedAt: serverTimestamp(),
+          });
+        });
         scrollListToTop();
-      } catch (e) { console.error('[Build] Drop into workout error:', e); }
+      } catch (e) { console.error('[Build] Drop into workout dock error:', e); }
     } else {
       // Asset dropped onto another asset — combine them into a new folder
       // (or, for two movements, optionally a new workout).
