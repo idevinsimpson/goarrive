@@ -125,6 +125,8 @@ const TRAY_SLIDE_DISTANCE = 220;     // translateY when hidden — guaranteed of
 const TRAY_MAX_RECENTS = 8;          // wider recents list — user can horizontally scroll to reach later entries
 const TRAY_NEW_FOLDER_KEY = 'tray:new';
 const TRAY_NEW_PLAYBOOK_KEY = 'tray:new-playbook';
+const TRAY_ARCHIVE_KEY = 'tray:archive';
+const TRAY_CANCEL_KEY = 'tray:cancel';
 // Horizontal-scroll edge band inside the tray. Drag pointer inside the tray
 // zone but within this many px of the left/right edge triggers a horizontal
 // scroll of the tray items so hidden targets slide into view.
@@ -720,6 +722,12 @@ function BuildScreenInner() {
   const [pendingPlaybookDropItem, setPendingPlaybookDropItem] = useState<BuildItem | null>(null);
   // Movement dropped on the tray "New" target — chooser asks Folder vs Workout.
   const [trayDropChooserItem, setTrayDropChooserItem] = useState<BuildItem | null>(null);
+  // Archive drop: confirmation modal + pending item.
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [pendingArchiveItem, setPendingArchiveItem] = useState<BuildItem | null>(null);
+  // Cancel chip: fixed position (outside scroll), separate rect ref.
+  const cancelChipRef = useRef<View>(null);
+  const cancelChipAbsRectRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
   const navigation = useNavigation();
 
   const ghostAnimStyle = useAnimatedStyle(() => ({
@@ -1500,6 +1508,46 @@ function BuildScreenInner() {
     dropToastTimerRef.current = setTimeout(() => setDropToast(null), 2500);
   }, []);
 
+  // Archive via tray drop: soft-archive the dragged item, re-parenting folder
+  // children up one level first (spec default A).
+  const confirmArchiveItem = useCallback(async () => {
+    const item = pendingArchiveItem;
+    setShowArchiveConfirm(false);
+    setPendingArchiveItem(null);
+    if (!item) return;
+    try {
+      if (item.type === 'Playbooks') {
+        // Soft-only: revoke booking links then flag isArchived. No deleteDoc.
+        try {
+          const fn = httpsCallable(functions, 'revokePlaybookBookingLink');
+          await fn({ playbookId: item.id, regenerate: false, deleteWindows: true });
+        } catch (e) { console.warn('[Build] Booking cleanup on archive failed:', e); }
+        await updateDoc(doc(db, 'playbooks', item.id), { isArchived: true, updatedAt: serverTimestamp() });
+      } else if (item.type === 'Folder') {
+        // Re-parent children up one level then flag the folder archived.
+        const batch = writeBatch(db);
+        const parentId = item.parentId ?? null;
+        const childSnap = await Promise.all([
+          getDocs(query(collection(db, 'movements'), where('parentId', '==', item.id))),
+          getDocs(query(collection(db, 'workouts'), where('parentId', '==', item.id))),
+          getDocs(query(collection(db, 'build_folders'), where('parentId', '==', item.id))),
+          getDocs(query(collection(db, 'playbooks'), where('parentId', '==', item.id))),
+        ]);
+        for (const snap of childSnap) {
+          for (const d of snap.docs) {
+            batch.update(d.ref, { parentId, updatedAt: serverTimestamp() });
+          }
+        }
+        batch.update(doc(db, 'build_folders', item.id), { isArchived: true, updatedAt: serverTimestamp() });
+        await batch.commit();
+      } else {
+        const coll = COLLECTION_BY_TYPE[item.type as BuildType];
+        await updateDoc(doc(db, coll, item.id), { isArchived: true, updatedAt: serverTimestamp() });
+      }
+      showDropToast(`Archived "${item.name}"`);
+    } catch (e) { console.error('[Build] Archive item error:', e); }
+  }, [pendingArchiveItem, showDropToast]);
+
   const dropItemIntoFolder = useCallback(async (dragged: BuildItem, folderId: string) => {
     // Folder-into-folder nest: reject self-drop and cycles (target folder
     // must not be a descendant of the dragged folder — walking the parent
@@ -1545,12 +1593,18 @@ function BuildScreenInner() {
   // to the nearest target horizontally so near-miss drops still land.
   // item === null means the "New Folder" target.
   const findTrayTarget = useCallback((ax: number, ay: number): { key: string; item: BuildItem | null } | null => {
-    if (!trayVisibleRef.current || trayItemLayoutsRef.current.size === 0) return null;
+    if (!trayVisibleRef.current) return null;
     const windowH = Dimensions.get('window').height;
     // trayRow top = window bottom − bottom padding (inset + 12) − row height.
     // Prefer the measured absolute top (iOS visual-viewport safe); math fallback.
     const rowTop = trayRowTopRef.current ?? (windowH - (insets.bottom + 12) - (TRAY_HEIGHT - 24));
     if (ay < rowTop - 10) return null; // above the tray band (10px grace)
+    // Cancel chip is pinned outside the scroll view — check via absolute rect.
+    const cc = cancelChipAbsRectRef.current;
+    if (cc && ax >= cc.x - 10 && ax <= cc.x + cc.w + 10 && ay >= cc.y - 10 && ay <= cc.y + cc.h + 10) {
+      return { key: TRAY_CANCEL_KEY, item: null };
+    }
+    if (trayItemLayoutsRef.current.size === 0) return null;
     let best: { key: string; item: BuildItem | null } | null = null;
     let bestDist = Infinity;
     trayItemLayoutsRef.current.forEach(({ x, w, item }, key) => {
@@ -1658,7 +1712,15 @@ function BuildScreenInner() {
     // Tray targets first — they float above the list.
     const tray = findTrayTarget(ax, ay);
     if (tray) {
-      if (tray.item) {
+      if (tray.key === TRAY_CANCEL_KEY) {
+        // No-op: drag session ends normally, tray slides down via cleanup.
+        return;
+      } else if (tray.key === TRAY_ARCHIVE_KEY) {
+        // Open archive confirmation modal — write happens on confirm, not here.
+        setPendingArchiveItem(dragged);
+        setShowArchiveConfirm(true);
+        return;
+      } else if (tray.item) {
         await dropItemIntoFolder(dragged, tray.item.id);
       } else if (tray.key === TRAY_NEW_PLAYBOOK_KEY) {
         // Tray "New Playbook" target (workouts only): open the create modal
@@ -2292,7 +2354,8 @@ function BuildScreenInner() {
   // Drop rects for tray items that left the tray — onLayout only fires for
   // mounted views, so removed folders would otherwise leave stale rects.
   useEffect(() => {
-    const valid = new Set([TRAY_NEW_FOLDER_KEY, TRAY_NEW_PLAYBOOK_KEY, ...trayFolders.map(f => `tray:${f.id}`)]);
+    const valid = new Set([TRAY_NEW_FOLDER_KEY, TRAY_NEW_PLAYBOOK_KEY, TRAY_ARCHIVE_KEY, ...trayFolders.map(f => `tray:${f.id}`)]);
+    // TRAY_CANCEL_KEY is stored separately (cancelChipAbsRectRef), not in trayItemLayoutsRef.
     trayItemLayoutsRef.current.forEach((_v, k) => {
       if (!valid.has(k)) trayItemLayoutsRef.current.delete(k);
     });
@@ -2310,6 +2373,7 @@ function BuildScreenInner() {
     }
     trayTranslate.value = withTiming(TRAY_SLIDE_DISTANCE, { duration: 180 });
     trayItemLayoutsRef.current.clear();
+    cancelChipAbsRectRef.current = null;
     const t = setTimeout(() => setTrayMounted(false), 200);
     return () => clearTimeout(t);
   }, [trayVisible, trayTranslate]);
@@ -2477,6 +2541,24 @@ function BuildScreenInner() {
                 <Icon name="folder" size={14} color="#F5A623" />
                 <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
               </View>
+              {item.isArchived && showArchived && (
+                <>
+                  <View style={styles.archivedPill}>
+                    <Text style={styles.archivedPillText}>Archived</Text>
+                  </View>
+                  <Pressable
+                    style={styles.restoreBtn}
+                    onPress={async (e) => {
+                      e.stopPropagation();
+                      try {
+                        await updateDoc(doc(db, 'build_folders', item.id), { isArchived: false, updatedAt: serverTimestamp() });
+                      } catch (err) { console.error('[Build] Restore folder error:', err); }
+                    }}
+                  >
+                    <Text style={styles.restoreBtnText}>Restore</Text>
+                  </Pressable>
+                </>
+              )}
               {hoveredId === item.id && dragItem && dragItem.id !== item.id && (
                 <View style={[StyleSheet.absoluteFill, { borderWidth: 2, borderColor: '#F5A623', borderRadius: 10 }]} pointerEvents="none" />
               )}
@@ -2581,6 +2663,25 @@ function BuildScreenInner() {
             {isWorkout && <Icon name="workouts" size={14} color="#7DD3FC" />}
             <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
           </View>
+          {item.isArchived && showArchived && (
+            <>
+              <View style={styles.archivedPill}>
+                <Text style={styles.archivedPillText}>Archived</Text>
+              </View>
+              <Pressable
+                style={styles.restoreBtn}
+                onPress={async (e) => {
+                  e.stopPropagation();
+                  try {
+                    const coll = item.type === 'Folder' ? 'build_folders' : COLLECTION_BY_TYPE[item.type as BuildType];
+                    await updateDoc(doc(db, coll, item.id), { isArchived: false, updatedAt: serverTimestamp() });
+                  } catch (err) { console.error('[Build] Restore error:', err); }
+                }}
+              >
+                <Text style={styles.restoreBtnText}>Restore</Text>
+              </Pressable>
+            </>
+          )}
           {isMovement && !item.videoUrl && !item.mediaUrl && !item.gifLoopUrl && !item.gifLowUrl && (
             <View style={styles.videoNeededPill}>
               <Text style={styles.videoNeededText}>Video needed</Text>
@@ -4044,6 +4145,12 @@ function BuildScreenInner() {
                     const windowH = Dimensions.get('window').height;
                     if (Number.isFinite(y) && y > 0 && y < windowH) trayRowTopRef.current = y;
                   });
+                  // Measure the Cancel chip absolute position for hit-testing.
+                  cancelChipRef.current?.measureInWindow((cx, cy, cw, ch) => {
+                    if (Number.isFinite(cx) && cw > 0) {
+                      cancelChipAbsRectRef.current = { x: cx, y: cy, w: cw, h: ch };
+                    }
+                  });
                 }, 300);
               }}
             >
@@ -4086,33 +4193,73 @@ function BuildScreenInner() {
                   <Text style={s.trayItemText} numberOfLines={1}>New Playbook</Text>
                 </TrayChip>
               )}
+              {/* Archive chip — always visible during any drag. Red-outlined. */}
+              <TrayChip
+                accent="#E05252"
+                hovered={hoveredId === TRAY_ARCHIVE_KEY}
+                onLayout={registerTrayLayout(TRAY_ARCHIVE_KEY, null)}
+              >
+                <Icon name="archive" size={22} color="#E05252" />
+                <Text style={[s.trayItemText, { color: '#E05252' }]} numberOfLines={1}>Archive</Text>
+              </TrayChip>
             </View>
           </ScrollView>
-          {/* Scroll-down affordance on the tray's right edge — visible during
-              drag. Positioned outside the horizontal ScrollView so it stays
-              fixed to the viewport regardless of tray scroll. Height matches
-              a chip so it can't stretch if the tray's auto-sizing wobbles. */}
+          {/* Cancel chip — pinned to the far right, fixed position outside the
+              horizontal ScrollView so it stays visible regardless of scroll.
+              Replaces the old chevron-down affordance visually. The auto-scroll
+              hotspot logic (pointer > windowW - AUTO_SCROLL_HOTSPOT_W) is purely
+              coordinate-based and is unaffected by this visual change. */}
           {dragItem && (
-            <View pointerEvents="none" style={{
-              position: 'absolute',
-              right: 12,
-              // Center on the chip row: tray paddingBottom (insets+16) + ScrollView paddingVertical (18)
-              bottom: insets.bottom + 16 + 18,
-              height: TRAY_HEIGHT - 24,
-              width: AUTO_SCROLL_HOTSPOT_W - 16,
-              borderRadius: 12,
-              backgroundColor: '#1E2A3A',
-              borderWidth: 1,
-              borderColor: '#60A5FA',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}>
-              <Icon name="chevron-down" size={20} color="#60A5FA" />
+            <View
+              ref={cancelChipRef}
+              pointerEvents="none"
+              style={{
+                position: 'absolute',
+                right: 12,
+                bottom: insets.bottom + 16 + 18,
+                height: TRAY_HEIGHT - 24,
+                width: AUTO_SCROLL_HOTSPOT_W - 16,
+                borderRadius: 12,
+                backgroundColor: '#0E1117',
+                borderWidth: hoveredId === TRAY_CANCEL_KEY ? 2 : 1,
+                borderColor: hoveredId === TRAY_CANCEL_KEY ? '#94A3B8' : '#2D3B4E',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 4,
+                ...(hoveredId === TRAY_CANCEL_KEY ? {
+                  shadowColor: '#94A3B8',
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 0.5,
+                  shadowRadius: 6,
+                  elevation: 6,
+                } : {}),
+              }}
+            >
+              <Icon name="close" size={20} color={hoveredId === TRAY_CANCEL_KEY ? '#94A3B8' : '#4A5568'} />
+              <Text style={{ color: hoveredId === TRAY_CANCEL_KEY ? '#94A3B8' : '#4A5568', fontSize: 10, fontWeight: '700' }}>Cancel</Text>
             </View>
           )}
         </Reanimated.View>
       )}
 
+
+      {/* Archive confirmation modal — triggered by dropping an item on the Archive tray chip */}
+      <Modal transparent visible={showArchiveConfirm} animationType="fade" onRequestClose={() => { setShowArchiveConfirm(false); setPendingArchiveItem(null); }}>
+        <Pressable style={s.pbConfirmBackdrop} onPress={() => { setShowArchiveConfirm(false); setPendingArchiveItem(null); }}>
+          <Pressable style={s.pbConfirmCard} onPress={(e) => e.stopPropagation()}>
+            <Text style={[s.pbConfirmTitle, { color: '#E05252' }]}>Archive {pendingArchiveItem?.name ? `"${pendingArchiveItem.name}"` : 'item'}?</Text>
+            <Text style={s.pbConfirmBody}>You can restore it later from the Archived view.</Text>
+            <View style={s.pbConfirmRow}>
+              <Pressable style={s.pbConfirmCancel} onPress={() => { setShowArchiveConfirm(false); setPendingArchiveItem(null); }}>
+                <Text style={s.pbConfirmCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={s.pbConfirmDelete} onPress={confirmArchiveItem}>
+                <Text style={s.pbConfirmDeleteText}>Archive</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Drop rejected toast — shows briefly when a drop is silently blocked */}
       {dropToast && (
@@ -4207,6 +4354,39 @@ const styles = StyleSheet.create({
   },
   remixPillTextReady: {
     color: '#34D399',
+  },
+  archivedPill: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: 'rgba(224,82,82,0.18)',
+  },
+  archivedPillText: {
+    fontSize: 8,
+    color: '#E05252',
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-SemiBold',
+  },
+  restoreBtn: {
+    position: 'absolute',
+    bottom: 30,
+    left: 8,
+    right: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: 'rgba(30,42,58,0.88)',
+    borderWidth: 1,
+    borderColor: '#94A3B8',
+    alignItems: 'center',
+  },
+  restoreBtnText: {
+    fontSize: 10,
+    color: '#94A3B8',
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-SemiBold',
   },
   placeholderLogo: {
     width: '100%',
