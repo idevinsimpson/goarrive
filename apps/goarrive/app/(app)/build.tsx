@@ -635,6 +635,11 @@ function BuildScreenInner() {
 
   // Workout folder page — replaces the old modal flow
   const [openWorkoutId, setOpenWorkoutId] = useState<string | null>(null);
+  // Ref mirror so drag lifecycle handlers (which run outside React's render
+  // cycle) can check whether we're inside a workout drill-in when deciding
+  // whether to restore the app tab bar after a drag ends.
+  const openWorkoutIdRef = useRef<string | null>(null);
+  openWorkoutIdRef.current = openWorkoutId;
 
   // Plans & Playbooks
   const [showPlanCreate, setShowPlanCreate] = useState(false);
@@ -2404,8 +2409,9 @@ function BuildScreenInner() {
     if (_dragItemRef.current) suppressPressUntilRef.current = Date.now() + 500;
     stopAutoScroll();
     unlockPageScroll();
-    // Inside a playbook the tab bar stays hidden after the drag too (A3).
-    if (!currentPlaybookRef.current) {
+    // Inside a playbook OR inside a workout drill-in the tab bar stays
+    // hidden after the drag too — both are focused workspaces (A3).
+    if (!currentPlaybookRef.current && !openWorkoutIdRef.current) {
       navigation.setOptions({ tabBarStyle: TAB_BAR_STYLE });
     }
     if (trayTimerRef.current) {
@@ -2417,11 +2423,15 @@ function BuildScreenInner() {
   }, [stopAutoScroll, unlockPageScroll, clearDragState, navigation]);
 
   // Belt-and-suspenders: never leave page scroll locked or a rAF loop
-  // running if the screen unmounts mid-drag.
+  // running if the screen unmounts mid-drag. Only restore the tab bar if
+  // we're not in a focused workspace — otherwise the drill-in useEffect
+  // above owns the hide.
   useEffect(() => () => {
     stopAutoScroll();
     unlockPageScroll();
-    navigation.setOptions({ tabBarStyle: TAB_BAR_STYLE });
+    if (!currentPlaybookRef.current && !openWorkoutIdRef.current) {
+      navigation.setOptions({ tabBarStyle: TAB_BAR_STYLE });
+    }
     if (trayTimerRef.current) clearTimeout(trayTimerRef.current);
     if (dropToastTimerRef.current) clearTimeout(dropToastTimerRef.current);
   }, [stopAutoScroll, unlockPageScroll, navigation]);
