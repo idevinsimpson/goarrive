@@ -82,6 +82,12 @@ export interface FlatMovement {
   grabEquipmentText?: string;
   /** For Grab Equipment blocks: AI-generated background image URL */
   grabEquipmentImageUrl?: string;
+  /** For Grab Equipment blocks: pre-generated TTS URL (used by share-link
+   *  viewers who can't call generateVoice from anonymous auth) */
+  grabEquipmentVoiceUrl?: string;
+  /** For Grab Equipment blocks: hash of the text used to generate the voice
+   *  URL — the player rejects a stale URL if the text has changed since */
+  grabEquipmentVoiceHash?: string;
   /** For Intro/Outro: whether this is full-screen cinematic */
   isFullScreen?: boolean;
   /** Original block type string (e.g., 'Warm-Up', 'Circuit') */
@@ -323,6 +329,8 @@ export function useWorkoutFlatten(workout: any): FlatMovement[] {
               stepType: 'grabEquipment',
               grabEquipmentText: block.grabEquipmentText || '',
               grabEquipmentImageUrl: block.grabEquipmentImageUrl || undefined,
+              grabEquipmentVoiceUrl: block.grabEquipmentVoiceUrl || undefined,
+              grabEquipmentVoiceHash: block.grabEquipmentVoiceHash || undefined,
               isFullScreen: false,
               originalBlockType: blockType,
             });

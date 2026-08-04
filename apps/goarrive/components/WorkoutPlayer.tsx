@@ -1305,32 +1305,40 @@ export default function WorkoutPlayer({
   //   [ NEXT UP | name + meta (flex) | thumb ]
   const renderNextUp = () => {
     if (!next) return null;
-    const nextLabel = next.stepType === 'exercise'
-      ? composePrescriptionLabel(next.name, next.weight, next.reps)
-      : next.originalBlockType || next.name;
+    // Skip synthetic "Get Ready" prep-rest bridges (movementIndex === -1,
+    // duration 0) — they're not a meaningful "next" for the viewer. Show the
+    // real movement that follows the bridge instead.
+    let up: any = next;
+    if (up.stepType === 'exercise' && up.movementIndex === -1 && (up.duration ?? 0) === 0) {
+      const after = flatMovements[currentIndex + 2];
+      if (after) up = after;
+    }
+    const nextLabel = up.stepType === 'exercise'
+      ? composePrescriptionLabel(up.name, up.weight, up.reps)
+      : up.originalBlockType || up.name;
     return (
       <View style={st.nextUpBar}>
         <Text style={st.nextUpLabel}>NEXT UP</Text>
         <View style={st.nextUpInfo}>
           <Text style={st.nextUpName} numberOfLines={1}>{nextLabel}</Text>
           <Text style={st.nextUpMeta} numberOfLines={1}>
-            {next.blockName}{next.duration ? ` · ${next.duration}s` : ''}
+            {up.blockName}{up.duration ? ` · ${up.duration}s` : ''}
           </Text>
         </View>
-        {(next.posterUrl || next.thumbnailUrl) ? (
+        {(up.posterUrl || up.thumbnailUrl) ? (
           <PosterThumb
-            posterUrl={(next as any).posterUrl}
-            gifUrl={next.thumbnailUrl}
+            posterUrl={(up as any).posterUrl}
+            gifUrl={up.thumbnailUrl}
             containerStyle={st.nextUpThumb}
             resizeMode="cover"
           />
         ) : (
           <View style={[st.nextUpThumb, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#1A2035' }]}>
             <Icon name={
-              next.stepType === 'waterBreak' ? 'droplet' :
-              next.stepType === 'transition' ? 'arrow-right' :
-              next.stepType === 'grabEquipment' ? 'briefcase' :
-              next.stepType === 'demo' ? 'eye' :
+              up.stepType === 'waterBreak' ? 'droplet' :
+              up.stepType === 'transition' ? 'arrow-right' :
+              up.stepType === 'grabEquipment' ? 'briefcase' :
+              up.stepType === 'demo' ? 'eye' :
               'play-circle'
             } size={Math.round(fs(20))} color="#3A4050" />
           </View>

@@ -99,6 +99,11 @@ export function sanitizePlayerBlock(
     instructionText: block.instructionText || '',
     grabEquipmentText: block.grabEquipmentText || '',
     grabEquipmentImageUrl: block.grabEquipmentImageUrl || null,
+    // Pre-generated TTS for the equipment text so share-link viewers (who
+    // can't call generateVoice from anonymous auth) hear the coach's script
+    // instead of a static "Get ready." fallback.
+    grabEquipmentVoiceUrl: block.grabEquipmentVoiceUrl || null,
+    grabEquipmentVoiceHash: block.grabEquipmentVoiceHash || null,
     // Follow-Along Video: audio + crop transform
     soundEnabled: block.soundEnabled !== false,
     cropScale: block.cropScale ?? null,

@@ -60,6 +60,7 @@ import WorkoutPlayer from './WorkoutPlayer';
 import LiveViewPlayer from './LiveViewPlayer';
 import WorkoutIntroAnnouncementModal, { type IntroAnnouncementSaveFields } from './WorkoutIntroAnnouncementModal';
 import { buildDefaultIntroScript } from '../utils/workoutIntroAnnouncement';
+import { generateGrabEquipmentVoice, grabEquipmentHash } from '../utils/grabEquipmentVoice';
 import VideoCropModal, { CropValues } from './VideoCropModal';
 import { FB, FH } from '../lib/theme';
 import { CONTENT_BOTTOM_CLEARANCE } from '../lib/tabBarStyle';
@@ -165,6 +166,8 @@ interface WorkoutBlock {
   grabEquipmentDurationSec?: number;
   grabEquipmentText?: string;
   grabEquipmentImageUrl?: string;
+  grabEquipmentVoiceUrl?: string;
+  grabEquipmentVoiceHash?: string;
   beginningRestSec?: number;
   blockPreSequence?: ('demo' | 'grabEquipment')[];
   circuitStartRestSec?: number; // legacy compat
@@ -811,6 +814,8 @@ export default function WorkoutFolderPage({
                 grabEquipmentDurationSec: b.grabEquipmentDurationSec ?? undefined,
                 grabEquipmentText: b.grabEquipmentText ?? '',
                 grabEquipmentImageUrl: b.grabEquipmentImageUrl ?? undefined,
+                grabEquipmentVoiceUrl: b.grabEquipmentVoiceUrl ?? undefined,
+                grabEquipmentVoiceHash: b.grabEquipmentVoiceHash ?? undefined,
                 beginningRestSec: b.beginningRestSec ?? b.circuitStartRestSec ?? undefined,
                 blockPreSequence: b.blockPreSequence ?? undefined,
                 circuitStartRestSec: b.circuitStartRestSec ?? undefined,
@@ -1157,6 +1162,8 @@ export default function WorkoutFolderPage({
             if (b.grabEquipmentDurationSec) clean.grabEquipmentDurationSec = b.grabEquipmentDurationSec;
             if (b.grabEquipmentText) clean.grabEquipmentText = b.grabEquipmentText;
             if (b.grabEquipmentImageUrl) clean.grabEquipmentImageUrl = b.grabEquipmentImageUrl;
+            if (b.grabEquipmentVoiceUrl) clean.grabEquipmentVoiceUrl = b.grabEquipmentVoiceUrl;
+            if (b.grabEquipmentVoiceHash) clean.grabEquipmentVoiceHash = b.grabEquipmentVoiceHash;
           }
           if (b.blockPreSequence) clean.blockPreSequence = b.blockPreSequence;
           if (b.beginningRestSec != null && b.beginningRestSec > 0) {
@@ -1258,6 +1265,8 @@ export default function WorkoutFolderPage({
           if (b.grabEquipmentDurationSec) clean.grabEquipmentDurationSec = b.grabEquipmentDurationSec;
           if (b.grabEquipmentText) clean.grabEquipmentText = b.grabEquipmentText;
           if (b.grabEquipmentImageUrl) clean.grabEquipmentImageUrl = b.grabEquipmentImageUrl;
+          if (b.grabEquipmentVoiceUrl) clean.grabEquipmentVoiceUrl = b.grabEquipmentVoiceUrl;
+          if (b.grabEquipmentVoiceHash) clean.grabEquipmentVoiceHash = b.grabEquipmentVoiceHash;
         }
         if (b.blockPreSequence) clean.blockPreSequence = b.blockPreSequence;
         if (b.beginningRestSec != null && b.beginningRestSec > 0) {
@@ -1719,15 +1728,42 @@ export default function WorkoutFolderPage({
     upsertEquipHistory(text, item.imageUrl);
   }, [blocks, updateBlocks, upsertEquipHistory]);
 
+  // Pre-generate the equipment TTS clip on save so share-link viewers (who
+  // authenticate anonymously and can't call generateVoice) hear the coach's
+  // script instead of the static "Get ready." fallback. Skip if the text
+  // hasn't changed since the last generation (hash match).
+  const triggerEquipmentVoiceGen = useCallback(async (blockIdx: number, text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const nextHash = grabEquipmentHash(trimmed);
+    const existing = blocksRef.current[blockIdx];
+    if (existing?.grabEquipmentVoiceUrl && existing.grabEquipmentVoiceHash === nextHash) return;
+    try {
+      const { url, hash } = await generateGrabEquipmentVoice(trimmed);
+      if (!url) return;
+      const newBlocks = [...blocksRef.current];
+      const target = newBlocks[blockIdx];
+      if (!target || (target.grabEquipmentText ?? '').trim() !== trimmed) return;
+      (target as any).grabEquipmentVoiceUrl = url;
+      (target as any).grabEquipmentVoiceHash = hash;
+      updateBlocks(newBlocks);
+    } catch (err) {
+      console.warn('[WorkoutFolder] triggerEquipmentVoiceGen failed', err);
+    }
+  }, [updateBlocks]);
+
   const closeBlockOverlay = useCallback(() => {
     if (blockOverlayIndex != null) {
       const t = blocks[blockOverlayIndex]?.grabEquipmentText;
-      if (t?.trim()) upsertEquipHistory(t);
+      if (t?.trim()) {
+        upsertEquipHistory(t);
+        triggerEquipmentVoiceGen(blockOverlayIndex, t);
+      }
     }
     setEquipHistoryOpenIdx(null);
     setEquipLibraryOpenIdx(null);
     setBlockOverlayIndex(null);
-  }, [blockOverlayIndex, blocks, upsertEquipHistory]);
+  }, [blockOverlayIndex, blocks, upsertEquipHistory, triggerEquipmentVoiceGen]);
 
   // ── Grab Equipment image generation ──────────────────────────────────────
   const generateEquipImgFn = httpsCallable<
@@ -3561,7 +3597,11 @@ export default function WorkoutFolderPage({
                               style={[st.overlayTextInput, { flex: 1 }]}
                               value={block.grabEquipmentText ?? ''}
                               onChangeText={(t) => updateBlockField(bi, 'grabEquipmentText', t)}
-                              onBlur={() => upsertEquipHistory(block.grabEquipmentText ?? '')}
+                              onBlur={() => {
+                                const t = block.grabEquipmentText ?? '';
+                                upsertEquipHistory(t);
+                                triggerEquipmentVoiceGen(bi, t);
+                              }}
                               placeholder="e.g. Grab a pair of dumbbells"
                               placeholderTextColor="#4A5568"
                             />

@@ -1192,6 +1192,18 @@ export function useWorkoutTTS({
           enqueueCue('get_ready', key);
         } else {
           const cacheKey = `${TTS_VOICE_SLUG}|${normalized}`;
+          // Prefer the pre-generated URL saved on the block (used by share-link
+          // viewers who can't call generateVoice from anonymous auth). We only
+          // trust it when the stored hash matches the current text hash — a
+          // stale URL means the coach edited the text after the last save.
+          const preGenUrl = (current as any).grabEquipmentVoiceUrl || '';
+          const preGenHash = (current as any).grabEquipmentVoiceHash || '';
+          const currentHash = hashTtsText(cacheKey);
+          if (preGenUrl && preGenHash === currentHash) {
+            console.info('[VOICE-AUDIT] grab-equipment: using pre-generated voice URL', { currentIndex, hash: currentHash });
+            enqueueVoice(preGenUrl, key);
+            return;
+          }
           const cached = grabEquipVoiceCacheRef.current[cacheKey];
           console.info('[VOICE-AUDIT] grab-equipment: text found', { currentIndex, normalized: normalized.slice(0, 60), cacheHit: cached !== undefined });
           if (cached !== undefined) {
