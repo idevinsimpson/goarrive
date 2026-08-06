@@ -6,7 +6,9 @@
     "doc": "docs"
   },
   "scripts": {
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "capture:coach-discovery": "node scripts/capture-coach-discovery.mjs",
+    "optimize:coach-discovery-images": "node scripts/optimize-coach-discovery-images.mjs"
   },
   "repository": {
     "type": "git",
@@ -21,6 +23,7 @@
   "homepage": "https://github.com/idevinsimpson/goarrive#readme",
   "description": "",
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@playwright/test": "^1.59.1",
     "@types/node": "^25.5.2"
   }

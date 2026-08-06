@@ -3,9 +3,8 @@
 //
 // KEY RULE: All text inputs, textareas, and selects MUST render at font-size
 // >= 16px on mobile web. iOS Safari auto-zooms the viewport whenever a focused
-// input has a font-size below 16px. The viewport meta tag below adds
-// `maximum-scale=1` as an additional guard, but the CSS rule is the primary
-// fix and should be preserved in all future input components.
+// input has a font-size below 16px. The global CSS rule below prevents that
+// focus zoom while preserving intentional pinch-to-zoom for accessibility.
 import { ScrollViewStyleReset } from 'expo-router/html';
 
 export default function Root({ children }: { children: React.ReactNode }) {
@@ -14,16 +13,9 @@ export default function Root({ children }: { children: React.ReactNode }) {
       <head>
         <meta charSet="utf-8" />
         <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
-        {/*
-          maximum-scale=1 prevents iOS Safari from auto-zooming when the user
-          taps a text input whose computed font-size is below 16px.
-          user-scalable=no is intentionally NOT set here — that would block
-          intentional pinch-to-zoom for accessibility. maximum-scale=1 is the
-          minimal change that stops the unwanted auto-zoom on input focus.
-        */}
         <meta
           name="viewport"
-          content="width=device-width, initial-scale=1, maximum-scale=1, shrink-to-fit=no, viewport-fit=cover"
+          content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover"
         />
         {/* PWA / App identity */}
         <meta name="application-name" content="GoArrive" />
@@ -46,8 +38,8 @@ export default function Root({ children }: { children: React.ReactNode }) {
         <ScrollViewStyleReset />
         {/*
           Global rule: every input, textarea, and select must be at least 16px.
-          iOS zooms when font-size < 16px. This is the belt-and-suspenders
-          companion to the viewport maximum-scale=1 above.
+          iOS zooms when font-size < 16px; this avoids the focus jump without
+          limiting the user's accessibility zoom controls.
           Going forward, any new input component added to the app inherits this
           rule automatically — no per-component override needed.
         */}
