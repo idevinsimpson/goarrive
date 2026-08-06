@@ -15,9 +15,9 @@ Optimized bundled WebPs live beside the PNG masters in `apps/goarrive/assets/coa
 
 The existing app mark is loaded from `apps/goarrive/assets/logo.png`, with the public web copy at `/goarrive-logo.png`. Confirm that it is the approved production mark/wordmark before release; supply a separate approved wordmark asset if required by brand review.
 
-## Missing sanitized product captures
+## Sanitized product captures
 
-Every item below is still missing. The current experience intentionally renders a labeled replacement panel instead of fabricated UI.
+The Build workspace is now represented by a real, sanitized GoArrive capture. Every other item below remains a labeled replacement panel rather than fabricated UI.
 
 | Needed capture | Primary use | Status / capture requirement |
 | --- | --- | --- |
@@ -25,7 +25,7 @@ Every item below is still missing. The current experience intentionally renders 
 | Coach Command Center | Scene 14 coach montage | **Missing.** Desktop/laptop crop showing realistic, non-confidential priorities. |
 | Plan Builder | Scene 10 and member journey | **Missing.** Coach view with schedule, support level, phases, contract/investment, and next step only if currently live. |
 | Member-facing plan | Scenes 9–10 | **Missing.** Phone capture paired to the same fictional demo member. |
-| Build page | Scene 14 montage | **Missing.** Coach Build view. |
+| Build page | Scene 14 montage | **Included.** `product-build.png` is the redacted source master; the matching 37 KB WebP is bundled for native and copied to public web assets. |
 | Movement Library | Product-system support | **Missing.** Sanitized movement list/grid. |
 | Workout Builder | Product-system support | **Missing.** Sanitized authored workout. |
 | Workout Player | Scene 11 | **Missing.** Phone capture showing only currently live guided-workout capabilities. |
@@ -39,6 +39,14 @@ Every item below is still missing. The current experience intentionally renders 
 | Coach Launch | Scene 17 | **Missing.** Guided module progression with approved current module names. |
 | Agreement screen | Next-step/product support | **Missing.** Sanitized screen only; do not expose signatures or private contractual records. |
 | Member profile or hub | Member journey/product support | **Missing.** Fictional profile with no contact or health data. |
+
+### Build capture provenance
+
+- Source: internal training guide, [GoArrive App — Coach How-To: Upload a Movement + Build a Workout](https://docs.google.com/document/d/19rpqQB2msxpxnVaXTE0xkDi2BcnxsvbkmguzixB8tNg).
+- Guide update shown in source: 2026-06-05. Asset extraction and privacy review: 2026-08-05.
+- Source app commit and original device dimensions were not recorded in the guide; those fields remain unknown and should be added if the original capture is recovered.
+- Redactions: account initials were removed and one potentially member-specific workout title was replaced with “Demo Strength Workout.” No email address, phone number, payment information, health information, meeting credential, signature, or confidential note remains visible.
+- Runtime paths: `apps/goarrive/assets/coach-discovery/product-build.webp` and `apps/goarrive/public/coach-discovery/product-build.webp`.
 
 ## Capture rules
 

@@ -16,6 +16,9 @@ dist/
 /playwright/.cache/
 /playwright/.auth/
 
+# Local source material used to derive sanitized coach-discovery captures
+/docs/coach-discovery/artifacts/source-captures/
+
 # Debug/ad-hoc scripts that may contain secrets or personal data
 functions/check-zoom-*.js
 functions/create-zoom-test-session.js

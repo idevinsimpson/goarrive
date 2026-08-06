@@ -8,11 +8,11 @@ Release-candidate checks run on 2026-08-05 EDT against the local static export a
 | --- | --- | --- |
 | `cd apps/goarrive && npm run ts:check` | **PASS** | TypeScript completed with no errors. |
 | `cd apps/goarrive && npm run build:web` | **PASS** | Expo exported the public `/coach-discovery` static route. Existing Expo Notifications web-support and Expo AV deprecation warnings remain. |
-| Playwright targeted suite, Chromium + WebKit | **PASS — 12/12** | `playwright test tests/coach-discovery.spec.ts --project=chromium --project=webkit`; 12.2 seconds. |
+| Playwright targeted suite, Chromium + WebKit | **PASS — 14/14** | `playwright test tests/coach-discovery.spec.ts --project=chromium --project=webkit`; 17.9 seconds. Includes the sanitized Build capture check in both engines. |
 | 390 x 844 structure/overflow | **PASS** | 27 scenes, public URL, one H1 + 26 H2s, semantic hero image, and <=1 px horizontal overflow in both engines. |
 | Standard/presentation keyboard use | **PASS** | Focusable story region, PageDown scrolling, Home/End scene navigation, and final CTA visibility in both engines. |
 | Reduced motion | **PASS** | Tested with emulated `prefers-reduced-motion: reduce` in both engines. |
-| Compensation content guard | **PASS (automated copy check)** | Qualifier, 7% referral copy, and the planned/not-current-terms Team Builder label and proposed 10-point figure were present. Legal sign-off is still required. |
+| Compensation content guard | **PASS** | Automated copy checks passed, and scenes 19–21 were compared against the 2025 Drive agreement plus the repository's 2026 JotForm-derived terms. Percentages and cap mechanics match; source-of-record confirmation and legal sign-off remain required before production. |
 | Scoped analytics + final CTA | **PASS** | `experience_opened`, `compensation_section_viewed`, and `next_step_cta_selected` DOM events were observed; the CTA routed to `/coach-apply` in both engines. |
 | Automated accessibility | **PASS** | Axe WCAG 2 A/AA/2.1 AA scan reported zero violations inside the route in Chromium and WebKit. |
 | Static HTML contract | **PASS** | One viewport tag with no `maximum-scale`, discovery title/description/canonical/OG/Twitter metadata, two font preloads, one H1, 26 H2s, and semantic image markup. |
@@ -25,7 +25,7 @@ The broader app command `npm run test:vitest -- --run` produced **191 passing te
 | Artifact/check | Result | Notes |
 | --- | --- | --- |
 | Phone hero, 390 x 844 | **PASS** | Photography, safe-area progress, headline, support copy, wordmark, and controls paint correctly. |
-| Phone scenes 5, 9, 14, 19, 21, 27 | **PASS** | Orbit, sticky journey, product placeholders, tier cards, growth cards, qualifiers, and final CTA are legible with no observed collapse/crop. |
+| Phone scenes 5, 9, 14, 19, 21, 27 | **PASS** | Orbit, sticky journey, sanitized Build capture, remaining product placeholders, tier cards, growth cards, qualifiers, and final CTA are legible with no observed collapse/crop. |
 | Tablet hero, 820 x 1180 | **PASS** | Responsive crop, type scale, progress rail, and controls reviewed. |
 | Desktop hero, 1440 x 1000 | **PASS** | Max-width composition, progress rail, image crop, and controls reviewed. |
 | Full mobile recording | **PASS (artifact integrity)** | 19.72 seconds, 390 x 844. Metadata loaded successfully; late and end frames were inspected at scenes 23 and 27. This is a fast automated walkthrough, not final presenter pacing approval. |
@@ -68,7 +68,7 @@ Firebase CLI and usable Firebase authentication were unavailable in the local Wi
 
 ## Known limitations
 
-- Product interfaces are intentionally labeled placeholders until sanitized demo screenshots are supplied.
+- The Build workspace uses a real sanitized product capture; all other product interfaces remain intentionally labeled placeholders until suitable demo screenshots are supplied.
 - Generated people are disclosed placeholders, not real coaches, members, or testimonials.
 - The current choreography is a polished structural pass with shared fade/translate motion, a sticky member journey, card stacks, diagrams, and proximity snapping; final scene-specific motion can be refined with approved assets.
 - Presentation keys move between scene starts; long Scene 9 should be explored with normal scrolling when pausing on individual journey steps.

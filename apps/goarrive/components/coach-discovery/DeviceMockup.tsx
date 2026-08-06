@@ -1,6 +1,14 @@
 import React from 'react';
-import { StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import {
+  ImageSourcePropType,
+  StyleProp,
+  StyleSheet,
+  Text,
+  View,
+  ViewStyle,
+} from 'react-native';
 import type { DiscoveryAccent } from '../../data/coachDiscoveryScenes';
+import { AccessibleImage } from './AccessibleImage';
 import { accentColor, accentSoft, discoveryColors, discoveryFonts } from './tokens';
 
 interface DeviceMockupProps {
@@ -10,6 +18,9 @@ interface DeviceMockupProps {
   accent?: DiscoveryAccent;
   style?: StyleProp<ViewStyle>;
   compact?: boolean;
+  source?: ImageSourcePropType;
+  webSource?: string;
+  imageLabel?: string;
 }
 
 export function DeviceMockup({
@@ -19,11 +30,15 @@ export function DeviceMockup({
   accent = 'blue',
   style,
   compact = false,
+  source,
+  webSource,
+  imageLabel,
 }: DeviceMockupProps) {
   const color = accentColor(accent);
+  const hasProductCapture = Boolean(source && webSource && imageLabel);
   return (
     <View
-      accessibilityLabel={`${title}. Approved demo screenshot placeholder.`}
+      accessibilityLabel={hasProductCapture ? undefined : `${title}. Approved demo screenshot placeholder.`}
       style={[
         styles.frame,
         variant === 'phone' && styles.phone,
@@ -43,31 +58,49 @@ export function DeviceMockup({
         )}
         {variant === 'phone' && <View style={styles.island} />}
       </View>
-      <View style={styles.screen}>
-        <View style={[styles.screenGlow, { backgroundColor: accentSoft(accent) }]} />
-        <View style={styles.slotLabel}>
-          <View style={[styles.slotDot, { backgroundColor: color }]} />
-          <Text style={[styles.slotText, { color }]}>APP SCREENSHOT SLOT</Text>
-        </View>
-        <Text style={styles.title}>{title}</Text>
-        {!!caption && <Text style={styles.caption}>{caption}</Text>}
-        <View style={styles.demoUi}>
-          <View style={styles.uiRail}>
-            <View style={[styles.uiRailItem, { backgroundColor: color }]} />
-            <View style={styles.uiRailItem} />
-            <View style={styles.uiRailItem} />
-          </View>
-          <View style={styles.uiBody}>
-            <View style={[styles.uiHeadline, { width: '68%' }]} />
-            <View style={[styles.uiLine, { width: '88%' }]} />
-            <View style={[styles.uiLine, { width: '74%' }]} />
-            <View style={styles.uiCards}>
-              <View style={[styles.uiCard, { borderColor: color }]} />
-              <View style={styles.uiCard} />
+      <View
+        style={[
+          styles.screen,
+          hasProductCapture && styles.captureScreen,
+          hasProductCapture && variant === 'phone' && styles.phoneCaptureScreen,
+        ]}
+      >
+        {source && webSource && imageLabel ? (
+          <AccessibleImage
+            source={source}
+            webSource={webSource}
+            label={imageLabel}
+            resizeMode="contain"
+            style={[styles.productCapture, variant === 'phone' && styles.phoneProductCapture]}
+          />
+        ) : (
+          <>
+            <View style={[styles.screenGlow, { backgroundColor: accentSoft(accent) }]} />
+            <View style={styles.slotLabel}>
+              <View style={[styles.slotDot, { backgroundColor: color }]} />
+              <Text style={[styles.slotText, { color }]}>APP SCREENSHOT SLOT</Text>
             </View>
-          </View>
-        </View>
-        <Text style={styles.replaceText}>Replace with sanitized demo data capture</Text>
+            <Text style={styles.title}>{title}</Text>
+            {!!caption && <Text style={styles.caption}>{caption}</Text>}
+            <View style={styles.demoUi}>
+              <View style={styles.uiRail}>
+                <View style={[styles.uiRailItem, { backgroundColor: color }]} />
+                <View style={styles.uiRailItem} />
+                <View style={styles.uiRailItem} />
+              </View>
+              <View style={styles.uiBody}>
+                <View style={[styles.uiHeadline, { width: '68%' }]} />
+                <View style={[styles.uiLine, { width: '88%' }]} />
+                <View style={[styles.uiLine, { width: '74%' }]} />
+                <View style={styles.uiCards}>
+                  <View style={[styles.uiCard, { borderColor: color }]} />
+                  <View style={styles.uiCard} />
+                </View>
+              </View>
+            </View>
+            <Text style={styles.replaceText}>Replace with sanitized demo data capture</Text>
+          </>
+        )}
       </View>
     </View>
   );
@@ -137,6 +170,20 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: discoveryColors.backgroundAlt,
     padding: 18,
+  },
+  captureScreen: {
+    padding: 0,
+    backgroundColor: '#080B12',
+  },
+  phoneCaptureScreen: {
+    minHeight: 430,
+  },
+  productCapture: {
+    width: '100%',
+    height: '100%',
+  },
+  phoneProductCapture: {
+    height: 430,
   },
   screenGlow: {
     position: 'absolute',

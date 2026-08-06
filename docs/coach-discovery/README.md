@@ -14,6 +14,8 @@ npm run web -- --port 4173
 
 Open `http://127.0.0.1:4173/coach-discovery` and set responsive mode to **390 x 844**. To open the development server to a phone on the same network, start Expo with `npm run web -- --lan --port 4173` and append `/coach-discovery` to the LAN URL Expo prints.
 
+To preview the production-style static export after `npm run build:web`, return to the repository root and run `npm run preview:coach-discovery`. This serves the exported route without adding another package dependency and prints both a computer-local URL and LAN URLs that a phone on the same Wi-Fi network can open.
+
 The route is public:
 
 - Standard scroll: `/coach-discovery`
@@ -89,7 +91,7 @@ Every compensation explanation is subordinate to this on-screen qualifier:
 
 > High-level education only. Current GoArrive Program Terms govern eligibility, definitions, timing, calculations, and payment.
 
-Before release, the product owner/legal reviewer must compare scenes 19–21 line by line with the authoritative publication version of `G➲A Program Terms.docx`, including New Business, annual reset, proration, technology fee, and continuing referral obligations. Do not treat the scene copy as an agreement or income promise. Maya is disclosed on screen as a generated story character, not a real member testimonial.
+The scene copy was compared on 2026-08-05 against the Drive copy of [GoArrive Program Terms & Contractual Agreements](https://docs.google.com/document/d/1zjHQ8q5ekscpsQ2roAGtYBgdfMzhf4Mk2OHA9181qKw) and the repository's newer JotForm-derived agreement. Percentages, New Business, annual reset, proration, technology fee, and continuing referral obligations match. See [LEGAL_TERMS_VERIFICATION.md](./LEGAL_TERMS_VERIFICATION.md). Because the Drive document predates the repository version, the product owner/legal reviewer must still confirm the governing publication and approve the paraphrase before production. Do not treat the scene copy as an agreement or income promise. Maya is disclosed on screen as a generated story character, not a real member testimonial.
 
 ## Analytics
 
@@ -117,11 +119,11 @@ No separate analytics backend or invasive tracking was added. On web, each event
 
 The four cinematic images are generated structural placeholders. Their exact paths, prompt specifications, and disclosure status are recorded in [ASSET_MANIFEST.md](./ASSET_MANIFEST.md). Replace them with permissioned GoArrive coach/member imagery when available, or obtain explicit approval to publish the generated scenes.
 
-All product frames still show labeled demo placeholders. Sanitized captures are needed for: Member intake; Coach Command Center; Plan Builder; member-facing plan; Build; Movement Library; Workout Builder; Workout Player; member workouts; workout sharing; Zoom/session experience; Coach Review Queue; Glow/Grow reflection; Scheduling; Billing; Coach Launch; Agreement; and member profile/hub. Also still needed are an approved production wordmark/mark check, any permissioned testimonial/story, and any approved screen recording. Every capture must use realistic demo data and remove health information, real contact details, payment data, and confidential notes.
+Scene 14 now uses a real, sanitized Build workspace capture sourced from an internal GoArrive training guide. The account initials and one potentially member-specific workout title were redacted before bundling. Sanitized captures are still needed for: Member intake; Coach Command Center; Plan Builder; member-facing plan; Movement Library; Workout Builder; Workout Player; member workouts; workout sharing; Zoom/session experience; Coach Review Queue; Glow/Grow reflection; Scheduling; Billing; Coach Launch; Agreement; and member profile/hub. Also still needed are an approved production wordmark/mark check, any permissioned testimonial/story, and any approved screen recording. Every future capture must use realistic demo data and remove health information, real contact details, payment data, and confidential notes.
 
 Additional known limitations:
 
-- No product screenshot has been represented as live imagery yet; placeholder labels are intentional.
+- One current product screenshot—the sanitized Build workspace—is represented as live imagery. All remaining placeholder labels are intentional.
 - Chromium and WebKit E2E, automated accessibility checks, and key-scene responsive artifact review are complete. Real iPhone Safari, Android Chrome, assistive-technology, Lighthouse, and full product-owner review remain pending.
 - Presentation mode has no private presenter-notes panel.
 - The print stylesheet is an export foundation, not an approved PDF deliverable.

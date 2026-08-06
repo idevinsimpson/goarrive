@@ -32,6 +32,21 @@ test.describe('public coach discovery experience', () => {
     await expect.poll(() => story.evaluate((element) => element.scrollTop)).toBeGreaterThan(100);
   });
 
+  test('renders the sanitized Build product capture in the coach experience', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/coach-discovery?present=1');
+    await page.evaluate(() => {
+      document.getElementById('coach-discovery-scene-14')?.scrollIntoView();
+    });
+
+    const buildCapture = page.getByRole('img', {
+      name: /Sanitized GoArrive Build workspace showing workout cards/i,
+    });
+    await expect(buildCapture).toHaveCount(1);
+    await expect(buildCapture).toBeVisible();
+    await expect(buildCapture).toHaveAttribute('src', '/coach-discovery/product-build.webp');
+  });
+
   test('has no automatically detectable WCAG A or AA violations', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/coach-discovery');

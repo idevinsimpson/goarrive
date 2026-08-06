@@ -45,6 +45,10 @@ const FUTURE_IMAGE: DiscoveryImageAsset = {
   source: require('../../assets/coach-discovery/coach-future-life.webp'),
   webSource: '/coach-discovery/coach-future-life.webp',
 };
+const BUILD_CAPTURE: DiscoveryImageAsset = {
+  source: require('../../assets/coach-discovery/product-build.webp'),
+  webSource: '/coach-discovery/product-build.webp',
+};
 const LOGO = require('../../assets/logo.png');
 
 interface DiscoverySceneContentProps {
@@ -292,9 +296,20 @@ export function DiscoverySceneContent({ meta, isMobile, onNextStep }: DiscoveryS
           <View style={styles.screenStack}>
             <DeviceMockup title="Command Center" caption="What needs attention today" variant="laptop" accent="blue" />
             <View style={[styles.screenStackCards, !isMobile && styles.screenStackCardsWide]}>
-              <DeviceMockup title="Build" variant="panel" compact accent="blue" />
-              <DeviceMockup title="Coach Review" variant="panel" compact accent="green" />
-              <DeviceMockup title="Billing" variant="panel" compact accent="gold" />
+              <View style={[styles.buildCaptureWrap, !isMobile && styles.buildCaptureWrapWide]}>
+                <DeviceMockup
+                  title="Build"
+                  variant="phone"
+                  accent="blue"
+                  source={BUILD_CAPTURE.source}
+                  webSource={BUILD_CAPTURE.webSource}
+                  imageLabel="Sanitized GoArrive Build workspace showing workout cards, search, filters, and bottom navigation"
+                />
+              </View>
+              <View style={styles.auxiliaryScreens}>
+                <DeviceMockup title="Coach Review" variant="panel" compact accent="green" />
+                <DeviceMockup title="Billing" variant="panel" compact accent="gold" />
+              </View>
             </View>
           </View>
         </View>
@@ -1037,8 +1052,20 @@ const styles = StyleSheet.create({
   },
   screenStackCardsWide: {
     flexDirection: 'row',
+    alignItems: 'center',
     transform: [{ translateY: -54 }],
     paddingHorizontal: 36,
+  },
+  buildCaptureWrap: {
+    alignItems: 'center',
+  },
+  buildCaptureWrapWide: {
+    flexBasis: 270,
+    flexShrink: 0,
+  },
+  auxiliaryScreens: {
+    flex: 1,
+    gap: 12,
   },
   infrastructureGrid: {
     gap: 8,
