@@ -404,24 +404,24 @@ export function DiscoverySceneContent({ meta, isMobile, onNextStep }: DiscoveryS
               <View style={styles.capMarker} />
             </View>
             <View style={styles.capLabels}>
-              <Text style={styles.capSmall}>Progress toward annual cap</Text>
+              <Text style={[styles.capSmall, isMobile && styles.capSmallMobile]}>Progress toward annual cap</Text>
               <Text style={styles.capReached}>CAP REACHED</Text>
             </View>
             <View style={styles.afterCapCard}>
-              <Text style={styles.afterCapLabel}>AFTER THE CAP</Text>
+              <Text style={[styles.afterCapLabel, isMobile && styles.afterCapLabelMobile]}>AFTER THE CAP</Text>
               <Text style={styles.afterCapValue}>100%</Text>
-              <Text style={styles.afterCapCopy}>of additional New Business revenue for the applicable term, minus the monthly admin technology fee</Text>
+              <Text style={[styles.afterCapCopy, isMobile && styles.afterCapCopyMobile]}>of additional New Business revenue for the applicable term, minus the monthly admin technology fee</Text>
             </View>
           </View>
           <View style={styles.factList}>
             {EARNINGS_CAP_FACTS.map((fact) => (
               <View key={fact} style={styles.factRow}>
                 <View style={styles.factDot} />
-                <Text style={styles.factText}>{fact}</Text>
+                <Text style={[styles.factText, isMobile && styles.factTextMobile]}>{fact}</Text>
               </View>
             ))}
           </View>
-          <Text style={styles.legalNote}>{PROGRAM_TERMS_NOTE}</Text>
+          <Text style={[styles.legalNote, isMobile && styles.legalNoteMobile]}>{PROGRAM_TERMS_NOTE}</Text>
         </View>
       );
 
@@ -438,7 +438,7 @@ export function DiscoverySceneContent({ meta, isMobile, onNextStep }: DiscoveryS
       return (
         <View style={[contentPad, styles.honestTradeScene]}>
           {heading('center')}
-          <Text style={styles.tradeLead}>GoArrive shares in revenue because GoArrive shares in:</Text>
+          <Text style={[styles.tradeLead, isMobile && styles.tradeLeadMobile]}>GoArrive shares in revenue because GoArrive shares in:</Text>
           <View style={styles.tradeWords}>
             {['Infrastructure', 'Risk', 'Support', 'Development', 'Administration', 'Growth'].map((word) => (
               <Text key={word} style={styles.tradeWord}>{word}</Text>
@@ -458,10 +458,10 @@ export function DiscoverySceneContent({ meta, isMobile, onNextStep }: DiscoveryS
             {heading()}
             <View style={styles.futureList}>
               {['Meaningful member impact', 'A flexible schedule', 'A growing practice', 'Supportive community', 'Leadership', 'Multiple earning pathways', 'Room for family and life', 'Still loving coaching'].map((item) => (
-                <View key={item} style={styles.futurePill}><Text style={styles.futurePillText}>{item}</Text></View>
+                <View key={item} style={styles.futurePill}><Text style={[styles.futurePillText, isMobile && styles.futurePillTextMobile]}>{item}</Text></View>
               ))}
             </View>
-            <Text style={styles.futureQualifier}>Not guaranteed. But intentionally possible.</Text>
+            <Text style={[styles.futureQualifier, isMobile && styles.futureQualifierMobile]}>Not guaranteed. But intentionally possible.</Text>
           </View>
         </ImageScene>
       );
@@ -476,7 +476,7 @@ export function DiscoverySceneContent({ meta, isMobile, onNextStep }: DiscoveryS
                 {['Care deeply.', 'Welcome feedback.', 'Value collaboration.', 'Keep learning.', 'Show up consistently.', 'Think long-term.', 'Want to build something larger than themselves.'].map((item) => (
                   <View key={item} style={styles.fitItem}>
                     <View style={styles.fitCheck}><Text style={styles.fitCheckText}>✓</Text></View>
-                    <Text style={styles.fitText}>{item}</Text>
+                    <Text style={[styles.fitText, isMobile && styles.fitTextMobile]}>{item}</Text>
                   </View>
                 ))}
               </View>
@@ -499,7 +499,7 @@ export function DiscoverySceneContent({ meta, isMobile, onNextStep }: DiscoveryS
           <View style={styles.questionList}>
             {['What feels most limiting today?', 'What excites you here?', 'What questions or concerns remain?'].map((question, index) => (
               <View key={question} style={styles.questionRow}>
-                <Text style={styles.questionNumber}>{String(index + 1).padStart(2, '0')}</Text>
+                <Text style={[styles.questionNumber, isMobile && styles.questionNumberMobile]}>{String(index + 1).padStart(2, '0')}</Text>
                 <Text style={styles.questionText}>{question}</Text>
               </View>
             ))}
@@ -515,7 +515,7 @@ export function DiscoverySceneContent({ meta, isMobile, onNextStep }: DiscoveryS
             {['Deeper fit conversation', 'Experience the platform', 'Coach Launch', 'Apprenticeship', 'First members', 'Long-term growth'].map((step, index) => (
               <React.Fragment key={step}>
                 <View style={styles.nextStepItem}>
-                  <Text style={styles.nextStepNumber}>{String(index + 1).padStart(2, '0')}</Text>
+                  <Text style={[styles.nextStepNumber, isMobile && styles.nextStepNumberMobile]}>{String(index + 1).padStart(2, '0')}</Text>
                   <Text style={styles.nextStepText}>{step}</Text>
                 </View>
                 {index < 5 && <View style={styles.nextStepLine} />}
@@ -533,7 +533,7 @@ export function DiscoverySceneContent({ meta, isMobile, onNextStep }: DiscoveryS
           <View style={styles.closeGlowGold} />
           {heading('center')}
           <AccessibleImage source={LOGO} webSource="/goarrive-logo.png" resizeMode="contain" label="GoArrive" style={styles.closeLogo} />
-          <Text style={styles.closeUrl}>GoArrive.fit</Text>
+          <Text style={[styles.closeUrl, isMobile && styles.closeUrlMobile]}>GoArrive.fit</Text>
           <FinalButton onPress={onNextStep} />
         </View>
       );
@@ -1244,6 +1244,7 @@ const styles = StyleSheet.create({
     fontFamily: discoveryFonts.body,
     fontSize: 9,
   },
+  capSmallMobile: { color: '#C4CCDA', fontSize: 12, lineHeight: 18 },
   capReached: {
     color: discoveryColors.gold,
     fontFamily: discoveryFonts.body,
@@ -1266,6 +1267,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.3,
     fontWeight: '700',
   },
+  afterCapLabelMobile: { fontSize: 12, lineHeight: 18 },
   afterCapValue: {
     color: discoveryColors.text,
     fontFamily: discoveryFonts.heading,
@@ -1282,6 +1284,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     maxWidth: 620,
   },
+  afterCapCopyMobile: { color: '#D7DDE7', fontSize: 15, lineHeight: 23 },
   factList: {
     gap: 10,
   },
@@ -1304,12 +1307,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 19,
   },
+  factTextMobile: { color: '#D7DDE7', fontSize: 14, lineHeight: 22 },
   legalNote: {
     color: discoveryColors.muted,
     fontFamily: discoveryFonts.body,
     fontSize: 10,
     lineHeight: 16,
   },
+  legalNoteMobile: { color: '#C4CCDA', fontSize: 13, lineHeight: 20 },
   honestTradeScene: {
     alignItems: 'center',
   },
@@ -1320,6 +1325,7 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     textAlign: 'center',
   },
+  tradeLeadMobile: { color: '#D7DDE7', fontSize: 17, lineHeight: 26 },
   tradeWords: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1391,6 +1397,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 14,
   },
+  futurePillTextMobile: { fontSize: 13, lineHeight: 18 },
   futureQualifier: {
     color: discoveryColors.green,
     fontFamily: discoveryFonts.body,
@@ -1398,6 +1405,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: 18,
   },
+  futureQualifierMobile: { fontSize: 14, lineHeight: 21, fontWeight: '600' },
   fitList: {
     gap: 10,
   },
@@ -1426,6 +1434,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
   },
+  fitTextMobile: { color: '#D7DDE7', fontSize: 17, lineHeight: 25 },
   portraitMosaic: {
     flex: 1,
     width: '100%',
@@ -1468,6 +1477,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
   },
+  questionNumberMobile: { fontSize: 12, lineHeight: 18 },
   questionText: {
     flex: 1,
     color: discoveryColors.text,
@@ -1496,6 +1506,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
   },
+  nextStepNumberMobile: { fontSize: 12, lineHeight: 18 },
   nextStepText: {
     flex: 1,
     color: discoveryColors.text,
@@ -1544,6 +1555,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.4,
     marginTop: -10,
   },
+  closeUrlMobile: { color: '#D7DDE7', fontSize: 15, lineHeight: 22 },
   finalButton: {
     minHeight: 52,
     paddingHorizontal: 24,

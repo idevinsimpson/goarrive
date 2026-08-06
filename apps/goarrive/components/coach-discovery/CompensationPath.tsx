@@ -10,22 +10,22 @@ export function CompensationPath({ isMobile }: { isMobile: boolean }) {
         {COMPENSATION_TIERS.map((tier, index) => (
           <View key={tier.range} style={[styles.card, index === 2 && styles.cardFeatured]}>
             <View style={styles.cardTop}>
-              <Text style={styles.tierLabel}>TIER {index + 1}</Text>
+              <Text style={[styles.tierLabel, isMobile && styles.tierLabelMobile]}>TIER {index + 1}</Text>
               <Text style={styles.range}>{tier.range}</Text>
             </View>
             <View style={styles.shareRow}>
               <Text style={styles.percent}>{tier.coachShare}%</Text>
-              <Text style={styles.shareLabel}>coach share</Text>
+              <Text style={[styles.shareLabel, isMobile && styles.shareLabelMobile]}>coach share</Text>
             </View>
             <View style={styles.bar}>
               <View style={[styles.barCoach, { width: `${tier.coachShare}%` }]} />
               <View style={[styles.barPlatform, { width: `${tier.goArriveShare}%` }]} />
             </View>
-            <Text style={styles.platformShare}>{tier.goArriveShare}% GoArrive</Text>
+            <Text style={[styles.platformShare, isMobile && styles.platformShareMobile]}>{tier.goArriveShare}% GoArrive</Text>
           </View>
         ))}
       </View>
-      <Text style={styles.qualifier}>{PROGRAM_TERMS_NOTE}</Text>
+      <Text style={[styles.qualifier, isMobile && styles.qualifierMobile]}>{PROGRAM_TERMS_NOTE}</Text>
     </View>
   );
 }
@@ -65,6 +65,10 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     fontWeight: '700',
   },
+  tierLabelMobile: {
+    fontSize: 12,
+    lineHeight: 17,
+  },
   range: {
     color: discoveryColors.text,
     fontFamily: discoveryFonts.heading,
@@ -88,6 +92,11 @@ const styles = StyleSheet.create({
     fontFamily: discoveryFonts.body,
     fontSize: 12,
   },
+  shareLabelMobile: {
+    color: '#D7DDE7',
+    fontSize: 14,
+    lineHeight: 20,
+  },
   bar: {
     height: 5,
     borderRadius: 3,
@@ -109,10 +118,20 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'right',
   },
+  platformShareMobile: {
+    color: '#C4CCDA',
+    fontSize: 12,
+    lineHeight: 18,
+  },
   qualifier: {
     color: discoveryColors.muted,
     fontFamily: discoveryFonts.body,
     fontSize: 11,
     lineHeight: 17,
+  },
+  qualifierMobile: {
+    color: '#C4CCDA',
+    fontSize: 13,
+    lineHeight: 20,
   },
 });

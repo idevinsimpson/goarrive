@@ -220,7 +220,9 @@ export default function DiscoveryExperience() {
 function sceneHeightMultiplier(scene: number, isMobile: boolean) {
   if (scene === 9) return isMobile ? 3.7 : 1.55;
   if (scene === 17) return isMobile ? 1.8 : 1.45;
-  if ([15, 18, 20, 21, 24].includes(scene)) return isMobile ? 1.45 : 1.15;
+  if ([20, 21].includes(scene)) return isMobile ? 1.65 : 1.15;
+  if (scene === 24) return isMobile ? 1.55 : 1.15;
+  if ([15, 18].includes(scene)) return isMobile ? 1.45 : 1.15;
   if ([10, 11, 14, 19].includes(scene)) return isMobile ? 1.25 : 1.05;
   return 1;
 }

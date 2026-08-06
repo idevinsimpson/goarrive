@@ -13,15 +13,15 @@ export function GrowthPathways({ isMobile }: { isMobile: boolean }) {
             <View key={path.title} style={[styles.card, isMobile && styles.cardMobile, planned && styles.plannedCard]}>
               <View style={styles.numberRow}>
                 <Text style={styles.number}>{String(index + 1).padStart(2, '0')}</Text>
-                <Text style={[styles.label, planned && styles.plannedLabel]}>{path.label}</Text>
+                <Text style={[styles.label, isMobile && styles.labelMobile, planned && styles.plannedLabel]}>{path.label}</Text>
               </View>
               <Text style={styles.title}>{path.title}</Text>
-              <Text style={styles.detail}>{path.detail}</Text>
+              <Text style={[styles.detail, isMobile && styles.detailMobile]}>{path.detail}</Text>
             </View>
           );
         })}
       </View>
-      <Text style={styles.note}>{PROGRAM_TERMS_NOTE}</Text>
+      <Text style={[styles.note, isMobile && styles.noteMobile]}>{PROGRAM_TERMS_NOTE}</Text>
     </View>
   );
 }
@@ -75,6 +75,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'right',
   },
+  labelMobile: {
+    fontSize: 10,
+    lineHeight: 15,
+  },
   plannedLabel: {
     color: discoveryColors.textSoft,
     maxWidth: 150,
@@ -94,10 +98,20 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginTop: 10,
   },
+  detailMobile: {
+    color: '#D7DDE7',
+    fontSize: 15,
+    lineHeight: 23,
+  },
   note: {
     color: discoveryColors.muted,
     fontFamily: discoveryFonts.body,
     fontSize: 11,
     lineHeight: 17,
+  },
+  noteMobile: {
+    color: '#C4CCDA',
+    fontSize: 13,
+    lineHeight: 20,
   },
 });
