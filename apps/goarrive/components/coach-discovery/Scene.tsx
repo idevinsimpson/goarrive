@@ -74,7 +74,7 @@ export function Scene({
         style,
       ]}
     >
-      <Animated.View style={[styles.reveal, animationStyle, contentStyle]}>{children}</Animated.View>
+      <Animated.View style={[styles.reveal, { minHeight }, animationStyle, contentStyle]}>{children}</Animated.View>
     </View>
   );
 }
@@ -156,7 +156,8 @@ const styles = StyleSheet.create({
     backgroundColor: discoveryColors.background,
   },
   reveal: {
-    flex: 1,
+    flexGrow: 1,
+    flexShrink: 0,
     width: '100%',
   },
   headingWrap: {

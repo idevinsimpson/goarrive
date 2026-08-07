@@ -22,6 +22,44 @@ test.describe('public coach discovery experience', () => {
     expect(overflow).toBeLessThanOrEqual(1);
   });
 
+  for (const viewport of [
+    { name: 'portrait', width: 390, height: 844 },
+    { name: 'landscape', width: 844, height: 390 },
+  ]) {
+    test(`keeps scene content inside its boundary in ${viewport.name}`, async ({ page }) => {
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await page.goto('/coach-discovery');
+      await expect(page.locator('[id^="coach-discovery-scene-"]')).toHaveCount(27);
+
+      await expect.poll(() => page.evaluate(() =>
+          [...document.querySelectorAll<HTMLElement>('[id^="coach-discovery-scene-"]')]
+            .filter((scene) => {
+              const sceneBottom = scene.getBoundingClientRect().bottom;
+              const semanticLeaves = [...scene.querySelectorAll<HTMLElement>('h1, h2, p, span, img, button')]
+                .filter((element) => getComputedStyle(element).position !== 'absolute');
+              return semanticLeaves.some((element) => element.getBoundingClientRect().bottom > sceneBottom + 3);
+            })
+            .map((scene) => scene.id),
+        )).toEqual([]);
+    });
+  }
+
+  test('shows all culture pillars and the real Audreya member story on mobile', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/coach-discovery');
+
+    await page.locator('#coach-discovery-scene-8').scrollIntoViewIfNeeded();
+    await expect(page.getByRole('heading', { name: 'Meet Audreya.' })).toBeVisible();
+    await expect(page.getByRole('img', { name: 'GoArrive member Audreya training from home' }).first()).toBeVisible();
+    await expect(page.getByText('G➲A gave her structure, coaching, and confidence from home.')).toBeVisible();
+
+    await page.locator('#coach-discovery-scene-18').scrollIntoViewIfNeeded();
+    for (const pillar of ['Show Up', 'People Over Ego', 'Create Moments', 'Traction']) {
+      await expect(page.getByText(pillar, { exact: true })).toBeVisible();
+    }
+  });
+
   test('supports keyboard scrolling in standard desktop mode', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto('/coach-discovery');

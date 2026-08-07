@@ -33,9 +33,9 @@ const HERO_IMAGE: DiscoveryImageAsset = {
   source: require('../../assets/coach-discovery/hero-online-coaching.webp'),
   webSource: '/coach-discovery/hero-online-coaching.webp',
 };
-const MAYA_IMAGE: DiscoveryImageAsset = {
-  source: require('../../assets/coach-discovery/member-maya-home.webp'),
-  webSource: '/coach-discovery/member-maya-home.webp',
+const AUDREYA_IMAGE: DiscoveryImageAsset = {
+  source: require('../../assets/coach-discovery/member-audreya.jpg'),
+  webSource: '/coach-discovery/member-audreya.jpg',
 };
 const REVIEW_IMAGE: DiscoveryImageAsset = {
   source: require('../../assets/coach-discovery/coach-review-session.webp'),
@@ -194,15 +194,16 @@ export function DiscoverySceneContent({ meta, isMobile, onNextStep }: DiscoveryS
       return (
         <View style={contentPad}>
           <View style={[styles.split, !isMobile && styles.splitWide, styles.centerVertically]}>
-            <PortraitCard image={MAYA_IMAGE} label="Generated member story portrait of Maya preparing to train at home" />
+            <PortraitCard image={AUDREYA_IMAGE} label="GoArrive member Audreya training from home" position="top" />
             <View style={styles.splitCopy}>
               {heading()}
               <View style={styles.mayaFacts}>
                 {[
-                  'Busy schedule.',
-                  'Tried several programs.',
-                  'Does not need more information.',
-                  'Needs structure that fits her life.',
+                  'Full-time work schedule.',
+                  'Active marathon runner.',
+                  'Struggled to fit strength training into her week.',
+                  'Didn’t feel confident performing movements on her own.',
+                  'G➲A gave her structure, coaching, and confidence from home.',
                 ].map((fact, index) => (
                   <View key={fact} style={styles.mayaFact}>
                     <Text style={styles.mayaFactNumber}>{String(index + 1).padStart(2, '0')}</Text>
@@ -210,7 +211,7 @@ export function DiscoverySceneContent({ meta, isMobile, onNextStep }: DiscoveryS
                   </View>
                 ))}
               </View>
-              <Text style={styles.disclosure}>Maya is a generated story character, not a real member testimonial.</Text>
+              <Text style={styles.disclosure}>A real GoArrive member experience.</Text>
             </View>
           </View>
         </View>
@@ -322,7 +323,7 @@ export function DiscoverySceneContent({ meta, isMobile, onNextStep }: DiscoveryS
           <SupportingText style={styles.sectionIntro}>The platform share supports an entire operating system—not one app.</SupportingText>
           <View style={[styles.infrastructureGrid, !isMobile && styles.infrastructureGridWide]}>
             {INFRASTRUCTURE_ITEMS.map((item, index) => (
-              <View key={item} style={styles.infrastructureItem}>
+              <View key={item} style={[styles.infrastructureItem, !isMobile && styles.infrastructureItemWide]}>
                 <View style={[styles.infrastructureIcon, { backgroundColor: index % 3 === 0 ? discoveryColors.blueSoft : 'rgba(255,255,255,0.04)' }]}>
                   <Text style={styles.infrastructureIconText}>{String(index + 1).padStart(2, '0')}</Text>
                 </View>
@@ -375,7 +376,7 @@ export function DiscoverySceneContent({ meta, isMobile, onNextStep }: DiscoveryS
           {heading()}
           <View style={[styles.cultureGrid, !isMobile && styles.cultureGridWide]}>
             {CULTURE_PILLARS.map((pillar, index) => (
-              <View key={pillar.name} style={styles.cultureCard}>
+              <View key={pillar.name} style={[styles.cultureCard, !isMobile && styles.cultureCardWide]}>
                 <Text style={styles.cultureNumber}>{String(index + 1).padStart(2, '0')}</Text>
                 <Text style={styles.cultureName}>{pillar.name}</Text>
                 <Text style={styles.cultureDefinition}>{pillar.definition}</Text>
@@ -485,7 +486,7 @@ export function DiscoverySceneContent({ meta, isMobile, onNextStep }: DiscoveryS
               <MosaicImage image={HERO_IMAGE} label="Online coach" />
               <MosaicImage image={REVIEW_IMAGE} label="Coach reviewing a session" />
               <MosaicImage image={FUTURE_IMAGE} label="Coach balancing work and life" />
-              <MosaicImage image={MAYA_IMAGE} label="Member preparing to train" />
+              <MosaicImage image={AUDREYA_IMAGE} label="GoArrive member Audreya training from home" />
             </View>
           </View>
         </View>
@@ -554,10 +555,20 @@ function ImageScene({ image, label, children, eager = false }: { image: Discover
   );
 }
 
-function PortraitCard({ image, label, position = 'center' }: { image: DiscoveryImageAsset; label: string; position?: 'center' | 'bottom' }) {
+function PortraitCard({ image, label, position = 'center' }: { image: DiscoveryImageAsset; label: string; position?: 'top' | 'center' | 'bottom' }) {
   return (
     <View style={styles.portraitCard}>
-      <AccessibleImage source={image.source} webSource={image.webSource} resizeMode="cover" label={label} style={[styles.portraitImage, position === 'bottom' && ({ objectPosition: 'center bottom' } as any)]} />
+      <AccessibleImage
+        source={image.source}
+        webSource={image.webSource}
+        resizeMode="cover"
+        label={label}
+        style={[
+          styles.portraitImage,
+          position === 'top' && ({ objectPosition: 'center top' } as any),
+          position === 'bottom' && ({ objectPosition: 'center bottom' } as any),
+        ]}
+      />
       <View style={styles.portraitOverlay} />
     </View>
   );
@@ -1075,8 +1086,6 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   infrastructureItem: {
-    flexBasis: '31%',
-    flexGrow: 1,
     minHeight: 94,
     padding: 14,
     borderRadius: 15,
@@ -1086,6 +1095,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  infrastructureItemWide: {
+    flexBasis: '31%',
+    flexGrow: 1,
   },
   infrastructureIcon: {
     width: 34,
@@ -1172,14 +1185,16 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   cultureCard: {
-    flexBasis: '46%',
-    flexGrow: 1,
     minHeight: 250,
     padding: 22,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: 'rgba(245,166,35,0.26)',
     backgroundColor: discoveryColors.surface,
+  },
+  cultureCardWide: {
+    flexBasis: '46%',
+    flexGrow: 1,
   },
   cultureNumber: {
     color: discoveryColors.gold,

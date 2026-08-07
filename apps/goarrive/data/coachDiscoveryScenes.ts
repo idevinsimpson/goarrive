@@ -26,7 +26,7 @@ export const COACH_DISCOVERY_SCENES: DiscoverySceneMeta[] = [
   { id: 'welcome', number: 5, act: 'answer', actLabel: 'The GoArrive answer', headline: 'Welcome to GoArrive.', accent: 'blue' },
   { id: 'remove-friction', number: 6, act: 'answer', actLabel: 'The GoArrive answer', headline: 'We do not\nreplace coaching.', accent: 'blue' },
   { id: 'more-human', number: 7, act: 'answer', actLabel: 'The GoArrive answer', headline: 'Technology should make\ncoaching more human.', accent: 'green' },
-  { id: 'meet-maya', number: 8, act: 'member', actLabel: 'The member experience', headline: 'Meet Maya.', accent: 'green' },
+  { id: 'meet-audreya', number: 8, act: 'member', actLabel: 'The member experience', headline: 'Meet Audreya.', accent: 'green' },
   { id: 'member-journey', number: 9, act: 'member', actLabel: 'The member experience', headline: 'From overwhelmed\nto supported.', accent: 'green' },
   { id: 'tailored-plan', number: 10, act: 'member', actLabel: 'The member experience', headline: 'A plan built\naround her life.', accent: 'blue' },
   { id: 'workout-player', number: 11, act: 'member', actLabel: 'The member experience', headline: 'The workout carries\nthe coach with it.', accent: 'blue' },
