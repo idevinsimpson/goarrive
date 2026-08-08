@@ -88,8 +88,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.sendMemberInvite = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.listPublicCoaches = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = void 0;
-exports.pollMovementVariationJobs = exports.dismissMovementVariation = exports.finalizeMovementVariation = exports.getMovementVariationStatus = exports.startMovementVariation = exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.submitGuestReflection = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.onCoachFeedbackStatusChanged = exports.onCoachFeedbackCreated = exports.sendWeeklyDigest = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.batchGenerateVoice = exports.onMemberCreated = exports.onCoachCreated = exports.getWorkoutMusic = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = void 0;
+exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.sendMemberInvite = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.listPublicCoaches = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = exports.getSessionWorkout = exports.playbookBookingIcs = exports.bookViaBookingToken = exports.resolvePlaybookBookingToken = exports.revokePlaybookBookingLink = exports.createPlaybookBookingLink = exports.cleanupExpiredBookingRequests = exports.bookPlaybookSession = void 0;
+exports.generateEquipmentImage = exports.submitGuestReflection = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.onCoachFeedbackStatusChanged = exports.onCoachFeedbackCreated = exports.sendWeeklyDigest = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.batchGenerateVoice = exports.onMemberCreated = exports.onCoachCreated = exports.getWorkoutMusic = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = void 0;
+exports.pollMovementVariationJobs = exports.dismissMovementVariation = exports.finalizeMovementVariation = exports.getMovementVariationStatus = exports.startMovementVariation = exports.listEquipmentImages = exports.saveEquipmentImageChoice = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -101,6 +102,21 @@ const googleapis_1 = require("googleapis");
 const zoom_1 = require("./zoom");
 const zoomRtms_1 = require("./zoomRtms");
 const ws_1 = __importDefault(require("ws"));
+const playbookScheduling_1 = require("./playbookScheduling");
+// Playbook scheduling (Phase 3a): transactional booking with the
+// member-level double-booking guard + per-playbook weekly cap.
+var playbookScheduling_2 = require("./playbookScheduling");
+Object.defineProperty(exports, "bookPlaybookSession", { enumerable: true, get: function () { return playbookScheduling_2.bookPlaybookSession; } });
+Object.defineProperty(exports, "cleanupExpiredBookingRequests", { enumerable: true, get: function () { return playbookScheduling_2.cleanupExpiredBookingRequests; } });
+// Playbook booking links (Phase 3b): coach availability windows + public
+// Calendly-style token page + guest-by-email bookings.
+var playbookBooking_1 = require("./playbookBooking");
+Object.defineProperty(exports, "createPlaybookBookingLink", { enumerable: true, get: function () { return playbookBooking_1.createPlaybookBookingLink; } });
+Object.defineProperty(exports, "revokePlaybookBookingLink", { enumerable: true, get: function () { return playbookBooking_1.revokePlaybookBookingLink; } });
+Object.defineProperty(exports, "resolvePlaybookBookingToken", { enumerable: true, get: function () { return playbookBooking_1.resolvePlaybookBookingToken; } });
+Object.defineProperty(exports, "bookViaBookingToken", { enumerable: true, get: function () { return playbookBooking_1.bookViaBookingToken; } });
+Object.defineProperty(exports, "playbookBookingIcs", { enumerable: true, get: function () { return playbookBooking_1.playbookBookingIcs; } });
+Object.defineProperty(exports, "getSessionWorkout", { enumerable: true, get: function () { return playbookBooking_1.getSessionWorkout; } });
 const tasks_1 = require("@google-cloud/tasks");
 const workoutPlayerSanitizer_1 = require("./workoutPlayerSanitizer");
 // ── Slack Bot (ME-011, ME-012) ────────────────────────────────────────────────
@@ -265,6 +281,7 @@ exports.listPublicCoaches = (0, https_1.onCall)({ invoker: 'public' }, async () 
         .map((d) => ({
         uid: d.id,
         displayName: (d.data().displayName || d.data().name || ''),
+        funnelPhotoUrl: (d.data().funnelPhotoUrl || ''),
     }))
         .filter((c) => c.displayName.trim().length > 0);
     return { coaches };
@@ -1820,6 +1837,10 @@ exports.claimMemberAccount = (0, https_1.onCall)({ region: 'us-central1' }, asyn
     console.log('[claimMemberAccount] Member claimed:', callerUid, memberId);
     return { success: true };
 });
+// sendMemberInvite: an earlier duplicate declaration (added in a parallel
+// branch the same day) lived here and broke `tsc` for the whole functions
+// package. Removed in favor of the fuller implementation below, which is
+// what module evaluation order would have exported anyway.
 /**
  * sendMemberInvite – Coach-initiated: ensure a Firebase Auth account exists
  * for a coach-created member and return a password-reset / first-time-setup
@@ -1945,6 +1966,32 @@ async function writeSessionEvent(event) {
 // ─── Helper: Write audit log entry ───────────────────────────────────────────
 async function writeAuditLog(entry) {
     await db.collection('scheduling_audit_log').add(Object.assign(Object.assign({}, entry), { createdAt: firestore_2.FieldValue.serverTimestamp() }));
+}
+/**
+ * Playbook self-service cancel/reschedule reuses the skip auto-approval
+ * window: when the coach has configured autoApproveSkipLeadDays and the
+ * session is closer than that, the member must submit a skip request instead
+ * of acting directly. No lead-days setting = no gate (matches skip policy).
+ */
+async function assertWithinSkipAutoApprovalWindow(instance, verb) {
+    try {
+        const coachSnap = await db.collection('coaches').doc(instance.coachId).get();
+        const autoLeadDays = coachSnap.exists ? coachSnap.data().autoApproveSkipLeadDays : undefined;
+        if (typeof autoLeadDays !== 'number' || autoLeadDays <= 0)
+            return;
+        const [year, month, day] = instance.scheduledDate.split('-').map(Number);
+        const [h, m] = (instance.scheduledStartTime || '00:00').split(':').map(Number);
+        const sessionTime = new Date(year, month - 1, day, h, m);
+        const hoursUntil = (sessionTime.getTime() - Date.now()) / (1000 * 60 * 60);
+        if (hoursUntil < autoLeadDays * 24) {
+            throw new https_1.HttpsError('failed-precondition', `This session is too close to ${verb} directly — please send your coach a skip request instead.`);
+        }
+    }
+    catch (err) {
+        if (err instanceof https_1.HttpsError)
+            throw err;
+        console.warn(`[assertWithinSkipAutoApprovalWindow] Policy check failed open: ${err.message}`);
+    }
 }
 // ─── 13. manageZoomRoom — Add/update/deactivate Zoom room resources ─────────
 exports.manageZoomRoom = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
@@ -2741,6 +2788,39 @@ exports.generateUpcomingInstances = (0, scheduler_1.onSchedule)({ schedule: '0 2
     console.log(`[generateUpcomingInstances] Generated ${totalGenerated} new instances for ${slotsSnap.size} active slots`);
 });
 // ─── 17. allocateSessionInstance — Assign a Zoom room to a session instance ──
+// Coach Zoom identity is hardcoded to the coach's login email (goa.fit
+// workspace account) — coaches no longer add/remove their own Zoom account.
+// If the coach has no personal zoom_room yet, provision one from their auth
+// email so allocation keeps working without the removed Settings UI.
+async function ensurePersonalZoomRoom(coachId) {
+    let email;
+    try {
+        email = (await admin.auth().getUser(coachId)).email;
+    }
+    catch (_a) {
+        return null;
+    }
+    if (!email)
+        return null;
+    const roomRef = await db.collection('zoom_rooms').add({
+        coachId,
+        label: 'My Zoom',
+        zoomAccountEmail: email,
+        isPersonal: true,
+        status: 'active',
+        maxConcurrentMeetings: 1,
+        autoProvisioned: true,
+        createdAt: firestore_2.FieldValue.serverTimestamp(),
+        updatedAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    await writeAuditLog({
+        coachId,
+        action: 'zoom_room_auto_provisioned',
+        zoomRoomId: roomRef.id,
+        details: `Personal Zoom room auto-provisioned from coach login email ${email}`,
+    });
+    return roomRef.get();
+}
 exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber], invoker: 'public' }, async (request) => {
     var _a, _b;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
@@ -2817,9 +2897,15 @@ exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1', s
         }
         candidateRooms = sortLru(candidateRooms);
     }
+    // Personal room missing → provision one from the coach's login email
+    if (candidateRooms.length === 0 && roomSource !== 'shared_pool') {
+        const autoRoom = await ensurePersonalZoomRoom(callerUid);
+        if (autoRoom && autoRoom.exists)
+            candidateRooms = [autoRoom];
+    }
     if (candidateRooms.length === 0) {
         const reason = roomSource === 'coach_personal'
-            ? 'No personal Zoom room configured. Add your Zoom in Settings.'
+            ? 'No personal Zoom room could be provisioned for this coach.'
             : roomSource === 'shared_pool'
                 ? 'No shared pool rooms available.'
                 : 'No active Zoom rooms available.';
@@ -2896,6 +2982,7 @@ exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1', s
             duration: instance.durationMinutes,
             timezone: 'America/New_York',
             hostEmail: allocatedRoom.zoomAccountEmail,
+            autoRecording: instance.recordingEnabled === false ? 'none' : 'cloud',
         });
     }
     catch (err) {
@@ -2931,11 +3018,9 @@ exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1', s
         allocationAttempts: (instance.allocationAttempts || 0) + 1,
         updatedAt: firestore_2.FieldValue.serverTimestamp(),
     });
-    // Advance the round-robin cursor: every successful allocation stamps lastUsedAt
-    await db.collection('zoom_rooms').doc(allocatedRoom.id).update({
-        lastUsedAt: firestore_2.FieldValue.serverTimestamp(),
-        updatedAt: firestore_2.FieldValue.serverTimestamp(),
-    });
+    // Advance the round-robin cursor: every successful allocation stamps
+    // lastUsedAt; pool rooms also keep lastAllocatedAt for older readers.
+    await db.collection('zoom_rooms').doc(allocatedRoom.id).update(Object.assign(Object.assign({ lastUsedAt: firestore_2.FieldValue.serverTimestamp() }, (allocatedRoom.poolId ? { lastAllocatedAt: firestore_2.FieldValue.serverTimestamp() } : {})), { updatedAt: firestore_2.FieldValue.serverTimestamp() }));
     // Write session event for traceability
     await writeSessionEvent({
         occurrenceId: instanceId,
@@ -2994,10 +3079,20 @@ exports.allocateAllPendingInstances = (0, https_1.onCall)({ region: 'us-central1
         return { success: true, allocated: 0, failed: 0, message: 'No pending instances to allocate' };
     }
     // Get all active Zoom rooms for this coach
-    const roomsSnap = await db.collection('zoom_rooms')
+    let roomsSnap = await db.collection('zoom_rooms')
         .where('coachId', '==', callerUid)
         .where('status', '==', 'active')
         .get();
+    // No rooms → provision a personal room from the coach's login email
+    if (roomsSnap.empty) {
+        const autoRoom = await ensurePersonalZoomRoom(callerUid);
+        if (autoRoom && autoRoom.exists) {
+            roomsSnap = await db.collection('zoom_rooms')
+                .where('coachId', '==', callerUid)
+                .where('status', '==', 'active')
+                .get();
+        }
+    }
     if (roomsSnap.empty) {
         return { success: false, allocated: 0, failed: pendingSnap.size, message: 'No active Zoom rooms available' };
     }
@@ -3040,6 +3135,7 @@ exports.allocateAllPendingInstances = (0, https_1.onCall)({ region: 'us-central1
                         duration: instance.durationMinutes,
                         timezone: 'America/New_York',
                         hostEmail: room.zoomAccountEmail,
+                        autoRecording: instance.recordingEnabled === false ? 'none' : 'cloud',
                     });
                     await db.collection('session_instances').doc(instance.id).update({
                         status: 'allocated',
@@ -3123,6 +3219,15 @@ exports.rescheduleInstance = (0, https_1.onCall)({ region: 'us-central1', secret
     if (!['scheduled', 'allocated', 'allocation_failed'].includes(instance.status)) {
         throw new https_1.HttpsError('failed-precondition', `Cannot reschedule instance in status "${instance.status}"`);
     }
+    // Playbook sessions: member self-reschedule reuses the skip auto-approval
+    // window — inside the window the member must go through a skip request.
+    if (instance.playbookId && rescheduleSource === 'member_action') {
+        await assertWithinSkipAutoApprovalWindow(instance, 'reschedule');
+    }
+    // Playbook sessions hold a member_time_reservations doc. Move it first —
+    // transactionally re-runs the overlap guard, throws already-exists on
+    // conflict — so a failed reschedule never tears down the Zoom meeting.
+    const movedReservation = await (0, playbookScheduling_1.moveReservationForInstance)(instanceId, instance, newDate, newStartTime);
     const originalDate = instance.scheduledDate;
     const originalTime = instance.scheduledStartTime;
     const existingMeetingId = instance.zoomMeetingId;
@@ -3151,23 +3256,11 @@ exports.rescheduleInstance = (0, https_1.onCall)({ region: 'us-central1', secret
     const endH = Math.floor(endMinutes / 60) % 24;
     const endM = endMinutes % 60;
     const newEndTime = `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
-    await instanceRef.update({
-        scheduledDate: newDate,
-        scheduledStartTime: newStartTime,
-        scheduledEndTime: newEndTime,
-        status: 'scheduled', // Reset to scheduled so it can be re-allocated
-        zoomRoomId: firestore_2.FieldValue.delete(),
-        zoomRoomLabel: firestore_2.FieldValue.delete(),
-        zoomMeetingId: firestore_2.FieldValue.delete(),
-        zoomMeetingUuid: firestore_2.FieldValue.delete(),
-        zoomJoinUrl: firestore_2.FieldValue.delete(),
-        zoomStartUrl: firestore_2.FieldValue.delete(),
-        zoomMeetingPassword: firestore_2.FieldValue.delete(),
-        zoomProviderMode: firestore_2.FieldValue.delete(),
-        allocatedAt: firestore_2.FieldValue.delete(),
-        rescheduledFrom: `${originalDate} ${originalTime}`,
-        updatedAt: firestore_2.FieldValue.serverTimestamp(),
-    });
+    await instanceRef.update(Object.assign(Object.assign({ scheduledDate: newDate, scheduledStartTime: newStartTime, scheduledEndTime: newEndTime, status: 'scheduled', zoomRoomId: firestore_2.FieldValue.delete(), zoomRoomLabel: firestore_2.FieldValue.delete(), zoomMeetingId: firestore_2.FieldValue.delete(), zoomMeetingUuid: firestore_2.FieldValue.delete(), zoomJoinUrl: firestore_2.FieldValue.delete(), zoomStartUrl: firestore_2.FieldValue.delete(), zoomMeetingPassword: firestore_2.FieldValue.delete(), zoomProviderMode: firestore_2.FieldValue.delete(), allocatedAt: firestore_2.FieldValue.delete(), rescheduledFrom: `${originalDate} ${originalTime}` }, (movedReservation ? {
+        reservationId: movedReservation.reservationId,
+        startUtc: firestore_2.Timestamp.fromDate(movedReservation.startUtc),
+        endUtc: firestore_2.Timestamp.fromDate(movedReservation.endUtc),
+    } : {})), { updatedAt: firestore_2.FieldValue.serverTimestamp() }));
     await writeSessionEvent({
         occurrenceId: instanceId,
         eventType: 'session_rescheduled',
@@ -3211,6 +3304,11 @@ exports.cancelInstance = (0, https_1.onCall)({ region: 'us-central1', secrets: [
         throw new https_1.HttpsError('permission-denied', 'You can only cancel your own sessions');
     }
     const cancelSource = (instance.memberId === callerUid) ? 'member_action' : 'coach_action';
+    // Playbook sessions: member self-cancel reuses the skip auto-approval
+    // window — inside the window the member must go through a skip request.
+    if (instance.playbookId && cancelSource === 'member_action') {
+        await assertWithinSkipAutoApprovalWindow(instance, 'cancel');
+    }
     // Delete existing Zoom meeting if one was allocated
     const cancelMeetingId = instance.zoomMeetingId;
     if (cancelMeetingId) {
@@ -3235,6 +3333,8 @@ exports.cancelInstance = (0, https_1.onCall)({ region: 'us-central1', secrets: [
         status: 'cancelled',
         updatedAt: firestore_2.FieldValue.serverTimestamp(),
     });
+    // Playbook sessions: free the member's time window for rebooking
+    await (0, playbookScheduling_1.releaseReservationForInstance)(instance);
     await writeSessionEvent({
         occurrenceId: instanceId,
         eventType: 'session_cancelled',
@@ -5534,6 +5634,8 @@ exports.requestSkipInstance = (0, https_1.onCall)({ region: 'us-central1', invok
             skipApprovedAt: firestore_2.FieldValue.serverTimestamp(),
             updatedAt: firestore_2.FieldValue.serverTimestamp(),
         });
+        // Playbook sessions: skipped = time window freed for rebooking
+        await (0, playbookScheduling_1.releaseReservationForInstance)(inst);
         await writeAuditLog({
             coachId: inst.coachId,
             action: 'skip_auto_approved',
@@ -8138,23 +8240,62 @@ exports.generateVoice = (0, https_1.onCall)({
     return { url: cdnUrl, path, writeback, writebackError, provider: selectedProvider };
 });
 // ─── getWorkoutMusic — AI background music for workout playback (Mubert v3) ──
-// Auth-required callable. Mints per-user Mubert customer credentials via
-// service/customers (cached in Firestore), generates a text-to-music track for
-// the requested style+duration, and caches the MP3 in Firebase Storage at
-// music_cache/<style>/<duration>.mp3. Trial plan allows only 100 tracks total,
-// so an existing style+duration combo is NEVER regenerated — Storage is the
-// source of truth, and a Firestore lock (musicCache/{style_duration}) prevents
-// two concurrent callers from both spending a generation on the same combo.
+// Auth-required callable with three modes:
+//   • Track mode  { style, trackIndex }: one fixed-length pooled track cached
+//     at music_cache/<style>/track_<index>.mp3. The player chains pool tracks
+//     into a no-repeat playlist; on generation failure (quota/outage) this
+//     falls back to an already-cached track from the same pool.
+//   • List mode   { style, list: true }: returns which pool indices already
+//     exist in Storage (no quota cost) so the player can plan its queue.
+//   • Legacy mode { style, duration }: the original single looped file at
+//     music_cache/<style>/<durationSecs>.mp3 — kept for old deployed bundles.
+// Mints per-user Mubert customer credentials via service/customers (cached in
+// Firestore). Trial plan allows only 100 generated tracks total, so an
+// existing cache entry is NEVER regenerated — Storage is the source of truth,
+// and a Firestore lock (musicCache/{lockId}) prevents two concurrent callers
+// from both spending a generation on the same entry.
 // ─────────────────────────────────────────────────────────────────────────────
 const MUBERT_API_BASE = 'https://music-api.mubert.com/api/v3';
+// KEEP IN SYNC (manual): apps/goarrive/constants/musicStyles.ts — keys must
+// match exactly; there is no shared module between the app and functions.
 const MUSIC_STYLES = {
+    // ── original 6 — keys must not change (cached files depend on them) ──
     workout: { prompt: 'High energy gym workout music, driving beat, motivating and powerful', intensity: 'high' },
     edm: { prompt: 'Energetic EDM electronic dance music, festival drops, pumping bass', intensity: 'high' },
     hiphop: { prompt: 'Upbeat hip-hop beat, confident groove, punchy drums', intensity: 'medium' },
     chill: { prompt: 'Chill relaxed lo-fi beats, calm steady rhythm, smooth and warm', intensity: 'low' },
     rock: { prompt: 'Energetic rock music, electric guitars, driving drums, anthemic', intensity: 'high' },
     focus: { prompt: 'Ambient focus music, minimal steady pulse, deep concentration', intensity: 'low' },
+    // ── expanded styles ──
+    pop: { prompt: 'Upbeat modern pop, catchy hooks, bright synths, feel-good energy', intensity: 'medium' },
+    house: { prompt: 'Groovy house music, four-on-the-floor kick, warm bassline, uplifting piano stabs', intensity: 'high' },
+    techno: { prompt: 'Driving techno, hypnotic pulsing synths, relentless kick drum, dark warehouse energy', intensity: 'high' },
+    trap: { prompt: 'Hard-hitting trap beat, booming 808 bass, crisp hi-hat rolls, aggressive swagger', intensity: 'high' },
+    rnb: { prompt: 'Smooth R&B groove, silky chords, laid-back beat, soulful and confident', intensity: 'low' },
+    latin: { prompt: 'High energy Latin dance music, reggaeton rhythm, tropical percussion, fiesta vibes', intensity: 'high' },
+    country: { prompt: 'Upbeat country rock, acoustic and electric guitars, stomping beat, feel-good americana', intensity: 'medium' },
+    metal: { prompt: 'Heavy metal workout music, distorted guitar riffs, double-kick drums, intense and powerful', intensity: 'high' },
+    funk: { prompt: 'Funky groove, slap bass, tight rhythm guitar, brass hits, irresistible bounce', intensity: 'medium' },
+    disco: { prompt: 'Classic disco energy, four-on-the-floor groove, strings and funky bass, dancefloor euphoria', intensity: 'medium' },
+    afrobeats: { prompt: 'Afrobeats rhythm, bouncy percussion, warm melodic hooks, sunny high-energy groove', intensity: 'medium' },
+    synthwave: { prompt: 'Retro synthwave, pulsing 80s synth bass, neon arpeggios, cinematic drive', intensity: 'medium' },
 };
+// Pooled tracks are fixed-length so one cached file serves any workout length;
+// the player strings pool tracks together and never repeats within the pool.
+const TRACK_DURATION_SECS = 180;
+const MAX_TRACKS_PER_STYLE = 24;
+// Deterministic per-index flavor appended to the style prompt so pooled
+// generations diverge even beyond Mubert's inherent generative variety.
+const TRACK_VARIATIONS = [
+    '',
+    'with a fresh melodic hook',
+    'darker and grittier',
+    'bright and euphoric',
+    'stripped back and rhythmic',
+    'with a big anthemic chorus feel',
+    'hypnotic and steady',
+    'playful and bouncy',
+];
 exports.getWorkoutMusic = (0, https_1.onCall)({
     region: 'us-central1',
     secrets: [mubertCompanyId, mubertLicenseToken],
@@ -8166,26 +8307,80 @@ exports.getWorkoutMusic = (0, https_1.onCall)({
         throw new https_1.HttpsError('unauthenticated', 'Sign in required');
     }
     const uid = request.auth.uid;
-    const { style, duration } = request.data;
+    const { style, duration, trackIndex, list } = request.data;
     const styleKey = String(style || '').toLowerCase();
     const styleConfig = MUSIC_STYLES[styleKey];
     if (!styleConfig) {
         throw new https_1.HttpsError('invalid-argument', `style must be one of: ${Object.keys(MUSIC_STYLES).join(', ')}`);
     }
-    // Bucket duration to whole minutes (60s–600s) so near-identical requests
-    // share one cached track instead of burning trial quota per second value.
-    const requestedSecs = typeof duration === 'number' && isFinite(duration) ? duration : 300;
-    const durationSecs = Math.min(600, Math.max(60, Math.round(requestedSecs / 60) * 60));
-    const path = `music_cache/${styleKey}/${durationSecs}.mp3`;
     const bucket = admin.storage().bucket();
+    const publicUrl = (p) => `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(p)}?alt=media`;
+    const listReadyIndices = async () => {
+        const [files] = await bucket.getFiles({ prefix: `music_cache/${styleKey}/track_` });
+        return files
+            .map((f) => { var _a; return (_a = /track_(\d+)\.mp3$/.exec(f.name)) === null || _a === void 0 ? void 0 : _a[1]; })
+            .filter((m) => !!m)
+            .map(Number)
+            .sort((a, b) => a - b);
+    };
+    // ── List mode: report which pool indices are already cached (no quota) ──
+    if (list === true) {
+        return {
+            style: styleKey,
+            readyIndices: await listReadyIndices(),
+            maxTracks: MAX_TRACKS_PER_STYLE,
+            trackDuration: TRACK_DURATION_SECS,
+        };
+    }
+    // Resolve the requested cache entry: pooled track vs legacy looped file.
+    const isTrackMode = trackIndex !== undefined && trackIndex !== null;
+    let path;
+    let lockId;
+    let genDurationSecs;
+    let prompt;
+    if (isTrackMode) {
+        if (!Number.isInteger(trackIndex) || trackIndex < 0 || trackIndex >= MAX_TRACKS_PER_STYLE) {
+            throw new https_1.HttpsError('invalid-argument', 'music:bad_track_index', {
+                reason: `trackIndex must be an integer in [0, ${MAX_TRACKS_PER_STYLE - 1}]`,
+            });
+        }
+        const idx = trackIndex;
+        path = `music_cache/${styleKey}/track_${idx}.mp3`;
+        lockId = `${styleKey}_track_${idx}`;
+        genDurationSecs = TRACK_DURATION_SECS;
+        const variation = TRACK_VARIATIONS[idx % TRACK_VARIATIONS.length];
+        prompt = variation ? `${styleConfig.prompt}, ${variation}` : styleConfig.prompt;
+    }
+    else {
+        // Bucket duration to whole minutes (60s–600s) so near-identical requests
+        // share one cached track instead of burning trial quota per second value.
+        const requestedSecs = typeof duration === 'number' && isFinite(duration) ? duration : 300;
+        const durationSecs = Math.min(600, Math.max(60, Math.round(requestedSecs / 60) * 60));
+        path = `music_cache/${styleKey}/${durationSecs}.mp3`;
+        lockId = `${styleKey}_${durationSecs}`;
+        genDurationSecs = durationSecs;
+        prompt = styleConfig.prompt;
+    }
     const file = bucket.file(path);
-    const cdnUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media`;
-    // ── Layer 0: Storage cache hit — never regenerate an existing combo ────
+    const cdnUrl = publicUrl(path);
+    // Success payload for track mode; `trackId` is the app-level id the player
+    // uses for likes/dislikes ('<style>/<index>'), not Mubert's generation id.
+    const trackResponse = (p, idx, cached) => ({
+        url: publicUrl(p),
+        path: p,
+        cached,
+        style: styleKey,
+        trackIndex: idx,
+        trackId: `${styleKey}/${idx}`,
+    });
+    // ── Layer 0: Storage cache hit — never regenerate an existing entry ────
     try {
         const [exists] = await file.exists();
         if (exists) {
-            console.info('[MUSIC] getWorkoutMusic: cache hit', { path, styleKey, durationSecs });
-            return { url: cdnUrl, path, cached: true, style: styleKey, duration: durationSecs };
+            console.info('[MUSIC] getWorkoutMusic: cache hit', { path, styleKey });
+            return isTrackMode
+                ? trackResponse(path, trackIndex, true)
+                : { url: cdnUrl, path, cached: true, style: styleKey, duration: genDurationSecs };
         }
     }
     catch (err) {
@@ -8193,8 +8388,8 @@ exports.getWorkoutMusic = (0, https_1.onCall)({
             path, message: String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 200),
         });
     }
-    // ── Layer 1: generation lock — only one caller spends quota per combo ──
-    const lockRef = db.doc(`musicCache/${styleKey}_${durationSecs}`);
+    // ── Layer 1: generation lock — only one caller spends quota per entry ──
+    const lockRef = db.doc(`musicCache/${lockId}`);
     const LOCK_TTL_MS = 3 * 60 * 1000;
     const acquiredLock = await db.runTransaction(async (tx) => {
         const snap = await tx.get(lockRef);
@@ -8208,12 +8403,28 @@ exports.getWorkoutMusic = (0, https_1.onCall)({
         return true;
     });
     if (!acquiredLock) {
-        // Another caller is generating this combo — wait for the file to land.
+        // Another caller is generating this entry — wait for the file to land.
         for (let i = 0; i < 20; i++) {
             await new Promise((r) => setTimeout(r, 3000));
             const [exists] = await file.exists();
             if (exists) {
-                return { url: cdnUrl, path, cached: true, style: styleKey, duration: durationSecs };
+                return isTrackMode
+                    ? trackResponse(path, trackIndex, true)
+                    : { url: cdnUrl, path, cached: true, style: styleKey, duration: genDurationSecs };
+            }
+        }
+        // Track mode degrades to any cached pool track rather than erroring —
+        // deterministic pick so every listener maps the same request to the
+        // same substitute while the pool is still filling in.
+        if (isTrackMode) {
+            const readyIndices = await listReadyIndices().catch(() => []);
+            if (readyIndices.length > 0) {
+                const fallbackIndex = readyIndices[trackIndex % readyIndices.length];
+                const fallbackPath = `music_cache/${styleKey}/track_${fallbackIndex}.mp3`;
+                console.warn('[MUSIC] getWorkoutMusic: busy fallback', {
+                    styleKey, requested: trackIndex, served: fallbackIndex,
+                });
+                return Object.assign(Object.assign({}, trackResponse(fallbackPath, fallbackIndex, true)), { fallback: true });
             }
         }
         throw new https_1.HttpsError('unavailable', 'music:generation_in_progress', {
@@ -8295,8 +8506,8 @@ exports.getWorkoutMusic = (0, https_1.onCall)({
                 'access-token': accessToken,
             },
             body: JSON.stringify({
-                prompt: styleConfig.prompt,
-                duration: durationSecs,
+                prompt,
+                duration: genDurationSecs,
                 bitrate: 128,
                 mode: 'track',
                 intensity: styleConfig.intensity,
@@ -8306,7 +8517,7 @@ exports.getWorkoutMusic = (0, https_1.onCall)({
         if (!genResp.ok) {
             const errBody = (await genResp.text()).slice(0, 500);
             console.error('[MUSIC] getWorkoutMusic: generation FAILED', {
-                status: genResp.status, body: errBody, styleKey, durationSecs,
+                status: genResp.status, body: errBody, styleKey, path,
             });
             throw new https_1.HttpsError('internal', `music:generate:${genResp.status}`, {
                 layer: 'generate', status: genResp.status, body: errBody,
@@ -8333,7 +8544,7 @@ exports.getWorkoutMusic = (0, https_1.onCall)({
             }
         }
         if (!trackUrl) {
-            console.error('[MUSIC] getWorkoutMusic: generation timed out', { trackId, styleKey, durationSecs });
+            console.error('[MUSIC] getWorkoutMusic: generation timed out', { trackId, styleKey, path });
             throw new https_1.HttpsError('deadline-exceeded', 'music:generate:timeout', { trackId });
         }
         // ── Layer 4: download + Storage upload (cache forever) ──────────────
@@ -8346,21 +8557,45 @@ exports.getWorkoutMusic = (0, https_1.onCall)({
         }
         const audioBuffer = Buffer.from(await dlResp.arrayBuffer());
         await file.save(audioBuffer, { contentType: 'audio/mpeg' });
-        await lockRef.set({
-            status: 'ready', url: cdnUrl, path, style: styleKey, duration: durationSecs,
-            trackId: trackId || null, createdAt: Date.now(), uid,
-        }).catch(() => { });
+        // `trackId` on the lock doc is Mubert's generation id (historical name),
+        // unrelated to the app-level '<style>/<index>' id in track responses.
+        await lockRef.set(Object.assign(Object.assign({ status: 'ready', url: cdnUrl, path, style: styleKey, duration: genDurationSecs }, (isTrackMode ? { trackIndex } : {})), { trackId: trackId || null, createdAt: Date.now(), uid })).catch(() => { });
         console.info('[MUSIC] getWorkoutMusic: generated + cached', {
-            path, styleKey, durationSecs, bytes: audioBuffer.length, trackId,
+            path, styleKey, bytes: audioBuffer.length, trackId,
         });
-        return { url: cdnUrl, path, cached: false, style: styleKey, duration: durationSecs };
+        return isTrackMode
+            ? trackResponse(path, trackIndex, false)
+            : { url: cdnUrl, path, cached: false, style: styleKey, duration: genDurationSecs };
     }
     catch (err) {
         await releaseLock();
+        // Track mode degrades gracefully: if generation failed (Mubert trial
+        // quota spent, outage, timeout) but the style already has pooled tracks,
+        // serve one deterministically instead of failing — the player prefers a
+        // repeat over silence, and the same failing index maps to the same
+        // substitute for every listener (coach and member keep hearing the same
+        // sequence on a workout).
+        if (isTrackMode) {
+            try {
+                const readyIndices = await listReadyIndices();
+                if (readyIndices.length > 0) {
+                    const fallbackIndex = readyIndices[trackIndex % readyIndices.length];
+                    const fallbackPath = `music_cache/${styleKey}/track_${fallbackIndex}.mp3`;
+                    console.warn('[MUSIC] getWorkoutMusic: track fallback', {
+                        styleKey, requested: trackIndex, served: fallbackIndex,
+                        reason: String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 200),
+                    });
+                    return Object.assign(Object.assign({}, trackResponse(fallbackPath, fallbackIndex, true)), { fallback: true });
+                }
+            }
+            catch (_q) {
+                // fall through to the original error
+            }
+        }
         if (err instanceof https_1.HttpsError)
             throw err;
         const detail = String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 300);
-        console.error('[MUSIC] getWorkoutMusic: THREW', { styleKey, durationSecs, detail }, err);
+        console.error('[MUSIC] getWorkoutMusic: THREW', { styleKey, path, detail }, err);
         throw new https_1.HttpsError('internal', 'music:failed', { message: detail });
     }
 });
@@ -8618,8 +8853,12 @@ exports.getEmbeddedSessionJoinConfig = (0, https_1.onCall)({
     const instance = instanceSnap.data();
     const callerToken = (_c = request.auth) === null || _c === void 0 ? void 0 : _c.token;
     const callerIsAdmin = (callerToken === null || callerToken === void 0 ? void 0 : callerToken.role) === 'platformAdmin' || (callerToken === null || callerToken === void 0 ? void 0 : callerToken.admin) === true;
-    if (!callerIsAdmin && callerUid !== instance.memberId) {
-        throw new https_1.HttpsError('permission-denied', 'Only the assigned member can join this session');
+    // Coach live-view: the session's coach may also join as a participant to
+    // observe the member (still role 0 — host-start remains future work).
+    const callerIsCoach = callerUid === instance.coachId;
+    const callerIsMember = callerUid === instance.memberId;
+    if (!callerIsAdmin && !callerIsMember && !callerIsCoach) {
+        throw new https_1.HttpsError('permission-denied', 'Only the assigned member or coach can join this session');
     }
     const meetingNumber = instance.zoomMeetingId;
     if (!meetingNumber || !instance.zoomJoinUrl) {
@@ -8628,23 +8867,26 @@ exports.getEmbeddedSessionJoinConfig = (0, https_1.onCall)({
     if (instance.status !== 'allocated' && instance.status !== 'in_progress') {
         throw new https_1.HttpsError('failed-precondition', `Session is in status "${instance.status}", cannot join`);
     }
-    let userName = instance.memberName || '';
+    // Display identity: coach callers join under their own name so the member
+    // sees "Coach <name>" — everyone else keeps the member identity.
+    const identityUid = callerIsCoach && !callerIsMember
+        ? instance.coachId
+        : instance.memberId;
+    const identityFallback = callerIsCoach && !callerIsMember ? 'Coach' : 'Member';
+    let userName = callerIsCoach && !callerIsMember ? '' : instance.memberName || '';
     let userEmail = '';
     try {
-        const userDoc = await db
-            .collection('users')
-            .doc(instance.memberId)
-            .get();
+        const userDoc = await db.collection('users').doc(identityUid).get();
         const udata = userDoc.data() || {};
         if (!userName) {
             userName =
-                udata.displayName || udata.name || 'Member';
+                udata.displayName || udata.name || identityFallback;
         }
         userEmail = udata.email || '';
     }
     catch (_d) {
         if (!userName)
-            userName = 'Member';
+            userName = identityFallback;
     }
     const sdkKey = zoomMeetingSdkKey.value().trim();
     const sdkSecret = zoomMeetingSdkSecret.value().trim();
@@ -9213,6 +9455,26 @@ exports.saveEquipmentImageChoice = (0, https_1.onCall)({ region: 'us-central1', 
     const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media`;
     console.info('[saveEquipmentImageChoice] Saved default', { equipmentSlug, choiceIndex });
     return { imageUrl };
+});
+// ─── listEquipmentImages — platform-wide shared equipment image library ──────
+// Lists every equipment_images/{slug}/default.png in Storage. Shared across
+// ALL coaches by explicit product decision (cross-coach image reuse).
+exports.listEquipmentImages = (0, https_1.onCall)({ region: 'us-central1', timeoutSeconds: 60, invoker: 'public' }, async (request) => {
+    var _a;
+    if (!((_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid))
+        throw new https_1.HttpsError('unauthenticated', 'Authentication required');
+    const bucket = admin.storage().bucket();
+    const [files] = await bucket.getFiles({ prefix: 'equipment_images/' });
+    const images = files
+        .filter(f => f.name.endsWith('/default.png'))
+        .map(f => {
+        const slug = f.name.slice('equipment_images/'.length, -'/default.png'.length);
+        const label = slug.replace(/-and-/g, ' and ').replace(/-/g, ' ');
+        const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(f.name)}?alt=media`;
+        return { slug, label, imageUrl };
+    });
+    console.info('[listEquipmentImages] Listed', { count: images.length });
+    return { images };
 });
 // ─────────────────────────────────────────────────────────────────────────────
 // AI Movement Variation (Runway video-to-video)
