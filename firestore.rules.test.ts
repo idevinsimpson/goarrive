@@ -31,10 +31,14 @@ import {
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import {
+  collection,
   doc,
   getDoc,
+  getDocs,
+  query,
   setDoc,
   updateDoc,
+  where,
 } from 'firebase/firestore';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -116,6 +120,11 @@ beforeEach(async () => {
       uid: MEMBER_A_UID,
       coachId: COACH_A_UID,
       goals: ['Fat loss'],
+    });
+    await setDoc(doc(db, 'intakeSubmissions', 'leadNoCoach'), {
+      uid: 'leadNoCoach',
+      coachId: 'unassigned',
+      goals: ['Muscle gain'],
     });
 
     // Seed pending workout_log (no review fields yet)
@@ -300,6 +309,24 @@ describe('intakeSubmissions', () => {
         coachId: COACH_A_UID,
         goals: ['Fat loss'],
       })
+    );
+  });
+
+  test('platformAdmin can read a coach-assigned intake submission', async () => {
+    await assertSucceeds(getDoc(doc(asPlatformAdmin(), 'intakeSubmissions', MEMBER_A_UID)));
+  });
+
+  test('platformAdmin can read an unassigned intake submission', async () => {
+    await assertSucceeds(getDoc(doc(asPlatformAdmin(), 'intakeSubmissions', 'leadNoCoach')));
+  });
+
+  test('coach A is blocked from reading an unassigned intake submission', async () => {
+    await assertFails(getDoc(doc(asCoachA(), 'intakeSubmissions', 'leadNoCoach')));
+  });
+
+  test('platformAdmin can list unassigned intake submissions', async () => {
+    await assertSucceeds(
+      getDocs(query(collection(asPlatformAdmin(), 'intakeSubmissions'), where('coachId', '==', 'unassigned')))
     );
   });
 });
