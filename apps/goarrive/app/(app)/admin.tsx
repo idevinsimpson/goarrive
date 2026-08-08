@@ -38,6 +38,7 @@ import {
   arrayRemove,
 } from 'firebase/firestore';
 import AdminCommsTab from '../../components/AdminCommsTab';
+import AdminLeadsTab from '../../components/AdminLeadsTab';
 import { MODULE_KEYS, MODULE_LABELS, resolveModules, type ModuleKey } from '../../lib/useCoachModules';
 import { HIDEABLE_SETTINGS, HIDEABLE_SETTING_LABELS, type HideableSettingKey } from '../../lib/useHiddenSettings';
 import { db, functions } from '../../lib/firebase';
@@ -100,7 +101,7 @@ const copyToClipboard = async (text: string) => {
   }
 };
 
-type AdminTab = 'operations' | 'events' | 'recordings' | 'deadletter' | 'cts_billing' | 'analytics' | 'coaches' | 'comms';
+type AdminTab = 'operations' | 'events' | 'recordings' | 'deadletter' | 'cts_billing' | 'analytics' | 'coaches' | 'leads' | 'comms';
 
 export default function AdminScreen() {
   const insets = useSafeAreaInsets();
@@ -714,6 +715,7 @@ export default function AdminScreen() {
     { key: 'cts_billing', label: 'CTS Billing', icon: 'cash-outline' },
     { key: 'analytics', label: 'Analytics', icon: 'bar-chart-outline' },
     { key: 'coaches', label: 'Coaches', icon: 'people-outline' },
+    { key: 'leads', label: 'Leads', icon: 'person-add-outline' },
     { key: 'comms', label: 'Comms', icon: 'share' },
   ];
 
@@ -1839,6 +1841,8 @@ export default function AdminScreen() {
       {/* ══════════════════════════════════════════════════════════════════════
          TAB: COMMS (coach feedback + What's New release notes)
          ══════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'leads' && <AdminLeadsTab coaches={coaches} />}
+
       {activeTab === 'comms' && <AdminCommsTab />}
     </ScrollView>
   );

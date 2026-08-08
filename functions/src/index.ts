@@ -5032,7 +5032,7 @@ function openMediaWs(args: {
 // Provider health, reminder scheduler, dead-letter handling, event log, iCal feed
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { getProviderHealth, sendNotification, resetNotificationProviders, MessageType } from './notifications';
+import { getProviderHealth, sendNotification, resetNotificationProviders, notifyCoachOfNewMember, MessageType } from './notifications';
 import { createRemindersForInstance, processDueReminders, cancelRemindersForInstance } from './reminders';
 import { MockZoomProvider } from './zoom';
 
@@ -10143,63 +10143,8 @@ export const onMemberCreated = onDocumentCreated(
     const memberName = data.displayName || data.email || 'A new member';
 
     try {
-      // Look up coach's FCM tokens
-      const tokensSnap = await db
-        .collection('coaches')
-        .doc(coachId)
-        .collection('fcmTokens')
-        .get();
-
-      // Also check legacy root-level token field
-      const coachDoc = await db.collection('coaches').doc(coachId).get();
-      const legacyToken = coachDoc.exists
-        ? (coachDoc.data()?.fcmToken as string | undefined)
-        : undefined;
-
-      const tokens: string[] = [];
-      tokensSnap.forEach((doc) => {
-        const t = doc.data()?.token as string | undefined;
-        if (t) tokens.push(t);
-      });
-      if (legacyToken && !tokens.includes(legacyToken)) {
-        tokens.push(legacyToken);
-      }
-
-      if (tokens.length === 0) {
-        console.log(TAG, 'No FCM tokens for coach', coachId, '— skipping push');
-        return;
-      }
-
-      const title = 'New Member Signed Up';
-      const body = `${memberName} just joined your roster.`;
-
-      for (const token of tokens) {
-        try {
-          await messaging.send({
-            token,
-            notification: { title, body },
-            webpush: {
-              notification: { icon: '/icon-192.png', badge: '/icon-192.png' },
-            },
-          });
-        } catch (sendErr: any) {
-          // Clean up stale tokens
-          if (
-            sendErr?.code === 'messaging/registration-token-not-registered' ||
-            sendErr?.code === 'messaging/invalid-registration-token'
-          ) {
-            console.log(TAG, 'Removing stale token for coach', coachId);
-            const staleDoc = tokensSnap.docs.find(
-              (d) => d.data()?.token === token
-            );
-            if (staleDoc) await staleDoc.ref.delete();
-          } else {
-            console.warn(TAG, 'FCM send failed:', sendErr);
-          }
-        }
-      }
-
-      console.log(TAG, 'Notified coach', coachId, 'about new member', memberId);
+      // Shared with adminAssignLeadToCoach (leads.ts) — extracted helper.
+      await notifyCoachOfNewMember(coachId, memberName);
     } catch (err) {
       console.error(TAG, 'Error notifying coach:', err);
     }
@@ -10423,6 +10368,9 @@ export { shareMeta } from './shareMeta';
 
 // ─── Coach Comms — weekly digest, feedback ack, shipped/planned loop ─────────
 export { sendWeeklyDigest, onCoachFeedbackCreated, onCoachFeedbackStatusChanged } from './coachComms';
+
+// ─── Leads — unassigned intake alerts + admin assignment ─────────────────────
+export { onIntakeSubmissionCreated, adminAssignLeadToCoach } from './leads';
 
 type ShareVisibility = 'restricted' | 'anyone_with_link' | 'anyone_with_link_signin_required';
 const VALID_VISIBILITIES: ShareVisibility[] = ['restricted', 'anyone_with_link', 'anyone_with_link_signin_required'];
