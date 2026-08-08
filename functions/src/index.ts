@@ -2337,6 +2337,50 @@ export const activateCoachInvite = onCall(
 
 
 /**
+ * getMemberClaimStatus – Public lookup for the post-checkout claim gate.
+ *
+ * Firestore rules block unauthenticated member reads, so the public
+ * /checkout-success page needs this to decide between "create your account"
+ * and "sign in". Returns only existence, link state, and a masked email —
+ * never raw PII.
+ *
+ * Input: { memberId: string }
+ * Output: { exists: boolean, hasAccount: boolean, emailMasked: string }
+ */
+export const getMemberClaimStatus = onCall(
+  { invoker: 'public' },
+  async (request) => {
+    const { memberId } = request.data as { memberId?: string };
+    if (!memberId) throw new HttpsError('invalid-argument', 'memberId is required');
+
+    const memberSnap = await db.collection('members').doc(memberId).get();
+    if (!memberSnap.exists) {
+      return { exists: false, hasAccount: false, emailMasked: '' };
+    }
+
+    const member = memberSnap.data()!;
+    const email = ((member.email as string | undefined) ?? '').trim();
+    const maskPart = (s: string) => (s.length <= 1 ? s : `${s[0]}•••`);
+    let emailMasked = '';
+    const at = email.indexOf('@');
+    if (at > 0) {
+      const local = email.slice(0, at);
+      const domain = email.slice(at + 1);
+      const dot = domain.lastIndexOf('.');
+      emailMasked = dot > 0
+        ? `${maskPart(local)}@${maskPart(domain.slice(0, dot))}${domain.slice(dot)}`
+        : `${maskPart(local)}@${maskPart(domain)}`;
+    }
+
+    return {
+      exists: true,
+      hasAccount: member.hasAccount === true && !!member.uid,
+      emailMasked,
+    };
+  }
+);
+
+/**
  * claimMemberAccount – Links a newly created Firebase Auth account to an
  * existing member doc (created by a coach via quick-add).
  *
@@ -2380,11 +2424,13 @@ export const claimMemberAccount = onCall(
       );
     }
 
-    // Set custom claims: role = member
+    // Set custom claims: role = member.
+    // tenantId falls back to coachId — intake- and coach-created member docs
+    // may lack tenantId (the self-signup rules allowlist excludes it).
     await admin.auth().setCustomUserClaims(callerUid, {
       role: 'member',
       coachId: member.coachId,
-      tenantId: member.tenantId,
+      tenantId: member.tenantId ?? member.coachId,
       memberId: memberId,
     });
 
