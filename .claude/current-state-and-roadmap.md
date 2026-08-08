@@ -43,7 +43,7 @@ The platform has a strong operational backbone. The following systems are fully 
 
 **Workout Duration Estimate** (PR #219): The build-time duration estimate now correctly accounts for swap-sides split/duplicate mode, so coaches see accurate time predictions for workouts with bilateral movements.
 
-**AI Features**: Movement variations via Runway (build a variation from an existing movement, background-mode polling that persists outputs, motion remix from a still frame), AI workout music via Mubert (coach toggle + style, member playback with independent mute and coach volume setting), AI-generated spoken workout intro announcements, grab-equipment AI images, and follow-along video blocks.
+**AI Features**: Movement variations via Runway (build a variation from an existing movement, background-mode polling that persists outputs, motion remix from a still frame), AI workout music via Mubert (18 styles, no-repeat track pools that change songs through the workout with a deterministic per-workout order, in-player music panel with skip/like/dislike/volume/style-change, per-user `musicPrefs` + shared per-workout `workoutMusicFeedback` dislikes), AI-generated spoken workout intro announcements, grab-equipment AI images, and follow-along video blocks.
 
 **Zoom**: RTMS backend + Meeting SDK embedded join are integrated; the player joins via Client View for iOS Safari camera support. True round-robin room allocation (lastUsedAt LRU + bot-pool preference) is live (PR #205). The "My Zoom Account" coach UI has been removed — Zoom identity is hardcoded to the coach's login email (PR #201). See `docs/ZOOM_APPS_MAP.md` for the three-app layout.
 

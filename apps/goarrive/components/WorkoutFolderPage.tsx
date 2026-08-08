@@ -61,6 +61,7 @@ import { buildDefaultIntroScript } from '../utils/workoutIntroAnnouncement';
 import VideoCropModal, { CropValues } from './VideoCropModal';
 import { FB, FH } from '../lib/theme';
 import { CONTENT_BOTTOM_CLEARANCE } from '../lib/tabBarStyle';
+import { MUSIC_STYLE_OPTIONS, MUSIC_VOLUME_OPTIONS } from '../constants/musicStyles';
 import PosterThumb from './PosterThumb';
 import {
   filterMovements,
@@ -1453,6 +1454,9 @@ export default function WorkoutFolderPage({
         outroCropScale: original.outroCropScale ?? 1,
         outroCropTranslateX: original.outroCropTranslateX ?? 0,
         outroCropTranslateY: original.outroCropTranslateY ?? 0,
+        workoutMusicEnabled: original.workoutMusicEnabled ?? false,
+        workoutMusicStyle: original.workoutMusicStyle ?? 'workout',
+        workoutMusicVolume: original.workoutMusicVolume ?? 0.35,
         isArchived: false,
         isTemplate: original.isTemplate ?? false,
         // Never inherit sharing — duplicate starts private; coach can re-share if they want.
@@ -3978,7 +3982,8 @@ export default function WorkoutFolderPage({
         onRequestClose={() => setShowMusicModal(false)}
       >
         <View style={st.shareModalOverlay}>
-          <View style={st.shareModalCard}>
+          {/* 18 style chips can outgrow short screens — cap the card and scroll. */}
+          <View style={[st.shareModalCard, { maxHeight: '85%' }]}>
             <View style={st.shareModalHeader}>
               <Text style={st.shareModalTitle}>Workout Music</Text>
               <TouchableOpacity onPress={() => setShowMusicModal(false)}>
@@ -3986,11 +3991,12 @@ export default function WorkoutFolderPage({
               </TouchableOpacity>
             </View>
 
+            <ScrollView showsVerticalScrollIndicator={false}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
               <View style={{ flex: 1, paddingRight: 12 }}>
                 <Text style={st.shareModalOptionTitle}>Background music</Text>
                 <Text style={st.shareModalOptionDesc}>
-                  AI-generated music plays softly under coach audio during playback
+                  AI music changes songs through the workout — members can adjust it in the player
                 </Text>
               </View>
               <Switch
@@ -4050,6 +4056,7 @@ export default function WorkoutFolderPage({
                 );
               })}
             </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -4057,22 +4064,8 @@ export default function WorkoutFolderPage({
   );
 }
 
-// ── Workout Music constants ──────────────────────────────────────────────────
-const MUSIC_VOLUME_OPTIONS: Array<{ value: number; label: string }> = [
-  { value: 0.2, label: 'Quiet' },
-  { value: 0.35, label: 'Soft' },
-  { value: 0.55, label: 'Medium' },
-  { value: 0.8, label: 'Loud' },
-];
-
-const MUSIC_STYLE_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: 'workout', label: 'Workout' },
-  { value: 'edm', label: 'EDM' },
-  { value: 'hiphop', label: 'Hip-Hop' },
-  { value: 'chill', label: 'Chill' },
-  { value: 'rock', label: 'Rock' },
-  { value: 'focus', label: 'Focus' },
-];
+// Workout Music constants now live in ../constants/musicStyles (shared with
+// the player's music panel — 18 styles).
 
 // ── Share Settings constants & helpers ──────────────────────────────────────
 const VISIBILITY_OPTIONS: Array<{ value: ShareVisibility; label: string; description: string }> = [

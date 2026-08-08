@@ -388,3 +388,130 @@ describe('workout_logs — coach review field alignment', () => {
     );
   });
 });
+
+// ─── musicPrefs — per-user liked/disliked workout music tracks ────────────────
+
+describe('musicPrefs', () => {
+  test('member can write their own music prefs', async () => {
+    await assertSucceeds(
+      setDoc(
+        doc(asMemberA(), 'musicPrefs', MEMBER_A_UID),
+        { likedTracks: ['edm/3'], dislikedTracks: [] },
+        { merge: true }
+      )
+    );
+  });
+
+  test('coach can read and write their own music prefs', async () => {
+    await assertSucceeds(
+      setDoc(
+        doc(asCoachA(), 'musicPrefs', COACH_A_UID),
+        { likedTracks: [], dislikedTracks: ['metal/7'] },
+        { merge: true }
+      )
+    );
+    await assertSucceeds(getDoc(doc(asCoachA(), 'musicPrefs', COACH_A_UID)));
+  });
+
+  test('member B cannot write member A music prefs', async () => {
+    await assertFails(
+      setDoc(doc(asMemberB(), 'musicPrefs', MEMBER_A_UID), { dislikedTracks: ['edm/1'] }, { merge: true })
+    );
+  });
+
+  test('coach A cannot read member A music prefs', async () => {
+    await assertFails(getDoc(doc(asCoachA(), 'musicPrefs', MEMBER_A_UID)));
+  });
+
+  test('unauthenticated cannot read or write music prefs', async () => {
+    await assertFails(getDoc(doc(asUnauthenticated(), 'musicPrefs', MEMBER_A_UID)));
+    await assertFails(
+      setDoc(doc(asUnauthenticated(), 'musicPrefs', MEMBER_A_UID), { dislikedTracks: [] })
+    );
+  });
+
+  test('platformAdmin can read and write any music prefs', async () => {
+    await assertSucceeds(getDoc(doc(asPlatformAdmin(), 'musicPrefs', MEMBER_A_UID)));
+    await assertSucceeds(
+      setDoc(doc(asPlatformAdmin(), 'musicPrefs', MEMBER_A_UID), { likedTracks: ['pop/0'] }, { merge: true })
+    );
+  });
+});
+
+// ─── workoutMusicFeedback — shared per-workout track dislikes ─────────────────
+// Member access requires member custom claims (role + coachId), unlike the
+// bootstrap contexts above, because the rule uses isMemberOfCoach().
+
+function asClaimedMemberA() {
+  return testEnv
+    .authenticatedContext(MEMBER_A_UID, { role: 'member', coachId: COACH_A_UID })
+    .firestore();
+}
+
+function asClaimedMemberB() {
+  return testEnv
+    .authenticatedContext(MEMBER_B_UID, { role: 'member', coachId: COACH_B_UID })
+    .firestore();
+}
+
+describe('workoutMusicFeedback', () => {
+  const WORKOUT_A_ID = 'workoutA';
+
+  test('coach (bootstrap) can write shared dislikes for their own workout', async () => {
+    await assertSucceeds(
+      setDoc(
+        doc(asCoachA(), 'workoutMusicFeedback', COACH_A_UID, 'workouts', WORKOUT_A_ID),
+        { dislikedTracks: ['house/2'] },
+        { merge: true }
+      )
+    );
+  });
+
+  test('member of the coach can read and write shared dislikes', async () => {
+    await assertSucceeds(
+      setDoc(
+        doc(asClaimedMemberA(), 'workoutMusicFeedback', COACH_A_UID, 'workouts', WORKOUT_A_ID),
+        { dislikedTracks: ['edm/5'] },
+        { merge: true }
+      )
+    );
+    await assertSucceeds(
+      getDoc(doc(asClaimedMemberA(), 'workoutMusicFeedback', COACH_A_UID, 'workouts', WORKOUT_A_ID))
+    );
+  });
+
+  test('read of a not-yet-created feedback doc succeeds for tenant members', async () => {
+    await assertSucceeds(
+      getDoc(doc(asClaimedMemberA(), 'workoutMusicFeedback', COACH_A_UID, 'workouts', 'neverWritten'))
+    );
+  });
+
+  test('member of another coach cannot read or write', async () => {
+    await assertFails(
+      getDoc(doc(asClaimedMemberB(), 'workoutMusicFeedback', COACH_A_UID, 'workouts', WORKOUT_A_ID))
+    );
+    await assertFails(
+      setDoc(
+        doc(asClaimedMemberB(), 'workoutMusicFeedback', COACH_A_UID, 'workouts', WORKOUT_A_ID),
+        { dislikedTracks: ['edm/1'] },
+        { merge: true }
+      )
+    );
+  });
+
+  test('unauthenticated cannot read', async () => {
+    await assertFails(
+      getDoc(doc(asUnauthenticated(), 'workoutMusicFeedback', COACH_A_UID, 'workouts', WORKOUT_A_ID))
+    );
+  });
+
+  test('platformAdmin can read and write', async () => {
+    await assertSucceeds(
+      setDoc(
+        doc(asPlatformAdmin(), 'workoutMusicFeedback', COACH_A_UID, 'workouts', WORKOUT_A_ID),
+        { dislikedTracks: ['rock/9'] },
+        { merge: true }
+      )
+    );
+  });
+});

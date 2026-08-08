@@ -21,6 +21,8 @@ The platform organizes its data across several critical collections, each servin
 | `member_plans` | Billing structure and service level | `memberId`, `coachId`, `price`, `interval`, `status` | Managed by billing logic and Stripe webhooks. |
 | `session_instances` | Concrete scheduled events | `slotId`, `coachId`, `startTime`, `endTime`, `zoomUrl` | Generated from `recurring_slots`. |
 | `recurring_slots` | Scheduling patterns | `coachId`, `dayOfWeek`, `startTime`, `durationMin` | Defines the pattern for generating session instances. |
+| `musicPrefs` | Per-user workout music taste (doc id = uid) | `likedTracks[]`, `dislikedTracks[]` (track ids `<style>/<index>`) | Owner-only read/write (`isOwnDoc`), platformAdmin full. |
+| `workoutMusicFeedback/{coachId}/workouts` | Shared per-workout track dislikes — excluded for everyone playing that workout | `dislikedTracks[]` | Tenant coach + that coach's members read/write (path-var rules), platformAdmin full. |
 
 ## Query Patterns
 Queries in GoArrive are heavily reliant on proper scoping to maintain multi-tenancy and security.

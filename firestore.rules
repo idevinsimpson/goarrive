@@ -137,6 +137,26 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
+    // MUSIC PREFS — per-user liked/disliked workout music tracks
+    // Doc id = the listener's own uid (coach OR member). Written client-side
+    // with setDoc(merge) + arrayUnion/arrayRemove. Track ids are '<style>/<index>'.
+    // ─────────────────────────────────────────────
+    match /musicPrefs/{uid} {
+      allow read, write: if isOwnDoc(uid) || isPlatformAdmin();
+    }
+
+    // ─────────────────────────────────────────────
+    // WORKOUT MUSIC FEEDBACK — shared per-workout track dislikes
+    // A dislike recorded by anyone playing a workout (the coach or one of
+    // their members) excludes that track for everyone playing that workout.
+    // Nested path so rules use path vars (reads of not-yet-created docs work)
+    // and stay tenant-isolated.
+    // ─────────────────────────────────────────────
+    match /workoutMusicFeedback/{coachId}/workouts/{workoutId} {
+      allow read, write: if isCoachOrBootstrap(coachId) || isMemberOfCoach(coachId) || isPlatformAdmin();
+    }
+
+    // ─────────────────────────────────────────────
     // SHARED TEMPLATES (Item 4: cross-coach template sharing)
     // ─────────────────────────────────────────────
     match /shared_templates/{templateId} {
