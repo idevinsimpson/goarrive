@@ -2578,6 +2578,14 @@ function PlanControlsDrawer({ visible, onClose, plan, pricing, onChange }: {
                   );
                 })}
               </View>
+              {pricing.displayMonthlyPrice === 0 && (
+                <View style={{ marginTop: 10, padding: 12, backgroundColor: 'rgba(110,187,122,0.08)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(110,187,122,0.25)' }}>
+                  <Text style={{ color: ACCENT, fontSize: 14, fontWeight: '600', marginBottom: 4 }}>Free Plan</Text>
+                  <Text style={{ color: MUTED, fontSize: 13, lineHeight: 18 }}>
+                    Members join without payment — no card required and pay-in-full is disabled. If Commit to Save is on, the member saves a card at signup for missed-session fees; that card also covers after-contract continuation billing. Without Commit to Save there is no card on file, so continuation pricing can't auto-bill at contract end.
+                  </Text>
+                </View>
+              )}
             </View>
 
             {/* ── Member Visibility Controls ── */}

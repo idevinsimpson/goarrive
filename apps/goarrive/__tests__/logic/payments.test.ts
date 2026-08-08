@@ -177,6 +177,60 @@ describe('calculatePricing', () => {
   });
 });
 
+describe('calculatePricing — $0 / free plans', () => {
+  it('manual override of 0 produces a free plan', () => {
+    const plan = createDefaultPlan('Test', 'm1', 'c1');
+    plan.isManualOverride = true;
+    plan.monthlyPriceOverride = 0;
+    const result = calculatePricing(plan);
+    expect(result.isManualOverride).toBe(true);
+    expect(result.displayMonthlyPrice).toBe(0);
+    expect(result.payInFullPrice).toBe(0);
+    expect(result.perSessionPrice).toBe(0);
+  });
+
+  it('explicitly zeroed rate inputs produce $0 (0 is not swallowed by defaults)', () => {
+    const plan = createDefaultPlan('Test', 'm1', 'c1');
+    plan.hourlyRate = 0;
+    plan.programBuildTimeHours = 0;
+    plan.checkInCallMinutes = 0;
+    const result = calculatePricing(plan);
+    expect(result.hourlyRate).toBe(0);
+    expect(result.calculatedMonthlyPrice).toBe(0);
+    // Default plan has CTS active ($100 savings) — must clamp to 0, never negative
+    expect(result.displayMonthlyPrice).toBe(0);
+  });
+
+  it('weekly and yearly override frequencies at 0 still produce $0', () => {
+    const plan = createDefaultPlan('Test', 'm1', 'c1');
+    plan.isManualOverride = true;
+    plan.monthlyPriceOverride = 0;
+    plan.overrideFrequency = 'week';
+    expect(calculatePricing(plan).displayMonthlyPrice).toBe(0);
+    plan.overrideFrequency = 'year';
+    expect(calculatePricing(plan).displayMonthlyPrice).toBe(0);
+  });
+
+  it('negative override is ignored and falls back to calculated price', () => {
+    const plan = createDefaultPlan('Test', 'm1', 'c1');
+    plan.isManualOverride = true;
+    plan.monthlyPriceOverride = -50;
+    const result = calculatePricing(plan);
+    expect(result.isManualOverride).toBe(false);
+    expect(result.displayMonthlyPrice).toBeGreaterThan(0);
+  });
+
+  it('all numeric results remain finite for a free plan', () => {
+    const plan = createDefaultPlan('Test', 'm1', 'c1');
+    plan.isManualOverride = true;
+    plan.monthlyPriceOverride = 0;
+    const result = calculatePricing(plan);
+    for (const [, value] of Object.entries(result).filter(([, v]) => typeof v === 'number')) {
+      expect(Number.isFinite(value)).toBe(true);
+    }
+  });
+});
+
 describe('createDefaultPlan', () => {
   it('returns a plan with consistent sessionsPerWeek and schedule length', () => {
     const plan = createDefaultPlan('Test', 'm1', 'c1');
