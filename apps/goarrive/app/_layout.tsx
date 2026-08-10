@@ -42,6 +42,7 @@ export default function RootLayout() {
             <Stack.Screen name="intake/[coachId]" />
             <Stack.Screen name="coach-signup" />
             <Stack.Screen name="coach-apply" />
+            <Stack.Screen name="coach-discovery" />
             <Stack.Screen name="checkout-success" />
             <Stack.Screen name="shared-plan/[memberId]" />
             <Stack.Screen name="join/[sessionInstanceId]" />
