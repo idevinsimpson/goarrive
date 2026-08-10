@@ -152,7 +152,7 @@ export default function LiveViewPlayer({ sessionId, onClose }: LiveViewPlayerPro
         <View style={st.body}>
           {session === undefined ? (
             <ActivityIndicator size="large" color="#F5A623" />
-          ) : ended ? (
+          ) : ended || !session ? (
             <View style={st.endedCard}>
               <Text style={st.endedIcon}>✓</Text>
               <Text style={st.endedText}>{endMessage}</Text>
