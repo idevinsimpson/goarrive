@@ -14,7 +14,7 @@
  * Schema: id, name, email, phone, notes, coachId, tenantId, isArchived, createdAt, updatedAt
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -41,6 +41,7 @@ import {
   where,
   Timestamp,
   serverTimestamp,
+  onSnapshot,
 } from 'firebase/firestore';
 import { useAuth } from '../../lib/AuthContext';
 import { ModuleGate } from '../../lib/useCoachModules';
@@ -57,7 +58,10 @@ import ConfirmDialog from '../../components/ConfirmDialog';
 import UndoToast from '../../components/UndoToast';
 import ListSkeleton from '../../components/ListSkeleton';
 import AssignWorkoutModal from '../../components/AssignWorkoutModal';
+import LiveViewPlayer from '../../components/LiveViewPlayer';
 import { useLocalSearchParams, router } from 'expo-router';
+
+const LIVE_STALE_MS = 30_000;
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -134,6 +138,10 @@ function MembersScreenInner() {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [assignTarget, setAssignTarget] = useState<MemberDetailData | null>(null);
   const [assignmentRefresh, setAssignmentRefresh] = useState(0);
+
+  // Live session state — maps memberId → sessionId for members currently live
+  const [liveSessions, setLiveSessions] = useState<Record<string, string>>({});
+  const [liveViewSessionId, setLiveViewSessionId] = useState<string | null>(null);
 
   // Share intake form state
   const [showShareModal, setShowShareModal] = useState(false);
@@ -226,6 +234,25 @@ function MembersScreenInner() {
   useEffect(() => {
     if (coachId) loadMembers();
   }, [coachId, loadMembers]);
+
+  // Real-time subscription to active workout sessions for this coach's members
+  useEffect(() => {
+    if (!coachId) return;
+    const q = query(collection(db, 'workoutSessions'), where('coachId', '==', coachId));
+    const unsub = onSnapshot(q, (snap) => {
+      const now = Date.now();
+      const active: Record<string, string> = {};
+      snap.docs.forEach((d) => {
+        const data = d.data();
+        const updatedAt = data.updatedAt?.toDate?.() ?? new Date(0);
+        if (now - updatedAt.getTime() < LIVE_STALE_MS) {
+          active[data.memberId] = d.id;
+        }
+      });
+      setLiveSessions(active);
+    }, () => {});
+    return unsub;
+  }, [coachId]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -604,6 +631,8 @@ function MembersScreenInner() {
             const meta = assignMeta[m.id];
             const assignCount = meta?.total ?? 0;
             const hasToday = meta?.hasToday ?? false;
+            const liveSessionId = liveSessions[m.id];
+            const isLive = !!liveSessionId && !m.isArchived;
             return (
               <Pressable
                 key={m.id}
@@ -661,8 +690,19 @@ function MembersScreenInner() {
                     ) : null}
                   </View>
 
-                  {/* Date */}
-                  <Text style={styles.cardDate}>{formatDate(m.createdAt)}</Text>
+                  {/* Live dot — tappable to open LiveViewPlayer */}
+                  {isLive ? (
+                    <Pressable
+                      onPress={(e) => { e.stopPropagation(); setLiveViewSessionId(liveSessionId); }}
+                      style={styles.liveDotBtn}
+                      hitSlop={8}
+                    >
+                      <View style={styles.liveDot} />
+                    </Pressable>
+                  ) : (
+                    /* Date */
+                    <Text style={styles.cardDate}>{formatDate(m.createdAt)}</Text>
+                  )}
                 </View>
               </Pressable>
             );
@@ -735,6 +775,14 @@ function MembersScreenInner() {
         }}
         onAssign={handleAssignComplete}
       />
+
+      {/* Live View Player */}
+      {liveViewSessionId && (
+        <LiveViewPlayer
+          sessionId={liveViewSessionId}
+          onClose={() => setLiveViewSessionId(null)}
+        />
+      )}
 
       {/* Share Intake Form modal */}
       <Modal transparent animationType="fade" visible={showShareModal} onRequestClose={() => setShowShareModal(false)}>
@@ -1083,6 +1131,18 @@ const styles = StyleSheet.create({
     color: '#4A5568',
     fontFamily: FONT_BODY,
     marginLeft: 8,
+  },
+  liveDotBtn: {
+    marginLeft: 8,
+    padding: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  liveDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#34D399',
   },
   // NEXT-A: Assignment count badge
   assignBadge: {

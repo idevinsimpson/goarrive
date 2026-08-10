@@ -119,6 +119,7 @@ export default function DashboardScreen() {
   const [showAdminMetrics, setShowAdminMetrics] = useState(false);
   const [showQuickAssign, setShowQuickAssign] = useState(false);
   const [showReviewQueue, setShowReviewQueue] = useState(false);
+  const [liveMemberCount, setLiveMemberCount] = useState(0);
 
   const [funnelSubdomain, setFunnelSubdomain] = useState<string | null | undefined>(undefined);
   const [loading, setLoading] = useState(true);
@@ -243,6 +244,21 @@ export default function DashboardScreen() {
     return unsub;
   }, [coachId]);
 
+  // Live session count — real-time subscription to active workout sessions
+  useEffect(() => {
+    if (!coachId) return;
+    const q = query(collection(db, 'workoutSessions'), where('coachId', '==', coachId));
+    const unsub = onSnapshot(q, (snap) => {
+      const now = Date.now();
+      const count = snap.docs.filter((d) => {
+        const updatedAt = d.data().updatedAt?.toDate?.() ?? new Date(0);
+        return now - updatedAt.getTime() < 30_000;
+      }).length;
+      setLiveMemberCount(count);
+    }, () => {});
+    return unsub;
+  }, [coachId]);
+
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchData();
@@ -284,6 +300,20 @@ export default function DashboardScreen() {
 
         {/* Divider */}
         <View style={s.divider} />
+
+        {/* Live session chip */}
+        {liveMemberCount > 0 && (
+          <Pressable
+            style={s.liveBanner}
+            onPress={() => router.push('/(app)/members')}
+          >
+            <View style={s.liveDot} />
+            <Text style={s.liveBannerText}>
+              {liveMemberCount} member{liveMemberCount !== 1 ? 's' : ''} in session now
+            </Text>
+            <Icon name="chevron-right" size={16} color="#34D399" />
+          </Pressable>
+        )}
 
         {/* Today's highlight banner */}
         {stats.todayAssignments > 0 && (
@@ -552,6 +582,31 @@ const s = StyleSheet.create({
     height: 1,
     backgroundColor: '#1E2A3A',
     marginVertical: 20,
+  },
+  liveBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(52,211,153,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(52,211,153,0.2)',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  liveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#34D399',
+  },
+  liveBannerText: {
+    fontSize: 15,
+    color: '#34D399',
+    fontFamily: FONT_BODY,
+    fontWeight: '600',
+    flex: 1,
   },
   todayBanner: {
     flexDirection: 'row',
