@@ -75,7 +75,7 @@ export default function MemberDetail({
 
   // Invite / password reset modal state
   const [inviteLoading, setInviteLoading] = useState(false);
-  const [inviteResult, setInviteResult] = useState<{ link: string; email: string; authCreated: boolean } | null>(null);
+  const [inviteResult, setInviteResult] = useState<{ link: string; email: string; authCreated: boolean; wasLinked: boolean } | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteCopied, setInviteCopied] = useState(false);
 
@@ -111,6 +111,8 @@ export default function MemberDetail({
         .join('')
     : '?';
 
+  const isLinked = currentMember.hasAccount === true && !!currentMember.uid;
+
   function navigateToPlan() {
     onClose();
     router.push(`/(app)/member-plan/${currentMember.id}` as any);
@@ -129,6 +131,7 @@ export default function MemberDetail({
     }
 
     setInviteLoading(true);
+    const wasLinked = currentMember.hasAccount === true && !!currentMember.uid;
     try {
       const functions = getFunctions();
       const callable = httpsCallable(functions, 'sendMemberInvite');
@@ -141,6 +144,7 @@ export default function MemberDetail({
         link: data.resetLink,
         email: data.email ?? currentMember.email,
         authCreated: !!data.authCreated,
+        wasLinked,
       });
     } catch (err: any) {
       console.error('[sendMemberInvite] failed', err);
@@ -315,6 +319,11 @@ export default function MemberDetail({
                     <Text style={s.archivedBadgeText}>Archived</Text>
                   </View>
                 )}
+                <View style={[s.linkBadge, isLinked && s.linkBadgeLinked]}>
+                  <Text style={[s.linkBadgeText, isLinked && s.linkBadgeTextLinked]}>
+                    {isLinked ? 'Linked' : 'No login'}
+                  </Text>
+                </View>
                 {currentMember.email ? (
                   <Text style={s.metaText} numberOfLines={1}>{currentMember.email}</Text>
                 ) : currentMember.phone ? (
@@ -504,12 +513,18 @@ export default function MemberDetail({
             ) : inviteResult ? (
               <>
                 <Text style={inviteStyles.title}>
-                  {inviteResult.authCreated ? 'Invite link ready' : 'Password reset link ready'}
+                  {inviteResult.authCreated
+                    ? 'Invite link ready'
+                    : inviteResult.wasLinked
+                      ? 'Password reset link ready'
+                      : 'Existing account linked'}
                 </Text>
                 <Text style={inviteStyles.body}>
                   {inviteResult.authCreated
                     ? `We created an account for ${inviteResult.email}. Send them this link so they can set a password and log in.`
-                    : `Send ${inviteResult.email} this link so they can reset their password and log in.`}
+                    : inviteResult.wasLinked
+                      ? `Send ${inviteResult.email} this link so they can reset their password and log in.`
+                      : `${inviteResult.email} already had a GoArrive account — it's now linked to this member. Send them this link if they need to reset their password.`}
                 </Text>
                 <View style={inviteStyles.linkBox}>
                   <Text style={inviteStyles.linkText} numberOfLines={3}>
@@ -699,6 +714,25 @@ const s = StyleSheet.create({
     color: MUTED,
     fontFamily: FB,
     fontWeight: '600',
+  },
+  linkBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(138,149,163,0.15)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  linkBadgeLinked: {
+    backgroundColor: 'rgba(110,187,122,0.15)',
+  },
+  linkBadgeText: {
+    fontSize: 11,
+    color: MUTED,
+    fontFamily: FB,
+    fontWeight: '600',
+  },
+  linkBadgeTextLinked: {
+    color: GREEN,
   },
   quickActions: {
     flexDirection: 'row',

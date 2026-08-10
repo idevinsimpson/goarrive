@@ -582,8 +582,11 @@ export const createCheckoutSession = onCall(
 
     // ── (1) Plan status check — block checkout if already paid or cancelled ──
     const planStatus = plan.checkoutStatus as string | undefined;
-    if (planStatus === 'paid') {
+    if (planStatus === 'paid' || planStatus === 'pay_in_full_paid') {
       throw new HttpsError('failed-precondition', 'This plan has already been paid.');
+    }
+    if (planStatus === 'free_active') {
+      throw new HttpsError('failed-precondition', 'This plan is already active.');
     }
     if (planStatus === 'cancelled') {
       throw new HttpsError('failed-precondition', 'This plan has been cancelled.');
@@ -631,11 +634,11 @@ export const createCheckoutSession = onCall(
     const sessionsPerMonth = Math.round(sessionsPerWeek * (52 / 12));
     const contractMonths = (plan.contractMonths as number) || 12;
 
-    // Initial monthly
-    const hourlyRate = (plan.hourlyRate as number) || 100;
-    const sessionLengthMinutes = (plan.sessionLengthMinutes as number) || 60;
-    const checkInCallMinutes = (plan.checkInCallMinutes as number) || 30;
-    const programBuildTimeHours = (plan.programBuildTimeHours as number) || 5;
+    // Initial monthly — ?? (not ||) so an explicitly zeroed rate survives ($0/free plans)
+    const hourlyRate = (plan.hourlyRate as number) ?? 100;
+    const sessionLengthMinutes = (plan.sessionLengthMinutes as number) ?? 60;
+    const checkInCallMinutes = (plan.checkInCallMinutes as number) ?? 30;
+    const programBuildTimeHours = (plan.programBuildTimeHours as number) ?? 5;
 
     // ── Pricing: use client-sent displayed prices to avoid rounding mismatches ──
     // The frontend's calculatePricing() already applies CTS, nutrition, manual
@@ -658,15 +661,17 @@ export const createCheckoutSession = onCall(
     const nutritionMonthlyCost = nutActive
       ? ((plan.nutrition?.monthlyCost as number) ?? (plan.nutritionMonthlyCost as number) ?? 100)
       : 0;
-    const serverMonthly = serverBaseMonthly - ctsMonthlySavings + nutritionMonthlyCost;
-    const payInFullDiscountPct = (plan.payInFullDiscountPercent as number) || 10;
+    // Clamp at 0: CTS savings on a $0/free plan must never produce a negative price
+    const serverMonthly = Math.max(0, serverBaseMonthly - ctsMonthlySavings + nutritionMonthlyCost);
+    const payInFullDiscountPct = (plan.payInFullDiscountPercent as number) ?? 10;
     const serverPayInFull = Math.round(serverMonthly * contractMonths * (1 - payInFullDiscountPct / 100));
 
-    // Use client-sent prices when available; fall back to server calculation
-    const displayMonthlyPrice = (typeof clientMonthly === 'number' && clientMonthly > 0)
+    // Use client-sent prices when available; fall back to server calculation.
+    // 0 is a valid client price ($0/free plans) — only reject missing/negative.
+    const displayMonthlyPrice = (typeof clientMonthly === 'number' && Number.isFinite(clientMonthly) && clientMonthly >= 0)
       ? Math.round(clientMonthly)
       : Math.round(serverMonthly);
-    const payInFullTotal = (typeof clientPayInFull === 'number' && clientPayInFull > 0)
+    const payInFullTotal = (typeof clientPayInFull === 'number' && Number.isFinite(clientPayInFull) && clientPayInFull >= 0)
       ? Math.round(clientPayInFull)
       : serverPayInFull;
 
@@ -678,6 +683,17 @@ export const createCheckoutSession = onCall(
     if (paymentOption === 'pay_in_full' && Math.abs(payInFullTotal - serverPayInFull) > 50) {
       console.error(`[createCheckoutSession] Pay-in-full price mismatch: client=${payInFullTotal}, server=${serverPayInFull}`);
       throw new HttpsError('invalid-argument', 'Price mismatch — please refresh and try again.');
+    }
+
+    // ── $0 (free) plan guards ──
+    // Stripe can't process a $0 one-time payment (USD card minimum is $0.50).
+    if (paymentOption === 'pay_in_full' && payInFullTotal <= 0) {
+      throw new HttpsError('failed-precondition', 'Pay in full is not available for a free plan.');
+    }
+    // A free plan only goes through Stripe when the member opts into Commit to
+    // Save (card on file for missed-session fees). Otherwise use startFreePlan.
+    if (displayMonthlyPrice === 0 && !ctsActive) {
+      throw new HttpsError('failed-precondition', 'This plan is free — no checkout is needed.');
     }
 
     const payInFullMonthlyEquivalent = Math.round(payInFullTotal / contractMonths);
@@ -734,6 +750,9 @@ export const createCheckoutSession = onCall(
       billingInterval,
       ctsActive,
       ctsMonthlySavings: ctsActive ? ctsMonthlySavings : (plan.postContract?.ctsMonthlySavings ?? null),
+      ctsMissedSessionFee: ctsActive
+        ? ((plan.commitToSave?.missedSessionFee as number) ?? (plan.commitToSaveMissedSessionFee as number) ?? 50)
+        : null,
       nutActive,
       nutritionMonthlyCost: nutActive ? nutritionMonthlyCost : 0,
       tierSplit,
@@ -796,6 +815,9 @@ export const createCheckoutSession = onCall(
           customer: stripeCustomerId,
           payment_method_types: ['card'],
           mode: 'subscription',
+          // $0 + Commit to Save: nothing is due today, but the card must still be
+          // collected so CTS missed-session fees can charge later.
+          ...(recurringAmount === 0 ? { payment_method_collection: 'always' as const } : {}),
           line_items: [
             {
               price_data: {
@@ -897,6 +919,166 @@ export const createCheckoutSession = onCall(
       if (err?.code && err?.httpErrorCode) throw err; // Already an HttpsError
       console.error('[createCheckoutSession] Unhandled error:', err?.message ?? err, err?.stack ?? '');
       throw new HttpsError('internal', 'Something went wrong creating checkout. Please try again.');
+    }
+  }
+);
+
+// ─── startFreePlan ────────────────────────────────────────────────────────────
+/**
+ * Activates a $0 (free) plan with no Stripe involvement.
+ *
+ * Free plans skip payment entirely UNLESS the member opts into Commit to Save —
+ * that path must go through createCheckoutSession (a $0 subscription that puts
+ * a card on file for missed-session fees). This callable therefore rejects any
+ * plan whose server-computed price is not $0; it accepts no CTS/add-on params.
+ *
+ * Works even when the coach has not connected Stripe. Writes the same
+ * acceptedPlanSnapshots + checkoutIntents records as a paid checkout (with $0
+ * amounts, paymentOption 'free') so downstream reporting sees a consistent
+ * shape. No ledger entries — $0 generates no earnings.
+ */
+export const startFreePlan = onCall(
+  { invoker: 'public' },
+  async (request) => {
+    const { planId, memberId } = request.data as { planId: string; memberId: string };
+    if (!planId || !memberId) {
+      throw new HttpsError('invalid-argument', 'planId and memberId are required');
+    }
+
+    try {
+      // Auth is optional — shared-plan members are not signed in.
+      const callerUid = request.auth?.uid;
+      const callerToken = request.auth?.token as Record<string, any> | undefined;
+      const callerIsAdmin = callerToken?.role === 'platformAdmin' || callerToken?.admin === true;
+
+      const planRef = db.collection('member_plans').doc(planId);
+      const snapshotRef = db.collection('acceptedPlanSnapshots').doc();
+      const intentRef = db.collection('checkoutIntents').doc();
+      const now = Timestamp.now();
+
+      await db.runTransaction(async (tx) => {
+        const planSnap = await tx.get(planRef);
+        if (!planSnap.exists) throw new HttpsError('not-found', 'Plan not found');
+        const plan = planSnap.data()!;
+
+        const coachId = plan.coachId as string;
+        if (!coachId) throw new HttpsError('failed-precondition', 'Plan has no coachId');
+        if (callerUid && callerUid !== memberId && callerUid !== coachId && !callerIsAdmin) {
+          throw new HttpsError('permission-denied', 'Not authorized for this plan');
+        }
+        if (!callerIsAdmin && plan.memberId !== memberId) {
+          throw new HttpsError('permission-denied', 'Member ID does not match this plan');
+        }
+
+        const planStatus = plan.checkoutStatus as string | undefined;
+        if (planStatus === 'paid' || planStatus === 'pay_in_full_paid') {
+          throw new HttpsError('failed-precondition', 'This plan has already been paid.');
+        }
+        if (planStatus === 'free_active' || plan.status === 'active') {
+          throw new HttpsError('failed-precondition', 'This plan is already active.');
+        }
+        if (planStatus === 'cancelled') {
+          throw new HttpsError('failed-precondition', 'This plan has been cancelled.');
+        }
+
+        // Server-side price check — same resolution chain as createCheckoutSession,
+        // with ?? so an explicit 0 survives. Anything non-zero must use Stripe.
+        const sessionsPerWeek = (plan.sessionsPerWeek as number) || 3;
+        const sessionsPerMonth = Math.round(sessionsPerWeek * (52 / 12));
+        const hourlyRate = (plan.hourlyRate as number) ?? 100;
+        const sessionLengthMinutes = (plan.sessionLengthMinutes as number) ?? 60;
+        const serverBaseMonthly = Math.round(
+          plan.pricingResult?.displayMonthlyPrice ??
+          plan.monthlyPriceOverride ??
+          plan.pricingResult?.calculatedMonthlyPrice ??
+          (hourlyRate * (sessionLengthMinutes / 60) * sessionsPerMonth)
+        );
+        if (serverBaseMonthly !== 0) {
+          throw new HttpsError('failed-precondition', 'This plan is not free — please use the payment checkout.');
+        }
+
+        const contractMonths = (plan.contractMonths as number) || 12;
+        const contractStartAt = now;
+        const contractEndAt = Timestamp.fromMillis(now.toMillis() + contractMonths * 30.44 * 24 * 60 * 60 * 1000);
+
+        // Continuation prices only when the coach explicitly configured them —
+        // there is no card on file, so these are informational for reporting.
+        const cp = plan.continuationPricing as any;
+        const contHr = (cp?.continuationHourlyRate as number | undefined) ?? null;
+        const contMin = (cp?.continuationMinutesPerSession as number | undefined) ?? 3.5;
+        const continuationMonthlyPrice = contHr != null
+          ? Math.round(contHr * (contMin / 60) * sessionsPerMonth)
+          : 0;
+
+        tx.set(snapshotRef, {
+          snapshotId: snapshotRef.id,
+          planId,
+          memberId,
+          coachId,
+          snapshotAt: now,
+          contractLengthMonths: contractMonths,
+          hourlyRate,
+          sessionLengthMinutes,
+          checkInCallMinutes: (plan.checkInCallMinutes as number) ?? 30,
+          programBuildTimeHours: (plan.programBuildTimeHours as number) ?? 5,
+          sessionsPerWeek,
+          calculatedMonthlyPrice: 0,
+          displayMonthlyPrice: 0,
+          payInFullTotal: 0,
+          payInFullMonthlyEquivalent: 0,
+          continuationHourlyRate: contHr,
+          continuationMinutesPerSession: contMin,
+          continuationCheckInMinutesPerMonth: (cp?.continuationCheckInMinutesPerMonth as number | undefined) ?? 30,
+          continuationMonthlyPrice,
+          continuationPayInFullTotal: 0,
+          continuationPayInFullMonthlyEquivalent: 0,
+          baseMonthlyPrice: 0,
+          billingInterval: 'month',
+          ctsActive: false,
+          ctsMonthlySavings: plan.postContract?.ctsMonthlySavings ?? null,
+          ctsMissedSessionFee: null,
+          nutActive: false,
+          nutritionMonthlyCost: 0,
+          tierSplit: null,
+          applicationFeePercent: null,
+          contractStartAt,
+          contractEndAt,
+        });
+
+        tx.set(intentRef, {
+          intentId: intentRef.id,
+          memberId,
+          coachId,
+          planId,
+          snapshotId: snapshotRef.id,
+          paymentOption: 'free',
+          billingInterval: 'month',
+          status: 'completed',
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        tx.update(planRef, {
+          status: 'active',
+          checkoutStatus: 'free_active',
+          acceptedAt: now,
+          contractStartAt,
+          contractEndAt,
+          acceptedSnapshotId: snapshotRef.id,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      });
+
+      console.log('[startFreePlan] Free plan', planId, 'activated for member', memberId);
+      return {
+        intentId: intentRef.id,
+        snapshotId: snapshotRef.id,
+        redirectUrl: `/checkout-success?intent=${intentRef.id}&memberId=${memberId}&planId=${planId}&free=1`,
+      };
+    } catch (err: any) {
+      if (err?.code && err?.httpErrorCode) throw err; // Already an HttpsError
+      console.error('[startFreePlan] Unhandled error:', err?.message ?? err, err?.stack ?? '');
+      throw new HttpsError('internal', 'Something went wrong activating this plan. Please try again.');
     }
   }
 );
@@ -1109,10 +1291,13 @@ async function handleCheckoutSessionCompleted(
   const contractStartAt = now;
   const contractEndAt = Timestamp.fromMillis(now.toMillis() + contractMonths * 30.44 * 24 * 60 * 60 * 1000);
 
-  // Update plan status
+  // Update plan status.
+  // amount_total === 0 → $0 + Commit to Save checkout (card-on-file only).
   await db.collection('member_plans').doc(planId).update({
     status: 'active',
-    checkoutStatus: paymentOption === 'pay_in_full' ? 'pay_in_full_paid' : 'paid',
+    checkoutStatus: session.amount_total === 0
+      ? 'free_active'
+      : (paymentOption === 'pay_in_full' ? 'pay_in_full_paid' : 'paid'),
     acceptedAt: now,
     contractStartAt,
     contractEndAt,
@@ -1126,6 +1311,75 @@ async function handleCheckoutSessionCompleted(
       checkoutSessionId: session.id,
       checkoutCompletedAt: now,
     });
+  }
+
+  // ── Make the collected card the customer's invoice default ──
+  // CTS missed-session fees are charged via standalone auto-collected invoices
+  // (enforceCtsAccountability), which only charge the CUSTOMER's
+  // invoice_settings.default_payment_method. Checkout sets the SUBSCRIPTION's
+  // default only, so without this copy those invoices could never collect —
+  // including on $0 + Commit to Save plans where the card exists solely for this.
+  if (session.mode === 'subscription' && session.subscription && snapshot?.coachId) {
+    try {
+      const coachAccountSnap = await db.collection('coachStripeAccounts').doc(snapshot.coachId as string).get();
+      const stripeAccountId = coachAccountSnap.data()?.stripeAccountId as string | undefined;
+      const customerId = typeof session.customer === 'string' ? session.customer : (session.customer as any)?.id;
+      if (stripeAccountId && customerId) {
+        const stripe = getStripe(stripeSecretKey.value());
+        const subscriptionId = typeof session.subscription === 'string'
+          ? session.subscription
+          : (session.subscription as any).id;
+        const sub = await stripe.subscriptions.retrieve(subscriptionId, {}, { stripeAccount: stripeAccountId });
+        const defaultPm = typeof sub.default_payment_method === 'string'
+          ? sub.default_payment_method
+          : (sub.default_payment_method as any)?.id;
+        if (defaultPm) {
+          await stripe.customers.update(
+            customerId,
+            { invoice_settings: { default_payment_method: defaultPm } },
+            { stripeAccount: stripeAccountId }
+          );
+          console.log('[handleCheckoutSessionCompleted] Customer', customerId, 'invoice default payment method set');
+        } else {
+          console.warn('[handleCheckoutSessionCompleted] Subscription', subscriptionId, 'has no default_payment_method to copy');
+        }
+      }
+    } catch (err) {
+      // Non-fatal: the plan is already activated; CTS fee charging will surface
+      // any missing payment method when an invoice fails to collect.
+      console.error('[handleCheckoutSessionCompleted] Failed to set customer default payment method:', err);
+    }
+  }
+
+  // ── Commit to Save chosen at checkout: record the consent ──
+  // enforceCtsAccountability only processes members with an active consent doc;
+  // without this write, checkout-time CTS would never be enforced.
+  if (snapshot?.ctsActive === true) {
+    try {
+      const existing = await db.collection('commitToSaveConsents')
+        .where('memberId', '==', memberId)
+        .where('planId', '==', planId)
+        .limit(1)
+        .get();
+      if (existing.empty) {
+        await db.collection('commitToSaveConsents').add({
+          memberId,
+          planId,
+          coachId: snapshot.coachId ?? null,
+          ctsMonthlyRate: snapshot.displayMonthlyPrice ?? null,
+          standardMonthlyRate: snapshot.baseMonthlyPrice ?? null,
+          missedSessionFee: (snapshot.ctsMissedSessionFee as number | null) ?? 50,
+          agreedVia: 'checkout',
+          agreedAt: now,
+          status: 'active',
+        });
+        console.log('[handleCheckoutSessionCompleted] CTS consent recorded for member', memberId, 'plan', planId);
+      } else if (existing.docs[0].data().status !== 'active') {
+        await existing.docs[0].ref.update({ status: 'active', updatedAt: FieldValue.serverTimestamp() });
+      }
+    } catch (err) {
+      console.error('[handleCheckoutSessionCompleted] Failed to record CTS consent:', err);
+    }
   }
 
   // ── Pay-in-full: create deferred continuation subscription ──
@@ -1345,6 +1599,9 @@ async function handleCheckoutSessionCompleted(
 async function handleInvoicePaid(invoice: Stripe.Invoice, eventId: string) {
   const sub = (invoice as any).subscription as string | null;
   if (!sub) return;
+
+  // $0 invoices (free plans with card on file) generate no earnings — no ledger entry.
+  if (!invoice.amount_paid) return;
 
   // Find memberSubscription by subscriptionId
   const subSnap = await db.collection('memberSubscriptions')
@@ -2080,6 +2337,50 @@ export const activateCoachInvite = onCall(
 
 
 /**
+ * getMemberClaimStatus – Public lookup for the post-checkout claim gate.
+ *
+ * Firestore rules block unauthenticated member reads, so the public
+ * /checkout-success page needs this to decide between "create your account"
+ * and "sign in". Returns only existence, link state, and a masked email —
+ * never raw PII.
+ *
+ * Input: { memberId: string }
+ * Output: { exists: boolean, hasAccount: boolean, emailMasked: string }
+ */
+export const getMemberClaimStatus = onCall(
+  { invoker: 'public' },
+  async (request) => {
+    const { memberId } = request.data as { memberId?: string };
+    if (!memberId) throw new HttpsError('invalid-argument', 'memberId is required');
+
+    const memberSnap = await db.collection('members').doc(memberId).get();
+    if (!memberSnap.exists) {
+      return { exists: false, hasAccount: false, emailMasked: '' };
+    }
+
+    const member = memberSnap.data()!;
+    const email = ((member.email as string | undefined) ?? '').trim();
+    const maskPart = (s: string) => (s.length <= 1 ? s : `${s[0]}•••`);
+    let emailMasked = '';
+    const at = email.indexOf('@');
+    if (at > 0) {
+      const local = email.slice(0, at);
+      const domain = email.slice(at + 1);
+      const dot = domain.lastIndexOf('.');
+      emailMasked = dot > 0
+        ? `${maskPart(local)}@${maskPart(domain.slice(0, dot))}${domain.slice(dot)}`
+        : `${maskPart(local)}@${maskPart(domain)}`;
+    }
+
+    return {
+      exists: true,
+      hasAccount: member.hasAccount === true && !!member.uid,
+      emailMasked,
+    };
+  }
+);
+
+/**
  * claimMemberAccount – Links a newly created Firebase Auth account to an
  * existing member doc (created by a coach via quick-add).
  *
@@ -2123,11 +2424,13 @@ export const claimMemberAccount = onCall(
       );
     }
 
-    // Set custom claims: role = member
+    // Set custom claims: role = member.
+    // tenantId falls back to coachId — intake- and coach-created member docs
+    // may lack tenantId (the self-signup rules allowlist excludes it).
     await admin.auth().setCustomUserClaims(callerUid, {
       role: 'member',
       coachId: member.coachId,
-      tenantId: member.tenantId,
+      tenantId: member.tenantId ?? member.coachId,
       memberId: memberId,
     });
 
@@ -4729,7 +5032,7 @@ function openMediaWs(args: {
 // Provider health, reminder scheduler, dead-letter handling, event log, iCal feed
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { getProviderHealth, sendNotification, resetNotificationProviders, MessageType } from './notifications';
+import { getProviderHealth, sendNotification, resetNotificationProviders, notifyCoachOfNewMember, MessageType } from './notifications';
 import { createRemindersForInstance, processDueReminders, cancelRemindersForInstance } from './reminders';
 import { MockZoomProvider } from './zoom';
 
@@ -5962,9 +6265,10 @@ export const batchPhaseTransition = onSchedule(
   async () => {
     console.log('[batchPhaseTransition] Starting daily phase transition check');
 
-    // Find all member plans that have contractStartAt and phases
+    // Find all member plans that have contractStartAt and phases.
+    // free_active = $0 plans — they progress through phases like paid ones.
     const plansSnap = await db.collection('member_plans')
-      .where('checkoutStatus', 'in', ['paid', 'pay_in_full_paid'])
+      .where('checkoutStatus', 'in', ['paid', 'pay_in_full_paid', 'free_active'])
       .get();
 
     const now = new Date();
@@ -9839,63 +10143,8 @@ export const onMemberCreated = onDocumentCreated(
     const memberName = data.displayName || data.email || 'A new member';
 
     try {
-      // Look up coach's FCM tokens
-      const tokensSnap = await db
-        .collection('coaches')
-        .doc(coachId)
-        .collection('fcmTokens')
-        .get();
-
-      // Also check legacy root-level token field
-      const coachDoc = await db.collection('coaches').doc(coachId).get();
-      const legacyToken = coachDoc.exists
-        ? (coachDoc.data()?.fcmToken as string | undefined)
-        : undefined;
-
-      const tokens: string[] = [];
-      tokensSnap.forEach((doc) => {
-        const t = doc.data()?.token as string | undefined;
-        if (t) tokens.push(t);
-      });
-      if (legacyToken && !tokens.includes(legacyToken)) {
-        tokens.push(legacyToken);
-      }
-
-      if (tokens.length === 0) {
-        console.log(TAG, 'No FCM tokens for coach', coachId, '— skipping push');
-        return;
-      }
-
-      const title = 'New Member Signed Up';
-      const body = `${memberName} just joined your roster.`;
-
-      for (const token of tokens) {
-        try {
-          await messaging.send({
-            token,
-            notification: { title, body },
-            webpush: {
-              notification: { icon: '/icon-192.png', badge: '/icon-192.png' },
-            },
-          });
-        } catch (sendErr: any) {
-          // Clean up stale tokens
-          if (
-            sendErr?.code === 'messaging/registration-token-not-registered' ||
-            sendErr?.code === 'messaging/invalid-registration-token'
-          ) {
-            console.log(TAG, 'Removing stale token for coach', coachId);
-            const staleDoc = tokensSnap.docs.find(
-              (d) => d.data()?.token === token
-            );
-            if (staleDoc) await staleDoc.ref.delete();
-          } else {
-            console.warn(TAG, 'FCM send failed:', sendErr);
-          }
-        }
-      }
-
-      console.log(TAG, 'Notified coach', coachId, 'about new member', memberId);
+      // Shared with adminAssignLeadToCoach (leads.ts) — extracted helper.
+      await notifyCoachOfNewMember(coachId, memberName);
     } catch (err) {
       console.error(TAG, 'Error notifying coach:', err);
     }
@@ -10119,6 +10368,9 @@ export { shareMeta } from './shareMeta';
 
 // ─── Coach Comms — weekly digest, feedback ack, shipped/planned loop ─────────
 export { sendWeeklyDigest, onCoachFeedbackCreated, onCoachFeedbackStatusChanged } from './coachComms';
+
+// ─── Leads — unassigned intake alerts + admin assignment ─────────────────────
+export { onIntakeSubmissionCreated, adminAssignLeadToCoach } from './leads';
 
 type ShareVisibility = 'restricted' | 'anyone_with_link' | 'anyone_with_link_signin_required';
 const VALID_VISIBILITIES: ShareVisibility[] = ['restricted', 'anyone_with_link', 'anyone_with_link_signin_required'];

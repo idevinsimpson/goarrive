@@ -695,3 +695,68 @@ function formatDateFriendly(dateStr: string): string {
     return dateStr;
   }
 }
+
+// ─── Admin Lead Alert (unassigned intake — no coach selected) ───────────────
+
+export function adminLeadAlertEmail(
+  leadName: string,
+  leadEmail: string,
+  leadPhone: string,
+  goals: string
+): RenderedMessage {
+  const name = leadName || 'Unknown lead';
+
+  const subject = `[New Lead] ${name} needs a coach`;
+  const body = `New unassigned lead from the intake funnel\n\nName: ${name}\nEmail: ${leadEmail || '—'}\nPhone: ${leadPhone || '—'}\nGoals: ${goals || '—'}\n\nThey submitted the intake form without choosing a coach. Review and assign them in the admin Leads tab: https://goarrive.fit/admin`;
+
+  const htmlBody = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="dark">
+<meta name="supported-color-schemes" content="dark">
+<style>
+  :root { color-scheme: dark; supported-color-schemes: dark; }
+  body { background-color: #0F1117 !important; }
+  @media (prefers-color-scheme: dark) {
+    body, .bg-page { background-color: #0F1117 !important; }
+    .bg-card { background-color: #1A1D27 !important; }
+    .bg-steps { background-color: #252830 !important; }
+    .txt { color: #E8EAF0 !important; }
+    .txt-muted { color: #9CA3AF !important; }
+  }
+</style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #0F1117;" bgcolor="#0F1117">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg-page" bgcolor="#0F1117" style="background-color: #0F1117;">
+<tr><td align="center" style="padding: 24px 12px;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0" style="max-width: 480px; width: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+  <tr><td align="center" style="padding: 8px 0 20px 0;">
+    <img src="${EMAIL_LOGO_URL}" alt="GoArrive" width="220" style="display: block; width: 220px; max-width: 80%; height: auto;">
+  </td></tr>
+  <tr><td class="bg-card" bgcolor="#1A1D27" style="background-color: #1A1D27; border-radius: 12px; padding: 24px;">
+    <h2 style="color: #6EBB7A; margin: 0 0 8px 0; font-size: 22px;">New lead needs a coach</h2>
+    <p class="txt-muted" style="color: #9CA3AF; margin: 0 0 16px 0; font-size: 14px;">They completed the intake form without choosing a coach.</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg-steps" bgcolor="#252830" style="background-color: #252830; border-radius: 8px; margin: 4px 0 16px 0;">
+    <tr><td style="padding: 16px;">
+      <p class="txt" style="margin: 0 0 6px 0; color: #E8EAF0;"><strong style="color: #F5A623;">Name:</strong> ${escapeHtml(name)}</p>
+      <p class="txt" style="margin: 0 0 6px 0; color: #E8EAF0;"><strong style="color: #F5A623;">Email:</strong> ${escapeHtml(leadEmail || '—')}</p>
+      <p class="txt" style="margin: 0 0 6px 0; color: #E8EAF0;"><strong style="color: #F5A623;">Phone:</strong> ${escapeHtml(leadPhone || '—')}</p>
+      <p class="txt" style="margin: 0; color: #E8EAF0;"><strong style="color: #F5A623;">Goals:</strong> ${escapeHtml(goals || '—')}</p>
+    </td></tr>
+    </table>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="padding: 12px 0 4px 0;">
+      <a href="https://goarrive.fit/admin" style="display: inline-block; background-color: #FFC000; color: #0F1117; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700;">Open Leads tab</a>
+    </td></tr></table>
+  </td></tr>
+  <tr><td align="center" style="padding: 20px 0 0 0;">
+    <p style="color: #7A7F94; font-size: 12px; margin: 0;">GoArrive · Coaching, arrived.</p>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+
+  return { subject, body, htmlBody };
+}

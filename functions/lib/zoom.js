@@ -112,6 +112,7 @@ class RealZoomProvider {
         return response;
     }
     async createMeeting(request) {
+        var _a;
         const response = await this.apiRequest('POST', `/users/${encodeURIComponent(request.hostEmail)}/meetings`, {
             topic: request.topic,
             type: 2, // Scheduled meeting
@@ -121,7 +122,7 @@ class RealZoomProvider {
             settings: {
                 join_before_host: true,
                 waiting_room: false,
-                auto_recording: 'cloud',
+                auto_recording: (_a = request.autoRecording) !== null && _a !== void 0 ? _a : 'cloud',
                 mute_upon_entry: true,
                 approval_type: 0, // Automatically approve
             },

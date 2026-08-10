@@ -70,6 +70,9 @@ interface MemberListItem {
   coachId: string;
   tenantId: string;
   isArchived: boolean;
+  /** True when the member record is linked to a Firebase Auth account */
+  hasAccount: boolean;
+  uid: string;
   createdAt: any;
   updatedAt: any;
 }
@@ -173,6 +176,8 @@ function MembersScreenInner() {
           coachId: data.coachId ?? '',
           tenantId: data.tenantId ?? '',
           isArchived: data.isArchived ?? false,
+          hasAccount: data.hasAccount === true && !!data.uid,
+          uid: data.uid ?? '',
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
         };
@@ -631,6 +636,14 @@ function MembersScreenInner() {
                           <Text style={styles.assignBadgeText}>{assignCount}</Text>
                         </View>
                       )}
+                      {/* Account link status */}
+                      {!m.isArchived && (
+                        <View style={[styles.linkBadge, m.hasAccount && styles.linkBadgeLinked]}>
+                          <Text style={[styles.linkBadgeText, m.hasAccount && styles.linkBadgeTextLinked]}>
+                            {m.hasAccount ? 'Linked' : 'No login'}
+                          </Text>
+                        </View>
+                      )}
                     </View>
                     <Text style={styles.cardEmail} numberOfLines={1}>
                       {m.email}
@@ -1032,6 +1045,26 @@ const styles = StyleSheet.create({
     color: '#E05252',
     fontFamily: FONT_HEADING,
     textTransform: 'uppercase',
+  },
+  // Account link status badge
+  linkBadge: {
+    backgroundColor: 'rgba(138,149,163,0.12)',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 6,
+  },
+  linkBadgeLinked: {
+    backgroundColor: 'rgba(110,187,122,0.12)',
+  },
+  linkBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#8A95A3',
+    fontFamily: FONT_HEADING,
+    textTransform: 'uppercase',
+  },
+  linkBadgeTextLinked: {
+    color: '#6EBB7A',
   },
   cardEmail: {
     fontSize: 14,

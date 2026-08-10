@@ -866,8 +866,12 @@ service cloud.firestore {
       allow create: if request.auth == null
                     || (isAuthenticated() && request.auth.uid == request.resource.data.uid)
                     || (isAuthenticated() && isCoachOrBootstrap(request.resource.data.coachId));
-      // get: full document-level check (resource.data available)
-      allow get: if isAuthenticated() && isCoachOrBootstrap(resource.data.coachId);
+      // get: full document-level check (resource.data available).
+      // platformAdmin needs get for the admin Leads queue (unassigned intakes).
+      allow get: if isAuthenticated() && (
+        isCoachOrBootstrap(resource.data.coachId)
+        || isPlatformAdmin()
+      );
       // list: require the query to scope to the caller's coachId.
       // The app only uses get (single doc reads), so list is admin/coach-only.
       allow list: if isAuthenticated() && (

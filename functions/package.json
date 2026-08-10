@@ -4,16 +4,24 @@
     "build": "tsc",
     "serve": "npm run build && firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions",
-    "test:rules": "jest --rootDir=.. --testPathPattern='firestore\\.rules\\.test'"
+    "test:rules": "jest"
   },
   "jest": {
     "preset": "ts-jest",
     "testEnvironment": "node",
+    "roots": [
+      "<rootDir>/.."
+    ],
     "testMatch": [
       "<rootDir>/../firestore.rules.test.ts"
     ],
+    "moduleDirectories": [
+      "node_modules",
+      "<rootDir>/node_modules"
+    ],
     "globals": {
       "ts-jest": {
+        "diagnostics": false,
         "tsconfig": {
           "module": "commonjs",
           "esModuleInterop": true
