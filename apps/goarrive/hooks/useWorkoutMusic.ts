@@ -417,7 +417,7 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
     if (!enabled || musicElRef.current || musicOffRef.current) return;
     const el: HTMLAudioElement = new (window as any).Audio();
     el.loop = false; // playlist advances on 'ended' instead of looping
-    el.volume = volumeRef.current;
+    el.volume = volumeRef.current * volumeRef.current; // perceptual curve — see setVolume
     el.muted = mutedRef.current;
     el.addEventListener('ended', () => {
       if (musicElRef.current !== el || !el.src) return;
@@ -520,10 +520,13 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
   }, [startMusic]);
 
   const setVolume = useCallback((v: number) => {
-    const clamped = Math.min(1, Math.max(0.1, Math.round(v * 10) / 10));
+    const clamped = Math.min(1, Math.max(0, Math.round(v * 10) / 10));
     volumeRef.current = clamped;
     setVolumeState(clamped);
-    if (musicElRef.current) musicElRef.current.volume = clamped;
+    // Human loudness perception is logarithmic; a linear HTMLAudio volume feels
+    // front-loaded (10% still audibly loud). Square the display value so the
+    // slider feels natural — 10% displayed ≈ 1% actual, 50% ≈ 25%, 100% = 100%.
+    if (musicElRef.current) musicElRef.current.volume = clamped * clamped;
   }, []);
 
   const skipNext = useCallback(() => {
