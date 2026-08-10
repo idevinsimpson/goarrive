@@ -51,8 +51,8 @@ import { useAuth } from '../lib/AuthContext';
 import { doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { setAudioMuted, unlockAudioContext } from '../lib/audioCues';
-import { httpsCallable } from 'firebase/functions';
-import { functions } from '../lib/firebase';
+import { useWorkoutMusic } from '../hooks/useWorkoutMusic';
+import MusicSettingsSheet from './MusicSettingsSheet';
 import { FB, FH } from '../lib/theme';
 import VoiceAuditPanel from './VoiceAuditPanel';
 import { isStagingHost } from '../lib/runtimeEnv';
@@ -224,114 +224,39 @@ export default function WorkoutPlayer({
   const [isMuted, setIsMuted] = useState(false);
   useEffect(() => { setAudioMuted(isMuted); }, [isMuted]);
 
-  // ── Workout background music (Mubert) ─────────────────────────────────
-  // Coach-enabled looped track played softly under coach audio/TTS. Web-only
-  // (HTMLAudioElement). The element is created + primed inside the Play tap
-  // gesture (iOS Safari only allows play() from a user gesture); src attaches
-  // when the prefetch resolves. Per the e49f0a0 rule, an element is always
-  // paused + released before being abandoned so it can never resurrect.
+  // ── Workout background music (Mubert playlist) ────────────────────────
+  // Coach-enabled pooled tracks played softly under coach audio/TTS as a
+  // no-repeat playlist that changes songs through the workout. Web-only.
+  // All element/queue mechanics live in useWorkoutMusic — the single blessed
+  // element, in-gesture priming, e49f0a0 release discipline and announcement
+  // hold are preserved verbatim from the original inline implementation.
+  const { user, claims } = useAuth();
   const musicVolume =
     typeof workout?.workoutMusicVolume === 'number' ? workout.workoutMusicVolume : 0.35;
   const musicEnabled = Platform.OS === 'web' && !!workout?.workoutMusicEnabled;
-  // Member can mute music independently of the main workout audio.
-  const [musicMuted, setMusicMuted] = useState(false);
   const musicStyle =
     typeof workout?.workoutMusicStyle === 'string' && workout.workoutMusicStyle
       ? workout.workoutMusicStyle
       : 'workout';
-  const musicElRef = useRef<HTMLAudioElement | null>(null);
-  const musicUrlRef = useRef<string | null>(null);
-  const musicFetchRef = useRef<Promise<string | null> | null>(null);
-  const musicPausedRef = useRef(false);
-  // While the intro announcement speaks, music is held (primed but silent)
-  // so the welcome clip is never buried under the track.
-  const musicHoldRef = useRef(false);
-
-  // Prefetch the track URL during the ready screen so Play starts instantly.
+  const music = useWorkoutMusic({
+    enabled: musicEnabled,
+    visible,
+    phase,
+    isPaused,
+    isMuted,
+    initialStyle: musicStyle,
+    initialVolume: musicVolume,
+    uid: user?.uid ?? null,
+    workoutId: typeof workout?.id === 'string' ? workout.id : null,
+    coachId: typeof workout?.coachId === 'string' ? workout.coachId : null,
+  });
+  // Local aliases keep the announcement/start call sites identical to the
+  // pre-hook implementation.
+  const { startMusic, releaseMusicHold, musicHoldRef } = music;
+  const [showMusicSheet, setShowMusicSheet] = useState(false);
   useEffect(() => {
-    if (!musicEnabled || phase !== 'ready' || musicFetchRef.current) return;
-    const getWorkoutMusic = httpsCallable<
-      { style: string; duration: number },
-      { url: string }
-    >(functions, 'getWorkoutMusic');
-    musicFetchRef.current = getWorkoutMusic({ style: musicStyle, duration: 300 })
-      .then((res) => {
-        musicUrlRef.current = res.data?.url ?? null;
-        return musicUrlRef.current;
-      })
-      .catch((err: any) => {
-        console.warn('[MUSIC] prefetch failed:', err?.message ?? err);
-        return null;
-      });
-  }, [musicEnabled, musicStyle, phase]);
-
-  const stopMusic = useCallback(() => {
-    const el = musicElRef.current;
-    musicElRef.current = null;
-    if (!el) return;
-    // Pause BEFORE releasing — abandoning a still-loading element without
-    // pausing lets it start playing on its own once data arrives (e49f0a0).
-    try {
-      el.pause();
-      el.currentTime = 0;
-      el.removeAttribute('src');
-      el.load();
-    } catch {}
-  }, []);
-
-  // Must run synchronously inside the Play tap gesture.
-  const startMusic = useCallback(() => {
-    if (!musicEnabled || musicElRef.current) return;
-    const el: HTMLAudioElement = new (window as any).Audio();
-    el.loop = true;
-    el.volume = musicVolume;
-    el.muted = isMuted || musicMuted;
-    musicElRef.current = el;
-    const attach = (url: string | null) => {
-      if (!url || musicElRef.current !== el) return;
-      el.src = url;
-      if (!musicPausedRef.current && !musicHoldRef.current) {
-        el.play().catch(() => {});
-      }
-    };
-    if (musicUrlRef.current) {
-      if (musicHoldRef.current) {
-        // Prime inside the gesture so releaseMusicHold's play() is allowed.
-        el.play().catch(() => {});
-      }
-      attach(musicUrlRef.current);
-    } else {
-      // Prime inside the gesture so the later src-attach play() is allowed.
-      el.play().catch(() => {});
-      (musicFetchRef.current || Promise.resolve(null)).then(attach);
-    }
-  }, [musicEnabled, isMuted, musicMuted, musicVolume]);
-
-  const releaseMusicHold = useCallback(() => {
-    if (!musicHoldRef.current) return;
-    musicHoldRef.current = false;
-    const el = musicElRef.current;
-    if (el && el.src && !musicPausedRef.current) el.play().catch(() => {});
-  }, []);
-
-  // Pause/resume with the workout; respect mute; stop on finish/close/unmount.
-  useEffect(() => {
-    musicPausedRef.current = isPaused;
-    const el = musicElRef.current;
-    if (!el || !el.src) return;
-    if (isPaused) el.pause();
-    else el.play().catch(() => {});
-  }, [isPaused]);
-  useEffect(() => {
-    if (musicElRef.current) musicElRef.current.muted = isMuted || musicMuted;
-  }, [isMuted, musicMuted]);
-  useEffect(() => {
-    if (phase === 'complete') stopMusic();
-  }, [phase, stopMusic]);
-  useEffect(() => {
-    if (!visible) stopMusic();
-  }, [visible, stopMusic]);
-  useEffect(() => () => stopMusic(), [stopMusic]);
+    if (!visible || phase === 'complete') setShowMusicSheet(false);
+  }, [visible, phase]);
 
   // ── Voice coaching ────────────────────────────────────
   const { stopAllAudio, playExclusiveVoice } = useWorkoutTTS({
@@ -357,8 +282,8 @@ export default function WorkoutPlayer({
   const [swapReason, setSwapReason] = useState('');
 
   // ── Live heart rate (Web Bluetooth) ───────────────────────────────────
+  // (user/claims come from the useAuth destructure in the music block above.)
   const hr = useHeartRate();
-  const { user, claims } = useAuth();
   const isMember = !!user && claims?.role === 'member';
 
   // ── Live View session writes (workoutSessions collection) ────────────────
@@ -1268,10 +1193,16 @@ export default function WorkoutPlayer({
           )}
           {musicEnabled && (
             <TouchableOpacity
-              onPress={() => setMusicMuted(m => !m)}
+              onPress={() => setShowMusicSheet(true)}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             >
-              <Icon name="music" size={fs(22)} color={musicMuted ? '#F59E0B' : '#8A95A3'} />
+              {/* Amber = music silenced (muted or turned off), matching the
+                  old mute-toggle affordance; the button now opens the panel. */}
+              <Icon
+                name="music"
+                size={fs(22)}
+                color={music.musicMuted || music.musicOff ? '#F59E0B' : '#8A95A3'}
+              />
             </TouchableOpacity>
           )}
           <TouchableOpacity
@@ -2158,6 +2089,34 @@ export default function WorkoutPlayer({
               </TouchableOpacity>
             </View>
           </View>
+        )}
+
+        {/* Music panel — independent of the auto-hiding controls overlay */}
+        {musicEnabled && (
+          <MusicSettingsSheet
+            visible={showMusicSheet}
+            onClose={() => setShowMusicSheet(false)}
+            fs={fs}
+            currentStyle={music.currentStyle}
+            onChangeStyle={music.changeStyle}
+            currentTrackIndex={music.currentTrackIndex}
+            trackStatus={music.trackStatus}
+            musicMuted={music.musicMuted}
+            onToggleMute={music.toggleMusicMuted}
+            onSkipNext={music.skipNext}
+            onSkipBack={music.skipBack}
+            liked={music.liked}
+            disliked={music.disliked}
+            onToggleLike={music.toggleLike}
+            onToggleDislike={music.toggleDislike}
+            canRate={!!user}
+            volume={music.volume}
+            onVolumeChange={music.setVolume}
+            musicOff={music.musicOff}
+            onTurnOffForSession={music.turnOffForSession}
+            onTurnMusicBackOn={music.turnMusicBackOn}
+            started={phase !== 'ready'}
+          />
         )}
       </View>
       </View>

@@ -95,6 +95,12 @@ The functions are organized into several logical categories, each serving a dist
 | `cleanupOldMovementThumbnails` | `onDocumentUpdated` | Cleans up old thumbnails when new ones are generated. |
 | `retryFailedGifGeneration` | `onSchedule` | Retries failed GIF generation attempts. |
 
+### AI Workout Music
+
+| Function | Trigger | Purpose |
+|---|---|---|
+| `getWorkoutMusic` | `onCall` | Mubert v3 background music, cached in Storage. Three modes: `{style, trackIndex}` returns one 180s pooled track (`music_cache/<style>/track_<n>.mp3`, pool of 24/style, per-index prompt variation) for the player's no-repeat playlist; `{style, list: true}` lists already-cached pool indices (no quota cost); legacy `{style, duration}` returns the old single looped file. 18 styles (`MUSIC_STYLES` — keep in sync with `apps/goarrive/constants/musicStyles.ts`). On generation failure (Mubert trial quota is ~100 tracks lifetime) track mode deterministically falls back to a cached pool track instead of erroring. Locks via `musicCache/{lockId}`; per-user creds in `mubertCustomers/{uid}` (both Admin-SDK only). |
+
 ### Notifications & Reminders
 
 | Function | Trigger | Purpose |

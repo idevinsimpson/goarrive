@@ -22,6 +22,8 @@ The platform organizes its data across several critical collections, each servin
 | `member_plans` | Coaching plan + billing structure (doc ID = memberId) | `memberId`, `coachId`, `status`, `checkoutStatus` (`pending_payment`/`paid`/`pay_in_full_paid`/`free_active`/`cancelled`/`failed`), `pricingResult`, `monthlyPriceOverride`, `hourlyRate`, `commitToSave`, `continuationPricing`, `stripeCustomerId`, `acceptedSnapshotId` | Coach-or-admin write, member read. Activated by the Stripe webhook (paid) or `startFreePlan` ($0 plans, `checkoutStatus: 'free_active'`). There are no bare `price`/`interval` fields — pricing lives in `pricingResult` + inputs. |
 | `session_instances` | Concrete scheduled events | `slotId`, `coachId`, `startTime`, `endTime`, `zoomUrl` | Generated from `recurring_slots`. |
 | `recurring_slots` | Scheduling patterns | `coachId`, `dayOfWeek`, `startTime`, `durationMin` | Defines the pattern for generating session instances. |
+| `musicPrefs` | Per-user workout music taste (doc id = uid) | `likedTracks[]`, `dislikedTracks[]` (track ids `<style>/<index>`) | Owner-only read/write (`isOwnDoc`), platformAdmin full. |
+| `workoutMusicFeedback/{coachId}/workouts` | Shared per-workout track dislikes — excluded for everyone playing that workout | `dislikedTracks[]` | Tenant coach + that coach's members read/write (path-var rules), platformAdmin full. |
 
 ## Query Patterns
 Queries in GoArrive are heavily reliant on proper scoping to maintain multi-tenancy and security.

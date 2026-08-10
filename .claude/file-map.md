@@ -53,6 +53,7 @@ The frontend application lives in `apps/goarrive/` and follows Expo Router's fil
 |---|---|
 | `BulkMovementUpload.tsx` | Bulk movement upload with AI auto-analysis via ChatGPT. |
 | `WorkoutPlayer.tsx` | Workout playback engine (built but partially disconnected). |
+| `MusicSettingsSheet.tsx` | In-player music panel (now playing, skip, like/dislike, volume, style change). Style options in `constants/musicStyles.ts`. |
 | `WorkoutForm.tsx` | Workout creation/edit form with block builder. |
 | `WorkoutDetail.tsx` | Workout detail view with assignment capabilities. |
 | `MovementForm.tsx` | Movement creation/edit form. |
@@ -81,6 +82,7 @@ The frontend application lives in `apps/goarrive/` and follows Expo Router's fil
 | `hooks/useMovementSwap.ts` | Hook for swapping movements (regression/progression). |
 | `hooks/useWorkoutTimer.ts` | Hook for workout timer logic. |
 | `hooks/useWorkoutTTS.ts` | Hook for text-to-speech during workouts. |
+| `hooks/useWorkoutMusic.ts` | Workout background-music playlist manager (Mubert track pools, skip/like/dislike, style change). Pure queue helpers in `useWorkoutMusic.helpers.ts`. |
 | `hooks/usePlaybackSpeed.ts` | Hook for video playback speed control. |
 | `hooks/useSeamlessLoop.ts` | Hook for seamless video looping. |
 | `hooks/useMediaPrefetch.ts` | Hook for prefetching upcoming movement media. |

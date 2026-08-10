@@ -9775,24 +9775,64 @@ export const generateVoice = onCall(
 );
 
 // ─── getWorkoutMusic — AI background music for workout playback (Mubert v3) ──
-// Auth-required callable. Mints per-user Mubert customer credentials via
-// service/customers (cached in Firestore), generates a text-to-music track for
-// the requested style+duration, and caches the MP3 in Firebase Storage at
-// music_cache/<style>/<duration>.mp3. Trial plan allows only 100 tracks total,
-// so an existing style+duration combo is NEVER regenerated — Storage is the
-// source of truth, and a Firestore lock (musicCache/{style_duration}) prevents
-// two concurrent callers from both spending a generation on the same combo.
+// Auth-required callable with three modes:
+//   • Track mode  { style, trackIndex }: one fixed-length pooled track cached
+//     at music_cache/<style>/track_<index>.mp3. The player chains pool tracks
+//     into a no-repeat playlist; on generation failure (quota/outage) this
+//     falls back to an already-cached track from the same pool.
+//   • List mode   { style, list: true }: returns which pool indices already
+//     exist in Storage (no quota cost) so the player can plan its queue.
+//   • Legacy mode { style, duration }: the original single looped file at
+//     music_cache/<style>/<durationSecs>.mp3 — kept for old deployed bundles.
+// Mints per-user Mubert customer credentials via service/customers (cached in
+// Firestore). Trial plan allows only 100 generated tracks total, so an
+// existing cache entry is NEVER regenerated — Storage is the source of truth,
+// and a Firestore lock (musicCache/{lockId}) prevents two concurrent callers
+// from both spending a generation on the same entry.
 // ─────────────────────────────────────────────────────────────────────────────
 const MUBERT_API_BASE = 'https://music-api.mubert.com/api/v3';
 
+// KEEP IN SYNC (manual): apps/goarrive/constants/musicStyles.ts — keys must
+// match exactly; there is no shared module between the app and functions.
 const MUSIC_STYLES: Record<string, { prompt: string; intensity: 'low' | 'medium' | 'high' }> = {
+  // ── original 6 — keys must not change (cached files depend on them) ──
   workout: { prompt: 'High energy gym workout music, driving beat, motivating and powerful', intensity: 'high' },
   edm: { prompt: 'Energetic EDM electronic dance music, festival drops, pumping bass', intensity: 'high' },
   hiphop: { prompt: 'Upbeat hip-hop beat, confident groove, punchy drums', intensity: 'medium' },
   chill: { prompt: 'Chill relaxed lo-fi beats, calm steady rhythm, smooth and warm', intensity: 'low' },
   rock: { prompt: 'Energetic rock music, electric guitars, driving drums, anthemic', intensity: 'high' },
   focus: { prompt: 'Ambient focus music, minimal steady pulse, deep concentration', intensity: 'low' },
+  // ── expanded styles ──
+  pop: { prompt: 'Upbeat modern pop, catchy hooks, bright synths, feel-good energy', intensity: 'medium' },
+  house: { prompt: 'Groovy house music, four-on-the-floor kick, warm bassline, uplifting piano stabs', intensity: 'high' },
+  techno: { prompt: 'Driving techno, hypnotic pulsing synths, relentless kick drum, dark warehouse energy', intensity: 'high' },
+  trap: { prompt: 'Hard-hitting trap beat, booming 808 bass, crisp hi-hat rolls, aggressive swagger', intensity: 'high' },
+  rnb: { prompt: 'Smooth R&B groove, silky chords, laid-back beat, soulful and confident', intensity: 'low' },
+  latin: { prompt: 'High energy Latin dance music, reggaeton rhythm, tropical percussion, fiesta vibes', intensity: 'high' },
+  country: { prompt: 'Upbeat country rock, acoustic and electric guitars, stomping beat, feel-good americana', intensity: 'medium' },
+  metal: { prompt: 'Heavy metal workout music, distorted guitar riffs, double-kick drums, intense and powerful', intensity: 'high' },
+  funk: { prompt: 'Funky groove, slap bass, tight rhythm guitar, brass hits, irresistible bounce', intensity: 'medium' },
+  disco: { prompt: 'Classic disco energy, four-on-the-floor groove, strings and funky bass, dancefloor euphoria', intensity: 'medium' },
+  afrobeats: { prompt: 'Afrobeats rhythm, bouncy percussion, warm melodic hooks, sunny high-energy groove', intensity: 'medium' },
+  synthwave: { prompt: 'Retro synthwave, pulsing 80s synth bass, neon arpeggios, cinematic drive', intensity: 'medium' },
 };
+
+// Pooled tracks are fixed-length so one cached file serves any workout length;
+// the player strings pool tracks together and never repeats within the pool.
+const TRACK_DURATION_SECS = 180;
+const MAX_TRACKS_PER_STYLE = 24;
+// Deterministic per-index flavor appended to the style prompt so pooled
+// generations diverge even beyond Mubert's inherent generative variety.
+const TRACK_VARIATIONS = [
+  '',
+  'with a fresh melodic hook',
+  'darker and grittier',
+  'bright and euphoric',
+  'stripped back and rhythmic',
+  'with a big anthemic chorus feel',
+  'hypnotic and steady',
+  'playful and bouncy',
+];
 
 export const getWorkoutMusic = onCall(
   {
@@ -9807,7 +9847,12 @@ export const getWorkoutMusic = onCall(
     }
     const uid = request.auth.uid;
 
-    const { style, duration } = request.data as { style?: string; duration?: number };
+    const { style, duration, trackIndex, list } = request.data as {
+      style?: string;
+      duration?: number;
+      trackIndex?: number;
+      list?: boolean;
+    };
 
     const styleKey = String(style || '').toLowerCase();
     const styleConfig = MUSIC_STYLES[styleKey];
@@ -9818,22 +9863,78 @@ export const getWorkoutMusic = onCall(
       );
     }
 
-    // Bucket duration to whole minutes (60s–600s) so near-identical requests
-    // share one cached track instead of burning trial quota per second value.
-    const requestedSecs = typeof duration === 'number' && isFinite(duration) ? duration : 300;
-    const durationSecs = Math.min(600, Math.max(60, Math.round(requestedSecs / 60) * 60));
-
-    const path = `music_cache/${styleKey}/${durationSecs}.mp3`;
     const bucket = admin.storage().bucket();
-    const file = bucket.file(path);
-    const cdnUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media`;
+    const publicUrl = (p: string) =>
+      `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(p)}?alt=media`;
+    const listReadyIndices = async (): Promise<number[]> => {
+      const [files] = await bucket.getFiles({ prefix: `music_cache/${styleKey}/track_` });
+      return files
+        .map((f) => /track_(\d+)\.mp3$/.exec(f.name)?.[1])
+        .filter((m): m is string => !!m)
+        .map(Number)
+        .sort((a, b) => a - b);
+    };
 
-    // ── Layer 0: Storage cache hit — never regenerate an existing combo ────
+    // ── List mode: report which pool indices are already cached (no quota) ──
+    if (list === true) {
+      return {
+        style: styleKey,
+        readyIndices: await listReadyIndices(),
+        maxTracks: MAX_TRACKS_PER_STYLE,
+        trackDuration: TRACK_DURATION_SECS,
+      };
+    }
+
+    // Resolve the requested cache entry: pooled track vs legacy looped file.
+    const isTrackMode = trackIndex !== undefined && trackIndex !== null;
+    let path: string;
+    let lockId: string;
+    let genDurationSecs: number;
+    let prompt: string;
+    if (isTrackMode) {
+      if (!Number.isInteger(trackIndex) || (trackIndex as number) < 0 || (trackIndex as number) >= MAX_TRACKS_PER_STYLE) {
+        throw new HttpsError('invalid-argument', 'music:bad_track_index', {
+          reason: `trackIndex must be an integer in [0, ${MAX_TRACKS_PER_STYLE - 1}]`,
+        });
+      }
+      const idx = trackIndex as number;
+      path = `music_cache/${styleKey}/track_${idx}.mp3`;
+      lockId = `${styleKey}_track_${idx}`;
+      genDurationSecs = TRACK_DURATION_SECS;
+      const variation = TRACK_VARIATIONS[idx % TRACK_VARIATIONS.length];
+      prompt = variation ? `${styleConfig.prompt}, ${variation}` : styleConfig.prompt;
+    } else {
+      // Bucket duration to whole minutes (60s–600s) so near-identical requests
+      // share one cached track instead of burning trial quota per second value.
+      const requestedSecs = typeof duration === 'number' && isFinite(duration) ? duration : 300;
+      const durationSecs = Math.min(600, Math.max(60, Math.round(requestedSecs / 60) * 60));
+      path = `music_cache/${styleKey}/${durationSecs}.mp3`;
+      lockId = `${styleKey}_${durationSecs}`;
+      genDurationSecs = durationSecs;
+      prompt = styleConfig.prompt;
+    }
+
+    const file = bucket.file(path);
+    const cdnUrl = publicUrl(path);
+    // Success payload for track mode; `trackId` is the app-level id the player
+    // uses for likes/dislikes ('<style>/<index>'), not Mubert's generation id.
+    const trackResponse = (p: string, idx: number, cached: boolean) => ({
+      url: publicUrl(p),
+      path: p,
+      cached,
+      style: styleKey,
+      trackIndex: idx,
+      trackId: `${styleKey}/${idx}`,
+    });
+
+    // ── Layer 0: Storage cache hit — never regenerate an existing entry ────
     try {
       const [exists] = await file.exists();
       if (exists) {
-        console.info('[MUSIC] getWorkoutMusic: cache hit', { path, styleKey, durationSecs });
-        return { url: cdnUrl, path, cached: true, style: styleKey, duration: durationSecs };
+        console.info('[MUSIC] getWorkoutMusic: cache hit', { path, styleKey });
+        return isTrackMode
+          ? trackResponse(path, trackIndex as number, true)
+          : { url: cdnUrl, path, cached: true, style: styleKey, duration: genDurationSecs };
       }
     } catch (err: any) {
       console.warn('[MUSIC] getWorkoutMusic: cache check failed', {
@@ -9841,8 +9942,8 @@ export const getWorkoutMusic = onCall(
       });
     }
 
-    // ── Layer 1: generation lock — only one caller spends quota per combo ──
-    const lockRef = db.doc(`musicCache/${styleKey}_${durationSecs}`);
+    // ── Layer 1: generation lock — only one caller spends quota per entry ──
+    const lockRef = db.doc(`musicCache/${lockId}`);
     const LOCK_TTL_MS = 3 * 60 * 1000;
     const acquiredLock = await db.runTransaction(async (tx) => {
       const snap = await tx.get(lockRef);
@@ -9856,12 +9957,28 @@ export const getWorkoutMusic = onCall(
     });
 
     if (!acquiredLock) {
-      // Another caller is generating this combo — wait for the file to land.
+      // Another caller is generating this entry — wait for the file to land.
       for (let i = 0; i < 20; i++) {
         await new Promise((r) => setTimeout(r, 3000));
         const [exists] = await file.exists();
         if (exists) {
-          return { url: cdnUrl, path, cached: true, style: styleKey, duration: durationSecs };
+          return isTrackMode
+            ? trackResponse(path, trackIndex as number, true)
+            : { url: cdnUrl, path, cached: true, style: styleKey, duration: genDurationSecs };
+        }
+      }
+      // Track mode degrades to any cached pool track rather than erroring —
+      // deterministic pick so every listener maps the same request to the
+      // same substitute while the pool is still filling in.
+      if (isTrackMode) {
+        const readyIndices = await listReadyIndices().catch(() => [] as number[]);
+        if (readyIndices.length > 0) {
+          const fallbackIndex = readyIndices[(trackIndex as number) % readyIndices.length];
+          const fallbackPath = `music_cache/${styleKey}/track_${fallbackIndex}.mp3`;
+          console.warn('[MUSIC] getWorkoutMusic: busy fallback', {
+            styleKey, requested: trackIndex, served: fallbackIndex,
+          });
+          return { ...trackResponse(fallbackPath, fallbackIndex, true), fallback: true };
         }
       }
       throw new HttpsError('unavailable', 'music:generation_in_progress', {
@@ -9954,8 +10071,8 @@ export const getWorkoutMusic = onCall(
           'access-token': accessToken,
         },
         body: JSON.stringify({
-          prompt: styleConfig.prompt,
-          duration: durationSecs,
+          prompt,
+          duration: genDurationSecs,
           bitrate: 128,
           mode: 'track',
           intensity: styleConfig.intensity,
@@ -9965,7 +10082,7 @@ export const getWorkoutMusic = onCall(
       if (!genResp.ok) {
         const errBody = (await genResp.text()).slice(0, 500);
         console.error('[MUSIC] getWorkoutMusic: generation FAILED', {
-          status: genResp.status, body: errBody, styleKey, durationSecs,
+          status: genResp.status, body: errBody, styleKey, path,
         });
         throw new HttpsError('internal', `music:generate:${genResp.status}`, {
           layer: 'generate', status: genResp.status, body: errBody,
@@ -9999,7 +10116,7 @@ export const getWorkoutMusic = onCall(
         }
       }
       if (!trackUrl) {
-        console.error('[MUSIC] getWorkoutMusic: generation timed out', { trackId, styleKey, durationSecs });
+        console.error('[MUSIC] getWorkoutMusic: generation timed out', { trackId, styleKey, path });
         throw new HttpsError('deadline-exceeded', 'music:generate:timeout', { trackId });
       }
 
@@ -10014,20 +10131,47 @@ export const getWorkoutMusic = onCall(
       const audioBuffer = Buffer.from(await dlResp.arrayBuffer());
       await file.save(audioBuffer, { contentType: 'audio/mpeg' });
 
+      // `trackId` on the lock doc is Mubert's generation id (historical name),
+      // unrelated to the app-level '<style>/<index>' id in track responses.
       await lockRef.set({
-        status: 'ready', url: cdnUrl, path, style: styleKey, duration: durationSecs,
+        status: 'ready', url: cdnUrl, path, style: styleKey, duration: genDurationSecs,
+        ...(isTrackMode ? { trackIndex } : {}),
         trackId: trackId || null, createdAt: Date.now(), uid,
       }).catch(() => {});
 
       console.info('[MUSIC] getWorkoutMusic: generated + cached', {
-        path, styleKey, durationSecs, bytes: audioBuffer.length, trackId,
+        path, styleKey, bytes: audioBuffer.length, trackId,
       });
-      return { url: cdnUrl, path, cached: false, style: styleKey, duration: durationSecs };
+      return isTrackMode
+        ? trackResponse(path, trackIndex as number, false)
+        : { url: cdnUrl, path, cached: false, style: styleKey, duration: genDurationSecs };
     } catch (err: any) {
       await releaseLock();
+      // Track mode degrades gracefully: if generation failed (Mubert trial
+      // quota spent, outage, timeout) but the style already has pooled tracks,
+      // serve one deterministically instead of failing — the player prefers a
+      // repeat over silence, and the same failing index maps to the same
+      // substitute for every listener (coach and member keep hearing the same
+      // sequence on a workout).
+      if (isTrackMode) {
+        try {
+          const readyIndices = await listReadyIndices();
+          if (readyIndices.length > 0) {
+            const fallbackIndex = readyIndices[(trackIndex as number) % readyIndices.length];
+            const fallbackPath = `music_cache/${styleKey}/track_${fallbackIndex}.mp3`;
+            console.warn('[MUSIC] getWorkoutMusic: track fallback', {
+              styleKey, requested: trackIndex, served: fallbackIndex,
+              reason: String(err?.message || err).slice(0, 200),
+            });
+            return { ...trackResponse(fallbackPath, fallbackIndex, true), fallback: true };
+          }
+        } catch {
+          // fall through to the original error
+        }
+      }
       if (err instanceof HttpsError) throw err;
       const detail = String(err?.message || err).slice(0, 300);
-      console.error('[MUSIC] getWorkoutMusic: THREW', { styleKey, durationSecs, detail }, err);
+      console.error('[MUSIC] getWorkoutMusic: THREW', { styleKey, path, detail }, err);
       throw new HttpsError('internal', 'music:failed', { message: detail });
     }
   }
