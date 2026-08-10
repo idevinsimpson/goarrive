@@ -72,11 +72,18 @@ export function pickNameTier(
 // (Safari toolbars, in-app webviews). Regression 2026-07-21: player rendered
 // at 74% of screen width inside a webview.
 //
-// Rule: in portrait, WIDTH ALWAYS WINS. The scale is driven by viewport
-// width; when the viewport is too short for the full 640-unit artboard, the
-// media slot absorbs the shortfall (the 4:5 media crops via cover) down to a
-// floor of BASE_MEDIA_MIN_H. Only below that degenerate height (or in
-// landscape, where pillarboxing is the design) does the uniform fit apply.
+// Rule: in portrait, WIDTH ALWAYS WINS up to a maximum artboard width. The
+// scale is driven by viewport width; when the viewport is too short for the
+// full 640-unit artboard, the media slot absorbs the shortfall (the 4:5 media
+// crops via cover) down to a floor of BASE_MEDIA_MIN_H. Only below that
+// degenerate height (or in landscape, where pillarboxing is the design) does
+// the uniform fit apply.
+//
+// Regression 2026-08-06 (iPad): without a scale cap, iPad portrait (810px)
+// yielded scale 2.25 — the countdown badge (fs(132)=297px) overlapped the
+// title, and text/media grew past design intent. CANVAS_MAX_FRAME_W caps the
+// artboard so tablet and desktop show a centered phone-sized canvas rather
+// than a scaled-up phone.
 export const CANVAS_BASE_W = 360;
 export const CANVAS_BASE_H = 640;
 // Non-media vertical slots: logo 56 + gap 4 + title 112 + gap 12 + gap 12
@@ -85,6 +92,10 @@ export const CANVAS_BASE_CHROME_H = 260;
 export const CANVAS_BASE_MEDIA_H = 380; // full design media slot height
 export const CANVAS_BASE_MEDIA_W = 304; // 4:5 of 380
 export const CANVAS_BASE_MEDIA_MIN_H = 160;
+// Max artboard width in px. 480 comfortably fits the widest phone (iPhone 15
+// Pro Max @ 430px) while producing a centered canvas on tablet/desktop.
+export const CANVAS_MAX_FRAME_W = 480;
+export const CANVAS_MAX_SCALE = CANVAS_MAX_FRAME_W / CANVAS_BASE_W;
 
 export interface PlayerCanvas {
   scale: number;
@@ -102,7 +113,10 @@ export function computePlayerCanvas(
 ): PlayerCanvas {
   const availW = winW;
   const availH = Math.max(1, winH - safeTop - safeBottom);
-  const widthScale = availW / CANVAS_BASE_W;
+  // Cap the width-driven scale so tablet/desktop viewports don't scale the
+  // artboard above phone-max width. Below the cap this is a no-op (phones
+  // keep the width-always-wins behavior).
+  const widthScale = Math.min(availW / CANVAS_BASE_W, CANVAS_MAX_SCALE);
   const fitScale = Math.max(
     0.0001,
     Math.min(widthScale, availH / CANVAS_BASE_H),
