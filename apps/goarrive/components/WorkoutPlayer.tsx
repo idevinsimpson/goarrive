@@ -46,6 +46,7 @@ import { useMovementHydrate } from '../hooks/useMovementHydrate';
 import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useWorkoutTTS, unlockAudioPlayback } from '../hooks/useWorkoutTTS';
+import { usePipCanvasStream } from '../hooks/usePipCanvasStream';
 import { useHeartRate, HeartRateSessionStats } from '../hooks/useHeartRate';
 import { useAuth } from '../lib/AuthContext';
 import { doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
@@ -71,6 +72,11 @@ import {
 if (isStagingHost()) {
   installVoiceAuditCapture();
 }
+
+// ── PiP canvas feature flags (Phase 2 — staging only) ───────────────────────
+// Default true on staging so QA can verify the canvas renders without a
+// Firebase Remote Config toggle. Phase 3 will wire this to Remote Config.
+const workoutFlags = { pipCanvasEnabled: true };
 
 // ── Constants ───────────────────────────────────────────────────────────────
 // How many seconds before a timed phase ends should the visual switch to the
@@ -178,6 +184,101 @@ export default function WorkoutPlayer({
   } = timer;
 
   useWakeLock(phase !== 'ready' && phase !== 'complete');
+
+  // ── PiP canvas-stream (Phase 2, staging-only) ────────────────────────────
+  const pipEnabled = isStagingHost() && workoutFlags.pipCanvasEnabled;
+  // Ref to the DOM video element for the currently-active workout video.
+  // Populated via effect when the expo-av Video mounts/changes.
+  const pipSourceVideoRef = useRef<HTMLVideoElement | null>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const vid = videoRef.current?._nativeRef?.current?.getVideoElement?.() ?? null;
+    pipSourceVideoRef.current = vid;
+  }, [phase, currentIndex]);
+
+  const { mediaStream, isReady: pipStreamReady } = usePipCanvasStream({
+    enabled: pipEnabled && Platform.OS === 'web',
+    phase,
+    current: current as any,
+    next: next as any,
+    timeLeft: typeof timeLeft === 'number' ? timeLeft : 0,
+    isPaused,
+    isRepBased,
+    repsDone: 0,
+    progressPct,
+    videoElRef: pipSourceVideoRef,
+  });
+
+  // Hidden <video> that carries the canvas-stream MediaStream as srcObject.
+  // Created imperatively to avoid React Native JSX incompatibility with raw <video>.
+  const pipCanvasVideoRef = useRef<HTMLVideoElement | null>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !pipEnabled) return;
+    const vid = document.createElement('video');
+    vid.autoplay = true;
+    vid.muted = true;
+    vid.playsInline = true;
+    vid.setAttribute('playsinline', '');
+    Object.assign(vid.style, {
+      position: 'fixed',
+      left: '-10000px',
+      top: '0',
+      opacity: '0',
+      pointerEvents: 'none',
+      width: '1px',
+      height: '1px',
+    });
+    document.body.appendChild(vid);
+    pipCanvasVideoRef.current = vid;
+    return () => {
+      vid.pause();
+      (vid as any).srcObject = null;
+      vid.parentNode?.removeChild(vid);
+      pipCanvasVideoRef.current = null;
+    };
+  }, [pipEnabled]);
+
+  // Wire the canvas MediaStream into the hidden video when it's available.
+  // volume=0 (not muted) so PiP still carries audio via the MediaStream track.
+  useEffect(() => {
+    const vid = pipCanvasVideoRef.current;
+    if (!vid || !mediaStream) return;
+    (vid as any).srcObject = mediaStream;
+    vid.volume = 0;
+    vid.play().catch(() => {});
+  }, [mediaStream]);
+
+  // Debug preview: small 160x200 canvas thumbnail in the bottom-right corner
+  // so QA can confirm the canvas is drawing correctly in staging.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !pipEnabled || !mediaStream) return;
+    const previewVid = document.createElement('video');
+    previewVid.autoplay = true;
+    previewVid.muted = true;
+    previewVid.playsInline = true;
+    previewVid.setAttribute('playsinline', '');
+    (previewVid as any).srcObject = mediaStream;
+    Object.assign(previewVid.style, {
+      position: 'fixed',
+      right: '12px',
+      bottom: '80px',
+      width: '160px',
+      height: '200px',
+      border: '2px solid rgba(76,175,144,0.8)',
+      borderRadius: '6px',
+      zIndex: '9999',
+      objectFit: 'cover',
+      background: '#000',
+    });
+    previewVid.title = 'PiP canvas debug preview';
+    document.body.appendChild(previewVid);
+    previewVid.play().catch(() => {});
+    return () => {
+      previewVid.pause();
+      (previewVid as any).srcObject = null;
+      previewVid.parentNode?.removeChild(previewVid);
+    };
+  }, [pipEnabled, mediaStream]);
 
   // Live progress publisher (playbook live view). Fires on transitions only —
   // not every timer tick — so Firestore writes stay cheap for the caller.
