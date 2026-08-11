@@ -88,9 +88,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.sendMemberInvite = exports.claimMemberAccount = exports.getMemberClaimStatus = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.startFreePlan = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.listPublicCoaches = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = exports.getSessionWorkout = exports.playbookBookingIcs = exports.bookViaBookingToken = exports.resolvePlaybookBookingToken = exports.revokePlaybookBookingLink = exports.createPlaybookBookingLink = exports.cleanupExpiredBookingRequests = exports.bookPlaybookSession = void 0;
-exports.updateShareToken = exports.createShareToken = exports.adminAssignLeadToCoach = exports.onIntakeSubmissionCreated = exports.onCoachFeedbackStatusChanged = exports.onCoachFeedbackCreated = exports.sendWeeklyDigest = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.batchGenerateVoice = exports.onMemberCreated = exports.onCoachCreated = exports.getWorkoutMusic = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = void 0;
-exports.pollMovementVariationJobs = exports.dismissMovementVariation = exports.finalizeMovementVariation = exports.getMovementVariationStatus = exports.startMovementVariation = exports.listEquipmentImages = exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.submitGuestReflection = exports.resolveShareToken = exports.revokeShareToken = void 0;
+exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.sendMemberInvite = exports.claimMemberAccount = exports.getMemberClaimStatus = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.startFreePlan = exports.deactivateDiscountCode = exports.createDiscountCode = exports.createFunnelCheckoutSession = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.listPublicCoaches = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = exports.getSessionWorkout = exports.playbookBookingIcs = exports.bookViaBookingToken = exports.resolvePlaybookBookingToken = exports.revokePlaybookBookingLink = exports.createPlaybookBookingLink = exports.cleanupExpiredBookingRequests = exports.bookPlaybookSession = void 0;
+exports.onIntakeSubmissionCreated = exports.onCoachFeedbackStatusChanged = exports.onCoachFeedbackCreated = exports.sendWeeklyDigest = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.batchGenerateVoice = exports.onMemberCreated = exports.onCoachCreated = exports.getWorkoutMusic = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = void 0;
+exports.sendDripEmail = exports.unsyncMemberPlaybook = exports.syncTemplatePlaybookToMembers = exports.resumeStripeSubscription = exports.pauseStripeSubscription = exports.pollMovementVariationJobs = exports.dismissMovementVariation = exports.finalizeMovementVariation = exports.getMovementVariationStatus = exports.startMovementVariation = exports.listEquipmentImages = exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.submitGuestReflection = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.adminAssignLeadToCoach = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -810,6 +810,262 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
         throw new https_1.HttpsError('internal', 'Something went wrong creating checkout. Please try again.');
     }
 });
+// ─── createFunnelCheckoutSession ─────────────────────────────────────────────
+/**
+ * Creates a Stripe Checkout Session for the PR-G onboarding funnel.
+ * Called pre-auth (funnel visitor) after questionnaire submission.
+ *
+ * TODO: Justin pricing — replace $19.99 hardcode with configurable price.
+ */
+exports.createFunnelCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
+    var _a;
+    const { submissionId, discountCode } = request.data;
+    if (!submissionId) {
+        throw new https_1.HttpsError('invalid-argument', 'submissionId is required');
+    }
+    try {
+        // ── Load submission ──
+        const subRef = db.collection('onboarding_submissions').doc(submissionId);
+        const subSnap = await subRef.get();
+        if (!subSnap.exists)
+            throw new https_1.HttpsError('not-found', 'Submission not found');
+        const submission = subSnap.data();
+        if (submission.status === 'paid') {
+            throw new https_1.HttpsError('failed-precondition', 'This submission has already been paid.');
+        }
+        const coachId = submission.coachId;
+        if (!coachId)
+            throw new https_1.HttpsError('failed-precondition', 'Submission has no coachId');
+        // ── Load coach Stripe account ──
+        const coachAccountSnap = await db.collection('coachStripeAccounts').doc(coachId).get();
+        if (!coachAccountSnap.exists) {
+            throw new https_1.HttpsError('failed-precondition', 'Coach has not connected Stripe.');
+        }
+        const coachAccount = coachAccountSnap.data();
+        if (!coachAccount.chargesEnabled) {
+            throw new https_1.HttpsError('failed-precondition', 'Coach payments not yet enabled.');
+        }
+        const stripeAccountId = coachAccount.stripeAccountId;
+        // ── Tier split ──
+        const activePayingSnap = await db.collection('member_plans')
+            .where('coachId', '==', coachId)
+            .where('checkoutStatus', '==', 'paid')
+            .get();
+        const applicationFeePercent = getTierSplit(activePayingSnap.size);
+        const stripe = getStripe(stripeSecretKey.value());
+        const appBaseUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
+        // ── Resolve discount code ──
+        let promotionCodeId;
+        if (discountCode) {
+            const codeQuery = await db.collection('discount_codes')
+                .where('coachId', '==', coachId)
+                .where('code', '==', discountCode.toUpperCase())
+                .where('active', '==', true)
+                .limit(1)
+                .get();
+            if (codeQuery.empty) {
+                throw new https_1.HttpsError('not-found', 'Discount code not found or inactive.');
+            }
+            const codeDoc = codeQuery.docs[0];
+            const codeData = codeDoc.data();
+            if (codeData.maxUses > 0 && codeData.usesCount >= codeData.maxUses) {
+                throw new https_1.HttpsError('resource-exhausted', 'Discount code has reached its usage limit.');
+            }
+            promotionCodeId = codeData.stripePromotionCodeId;
+        }
+        // Resolve price from Playbook Folder subscription path (PM audit follow-up:
+        // "PR-H must read price from the subscription-path config, not the string").
+        // Fallback to $19.99 only if the folder/path is missing a configured price
+        // (e.g. legacy folders created before pricePerMonthCents landed).
+        const FALLBACK_MONTHLY_CENTS = 1999;
+        let monthlyAmountCents = FALLBACK_MONTHLY_CENTS;
+        let resolvedProgramName;
+        const folderId = submission.folderId;
+        const subscriptionPathId = submission.subscriptionPathId;
+        if (folderId) {
+            try {
+                const folderSnap = await db.collection('playbook_folders').doc(folderId).get();
+                if (folderSnap.exists) {
+                    const folderData = folderSnap.data();
+                    resolvedProgramName = folderData.name || undefined;
+                    const paths = folderData.subscriptionPaths || [];
+                    const path = paths.find((p) => p.id === subscriptionPathId);
+                    if ((path === null || path === void 0 ? void 0 : path.pricePerMonthCents) && path.pricePerMonthCents > 0) {
+                        monthlyAmountCents = path.pricePerMonthCents;
+                    }
+                    else {
+                        console.warn('createFunnelCheckoutSession: path has no pricePerMonthCents, using fallback', {
+                            folderId,
+                            subscriptionPathId,
+                            fallbackCents: FALLBACK_MONTHLY_CENTS,
+                        });
+                    }
+                }
+                else {
+                    console.warn('createFunnelCheckoutSession: folder not found, using fallback price', { folderId });
+                }
+            }
+            catch (e) {
+                console.error('createFunnelCheckoutSession: folder lookup failed, using fallback price', {
+                    folderId,
+                    error: e instanceof Error ? e.message : String(e),
+                });
+            }
+        }
+        else {
+            console.warn('createFunnelCheckoutSession: submission missing folderId, using fallback price', { submissionId });
+        }
+        const programName = resolvedProgramName || submission.programName || 'GoArrive Coaching Program';
+        const sessionParams = {
+            payment_method_types: ['card'],
+            mode: 'subscription',
+            line_items: [
+                {
+                    price_data: {
+                        currency: 'usd',
+                        product_data: { name: programName },
+                        unit_amount: monthlyAmountCents,
+                        recurring: { interval: 'month' },
+                    },
+                    quantity: 1,
+                },
+            ],
+            subscription_data: {
+                application_fee_percent: applicationFeePercent,
+                metadata: {
+                    submissionId,
+                    coachId,
+                    funnelCheckout: 'true',
+                },
+            },
+            success_url: `${appBaseUrl}/checkout-success?submissionId=${submissionId}`,
+            cancel_url: `${appBaseUrl}/checkout/${submissionId}?cancelled=1`,
+            metadata: Object.assign({ submissionId,
+                coachId, funnelCheckout: 'true' }, (discountCode ? { discountCodeUsed: discountCode.toUpperCase() } : {})),
+        };
+        if (promotionCodeId) {
+            sessionParams.discounts = [{ promotion_code: promotionCodeId }];
+        }
+        const session = await stripe.checkout.sessions.create(sessionParams, {
+            stripeAccount: stripeAccountId,
+        });
+        return { url: session.url, sessionId: session.id };
+    }
+    catch (err) {
+        if ((err === null || err === void 0 ? void 0 : err.code) && (err === null || err === void 0 ? void 0 : err.httpErrorCode))
+            throw err;
+        console.error('[createFunnelCheckoutSession] Error:', (_a = err === null || err === void 0 ? void 0 : err.message) !== null && _a !== void 0 ? _a : err);
+        throw new https_1.HttpsError('internal', 'Something went wrong. Please try again.');
+    }
+});
+// ─── createDiscountCode ───────────────────────────────────────────────────────
+/**
+ * Coach creates a discount code backed by a Stripe Coupon + Promotion Code.
+ */
+exports.createDiscountCode = (0, https_1.onCall)({ secrets: [stripeSecretKey] }, async (request) => {
+    var _a, _b;
+    // Must be a coach
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const callerToken = (_b = request.auth) === null || _b === void 0 ? void 0 : _b.token;
+    const effectiveCoachId = (callerToken === null || callerToken === void 0 ? void 0 : callerToken.coachId) || callerUid;
+    if (!(callerToken === null || callerToken === void 0 ? void 0 : callerToken.coachId) && (callerToken === null || callerToken === void 0 ? void 0 : callerToken.role) !== 'coach' && (callerToken === null || callerToken === void 0 ? void 0 : callerToken.role) !== 'platformAdmin') {
+        throw new https_1.HttpsError('permission-denied', 'Only coaches can create discount codes');
+    }
+    const { name, code: rawCode, percentOff, duration, durationInMonths, maxUses, } = request.data;
+    if (!name || typeof name !== 'string')
+        throw new https_1.HttpsError('invalid-argument', 'name is required');
+    if (typeof percentOff !== 'number' || percentOff < 5 || percentOff > 50) {
+        throw new https_1.HttpsError('invalid-argument', 'percentOff must be between 5 and 50');
+    }
+    if (!['once', 'repeating', 'forever'].includes(duration)) {
+        throw new https_1.HttpsError('invalid-argument', 'duration must be once, repeating, or forever');
+    }
+    if (duration === 'repeating' && (!durationInMonths || durationInMonths < 1)) {
+        throw new https_1.HttpsError('invalid-argument', 'durationInMonths required for repeating duration');
+    }
+    if (typeof maxUses !== 'number' || maxUses < 1) {
+        throw new https_1.HttpsError('invalid-argument', 'maxUses must be at least 1');
+    }
+    // Auto-gen code if not provided
+    const code = rawCode
+        ? rawCode.toUpperCase().replace(/[^A-Z0-9]/g, '')
+        : Array.from({ length: 8 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[Math.floor(Math.random() * 36)]).join('');
+    // Verify coach has Stripe connected
+    const coachAccountSnap = await db.collection('coachStripeAccounts').doc(effectiveCoachId).get();
+    if (!coachAccountSnap.exists) {
+        throw new https_1.HttpsError('failed-precondition', 'Connect Stripe before creating discount codes.');
+    }
+    const stripeAccountId = coachAccountSnap.data().stripeAccountId;
+    const stripe = getStripe(stripeSecretKey.value());
+    // Create Stripe Coupon
+    const couponParams = {
+        percent_off: percentOff,
+        duration,
+        max_redemptions: maxUses,
+        metadata: { coachId: effectiveCoachId },
+        name,
+    };
+    if (duration === 'repeating' && durationInMonths) {
+        couponParams.duration_in_months = durationInMonths;
+    }
+    const coupon = await stripe.coupons.create(couponParams, { stripeAccount: stripeAccountId });
+    // Create Stripe Promotion Code
+    const promoCode = await stripe.promotionCodes.create({
+        promotion: { type: 'coupon', coupon: coupon.id },
+        code,
+        max_redemptions: maxUses,
+        metadata: { coachId: effectiveCoachId },
+    }, { stripeAccount: stripeAccountId });
+    // Write to Firestore
+    const docRef = db.collection('discount_codes').doc(promoCode.id);
+    await docRef.set({
+        coachId: effectiveCoachId,
+        name,
+        code,
+        percentOff,
+        duration,
+        durationInMonths: durationInMonths !== null && durationInMonths !== void 0 ? durationInMonths : null,
+        maxUses,
+        usesCount: 0,
+        active: true,
+        stripeCouponId: coupon.id,
+        stripePromotionCodeId: promoCode.id,
+        createdAt: firestore_2.FieldValue.serverTimestamp(),
+        updatedAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    return { id: promoCode.id, code };
+});
+// ─── deactivateDiscountCode ───────────────────────────────────────────────────
+exports.deactivateDiscountCode = (0, https_1.onCall)({ secrets: [stripeSecretKey] }, async (request) => {
+    var _a, _b, _c;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const callerToken = (_b = request.auth) === null || _b === void 0 ? void 0 : _b.token;
+    const effectiveCoachId = (callerToken === null || callerToken === void 0 ? void 0 : callerToken.coachId) || callerUid;
+    const { discountCodeId } = request.data;
+    if (!discountCodeId)
+        throw new https_1.HttpsError('invalid-argument', 'discountCodeId is required');
+    const docRef = db.collection('discount_codes').doc(discountCodeId);
+    const snap = await docRef.get();
+    if (!snap.exists)
+        throw new https_1.HttpsError('not-found', 'Discount code not found');
+    const data = snap.data();
+    if (data.coachId !== effectiveCoachId && (callerToken === null || callerToken === void 0 ? void 0 : callerToken.role) !== 'platformAdmin') {
+        throw new https_1.HttpsError('permission-denied', 'Not authorized to deactivate this code');
+    }
+    // Load coach Stripe account
+    const coachAccountSnap = await db.collection('coachStripeAccounts').doc(data.coachId).get();
+    const stripeAccountId = (_c = coachAccountSnap.data()) === null || _c === void 0 ? void 0 : _c.stripeAccountId;
+    if (stripeAccountId) {
+        const stripe = getStripe(stripeSecretKey.value());
+        await stripe.promotionCodes.update(data.stripePromotionCodeId, { active: false }, { stripeAccount: stripeAccountId });
+    }
+    await docRef.update({ active: false, updatedAt: firestore_2.FieldValue.serverTimestamp() });
+    return { success: true };
+});
 // ─── startFreePlan ────────────────────────────────────────────────────────────
 /**
  * Activates a $0 (free) plan with no Stripe involvement.
@@ -1117,15 +1373,219 @@ async function processStripeEvent(tag, event, res) {
     res.status(200).send('OK');
 }
 // ── Webhook handlers ──────────────────────────────────────────────────────────
+// ── enrollSubscriber ─────────────────────────────────────────────────────────
+// Internal helper (not exported). Called from handleCheckoutSessionCompleted
+// when submissionId is present in session metadata.
+// Duplicates the template playbook to a member-owned copy, writes the
+// playbook_folder_members doc, marks the submission enrolled, and queues a
+// drip email.
+async function enrollSubscriber(params) {
+    var _a, _b, _c, _d, _e;
+    const { submissionId, memberId, stripeSubscriptionId, stripeCustomerId } = params;
+    const TAG = '[enrollSubscriber]';
+    // 1. Load submission
+    const submSnap = await db.collection('onboarding_submissions').doc(submissionId).get();
+    if (!submSnap.exists) {
+        console.warn(TAG, 'Submission not found:', submissionId);
+        return;
+    }
+    const subm = submSnap.data();
+    const { coachId, folderId, subscriptionPathId, scheduleDaysOfWeek, scheduleTimeOfDay, timezone, email, firstName, lastName } = subm;
+    if (!coachId || !folderId || !subscriptionPathId) {
+        console.warn(TAG, 'Submission missing required fields:', submissionId);
+        return;
+    }
+    // 2. Load folder + find subscription path
+    const folderSnap = await db.collection('playbook_folders').doc(folderId).get();
+    if (!folderSnap.exists) {
+        console.warn(TAG, 'Folder not found:', folderId);
+        return;
+    }
+    const folder = folderSnap.data();
+    const subscriptionPaths = (_a = folder.subscriptionPaths) !== null && _a !== void 0 ? _a : [];
+    const path = subscriptionPaths.find((p) => p.id === subscriptionPathId);
+    if (!path) {
+        console.warn(TAG, 'Subscription path not found:', subscriptionPathId, 'in folder', folderId);
+        return;
+    }
+    const { templatePlaybookId, musicStyle: pathMusicStyle } = path;
+    if (!templatePlaybookId) {
+        console.warn(TAG, 'Subscription path has no templatePlaybookId:', subscriptionPathId);
+        return;
+    }
+    // 3. Load template playbook
+    const templateSnap = await db.collection('playbooks').doc(templatePlaybookId).get();
+    if (!templateSnap.exists) {
+        console.warn(TAG, 'Template playbook not found:', templatePlaybookId);
+        return;
+    }
+    const template = templateSnap.data();
+    // Clone playbook doc
+    const memberName = `${firstName !== null && firstName !== void 0 ? firstName : ''} ${lastName !== null && lastName !== void 0 ? lastName : ''}`.trim() || email;
+    const newPlaybookRef = db.collection('playbooks').doc();
+    const clonedFields = Object.assign({}, template);
+    // Remove server-generated fields that must be overridden
+    delete clonedFields.createdAt;
+    delete clonedFields.updatedAt;
+    delete clonedFields.assignedAt;
+    await newPlaybookRef.set(Object.assign(Object.assign({}, clonedFields), { name: `${(_b = template.name) !== null && _b !== void 0 ? _b : 'Playbook'} (${memberName})`, memberId, assignedMemberId: memberId, assignedMemberName: memberName, assignedAt: firestore_2.FieldValue.serverTimestamp(), templateSourceId: templatePlaybookId, musicStyle: pathMusicStyle || template.musicStyle || null, unsynced: false, createdAt: firestore_2.FieldValue.serverTimestamp(), updatedAt: firestore_2.FieldValue.serverTimestamp() }));
+    const newPlaybookId = newPlaybookRef.id;
+    console.log(TAG, 'Cloned playbook', templatePlaybookId, '->', newPlaybookId, 'for member', memberId);
+    // 4. Write playbook_folder_members
+    const memberDocRef = db.collection('playbook_folder_members').doc();
+    await memberDocRef.set({
+        playbookFolderId: folderId,
+        coachId,
+        memberId,
+        email: email !== null && email !== void 0 ? email : '',
+        name: memberName,
+        duplicatedPlaybookId: newPlaybookId,
+        subscriptionPathId,
+        scheduleDaysOfWeek: scheduleDaysOfWeek !== null && scheduleDaysOfWeek !== void 0 ? scheduleDaysOfWeek : [],
+        scheduleTimeOfDay: scheduleTimeOfDay !== null && scheduleTimeOfDay !== void 0 ? scheduleTimeOfDay : '',
+        timezone: timezone !== null && timezone !== void 0 ? timezone : null,
+        stripeSubscriptionId: stripeSubscriptionId !== null && stripeSubscriptionId !== void 0 ? stripeSubscriptionId : null,
+        stripeCustomerId: stripeCustomerId !== null && stripeCustomerId !== void 0 ? stripeCustomerId : null,
+        status: 'active',
+        pausedReason: null,
+        createdAt: firestore_2.FieldValue.serverTimestamp(),
+        updatedAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    console.log(TAG, 'Created folder member doc', memberDocRef.id);
+    // 5. Mark submission enrolled
+    await db.collection('onboarding_submissions').doc(submissionId).update({
+        status: 'enrolled',
+        enrolledAt: firestore_2.FieldValue.serverTimestamp(),
+        duplicatedPlaybookId: newPlaybookId,
+        folderMemberId: memberDocRef.id,
+    });
+    // 6. Queue drip email (flip to 'ready' so sendDripEmail picks it up)
+    const emailTemplate = (_c = folder.emailTemplate) !== null && _c !== void 0 ? _c : {};
+    await db.collection('drip_email_queue').doc(submissionId).set({
+        submissionId,
+        folderId,
+        coachId,
+        memberId,
+        email: email !== null && email !== void 0 ? email : '',
+        firstName: firstName !== null && firstName !== void 0 ? firstName : '',
+        lastName: lastName !== null && lastName !== void 0 ? lastName : '',
+        subject: (_d = emailTemplate.subject) !== null && _d !== void 0 ? _d : '',
+        body: (_e = emailTemplate.body) !== null && _e !== void 0 ? _e : '',
+        status: 'ready',
+        scheduledFor: firestore_2.FieldValue.serverTimestamp(),
+        createdAt: firestore_2.FieldValue.serverTimestamp(),
+        updatedAt: firestore_2.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    console.log(TAG, 'Enrollment complete for submission', submissionId);
+}
 async function handleCheckoutSessionCompleted(session, eventId) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s;
-    const { intentId, planId, snapshotId, memberId, coachId: _coachId } = (_a = session.metadata) !== null && _a !== void 0 ? _a : {};
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2;
+    const { intentId, planId, snapshotId, memberId, coachId: _coachId, submissionId, funnelCheckout, discountCodeUsed } = (_a = session.metadata) !== null && _a !== void 0 ? _a : {};
+    // ── Funnel checkout path (PR-H bookkeeping + PR-I enrollSubscriber) ──
+    // Composed: PR-H's payment bookkeeping (mark submission paid, increment
+    // discount usesCount) runs first, then PR-I's enrollSubscriber duplicates
+    // the template playbook + creates the playbook_folder_members doc. Because
+    // funnel checkouts don't create a member up-front (visitor is anonymous),
+    // we create the Firebase Auth user here from the submission fields before
+    // handing memberId to enrollSubscriber.
+    if (funnelCheckout === 'true' && submissionId) {
+        const funnelCoachId = (_b = session.metadata) === null || _b === void 0 ? void 0 : _b.coachId;
+        const subRef = db.collection('onboarding_submissions').doc(submissionId);
+        const customerId = typeof session.customer === 'string' ? session.customer : (_c = session.customer) === null || _c === void 0 ? void 0 : _c.id;
+        const funnelSubscriptionId = typeof session.subscription === 'string' ? session.subscription : (_d = session.subscription) === null || _d === void 0 ? void 0 : _d.id;
+        // 1. PR-H bookkeeping: mark submission paid + record Stripe IDs
+        await subRef.update({
+            status: 'paid',
+            stripeCustomerId: customerId !== null && customerId !== void 0 ? customerId : null,
+            stripeSubscriptionId: funnelSubscriptionId !== null && funnelSubscriptionId !== void 0 ? funnelSubscriptionId : null,
+            paidAt: firestore_2.FieldValue.serverTimestamp(),
+            updatedAt: firestore_2.FieldValue.serverTimestamp(),
+        });
+        // 2. PR-H bookkeeping: increment discount code usesCount if one was applied
+        if (discountCodeUsed && funnelCoachId) {
+            try {
+                const codeQuery = await db.collection('discount_codes')
+                    .where('coachId', '==', funnelCoachId)
+                    .where('code', '==', discountCodeUsed)
+                    .limit(1)
+                    .get();
+                if (!codeQuery.empty) {
+                    await codeQuery.docs[0].ref.update({
+                        usesCount: firestore_2.FieldValue.increment(1),
+                        updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                    });
+                }
+            }
+            catch (err) {
+                console.error('[handleCheckoutSessionCompleted] Failed to increment discount usesCount:', err);
+            }
+        }
+        console.log('[handleCheckoutSessionCompleted] Funnel submission marked paid:', submissionId);
+        // 3. Create the member Firebase Auth user (funnel visitors are anonymous
+        //    until payment succeeds). If the email already exists, reuse the
+        //    existing uid — enrollSubscriber is idempotent per submissionId.
+        let funnelMemberId = null;
+        try {
+            const submSnap = await subRef.get();
+            const subm = submSnap.data() || {};
+            const submEmail = (_e = subm.email) === null || _e === void 0 ? void 0 : _e.trim().toLowerCase();
+            const submFirst = (_f = subm.firstName) !== null && _f !== void 0 ? _f : '';
+            const submLast = (_g = subm.lastName) !== null && _g !== void 0 ? _g : '';
+            if (!submEmail || !funnelCoachId) {
+                console.warn('[handleCheckoutSessionCompleted] Funnel submission missing email or coachId — skipping enrollSubscriber', submissionId);
+                return;
+            }
+            const displayName = `${submFirst} ${submLast}`.trim() || submEmail;
+            let userRecord;
+            try {
+                userRecord = await admin.auth().getUserByEmail(submEmail);
+            }
+            catch (lookupErr) {
+                if ((lookupErr === null || lookupErr === void 0 ? void 0 : lookupErr.code) !== 'auth/user-not-found')
+                    throw lookupErr;
+                const tempPassword = `GA-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+                userRecord = await admin.auth().createUser({
+                    email: submEmail,
+                    displayName,
+                    password: tempPassword,
+                });
+                await admin.auth().setCustomUserClaims(userRecord.uid, {
+                    role: 'member',
+                    coachId: funnelCoachId,
+                    tenantId: funnelCoachId,
+                });
+                await db.collection('users').doc(userRecord.uid).set({
+                    uid: userRecord.uid,
+                    email: submEmail,
+                    displayName,
+                    role: 'member',
+                    coachId: funnelCoachId,
+                    tenantId: funnelCoachId,
+                    createdAt: firestore_2.FieldValue.serverTimestamp(),
+                    createdVia: 'funnel_checkout',
+                    submissionId,
+                }, { merge: true });
+            }
+            funnelMemberId = userRecord.uid;
+            // 4. PR-I: duplicate template playbook + create playbook_folder_members
+            await enrollSubscriber({
+                submissionId,
+                memberId: funnelMemberId,
+                stripeSubscriptionId: funnelSubscriptionId !== null && funnelSubscriptionId !== void 0 ? funnelSubscriptionId : '',
+                stripeCustomerId: customerId !== null && customerId !== void 0 ? customerId : '',
+            });
+        }
+        catch (err) {
+            console.error('[handleCheckoutSessionCompleted] Funnel enrollment failed for submission', submissionId, err);
+        }
+        return;
+    }
     void _coachId; // coachId is stored in snapshot; not needed here directly
     if (!intentId || !planId || !memberId) {
         console.warn('[handleCheckoutSessionCompleted] Missing metadata on session', session.id);
         return;
     }
-    const paymentOption = (_c = (_b = session.metadata) === null || _b === void 0 ? void 0 : _b.paymentOption) !== null && _c !== void 0 ? _c : 'monthly';
+    const paymentOption = (_j = (_h = session.metadata) === null || _h === void 0 ? void 0 : _h.paymentOption) !== null && _j !== void 0 ? _j : 'monthly';
     // Update checkoutIntent
     await db.collection('checkoutIntents').doc(intentId).update({
         status: 'completed',
@@ -1136,7 +1596,7 @@ async function handleCheckoutSessionCompleted(session, eventId) {
         ? await db.collection('acceptedPlanSnapshots').doc(snapshotId).get()
         : null;
     const snapshot = snapshotSnap === null || snapshotSnap === void 0 ? void 0 : snapshotSnap.data();
-    const contractMonths = (_d = snapshot === null || snapshot === void 0 ? void 0 : snapshot.contractLengthMonths) !== null && _d !== void 0 ? _d : 12;
+    const contractMonths = (_k = snapshot === null || snapshot === void 0 ? void 0 : snapshot.contractLengthMonths) !== null && _k !== void 0 ? _k : 12;
     const now = firestore_2.Timestamp.now();
     const contractStartAt = now;
     const contractEndAt = firestore_2.Timestamp.fromMillis(now.toMillis() + contractMonths * 30.44 * 24 * 60 * 60 * 1000);
@@ -1169,8 +1629,8 @@ async function handleCheckoutSessionCompleted(session, eventId) {
     if (session.mode === 'subscription' && session.subscription && (snapshot === null || snapshot === void 0 ? void 0 : snapshot.coachId)) {
         try {
             const coachAccountSnap = await db.collection('coachStripeAccounts').doc(snapshot.coachId).get();
-            const stripeAccountId = (_e = coachAccountSnap.data()) === null || _e === void 0 ? void 0 : _e.stripeAccountId;
-            const customerId = typeof session.customer === 'string' ? session.customer : (_f = session.customer) === null || _f === void 0 ? void 0 : _f.id;
+            const stripeAccountId = (_l = coachAccountSnap.data()) === null || _l === void 0 ? void 0 : _l.stripeAccountId;
+            const customerId = typeof session.customer === 'string' ? session.customer : (_m = session.customer) === null || _m === void 0 ? void 0 : _m.id;
             if (stripeAccountId && customerId) {
                 const stripe = getStripe(stripeSecretKey.value());
                 const subscriptionId = typeof session.subscription === 'string'
@@ -1179,7 +1639,7 @@ async function handleCheckoutSessionCompleted(session, eventId) {
                 const sub = await stripe.subscriptions.retrieve(subscriptionId, {}, { stripeAccount: stripeAccountId });
                 const defaultPm = typeof sub.default_payment_method === 'string'
                     ? sub.default_payment_method
-                    : (_g = sub.default_payment_method) === null || _g === void 0 ? void 0 : _g.id;
+                    : (_o = sub.default_payment_method) === null || _o === void 0 ? void 0 : _o.id;
                 if (defaultPm) {
                     await stripe.customers.update(customerId, { invoice_settings: { default_payment_method: defaultPm } }, { stripeAccount: stripeAccountId });
                     console.log('[handleCheckoutSessionCompleted] Customer', customerId, 'invoice default payment method set');
@@ -1209,10 +1669,10 @@ async function handleCheckoutSessionCompleted(session, eventId) {
                 await db.collection('commitToSaveConsents').add({
                     memberId,
                     planId,
-                    coachId: (_h = snapshot.coachId) !== null && _h !== void 0 ? _h : null,
-                    ctsMonthlyRate: (_j = snapshot.displayMonthlyPrice) !== null && _j !== void 0 ? _j : null,
-                    standardMonthlyRate: (_k = snapshot.baseMonthlyPrice) !== null && _k !== void 0 ? _k : null,
-                    missedSessionFee: (_l = snapshot.ctsMissedSessionFee) !== null && _l !== void 0 ? _l : 50,
+                    coachId: (_p = snapshot.coachId) !== null && _p !== void 0 ? _p : null,
+                    ctsMonthlyRate: (_q = snapshot.displayMonthlyPrice) !== null && _q !== void 0 ? _q : null,
+                    standardMonthlyRate: (_r = snapshot.baseMonthlyPrice) !== null && _r !== void 0 ? _r : null,
+                    missedSessionFee: (_s = snapshot.ctsMissedSessionFee) !== null && _s !== void 0 ? _s : 50,
                     agreedVia: 'checkout',
                     agreedAt: now,
                     status: 'active',
@@ -1238,17 +1698,17 @@ async function handleCheckoutSessionCompleted(session, eventId) {
     if (paymentOption === 'pay_in_full' && snapshot) {
         const continuationMonthlyPrice = snapshot.continuationMonthlyPrice;
         const coachId = snapshot.coachId;
-        const tierSplit = ((_m = snapshot.tierSplit) !== null && _m !== void 0 ? _m : 40);
+        const tierSplit = ((_t = snapshot.tierSplit) !== null && _t !== void 0 ? _t : 40);
         if (continuationMonthlyPrice && coachId) {
             try {
                 // Look up the coach's connected Stripe account
                 const coachAccountSnap = await db.collection('coachStripeAccounts').doc(coachId).get();
-                const stripeAccountId = (_o = coachAccountSnap.data()) === null || _o === void 0 ? void 0 : _o.stripeAccountId;
+                const stripeAccountId = (_u = coachAccountSnap.data()) === null || _u === void 0 ? void 0 : _u.stripeAccountId;
                 if (stripeAccountId) {
                     const stripe = getStripe(stripeSecretKey.value());
                     // Get the member's Stripe customer ID from the plan doc
                     const planSnap = await db.collection('member_plans').doc(planId).get();
-                    const stripeCustomerId = (_p = planSnap.data()) === null || _p === void 0 ? void 0 : _p.stripeCustomerId;
+                    const stripeCustomerId = (_v = planSnap.data()) === null || _v === void 0 ? void 0 : _v.stripeCustomerId;
                     if (stripeCustomerId) {
                         // Create a price object for the continuation monthly amount
                         const continuationPrice = await stripe.prices.create({
@@ -1323,17 +1783,17 @@ async function handleCheckoutSessionCompleted(session, eventId) {
             : session.subscription.id;
         const continuationMonthlyPrice = snapshot.continuationMonthlyPrice;
         const coachId = snapshot.coachId;
-        const tierSplit = ((_q = snapshot.tierSplit) !== null && _q !== void 0 ? _q : 40);
+        const tierSplit = ((_w = snapshot.tierSplit) !== null && _w !== void 0 ? _w : 40);
         // Calculate Phase 1 end date from the snapshot's contractEndAt
         const contractEndAtSnap = snapshot.contractEndAt;
         const contractEndMs = (contractEndAtSnap === null || contractEndAtSnap === void 0 ? void 0 : contractEndAtSnap._seconds)
             ? contractEndAtSnap._seconds * 1000
-            : ((contractEndAtSnap === null || contractEndAtSnap === void 0 ? void 0 : contractEndAtSnap.seconds) ? contractEndAtSnap.seconds * 1000 : Number((_r = snapshot.contractEndAtMs) !== null && _r !== void 0 ? _r : 0));
+            : ((contractEndAtSnap === null || contractEndAtSnap === void 0 ? void 0 : contractEndAtSnap.seconds) ? contractEndAtSnap.seconds * 1000 : Number((_x = snapshot.contractEndAtMs) !== null && _x !== void 0 ? _x : 0));
         const phase1EndUnix = Math.floor(contractEndMs / 1000);
         if (continuationMonthlyPrice && coachId) {
             try {
                 const coachAccountSnap = await db.collection('coachStripeAccounts').doc(coachId).get();
-                const stripeAccountId = (_s = coachAccountSnap.data()) === null || _s === void 0 ? void 0 : _s.stripeAccountId;
+                const stripeAccountId = (_y = coachAccountSnap.data()) === null || _y === void 0 ? void 0 : _y.stripeAccountId;
                 if (stripeAccountId) {
                     const stripe = getStripe(stripeSecretKey.value());
                     // Create a continuation price on the coach's connected account
@@ -1400,6 +1860,29 @@ async function handleCheckoutSessionCompleted(session, eventId) {
         }
     }
     console.log('[handleCheckoutSessionCompleted] Plan', planId, 'activated for member', memberId);
+    // ── Subscription-path enrollment (PR-I) ──────────────────────────────────
+    // When the checkout was created from a funnel onboarding submission (PR-G),
+    // submissionId is present in metadata. Duplicate the template playbook and
+    // create a playbook_folder_members doc for the new subscriber.
+    if (submissionId) {
+        try {
+            const stripeSubscriptionId = typeof session.subscription === 'string'
+                ? session.subscription
+                : (_0 = (_z = session.subscription) === null || _z === void 0 ? void 0 : _z.id) !== null && _0 !== void 0 ? _0 : null;
+            const stripeCustomerId = typeof session.customer === 'string'
+                ? session.customer
+                : (_2 = (_1 = session.customer) === null || _1 === void 0 ? void 0 : _1.id) !== null && _2 !== void 0 ? _2 : null;
+            await enrollSubscriber({
+                submissionId,
+                memberId,
+                stripeSubscriptionId: stripeSubscriptionId !== null && stripeSubscriptionId !== void 0 ? stripeSubscriptionId : '',
+                stripeCustomerId: stripeCustomerId !== null && stripeCustomerId !== void 0 ? stripeCustomerId : '',
+            });
+        }
+        catch (err) {
+            console.error('[handleCheckoutSessionCompleted] enrollSubscriber failed:', err);
+        }
+    }
 }
 async function handleInvoicePaid(invoice, eventId) {
     var _a, _b, _c, _d;
@@ -9255,7 +9738,7 @@ exports.updateShareToken = (0, https_1.onCall)(async (request) => {
     const callerRole = callerToken.role;
     const coachId = callerToken.coachId || request.auth.uid;
     const isAdmin = callerRole === 'platformAdmin' || !!callerToken.admin;
-    const { workoutId, visibility, expiresAt } = request.data;
+    const { workoutId, visibility, expiresAt, shareType, emailGateEnabled, ctaConfig, campaignName } = request.data;
     if (!workoutId) {
         throw new https_1.HttpsError('invalid-argument', 'workoutId is required.');
     }
@@ -9273,6 +9756,14 @@ exports.updateShareToken = (0, https_1.onCall)(async (request) => {
         updates.visibility = normalizeVisibility(visibility);
     if (expiresAt !== undefined)
         updates.expiresAt = normalizeExpiresAt(expiresAt);
+    if (shareType !== undefined)
+        updates.shareType = shareType === 'marketing' ? 'marketing' : 'member';
+    if (emailGateEnabled !== undefined)
+        updates.emailGateEnabled = !!emailGateEnabled;
+    if (ctaConfig !== undefined)
+        updates.ctaConfig = ctaConfig;
+    if (campaignName !== undefined)
+        updates.campaignName = typeof campaignName === 'string' ? campaignName.slice(0, 120) : '';
     if (Object.keys(updates).length === 0) {
         return { updated: 0 };
     }
@@ -9323,7 +9814,7 @@ exports.revokeShareToken = (0, https_1.onCall)(async (request) => {
     return { revoked: tokens.size };
 });
 exports.resolveShareToken = (0, https_1.onRequest)({ cors: true, region: 'us-central1' }, async (req, res) => {
-    var _a;
+    var _a, _b;
     const shareId = req.query.shareId || ((_a = req.body) === null || _a === void 0 ? void 0 : _a.shareId);
     if (!shareId || typeof shareId !== 'string' || shareId.length !== 32) {
         res.status(400).json({ error: 'Invalid share link.' });
@@ -9366,7 +9857,7 @@ exports.resolveShareToken = (0, https_1.onRequest)({ cors: true, region: 'us-cen
             await admin.auth().verifyIdToken(authHeader.slice(7));
             isAuthenticated = true;
         }
-        catch (_b) {
+        catch (_c) {
             // Invalid token — treat as unauthenticated
         }
     }
@@ -9381,9 +9872,14 @@ exports.resolveShareToken = (0, https_1.onRequest)({ cors: true, region: 'us-cen
         blockCount: (workout.blocks || []).length,
         coachName: coachData.displayName || coachData.name || 'Coach',
         coachPhotoUrl: coachData.photoURL || null,
+        coachId: tokenData.createdBy,
         tags: workout.tags || [],
         visibility,
         requireAuth,
+        shareType: (tokenData.shareType === 'marketing' ? 'marketing' : 'member'),
+        emailGateEnabled: tokenData.emailGateEnabled === true,
+        ctaConfig: (_b = tokenData.ctaConfig) !== null && _b !== void 0 ? _b : null,
+        campaignName: typeof tokenData.campaignName === 'string' ? tokenData.campaignName : '',
     };
     if (requireAuth && !isAuthenticated) {
         res.status(200).json({ authenticated: false, teaser });
@@ -10306,5 +10802,285 @@ exports.pollMovementVariationJobs = (0, scheduler_1.onSchedule)({
             });
         }
     }
+});
+// ─── pauseStripeSubscription ──────────────────────────────────────────────────
+/**
+ * Pause a member's recurring Stripe subscription (skip charging) by setting
+ * pause_collection: { behavior: 'void' }. Requires coachId claim.
+ *
+ * Params: { memberId: string, stripeSubscriptionId: string }
+ */
+exports.pauseStripeSubscription = (0, https_1.onCall)({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
+    var _a, _b, _c;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const callerToken = (_b = request.auth) === null || _b === void 0 ? void 0 : _b.token;
+    const callerCoachId = (_c = callerToken === null || callerToken === void 0 ? void 0 : callerToken.coachId) !== null && _c !== void 0 ? _c : ((callerToken === null || callerToken === void 0 ? void 0 : callerToken.role) === 'platformAdmin' ? callerUid : undefined);
+    if (!callerCoachId)
+        throw new https_1.HttpsError('permission-denied', 'Must be a coach');
+    const { memberId, stripeSubscriptionId } = request.data;
+    if (!memberId || !stripeSubscriptionId)
+        throw new https_1.HttpsError('invalid-argument', 'memberId and stripeSubscriptionId are required');
+    // Verify this subscription belongs to the calling coach.
+    const subRef = db.collection('memberSubscriptions').doc(stripeSubscriptionId);
+    const subSnap = await subRef.get();
+    if (!subSnap.exists)
+        throw new https_1.HttpsError('not-found', 'Subscription not found');
+    const subData = subSnap.data();
+    if (subData.coachId !== callerCoachId)
+        throw new https_1.HttpsError('permission-denied', 'Subscription belongs to a different coach');
+    if (subData.memberId !== memberId)
+        throw new https_1.HttpsError('invalid-argument', 'memberId does not match subscription');
+    const stripe = getStripe(stripeSecretKey.value());
+    await stripe.subscriptions.update(stripeSubscriptionId, {
+        pause_collection: { behavior: 'void' },
+    });
+    await subRef.update({ pausedAt: firestore_2.FieldValue.serverTimestamp(), updatedAt: firestore_2.FieldValue.serverTimestamp() });
+    return { success: true };
+});
+// ─── resumeStripeSubscription ─────────────────────────────────────────────────
+/**
+ * Resume a paused member Stripe subscription. Requires coachId claim.
+ *
+ * Params: { memberId: string, stripeSubscriptionId: string }
+ */
+exports.resumeStripeSubscription = (0, https_1.onCall)({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
+    var _a, _b, _c;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const callerToken = (_b = request.auth) === null || _b === void 0 ? void 0 : _b.token;
+    const callerCoachId = (_c = callerToken === null || callerToken === void 0 ? void 0 : callerToken.coachId) !== null && _c !== void 0 ? _c : ((callerToken === null || callerToken === void 0 ? void 0 : callerToken.role) === 'platformAdmin' ? callerUid : undefined);
+    if (!callerCoachId)
+        throw new https_1.HttpsError('permission-denied', 'Must be a coach');
+    const { memberId, stripeSubscriptionId } = request.data;
+    if (!memberId || !stripeSubscriptionId)
+        throw new https_1.HttpsError('invalid-argument', 'memberId and stripeSubscriptionId are required');
+    // Verify this subscription belongs to the calling coach.
+    const subRef = db.collection('memberSubscriptions').doc(stripeSubscriptionId);
+    const subSnap = await subRef.get();
+    if (!subSnap.exists)
+        throw new https_1.HttpsError('not-found', 'Subscription not found');
+    const subData = subSnap.data();
+    if (subData.coachId !== callerCoachId)
+        throw new https_1.HttpsError('permission-denied', 'Subscription belongs to a different coach');
+    if (subData.memberId !== memberId)
+        throw new https_1.HttpsError('invalid-argument', 'memberId does not match subscription');
+    // Capture pause duration before clearing pausedAt.
+    const pausedAtTs = subData.pausedAt;
+    const resumedAtMs = Date.now();
+    const pauseDurationMs = pausedAtTs ? resumedAtMs - pausedAtTs.toMillis() : 0;
+    // Round up to whole days so the member always gets the full window.
+    const extendedDays = pausedAtTs ? Math.ceil(pauseDurationMs / (24 * 60 * 60 * 1000)) : 0;
+    const stripe = getStripe(stripeSecretKey.value());
+    // Empty string clears pause_collection and resumes billing.
+    await stripe.subscriptions.update(stripeSubscriptionId, {
+        pause_collection: '',
+    });
+    // Extend contractEndAt on the member_plans doc if it exists.
+    if (extendedDays > 0) {
+        const planSnap = await db.collection('member_plans').doc(memberId).get();
+        if (planSnap.exists) {
+            const planData = planSnap.data();
+            if (planData.contractEndAt) {
+                const originalEndMs = planData.contractEndAt.toMillis();
+                const newEndMs = originalEndMs + extendedDays * 24 * 60 * 60 * 1000;
+                await planSnap.ref.update({
+                    contractEndAt: firestore_2.Timestamp.fromMillis(newEndMs),
+                    updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                });
+            }
+        }
+        // If this is a monthly subscription with a schedule, shift the current phase end_date.
+        if (subData.stripeScheduleId) {
+            const schedule = await stripe.subscriptionSchedules.retrieve(subData.stripeScheduleId, { stripeAccount: subData.stripeAccountId });
+            if (schedule.phases && schedule.phases.length > 0) {
+                const nowSec = Math.floor(resumedAtMs / 1000);
+                const currentPhaseIndex = schedule.phases.findIndex((p) => p.start_date <= nowSec && (p.end_date == null || p.end_date > nowSec));
+                const idx = currentPhaseIndex >= 0 ? currentPhaseIndex : 0;
+                const shiftSec = extendedDays * 24 * 60 * 60;
+                const updatedPhases = schedule.phases.map((p, i) => {
+                    const base = Object.assign(Object.assign({ items: p.items.map((item) => {
+                            var _a;
+                            return ({
+                                price: typeof item.price === 'string' ? item.price : item.price.id,
+                                quantity: (_a = item.quantity) !== null && _a !== void 0 ? _a : 1,
+                            });
+                        }) }, (p.application_fee_percent != null && { application_fee_percent: p.application_fee_percent })), (p.metadata && { metadata: p.metadata }));
+                    if (i === idx && p.end_date != null) {
+                        return Object.assign(Object.assign({}, base), { end_date: p.end_date + shiftSec });
+                    }
+                    if (p.end_date != null) {
+                        return Object.assign(Object.assign({}, base), { end_date: p.end_date });
+                    }
+                    return base;
+                });
+                await stripe.subscriptionSchedules.update(subData.stripeScheduleId, { phases: updatedPhases }, { stripeAccount: subData.stripeAccountId });
+            }
+        }
+    }
+    // Build the history entry, then clear pausedAt.
+    const historyEntry = pausedAtTs
+        ? { pausedAt: pausedAtTs, resumedAt: firestore_2.Timestamp.fromMillis(resumedAtMs), extendedDays }
+        : null;
+    await subRef.update(Object.assign({ pausedAt: firestore_2.FieldValue.delete(), updatedAt: firestore_2.FieldValue.serverTimestamp() }, (historyEntry && { pauseHistory: firestore_2.FieldValue.arrayUnion(historyEntry) })));
+    return { success: true };
+});
+// ── syncTemplatePlaybookToMembers ─────────────────────────────────────────────
+// Firestore trigger: when a playbook doc is updated, check if it is a template
+// (no templateSourceId) and if the parent folder has syncEnabled. If so,
+// propagate non-personalized field changes to all enrolled member copies that
+// have not opted out (unsynced !== true).
+exports.syncTemplatePlaybookToMembers = (0, firestore_1.onDocumentUpdated)({ document: 'playbooks/{playbookId}', region: 'us-central1' }, async (event) => {
+    var _a;
+    const after = (_a = event.data) === null || _a === void 0 ? void 0 : _a.after.data();
+    if (!after)
+        return;
+    // Only act on template playbooks (member copies have templateSourceId)
+    if (after.templateSourceId)
+        return;
+    const playbookId = event.params.playbookId;
+    const coachId = after.coachId;
+    if (!coachId)
+        return;
+    // Find which folder this template belongs to (folder.templatePlaybookIds contains it)
+    const foldersSnap = await db.collection('playbook_folders')
+        .where('coachId', '==', coachId)
+        .where('templatePlaybookIds', 'array-contains', playbookId)
+        .where('syncEnabled', '==', true)
+        .limit(10)
+        .get();
+    if (foldersSnap.empty)
+        return;
+    // Fields that should sync (non-personalized content)
+    const syncableFields = ['workoutIds', 'musicStyle', 'description'];
+    const patch = {};
+    for (const f of syncableFields) {
+        if (after[f] !== undefined)
+            patch[f] = after[f];
+    }
+    if (Object.keys(patch).length === 0)
+        return;
+    let updatedCount = 0;
+    for (const _folderDoc of foldersSnap.docs) {
+        // Find all enrolled member playbooks sourced from this template
+        const memberPlaybooksSnap = await db.collection('playbooks')
+            .where('coachId', '==', coachId)
+            .where('templateSourceId', '==', playbookId)
+            .get();
+        const writes = [];
+        for (const mp of memberPlaybooksSnap.docs) {
+            if (mp.data().unsynced === true)
+                continue;
+            writes.push(mp.ref.update(Object.assign(Object.assign({}, patch), { updatedAt: firestore_2.FieldValue.serverTimestamp() })));
+            updatedCount++;
+        }
+        await Promise.all(writes);
+    }
+    console.log('[syncTemplatePlaybookToMembers] Synced', updatedCount, 'member copies from template', playbookId);
+});
+// ── unsyncMemberPlaybook ──────────────────────────────────────────────────────
+// Callable: member or coach can detach a member's playbook copy from future
+// template syncs. Sets unsynced = true on the playbook doc.
+exports.unsyncMemberPlaybook = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
+    var _a, _b, _c;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const { playbookId } = ((_b = request.data) !== null && _b !== void 0 ? _b : {});
+    if (!playbookId)
+        throw new https_1.HttpsError('invalid-argument', 'playbookId is required');
+    const playbookSnap = await db.collection('playbooks').doc(playbookId).get();
+    if (!playbookSnap.exists)
+        throw new https_1.HttpsError('not-found', 'Playbook not found');
+    const playbook = playbookSnap.data();
+    const callerToken = (_c = request.auth) === null || _c === void 0 ? void 0 : _c.token;
+    const isAdmin = (callerToken === null || callerToken === void 0 ? void 0 : callerToken.role) === 'platformAdmin' || (callerToken === null || callerToken === void 0 ? void 0 : callerToken.admin) === true;
+    const isCoach = callerUid === playbook.coachId;
+    const isMemberOwner = callerUid === playbook.memberId || callerUid === playbook.assignedMemberId;
+    if (!isAdmin && !isCoach && !isMemberOwner) {
+        throw new https_1.HttpsError('permission-denied', 'Only the assigned member or coach can detach this playbook');
+    }
+    await db.collection('playbooks').doc(playbookId).update({
+        unsynced: true,
+        updatedAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    return { success: true };
+});
+// ── sendDripEmail ─────────────────────────────────────────────────────────────
+// Scheduled every 15 minutes. Queries drip_email_queue docs with status='ready'
+// and scheduledFor <= now. Sends via Resend API using EMAIL_API_KEY secret.
+// On success: status='sent'. On failure: status='failed'.
+exports.sendDripEmail = (0, scheduler_1.onSchedule)({ schedule: 'every 15 minutes', timeZone: 'UTC', region: 'us-central1', secrets: [emailApiKey] }, async () => {
+    var _a, _b, _c;
+    const now = firestore_2.Timestamp.now();
+    const readySnap = await db.collection('drip_email_queue')
+        .where('status', '==', 'ready')
+        .where('scheduledFor', '<=', now)
+        .limit(50)
+        .get();
+    if (readySnap.empty)
+        return;
+    const apiKey = emailApiKey.value();
+    let sent = 0;
+    let failed = 0;
+    for (const qDoc of readySnap.docs) {
+        const q = qDoc.data();
+        const toEmail = q.email;
+        const firstName = (_a = q.firstName) !== null && _a !== void 0 ? _a : '';
+        const rawSubject = (_b = q.subject) !== null && _b !== void 0 ? _b : '';
+        const rawBody = (_c = q.body) !== null && _c !== void 0 ? _c : '';
+        // Simple token substitution for {{firstName}} etc.
+        const subject = rawSubject.replace(/\{\{firstName\}\}/g, firstName);
+        const body = rawBody.replace(/\{\{firstName\}\}/g, firstName);
+        if (!toEmail || !subject) {
+            await qDoc.ref.update({ status: 'failed', error: 'Missing email or subject', updatedAt: firestore_2.FieldValue.serverTimestamp() });
+            failed++;
+            continue;
+        }
+        if (!apiKey) {
+            console.warn('[sendDripEmail] EMAIL_API_KEY not set — skipping send for', qDoc.id);
+            await qDoc.ref.update({ status: 'failed', error: 'EMAIL_API_KEY not configured', updatedAt: firestore_2.FieldValue.serverTimestamp() });
+            failed++;
+            continue;
+        }
+        try {
+            const res = await fetch('https://api.resend.com/emails', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    from: 'GoArrive <noreply@goarrive.fit>',
+                    to: [toEmail],
+                    subject,
+                    text: body,
+                }),
+            });
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(`Resend API error ${res.status}: ${errText}`);
+            }
+            await qDoc.ref.update({
+                status: 'sent',
+                sentAt: firestore_2.FieldValue.serverTimestamp(),
+                updatedAt: firestore_2.FieldValue.serverTimestamp(),
+            });
+            sent++;
+        }
+        catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error('[sendDripEmail] Send failed for', qDoc.id, ':', msg);
+            await qDoc.ref.update({
+                status: 'failed',
+                error: msg,
+                updatedAt: firestore_2.FieldValue.serverTimestamp(),
+            });
+            failed++;
+        }
+    }
+    console.log('[sendDripEmail] Batch complete — sent:', sent, 'failed:', failed);
 });
 //# sourceMappingURL=index.js.map
