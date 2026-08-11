@@ -571,6 +571,108 @@ export default function WorkoutPlayer({
     };
   }, []);
 
+  // ── MediaSession API (C) ──────────────────────────────────────────────────
+  // Registers OS-level media controls (lock screen, Now Playing widget, headset
+  // buttons) so the member can pause/skip without unlocking the phone.
+  // Feature-detected: only wires on web, only when the API is available.
+  // Also signals to iOS that media is actively playing, which helps prevent
+  // AudioContext auto-suspend alongside the graph keepalive oscillator.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof navigator === 'undefined') return;
+    if (!('mediaSession' in navigator)) return;
+    if (phase === 'ready' || phase === 'complete') return;
+
+    const title = current?.name || (workout?.title ?? workout?.name ?? 'GoArrive Workout');
+    const workoutTitle = workout?.title ?? workout?.name ?? 'GoArrive';
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title,
+        artist: 'GoArrive',
+        album: workoutTitle,
+      });
+      navigator.mediaSession.setActionHandler('play', () => {
+        if (isPaused) handlePauseResume();
+      });
+      navigator.mediaSession.setActionHandler('pause', () => {
+        if (!isPaused) handlePauseResume();
+      });
+      navigator.mediaSession.setActionHandler('nexttrack', () => {
+        handleSkip();
+      });
+      // previoustrack: seek back to the start of the current step so the
+      // member can replay the current movement without jumping backward.
+      navigator.mediaSession.setActionHandler('previoustrack', () => {
+        seekRelative(-timeLeft);
+      });
+    } catch {}
+    return () => {
+      try {
+        navigator.mediaSession.setActionHandler('play', null);
+        navigator.mediaSession.setActionHandler('pause', null);
+        navigator.mediaSession.setActionHandler('nexttrack', null);
+        navigator.mediaSession.setActionHandler('previoustrack', null);
+      } catch {}
+    };
+  }, [phase, current?.name, workout?.title, workout?.name, isPaused, handlePauseResume, handleSkip, seekRelative, timeLeft]);
+
+  // ── PiP (D) ──────────────────────────────────────────────────────────────
+  // Picture-in-Picture for the movement demo video. Lets the member follow
+  // the movement guide in a floating tile while navigating other apps.
+  const [isPiP, setIsPiP] = useState(false);
+
+  const getDomVideo = useCallback((): HTMLVideoElement | null => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return null;
+    const expoEl = videoRef.current;
+    if (!expoEl) return null;
+    try {
+      const domVideo =
+        typeof expoEl._nativeRef?.current?.getVideoElement === 'function'
+          ? expoEl._nativeRef.current.getVideoElement()
+          : null;
+      return domVideo instanceof HTMLVideoElement ? domVideo : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const handlePiP = useCallback(async () => {
+    const domVideo = getDomVideo();
+    if (!domVideo) return;
+    try {
+      if ((document as any).pictureInPictureElement) {
+        await (document as any).exitPictureInPicture();
+      } else if ((domVideo as any).webkitPresentationMode === 'picture-in-picture') {
+        (domVideo as any).webkitSetPresentationMode('inline');
+      } else if ((document as any).pictureInPictureEnabled) {
+        await (domVideo as any).requestPictureInPicture();
+      } else if (typeof (domVideo as any).webkitSetPresentationMode === 'function') {
+        (domVideo as any).webkitSetPresentationMode('picture-in-picture');
+      }
+    } catch {
+      // PiP blocked (e.g. user gesture required on some browsers) — ignore.
+    }
+  }, [getDomVideo]);
+
+  // Track PiP state via events so the button icon stays accurate.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const domVideo = getDomVideo();
+    if (!domVideo) return;
+    const onEnter = () => setIsPiP(true);
+    const onLeave = () => setIsPiP(false);
+    domVideo.addEventListener('enterpictureinpicture', onEnter);
+    domVideo.addEventListener('leavepictureinpicture', onLeave);
+    return () => {
+      domVideo.removeEventListener('enterpictureinpicture', onEnter);
+      domVideo.removeEventListener('leavepictureinpicture', onLeave);
+    };
+  }, [getDomVideo, phase]);
+
+  const pipSupported = Platform.OS === 'web'
+    && typeof document !== 'undefined'
+    && ((document as any).pictureInPictureEnabled
+      || typeof (document.createElement('video') as any).webkitSetPresentationMode === 'function');
+
   // ── Tap-to-show controls ──────────────────────────────
   const [showControls, setShowControls] = useState(false);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2083,10 +2185,18 @@ export default function WorkoutPlayer({
                   <Text style={st.seekBtn10Label}>››</Text>
                 </TouchableOpacity>
               </View>
-              <TouchableOpacity style={st.sharedOverlaySkipBtn} onPress={handleSkipFromOverlay}>
-                <Icon name="skip-forward" size={fs(18)} color="#F5A623" />
-                <Text style={st.sharedOverlaySkipText}>Skip</Text>
-              </TouchableOpacity>
+              <View style={st.overlayBottomRow}>
+                <TouchableOpacity style={st.sharedOverlaySkipBtn} onPress={handleSkipFromOverlay}>
+                  <Icon name="skip-forward" size={fs(18)} color="#F5A623" />
+                  <Text style={st.sharedOverlaySkipText}>Skip</Text>
+                </TouchableOpacity>
+                {pipSupported && displayedUrl && (
+                  <TouchableOpacity style={st.pipBtn} onPress={handlePiP}>
+                    <Icon name={isPiP ? 'minimize-2' : 'maximize-2'} size={fs(16)} color="#F0F4F8" />
+                    <Text style={st.pipBtnText}>{isPiP ? 'Exit PiP' : 'PiP'}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
           </View>
         )}
@@ -2759,6 +2869,18 @@ const makeStyles = (fs: (n: number) => number) => StyleSheet.create({
   },
   sharedOverlaySkipText: {
     fontSize: fs(15), fontWeight: '600', color: '#F5A623', fontFamily: FH,
+  },
+  overlayBottomRow: {
+    flexDirection: 'row' as any, alignItems: 'center' as any, gap: fs(12),
+  },
+  pipBtn: {
+    flexDirection: 'row' as any, alignItems: 'center' as any, gap: fs(6),
+    paddingVertical: fs(10), paddingHorizontal: fs(16),
+    borderRadius: fs(20), borderWidth: fs(1),
+    borderColor: 'rgba(240,244,248,0.3)',
+  },
+  pipBtnText: {
+    fontSize: fs(13), fontWeight: '600' as any, color: '#F0F4F8', fontFamily: FH,
   },
   seekRow: {
     flexDirection: 'row' as any,
