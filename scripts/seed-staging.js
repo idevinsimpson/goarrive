@@ -154,7 +154,7 @@ async function main() {
     updatedAt: now,
   });
 
-  // 5. Music-enabled workout
+  // 5. Music-enabled workout (workoutMusicEnabled + volume for sweep Tests 3 & 4)
   console.log('\n5. Music-enabled workout');
   await upsertDoc('workouts', 'workout-seed-001', {
     coachId: 'test-coach-seed-001',
@@ -169,6 +169,9 @@ async function main() {
     estimatedDurationMin: 30,
     coverThumbs: [],
     musicStyle: 'workout',
+    workoutMusicEnabled: true,
+    workoutMusicStyle: 'lofi',
+    workoutMusicVolume: 0.5,
     blocks: [
       {
         type: 'movement',
@@ -182,7 +185,7 @@ async function main() {
     updatedAt: now,
   });
 
-  // 6. Template playbook
+  // 6. Template playbook (assigned to test member to unblock player tests)
   console.log('\n6. Template playbook');
   await upsertDoc('playbooks', 'playbook-seed-001', {
     coachId: 'test-coach-seed-001',
@@ -190,9 +193,9 @@ async function main() {
     name: 'Seed Template Playbook',
     description: 'Seed template playbook for Playbook Folder validation',
     workoutIds: ['workout-seed-001'],
-    memberIds: [],
-    assignedMemberId: null,
-    assignedMemberName: null,
+    memberIds: ['test-member-seed-001'],
+    assignedMemberId: 'test-member-seed-001',
+    assignedMemberName: 'Test Member (Seed)',
     isArchived: false,
     recordingEnabled: false,
     schedulingEnabled: false,
@@ -238,15 +241,26 @@ async function main() {
     updatedAt: now,
   });
 
+  // 8. Staging platformAdmin account
+  console.log('\n8. Staging platformAdmin auth user');
+  await upsertAuthUser({
+    uid: 'staging-admin-seed-001',
+    email: 'staging-admin@goarrive.fit',
+    password: 'StagingAdmin#2026',
+    displayName: 'Staging Admin',
+    customClaims: { role: 'platformAdmin', admin: true },
+  });
+
   console.log('\n=== Seed complete ===');
   console.log('\nFixtures seeded:');
-  console.log('  Coach:               test-coach-seed-001  /  test-coach-seed@goa.staging  / SeedTest#2026');
-  console.log('  Member:              test-member-seed-001 /  test-member-seed@goa.staging / SeedTest#2026');
+  console.log('  Coach:               test-coach-seed-001   /  test-coach-seed@goa.staging  / SeedTest#2026');
+  console.log('  Member:              test-member-seed-001  /  test-member-seed@goa.staging / SeedTest#2026');
   console.log('  member_plans:        test-member-seed-001  (contractEndAt = now+90d)');
   console.log('  memberSubscriptions: sub_seed_001          (placeholder — Stripe API calls will fail)');
-  console.log('  workout:             workout-seed-001      (musicStyle: workout)');
-  console.log('  playbook:            playbook-seed-001');
+  console.log('  workout:             workout-seed-001      (musicStyle: workout, workoutMusicEnabled: true, workoutMusicVolume: 0.5)');
+  console.log('  playbook:            playbook-seed-001     (assignedMemberId: test-member-seed-001)');
   console.log('  playbook_folder:     folder-seed-001');
+  console.log('  staging admin:       staging-admin@goarrive.fit  (platformAdmin — see docs/staging-admin-account.md)');
   console.log('\nStaging URL: https://goarrive--staging-gurfzjak.web.app');
   console.log('\nNOTE: stripeSubscriptionId sub_seed_001 is a placeholder.');
   console.log('The pause/resume UI button will render, but the Cloud Function will fail');

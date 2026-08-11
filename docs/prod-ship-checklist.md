@@ -34,6 +34,25 @@ strike it (do not delete) so the audit trail survives.
   per-IP or per-fingerprint rate limit. Add throttling before we open the CTA to
   paid traffic (Justin's video / marketing spend).
 
+### 2026-08-11 — PR #244 (lapsed-payment) audit follow-ups
+
+- [ ] **Dunning schedule** — current `handleInvoicePaymentFailed` sends ONE
+  email at lapse only. Add a proper dunning cadence (e.g. Day 0 / Day 3 / Day 7)
+  before we take real Stripe payments in prod.
+
+- [ ] **Resend template + unsubscribe** — the lapsed-payment email is inline
+  HTML with no unsubscribe link. Move to a Resend template with a proper
+  unsubscribe header/footer before prod (CAN-SPAM).
+
+- [ ] **Members-list N+1 → `paymentStatus` on member doc** — the members list
+  currently reads `memberSubscription` per row for the PAUSED badge. Denormalize
+  `paymentStatus` onto the member doc via a subscription-write trigger so the
+  list stays O(1) per row.
+
+- [ ] **`notification_log` read-rule check** — verify Firestore rules allow the
+  coach dashboard to read `notification_log` rows filtered by `coachId`;
+  otherwise the "member payment lapsed" notification never surfaces in the UI.
+
 ### 2026-08-11 — PR #237 prod flags
 
 _(Preserve whatever Devin logged in the #237 thread — capture here on next PR-237

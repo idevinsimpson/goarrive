@@ -1484,6 +1484,7 @@ function BuildScreenInner() {
       const seedIds = pendingDrop && pendingDrop.type === 'Workouts'
         ? [pendingDrop.id]
         : playbookSeedWorkoutIds;
+      console.info('[Build] createPlaybook payload', { coachId, tenantId, parentId: currentFolderId || null, name, workoutIds: seedIds, assignedMemberId: assignedMemberId || null });
       await addDoc(collection(db, 'playbooks'), {
         coachId,
         tenantId,
@@ -1501,13 +1502,17 @@ function BuildScreenInner() {
       resetPlaybookCreateState();
       scrollOffsetRef.current = 0;
       requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: false }));
-    } catch (e) { console.error('[Build] Create playbook error:', e); }
+    } catch (e: any) {
+      console.error('[Build] Create playbook error:', e);
+      Alert.alert('Create playbook failed', e?.message ?? 'Unknown error');
+    }
   }, [coachId, tenantId, currentFolderId, newPlaybookName, newPlaybookDesc, pendingPlaybookDropItem, playbookSeedWorkoutIds, pbAssignMemberId, pbAddByEmail, pbNewMemberName, pbNewMemberEmail, pbMembers, resetPlaybookCreateState]);
 
   const createPlaybookFolder = useCallback(async () => {
     const name = newPbFolderName.trim();
     if (!name) return;
     try {
+      console.info('[Build] createPlaybookFolder payload', { coachId, tenantId, parentId: currentFolderId || null, name, syncEnabled: newPbFolderSync });
       await addDoc(collection(db, 'playbook_folders'), {
         coachId,
         tenantId,
@@ -1528,7 +1533,10 @@ function BuildScreenInner() {
       setShowPbFolderCreate(false);
       scrollOffsetRef.current = 0;
       requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: false }));
-    } catch (e) { console.error('[Build] Create playbook folder error:', e); }
+    } catch (e: any) {
+      console.error('[Build] Create playbook folder error:', e);
+      Alert.alert('Create folder failed', e?.message ?? 'Unknown error');
+    }
   }, [coachId, tenantId, currentFolderId, newPbFolderName, newPbFolderSync]);
 
   // ── Drag & Drop handlers (filteredItems-independent) ──────────────────

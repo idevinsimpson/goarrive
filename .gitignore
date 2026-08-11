@@ -6,6 +6,7 @@ dist/
 .firebase/
 .env
 .secrets/
+docs/staging-credentials.md
 
 .github/workflows/test.yml
 
