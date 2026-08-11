@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-08-11._
+_Last refreshed: 2026-08-11 (post-prod ship becd16c)._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -95,6 +95,22 @@ The `resolveShareToken` Cloud Function sanitizes workout documents before servin
 
 ### Subscription Pause/Resume: Coach Ownership Verification
 The `pauseStripeSubscription` and `resumeStripeSubscription` callables (PR #233) verify coach ownership by checking that the subscription's `coachId` Firestore field matches the caller's `coachId` claim — they do not trust the client-supplied member ID alone. Lesson: any billing-mutation callable that acts on a member's subscription must verify the calling coach owns that member's record at the function layer, not just in Firestore rules.
+
+
+### Subscription Pause Must Extend contractEndAt
+When `pauseStripeSubscription` was first shipped (PR #233), it paused Stripe billing and set `pausedAt` in Firestore but did not extend `contractEndAt`. This meant the contract timer continued running through the pause period, causing members to hit their contract end date early. Fix (PR #237): on pause, read the pause duration from Stripe's response and extend `contractEndAt` by that duration so the clock only runs while the subscription is active. Lesson: any billing mutation that suspends a time-boxed commitment (contract, trial, grace period) must also adjust the corresponding deadline by the suspension length.
+
+### Guest Funnel Writes Need Input Validation in Firestore Rules
+The `onboarding_submissions` collection is writable by unauthenticated guests. Without rules-level validation, junk or adversarial data floods the collection. PR #240 added Firestore rules that require a valid `coachId` string and enforce email format on guest creates (mirroring the `intakeSubmissions` pattern). Lesson: any guest-writable collection must have input validation baked into the Firestore rules themselves — client-side validation alone is insufficient for unauthenticated paths.
+
+### Drip Email Queue Needs Server-Only Update Rights
+The `drip_email_queue` collection is written by the `enrollSubscriber` Cloud Function and read by `sendDripEmail`. Allowing client writes would let anyone queue arbitrary emails under a coach's Resend account. PR #243 set rules to `allow read: if isCoachOrAdmin()` and no client writes — all queue writes go through trusted server code only. Lesson: any server-managed outbox or task queue must restrict client write access entirely; reads can be scoped to the coach/admin for debugging.
+
+### Audio PiP Phase 2 Is a No-Op on iOS Safari
+`canvas.captureStream()` is not supported in iOS Safari. `usePipCanvasStream` (PR #236) guards against this with a feature-detect: when `captureStream` is absent, the hook returns `null` and the PiP button is hidden rather than erroring. Lesson: any canvas-stream or screen-capture feature must detect API availability before calling it and degrade gracefully — iOS Safari's media capture APIs lag significantly behind Chrome and Firefox.
+
+### Hardcoded Prices Break Multi-Tenant Checkout
+`createFunnelCheckoutSession` initially used a hardcoded $19.99/mo price. PR #242 replaced this with a lookup from `playbook_folders/{folderId}.subscriptionPaths[pathId].pricePerMonthCents`, falling back to 1999 cents with a `console.warn` when the path config is missing. Lesson: checkout session creation must always read price from the coach's configuration, never from a constant — coaches set their own pricing, and hardcodes cause silent undercharging or overcharging the moment a coach customizes a path.
 
 
 ## Known Performance Risks
