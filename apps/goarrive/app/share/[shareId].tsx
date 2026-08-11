@@ -7,15 +7,18 @@ import {
   Pressable,
   Platform,
   ScrollView,
+  TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { signInAnonymously } from 'firebase/auth';
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '../../lib/AuthContext';
-import { auth } from '../../lib/firebase';
+import { auth, db } from '../../lib/firebase';
 import { Icon } from '../../components/Icon';
 import WorkoutPlayer from '../../components/WorkoutPlayer';
 import PostWorkoutJournal, { JournalEntry } from '../../components/PostWorkoutJournal';
+import WorkoutFunnelCTA, { MarketingCtaConfig } from '../../components/WorkoutFunnelCTA';
 import { isWebBluetoothAvailable } from '../../hooks/useHeartRate';
 import { BG, CARD, BORDER, FG, GOLD, MUTED, FH, FB } from '../../lib/theme';
 
@@ -37,6 +40,10 @@ interface Teaser {
   tags: string[];
   visibility?: ShareVisibility;
   requireAuth?: boolean;
+  shareType?: 'member' | 'marketing';
+  emailGateEnabled?: boolean;
+  ctaConfig?: MarketingCtaConfig;
+  coachId?: string;
 }
 
 interface SharedWorkout {
@@ -64,8 +71,15 @@ export default function SharePage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [showPlayer, setShowPlayer] = useState(false);
-  const [postFlow, setPostFlow] = useState<'none' | 'journal' | 'nudge'>('none');
+  const [postFlow, setPostFlow] = useState<'none' | 'journal' | 'nudge' | 'cta'>('none');
   const [playStartedAt, setPlayStartedAt] = useState<number | null>(null);
+
+  // Email gate state (marketing share links)
+  const [emailGatePassed, setEmailGatePassed] = useState(false);
+  const [leadName, setLeadName] = useState('');
+  const [leadEmail, setLeadEmail] = useState('');
+  const [leadSubmitting, setLeadSubmitting] = useState(false);
+  const [leadError, setLeadError] = useState('');
 
   useEffect(() => {
     if (!shareId) return;
@@ -79,15 +93,18 @@ export default function SharePage() {
   // Only fires when: teaser has been resolved AND does NOT require signin AND
   // no user is present (real coaches/members keep their session; signin_required
   // shares keep their existing "sign in" prompt so viewer identity is real).
+  // For marketing links with emailGateEnabled, sign in anonymously once the
+  // email gate has been passed so music quota still works.
   useEffect(() => {
     if (authLoading) return;
     if (user) return;
     if (!teaser) return;
     if (teaser.requireAuth) return;
+    if (teaser.shareType === 'marketing' && teaser.emailGateEnabled && !emailGatePassed) return;
     signInAnonymously(auth).catch((err) => {
       console.warn('[SharePage] anonymous sign-in failed', err);
     });
-  }, [authLoading, user, teaser]);
+  }, [authLoading, user, teaser, emailGatePassed]);
 
   async function resolveToken() {
     setLoading(true);
@@ -137,9 +154,41 @@ export default function SharePage() {
     return playStartedAt ? Math.round((Date.now() - playStartedAt) / 1000) : 0;
   }
 
+  async function handleLeadSubmit() {
+    if (!leadName.trim() || !leadEmail.trim()) {
+      setLeadError('Please enter your name and email.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(leadEmail.trim())) {
+      setLeadError('Please enter a valid email address.');
+      return;
+    }
+    setLeadSubmitting(true);
+    setLeadError('');
+    try {
+      await addDoc(collection(db, 'marketing_leads'), {
+        coachId: teaser?.coachId ?? null,
+        workoutId: teaser?.workoutId ?? null,
+        shareId: shareId ?? null,
+        name: leadName.trim(),
+        email: leadEmail.trim().toLowerCase(),
+        capturedAt: serverTimestamp(),
+      });
+      setEmailGatePassed(true);
+    } catch (err) {
+      console.warn('[SharePage] lead capture failed:', err);
+      // Don't block the user if Firestore write fails — let them through
+      setEmailGatePassed(true);
+    } finally {
+      setLeadSubmitting(false);
+    }
+  }
+
   function handlePlayerComplete() {
     setShowPlayer(false);
-    if (!user) {
+    if (teaser?.shareType === 'marketing' && teaser?.ctaConfig) {
+      setPostFlow('journal');
+    } else if (!user) {
       setPostFlow('journal');
     }
   }
@@ -160,11 +209,19 @@ export default function SharePage() {
     }).catch((err) => {
       console.warn('[SharePage] guest reflection save failed:', err);
     });
-    setPostFlow('nudge');
+    if (teaser?.shareType === 'marketing' && teaser?.ctaConfig) {
+      setPostFlow('cta');
+    } else {
+      setPostFlow('nudge');
+    }
   }
 
   function handleGuestJournalSkip() {
-    setPostFlow('nudge');
+    if (teaser?.shareType === 'marketing' && teaser?.ctaConfig) {
+      setPostFlow('cta');
+    } else {
+      setPostFlow('nudge');
+    }
   }
 
   if (loading || authLoading) {
@@ -189,6 +246,96 @@ export default function SharePage() {
   }
 
   if (!teaser) return null;
+
+  // Email gate — show before loading workout for marketing links
+  if (
+    teaser.shareType === 'marketing' &&
+    teaser.emailGateEnabled &&
+    !emailGatePassed &&
+    !user
+  ) {
+    return (
+      <View style={{ flex: 1, backgroundColor: BG }}>
+        <ScrollView
+          contentContainerStyle={[styles.container, { paddingTop: Math.max(20, insets.top) }]}
+        >
+          <View style={styles.heroCard}>
+            <View style={styles.coachRow}>
+              <View style={styles.coachAvatar}>
+                <Icon name="person" size={20} color={GOLD} />
+              </View>
+              <Text style={styles.coachName}>{teaser.coachName}</Text>
+            </View>
+
+            <Text style={styles.workoutTitle}>{teaser.name}</Text>
+
+            {teaser.description ? (
+              <Text style={styles.workoutDesc}>{teaser.description}</Text>
+            ) : null}
+
+            <View style={styles.authGate}>
+              <Icon name="mail" size={24} color={GOLD} />
+              <Text style={styles.authGateTitle}>Enter your info to start</Text>
+              <Text style={styles.authGateDesc}>
+                Get free access to this workout from {teaser.coachName}.
+              </Text>
+            </View>
+
+            <View style={styles.emailGateForm}>
+              <TextInput
+                style={styles.emailGateInput}
+                value={leadName}
+                onChangeText={setLeadName}
+                placeholder="Your name"
+                placeholderTextColor={MUTED}
+                autoCapitalize="words"
+                editable={!leadSubmitting}
+              />
+              <TextInput
+                style={styles.emailGateInput}
+                value={leadEmail}
+                onChangeText={setLeadEmail}
+                placeholder="Email address"
+                placeholderTextColor={MUTED}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                editable={!leadSubmitting}
+              />
+              {leadError ? (
+                <Text style={styles.emailGateError}>{leadError}</Text>
+              ) : null}
+              <Pressable
+                style={[styles.playBtn, leadSubmitting && { opacity: 0.6 }]}
+                onPress={handleLeadSubmit}
+                disabled={leadSubmitting}
+              >
+                {leadSubmitting ? (
+                  <ActivityIndicator size="small" color={BG} />
+                ) : (
+                  <>
+                    <Icon name="play" size={20} color={BG} />
+                    <Text style={styles.playBtnText}>Start Workout</Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // Marketing CTA screen — after journal/nudge for marketing workouts
+  if (workout && postFlow === 'cta' && teaser.ctaConfig) {
+    return (
+      <WorkoutFunnelCTA
+        ctaConfig={teaser.ctaConfig}
+        coachName={teaser.coachName}
+        workoutName={workout.name}
+        onDismiss={() => setPostFlow('nudge')}
+      />
+    );
+  }
 
   if (workout && postFlow === 'nudge') {
     return (
@@ -643,5 +790,24 @@ const styles = StyleSheet.create({
     fontFamily: FB,
     fontWeight: '600',
     textDecorationLine: 'underline',
+  },
+  emailGateForm: {
+    gap: 12,
+  },
+  emailGateInput: {
+    backgroundColor: BG,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: FG,
+    fontSize: 15,
+    fontFamily: FB,
+  },
+  emailGateError: {
+    color: '#EF4444',
+    fontSize: 13,
+    fontFamily: FB,
   },
 });

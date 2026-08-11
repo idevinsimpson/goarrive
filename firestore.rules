@@ -1038,6 +1038,21 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
+    // MARKETING LEADS (email-gate captures from share links)
+    // Public write: anyone (including unauthenticated guests after anon sign-in)
+    // can create a lead document. Coaches and admins can read their own leads.
+    // No client updates or deletes.
+    // ─────────────────────────────────────────────
+    match /marketing_leads/{leadId} {
+      allow create: if true;
+      allow read: if isAuthenticated() && (
+        isCoachOrBootstrap(resource.data.coachId)
+        || isPlatformAdmin()
+      );
+      allow update, delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
     // PLATFORM RELEASES (What's New digest content)
     // Authored by platformAdmin; weekly digest function reads 'queued'
     // releases via Admin SDK. Coaches can read for the in-app What's New.
