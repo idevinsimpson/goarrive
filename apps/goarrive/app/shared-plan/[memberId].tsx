@@ -408,11 +408,13 @@ export default function SharedPlanScreen() {
           />
         )}
 
-        {/* Coaching Investment */}
+        {/* Coaching Investment — always rendered for free plans so the
+            Start Free CTA (the only way to join) can't be hidden. */}
         {pricing && (
           (activePlan.showInvestment !== false ||
             (activePlan.commitToSave?.enabled ?? false) ||
-            (activePlan.postContract?.enabled ?? false)
+            (activePlan.postContract?.enabled ?? false) ||
+            pricing.displayMonthlyPrice === 0
           ) && (
             <CoachingInvestmentSection
               plan={activePlan}
@@ -462,9 +464,11 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
 
   const pcEnabled = plan.postContract?.enabled ?? false;
   const ctsEnabledCheck = plan.commitToSave?.enabled ?? false;
+  // $0 plan: no payment — the member joins free (card collected only when CTS is added).
+  const isFree = pricing.displayMonthlyPrice === 0;
   // Nutrition add-on now renders in NutritionAddOnSection above this section.
   const hasVisibleAddOns = ctsEnabledCheck || pcEnabled;
-  if (plan.showInvestment === false && !hasVisibleAddOns) return null;
+  if (!isFree && plan.showInvestment === false && !hasVisibleAddOns) return null;
 
   const cts = plan.commitToSave || getCts(plan);
   const nut = plan.nutrition || getNutrition(plan);
@@ -536,11 +540,82 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
     }
   };
 
+  const handleStartFree = async () => {
+    setCheckoutLoading(true);
+    setError('');
+    try {
+      const functions = getFunctions();
+      if (ctsActive) {
+        // Commit to Save on a free plan: a card must go on file for
+        // missed-session fees, so route through Stripe as a $0 subscription.
+        const createCheckout = httpsCallable(functions, 'createCheckoutSession');
+        const result = await createCheckout({
+          planId: plan.id || plan.memberId,
+          memberId: plan.memberId,
+          paymentOption: 'monthly',
+          commitToSave: true,
+          nutritionAddOn: nutActive,
+          displayedMonthlyPrice: 0,
+          displayedPayInFullTotal: 0,
+        });
+        const { sessionUrl } = result.data as { sessionUrl: string };
+        if (sessionUrl) {
+          if (Platform.OS === 'web') {
+            window.location.href = sessionUrl;
+          } else {
+            import('expo-router').then(({ router }) => {
+              router.push(sessionUrl as any);
+            });
+          }
+        }
+      } else {
+        const startFree = httpsCallable(functions, 'startFreePlan');
+        const result = await startFree({
+          planId: plan.id || plan.memberId,
+          memberId: plan.memberId,
+        });
+        const { redirectUrl } = result.data as { redirectUrl: string };
+        if (redirectUrl) {
+          if (Platform.OS === 'web') {
+            window.location.href = redirectUrl;
+          } else {
+            import('expo-router').then(({ router }) => {
+              router.replace(redirectUrl as any);
+            });
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error('[SharedPlan] Free plan start error:', err);
+      setError(err.message || 'Could not start your plan. Please try again.');
+    } finally {
+      setCheckoutLoading(false);
+    }
+  };
+
   return (
     <View style={{ marginBottom: 20 }}>
-      <Text style={st.sectionLabel}>COACHING INVESTMENT</Text>
+      <Text style={st.sectionLabel}>{isFree ? 'YOUR MEMBERSHIP' : 'COACHING INVESTMENT'}</Text>
+
+      {isFree && (
+        <View style={[ips.optionCard, { borderColor: GREEN_BORDER, marginBottom: 16 }]}>
+          <View style={ips.optionHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={ips.optionTitle}>Free Membership</Text>
+              <Text style={ips.optionSubtitle}>
+                {`${plan.contractMonths || 12}-month coaching plan · No payment required`}
+              </Text>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={[ips.optionPrice, { color: ACCENT }]}>$0</Text>
+              <Text style={ips.optionPriceSuffix}>/mo</Text>
+            </View>
+          </View>
+        </View>
+      )}
 
       {/* Pricing options selection */}
+      {!isFree && (
       <View style={{ gap: 10, marginBottom: 16 }}>
         {/* Monthly card */}
         <Pressable
@@ -646,6 +721,7 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
           </View>
         </Pressable>
       </View>
+      )}
 
       {ctsEnabled && (
         <CommitToSaveCard
@@ -656,13 +732,14 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
           ctsSavings={ctsSavings}
           selected={selected}
           payInFullMonthly={payInFullMonthly}
+          isFree={isFree}
         />
       )}
 
       {/* Nutrition add-on now renders in NutritionAddOnSection above this section. */}
 
 
-      {plan.showInvestment !== false && (
+      {plan.showInvestment !== false && !isFree && (
         <View style={[inv.statsRow, { marginTop: 12, paddingVertical: 14, paddingHorizontal: 16 }]}>
           <Text style={{ color: MUTED, fontSize: 13, lineHeight: 19, textAlign: 'center' }}>
             <Text style={{ color: GOLD, fontWeight: '700' }}>Referral Rewards: </Text>
@@ -688,15 +765,17 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
 
       {/* Main Payment CTA */}
       <Pressable
-        onPress={handleProceed}
-        disabled={!selected || checkoutLoading}
-        style={[ips.ctaBtn, (!selected || checkoutLoading) && { opacity: 0.5 }]}
+        onPress={isFree ? handleStartFree : handleProceed}
+        disabled={(!isFree && !selected) || checkoutLoading}
+        style={[ips.ctaBtn, ((!isFree && !selected) || checkoutLoading) && { opacity: 0.5 }]}
       >
         {checkoutLoading ? (
           <ActivityIndicator size="small" color="#000" />
         ) : (
           <Text style={ips.ctaBtnText}>
-            {selected === 'pay_in_full'
+            {isFree
+              ? (ctsActive ? 'Start Free — Card Required' : 'Start Free')
+              : selected === 'pay_in_full'
               ? `Pay ${formatCurrency(Math.round(payInFullTotal))} Now`
               : selected === 'monthly'
               ? billingInterval === 'week'
@@ -711,21 +790,26 @@ function CoachingInvestmentSection({ plan, pricing, onChange }: {
 
       {/* Fine print */}
       <Text style={{ color: '#4A5568', fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 12 }}>
-        Payments are processed securely by Stripe. By proceeding you agree to the GoArrive coaching terms. You may cancel month-to-month continuation at any time after your contract ends.
+        {isFree
+          ? ctsActive
+            ? 'No charge today. Your card is saved securely by Stripe and only used for Commit to Save missed-session fees. By proceeding you agree to the GoArrive coaching terms.'
+            : 'No payment required. By proceeding you agree to the GoArrive coaching terms.'
+          : 'Payments are processed securely by Stripe. By proceeding you agree to the GoArrive coaching terms. You may cancel month-to-month continuation at any time after your contract ends.'}
       </Text>
     </View>
   );
 }
 
-function CommitToSaveCard({ plan, isActive, onToggle, monthlyPrice, ctsSavings, selected, payInFullMonthly }: {
+function CommitToSaveCard({ plan, isActive, onToggle, monthlyPrice, ctsSavings, selected, payInFullMonthly, isFree }: {
   plan: MemberPlanData; isActive: boolean;
   onToggle: () => void; monthlyPrice: number; ctsSavings: number;
   selected: 'monthly' | 'pay_in_full' | null; payInFullMonthly: number;
+  isFree?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const cts = plan.commitToSave || getCts(plan);
   const baseRate = selected === 'pay_in_full' ? payInFullMonthly : monthlyPrice;
-  const rateAfter = baseRate - ctsSavings;
+  const rateAfter = Math.max(0, baseRate - ctsSavings);
 
   return (
     <View style={[inv.addonCard, isActive && { borderColor: GOLD_BORDER, backgroundColor: GOLD_BG }]}>
@@ -745,10 +829,12 @@ function CommitToSaveCard({ plan, isActive, onToggle, monthlyPrice, ctsSavings, 
             </Pressable>
           </View>
           <Text style={{ color: GOLD, fontSize: 12, marginTop: 2 }}>
-            Consistency reward · −{formatCurrency(ctsSavings)}/mo
+            {isFree ? 'Accountability commitment' : `Consistency reward · −${formatCurrency(ctsSavings)}/mo`}
           </Text>
           <Text style={{ color: MUTED, fontSize: 13, lineHeight: 19, marginTop: 6 }}>
-            Save {formatCurrency(ctsSavings)} per month when you commit to showing up consistently.
+            {isFree
+              ? `Commit to showing up consistently. A card is saved at signup — a ${formatCurrency(cts?.missedSessionFee || 50)} fee applies only if you no-show a session.`
+              : `Save ${formatCurrency(ctsSavings)} per month when you commit to showing up consistently.`}
           </Text>
           <Pressable onPress={() => setExpanded(!expanded)} style={{ marginTop: 6 }}>
             <Text style={{ color: PRIMARY, fontSize: 13, fontWeight: '600' }}>
@@ -757,8 +843,9 @@ function CommitToSaveCard({ plan, isActive, onToggle, monthlyPrice, ctsSavings, 
           </Pressable>
           {expanded && (
             <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: BORDER }}>
-              <Text style={inv.detailLine}>→  Commit to Save lowers your monthly rate by {formatCurrency(ctsSavings)} while it's active.</Text>
-              <Text style={inv.detailLine}>→  Complete a 30-day streak and unlock an additional {cts?.nextMonthPercentOff || 5}% discount on the following month.</Text>
+              {!isFree && <Text style={inv.detailLine}>→  Commit to Save lowers your monthly rate by {formatCurrency(ctsSavings)} while it's active.</Text>}
+              {!isFree && <Text style={inv.detailLine}>→  Complete a 30-day streak and unlock an additional {cts?.nextMonthPercentOff || 5}% discount on the following month.</Text>}
+              {isFree && <Text style={inv.detailLine}>→  Your card is saved securely by Stripe when you start — nothing is charged up front.</Text>}
               <Text style={inv.detailLine}>→  If you miss a session without making it up within {cts?.makeUpWindowHours || 48} hours, a {formatCurrency(cts?.missedSessionFee || 50)} accountability fee applies.</Text>
               <Text style={inv.detailLine}>→  Fees are waived for family emergencies or illness.</Text>
               <Text style={inv.detailLine}>→  You can opt out at any time.</Text>
@@ -772,7 +859,7 @@ function CommitToSaveCard({ plan, isActive, onToggle, monthlyPrice, ctsSavings, 
           )}
         </View>
       </View>
-      {isActive && (
+      {isActive && !isFree && (
         <View style={{ flexDirection: 'row', marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(245,166,35,0.2)' }}>
           <View style={{ flex: 1 }}>
             <Text style={{ color: GOLD, fontSize: 11, fontWeight: '700', letterSpacing: 1 }}>YOU SAVE</Text>

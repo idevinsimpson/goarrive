@@ -88,8 +88,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.sendMemberInvite = exports.claimMemberAccount = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.listPublicCoaches = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = void 0;
-exports.pollMovementVariationJobs = exports.dismissMovementVariation = exports.finalizeMovementVariation = exports.getMovementVariationStatus = exports.startMovementVariation = exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.submitGuestReflection = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.onCoachFeedbackStatusChanged = exports.onCoachFeedbackCreated = exports.sendWeeklyDigest = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.batchGenerateVoice = exports.onMemberCreated = exports.onCoachCreated = exports.getWorkoutMusic = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = void 0;
+exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.sendMemberInvite = exports.claimMemberAccount = exports.getMemberClaimStatus = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.startFreePlan = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.listPublicCoaches = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = exports.getSessionWorkout = exports.playbookBookingIcs = exports.bookViaBookingToken = exports.resolvePlaybookBookingToken = exports.revokePlaybookBookingLink = exports.createPlaybookBookingLink = exports.cleanupExpiredBookingRequests = exports.bookPlaybookSession = void 0;
+exports.updateShareToken = exports.createShareToken = exports.adminAssignLeadToCoach = exports.onIntakeSubmissionCreated = exports.onCoachFeedbackStatusChanged = exports.onCoachFeedbackCreated = exports.sendWeeklyDigest = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.batchGenerateVoice = exports.onMemberCreated = exports.onCoachCreated = exports.getWorkoutMusic = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = void 0;
+exports.pollMovementVariationJobs = exports.dismissMovementVariation = exports.finalizeMovementVariation = exports.getMovementVariationStatus = exports.startMovementVariation = exports.listEquipmentImages = exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.submitGuestReflection = exports.resolveShareToken = exports.revokeShareToken = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -101,6 +102,21 @@ const googleapis_1 = require("googleapis");
 const zoom_1 = require("./zoom");
 const zoomRtms_1 = require("./zoomRtms");
 const ws_1 = __importDefault(require("ws"));
+const playbookScheduling_1 = require("./playbookScheduling");
+// Playbook scheduling (Phase 3a): transactional booking with the
+// member-level double-booking guard + per-playbook weekly cap.
+var playbookScheduling_2 = require("./playbookScheduling");
+Object.defineProperty(exports, "bookPlaybookSession", { enumerable: true, get: function () { return playbookScheduling_2.bookPlaybookSession; } });
+Object.defineProperty(exports, "cleanupExpiredBookingRequests", { enumerable: true, get: function () { return playbookScheduling_2.cleanupExpiredBookingRequests; } });
+// Playbook booking links (Phase 3b): coach availability windows + public
+// Calendly-style token page + guest-by-email bookings.
+var playbookBooking_1 = require("./playbookBooking");
+Object.defineProperty(exports, "createPlaybookBookingLink", { enumerable: true, get: function () { return playbookBooking_1.createPlaybookBookingLink; } });
+Object.defineProperty(exports, "revokePlaybookBookingLink", { enumerable: true, get: function () { return playbookBooking_1.revokePlaybookBookingLink; } });
+Object.defineProperty(exports, "resolvePlaybookBookingToken", { enumerable: true, get: function () { return playbookBooking_1.resolvePlaybookBookingToken; } });
+Object.defineProperty(exports, "bookViaBookingToken", { enumerable: true, get: function () { return playbookBooking_1.bookViaBookingToken; } });
+Object.defineProperty(exports, "playbookBookingIcs", { enumerable: true, get: function () { return playbookBooking_1.playbookBookingIcs; } });
+Object.defineProperty(exports, "getSessionWorkout", { enumerable: true, get: function () { return playbookBooking_1.getSessionWorkout; } });
 const tasks_1 = require("@google-cloud/tasks");
 const workoutPlayerSanitizer_1 = require("./workoutPlayerSanitizer");
 // ── Slack Bot (ME-011, ME-012) ────────────────────────────────────────────────
@@ -265,6 +281,7 @@ exports.listPublicCoaches = (0, https_1.onCall)({ invoker: 'public' }, async () 
         .map((d) => ({
         uid: d.id,
         displayName: (d.data().displayName || d.data().name || ''),
+        funnelPhotoUrl: (d.data().funnelPhotoUrl || ''),
     }))
         .filter((c) => c.displayName.trim().length > 0);
     return { coaches };
@@ -465,7 +482,7 @@ exports.disconnectStripeAccount = (0, https_1.onCall)({ secrets: [stripeSecretKe
  * RISK-001: CTS + pay-in-full stacking order is unresolved; both amounts stored in snapshot.
  */
 exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4;
     const { planId, memberId, paymentOption, commitToSave, nutritionAddOn, displayedMonthlyPrice: clientMonthly, displayedPayInFullTotal: clientPayInFull, billingInterval: clientBillingInterval } = request.data;
     // Billing interval: only applies to 'monthly' (recurring) payment option
     const billingInterval = paymentOption === 'monthly' && (clientBillingInterval === 'week' || clientBillingInterval === 'year')
@@ -502,8 +519,11 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
         }
         // ── (1) Plan status check — block checkout if already paid or cancelled ──
         const planStatus = plan.checkoutStatus;
-        if (planStatus === 'paid') {
+        if (planStatus === 'paid' || planStatus === 'pay_in_full_paid') {
             throw new https_1.HttpsError('failed-precondition', 'This plan has already been paid.');
+        }
+        if (planStatus === 'free_active') {
+            throw new https_1.HttpsError('failed-precondition', 'This plan is already active.');
         }
         if (planStatus === 'cancelled') {
             throw new https_1.HttpsError('failed-precondition', 'This plan has been cancelled.');
@@ -544,11 +564,11 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
         const sessionsPerWeek = plan.sessionsPerWeek || 3;
         const sessionsPerMonth = Math.round(sessionsPerWeek * (52 / 12));
         const contractMonths = plan.contractMonths || 12;
-        // Initial monthly
-        const hourlyRate = plan.hourlyRate || 100;
-        const sessionLengthMinutes = plan.sessionLengthMinutes || 60;
-        const checkInCallMinutes = plan.checkInCallMinutes || 30;
-        const programBuildTimeHours = plan.programBuildTimeHours || 5;
+        // Initial monthly — ?? (not ||) so an explicitly zeroed rate survives ($0/free plans)
+        const hourlyRate = (_c = plan.hourlyRate) !== null && _c !== void 0 ? _c : 100;
+        const sessionLengthMinutes = (_d = plan.sessionLengthMinutes) !== null && _d !== void 0 ? _d : 60;
+        const checkInCallMinutes = (_e = plan.checkInCallMinutes) !== null && _e !== void 0 ? _e : 30;
+        const programBuildTimeHours = (_f = plan.programBuildTimeHours) !== null && _f !== void 0 ? _f : 5;
         // ── Pricing: use client-sent displayed prices to avoid rounding mismatches ──
         // The frontend's calculatePricing() already applies CTS, nutrition, manual
         // overrides, and pay-in-full discount using the exact same formula the member
@@ -557,21 +577,23 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
         const ctsActive = commitToSave === true;
         const nutActive = nutritionAddOn === true;
         // Server-side fallback calculation (used for validation & snapshot)
-        const serverBaseMonthly = Math.round((_g = (_e = (_d = (_c = plan.pricingResult) === null || _c === void 0 ? void 0 : _c.displayMonthlyPrice) !== null && _d !== void 0 ? _d : plan.monthlyPriceOverride) !== null && _e !== void 0 ? _e : (_f = plan.pricingResult) === null || _f === void 0 ? void 0 : _f.calculatedMonthlyPrice) !== null && _g !== void 0 ? _g : (hourlyRate * (sessionLengthMinutes / 60) * sessionsPerMonth));
+        const serverBaseMonthly = Math.round((_l = (_j = (_h = (_g = plan.pricingResult) === null || _g === void 0 ? void 0 : _g.displayMonthlyPrice) !== null && _h !== void 0 ? _h : plan.monthlyPriceOverride) !== null && _j !== void 0 ? _j : (_k = plan.pricingResult) === null || _k === void 0 ? void 0 : _k.calculatedMonthlyPrice) !== null && _l !== void 0 ? _l : (hourlyRate * (sessionLengthMinutes / 60) * sessionsPerMonth));
         const ctsMonthlySavings = ctsActive
-            ? ((_k = (_j = (_h = plan.commitToSave) === null || _h === void 0 ? void 0 : _h.monthlySavings) !== null && _j !== void 0 ? _j : plan.commitToSaveMonthlySavings) !== null && _k !== void 0 ? _k : 100)
+            ? ((_p = (_o = (_m = plan.commitToSave) === null || _m === void 0 ? void 0 : _m.monthlySavings) !== null && _o !== void 0 ? _o : plan.commitToSaveMonthlySavings) !== null && _p !== void 0 ? _p : 100)
             : 0;
         const nutritionMonthlyCost = nutActive
-            ? ((_o = (_m = (_l = plan.nutrition) === null || _l === void 0 ? void 0 : _l.monthlyCost) !== null && _m !== void 0 ? _m : plan.nutritionMonthlyCost) !== null && _o !== void 0 ? _o : 100)
+            ? ((_s = (_r = (_q = plan.nutrition) === null || _q === void 0 ? void 0 : _q.monthlyCost) !== null && _r !== void 0 ? _r : plan.nutritionMonthlyCost) !== null && _s !== void 0 ? _s : 100)
             : 0;
-        const serverMonthly = serverBaseMonthly - ctsMonthlySavings + nutritionMonthlyCost;
-        const payInFullDiscountPct = plan.payInFullDiscountPercent || 10;
+        // Clamp at 0: CTS savings on a $0/free plan must never produce a negative price
+        const serverMonthly = Math.max(0, serverBaseMonthly - ctsMonthlySavings + nutritionMonthlyCost);
+        const payInFullDiscountPct = (_t = plan.payInFullDiscountPercent) !== null && _t !== void 0 ? _t : 10;
         const serverPayInFull = Math.round(serverMonthly * contractMonths * (1 - payInFullDiscountPct / 100));
-        // Use client-sent prices when available; fall back to server calculation
-        const displayMonthlyPrice = (typeof clientMonthly === 'number' && clientMonthly > 0)
+        // Use client-sent prices when available; fall back to server calculation.
+        // 0 is a valid client price ($0/free plans) — only reject missing/negative.
+        const displayMonthlyPrice = (typeof clientMonthly === 'number' && Number.isFinite(clientMonthly) && clientMonthly >= 0)
             ? Math.round(clientMonthly)
             : Math.round(serverMonthly);
-        const payInFullTotal = (typeof clientPayInFull === 'number' && clientPayInFull > 0)
+        const payInFullTotal = (typeof clientPayInFull === 'number' && Number.isFinite(clientPayInFull) && clientPayInFull >= 0)
             ? Math.round(clientPayInFull)
             : serverPayInFull;
         // Sanity check: client price must be within $10 of server estimate
@@ -583,12 +605,22 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
             console.error(`[createCheckoutSession] Pay-in-full price mismatch: client=${payInFullTotal}, server=${serverPayInFull}`);
             throw new https_1.HttpsError('invalid-argument', 'Price mismatch — please refresh and try again.');
         }
+        // ── $0 (free) plan guards ──
+        // Stripe can't process a $0 one-time payment (USD card minimum is $0.50).
+        if (paymentOption === 'pay_in_full' && payInFullTotal <= 0) {
+            throw new https_1.HttpsError('failed-precondition', 'Pay in full is not available for a free plan.');
+        }
+        // A free plan only goes through Stripe when the member opts into Commit to
+        // Save (card on file for missed-session fees). Otherwise use startFreePlan.
+        if (displayMonthlyPrice === 0 && !ctsActive) {
+            throw new https_1.HttpsError('failed-precondition', 'This plan is free — no checkout is needed.');
+        }
         const payInFullMonthlyEquivalent = Math.round(payInFullTotal / contractMonths);
         // Continuation monthly
         const cp = plan.continuationPricing;
-        const contHr = (_p = cp === null || cp === void 0 ? void 0 : cp.continuationHourlyRate) !== null && _p !== void 0 ? _p : hourlyRate;
-        const contMin = (_q = cp === null || cp === void 0 ? void 0 : cp.continuationMinutesPerSession) !== null && _q !== void 0 ? _q : 3.5;
-        const contCheckIn = (_r = cp === null || cp === void 0 ? void 0 : cp.continuationCheckInMinutesPerMonth) !== null && _r !== void 0 ? _r : 30;
+        const contHr = (_u = cp === null || cp === void 0 ? void 0 : cp.continuationHourlyRate) !== null && _u !== void 0 ? _u : hourlyRate;
+        const contMin = (_v = cp === null || cp === void 0 ? void 0 : cp.continuationMinutesPerSession) !== null && _v !== void 0 ? _v : 3.5;
+        const contCheckIn = (_w = cp === null || cp === void 0 ? void 0 : cp.continuationCheckInMinutesPerMonth) !== null && _w !== void 0 ? _w : 30;
         const continuationMonthlyPrice = Math.round(contHr * (contMin / 60) * sessionsPerMonth);
         const continuationPayInFullTotal = Math.round(continuationMonthlyPrice * 12 * 0.9);
         const continuationPayInFullMonthlyEquivalent = Math.round(continuationPayInFullTotal / 12);
@@ -632,7 +664,10 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
             baseMonthlyPrice: serverBaseMonthly,
             billingInterval,
             ctsActive,
-            ctsMonthlySavings: ctsActive ? ctsMonthlySavings : ((_t = (_s = plan.postContract) === null || _s === void 0 ? void 0 : _s.ctsMonthlySavings) !== null && _t !== void 0 ? _t : null),
+            ctsMonthlySavings: ctsActive ? ctsMonthlySavings : ((_y = (_x = plan.postContract) === null || _x === void 0 ? void 0 : _x.ctsMonthlySavings) !== null && _y !== void 0 ? _y : null),
+            ctsMissedSessionFee: ctsActive
+                ? ((_1 = (_0 = (_z = plan.commitToSave) === null || _z === void 0 ? void 0 : _z.missedSessionFee) !== null && _0 !== void 0 ? _0 : plan.commitToSaveMissedSessionFee) !== null && _1 !== void 0 ? _1 : 50)
+                : null,
             nutActive,
             nutritionMonthlyCost: nutActive ? nutritionMonthlyCost : 0,
             tierSplit,
@@ -663,7 +698,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
         if (!stripeCustomerId) {
             // Try user account first, then fall back to email stored on the plan
             const memberSnap = await db.collection('users').doc(memberId).get();
-            const memberEmail = ((_u = memberSnap.data()) === null || _u === void 0 ? void 0 : _u.email)
+            const memberEmail = ((_2 = memberSnap.data()) === null || _2 === void 0 ? void 0 : _2.email)
                 || plan.memberEmail
                 || plan.email;
             const customer = await stripe.customers.create({ email: memberEmail, metadata: { memberId, coachId, planId } }, { stripeAccount: stripeAccountId });
@@ -682,11 +717,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
                     ? displayMonthlyPrice * 12 * 100 // yearly in cents
                     : displayMonthlyPrice * 100; // monthly in cents
             const intervalLabel = isWeekly ? 'Weekly' : isYearly ? 'Yearly' : 'Monthly';
-            const session = await stripe.checkout.sessions.create({
-                customer: stripeCustomerId,
-                payment_method_types: ['card'],
-                mode: 'subscription',
-                line_items: [
+            const session = await stripe.checkout.sessions.create(Object.assign(Object.assign({ customer: stripeCustomerId, payment_method_types: ['card'], mode: 'subscription' }, (recurringAmount === 0 ? { payment_method_collection: 'always' } : {})), { line_items: [
                     {
                         price_data: {
                             currency: 'usd',
@@ -699,8 +730,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
                         },
                         quantity: 1,
                     },
-                ],
-                subscription_data: {
+                ], subscription_data: {
                     application_fee_percent: applicationFeePercent,
                     metadata: {
                         planId,
@@ -714,12 +744,9 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
                         continuationMonthlyPriceCents: String(continuationMonthlyPrice * 100),
                         tierSplit: String(tierSplit),
                     },
-                },
+                }, 
                 // (4) Include planId in success URL so checkout-success page can link the account
-                success_url: `${appBaseUrl}/checkout-success?intent=${intentId}&memberId=${memberId}&planId=${planId}`,
-                cancel_url: `${appBaseUrl}/shared-plan/${memberId}?checkout_cancelled=1`,
-                metadata: { intentId, planId, snapshotId, memberId, coachId },
-            }, { stripeAccount: stripeAccountId });
+                success_url: `${appBaseUrl}/checkout-success?intent=${intentId}&memberId=${memberId}&planId=${planId}`, cancel_url: `${appBaseUrl}/shared-plan/${memberId}?checkout_cancelled=1`, metadata: { intentId, planId, snapshotId, memberId, coachId } }), { stripeAccount: stripeAccountId });
             sessionUrl = session.url;
             stripeSessionId = session.id;
         }
@@ -779,8 +806,153 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
         // Re-throw HttpsError as-is; wrap unexpected errors with logging
         if ((err === null || err === void 0 ? void 0 : err.code) && (err === null || err === void 0 ? void 0 : err.httpErrorCode))
             throw err; // Already an HttpsError
-        console.error('[createCheckoutSession] Unhandled error:', (_v = err === null || err === void 0 ? void 0 : err.message) !== null && _v !== void 0 ? _v : err, (_w = err === null || err === void 0 ? void 0 : err.stack) !== null && _w !== void 0 ? _w : '');
+        console.error('[createCheckoutSession] Unhandled error:', (_3 = err === null || err === void 0 ? void 0 : err.message) !== null && _3 !== void 0 ? _3 : err, (_4 = err === null || err === void 0 ? void 0 : err.stack) !== null && _4 !== void 0 ? _4 : '');
         throw new https_1.HttpsError('internal', 'Something went wrong creating checkout. Please try again.');
+    }
+});
+// ─── startFreePlan ────────────────────────────────────────────────────────────
+/**
+ * Activates a $0 (free) plan with no Stripe involvement.
+ *
+ * Free plans skip payment entirely UNLESS the member opts into Commit to Save —
+ * that path must go through createCheckoutSession (a $0 subscription that puts
+ * a card on file for missed-session fees). This callable therefore rejects any
+ * plan whose server-computed price is not $0; it accepts no CTS/add-on params.
+ *
+ * Works even when the coach has not connected Stripe. Writes the same
+ * acceptedPlanSnapshots + checkoutIntents records as a paid checkout (with $0
+ * amounts, paymentOption 'free') so downstream reporting sees a consistent
+ * shape. No ledger entries — $0 generates no earnings.
+ */
+exports.startFreePlan = (0, https_1.onCall)({ invoker: 'public' }, async (request) => {
+    var _a, _b, _c, _d;
+    const { planId, memberId } = request.data;
+    if (!planId || !memberId) {
+        throw new https_1.HttpsError('invalid-argument', 'planId and memberId are required');
+    }
+    try {
+        // Auth is optional — shared-plan members are not signed in.
+        const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+        const callerToken = (_b = request.auth) === null || _b === void 0 ? void 0 : _b.token;
+        const callerIsAdmin = (callerToken === null || callerToken === void 0 ? void 0 : callerToken.role) === 'platformAdmin' || (callerToken === null || callerToken === void 0 ? void 0 : callerToken.admin) === true;
+        const planRef = db.collection('member_plans').doc(planId);
+        const snapshotRef = db.collection('acceptedPlanSnapshots').doc();
+        const intentRef = db.collection('checkoutIntents').doc();
+        const now = firestore_2.Timestamp.now();
+        await db.runTransaction(async (tx) => {
+            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p;
+            const planSnap = await tx.get(planRef);
+            if (!planSnap.exists)
+                throw new https_1.HttpsError('not-found', 'Plan not found');
+            const plan = planSnap.data();
+            const coachId = plan.coachId;
+            if (!coachId)
+                throw new https_1.HttpsError('failed-precondition', 'Plan has no coachId');
+            if (callerUid && callerUid !== memberId && callerUid !== coachId && !callerIsAdmin) {
+                throw new https_1.HttpsError('permission-denied', 'Not authorized for this plan');
+            }
+            if (!callerIsAdmin && plan.memberId !== memberId) {
+                throw new https_1.HttpsError('permission-denied', 'Member ID does not match this plan');
+            }
+            const planStatus = plan.checkoutStatus;
+            if (planStatus === 'paid' || planStatus === 'pay_in_full_paid') {
+                throw new https_1.HttpsError('failed-precondition', 'This plan has already been paid.');
+            }
+            if (planStatus === 'free_active' || plan.status === 'active') {
+                throw new https_1.HttpsError('failed-precondition', 'This plan is already active.');
+            }
+            if (planStatus === 'cancelled') {
+                throw new https_1.HttpsError('failed-precondition', 'This plan has been cancelled.');
+            }
+            // Server-side price check — same resolution chain as createCheckoutSession,
+            // with ?? so an explicit 0 survives. Anything non-zero must use Stripe.
+            const sessionsPerWeek = plan.sessionsPerWeek || 3;
+            const sessionsPerMonth = Math.round(sessionsPerWeek * (52 / 12));
+            const hourlyRate = (_a = plan.hourlyRate) !== null && _a !== void 0 ? _a : 100;
+            const sessionLengthMinutes = (_b = plan.sessionLengthMinutes) !== null && _b !== void 0 ? _b : 60;
+            const serverBaseMonthly = Math.round((_g = (_e = (_d = (_c = plan.pricingResult) === null || _c === void 0 ? void 0 : _c.displayMonthlyPrice) !== null && _d !== void 0 ? _d : plan.monthlyPriceOverride) !== null && _e !== void 0 ? _e : (_f = plan.pricingResult) === null || _f === void 0 ? void 0 : _f.calculatedMonthlyPrice) !== null && _g !== void 0 ? _g : (hourlyRate * (sessionLengthMinutes / 60) * sessionsPerMonth));
+            if (serverBaseMonthly !== 0) {
+                throw new https_1.HttpsError('failed-precondition', 'This plan is not free — please use the payment checkout.');
+            }
+            const contractMonths = plan.contractMonths || 12;
+            const contractStartAt = now;
+            const contractEndAt = firestore_2.Timestamp.fromMillis(now.toMillis() + contractMonths * 30.44 * 24 * 60 * 60 * 1000);
+            // Continuation prices only when the coach explicitly configured them —
+            // there is no card on file, so these are informational for reporting.
+            const cp = plan.continuationPricing;
+            const contHr = (_h = cp === null || cp === void 0 ? void 0 : cp.continuationHourlyRate) !== null && _h !== void 0 ? _h : null;
+            const contMin = (_j = cp === null || cp === void 0 ? void 0 : cp.continuationMinutesPerSession) !== null && _j !== void 0 ? _j : 3.5;
+            const continuationMonthlyPrice = contHr != null
+                ? Math.round(contHr * (contMin / 60) * sessionsPerMonth)
+                : 0;
+            tx.set(snapshotRef, {
+                snapshotId: snapshotRef.id,
+                planId,
+                memberId,
+                coachId,
+                snapshotAt: now,
+                contractLengthMonths: contractMonths,
+                hourlyRate,
+                sessionLengthMinutes,
+                checkInCallMinutes: (_k = plan.checkInCallMinutes) !== null && _k !== void 0 ? _k : 30,
+                programBuildTimeHours: (_l = plan.programBuildTimeHours) !== null && _l !== void 0 ? _l : 5,
+                sessionsPerWeek,
+                calculatedMonthlyPrice: 0,
+                displayMonthlyPrice: 0,
+                payInFullTotal: 0,
+                payInFullMonthlyEquivalent: 0,
+                continuationHourlyRate: contHr,
+                continuationMinutesPerSession: contMin,
+                continuationCheckInMinutesPerMonth: (_m = cp === null || cp === void 0 ? void 0 : cp.continuationCheckInMinutesPerMonth) !== null && _m !== void 0 ? _m : 30,
+                continuationMonthlyPrice,
+                continuationPayInFullTotal: 0,
+                continuationPayInFullMonthlyEquivalent: 0,
+                baseMonthlyPrice: 0,
+                billingInterval: 'month',
+                ctsActive: false,
+                ctsMonthlySavings: (_p = (_o = plan.postContract) === null || _o === void 0 ? void 0 : _o.ctsMonthlySavings) !== null && _p !== void 0 ? _p : null,
+                ctsMissedSessionFee: null,
+                nutActive: false,
+                nutritionMonthlyCost: 0,
+                tierSplit: null,
+                applicationFeePercent: null,
+                contractStartAt,
+                contractEndAt,
+            });
+            tx.set(intentRef, {
+                intentId: intentRef.id,
+                memberId,
+                coachId,
+                planId,
+                snapshotId: snapshotRef.id,
+                paymentOption: 'free',
+                billingInterval: 'month',
+                status: 'completed',
+                createdAt: firestore_2.FieldValue.serverTimestamp(),
+                updatedAt: firestore_2.FieldValue.serverTimestamp(),
+            });
+            tx.update(planRef, {
+                status: 'active',
+                checkoutStatus: 'free_active',
+                acceptedAt: now,
+                contractStartAt,
+                contractEndAt,
+                acceptedSnapshotId: snapshotRef.id,
+                updatedAt: firestore_2.FieldValue.serverTimestamp(),
+            });
+        });
+        console.log('[startFreePlan] Free plan', planId, 'activated for member', memberId);
+        return {
+            intentId: intentRef.id,
+            snapshotId: snapshotRef.id,
+            redirectUrl: `/checkout-success?intent=${intentRef.id}&memberId=${memberId}&planId=${planId}&free=1`,
+        };
+    }
+    catch (err) {
+        if ((err === null || err === void 0 ? void 0 : err.code) && (err === null || err === void 0 ? void 0 : err.httpErrorCode))
+            throw err; // Already an HttpsError
+        console.error('[startFreePlan] Unhandled error:', (_c = err === null || err === void 0 ? void 0 : err.message) !== null && _c !== void 0 ? _c : err, (_d = err === null || err === void 0 ? void 0 : err.stack) !== null && _d !== void 0 ? _d : '');
+        throw new https_1.HttpsError('internal', 'Something went wrong activating this plan. Please try again.');
     }
 });
 // ─── 6. stripeWebhook ─────────────────────────────────────────────────────────
@@ -946,7 +1118,7 @@ async function processStripeEvent(tag, event, res) {
 }
 // ── Webhook handlers ──────────────────────────────────────────────────────────
 async function handleCheckoutSessionCompleted(session, eventId) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s;
     const { intentId, planId, snapshotId, memberId, coachId: _coachId } = (_a = session.metadata) !== null && _a !== void 0 ? _a : {};
     void _coachId; // coachId is stored in snapshot; not needed here directly
     if (!intentId || !planId || !memberId) {
@@ -968,10 +1140,13 @@ async function handleCheckoutSessionCompleted(session, eventId) {
     const now = firestore_2.Timestamp.now();
     const contractStartAt = now;
     const contractEndAt = firestore_2.Timestamp.fromMillis(now.toMillis() + contractMonths * 30.44 * 24 * 60 * 60 * 1000);
-    // Update plan status
+    // Update plan status.
+    // amount_total === 0 → $0 + Commit to Save checkout (card-on-file only).
     await db.collection('member_plans').doc(planId).update({
         status: 'active',
-        checkoutStatus: paymentOption === 'pay_in_full' ? 'pay_in_full_paid' : 'paid',
+        checkoutStatus: session.amount_total === 0
+            ? 'free_active'
+            : (paymentOption === 'pay_in_full' ? 'pay_in_full_paid' : 'paid'),
         acceptedAt: now,
         contractStartAt,
         contractEndAt,
@@ -985,6 +1160,73 @@ async function handleCheckoutSessionCompleted(session, eventId) {
             checkoutCompletedAt: now,
         });
     }
+    // ── Make the collected card the customer's invoice default ──
+    // CTS missed-session fees are charged via standalone auto-collected invoices
+    // (enforceCtsAccountability), which only charge the CUSTOMER's
+    // invoice_settings.default_payment_method. Checkout sets the SUBSCRIPTION's
+    // default only, so without this copy those invoices could never collect —
+    // including on $0 + Commit to Save plans where the card exists solely for this.
+    if (session.mode === 'subscription' && session.subscription && (snapshot === null || snapshot === void 0 ? void 0 : snapshot.coachId)) {
+        try {
+            const coachAccountSnap = await db.collection('coachStripeAccounts').doc(snapshot.coachId).get();
+            const stripeAccountId = (_e = coachAccountSnap.data()) === null || _e === void 0 ? void 0 : _e.stripeAccountId;
+            const customerId = typeof session.customer === 'string' ? session.customer : (_f = session.customer) === null || _f === void 0 ? void 0 : _f.id;
+            if (stripeAccountId && customerId) {
+                const stripe = getStripe(stripeSecretKey.value());
+                const subscriptionId = typeof session.subscription === 'string'
+                    ? session.subscription
+                    : session.subscription.id;
+                const sub = await stripe.subscriptions.retrieve(subscriptionId, {}, { stripeAccount: stripeAccountId });
+                const defaultPm = typeof sub.default_payment_method === 'string'
+                    ? sub.default_payment_method
+                    : (_g = sub.default_payment_method) === null || _g === void 0 ? void 0 : _g.id;
+                if (defaultPm) {
+                    await stripe.customers.update(customerId, { invoice_settings: { default_payment_method: defaultPm } }, { stripeAccount: stripeAccountId });
+                    console.log('[handleCheckoutSessionCompleted] Customer', customerId, 'invoice default payment method set');
+                }
+                else {
+                    console.warn('[handleCheckoutSessionCompleted] Subscription', subscriptionId, 'has no default_payment_method to copy');
+                }
+            }
+        }
+        catch (err) {
+            // Non-fatal: the plan is already activated; CTS fee charging will surface
+            // any missing payment method when an invoice fails to collect.
+            console.error('[handleCheckoutSessionCompleted] Failed to set customer default payment method:', err);
+        }
+    }
+    // ── Commit to Save chosen at checkout: record the consent ──
+    // enforceCtsAccountability only processes members with an active consent doc;
+    // without this write, checkout-time CTS would never be enforced.
+    if ((snapshot === null || snapshot === void 0 ? void 0 : snapshot.ctsActive) === true) {
+        try {
+            const existing = await db.collection('commitToSaveConsents')
+                .where('memberId', '==', memberId)
+                .where('planId', '==', planId)
+                .limit(1)
+                .get();
+            if (existing.empty) {
+                await db.collection('commitToSaveConsents').add({
+                    memberId,
+                    planId,
+                    coachId: (_h = snapshot.coachId) !== null && _h !== void 0 ? _h : null,
+                    ctsMonthlyRate: (_j = snapshot.displayMonthlyPrice) !== null && _j !== void 0 ? _j : null,
+                    standardMonthlyRate: (_k = snapshot.baseMonthlyPrice) !== null && _k !== void 0 ? _k : null,
+                    missedSessionFee: (_l = snapshot.ctsMissedSessionFee) !== null && _l !== void 0 ? _l : 50,
+                    agreedVia: 'checkout',
+                    agreedAt: now,
+                    status: 'active',
+                });
+                console.log('[handleCheckoutSessionCompleted] CTS consent recorded for member', memberId, 'plan', planId);
+            }
+            else if (existing.docs[0].data().status !== 'active') {
+                await existing.docs[0].ref.update({ status: 'active', updatedAt: firestore_2.FieldValue.serverTimestamp() });
+            }
+        }
+        catch (err) {
+            console.error('[handleCheckoutSessionCompleted] Failed to record CTS consent:', err);
+        }
+    }
     // ── Pay-in-full: create deferred continuation subscription ──
     // The contract period is paid upfront. We create a Stripe subscription
     // with trial_end = contractEndAt so billing begins automatically when
@@ -996,17 +1238,17 @@ async function handleCheckoutSessionCompleted(session, eventId) {
     if (paymentOption === 'pay_in_full' && snapshot) {
         const continuationMonthlyPrice = snapshot.continuationMonthlyPrice;
         const coachId = snapshot.coachId;
-        const tierSplit = ((_e = snapshot.tierSplit) !== null && _e !== void 0 ? _e : 40);
+        const tierSplit = ((_m = snapshot.tierSplit) !== null && _m !== void 0 ? _m : 40);
         if (continuationMonthlyPrice && coachId) {
             try {
                 // Look up the coach's connected Stripe account
                 const coachAccountSnap = await db.collection('coachStripeAccounts').doc(coachId).get();
-                const stripeAccountId = (_f = coachAccountSnap.data()) === null || _f === void 0 ? void 0 : _f.stripeAccountId;
+                const stripeAccountId = (_o = coachAccountSnap.data()) === null || _o === void 0 ? void 0 : _o.stripeAccountId;
                 if (stripeAccountId) {
                     const stripe = getStripe(stripeSecretKey.value());
                     // Get the member's Stripe customer ID from the plan doc
                     const planSnap = await db.collection('member_plans').doc(planId).get();
-                    const stripeCustomerId = (_g = planSnap.data()) === null || _g === void 0 ? void 0 : _g.stripeCustomerId;
+                    const stripeCustomerId = (_p = planSnap.data()) === null || _p === void 0 ? void 0 : _p.stripeCustomerId;
                     if (stripeCustomerId) {
                         // Create a price object for the continuation monthly amount
                         const continuationPrice = await stripe.prices.create({
@@ -1081,17 +1323,17 @@ async function handleCheckoutSessionCompleted(session, eventId) {
             : session.subscription.id;
         const continuationMonthlyPrice = snapshot.continuationMonthlyPrice;
         const coachId = snapshot.coachId;
-        const tierSplit = ((_h = snapshot.tierSplit) !== null && _h !== void 0 ? _h : 40);
+        const tierSplit = ((_q = snapshot.tierSplit) !== null && _q !== void 0 ? _q : 40);
         // Calculate Phase 1 end date from the snapshot's contractEndAt
         const contractEndAtSnap = snapshot.contractEndAt;
         const contractEndMs = (contractEndAtSnap === null || contractEndAtSnap === void 0 ? void 0 : contractEndAtSnap._seconds)
             ? contractEndAtSnap._seconds * 1000
-            : ((contractEndAtSnap === null || contractEndAtSnap === void 0 ? void 0 : contractEndAtSnap.seconds) ? contractEndAtSnap.seconds * 1000 : Number((_j = snapshot.contractEndAtMs) !== null && _j !== void 0 ? _j : 0));
+            : ((contractEndAtSnap === null || contractEndAtSnap === void 0 ? void 0 : contractEndAtSnap.seconds) ? contractEndAtSnap.seconds * 1000 : Number((_r = snapshot.contractEndAtMs) !== null && _r !== void 0 ? _r : 0));
         const phase1EndUnix = Math.floor(contractEndMs / 1000);
         if (continuationMonthlyPrice && coachId) {
             try {
                 const coachAccountSnap = await db.collection('coachStripeAccounts').doc(coachId).get();
-                const stripeAccountId = (_k = coachAccountSnap.data()) === null || _k === void 0 ? void 0 : _k.stripeAccountId;
+                const stripeAccountId = (_s = coachAccountSnap.data()) === null || _s === void 0 ? void 0 : _s.stripeAccountId;
                 if (stripeAccountId) {
                     const stripe = getStripe(stripeSecretKey.value());
                     // Create a continuation price on the coach's connected account
@@ -1163,6 +1405,9 @@ async function handleInvoicePaid(invoice, eventId) {
     var _a, _b, _c, _d;
     const sub = invoice.subscription;
     if (!sub)
+        return;
+    // $0 invoices (free plans with card on file) generate no earnings — no ledger entry.
+    if (!invoice.amount_paid)
         return;
     // Find memberSubscription by subscriptionId
     const subSnap = await db.collection('memberSubscriptions')
@@ -1769,6 +2014,45 @@ exports.activateCoachInvite = (0, https_1.onCall)({ region: 'us-central1', invok
     return { success: true, coachId: callerUid };
 });
 /**
+ * getMemberClaimStatus – Public lookup for the post-checkout claim gate.
+ *
+ * Firestore rules block unauthenticated member reads, so the public
+ * /checkout-success page needs this to decide between "create your account"
+ * and "sign in". Returns only existence, link state, and a masked email —
+ * never raw PII.
+ *
+ * Input: { memberId: string }
+ * Output: { exists: boolean, hasAccount: boolean, emailMasked: string }
+ */
+exports.getMemberClaimStatus = (0, https_1.onCall)({ invoker: 'public' }, async (request) => {
+    var _a;
+    const { memberId } = request.data;
+    if (!memberId)
+        throw new https_1.HttpsError('invalid-argument', 'memberId is required');
+    const memberSnap = await db.collection('members').doc(memberId).get();
+    if (!memberSnap.exists) {
+        return { exists: false, hasAccount: false, emailMasked: '' };
+    }
+    const member = memberSnap.data();
+    const email = ((_a = member.email) !== null && _a !== void 0 ? _a : '').trim();
+    const maskPart = (s) => (s.length <= 1 ? s : `${s[0]}•••`);
+    let emailMasked = '';
+    const at = email.indexOf('@');
+    if (at > 0) {
+        const local = email.slice(0, at);
+        const domain = email.slice(at + 1);
+        const dot = domain.lastIndexOf('.');
+        emailMasked = dot > 0
+            ? `${maskPart(local)}@${maskPart(domain.slice(0, dot))}${domain.slice(dot)}`
+            : `${maskPart(local)}@${maskPart(domain)}`;
+    }
+    return {
+        exists: true,
+        hasAccount: member.hasAccount === true && !!member.uid,
+        emailMasked,
+    };
+});
+/**
  * claimMemberAccount – Links a newly created Firebase Auth account to an
  * existing member doc (created by a coach via quick-add).
  *
@@ -1778,7 +2062,7 @@ exports.activateCoachInvite = (0, https_1.onCall)({ region: 'us-central1', invok
  * Output: { success: boolean }
  */
 exports.claimMemberAccount = (0, https_1.onCall)({ region: 'us-central1' }, async (request) => {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
         throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
@@ -1802,11 +2086,13 @@ exports.claimMemberAccount = (0, https_1.onCall)({ region: 'us-central1' }, asyn
     if (member.email && member.email.toLowerCase() !== userEmail) {
         throw new https_1.HttpsError('permission-denied', `This plan belongs to ${member.email}. Please sign up with that email address.`);
     }
-    // Set custom claims: role = member
+    // Set custom claims: role = member.
+    // tenantId falls back to coachId — intake- and coach-created member docs
+    // may lack tenantId (the self-signup rules allowlist excludes it).
     await admin.auth().setCustomUserClaims(callerUid, {
         role: 'member',
         coachId: member.coachId,
-        tenantId: member.tenantId,
+        tenantId: (_d = member.tenantId) !== null && _d !== void 0 ? _d : member.coachId,
         memberId: memberId,
     });
     // Update the member doc to link the auth account
@@ -1820,6 +2106,10 @@ exports.claimMemberAccount = (0, https_1.onCall)({ region: 'us-central1' }, asyn
     console.log('[claimMemberAccount] Member claimed:', callerUid, memberId);
     return { success: true };
 });
+// sendMemberInvite: an earlier duplicate declaration (added in a parallel
+// branch the same day) lived here and broke `tsc` for the whole functions
+// package. Removed in favor of the fuller implementation below, which is
+// what module evaluation order would have exported anyway.
 /**
  * sendMemberInvite – Coach-initiated: ensure a Firebase Auth account exists
  * for a coach-created member and return a password-reset / first-time-setup
@@ -1945,6 +2235,32 @@ async function writeSessionEvent(event) {
 // ─── Helper: Write audit log entry ───────────────────────────────────────────
 async function writeAuditLog(entry) {
     await db.collection('scheduling_audit_log').add(Object.assign(Object.assign({}, entry), { createdAt: firestore_2.FieldValue.serverTimestamp() }));
+}
+/**
+ * Playbook self-service cancel/reschedule reuses the skip auto-approval
+ * window: when the coach has configured autoApproveSkipLeadDays and the
+ * session is closer than that, the member must submit a skip request instead
+ * of acting directly. No lead-days setting = no gate (matches skip policy).
+ */
+async function assertWithinSkipAutoApprovalWindow(instance, verb) {
+    try {
+        const coachSnap = await db.collection('coaches').doc(instance.coachId).get();
+        const autoLeadDays = coachSnap.exists ? coachSnap.data().autoApproveSkipLeadDays : undefined;
+        if (typeof autoLeadDays !== 'number' || autoLeadDays <= 0)
+            return;
+        const [year, month, day] = instance.scheduledDate.split('-').map(Number);
+        const [h, m] = (instance.scheduledStartTime || '00:00').split(':').map(Number);
+        const sessionTime = new Date(year, month - 1, day, h, m);
+        const hoursUntil = (sessionTime.getTime() - Date.now()) / (1000 * 60 * 60);
+        if (hoursUntil < autoLeadDays * 24) {
+            throw new https_1.HttpsError('failed-precondition', `This session is too close to ${verb} directly — please send your coach a skip request instead.`);
+        }
+    }
+    catch (err) {
+        if (err instanceof https_1.HttpsError)
+            throw err;
+        console.warn(`[assertWithinSkipAutoApprovalWindow] Policy check failed open: ${err.message}`);
+    }
 }
 // ─── 13. manageZoomRoom — Add/update/deactivate Zoom room resources ─────────
 exports.manageZoomRoom = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
@@ -2741,6 +3057,39 @@ exports.generateUpcomingInstances = (0, scheduler_1.onSchedule)({ schedule: '0 2
     console.log(`[generateUpcomingInstances] Generated ${totalGenerated} new instances for ${slotsSnap.size} active slots`);
 });
 // ─── 17. allocateSessionInstance — Assign a Zoom room to a session instance ──
+// Coach Zoom identity is hardcoded to the coach's login email (goa.fit
+// workspace account) — coaches no longer add/remove their own Zoom account.
+// If the coach has no personal zoom_room yet, provision one from their auth
+// email so allocation keeps working without the removed Settings UI.
+async function ensurePersonalZoomRoom(coachId) {
+    let email;
+    try {
+        email = (await admin.auth().getUser(coachId)).email;
+    }
+    catch (_a) {
+        return null;
+    }
+    if (!email)
+        return null;
+    const roomRef = await db.collection('zoom_rooms').add({
+        coachId,
+        label: 'My Zoom',
+        zoomAccountEmail: email,
+        isPersonal: true,
+        status: 'active',
+        maxConcurrentMeetings: 1,
+        autoProvisioned: true,
+        createdAt: firestore_2.FieldValue.serverTimestamp(),
+        updatedAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    await writeAuditLog({
+        coachId,
+        action: 'zoom_room_auto_provisioned',
+        zoomRoomId: roomRef.id,
+        details: `Personal Zoom room auto-provisioned from coach login email ${email}`,
+    });
+    return roomRef.get();
+}
 exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret, emailApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber], invoker: 'public' }, async (request) => {
     var _a, _b;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
@@ -2817,9 +3166,15 @@ exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1', s
         }
         candidateRooms = sortLru(candidateRooms);
     }
+    // Personal room missing → provision one from the coach's login email
+    if (candidateRooms.length === 0 && roomSource !== 'shared_pool') {
+        const autoRoom = await ensurePersonalZoomRoom(callerUid);
+        if (autoRoom && autoRoom.exists)
+            candidateRooms = [autoRoom];
+    }
     if (candidateRooms.length === 0) {
         const reason = roomSource === 'coach_personal'
-            ? 'No personal Zoom room configured. Add your Zoom in Settings.'
+            ? 'No personal Zoom room could be provisioned for this coach.'
             : roomSource === 'shared_pool'
                 ? 'No shared pool rooms available.'
                 : 'No active Zoom rooms available.';
@@ -2896,6 +3251,7 @@ exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1', s
             duration: instance.durationMinutes,
             timezone: 'America/New_York',
             hostEmail: allocatedRoom.zoomAccountEmail,
+            autoRecording: instance.recordingEnabled === false ? 'none' : 'cloud',
         });
     }
     catch (err) {
@@ -2931,11 +3287,9 @@ exports.allocateSessionInstance = (0, https_1.onCall)({ region: 'us-central1', s
         allocationAttempts: (instance.allocationAttempts || 0) + 1,
         updatedAt: firestore_2.FieldValue.serverTimestamp(),
     });
-    // Advance the round-robin cursor: every successful allocation stamps lastUsedAt
-    await db.collection('zoom_rooms').doc(allocatedRoom.id).update({
-        lastUsedAt: firestore_2.FieldValue.serverTimestamp(),
-        updatedAt: firestore_2.FieldValue.serverTimestamp(),
-    });
+    // Advance the round-robin cursor: every successful allocation stamps
+    // lastUsedAt; pool rooms also keep lastAllocatedAt for older readers.
+    await db.collection('zoom_rooms').doc(allocatedRoom.id).update(Object.assign(Object.assign({ lastUsedAt: firestore_2.FieldValue.serverTimestamp() }, (allocatedRoom.poolId ? { lastAllocatedAt: firestore_2.FieldValue.serverTimestamp() } : {})), { updatedAt: firestore_2.FieldValue.serverTimestamp() }));
     // Write session event for traceability
     await writeSessionEvent({
         occurrenceId: instanceId,
@@ -2994,10 +3348,20 @@ exports.allocateAllPendingInstances = (0, https_1.onCall)({ region: 'us-central1
         return { success: true, allocated: 0, failed: 0, message: 'No pending instances to allocate' };
     }
     // Get all active Zoom rooms for this coach
-    const roomsSnap = await db.collection('zoom_rooms')
+    let roomsSnap = await db.collection('zoom_rooms')
         .where('coachId', '==', callerUid)
         .where('status', '==', 'active')
         .get();
+    // No rooms → provision a personal room from the coach's login email
+    if (roomsSnap.empty) {
+        const autoRoom = await ensurePersonalZoomRoom(callerUid);
+        if (autoRoom && autoRoom.exists) {
+            roomsSnap = await db.collection('zoom_rooms')
+                .where('coachId', '==', callerUid)
+                .where('status', '==', 'active')
+                .get();
+        }
+    }
     if (roomsSnap.empty) {
         return { success: false, allocated: 0, failed: pendingSnap.size, message: 'No active Zoom rooms available' };
     }
@@ -3040,6 +3404,7 @@ exports.allocateAllPendingInstances = (0, https_1.onCall)({ region: 'us-central1
                         duration: instance.durationMinutes,
                         timezone: 'America/New_York',
                         hostEmail: room.zoomAccountEmail,
+                        autoRecording: instance.recordingEnabled === false ? 'none' : 'cloud',
                     });
                     await db.collection('session_instances').doc(instance.id).update({
                         status: 'allocated',
@@ -3123,6 +3488,15 @@ exports.rescheduleInstance = (0, https_1.onCall)({ region: 'us-central1', secret
     if (!['scheduled', 'allocated', 'allocation_failed'].includes(instance.status)) {
         throw new https_1.HttpsError('failed-precondition', `Cannot reschedule instance in status "${instance.status}"`);
     }
+    // Playbook sessions: member self-reschedule reuses the skip auto-approval
+    // window — inside the window the member must go through a skip request.
+    if (instance.playbookId && rescheduleSource === 'member_action') {
+        await assertWithinSkipAutoApprovalWindow(instance, 'reschedule');
+    }
+    // Playbook sessions hold a member_time_reservations doc. Move it first —
+    // transactionally re-runs the overlap guard, throws already-exists on
+    // conflict — so a failed reschedule never tears down the Zoom meeting.
+    const movedReservation = await (0, playbookScheduling_1.moveReservationForInstance)(instanceId, instance, newDate, newStartTime);
     const originalDate = instance.scheduledDate;
     const originalTime = instance.scheduledStartTime;
     const existingMeetingId = instance.zoomMeetingId;
@@ -3151,23 +3525,11 @@ exports.rescheduleInstance = (0, https_1.onCall)({ region: 'us-central1', secret
     const endH = Math.floor(endMinutes / 60) % 24;
     const endM = endMinutes % 60;
     const newEndTime = `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
-    await instanceRef.update({
-        scheduledDate: newDate,
-        scheduledStartTime: newStartTime,
-        scheduledEndTime: newEndTime,
-        status: 'scheduled', // Reset to scheduled so it can be re-allocated
-        zoomRoomId: firestore_2.FieldValue.delete(),
-        zoomRoomLabel: firestore_2.FieldValue.delete(),
-        zoomMeetingId: firestore_2.FieldValue.delete(),
-        zoomMeetingUuid: firestore_2.FieldValue.delete(),
-        zoomJoinUrl: firestore_2.FieldValue.delete(),
-        zoomStartUrl: firestore_2.FieldValue.delete(),
-        zoomMeetingPassword: firestore_2.FieldValue.delete(),
-        zoomProviderMode: firestore_2.FieldValue.delete(),
-        allocatedAt: firestore_2.FieldValue.delete(),
-        rescheduledFrom: `${originalDate} ${originalTime}`,
-        updatedAt: firestore_2.FieldValue.serverTimestamp(),
-    });
+    await instanceRef.update(Object.assign(Object.assign({ scheduledDate: newDate, scheduledStartTime: newStartTime, scheduledEndTime: newEndTime, status: 'scheduled', zoomRoomId: firestore_2.FieldValue.delete(), zoomRoomLabel: firestore_2.FieldValue.delete(), zoomMeetingId: firestore_2.FieldValue.delete(), zoomMeetingUuid: firestore_2.FieldValue.delete(), zoomJoinUrl: firestore_2.FieldValue.delete(), zoomStartUrl: firestore_2.FieldValue.delete(), zoomMeetingPassword: firestore_2.FieldValue.delete(), zoomProviderMode: firestore_2.FieldValue.delete(), allocatedAt: firestore_2.FieldValue.delete(), rescheduledFrom: `${originalDate} ${originalTime}` }, (movedReservation ? {
+        reservationId: movedReservation.reservationId,
+        startUtc: firestore_2.Timestamp.fromDate(movedReservation.startUtc),
+        endUtc: firestore_2.Timestamp.fromDate(movedReservation.endUtc),
+    } : {})), { updatedAt: firestore_2.FieldValue.serverTimestamp() }));
     await writeSessionEvent({
         occurrenceId: instanceId,
         eventType: 'session_rescheduled',
@@ -3211,6 +3573,11 @@ exports.cancelInstance = (0, https_1.onCall)({ region: 'us-central1', secrets: [
         throw new https_1.HttpsError('permission-denied', 'You can only cancel your own sessions');
     }
     const cancelSource = (instance.memberId === callerUid) ? 'member_action' : 'coach_action';
+    // Playbook sessions: member self-cancel reuses the skip auto-approval
+    // window — inside the window the member must go through a skip request.
+    if (instance.playbookId && cancelSource === 'member_action') {
+        await assertWithinSkipAutoApprovalWindow(instance, 'cancel');
+    }
     // Delete existing Zoom meeting if one was allocated
     const cancelMeetingId = instance.zoomMeetingId;
     if (cancelMeetingId) {
@@ -3235,6 +3602,8 @@ exports.cancelInstance = (0, https_1.onCall)({ region: 'us-central1', secrets: [
         status: 'cancelled',
         updatedAt: firestore_2.FieldValue.serverTimestamp(),
     });
+    // Playbook sessions: free the member's time window for rebooking
+    await (0, playbookScheduling_1.releaseReservationForInstance)(instance);
     await writeSessionEvent({
         occurrenceId: instanceId,
         eventType: 'session_cancelled',
@@ -5100,9 +5469,10 @@ const PLAN_INTENSITY_TO_SCHED_PHASE = {
 exports.batchPhaseTransition = (0, scheduler_1.onSchedule)({ schedule: 'every day 03:00', region: 'us-central1', timeZone: 'America/New_York', secrets: [zoomAccountId, zoomClientId, zoomClientSecret] }, async () => {
     var _a, _b, _c, _d, _e;
     console.log('[batchPhaseTransition] Starting daily phase transition check');
-    // Find all member plans that have contractStartAt and phases
+    // Find all member plans that have contractStartAt and phases.
+    // free_active = $0 plans — they progress through phases like paid ones.
     const plansSnap = await db.collection('member_plans')
-        .where('checkoutStatus', 'in', ['paid', 'pay_in_full_paid'])
+        .where('checkoutStatus', 'in', ['paid', 'pay_in_full_paid', 'free_active'])
         .get();
     const now = new Date();
     let transitioned = 0;
@@ -5534,6 +5904,8 @@ exports.requestSkipInstance = (0, https_1.onCall)({ region: 'us-central1', invok
             skipApprovedAt: firestore_2.FieldValue.serverTimestamp(),
             updatedAt: firestore_2.FieldValue.serverTimestamp(),
         });
+        // Playbook sessions: skipped = time window freed for rebooking
+        await (0, playbookScheduling_1.releaseReservationForInstance)(inst);
         await writeAuditLog({
             coachId: inst.coachId,
             action: 'skip_auto_approved',
@@ -8138,23 +8510,62 @@ exports.generateVoice = (0, https_1.onCall)({
     return { url: cdnUrl, path, writeback, writebackError, provider: selectedProvider };
 });
 // ─── getWorkoutMusic — AI background music for workout playback (Mubert v3) ──
-// Auth-required callable. Mints per-user Mubert customer credentials via
-// service/customers (cached in Firestore), generates a text-to-music track for
-// the requested style+duration, and caches the MP3 in Firebase Storage at
-// music_cache/<style>/<duration>.mp3. Trial plan allows only 100 tracks total,
-// so an existing style+duration combo is NEVER regenerated — Storage is the
-// source of truth, and a Firestore lock (musicCache/{style_duration}) prevents
-// two concurrent callers from both spending a generation on the same combo.
+// Auth-required callable with three modes:
+//   • Track mode  { style, trackIndex }: one fixed-length pooled track cached
+//     at music_cache/<style>/track_<index>.mp3. The player chains pool tracks
+//     into a no-repeat playlist; on generation failure (quota/outage) this
+//     falls back to an already-cached track from the same pool.
+//   • List mode   { style, list: true }: returns which pool indices already
+//     exist in Storage (no quota cost) so the player can plan its queue.
+//   • Legacy mode { style, duration }: the original single looped file at
+//     music_cache/<style>/<durationSecs>.mp3 — kept for old deployed bundles.
+// Mints per-user Mubert customer credentials via service/customers (cached in
+// Firestore). Trial plan allows only 100 generated tracks total, so an
+// existing cache entry is NEVER regenerated — Storage is the source of truth,
+// and a Firestore lock (musicCache/{lockId}) prevents two concurrent callers
+// from both spending a generation on the same entry.
 // ─────────────────────────────────────────────────────────────────────────────
 const MUBERT_API_BASE = 'https://music-api.mubert.com/api/v3';
+// KEEP IN SYNC (manual): apps/goarrive/constants/musicStyles.ts — keys must
+// match exactly; there is no shared module between the app and functions.
 const MUSIC_STYLES = {
+    // ── original 6 — keys must not change (cached files depend on them) ──
     workout: { prompt: 'High energy gym workout music, driving beat, motivating and powerful', intensity: 'high' },
     edm: { prompt: 'Energetic EDM electronic dance music, festival drops, pumping bass', intensity: 'high' },
     hiphop: { prompt: 'Upbeat hip-hop beat, confident groove, punchy drums', intensity: 'medium' },
     chill: { prompt: 'Chill relaxed lo-fi beats, calm steady rhythm, smooth and warm', intensity: 'low' },
     rock: { prompt: 'Energetic rock music, electric guitars, driving drums, anthemic', intensity: 'high' },
     focus: { prompt: 'Ambient focus music, minimal steady pulse, deep concentration', intensity: 'low' },
+    // ── expanded styles ──
+    pop: { prompt: 'Upbeat modern pop, catchy hooks, bright synths, feel-good energy', intensity: 'medium' },
+    house: { prompt: 'Groovy house music, four-on-the-floor kick, warm bassline, uplifting piano stabs', intensity: 'high' },
+    techno: { prompt: 'Driving techno, hypnotic pulsing synths, relentless kick drum, dark warehouse energy', intensity: 'high' },
+    trap: { prompt: 'Hard-hitting trap beat, booming 808 bass, crisp hi-hat rolls, aggressive swagger', intensity: 'high' },
+    rnb: { prompt: 'Smooth R&B groove, silky chords, laid-back beat, soulful and confident', intensity: 'low' },
+    latin: { prompt: 'High energy Latin dance music, reggaeton rhythm, tropical percussion, fiesta vibes', intensity: 'high' },
+    country: { prompt: 'Upbeat country rock, acoustic and electric guitars, stomping beat, feel-good americana', intensity: 'medium' },
+    metal: { prompt: 'Heavy metal workout music, distorted guitar riffs, double-kick drums, intense and powerful', intensity: 'high' },
+    funk: { prompt: 'Funky groove, slap bass, tight rhythm guitar, brass hits, irresistible bounce', intensity: 'medium' },
+    disco: { prompt: 'Classic disco energy, four-on-the-floor groove, strings and funky bass, dancefloor euphoria', intensity: 'medium' },
+    afrobeats: { prompt: 'Afrobeats rhythm, bouncy percussion, warm melodic hooks, sunny high-energy groove', intensity: 'medium' },
+    synthwave: { prompt: 'Retro synthwave, pulsing 80s synth bass, neon arpeggios, cinematic drive', intensity: 'medium' },
 };
+// Pooled tracks are fixed-length so one cached file serves any workout length;
+// the player strings pool tracks together and never repeats within the pool.
+const TRACK_DURATION_SECS = 180;
+const MAX_TRACKS_PER_STYLE = 24;
+// Deterministic per-index flavor appended to the style prompt so pooled
+// generations diverge even beyond Mubert's inherent generative variety.
+const TRACK_VARIATIONS = [
+    '',
+    'with a fresh melodic hook',
+    'darker and grittier',
+    'bright and euphoric',
+    'stripped back and rhythmic',
+    'with a big anthemic chorus feel',
+    'hypnotic and steady',
+    'playful and bouncy',
+];
 exports.getWorkoutMusic = (0, https_1.onCall)({
     region: 'us-central1',
     secrets: [mubertCompanyId, mubertLicenseToken],
@@ -8166,26 +8577,80 @@ exports.getWorkoutMusic = (0, https_1.onCall)({
         throw new https_1.HttpsError('unauthenticated', 'Sign in required');
     }
     const uid = request.auth.uid;
-    const { style, duration } = request.data;
+    const { style, duration, trackIndex, list } = request.data;
     const styleKey = String(style || '').toLowerCase();
     const styleConfig = MUSIC_STYLES[styleKey];
     if (!styleConfig) {
         throw new https_1.HttpsError('invalid-argument', `style must be one of: ${Object.keys(MUSIC_STYLES).join(', ')}`);
     }
-    // Bucket duration to whole minutes (60s–600s) so near-identical requests
-    // share one cached track instead of burning trial quota per second value.
-    const requestedSecs = typeof duration === 'number' && isFinite(duration) ? duration : 300;
-    const durationSecs = Math.min(600, Math.max(60, Math.round(requestedSecs / 60) * 60));
-    const path = `music_cache/${styleKey}/${durationSecs}.mp3`;
     const bucket = admin.storage().bucket();
+    const publicUrl = (p) => `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(p)}?alt=media`;
+    const listReadyIndices = async () => {
+        const [files] = await bucket.getFiles({ prefix: `music_cache/${styleKey}/track_` });
+        return files
+            .map((f) => { var _a; return (_a = /track_(\d+)\.mp3$/.exec(f.name)) === null || _a === void 0 ? void 0 : _a[1]; })
+            .filter((m) => !!m)
+            .map(Number)
+            .sort((a, b) => a - b);
+    };
+    // ── List mode: report which pool indices are already cached (no quota) ──
+    if (list === true) {
+        return {
+            style: styleKey,
+            readyIndices: await listReadyIndices(),
+            maxTracks: MAX_TRACKS_PER_STYLE,
+            trackDuration: TRACK_DURATION_SECS,
+        };
+    }
+    // Resolve the requested cache entry: pooled track vs legacy looped file.
+    const isTrackMode = trackIndex !== undefined && trackIndex !== null;
+    let path;
+    let lockId;
+    let genDurationSecs;
+    let prompt;
+    if (isTrackMode) {
+        if (!Number.isInteger(trackIndex) || trackIndex < 0 || trackIndex >= MAX_TRACKS_PER_STYLE) {
+            throw new https_1.HttpsError('invalid-argument', 'music:bad_track_index', {
+                reason: `trackIndex must be an integer in [0, ${MAX_TRACKS_PER_STYLE - 1}]`,
+            });
+        }
+        const idx = trackIndex;
+        path = `music_cache/${styleKey}/track_${idx}.mp3`;
+        lockId = `${styleKey}_track_${idx}`;
+        genDurationSecs = TRACK_DURATION_SECS;
+        const variation = TRACK_VARIATIONS[idx % TRACK_VARIATIONS.length];
+        prompt = variation ? `${styleConfig.prompt}, ${variation}` : styleConfig.prompt;
+    }
+    else {
+        // Bucket duration to whole minutes (60s–600s) so near-identical requests
+        // share one cached track instead of burning trial quota per second value.
+        const requestedSecs = typeof duration === 'number' && isFinite(duration) ? duration : 300;
+        const durationSecs = Math.min(600, Math.max(60, Math.round(requestedSecs / 60) * 60));
+        path = `music_cache/${styleKey}/${durationSecs}.mp3`;
+        lockId = `${styleKey}_${durationSecs}`;
+        genDurationSecs = durationSecs;
+        prompt = styleConfig.prompt;
+    }
     const file = bucket.file(path);
-    const cdnUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media`;
-    // ── Layer 0: Storage cache hit — never regenerate an existing combo ────
+    const cdnUrl = publicUrl(path);
+    // Success payload for track mode; `trackId` is the app-level id the player
+    // uses for likes/dislikes ('<style>/<index>'), not Mubert's generation id.
+    const trackResponse = (p, idx, cached) => ({
+        url: publicUrl(p),
+        path: p,
+        cached,
+        style: styleKey,
+        trackIndex: idx,
+        trackId: `${styleKey}/${idx}`,
+    });
+    // ── Layer 0: Storage cache hit — never regenerate an existing entry ────
     try {
         const [exists] = await file.exists();
         if (exists) {
-            console.info('[MUSIC] getWorkoutMusic: cache hit', { path, styleKey, durationSecs });
-            return { url: cdnUrl, path, cached: true, style: styleKey, duration: durationSecs };
+            console.info('[MUSIC] getWorkoutMusic: cache hit', { path, styleKey });
+            return isTrackMode
+                ? trackResponse(path, trackIndex, true)
+                : { url: cdnUrl, path, cached: true, style: styleKey, duration: genDurationSecs };
         }
     }
     catch (err) {
@@ -8193,8 +8658,8 @@ exports.getWorkoutMusic = (0, https_1.onCall)({
             path, message: String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 200),
         });
     }
-    // ── Layer 1: generation lock — only one caller spends quota per combo ──
-    const lockRef = db.doc(`musicCache/${styleKey}_${durationSecs}`);
+    // ── Layer 1: generation lock — only one caller spends quota per entry ──
+    const lockRef = db.doc(`musicCache/${lockId}`);
     const LOCK_TTL_MS = 3 * 60 * 1000;
     const acquiredLock = await db.runTransaction(async (tx) => {
         const snap = await tx.get(lockRef);
@@ -8208,12 +8673,28 @@ exports.getWorkoutMusic = (0, https_1.onCall)({
         return true;
     });
     if (!acquiredLock) {
-        // Another caller is generating this combo — wait for the file to land.
+        // Another caller is generating this entry — wait for the file to land.
         for (let i = 0; i < 20; i++) {
             await new Promise((r) => setTimeout(r, 3000));
             const [exists] = await file.exists();
             if (exists) {
-                return { url: cdnUrl, path, cached: true, style: styleKey, duration: durationSecs };
+                return isTrackMode
+                    ? trackResponse(path, trackIndex, true)
+                    : { url: cdnUrl, path, cached: true, style: styleKey, duration: genDurationSecs };
+            }
+        }
+        // Track mode degrades to any cached pool track rather than erroring —
+        // deterministic pick so every listener maps the same request to the
+        // same substitute while the pool is still filling in.
+        if (isTrackMode) {
+            const readyIndices = await listReadyIndices().catch(() => []);
+            if (readyIndices.length > 0) {
+                const fallbackIndex = readyIndices[trackIndex % readyIndices.length];
+                const fallbackPath = `music_cache/${styleKey}/track_${fallbackIndex}.mp3`;
+                console.warn('[MUSIC] getWorkoutMusic: busy fallback', {
+                    styleKey, requested: trackIndex, served: fallbackIndex,
+                });
+                return Object.assign(Object.assign({}, trackResponse(fallbackPath, fallbackIndex, true)), { fallback: true });
             }
         }
         throw new https_1.HttpsError('unavailable', 'music:generation_in_progress', {
@@ -8295,8 +8776,8 @@ exports.getWorkoutMusic = (0, https_1.onCall)({
                 'access-token': accessToken,
             },
             body: JSON.stringify({
-                prompt: styleConfig.prompt,
-                duration: durationSecs,
+                prompt,
+                duration: genDurationSecs,
                 bitrate: 128,
                 mode: 'track',
                 intensity: styleConfig.intensity,
@@ -8306,7 +8787,7 @@ exports.getWorkoutMusic = (0, https_1.onCall)({
         if (!genResp.ok) {
             const errBody = (await genResp.text()).slice(0, 500);
             console.error('[MUSIC] getWorkoutMusic: generation FAILED', {
-                status: genResp.status, body: errBody, styleKey, durationSecs,
+                status: genResp.status, body: errBody, styleKey, path,
             });
             throw new https_1.HttpsError('internal', `music:generate:${genResp.status}`, {
                 layer: 'generate', status: genResp.status, body: errBody,
@@ -8333,7 +8814,7 @@ exports.getWorkoutMusic = (0, https_1.onCall)({
             }
         }
         if (!trackUrl) {
-            console.error('[MUSIC] getWorkoutMusic: generation timed out', { trackId, styleKey, durationSecs });
+            console.error('[MUSIC] getWorkoutMusic: generation timed out', { trackId, styleKey, path });
             throw new https_1.HttpsError('deadline-exceeded', 'music:generate:timeout', { trackId });
         }
         // ── Layer 4: download + Storage upload (cache forever) ──────────────
@@ -8346,21 +8827,45 @@ exports.getWorkoutMusic = (0, https_1.onCall)({
         }
         const audioBuffer = Buffer.from(await dlResp.arrayBuffer());
         await file.save(audioBuffer, { contentType: 'audio/mpeg' });
-        await lockRef.set({
-            status: 'ready', url: cdnUrl, path, style: styleKey, duration: durationSecs,
-            trackId: trackId || null, createdAt: Date.now(), uid,
-        }).catch(() => { });
+        // `trackId` on the lock doc is Mubert's generation id (historical name),
+        // unrelated to the app-level '<style>/<index>' id in track responses.
+        await lockRef.set(Object.assign(Object.assign({ status: 'ready', url: cdnUrl, path, style: styleKey, duration: genDurationSecs }, (isTrackMode ? { trackIndex } : {})), { trackId: trackId || null, createdAt: Date.now(), uid })).catch(() => { });
         console.info('[MUSIC] getWorkoutMusic: generated + cached', {
-            path, styleKey, durationSecs, bytes: audioBuffer.length, trackId,
+            path, styleKey, bytes: audioBuffer.length, trackId,
         });
-        return { url: cdnUrl, path, cached: false, style: styleKey, duration: durationSecs };
+        return isTrackMode
+            ? trackResponse(path, trackIndex, false)
+            : { url: cdnUrl, path, cached: false, style: styleKey, duration: genDurationSecs };
     }
     catch (err) {
         await releaseLock();
+        // Track mode degrades gracefully: if generation failed (Mubert trial
+        // quota spent, outage, timeout) but the style already has pooled tracks,
+        // serve one deterministically instead of failing — the player prefers a
+        // repeat over silence, and the same failing index maps to the same
+        // substitute for every listener (coach and member keep hearing the same
+        // sequence on a workout).
+        if (isTrackMode) {
+            try {
+                const readyIndices = await listReadyIndices();
+                if (readyIndices.length > 0) {
+                    const fallbackIndex = readyIndices[trackIndex % readyIndices.length];
+                    const fallbackPath = `music_cache/${styleKey}/track_${fallbackIndex}.mp3`;
+                    console.warn('[MUSIC] getWorkoutMusic: track fallback', {
+                        styleKey, requested: trackIndex, served: fallbackIndex,
+                        reason: String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 200),
+                    });
+                    return Object.assign(Object.assign({}, trackResponse(fallbackPath, fallbackIndex, true)), { fallback: true });
+                }
+            }
+            catch (_q) {
+                // fall through to the original error
+            }
+        }
         if (err instanceof https_1.HttpsError)
             throw err;
         const detail = String((err === null || err === void 0 ? void 0 : err.message) || err).slice(0, 300);
-        console.error('[MUSIC] getWorkoutMusic: THREW', { styleKey, durationSecs, detail }, err);
+        console.error('[MUSIC] getWorkoutMusic: THREW', { styleKey, path, detail }, err);
         throw new https_1.HttpsError('internal', 'music:failed', { message: detail });
     }
 });
@@ -8419,7 +8924,6 @@ exports.onCoachCreated = (0, firestore_1.onDocumentCreated)({ document: 'coaches
 // AuthContext picks up the correct role, and sends FCM push to the assigned coach.
 // ═══════════════════════════════════════════════════════════════════════════════
 exports.onMemberCreated = (0, firestore_1.onDocumentCreated)('members/{memberId}', async (event) => {
-    var _a;
     const snap = event.data;
     if (!snap)
         return;
@@ -8450,58 +8954,8 @@ exports.onMemberCreated = (0, firestore_1.onDocumentCreated)('members/{memberId}
     }
     const memberName = data.displayName || data.email || 'A new member';
     try {
-        // Look up coach's FCM tokens
-        const tokensSnap = await db
-            .collection('coaches')
-            .doc(coachId)
-            .collection('fcmTokens')
-            .get();
-        // Also check legacy root-level token field
-        const coachDoc = await db.collection('coaches').doc(coachId).get();
-        const legacyToken = coachDoc.exists
-            ? (_a = coachDoc.data()) === null || _a === void 0 ? void 0 : _a.fcmToken
-            : undefined;
-        const tokens = [];
-        tokensSnap.forEach((doc) => {
-            var _a;
-            const t = (_a = doc.data()) === null || _a === void 0 ? void 0 : _a.token;
-            if (t)
-                tokens.push(t);
-        });
-        if (legacyToken && !tokens.includes(legacyToken)) {
-            tokens.push(legacyToken);
-        }
-        if (tokens.length === 0) {
-            console.log(TAG, 'No FCM tokens for coach', coachId, '— skipping push');
-            return;
-        }
-        const title = 'New Member Signed Up';
-        const body = `${memberName} just joined your roster.`;
-        for (const token of tokens) {
-            try {
-                await messaging.send({
-                    token,
-                    notification: { title, body },
-                    webpush: {
-                        notification: { icon: '/icon-192.png', badge: '/icon-192.png' },
-                    },
-                });
-            }
-            catch (sendErr) {
-                // Clean up stale tokens
-                if ((sendErr === null || sendErr === void 0 ? void 0 : sendErr.code) === 'messaging/registration-token-not-registered' ||
-                    (sendErr === null || sendErr === void 0 ? void 0 : sendErr.code) === 'messaging/invalid-registration-token') {
-                    console.log(TAG, 'Removing stale token for coach', coachId);
-                    const staleDoc = tokensSnap.docs.find((d) => { var _a; return ((_a = d.data()) === null || _a === void 0 ? void 0 : _a.token) === token; });
-                    if (staleDoc)
-                        await staleDoc.ref.delete();
-                }
-                else {
-                    console.warn(TAG, 'FCM send failed:', sendErr);
-                }
-            }
-        }
-        console.log(TAG, 'Notified coach', coachId, 'about new member', memberId);
+        // Shared with adminAssignLeadToCoach (leads.ts) — extracted helper.
+        await (0, notifications_1.notifyCoachOfNewMember)(coachId, memberName);
     }
     catch (err) {
         console.error(TAG, 'Error notifying coach:', err);
@@ -8618,8 +9072,12 @@ exports.getEmbeddedSessionJoinConfig = (0, https_1.onCall)({
     const instance = instanceSnap.data();
     const callerToken = (_c = request.auth) === null || _c === void 0 ? void 0 : _c.token;
     const callerIsAdmin = (callerToken === null || callerToken === void 0 ? void 0 : callerToken.role) === 'platformAdmin' || (callerToken === null || callerToken === void 0 ? void 0 : callerToken.admin) === true;
-    if (!callerIsAdmin && callerUid !== instance.memberId) {
-        throw new https_1.HttpsError('permission-denied', 'Only the assigned member can join this session');
+    // Coach live-view: the session's coach may also join as a participant to
+    // observe the member (still role 0 — host-start remains future work).
+    const callerIsCoach = callerUid === instance.coachId;
+    const callerIsMember = callerUid === instance.memberId;
+    if (!callerIsAdmin && !callerIsMember && !callerIsCoach) {
+        throw new https_1.HttpsError('permission-denied', 'Only the assigned member or coach can join this session');
     }
     const meetingNumber = instance.zoomMeetingId;
     if (!meetingNumber || !instance.zoomJoinUrl) {
@@ -8628,23 +9086,26 @@ exports.getEmbeddedSessionJoinConfig = (0, https_1.onCall)({
     if (instance.status !== 'allocated' && instance.status !== 'in_progress') {
         throw new https_1.HttpsError('failed-precondition', `Session is in status "${instance.status}", cannot join`);
     }
-    let userName = instance.memberName || '';
+    // Display identity: coach callers join under their own name so the member
+    // sees "Coach <name>" — everyone else keeps the member identity.
+    const identityUid = callerIsCoach && !callerIsMember
+        ? instance.coachId
+        : instance.memberId;
+    const identityFallback = callerIsCoach && !callerIsMember ? 'Coach' : 'Member';
+    let userName = callerIsCoach && !callerIsMember ? '' : instance.memberName || '';
     let userEmail = '';
     try {
-        const userDoc = await db
-            .collection('users')
-            .doc(instance.memberId)
-            .get();
+        const userDoc = await db.collection('users').doc(identityUid).get();
         const udata = userDoc.data() || {};
         if (!userName) {
             userName =
-                udata.displayName || udata.name || 'Member';
+                udata.displayName || udata.name || identityFallback;
         }
         userEmail = udata.email || '';
     }
     catch (_d) {
         if (!userName)
-            userName = 'Member';
+            userName = identityFallback;
     }
     const sdkKey = zoomMeetingSdkKey.value().trim();
     const sdkSecret = zoomMeetingSdkSecret.value().trim();
@@ -8679,6 +9140,10 @@ var coachComms_1 = require("./coachComms");
 Object.defineProperty(exports, "sendWeeklyDigest", { enumerable: true, get: function () { return coachComms_1.sendWeeklyDigest; } });
 Object.defineProperty(exports, "onCoachFeedbackCreated", { enumerable: true, get: function () { return coachComms_1.onCoachFeedbackCreated; } });
 Object.defineProperty(exports, "onCoachFeedbackStatusChanged", { enumerable: true, get: function () { return coachComms_1.onCoachFeedbackStatusChanged; } });
+// ─── Leads — unassigned intake alerts + admin assignment ─────────────────────
+var leads_1 = require("./leads");
+Object.defineProperty(exports, "onIntakeSubmissionCreated", { enumerable: true, get: function () { return leads_1.onIntakeSubmissionCreated; } });
+Object.defineProperty(exports, "adminAssignLeadToCoach", { enumerable: true, get: function () { return leads_1.adminAssignLeadToCoach; } });
 const VALID_VISIBILITIES = ['restricted', 'anyone_with_link', 'anyone_with_link_signin_required'];
 function normalizeVisibility(v) {
     return VALID_VISIBILITIES.includes(v) ? v : 'anyone_with_link';
@@ -9213,6 +9678,26 @@ exports.saveEquipmentImageChoice = (0, https_1.onCall)({ region: 'us-central1', 
     const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(destPath)}?alt=media`;
     console.info('[saveEquipmentImageChoice] Saved default', { equipmentSlug, choiceIndex });
     return { imageUrl };
+});
+// ─── listEquipmentImages — platform-wide shared equipment image library ──────
+// Lists every equipment_images/{slug}/default.png in Storage. Shared across
+// ALL coaches by explicit product decision (cross-coach image reuse).
+exports.listEquipmentImages = (0, https_1.onCall)({ region: 'us-central1', timeoutSeconds: 60, invoker: 'public' }, async (request) => {
+    var _a;
+    if (!((_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid))
+        throw new https_1.HttpsError('unauthenticated', 'Authentication required');
+    const bucket = admin.storage().bucket();
+    const [files] = await bucket.getFiles({ prefix: 'equipment_images/' });
+    const images = files
+        .filter(f => f.name.endsWith('/default.png'))
+        .map(f => {
+        const slug = f.name.slice('equipment_images/'.length, -'/default.png'.length);
+        const label = slug.replace(/-and-/g, ' and ').replace(/-/g, ' ');
+        const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(f.name)}?alt=media`;
+        return { slug, label, imageUrl };
+    });
+    console.info('[listEquipmentImages] Listed', { count: images.length });
+    return { images };
 });
 // ─────────────────────────────────────────────────────────────────────────────
 // AI Movement Variation (Runway video-to-video)

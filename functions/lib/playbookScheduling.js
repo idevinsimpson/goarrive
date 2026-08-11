@@ -1,0 +1,636 @@
+"use strict";
+/**
+ * Playbook Scheduling — Phase A (3a)
+ *
+ * Adds the member-level double-booking guard that the legacy scheduling
+ * system never had, plus the transactional booking path for playbook
+ * sessions.
+ *
+ * Collections:
+ *  - member_time_reservations: one doc per member per booked time window,
+ *    keyed `${memberKey}_${startUtcMillis}` so two concurrent bookings of the
+ *    identical start collide on create(); overlapping-but-not-identical
+ *    windows are caught by a range query inside the same transaction.
+ *    memberKey is `memberId` for signed-in members and `guest:<sha256(email)>`
+ *    for guest-by-email bookings (Phase B) — the guard works before the guest
+ *    ever creates an account.
+ *  - session_instances: playbook bookings reuse the existing state machine
+ *    (scheduled → allocated → in_progress → completed / missed / cancelled /
+ *    skipped) with new fields: playbookId, playbookTitle, sessionKind,
+ *    recordingEnabled, pinnedWorkoutId, startUtc, endUtc, reservationId.
+ *
+ * Group-proofing: reservations and caps are keyed per member, never per
+ * playbook. A future group playbook books N members = N transactions of this
+ * exact shape; nothing here assumes a single member.
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.bookPlaybookSession = exports.cleanupExpiredBookingRequests = exports.ROTATE_AT_PLAYBOOK_END = void 0;
+exports.wallTimeToUtc = wallTimeToUtc;
+exports.memberWeekWindowUtc = memberWeekWindowUtc;
+exports.releaseReservationForInstance = releaseReservationForInstance;
+exports.moveReservationForInstance = moveReservationForInstance;
+exports.validClientRequestId = validClientRequestId;
+exports.claimBookingRequest = claimBookingRequest;
+exports.storeBookingRequestResult = storeBookingRequestResult;
+exports.releaseBookingRequest = releaseBookingRequest;
+exports.hostingFieldsFor = hostingFieldsFor;
+exports.bookOccurrence = bookOccurrence;
+const admin = __importStar(require("firebase-admin"));
+const https_1 = require("firebase-functions/v2/https");
+const scheduler_1 = require("firebase-functions/v2/scheduler");
+const firestore_1 = require("firebase-admin/firestore");
+const getDb = () => admin.firestore();
+// Longest plausible session — bounds the reservation range query so the
+// composite index stays single-field-range (memberKey ==, startUtc range).
+const MAX_SESSION_MS = 4 * 60 * 60 * 1000;
+/**
+ * DECISION PENDING (Devin, Phase B.2): after the last workout in the playbook,
+ * rotate back to the first workout (true) or stop assigning workouts (false).
+ * Single flip point — the client-side day→workout mapping reads the same
+ * default. Change here + PlaybookSchedulePanel.ROTATE_AT_END to flip.
+ */
+exports.ROTATE_AT_PLAYBOOK_END = true;
+// ── Timezone math (no tz library in functions/ — Intl only) ─────────────────
+// All conversions are done per-date in the member's IANA timezone so DST
+// transitions land on the correct UTC instant.
+function tzOffsetMs(utcDate, timeZone) {
+    const dtf = new Intl.DateTimeFormat('en-US', {
+        timeZone, hour12: false,
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+    const parts = {};
+    for (const p of dtf.formatToParts(utcDate)) {
+        if (p.type !== 'literal')
+            parts[p.type] = Number(p.value);
+    }
+    const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour % 24, parts.minute, parts.second);
+    return asUtc - utcDate.getTime();
+}
+/** Convert a wall-clock date + HH:mm in an IANA timezone to a UTC Date. */
+function wallTimeToUtc(dateStr, hhmm, timeZone) {
+    const [y, mo, d] = dateStr.split('-').map(Number);
+    const [h, mi] = hhmm.split(':').map(Number);
+    const naive = Date.UTC(y, mo - 1, d, h, mi, 0);
+    // Fixed-point iteration: offset can change across a DST boundary, so
+    // re-evaluate once with the first guess.
+    let guess = naive - tzOffsetMs(new Date(naive), timeZone);
+    guess = naive - tzOffsetMs(new Date(guess), timeZone);
+    return new Date(guess);
+}
+function wallDateOf(utc, timeZone) {
+    var _a;
+    const dtf = new Intl.DateTimeFormat('en-CA', {
+        timeZone, year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short',
+    });
+    const parts = {};
+    for (const p of dtf.formatToParts(utc))
+        parts[p.type] = p.value;
+    const dowMap = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+    return {
+        dateStr: `${parts.year}-${parts.month}-${parts.day}`,
+        dow: (_a = dowMap[parts.weekday]) !== null && _a !== void 0 ? _a : 0,
+    };
+}
+function addDaysToDateStr(dateStr, days) {
+    const [y, mo, d] = dateStr.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, mo - 1, d));
+    dt.setUTCDate(dt.getUTCDate() + days);
+    return dt.toISOString().split('T')[0];
+}
+/**
+ * Cap week boundary: Monday 00:00 in the member's timezone (locked product
+ * decision). Returns the UTC window [weekStart, weekEnd) containing instant.
+ */
+function memberWeekWindowUtc(instant, timeZone) {
+    const { dateStr, dow } = wallDateOf(instant, timeZone);
+    const daysSinceMonday = (dow + 6) % 7;
+    const mondayStr = addDaysToDateStr(dateStr, -daysSinceMonday);
+    const nextMondayStr = addDaysToDateStr(mondayStr, 7);
+    return {
+        weekStartUtc: wallTimeToUtc(mondayStr, '00:00', timeZone),
+        weekEndUtc: wallTimeToUtc(nextMondayStr, '00:00', timeZone),
+    };
+}
+// ── Reservation helpers ─────────────────────────────────────────────────────
+/** Statuses that hold a member's time (block double-booking / count toward cap). */
+const BLOCKING_STATUSES = ['scheduled', 'allocated', 'in_progress', 'skip_requested', 'allocation_failed'];
+function reservationId(memberKey, startUtc) {
+    return `${memberKey}_${startUtc.getTime()}`;
+}
+/**
+ * Inside a transaction: verify [startUtc, endUtc) is free for memberKey.
+ * Checks (1) member_time_reservations — covers all playbook bookings incl.
+ * future guest bookings — and (2) legacy session_instances that predate the
+ * reservation system (no reservationId), tz-normalized per occurrence.
+ * Returns a human-readable conflict description or null if free.
+ */
+async function findOverlapInTxn(txn, memberKey, memberId, startUtc, endUtc) {
+    const db = getDb();
+    const resSnap = await txn.get(db.collection('member_time_reservations')
+        .where('memberKey', '==', memberKey)
+        .where('startUtc', '>', firestore_1.Timestamp.fromMillis(startUtc.getTime() - MAX_SESSION_MS))
+        .where('startUtc', '<', firestore_1.Timestamp.fromDate(endUtc)));
+    for (const doc of resSnap.docs) {
+        const r = doc.data();
+        const rStart = r.startUtc.toMillis();
+        const rEnd = r.endUtc.toMillis();
+        if (rStart < endUtc.getTime() && rEnd > startUtc.getTime()) {
+            return `existing booking ${new Date(rStart).toISOString()}`;
+        }
+    }
+    // Legacy instances: local wall-clock only (scheduledDate + HH:mm + IANA tz).
+    // Bound by scheduledDate ±1 day around the target window, then normalize
+    // each candidate through its own timezone (DST-safe, per-date).
+    if (memberId) {
+        const targetDate = startUtc.toISOString().split('T')[0];
+        const legacySnap = await txn.get(db.collection('session_instances')
+            .where('memberId', '==', memberId)
+            .where('scheduledDate', '>=', addDaysToDateStr(targetDate, -1))
+            .where('scheduledDate', '<=', addDaysToDateStr(targetDate, 1)));
+        for (const doc of legacySnap.docs) {
+            const inst = doc.data();
+            if (inst.reservationId)
+                continue; // reservation-backed — already checked above
+            if (!BLOCKING_STATUSES.includes(inst.status))
+                continue;
+            const instTz = inst.timezone || 'America/New_York';
+            const instStart = wallTimeToUtc(inst.scheduledDate, inst.scheduledStartTime || '00:00', instTz);
+            const instEnd = new Date(instStart.getTime() + (inst.durationMinutes || 30) * 60 * 1000);
+            if (instStart.getTime() < endUtc.getTime() && instEnd.getTime() > startUtc.getTime()) {
+                return `legacy session on ${inst.scheduledDate} at ${inst.scheduledStartTime}`;
+            }
+        }
+    }
+    return null;
+}
+/**
+ * Release the reservation held by a session instance (cancel / skip /
+ * reschedule). Deletes the doc — deterministic IDs mean a released window
+ * must be re-creatable via create(). Safe no-op when there is none.
+ */
+async function releaseReservationForInstance(instanceData) {
+    const resId = instanceData.reservationId;
+    if (!resId)
+        return;
+    try {
+        await getDb().collection('member_time_reservations').doc(resId).delete();
+    }
+    catch (err) {
+        console.warn(`[playbookScheduling] Failed to release reservation ${resId}: ${err.message}`);
+    }
+}
+/**
+ * Move an instance's reservation to a new window, transactionally re-running
+ * the overlap guard. Throws already-exists on conflict. Returns the new
+ * reservation ID and UTC instants (caller updates the instance doc).
+ */
+async function moveReservationForInstance(instanceId, instanceData, newDate, newStartTime) {
+    const oldResId = instanceData.reservationId;
+    if (!oldResId)
+        return null; // legacy instance — no reservation to move
+    const db = getDb();
+    const tz = instanceData.timezone || 'America/New_York';
+    const startUtc = wallTimeToUtc(newDate, newStartTime, tz);
+    const endUtc = new Date(startUtc.getTime() + (instanceData.durationMinutes || 30) * 60 * 1000);
+    const memberKey = instanceData.memberKey || instanceData.memberId;
+    const newResId = reservationId(memberKey, startUtc);
+    await db.runTransaction(async (txn) => {
+        const conflict = await findOverlapInTxn(txn, memberKey, instanceData.memberId || null, startUtc, endUtc);
+        if (conflict) {
+            throw new https_1.HttpsError('already-exists', `That time overlaps another session for this member (${conflict})`);
+        }
+        const oldResRef = db.collection('member_time_reservations').doc(oldResId);
+        const oldResSnap = await txn.get(oldResRef);
+        txn.create(db.collection('member_time_reservations').doc(newResId), Object.assign(Object.assign({}, (oldResSnap.exists ? oldResSnap.data() : {
+            memberKey,
+            memberId: instanceData.memberId || null,
+            guestEmail: instanceData.guestEmail || null,
+            coachId: instanceData.coachId,
+            playbookId: instanceData.playbookId || null,
+        })), { sessionInstanceId: instanceId, startUtc: firestore_1.Timestamp.fromDate(startUtc), endUtc: firestore_1.Timestamp.fromDate(endUtc), createdAt: firestore_1.FieldValue.serverTimestamp() }));
+        if (oldResSnap.exists)
+            txn.delete(oldResRef);
+    });
+    return { reservationId: newResId, startUtc, endUtc };
+}
+// ── Idempotent booking requests (optional client-supplied clientRequestId) ──
+// booking_requests/{clientRequestId}: dedupe guard so a client retry after a
+// timeout can never double-book. Requests without a clientRequestId behave
+// exactly as before (fully backward compatible).
+const CLIENT_REQUEST_ID_RE = /^[A-Za-z0-9_-]{16,64}$/;
+const PENDING_CLAIM_STALE_MS = 5 * 60 * 1000;
+const CLAIM_EXPIRY_MS = 24 * 60 * 60 * 1000;
+function validClientRequestId(raw) {
+    return typeof raw === 'string' && CLIENT_REQUEST_ID_RE.test(raw) ? raw : null;
+}
+/**
+ * Transactionally claim booking_requests/{clientRequestId}. Returns the
+ * stored result when this exact request already completed (idempotent
+ * replay); otherwise writes a pending claim and returns null. Scope fields
+ * must match on replay — a request ID can never cross coach/member/function.
+ */
+async function claimBookingRequest(clientRequestId, scope) {
+    const db = getDb();
+    const ref = db.collection('booking_requests').doc(clientRequestId);
+    let prior = null;
+    await db.runTransaction(async (txn) => {
+        var _a, _b, _c;
+        const snap = await txn.get(ref);
+        if (snap.exists) {
+            const data = snap.data();
+            if (data.fn !== scope.fn || data.coachId !== scope.coachId
+                || data.memberKey !== scope.memberKey || data.playbookId !== scope.playbookId) {
+                throw new https_1.HttpsError('permission-denied', 'This request ID belongs to a different booking');
+            }
+            if (data.result) {
+                prior = data.result;
+                return;
+            }
+            const createdMs = (_c = (_b = (_a = data.createdAt) === null || _a === void 0 ? void 0 : _a.toMillis) === null || _b === void 0 ? void 0 : _b.call(_a)) !== null && _c !== void 0 ? _c : 0;
+            if (Date.now() - createdMs < PENDING_CLAIM_STALE_MS) {
+                throw new https_1.HttpsError('aborted', 'This booking is still processing — try again in a moment');
+            }
+            // Stale pending claim from a crashed run — reclaim it.
+        }
+        txn.set(ref, Object.assign(Object.assign({}, scope), { result: null, createdAt: firestore_1.FieldValue.serverTimestamp(), 
+            // TTL-style cleanup guard: anything past expiresAt is safe to delete.
+            expiresAt: firestore_1.Timestamp.fromMillis(Date.now() + CLAIM_EXPIRY_MS) }));
+    });
+    return prior;
+}
+async function storeBookingRequestResult(clientRequestId, result) {
+    try {
+        await getDb().collection('booking_requests').doc(clientRequestId).set({ result, completedAt: firestore_1.FieldValue.serverTimestamp() }, { merge: true });
+    }
+    catch (err) {
+        console.warn(`[playbookScheduling] Failed to store booking request result ${clientRequestId}: ${err.message}`);
+    }
+}
+/** Release a pending claim after a failed run so a retry can book fresh. */
+async function releaseBookingRequest(clientRequestId) {
+    try {
+        await getDb().collection('booking_requests').doc(clientRequestId).delete();
+    }
+    catch (err) {
+        console.warn(`[playbookScheduling] Failed to release booking request ${clientRequestId}: ${err.message}`);
+    }
+}
+exports.cleanupExpiredBookingRequests = (0, scheduler_1.onSchedule)({ schedule: '30 3 * * *', timeZone: 'UTC' }, async () => {
+    const db = getDb();
+    const batchSize = 400;
+    let deletedCount = 0;
+    const expiredQuery = db
+        .collection('booking_requests')
+        .where('expiresAt', '<', firestore_1.Timestamp.now())
+        .limit(batchSize);
+    let snap = await expiredQuery.get();
+    while (!snap.empty) {
+        const batch = db.batch();
+        snap.docs.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+        deletedCount += snap.size;
+        snap = await expiredQuery.get();
+    }
+    console.log(`[cleanupExpiredBookingRequests] Deleted ${deletedCount} expired booking request(s)`);
+});
+function hostingFieldsFor(sessionKind) {
+    // coach_guided rides the coach's own Zoom room; coach_review rides the
+    // shared bot-room pool (round-robin in allocateSessionInstance).
+    return sessionKind === 'coach_guided'
+        ? { roomSource: 'coach_personal', hostingMode: 'coach_led', coachExpectedLive: true, personalZoomRequired: true, guidancePhase: 'coach_guided' }
+        : { roomSource: 'shared_pool', hostingMode: 'hosted', coachExpectedLive: false, personalZoomRequired: false, guidancePhase: 'self_guided' };
+}
+/**
+ * One atomic booking: global overlap guard + per-playbook weekly cap +
+ * reservation create + session_instance create, all in one transaction.
+ * Throws HttpsError already-exists (conflict) / resource-exhausted (cap).
+ */
+async function bookOccurrence(p) {
+    const db = getDb();
+    const startUtc = wallTimeToUtc(p.dateStr, p.startTime, p.timezone);
+    const endUtc = new Date(startUtc.getTime() + p.durationMinutes * 60 * 1000);
+    const endMinutesTotal = Number(p.startTime.split(':')[0]) * 60 + Number(p.startTime.split(':')[1]) + p.durationMinutes;
+    const scheduledEndTime = `${String(Math.floor(endMinutesTotal / 60) % 24).padStart(2, '0')}:${String(endMinutesTotal % 60).padStart(2, '0')}`;
+    const resId = reservationId(p.memberKey, startUtc);
+    const instRef = db.collection('session_instances').doc();
+    await db.runTransaction(async (txn) => {
+        // 1. Global overlap guard — reservations (all playbooks) + legacy instances
+        const conflict = await findOverlapInTxn(txn, p.memberKey, p.memberId, startUtc, endUtc);
+        if (conflict)
+            throw new https_1.HttpsError('already-exists', conflict);
+        // 2. Per-playbook weekly cap — Monday boundary in member tz. Signed-in
+        // members are counted by memberId (covers Phase A instances that predate
+        // the memberKey field); guests are counted by memberKey.
+        if (p.weeklySessionCap !== null) {
+            const { weekStartUtc, weekEndUtc } = memberWeekWindowUtc(startUtc, p.timezone);
+            const baseQuery = db.collection('session_instances')
+                .where('playbookId', '==', p.playbookId);
+            const capQuery = p.memberId
+                ? baseQuery.where('memberId', '==', p.memberId)
+                : baseQuery.where('memberKey', '==', p.memberKey);
+            const capSnap = await txn.get(capQuery
+                .where('startUtc', '>=', firestore_1.Timestamp.fromDate(weekStartUtc))
+                .where('startUtc', '<', firestore_1.Timestamp.fromDate(weekEndUtc)));
+            const activeCount = capSnap.docs.filter((doc) => BLOCKING_STATUSES.includes(doc.data().status) || doc.data().status === 'completed').length;
+            if (activeCount >= p.weeklySessionCap) {
+                throw new https_1.HttpsError('resource-exhausted', `weekly cap of ${p.weeklySessionCap} reached`);
+            }
+        }
+        // 3. Reservation — deterministic ID, create() collides on races
+        txn.create(db.collection('member_time_reservations').doc(resId), {
+            memberKey: p.memberKey,
+            memberId: p.memberId,
+            guestEmail: p.guestEmail,
+            coachId: p.coachId,
+            playbookId: p.playbookId,
+            sessionInstanceId: instRef.id,
+            startUtc: firestore_1.Timestamp.fromDate(startUtc),
+            endUtc: firestore_1.Timestamp.fromDate(endUtc),
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+        // 4. Session instance — reuses the legacy state machine end-to-end
+        const inst = Object.assign(Object.assign({ id: instRef.id, coachId: p.coachId, memberId: p.memberId, memberKey: p.memberKey, memberName: p.memberName, playbookId: p.playbookId, playbookTitle: p.playbook.name || 'Playbook', sessionKind: p.sessionKind, recordingEnabled: p.recordingEnabled, scheduledDate: p.dateStr, scheduledStartTime: p.startTime, scheduledEndTime, durationMinutes: p.durationMinutes, timezone: p.timezone, startUtc: firestore_1.Timestamp.fromDate(startUtc), endUtc: firestore_1.Timestamp.fromDate(endUtc), reservationId: resId, status: 'scheduled', allocationAttempts: 0, guestEmail: p.guestEmail, bookedVia: p.bookedVia || 'coach_panel', location: p.location || null }, hostingFieldsFor(p.sessionKind)), { createdAt: firestore_1.FieldValue.serverTimestamp(), updatedAt: firestore_1.FieldValue.serverTimestamp() });
+        if (p.pinnedWorkoutId && Array.isArray(p.playbook.workoutIds) && p.playbook.workoutIds.includes(p.pinnedWorkoutId)) {
+            inst.pinnedWorkoutId = p.pinnedWorkoutId;
+        }
+        txn.set(instRef, inst);
+    });
+    return { instanceId: instRef.id, reservationId: resId };
+}
+exports.bookPlaybookSession = (0, https_1.onCall)({ region: 'us-central1', invoker: 'public' }, async (request) => {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
+    const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
+    if (!callerUid)
+        throw new https_1.HttpsError('unauthenticated', 'Must be signed in');
+    const db = getDb();
+    const d = request.data;
+    const hasModules = Array.isArray(d.dayModules) && d.dayModules.length > 0;
+    if (!d.playbookId || !d.timezone) {
+        throw new https_1.HttpsError('invalid-argument', 'playbookId and timezone are required');
+    }
+    if (!hasModules && (!Array.isArray(d.daysOfWeek) || d.daysOfWeek.length === 0 || !d.startTime)) {
+        throw new https_1.HttpsError('invalid-argument', 'dayModules, or daysOfWeek + startTime, are required');
+    }
+    if (hasModules) {
+        for (const m of d.dayModules) {
+            if (typeof m.dayOfWeek !== 'number' || m.dayOfWeek < 0 || m.dayOfWeek > 6) {
+                throw new https_1.HttpsError('invalid-argument', 'dayModules dayOfWeek entries must be 0-6');
+            }
+            if (typeof m.startTime !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(m.startTime)) {
+                throw new https_1.HttpsError('invalid-argument', 'dayModules startTime must be HH:mm');
+            }
+        }
+    }
+    else {
+        if (d.daysOfWeek.some((x) => typeof x !== 'number' || x < 0 || x > 6)) {
+            throw new https_1.HttpsError('invalid-argument', 'daysOfWeek entries must be 0-6');
+        }
+        if (!/^\d{2}:\d{2}$/.test(d.startTime)) {
+            throw new https_1.HttpsError('invalid-argument', 'startTime must be HH:mm');
+        }
+    }
+    const playbookRef = db.collection('playbooks').doc(d.playbookId);
+    const playbookSnap = await playbookRef.get();
+    if (!playbookSnap.exists)
+        throw new https_1.HttpsError('not-found', 'Playbook not found');
+    const playbook = playbookSnap.data();
+    const token = (_b = request.auth) === null || _b === void 0 ? void 0 : _b.token;
+    const isAdmin = (token === null || token === void 0 ? void 0 : token.role) === 'platformAdmin' || (token === null || token === void 0 ? void 0 : token.admin) === true;
+    if (playbook.coachId !== callerUid && !isAdmin) {
+        throw new https_1.HttpsError('permission-denied', 'This playbook does not belong to you');
+    }
+    const coachId = playbook.coachId;
+    const memberId = d.memberId || playbook.assignedMemberId;
+    if (!memberId) {
+        throw new https_1.HttpsError('failed-precondition', 'Assign a member to this playbook before scheduling');
+    }
+    // Group-proofing: membership is a list from day one. Booking is valid for
+    // any member of the playbook (single-member UI just has one).
+    const memberIds = Array.isArray(playbook.memberIds) && playbook.memberIds.length > 0
+        ? playbook.memberIds
+        : (playbook.assignedMemberId ? [playbook.assignedMemberId] : []);
+    if (!memberIds.includes(memberId)) {
+        throw new https_1.HttpsError('failed-precondition', 'That member is not on this playbook');
+    }
+    const memberSnap = await db.collection('members').doc(memberId).get();
+    if (!memberSnap.exists)
+        throw new https_1.HttpsError('not-found', 'Member not found');
+    if (memberSnap.data().coachId !== coachId) {
+        throw new https_1.HttpsError('permission-denied', 'This member does not belong to this coach');
+    }
+    const memberName = memberSnap.data().name || playbook.assignedMemberName || 'Member';
+    const dayModulesMap = new Map();
+    if (hasModules) {
+        const normKind = (k) => (k === 'coach_guided' ? 'coach_guided' : 'coach_review');
+        const normDur = (n) => (typeof n === 'number' && n >= 5 && n <= 240 ? Math.round(n) : 45);
+        for (const m of d.dayModules) {
+            dayModulesMap.set(m.dayOfWeek, {
+                startTime: m.startTime,
+                sessionKind: normKind(m.sessionKind),
+                durationMinutes: normDur(m.durationMinutes),
+                workoutId: typeof m.workoutId === 'string' && m.workoutId ? m.workoutId : null,
+            });
+        }
+    }
+    // Per-day settings (Phase B.2) — validated map dow → { startTime, kind }
+    const daySettingsMap = new Map();
+    if (!hasModules && Array.isArray(d.daySettings)) {
+        for (const ds of d.daySettings) {
+            if (typeof (ds === null || ds === void 0 ? void 0 : ds.dayOfWeek) !== 'number' || ds.dayOfWeek < 0 || ds.dayOfWeek > 6) {
+                throw new https_1.HttpsError('invalid-argument', 'daySettings dayOfWeek must be 0-6');
+            }
+            if (typeof (ds === null || ds === void 0 ? void 0 : ds.startTime) !== 'string' || !/^\d{2}:\d{2}$/.test(ds.startTime)) {
+                throw new https_1.HttpsError('invalid-argument', 'daySettings startTime must be HH:mm');
+            }
+            if (ds.durationMinutes !== undefined && (typeof ds.durationMinutes !== 'number' || ds.durationMinutes < 5 || ds.durationMinutes > 240)) {
+                throw new https_1.HttpsError('invalid-argument', 'daySettings durationMinutes must be 5-240');
+            }
+            daySettingsMap.set(ds.dayOfWeek, {
+                startTime: ds.startTime,
+                sessionKind: ds.sessionKind === 'coach_guided' ? 'coach_guided' : 'coach_review',
+                durationMinutes: typeof ds.durationMinutes === 'number' ? Math.round(ds.durationMinutes) : null,
+            });
+        }
+    }
+    const sessionKind = d.sessionKind === 'coach_guided' ? 'coach_guided' : 'coach_review';
+    const recordingEnabled = d.recordingEnabled !== false;
+    const durationMinutes = d.durationMinutes && d.durationMinutes > 0 && d.durationMinutes <= 240 ? d.durationMinutes : 45;
+    const repeatFrequency = d.repeatFrequency === 'every_2_weeks' ? 'every_2_weeks' : d.repeatFrequency === 'none' ? 'none' : 'weekly';
+    const repeatHorizonWeeks = Math.min(8, Math.max(2, Math.round(d.repeatHorizonWeeks || 4)));
+    const weeklySessionCap = typeof d.weeklySessionCap === 'number' && d.weeklySessionCap > 0
+        ? Math.round(d.weeklySessionCap) : null;
+    const timezone = d.timezone;
+    // Effective DOW list: from dayModules when present, else legacy daysOfWeek.
+    const effectiveDows = hasModules
+        ? [...dayModulesMap.keys()].sort()
+        : [...new Set(d.daysOfWeek)].sort();
+    const effectiveStartTime = hasModules ? dayModulesMap.get(effectiveDows[0]).startTime : d.startTime;
+    // Persist scheduling settings on the playbook (also normalizes memberIds
+    // so group support later is purely additive).
+    await playbookRef.update({
+        schedulingEnabled: true,
+        sessionKind,
+        recordingEnabled,
+        sessionDurationMinutes: durationMinutes,
+        weeklySessionCap,
+        timezone,
+        scheduleDaysOfWeek: effectiveDows,
+        scheduleStartTime: effectiveStartTime,
+        scheduleDayModules: hasModules
+            ? [...dayModulesMap.entries()].map(([dayOfWeek, v]) => (Object.assign({ dayOfWeek }, v)))
+            : firestore_1.FieldValue.delete(),
+        scheduleDaySettings: !hasModules && Array.isArray(d.daySettings)
+            ? [...daySettingsMap.entries()].map(([dayOfWeek, v]) => (Object.assign({ dayOfWeek }, v)))
+            : firestore_1.FieldValue.delete(),
+        repeatFrequency,
+        repeatHorizonWeeks,
+        memberIds,
+        nextWorkoutIndex: typeof playbook.nextWorkoutIndex === 'number' ? playbook.nextWorkoutIndex : 0,
+        updatedAt: firestore_1.FieldValue.serverTimestamp(),
+    });
+    // ── Materialize occurrences (matches the legacy generator pattern:
+    // wall-clock date walk, N weeks ahead, skip past times) ────────────────
+    const now = new Date();
+    const todayStr = wallDateOf(now, timezone).dateStr;
+    const firstDate = d.startDate && /^\d{4}-\d{2}-\d{2}$/.test(d.startDate) && d.startDate > todayStr
+        ? d.startDate : todayStr;
+    const horizonEnd = addDaysToDateStr(firstDate, repeatHorizonWeeks * 7);
+    const stepDays = repeatFrequency === 'every_2_weeks' ? 14 : 7;
+    const occurrences = [];
+    for (const dow of effectiveDows) {
+        const mod = dayModulesMap.get(dow);
+        const dayStart = (_e = (_c = mod === null || mod === void 0 ? void 0 : mod.startTime) !== null && _c !== void 0 ? _c : (_d = daySettingsMap.get(dow)) === null || _d === void 0 ? void 0 : _d.startTime) !== null && _e !== void 0 ? _e : d.startTime;
+        const dayKind = (_h = (_f = mod === null || mod === void 0 ? void 0 : mod.sessionKind) !== null && _f !== void 0 ? _f : (_g = daySettingsMap.get(dow)) === null || _g === void 0 ? void 0 : _g.sessionKind) !== null && _h !== void 0 ? _h : sessionKind;
+        const dayDuration = (_l = (_j = mod === null || mod === void 0 ? void 0 : mod.durationMinutes) !== null && _j !== void 0 ? _j : (_k = daySettingsMap.get(dow)) === null || _k === void 0 ? void 0 : _k.durationMinutes) !== null && _l !== void 0 ? _l : durationMinutes;
+        const dayWorkoutId = (_m = mod === null || mod === void 0 ? void 0 : mod.workoutId) !== null && _m !== void 0 ? _m : null;
+        let cursor = firstDate;
+        while (wallDateOf(wallTimeToUtc(cursor, '12:00', timezone), timezone).dow !== dow) {
+            cursor = addDaysToDateStr(cursor, 1);
+        }
+        // Same-day booking only if the start time hasn't passed yet
+        if (cursor === todayStr && wallTimeToUtc(cursor, dayStart, timezone) <= now) {
+            cursor = addDaysToDateStr(cursor, stepDays);
+        }
+        if (repeatFrequency === 'none') {
+            if (cursor <= horizonEnd)
+                occurrences.push({ dateStr: cursor, startTime: dayStart, sessionKind: dayKind, durationMinutes: dayDuration, workoutId: dayWorkoutId });
+            continue;
+        }
+        while (cursor <= horizonEnd) {
+            occurrences.push({ dateStr: cursor, startTime: dayStart, sessionKind: dayKind, durationMinutes: dayDuration, workoutId: dayWorkoutId });
+            cursor = addDaysToDateStr(cursor, stepDays);
+        }
+    }
+    occurrences.sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+    if (occurrences.length === 0) {
+        throw new https_1.HttpsError('invalid-argument', 'No bookable occurrences in the selected window');
+    }
+    const memberKey = memberId; // guests book via bookViaBookingToken with `guest:<sha256(email)>`
+    // Idempotency: a retry carrying the same clientRequestId returns the
+    // stored result of the attempt that already ran (e.g. client timed out
+    // at 45s while the server finished booking).
+    const clientRequestId = validClientRequestId(d.clientRequestId);
+    if (clientRequestId) {
+        const prior = await claimBookingRequest(clientRequestId, {
+            fn: 'bookPlaybookSession',
+            coachId,
+            memberKey,
+            playbookId: d.playbookId,
+        });
+        if (prior) {
+            console.log(`[bookPlaybookSession] idempotent replay for request ${clientRequestId}`);
+            return prior;
+        }
+    }
+    const results = [];
+    for (const occ of occurrences) {
+        const dateStr = occ.dateStr;
+        try {
+            const { instanceId } = await bookOccurrence({
+                playbookId: d.playbookId,
+                playbook,
+                coachId,
+                memberKey,
+                memberId,
+                guestEmail: null,
+                memberName,
+                dateStr,
+                startTime: occ.startTime,
+                timezone,
+                durationMinutes: occ.durationMinutes,
+                sessionKind: occ.sessionKind,
+                recordingEnabled,
+                weeklySessionCap,
+                pinnedWorkoutId: occ.workoutId || ((_o = d.pinnedWorkoutIds) === null || _o === void 0 ? void 0 : _o[dateStr]) || null,
+                bookedVia: 'coach_panel',
+            });
+            results.push({ date: dateStr, status: 'booked', instanceId });
+        }
+        catch (err) {
+            if (err instanceof https_1.HttpsError && err.code === 'resource-exhausted') {
+                results.push({ date: dateStr, status: 'cap_reached', reason: err.message });
+            }
+            else if (err instanceof https_1.HttpsError && err.code === 'already-exists') {
+                results.push({ date: dateStr, status: 'conflict', reason: err.message });
+            }
+            else if ((err === null || err === void 0 ? void 0 : err.code) === 6 || /already exists/i.test((err === null || err === void 0 ? void 0 : err.message) || '')) {
+                // Firestore ALREADY_EXISTS from txn.create() racing another booking
+                results.push({ date: dateStr, status: 'conflict', reason: 'booked concurrently' });
+            }
+            else {
+                if (clientRequestId)
+                    await releaseBookingRequest(clientRequestId);
+                throw err;
+            }
+        }
+    }
+    const bookedCount = results.filter((r) => r.status === 'booked').length;
+    await db.collection('scheduling_audit_log').add({
+        coachId,
+        action: 'playbook_sessions_booked',
+        memberId,
+        details: `Booked ${bookedCount}/${results.length} ${playbook.name || 'playbook'} sessions (${sessionKind}, ${repeatFrequency}, ${repeatHorizonWeeks}w horizon)`,
+        metadata: { playbookId: d.playbookId, results },
+        createdAt: firestore_1.FieldValue.serverTimestamp(),
+    });
+    console.log(`[bookPlaybookSession] ${bookedCount}/${results.length} booked for playbook ${d.playbookId} member ${memberId}`);
+    const response = { success: true, bookedCount, results };
+    if (clientRequestId)
+        await storeBookingRequestResult(clientRequestId, response);
+    return response;
+});
+//# sourceMappingURL=playbookScheduling.js.map

@@ -13,14 +13,17 @@ The platform organizes its data across several critical collections, each servin
 |---|---|---|---|
 | `users` | Base profile information | `displayName`, `phone`, `photoURL`, `fcmToken` | Cloud Functions manage custom claims (`role`, `coachId`, `tenantId`). Users can update safe profile fields, but roles are Admin SDK only. |
 | `coaches` | Coach configuration and tenant info | `role`, `coachId`, `stripeAccountId`, `profitShareStartDate` | Written by Cloud Functions via Admin SDK during onboarding. Coaches can read their own data. |
-| `members` | Member profiles and plan status | `coachId`, `role`, `planId`, `status` | Scoped strictly to the `coachId`. |
+| `members` | Member profiles and plan status | `coachId`, `role`, `planId`, `status`, `uid`, `hasAccount` | Scoped strictly to the `coachId`. `hasAccount` + `uid` mark records linked to a Firebase Auth account (via self-signup, `sendMemberInvite`, or `claimMemberAccount`). |
+| `intakeSubmissions` | Intake form submissions (wizard + QuickAddMember) | `uid` or `memberId` (doc ID matches), `coachId` (`'unassigned'` = lead awaiting admin assignment), `submittedBy`, `submittedAt`, flat form fields | Coach-scoped get/list/update; platformAdmin get/list (Leads queue); public create. **Never contains passwords** — the wizard strips credentials before writing. `coachId: 'unassigned'` triggers the admin lead alert (`onIntakeSubmissionCreated`). |
 | `movements` | Core library of exercises (Build System) | `name`, `category`, `equipment`, `videoUrl`, `thumbnailUrl`, `isGlobal`, `isArchived` | Coaches read their own and global movements. Admins read all. |
 | `workouts` | Workout structures composed of blocks | `name`, `description`, `coachId`, `blocks` (array), `isTemplate`, `isArchived` | Coaches manage their own workouts. Admins read all. |
 | `workout_assignments` | Links a member to a scheduled workout | `memberId`, `coachId`, `workoutId`, `scheduledFor`, `status`, `completedAt` | Coaches manage assignments for their members. Members read their own. |
 | `workout_logs` | Completed workout results and reflections | `memberId`, `coachId`, `workoutId`, `completedAt`, `glowText`, `growText`, `coachReviewed` | Members create logs; they are immutable post-creation. Coaches update review fields. |
-| `member_plans` | Billing structure and service level | `memberId`, `coachId`, `price`, `interval`, `status` | Managed by billing logic and Stripe webhooks. |
+| `member_plans` | Coaching plan + billing structure (doc ID = memberId) | `memberId`, `coachId`, `status`, `checkoutStatus` (`pending_payment`/`paid`/`pay_in_full_paid`/`free_active`/`cancelled`/`failed`), `pricingResult`, `monthlyPriceOverride`, `hourlyRate`, `commitToSave`, `continuationPricing`, `stripeCustomerId`, `acceptedSnapshotId` | Coach-or-admin write, member read. Activated by the Stripe webhook (paid) or `startFreePlan` ($0 plans, `checkoutStatus: 'free_active'`). There are no bare `price`/`interval` fields — pricing lives in `pricingResult` + inputs. |
 | `session_instances` | Concrete scheduled events | `slotId`, `coachId`, `startTime`, `endTime`, `zoomUrl` | Generated from `recurring_slots`. |
 | `recurring_slots` | Scheduling patterns | `coachId`, `dayOfWeek`, `startTime`, `durationMin` | Defines the pattern for generating session instances. |
+| `musicPrefs` | Per-user workout music taste (doc id = uid) | `likedTracks[]`, `dislikedTracks[]` (track ids `<style>/<index>`) | Owner-only read/write (`isOwnDoc`), platformAdmin full. |
+| `workoutMusicFeedback/{coachId}/workouts` | Shared per-workout track dislikes — excluded for everyone playing that workout | `dislikedTracks[]` | Tenant coach + that coach's members read/write (path-var rules), platformAdmin full. |
 
 ## Query Patterns
 Queries in GoArrive are heavily reliant on proper scoping to maintain multi-tenancy and security.

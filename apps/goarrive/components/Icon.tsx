@@ -295,6 +295,20 @@ const ICONS: Record<string, IconDef> = {
     paths: [],
     fill: ['M6 18l8.5-6L6 6v12zm2-8.14L11.03 12 8 14.14V9.86zM16 6h2v12h-2z'],
   },
+  'skip-back': {
+    paths: [],
+    fill: ['M18 18L9.5 12 18 6v12zM16 9.86L12.97 12 16 14.14V9.86zM6 6h2v12H6z'],
+  },
+  'heart-filled': {
+    paths: [],
+    fill: ['M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z'],
+  },
+  'thumbs-down': {
+    paths: [
+      'M10 15v4a3 3 0 003 3l4-9V2H5.72a2 2 0 00-2 1.7l-1.38 9a2 2 0 002 2.3H10z',
+      'M17 2h2.67A2.31 2.31 0 0122 4v7a2.31 2.31 0 01-2.33 2H17',
+    ],
+  },
   'circle': {
     paths: ['M12 22a10 10 0 100-20 10 10 0 000 20z'],
   },
@@ -499,6 +513,11 @@ const ICONS: Record<string, IconDef> = {
   'plus': {
     paths: [
       'M12 5v14M5 12h14',
+    ],
+  },
+  'minus': {
+    paths: [
+      'M5 12h14',
     ],
   },
   'swap': {

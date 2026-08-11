@@ -13,8 +13,9 @@ The functions are organized into several logical categories, each serving a dist
 | `createStripeConnectLink` | `onCall` | Generates a Stripe Connect onboarding link for a coach. |
 | `refreshStripeAccountStatus` | `onCall` | Refreshes the status of a coach's Stripe Connect account. |
 | `disconnectStripeAccount` | `onCall` | Disconnects a coach's Stripe account. |
-| `createCheckoutSession` | `onCall` | Creates a Stripe Checkout session for member payment. |
-| `stripeWebhook` | `onRequest` | Handles incoming Stripe webhook events (subscriptions, payments, disputes). |
+| `createCheckoutSession` | `onCall` | Creates a Stripe Checkout session for member payment. Supports $0 + Commit-to-Save (card-on-file $0 subscription); rejects pay-in-full at $0. |
+| `startFreePlan` | `onCall` (public) | Activates a $0 plan with no Stripe involvement (`checkoutStatus: 'free_active'`). Free plans only touch Stripe when the member opts into CTS. |
+| `stripeWebhook` | `onRequest` | Handles incoming Stripe webhook events (subscriptions, payments, disputes). Also copies the collected card to the customer's invoice default (required for CTS fee invoices) and records checkout-time CTS consents. |
 | `activateCtsOptIn` | `onCall` | Activates a Commit-to-Save opt-in for a member. |
 | `reconcileConnectedAccountPayments` | `onCall` | Reconciles payments from connected Stripe accounts. |
 | `getConnectedAccountData` | `onCall` | Retrieves detailed data from a connected Stripe account. |
@@ -94,6 +95,12 @@ The functions are organized into several logical categories, each serving a dist
 | `cleanupOldMovementThumbnails` | `onDocumentUpdated` | Cleans up old thumbnails when new ones are generated. |
 | `retryFailedGifGeneration` | `onSchedule` | Retries failed GIF generation attempts. |
 
+### AI Workout Music
+
+| Function | Trigger | Purpose |
+|---|---|---|
+| `getWorkoutMusic` | `onCall` | Mubert v3 background music, cached in Storage. Three modes: `{style, trackIndex}` returns one 180s pooled track (`music_cache/<style>/track_<n>.mp3`, pool of 24/style, per-index prompt variation) for the player's no-repeat playlist; `{style, list: true}` lists already-cached pool indices (no quota cost); legacy `{style, duration}` returns the old single looped file. 18 styles (`MUSIC_STYLES` — keep in sync with `apps/goarrive/constants/musicStyles.ts`). On generation failure (Mubert trial quota is ~100 tracks lifetime) track mode deterministically falls back to a cached pool track instead of erroring. Locks via `musicCache/{lockId}`; per-user creds in `mubertCustomers/{uid}` (both Admin-SDK only). |
+
 ### Notifications & Reminders
 
 | Function | Trigger | Purpose |
@@ -107,9 +114,17 @@ The functions are organized into several logical categories, each serving a dist
 
 | Function | Trigger | Purpose |
 |---|---|---|
-| `claimMemberAccount` | `onCall` | Claims a member account (links auth to member doc). |
+| `claimMemberAccount` | `onCall` | Links a new/existing auth account to a member doc (email must match). Wired to the public `/checkout-success` claim gate. |
+| `getMemberClaimStatus` | `onCall` (public) | Claim-gate lookup: `{ exists, hasAccount, emailMasked }` for a memberId — no raw PII. |
 | `updateMemberGuidancePhase` | `onCall` | Updates a member's guidance phase. |
 | `getSharedPlan` | `onRequest` | Retrieves a shared plan for public viewing. |
+
+### Leads (unassigned intakes)
+
+| Function | Trigger | Purpose |
+|---|---|---|
+| `onIntakeSubmissionCreated` | `onDocumentCreated` (`intakeSubmissions/{id}`) | When `coachId === 'unassigned'`: admin alert email + Slack post. Coach-assigned intakes return early. |
+| `adminAssignLeadToCoach` | `onCall` (admin-only) | Assigns an unassigned lead to a coach: updates member + intake `coachId`/`tenantId`, refreshes claims if the member has an account, FCM-pushes the coach. |
 
 ### System & Admin
 

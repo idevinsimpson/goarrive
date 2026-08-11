@@ -131,6 +131,13 @@ export function sanitizePlayerWorkout(
     introAnnouncementVoiceUrl: workout.introAnnouncementVoiceUrl || null,
     introAnnouncementVoiceHash: workout.introAnnouncementVoiceHash || null,
     restDurationSeconds: workout.restDurationSeconds ?? null,
+    // Workout background music (Mubert pool). Without these, the share-link
+    // player's `musicEnabled` check reads undefined → no music button, no
+    // panel, no track. coachId also gates shared per-workout dislike loading.
+    workoutMusicEnabled: workout.workoutMusicEnabled === true,
+    workoutMusicStyle: typeof workout.workoutMusicStyle === 'string' ? workout.workoutMusicStyle : null,
+    workoutMusicVolume: typeof workout.workoutMusicVolume === 'number' ? workout.workoutMusicVolume : null,
+    coachId: typeof workout.coachId === 'string' ? workout.coachId : null,
     blocks: (workout.blocks || []).map((b: any) => sanitizePlayerBlock(b, movementCanonical)),
   };
 }

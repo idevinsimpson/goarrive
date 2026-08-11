@@ -414,10 +414,12 @@ export default function IntakeForm() {
         collection(db, 'intakeSubmissions'),
         userCred.user.uid
       );
+      // Credentials must never be persisted to Firestore — coaches can read this doc.
+      const { password: _password, confirmPassword: _confirmPassword, ...intakeData } = formData;
       await setDoc(intakeRef, {
         uid: userCred.user.uid,
         coachId: coachId || 'unassigned',
-        ...formData,
+        ...intakeData,
         ...(ref ? { programRef: ref } : {}),
         ...(source ? { programSource: source } : {}),
         submittedAt: Timestamp.now(),

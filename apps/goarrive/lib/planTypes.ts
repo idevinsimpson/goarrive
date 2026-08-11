@@ -447,7 +447,7 @@ export interface MemberPlanData {
   contractEndAt?: FirestoreTimestamp;    // Timestamp = contractStartAt + contractLengthMonths
   acceptedSnapshotId?: string;    // references acceptedPlanSnapshots/{id}
   stripeCustomerId?: string;      // Stripe customer ID on coach connected account
-  checkoutStatus?: 'pending_payment' | 'paid' | 'pay_in_full_paid' | 'failed';
+  checkoutStatus?: 'pending_payment' | 'paid' | 'pay_in_full_paid' | 'free_active' | 'cancelled' | 'failed';
 
   // No-show grace period (per-plan override, takes precedence over coach-level)
   noShowGraceMinutes?: number;
@@ -575,10 +575,11 @@ export function calculatePricing(
       p.contractMonths || (p.contractLengthMonths as ContractLength) || 12,
       p.phases || [],
       {
-        hourlyRate: p.hourlyRate || p.pricingInputs?.hourlyRate || 100,
-        sessionLengthMinutes: p.sessionLengthMinutes || p.pricingInputs?.sessionLengthMinutes || 60,
-        checkInCallLengthMinutes: p.checkInCallMinutes || p.pricingInputs?.checkInCallLengthMinutes || 30,
-        programBuildTimeHours: p.programBuildTimeHours || p.pricingInputs?.programBuildTimeHours || 5,
+        // ?? (not ||) so an explicit 0 survives — $0/free plans are valid.
+        hourlyRate: p.hourlyRate ?? p.pricingInputs?.hourlyRate ?? 100,
+        sessionLengthMinutes: p.sessionLengthMinutes ?? p.pricingInputs?.sessionLengthMinutes ?? 60,
+        checkInCallLengthMinutes: p.checkInCallMinutes ?? p.pricingInputs?.checkInCallLengthMinutes ?? 30,
+        programBuildTimeHours: p.programBuildTimeHours ?? p.pricingInputs?.programBuildTimeHours ?? 5,
       },
       p.sessionGuidanceProfiles || [],
       p.commitToSave?.active ?? p.commitToSaveAddOnActive ?? true,
@@ -679,7 +680,7 @@ function _calculatePricing(
     displayMonthlyPrice += nutritionMonthlyCost;
   }
 
-  const isManualOverride = typeof manualMonthlyOverride === 'number' && manualMonthlyOverride > 0;
+  const isManualOverride = typeof manualMonthlyOverride === 'number' && manualMonthlyOverride >= 0;
   if (isManualOverride) {
     const freq = overrideFrequency ?? 'month';
     if (freq === 'week') {
@@ -690,6 +691,9 @@ function _calculatePricing(
       displayMonthlyPrice = manualMonthlyOverride;
     }
   }
+
+  // A $0 override (free plan) is valid; CTS savings must never push the price negative.
+  displayMonthlyPrice = Math.max(0, displayMonthlyPrice);
 
   const totalSessions = totalSessionsPerWeek * totalWeeks;
   const perSessionPrice = displayMonthlyPrice > 0 && totalSessions > 0 ? (displayMonthlyPrice * contractLengthMonths) / totalSessions : 0;

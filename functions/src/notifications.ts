@@ -39,7 +39,8 @@ export type MessageType =
   | 'feedback_ack'
   | 'feedback_shipped'
   | 'feedback_planned'
-  | 'feedback_admin_alert';
+  | 'feedback_admin_alert'
+  | 'lead_admin_alert';
 
 export interface NotificationRecipient {
   uid: string;
@@ -459,4 +460,71 @@ export function resetProviders(): void {
   _emailProvider = null;
   _smsProvider = null;
   _pushProvider = null;
+}
+
+// ─── Coach FCM push: new member joined ──────────────────────────────────────
+
+/**
+ * notifyCoachOfNewMember — FCM push to a coach when a member joins their
+ * roster. Shared by onMemberCreated (self-signup with a coach selected) and
+ * adminAssignLeadToCoach (lead assignment is an update, so the onCreate
+ * trigger never fires for it).
+ */
+export async function notifyCoachOfNewMember(coachId: string, memberName: string): Promise<void> {
+  const TAG = '[notifyCoachOfNewMember]';
+
+  const tokensSnap = await db
+    .collection('coaches')
+    .doc(coachId)
+    .collection('fcmTokens')
+    .get();
+
+  // Also check legacy root-level token field
+  const coachDoc = await db.collection('coaches').doc(coachId).get();
+  const legacyToken = coachDoc.exists
+    ? (coachDoc.data()?.fcmToken as string | undefined)
+    : undefined;
+
+  const tokens: string[] = [];
+  tokensSnap.forEach((doc) => {
+    const t = doc.data()?.token as string | undefined;
+    if (t) tokens.push(t);
+  });
+  if (legacyToken && !tokens.includes(legacyToken)) {
+    tokens.push(legacyToken);
+  }
+
+  if (tokens.length === 0) {
+    console.log(TAG, 'No FCM tokens for coach', coachId, '— skipping push');
+    return;
+  }
+
+  const title = 'New Member Signed Up';
+  const body = `${memberName} just joined your roster.`;
+
+  for (const token of tokens) {
+    try {
+      await admin.messaging().send({
+        token,
+        notification: { title, body },
+        webpush: {
+          notification: { icon: '/icon-192.png', badge: '/icon-192.png' },
+        },
+      });
+    } catch (sendErr: any) {
+      // Clean up stale tokens
+      if (
+        sendErr?.code === 'messaging/registration-token-not-registered' ||
+        sendErr?.code === 'messaging/invalid-registration-token'
+      ) {
+        console.log(TAG, 'Removing stale token for coach', coachId);
+        const staleDoc = tokensSnap.docs.find((d) => d.data()?.token === token);
+        if (staleDoc) await staleDoc.ref.delete();
+      } else {
+        console.warn(TAG, 'FCM send failed:', sendErr);
+      }
+    }
+  }
+
+  console.log(TAG, 'Notified coach', coachId, 'about new member', memberName);
 }

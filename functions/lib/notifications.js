@@ -48,6 +48,7 @@ exports.resetNotificationProviders = resetNotificationProviders;
 exports.getProviderHealth = getProviderHealth;
 exports.sendNotification = sendNotification;
 exports.resetProviders = resetProviders;
+exports.notifyCoachOfNewMember = notifyCoachOfNewMember;
 const admin = __importStar(require("firebase-admin"));
 const db = admin.firestore();
 // ─── Mock Providers ──────────────────────────────────────────────────────────
@@ -373,5 +374,67 @@ function resetProviders() {
     _emailProvider = null;
     _smsProvider = null;
     _pushProvider = null;
+}
+// ─── Coach FCM push: new member joined ──────────────────────────────────────
+/**
+ * notifyCoachOfNewMember — FCM push to a coach when a member joins their
+ * roster. Shared by onMemberCreated (self-signup with a coach selected) and
+ * adminAssignLeadToCoach (lead assignment is an update, so the onCreate
+ * trigger never fires for it).
+ */
+async function notifyCoachOfNewMember(coachId, memberName) {
+    var _a;
+    const TAG = '[notifyCoachOfNewMember]';
+    const tokensSnap = await db
+        .collection('coaches')
+        .doc(coachId)
+        .collection('fcmTokens')
+        .get();
+    // Also check legacy root-level token field
+    const coachDoc = await db.collection('coaches').doc(coachId).get();
+    const legacyToken = coachDoc.exists
+        ? (_a = coachDoc.data()) === null || _a === void 0 ? void 0 : _a.fcmToken
+        : undefined;
+    const tokens = [];
+    tokensSnap.forEach((doc) => {
+        var _a;
+        const t = (_a = doc.data()) === null || _a === void 0 ? void 0 : _a.token;
+        if (t)
+            tokens.push(t);
+    });
+    if (legacyToken && !tokens.includes(legacyToken)) {
+        tokens.push(legacyToken);
+    }
+    if (tokens.length === 0) {
+        console.log(TAG, 'No FCM tokens for coach', coachId, '— skipping push');
+        return;
+    }
+    const title = 'New Member Signed Up';
+    const body = `${memberName} just joined your roster.`;
+    for (const token of tokens) {
+        try {
+            await admin.messaging().send({
+                token,
+                notification: { title, body },
+                webpush: {
+                    notification: { icon: '/icon-192.png', badge: '/icon-192.png' },
+                },
+            });
+        }
+        catch (sendErr) {
+            // Clean up stale tokens
+            if ((sendErr === null || sendErr === void 0 ? void 0 : sendErr.code) === 'messaging/registration-token-not-registered' ||
+                (sendErr === null || sendErr === void 0 ? void 0 : sendErr.code) === 'messaging/invalid-registration-token') {
+                console.log(TAG, 'Removing stale token for coach', coachId);
+                const staleDoc = tokensSnap.docs.find((d) => { var _a; return ((_a = d.data()) === null || _a === void 0 ? void 0 : _a.token) === token; });
+                if (staleDoc)
+                    await staleDoc.ref.delete();
+            }
+            else {
+                console.warn(TAG, 'FCM send failed:', sendErr);
+            }
+        }
+    }
+    console.log(TAG, 'Notified coach', coachId, 'about new member', memberName);
 }
 //# sourceMappingURL=notifications.js.map
