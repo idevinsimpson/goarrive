@@ -180,10 +180,13 @@ export default function MemberDetail({
     setPauseLoading(true);
     const isPaused = !!memberSubscription.pausedAt;
     const fnName = isPaused ? 'resumeStripeSubscription' : 'pauseStripeSubscription';
+    console.info('[MemberDetail] pause tapped', { memberSubscriptionId: memberSubscription?.id, pausedAt: memberSubscription?.pausedAt, fnName });
     try {
       const fn = httpsCallable(getFunctions(), fnName);
-      await fn({ memberId: member.id, stripeSubscriptionId: memberSubscription.id });
+      const result = await fn({ memberId: member.id, stripeSubscriptionId: memberSubscription.id });
+      console.info('[MemberDetail] pause result', result);
     } catch (err: any) {
+      console.error('[MemberDetail] pause error', err);
       const msg = err?.message || `Failed to ${isPaused ? 'resume' : 'pause'} subscription`;
       if (Platform.OS === 'web') window.alert(msg);
       else Alert.alert('Error', msg);
