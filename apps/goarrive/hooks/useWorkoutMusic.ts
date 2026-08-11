@@ -659,8 +659,11 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
         : await fetchTrack(style, first);
       if (seq !== seqRef.current || !res) return;
       if (musicElRef.current) {
+        // advance() may have attached a track for this style while fetchReadyList
+        // was in flight; skip to avoid overwriting it with a server-fallback style.
+        if (currentTrackRef.current?.style === style) return;
         if (currentTrackRef.current) historyRef.current.push(currentTrackRef.current);
-        attachTrack(res.url, res.style ?? style, res.trackIndex ?? first);
+        attachTrack(res.url, style, res.trackIndex ?? first);
         prefetchUpcoming(style);
       }
       // Not started yet (ready screen): the fetched URL waits in urlCacheRef
