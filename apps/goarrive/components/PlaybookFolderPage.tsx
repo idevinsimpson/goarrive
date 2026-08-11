@@ -35,7 +35,8 @@ import { db } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import { Icon } from './Icon';
 import { CONTENT_BOTTOM_CLEARANCE } from '../lib/tabBarStyle';
-import type { PlaybookFolder, PlaybookFolderMember, PlaybookFolderMemberStatus } from '../lib/types';
+import type { PlaybookFolder, PlaybookFolderMember, PlaybookFolderMemberStatus, PlaybookFolderSubscriptionPath } from '../lib/types';
+import { MUSIC_STYLE_OPTIONS } from '../constants/musicStyles';
 
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
@@ -74,6 +75,14 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
+
+  // Subscription paths editor
+  const [showAddPath, setShowAddPath] = useState(false);
+  const [newPathLabel, setNewPathLabel] = useState('');
+  const [newPathTemplateId, setNewPathTemplateId] = useState('');
+  const [newPathMusicStyle, setNewPathMusicStyle] = useState('');
+  const [newPathPriceDollars, setNewPathPriceDollars] = useState('');
+  const [savingPath, setSavingPath] = useState(false);
 
   // Three-dot member menu
   const [memberMenuId, setMemberMenuId] = useState<string | null>(null);
@@ -152,6 +161,53 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
     }
     setMemberMenuId(null);
   }, []);
+
+  const addSubscriptionPath = useCallback(async () => {
+    if (!folderId || !newPathLabel.trim()) return;
+    setSavingPath(true);
+    try {
+      const existing: PlaybookFolderSubscriptionPath[] = folder?.subscriptionPaths ?? [];
+      const priceDollars = parseFloat(newPathPriceDollars);
+      const pricePerMonthCents = Number.isFinite(priceDollars) && priceDollars > 0
+        ? Math.round(priceDollars * 100)
+        : undefined;
+      const newPath: PlaybookFolderSubscriptionPath = {
+        id: typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+        label: newPathLabel.trim(),
+        templatePlaybookId: newPathTemplateId,
+        musicStyle: newPathMusicStyle || undefined,
+        pricePerMonthCents,
+      };
+      await updateDoc(doc(db, 'playbook_folders', folderId), {
+        subscriptionPaths: [...existing, newPath],
+        updatedAt: serverTimestamp(),
+      });
+      setNewPathLabel('');
+      setNewPathTemplateId('');
+      setNewPathMusicStyle('');
+      setNewPathPriceDollars('');
+      setShowAddPath(false);
+    } catch (e) {
+      console.error('[PlaybookFolderPage] Add path error:', e);
+    } finally {
+      setSavingPath(false);
+    }
+  }, [folderId, folder?.subscriptionPaths, newPathLabel, newPathTemplateId, newPathMusicStyle, newPathPriceDollars]);
+
+  const deleteSubscriptionPath = useCallback(async (pathId: string) => {
+    if (!folderId) return;
+    try {
+      const existing: PlaybookFolderSubscriptionPath[] = folder?.subscriptionPaths ?? [];
+      await updateDoc(doc(db, 'playbook_folders', folderId), {
+        subscriptionPaths: existing.filter((p) => p.id !== pathId),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.error('[PlaybookFolderPage] Delete path error:', e);
+    }
+  }, [folderId, folder?.subscriptionPaths]);
 
   const filteredMembers = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -358,12 +414,100 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
               textAlignVertical="top"
             />
 
+            {/* Subscription paths editor */}
+            <Text style={s.sheetSubtitle}>Program Paths</Text>
+            <Text style={[s.settingDesc, { marginBottom: 10 }]}>
+              Each path maps to a template playbook and appears as a choice during member onboarding.
+            </Text>
+
+            {(folder.subscriptionPaths ?? []).map((path) => (
+              <View key={path.id} style={s.pathRow}>
+                <Text style={s.pathRowLabel} numberOfLines={1}>{path.label}</Text>
+                <Pressable hitSlop={8} onPress={() => deleteSubscriptionPath(path.id)}>
+                  <Text style={s.pathDeleteText}>Remove</Text>
+                </Pressable>
+              </View>
+            ))}
+
+            {showAddPath ? (
+              <View style={s.addPathForm}>
+                <TextInput
+                  style={s.textField}
+                  value={newPathLabel}
+                  onChangeText={setNewPathLabel}
+                  placeholder="Path label (e.g. Beginner, Full Gym)"
+                  placeholderTextColor="#4A5568"
+                />
+                <Text style={[s.settingDesc, { marginBottom: 6 }]}>Template playbook</Text>
+                {templatePlaybooks.length === 0 ? (
+                  <Text style={[s.settingDesc, { marginBottom: 10 }]}>No template playbooks — add one first.</Text>
+                ) : (
+                  <View style={s.pickerRow}>
+                    {templatePlaybooks.map((pb) => (
+                      <Pressable
+                        key={pb.id}
+                        style={[s.pickerChip, newPathTemplateId === pb.id ? s.pickerChipActive : {}]}
+                        onPress={() => setNewPathTemplateId(pb.id)}
+                      >
+                        <Text style={[s.pickerChipText, newPathTemplateId === pb.id ? s.pickerChipTextActive : {}]}
+                          numberOfLines={1}>
+                          {pb.name}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+                <Text style={[s.settingDesc, { marginBottom: 6 }]}>Music style (optional)</Text>
+                <View style={s.pickerRow}>
+                  {MUSIC_STYLE_OPTIONS.slice(0, 6).map((opt) => (
+                    <Pressable
+                      key={opt.value}
+                      style={[s.pickerChip, newPathMusicStyle === opt.value ? s.pickerChipActive : {}]}
+                      onPress={() => setNewPathMusicStyle(prev => prev === opt.value ? '' : opt.value)}
+                    >
+                      <Text style={[s.pickerChipText, newPathMusicStyle === opt.value ? s.pickerChipTextActive : {}]}>
+                        {opt.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <Text style={[s.settingDesc, { marginTop: 8, marginBottom: 6 }]}>Price per month (USD, optional — used by funnel checkout)</Text>
+                <TextInput
+                  style={s.textField}
+                  value={newPathPriceDollars}
+                  onChangeText={setNewPathPriceDollars}
+                  placeholder="e.g. 19.99"
+                  placeholderTextColor="#4A5568"
+                  keyboardType="decimal-pad"
+                />
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                  <Pressable
+                    style={[s.saveBtn, { flex: 1, backgroundColor: '#1E2A3A' }]}
+                    onPress={() => { setShowAddPath(false); setNewPathLabel(''); setNewPathTemplateId(''); setNewPathMusicStyle(''); setNewPathPriceDollars(''); }}
+                  >
+                    <Text style={[s.saveBtnText, { color: '#8A95A3' }]}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[s.saveBtn, { flex: 2 }, (!newPathLabel.trim() || savingPath) ? { opacity: 0.5 } : {}]}
+                    onPress={addSubscriptionPath}
+                    disabled={!newPathLabel.trim() || savingPath}
+                  >
+                    <Text style={s.saveBtnText}>{savingPath ? 'Adding...' : 'Add Path'}</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : (
+              <Pressable style={s.addPathBtn} onPress={() => setShowAddPath(true)}>
+                <Text style={s.addPathBtnText}>+ Add path</Text>
+              </Pressable>
+            )}
+
             <Pressable
               style={[s.saveBtn, savingSettings && { opacity: 0.6 }]}
               onPress={saveSettings}
               disabled={savingSettings}
             >
-              <Text style={s.saveBtnText}>{savingSettings ? 'Saving...' : 'Save'}</Text>
+              <Text style={s.saveBtnText}>{savingSettings ? 'Saving...' : 'Save Settings'}</Text>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -648,5 +792,74 @@ const s = StyleSheet.create({
     fontFamily: FH,
     fontSize: 15,
     color: '#fff',
+  },
+  pathRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0E1117',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#2D3748',
+  },
+  pathRowLabel: {
+    flex: 1,
+    fontFamily: FB,
+    fontSize: 13,
+    color: '#F0F4F8',
+  },
+  pathDeleteText: {
+    fontFamily: FB,
+    fontSize: 12,
+    color: '#EF4444',
+  },
+  addPathBtn: {
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#7C3AED44',
+    marginBottom: 8,
+  },
+  addPathBtnText: {
+    fontFamily: FB,
+    fontSize: 13,
+    color: '#A78BFA',
+  },
+  addPathForm: {
+    backgroundColor: '#0E1117',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#2D3748',
+  },
+  pickerRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 10,
+  },
+  pickerChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#1A2332',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#2D3748',
+  },
+  pickerChipActive: {
+    backgroundColor: '#7C3AED22',
+    borderColor: '#7C3AED',
+  },
+  pickerChipText: {
+    fontFamily: FB,
+    fontSize: 12,
+    color: '#8A95A3',
+  },
+  pickerChipTextActive: {
+    color: '#A78BFA',
   },
 });

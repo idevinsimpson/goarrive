@@ -5,8 +5,8 @@
  * Query params: submissionId (required), cancelled (optional — returned from Stripe cancel)
  *
  * Displayed after PR-G questionnaire step 3. Loads the onboarding submission,
- * shows $19.99/mo pricing, accepts an optional discount code, then calls
- * createFunnelCheckoutSession and redirects to Stripe Checkout.
+ * looks up the subscription path's monthly price, accepts an optional discount
+ * code, then calls createFunnelCheckoutSession and redirects to Stripe Checkout.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -29,12 +29,24 @@ const ACCENT = '#6EBB7A';
 const RED = '#E05252';
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'System';
 
+const FALLBACK_MONTHLY_CENTS = 1999;
+
 interface Submission {
   coachId: string;
   programName?: string;
   status?: string;
   firstName?: string;
   email?: string;
+  folderId?: string;
+  subscriptionPathId?: string;
+}
+
+interface SubscriptionPath {
+  id: string;
+  label: string;
+  templatePlaybookId: string;
+  musicStyle?: string;
+  pricePerMonthCents?: number;
 }
 
 export default function FunnelCheckoutScreen() {
@@ -43,6 +55,8 @@ export default function FunnelCheckoutScreen() {
   const { submissionId, cancelled } = useLocalSearchParams<{ submissionId: string; cancelled?: string }>();
 
   const [submission, setSubmission] = useState<Submission | null>(null);
+  const [monthlyCents, setMonthlyCents] = useState<number>(FALLBACK_MONTHLY_CENTS);
+  const [resolvedProgramName, setResolvedProgramName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [discountCode, setDiscountCode] = useState('');
   const [checkoutLoading, setCheckoutLoading] = useState(false);
@@ -53,10 +67,28 @@ export default function FunnelCheckoutScreen() {
     (async () => {
       try {
         const snap = await getDoc(doc(db, 'onboarding_submissions', submissionId));
-        if (snap.exists()) {
-          setSubmission(snap.data() as Submission);
-        } else {
+        if (!snap.exists()) {
           setError('Submission not found. Please restart the sign-up flow.');
+          return;
+        }
+        const sub = snap.data() as Submission;
+        setSubmission(sub);
+
+        if (sub.folderId) {
+          try {
+            const folderSnap = await getDoc(doc(db, 'playbook_folders', sub.folderId));
+            if (folderSnap.exists()) {
+              const folderData = folderSnap.data() as { name?: string; subscriptionPaths?: SubscriptionPath[] };
+              if (folderData.name) setResolvedProgramName(folderData.name);
+              const paths = folderData.subscriptionPaths || [];
+              const path = paths.find((p) => p.id === sub.subscriptionPathId);
+              if (path?.pricePerMonthCents && path.pricePerMonthCents > 0) {
+                setMonthlyCents(path.pricePerMonthCents);
+              }
+            }
+          } catch {
+            // Fall back to default price on lookup failure — server will do the same on checkout.
+          }
         }
       } catch (err) {
         setError('Failed to load your submission. Please try again.');
@@ -117,7 +149,8 @@ export default function FunnelCheckoutScreen() {
     );
   }
 
-  const programName = submission.programName || 'Coaching Program';
+  const programName = resolvedProgramName || submission.programName || 'Coaching Program';
+  const priceDollars = (monthlyCents / 100).toFixed(2);
 
   return (
     <View style={[s.container, { paddingTop: Math.max(Platform.OS === 'web' ? 12 : 56, insets.top) }]}>
@@ -139,7 +172,7 @@ export default function FunnelCheckoutScreen() {
         <View style={s.card}>
           <Text style={s.cardTitle}>{programName}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4, marginTop: 8 }}>
-            <Text style={{ color: '#FFF', fontSize: 36, fontWeight: '800', fontFamily: FH }}>$19.99</Text>
+            <Text style={{ color: '#FFF', fontSize: 36, fontWeight: '800', fontFamily: FH }}>${priceDollars}</Text>
             <Text style={{ color: MUTED, fontSize: 14 }}>/month</Text>
           </View>
           <Text style={{ color: MUTED, fontSize: 12, marginTop: 6, lineHeight: 18 }}>
