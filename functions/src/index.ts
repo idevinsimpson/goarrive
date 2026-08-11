@@ -1001,10 +1001,47 @@ export const createFunnelCheckoutSession = onCall(
         promotionCodeId = codeData.stripePromotionCodeId as string;
       }
 
-      // $19.99/mo hardcoded — TODO: Justin pricing
-      const monthlyAmountCents = 1999;
+      // Resolve price from Playbook Folder subscription path (PM audit follow-up:
+      // "PR-H must read price from the subscription-path config, not the string").
+      // Fallback to $19.99 only if the folder/path is missing a configured price
+      // (e.g. legacy folders created before pricePerMonthCents landed).
+      const FALLBACK_MONTHLY_CENTS = 1999;
+      let monthlyAmountCents = FALLBACK_MONTHLY_CENTS;
+      let resolvedProgramName: string | undefined;
 
-      const programName = (submission.programName as string) || 'GoArrive Coaching Program';
+      const folderId = submission.folderId as string | undefined;
+      const subscriptionPathId = submission.subscriptionPathId as string | undefined;
+      if (folderId) {
+        try {
+          const folderSnap = await db.collection('playbook_folders').doc(folderId).get();
+          if (folderSnap.exists) {
+            const folderData = folderSnap.data()!;
+            resolvedProgramName = (folderData.name as string) || undefined;
+            const paths = (folderData.subscriptionPaths as Array<{ id: string; pricePerMonthCents?: number }>) || [];
+            const path = paths.find((p) => p.id === subscriptionPathId);
+            if (path?.pricePerMonthCents && path.pricePerMonthCents > 0) {
+              monthlyAmountCents = path.pricePerMonthCents;
+            } else {
+              console.warn('createFunnelCheckoutSession: path has no pricePerMonthCents, using fallback', {
+                folderId,
+                subscriptionPathId,
+                fallbackCents: FALLBACK_MONTHLY_CENTS,
+              });
+            }
+          } else {
+            console.warn('createFunnelCheckoutSession: folder not found, using fallback price', { folderId });
+          }
+        } catch (e) {
+          console.error('createFunnelCheckoutSession: folder lookup failed, using fallback price', {
+            folderId,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      } else {
+        console.warn('createFunnelCheckoutSession: submission missing folderId, using fallback price', { submissionId });
+      }
+
+      const programName = resolvedProgramName || (submission.programName as string) || 'GoArrive Coaching Program';
 
       const sessionParams: Stripe.Checkout.SessionCreateParams = {
         payment_method_types: ['card'],
