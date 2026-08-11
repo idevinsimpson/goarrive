@@ -1127,28 +1127,37 @@ service cloud.firestore {
       allow delete: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
     }
 
+    // ONBOARDING SUBMISSIONS (Phase 4 — funnel enrollment)
+    // Public funnel: anyone (anon) can create; only coach/admin can read.
+    // Status transitions (status='enrolled', etc.) are server-side only via
+    // enrollSubscriber Cloud Function.
+    // ─────────────────────────────────────────────
+    match /onboarding_submissions/{submissionId} {
+      // Schema guard: require coachId string + valid email format so junk floods
+      // can't ship (mirrors intakeSubmissions plaintext-password lesson — don't
+      // let anonymous collections accept arbitrary payloads).
+      allow create: if request.resource.data.coachId is string
+        && request.resource.data.coachId.size() > 0
+        && request.resource.data.coachId.size() < 200
+        && request.resource.data.email is string
+        && request.resource.data.email.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$')
+        && request.resource.data.email.size() < 320;
+      allow read: if isAuthenticated() && (
+        isCoachOrBootstrap(resource.data.coachId)
+        || isPlatformAdmin()
+      );
+      allow update: if false;               // server-only status transitions
+      allow delete: if isPlatformAdmin();   // admin cleanup lever only
+    }
+
     // ─────────────────────────────────────────────
     // DRIP EMAIL QUEUE (Phase 4 — subscription enrollment drip emails)
     // Written by Cloud Functions (server-only). Coaches and admins can read.
     // No client writes — status transitions are server-side only.
     // ─────────────────────────────────────────────
-
     match /drip_email_queue/{queueId} {
       allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
       allow create, update, delete: if false;
-    }
-
-    // ─────────────────────────────────────────────
-    // ONBOARDING SUBMISSIONS (Phase 4 — funnel enrollment)
-    // Written by members/guests via funnel UI. Coaches and admins can read.
-    // Status transitions (enrolled) are Cloud Function server-side only.
-    // ─────────────────────────────────────────────
-
-    match /onboarding_submissions/{submissionId} {
-      allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
-      allow create: if true; // guests can submit the funnel form
-      allow update: if false; // server-only status transitions
-      allow delete: if isPlatformAdmin();
     }
 
     match /{document=**} {
