@@ -38,8 +38,10 @@ export default function RootLayout() {
             <Stack.Screen name="(auth)" />
             <Stack.Screen name="(app)" />
             <Stack.Screen name="(member)" />
+            <Stack.Screen name="(funnel)" />
             <Stack.Screen name="intake/index" />
             <Stack.Screen name="intake/[coachId]" />
+            <Stack.Screen name="checkout/[submissionId]" />
             <Stack.Screen name="coach-signup" />
             <Stack.Screen name="coach-apply" />
             <Stack.Screen name="coach-discovery" />

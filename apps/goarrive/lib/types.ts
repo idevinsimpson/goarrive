@@ -14,6 +14,7 @@ export interface PlaybookFolderSubscriptionPath {
   label: string;
   templatePlaybookId: string;
   musicStyle?: string;
+  pricePerMonthCents?: number;
 }
 
 export interface PlaybookFolderEmailTemplate {
