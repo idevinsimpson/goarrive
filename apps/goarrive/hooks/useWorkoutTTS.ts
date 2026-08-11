@@ -184,6 +184,7 @@ let musicVolumeGain = 1;
 let audioCtx: AudioContext | null = null;
 let voiceGain: GainNode | null = null;
 let musicGain: GainNode | null = null;
+let mediaStreamDest: MediaStreamAudioDestinationNode | null = null;
 const wiredElements = new WeakMap<HTMLMediaElement, GainBus>();
 
 function ensureAudioGraph(): void {
@@ -200,6 +201,9 @@ function ensureAudioGraph(): void {
     musicGain = audioCtx.createGain();
     musicGain.gain.value = musicVolumeGain;
     musicGain.connect(audioCtx.destination);
+    mediaStreamDest = audioCtx.createMediaStreamDestination();
+    voiceGain.connect(mediaStreamDest);
+    musicGain.connect(mediaStreamDest);
     console.info('[VOICE-AUDIT] audio graph online', {
       state: audioCtx.state, voiceGain: voiceVolume, musicGain: musicVolumeGain,
     });
@@ -294,6 +298,13 @@ export function setMusicVolume(v: number): void {
   }
 }
 
+// Returns the MediaStream carrying both voice and music output, for use as
+// the audio source of the canvas-stream PiP video element (Phase 2+).
+// Returns null before the audio graph is initialized.
+export function getPipAudioStream(): MediaStream | null {
+  return mediaStreamDest ? mediaStreamDest.stream : null;
+}
+
 // Constructor helper. `new Audio(url)` sets src synchronously, which is too
 // late for crossOrigin — MediaElementAudioSourceNode would taint the graph
 // and produce silence. This helper enforces the correct order:
@@ -330,6 +341,8 @@ export function resetAudioPool(): void {
   blessedGenericPlayers.length = 0;
   audioUnlocked = false;
   stopKeepalive();
+  try { mediaStreamDest?.disconnect(); } catch {}
+  mediaStreamDest = null;
 }
 
 function poolKeyForCue(key: CueKey): string {
