@@ -324,6 +324,8 @@ export interface MemberSubscription {
   currentPeriodEnd: FirestoreTimestamp;
   createdAt: FirestoreTimestamp;
   updatedAt: FirestoreTimestamp;
+  pausedAt?: FirestoreTimestamp;
+  pauseHistory?: Array<{ pausedAt: FirestoreTimestamp; resumedAt: FirestoreTimestamp; extendedDays: number }>;
 }
 
 /** billingEvents/{eventId} — append-only, idempotent by stripeEventId */

@@ -407,15 +407,20 @@ export default function MemberDetail({
                   {memberSubscription.pausedAt ? 'Paused — billing voided' : 'Active — billing on'}
                 </Text>
               </View>
-              <TouchableOpacity
-                style={[s.subBtn, memberSubscription.pausedAt ? s.subBtnResume : s.subBtnPause]}
-                onPress={handleToggleSubscriptionPause}
-                disabled={pauseLoading}
-              >
-                {pauseLoading
-                  ? <ActivityIndicator size="small" color={FG} />
-                  : <Text style={s.subBtnText}>{memberSubscription.pausedAt ? 'Resume' : 'Pause'}</Text>}
-              </TouchableOpacity>
+              <View style={{ alignItems: 'flex-end' }}>
+                <TouchableOpacity
+                  style={[s.subBtn, memberSubscription.pausedAt ? s.subBtnResume : s.subBtnPause]}
+                  onPress={handleToggleSubscriptionPause}
+                  disabled={pauseLoading}
+                >
+                  {pauseLoading
+                    ? <ActivityIndicator size="small" color={FG} />
+                    : <Text style={s.subBtnText}>{memberSubscription.pausedAt ? 'Resume' : 'Pause'}</Text>}
+                </TouchableOpacity>
+                {memberSubscription.pausedAt && (
+                  <Text style={s.subResumeHint}>Contract end extends by paused days on resume.</Text>
+                )}
+              </View>
             </View>
           )}
 
@@ -863,6 +868,14 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: FG,
+    fontFamily: FB,
+  },
+  subResumeHint: {
+    fontSize: 10,
+    color: '#8899AA',
+    marginTop: 4,
+    maxWidth: 160,
+    textAlign: 'right',
     fontFamily: FB,
   },
   body: {
