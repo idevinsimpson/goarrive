@@ -1406,9 +1406,10 @@ export const startFreePlan = onCall(
  * Handled events:
  *   - checkout.session.completed
  *   - invoice.paid
- *   - invoice.payment_failed
+ *   - invoice.payment_succeeded  (PR-K: clears lapse on recovery via handleInvoicePaid)
+ *   - invoice.payment_failed     (PR-K: marks lapsed, pauses drip, notifies coach, emails member)
  *   - customer.subscription.created
- *   - customer.subscription.updated
+ *   - customer.subscription.updated  (PR-K: clears lapse when status=active)
  *   - customer.subscription.deleted
  *   - charge.refunded
  *
@@ -1543,6 +1544,7 @@ async function processStripeEvent(tag: string, event: Stripe.Event, res: any) {
         await handleCheckoutSessionCompleted(event.data.object as Stripe.Checkout.Session, event.id);
         break;
       case 'invoice.paid':
+      case 'invoice.payment_succeeded':
         await handleInvoicePaid(event.data.object as Stripe.Invoice, event.id);
         break;
       case 'invoice.payment_failed':
@@ -2231,6 +2233,7 @@ async function handleInvoicePaid(invoice: Stripe.Invoice, eventId: string) {
 }
 
 async function handleInvoicePaymentFailed(invoice: Stripe.Invoice, eventId: string) {
+  const TAG = '[handleInvoicePaymentFailed]';
   const sub = (invoice as any).subscription as string | null;
   if (!sub) return;
 
@@ -2239,13 +2242,97 @@ async function handleInvoicePaymentFailed(invoice: Stripe.Invoice, eventId: stri
     .limit(1)
     .get();
 
-  if (!subSnap.empty) {
-    const planId = subSnap.docs[0].data().planId as string;
+  if (subSnap.empty) {
+    console.log(TAG, 'No memberSubscription found for', sub);
+    return;
+  }
+
+  const subDoc = subSnap.docs[0];
+  const subData = subDoc.data();
+  const { planId, memberId, coachId } = subData;
+
+  // 1. Mark member_plan as failed
+  if (planId) {
     await db.collection('member_plans').doc(planId).update({
       checkoutStatus: 'failed',
+      paymentStatus: 'lapsed',
       updatedAt: FieldValue.serverTimestamp(),
     });
-    console.log('[handleInvoicePaymentFailed] Plan', planId, 'marked payment_failed');
+    console.log(TAG, 'Plan', planId, 'marked payment_failed / lapsed');
+  }
+
+  // 2. Mark memberSubscription with paymentStatus=lapsed
+  await subDoc.ref.update({
+    paymentStatus: 'lapsed',
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  // 3. Pause drip queue for this member — set dripPaused=true on all ready drip docs
+  if (memberId) {
+    const dripSnap = await db.collection('drip_email_queue')
+      .where('memberId', '==', memberId)
+      .where('status', '==', 'ready')
+      .get();
+    const batch = db.batch();
+    dripSnap.docs.forEach((d) => batch.update(d.ref, { dripPaused: true, updatedAt: FieldValue.serverTimestamp() }));
+    if (!dripSnap.empty) await batch.commit();
+    console.log(TAG, 'Paused', dripSnap.size, 'drip queue docs for member', memberId);
+  }
+
+  // 4. Write notification_log for the coach
+  if (coachId && memberId) {
+    await db.collection('notification_log').add({
+      type: 'member_payment_lapsed',
+      coachId,
+      memberId,
+      stripeSubscriptionId: sub,
+      stripeInvoiceId: invoice.id,
+      billingEventId: eventId,
+      read: false,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    console.log(TAG, 'Coach notification_log written for coach', coachId, 'member', memberId);
+  }
+
+  // 5. Send Resend email to member
+  if (memberId) {
+    try {
+      const memberSnap = await db.collection('members').doc(memberId).get();
+      const memberData = memberSnap.exists ? memberSnap.data()! : {};
+      const memberEmail = memberData.email as string | undefined;
+      const memberName = (memberData.name ?? memberData.displayName ?? 'there') as string;
+
+      if (memberEmail) {
+        const apiKey = emailApiKey.value();
+        if (apiKey) {
+          const res = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              from: 'GoArrive <noreply@goarrive.fit>',
+              to: [memberEmail],
+              subject: 'Action required: payment issue with your GoArrive subscription',
+              text: `Hi ${memberName},\n\nWe were unable to process your most recent payment for your GoArrive subscription.\n\nTo keep your coaching plan active, please update your payment method:\nhttps://goarrive.fit\n\nIf you have any questions, reply to this email or reach out to your coach.\n\nThe GoArrive Team`,
+            }),
+          });
+          if (!res.ok) {
+            const errText = await res.text();
+            console.error(TAG, 'Resend email failed for member', memberId, ':', errText);
+          } else {
+            console.log(TAG, 'Lapse email sent to', memberEmail);
+          }
+        } else {
+          console.warn(TAG, 'EMAIL_API_KEY not set — skipping lapse email for member', memberId);
+        }
+      } else {
+        console.warn(TAG, 'No email on member doc', memberId, '— skipping lapse email');
+      }
+    } catch (emailErr) {
+      console.error(TAG, 'Error sending lapse email for member', memberId, ':', emailErr);
+    }
   }
 }
 
@@ -2290,6 +2377,35 @@ async function handleSubscriptionUpsert(sub: Stripe.Subscription, eventId: strin
   );
 
   console.log('[handleSubscriptionUpsert] memberSubscription upserted for', sub.id);
+
+  // PR-K: If subscription recovers to active, clear lapse flags
+  if (sub.status === 'active' && memberId) {
+    // Clear paymentStatus on memberSubscription
+    await subRef.update({ paymentStatus: null, updatedAt: FieldValue.serverTimestamp() });
+
+    // Clear paymentStatus on member_plan if we have a planId
+    if (planId) {
+      await db.collection('member_plans').doc(planId).update({
+        paymentStatus: null,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    // Un-pause drip queue docs for this member
+    const dripSnap = await db.collection('drip_email_queue')
+      .where('memberId', '==', memberId)
+      .where('dripPaused', '==', true)
+      .get();
+    const batch = db.batch();
+    dripSnap.docs.forEach((d) => {
+      // Only resume docs that are still in ready state (not sent/failed)
+      if (d.data().status === 'ready') {
+        batch.update(d.ref, { dripPaused: false, updatedAt: FieldValue.serverTimestamp() });
+      }
+    });
+    if (!dripSnap.empty) await batch.commit();
+    console.log('[handleSubscriptionUpsert] Payment recovery: cleared lapse flags for member', memberId);
+  }
 }
 
 async function handleSubscriptionDeleted(sub: Stripe.Subscription, eventId: string) {
@@ -12689,6 +12805,13 @@ export const sendDripEmail = onSchedule(
 
     for (const qDoc of readySnap.docs) {
       const q = qDoc.data();
+
+      // PR-K: skip drip sends when member payment is lapsed
+      if (q.dripPaused === true) {
+        console.log('[sendDripEmail] Skipping drip for paused member', q.memberId ?? qDoc.id);
+        continue;
+      }
+
       const toEmail = q.email as string;
       const firstName = (q.firstName as string) ?? '';
       const rawSubject = (q.subject as string) ?? '';

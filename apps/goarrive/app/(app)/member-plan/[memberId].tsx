@@ -2963,6 +2963,7 @@ export default function MemberPlanScreen() {
   const [plan, setPlan] = useState<MemberPlanData | null>(null);
   const [questionnaire, setQuestionnaire] = useState<any>(null);
   const [memberName, setMemberName] = useState('');
+  const [memberPaymentStatus, setMemberPaymentStatus] = useState<string | undefined>(undefined);
   const [tab, setTab] = useState<'questionnaire' | 'plan'>('plan');
   const [isCoachMode, setIsCoachMode] = useState(true);
   const [showControls, setShowControls] = useState(false);
@@ -3178,6 +3179,8 @@ export default function MemberPlanScreen() {
     planKeyRef.current = planKey; // Store the resolved key for auto-save
     finalPlan.id = planKey; // Ensure plan.id is set for checkout and other lookups
     console.log('[loadData] Setting plan for:', finalPlan.memberName, 'planKey:', planKey);
+    // PR-K: Surface paymentStatus for lapse banner
+    setMemberPaymentStatus((finalPlan as any).paymentStatus as string | undefined);
     setPlan(finalPlan);
     setLoading(false);
   };
@@ -3369,6 +3372,17 @@ export default function MemberPlanScreen() {
               {saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}
             </Text>
           )}
+        </View>
+      )}
+
+      {/* ─── PR-K: PAYMENT LAPSE BANNER ───────────────────────────────────── */}
+      {memberPaymentStatus === 'lapsed' && (
+        <View style={{ marginHorizontal: 16, marginBottom: 8, backgroundColor: 'rgba(224,82,82,0.12)', borderWidth: 1, borderColor: 'rgba(224,82,82,0.3)', borderRadius: 10, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <Icon name="warning" size={18} color="#E05252" />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: '#E05252', fontWeight: '700', fontSize: 13, fontFamily: FH }}>Payment Paused</Text>
+            <Text style={{ color: '#E05252', fontSize: 12, marginTop: 2, opacity: 0.8 }}>This member's last payment failed. Drip emails are paused until payment recovers.</Text>
+          </View>
         </View>
       )}
 
