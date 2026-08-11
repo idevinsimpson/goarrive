@@ -1,36 +1,24 @@
-# Relay Handoff — Mandatory Post-Staging Protocol
+# Staging Handoff — Post-Deploy Protocol
 
-**This is a mandatory step. It is not optional. It runs every single time you deploy to staging.**
-
-## What is Relay?
-
-Relay (`<@U0B1YQS8L12>`) is an autonomous Slack bot running 24/7 on a dedicated cloud computer. When you mention it in `#dev-goarrive`, it immediately triggers Manus to perform a browser-based smoke test on the GoArrive staging environment and posts the result back in the same thread. If the smoke test fails, Relay will tag you directly with the specific issues found so you can fix and redeploy.
-
-This creates a fully autonomous Maia → Relay → Manus → Relay → Maia loop with no human required in the middle.
+**Updated 2026-08-11: Relay/Manus automated smoke tests are RETIRED (Devin, #goarrive-notes, 2026-08-11 ~11:40 AM ET: "Relay no longer does smoke tests. Devin will do them."). Do NOT mention `<@U0B1YQS8L12>` (Relay) after staging deploys — it will not respond.**
 
 ## The Rule
 
-**After every successful `npm run deploy:staging` (Step 4 of `/ship`), before creating the PR, you MUST post the following message in the `#dev-goarrive` Slack channel:**
+After every successful staging deploy, before reporting done:
 
-```
-<@U0B1YQS8L12> smoke test — [what changed, what to focus on]. Staging: https://goarrive--staging-gurfzjak.web.app
-```
+1. **Post the staging URL in `#dev-goarrive`** with: what changed, what to focus on, and anything that can't be tested yet. The channel suffix changes per deploy — always include the full URL.
+2. **Run an automated pre-validation pass yourself when feasible** (Browser Use E2E — stateless browser testing against staging is Maia's lane per `.claude/agent-task-routing.md`). Post the PASS/FAIL-per-route table in the same thread. Mark anything you can't drive as BLOCKED for Devin rather than skipping it silently.
+3. **Devin's manual staging review is the authoritative smoke test.** Tag him with the focus list. His verdict gates production consideration — never production deployment itself, which always requires his separate explicit go.
 
-**Always include the full staging URL.** The channel suffix changes with each deploy. Manus cannot guess it.
+## Merge gating
 
-### Examples
+PR merge/deploy authority is governed by the **Standing Release Policy in `AGENTS.md`** (approved by Devin 2026-08-01): release-scoped, ready PRs in a named batch merge to `main` and deploy to staging under standing approval — no per-PR approval buttons. Stop-on-surprise conditions still halt everything. This file governs the *validation* step, not merge authority.
 
-```
-<@U0B1YQS8L12> smoke test — wired up WorkoutPlayer.tsx to the member workout page; test that a member can open and play a workout end to end. Staging: https://goarrive--staging-gurfzjak.web.app
-```
+> Note (2026-08-11): an earlier draft of this update proposed holding PRs as drafts until Devin's staging approval. That conflicts with the 8/1 Standing Release Policy and is NOT in force — flagged to Devin for reconciliation; until he rules, the Standing Release Policy governs.
 
-```
-<@U0B1YQS8L12> smoke test — fixed the coach billing tile showing wrong earnings; check the coach Command Center billing section. Staging: https://goarrive--staging-gurfzjak.web.app
-```
+## Smoke Test Account (staging validation)
 
-## Smoke Test Account — Manus Login Credentials
-
-Manus uses a dedicated platformAdmin account to log in to staging for authenticated route testing.
+The dedicated platformAdmin test account (formerly Manus's) remains valid for automated or manual staging passes:
 
 | Field | Value |
 |---|---|
@@ -39,65 +27,24 @@ Manus uses a dedicated platformAdmin account to log in to staging for authentica
 | UID | `tsUERODrkSaqfTgiRF2pYcWgjXs1` |
 | Role | `platformAdmin` (`role: 'platformAdmin'`, `admin: true`) |
 
-**If Manus reports login failures:** run `setAdminRole` on UID `tsUERODrkSaqfTgiRF2pYcWgjXs1` to restore the custom claim. The account exists in Firebase Auth — it just needs the claim re-applied.
-
-## What Manus Returns to You
-
-Manus posts back in the same thread tagging you (`<@U0AQAGGMTE3>`) with:
-- **PASS** or **FAIL** verdict on the first line
-- A table of routes tested with PASS/FAIL/BLOCKED per row
-- Any issues found with screen, steps to reproduce, expected vs actual
-- Any routes that could not be tested and why
-
-If the result is FAIL: fix the issue, redeploy, and trigger Relay again. Do not create a PR until you get a PASS.
+**If login fails:** run `setAdminRole` on UID `tsUERODrkSaqfTgiRF2pYcWgjXs1` to restore the custom claim.
 
 ## Updated /ship Workflow
-
-The `/ship` command workflow now has two additional steps between Step 4 (staging deploy) and Step 5 (PR creation):
 
 ```
 Step 1: tsc --noEmit
 Step 2: npm run test:vitest -- --run
 Step 3: npx expo export --platform web
 Step 4: npm run deploy:staging
-Step 4a: UPDATE the Briefing Doc (MANDATORY — Manus reads this before every test)
-         Run from the repo root:
-         node scripts/update-briefing-doc.js \
-           --staging-url "https://goarrive--staging-[suffix].web.app" \
-           --commit "$(git rev-parse --short HEAD)" \
-           --branch "$(git branch --show-current)" \
-           --deploy-class "Hosting only" \
-           --production-affecting "no" \
-           --what-changed "[2-5 sentences: what was shipped, files touched, behavior changed]" \
-           --what-to-focus-on "[exact test steps: route, action, expected outcome]" \
-           --what-not-to-retest "[stable routes to skip]" \
-           --known-gaps "[anything that can't be tested yet and why]" \
-           --activity-entry "[one-line summary for the activity log]"
-         Requires: .secrets/firebase-service-account.json (ask Devin/Manus if missing)
-         Then re-run with --slack-thread after posting in Step 4b to add the permalink.
-Step 4b: POST in #dev-goarrive → <@U0B1YQS8L12> smoke test — [summary]. Staging: https://goarrive--staging-[suffix].web.app
-         WAIT for Relay's result before proceeding
-         If FAIL → fix, redeploy, re-trigger Relay
-         If PASS → continue
-Step 5: git commit + push + gh pr create
-Step 6: Report back to Devin
+Step 5: Post staging URL + what-changed + focus list in #dev-goarrive
+Step 6: Run Browser Use pre-validation when feasible; post PASS/FAIL table in-thread
+Step 7: Hand off to Devin for the authoritative staging review
+Step 8: Report [DONE:] with PR URL(s) + staging URL + validation state
 ```
-
-### Why Step 4a matters
-
-Manus reads the Briefing Doc **before** every smoke test. If Sections 1–4 are empty or stale, Manus falls back to Maia's Slack message as the test spec — which works, but loses the structured context (known gaps, what NOT to re-test, Slack thread permalink). Filling the doc takes ~10 seconds and makes every smoke test more accurate and faster.
-
-## Slack IDs Reference
-
-| Agent | Slack ID | How to mention |
-|---|---|---|
-| Relay (smoke test bot) | `U0B1YQS8L12` | `<@U0B1YQS8L12>` |
-| Maia (you) | `U0AQAGGMTE3` | `<@U0AQAGGMTE3>` |
 
 ## Hard Rules
 
-- **Never skip this step.** Every staging deploy must be smoke tested before a PR is created.
-- **Never create a PR if the smoke test failed.** Fix first, redeploy, re-test.
-- **Always use the Slack ID** (`<@U0B1YQS8L12>`), not the display name `@relay`, to ensure the mention is correctly parsed.
-- **Include context in your message.** Relay passes your message directly to Manus as the test brief. A vague message produces a vague test. Be specific about what changed.
-- **Always include the full staging URL** in your message. The channel URL suffix changes with each deploy. Manus cannot guess it.
+- **Never ping Relay** (`<@U0B1YQS8L12>`) — retired 2026-08-11.
+- **Never skip the staging-URL post.** Devin cannot review what he cannot find.
+- **Never deploy to production** without Devin's separate explicit instruction — a staging PASS is not a production green light.
+- Be specific in the focus list: a vague brief produces a vague review.
