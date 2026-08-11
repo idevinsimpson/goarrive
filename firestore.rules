@@ -1125,6 +1125,17 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────
+    // DISCOUNT CODES (PR-H — coach-scoped promo codes)
+    // Coach owns; validation done server-side in createFunnelCheckoutSession.
+    // ─────────────────────────────────────────────
+    match /discount_codes/{codeId} {
+      allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+      allow create: if isAuthenticated() && (isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin());
+      allow update: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+      allow delete: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+    }
+
+    // ─────────────────────────────────────────────
     // ONBOARDING SUBMISSIONS (Phase 4 — pre-checkout questionnaire)
     // Public funnel: anyone (anon) can create; only coach/admin can read back.
     // ─────────────────────────────────────────────

@@ -923,6 +923,322 @@ export const createCheckoutSession = onCall(
   }
 );
 
+// ─── createFunnelCheckoutSession ─────────────────────────────────────────────
+/**
+ * Creates a Stripe Checkout Session for the PR-G onboarding funnel.
+ * Called pre-auth (funnel visitor) after questionnaire submission.
+ *
+ * TODO: Justin pricing — replace $19.99 hardcode with configurable price.
+ */
+export const createFunnelCheckoutSession = onCall(
+  { secrets: [stripeSecretKey], invoker: 'public' },
+  async (request) => {
+    const { submissionId, discountCode } = request.data as {
+      submissionId: string;
+      discountCode?: string;
+    };
+
+    if (!submissionId) {
+      throw new HttpsError('invalid-argument', 'submissionId is required');
+    }
+
+    try {
+      // ── Load submission ──
+      const subRef = db.collection('onboarding_submissions').doc(submissionId);
+      const subSnap = await subRef.get();
+      if (!subSnap.exists) throw new HttpsError('not-found', 'Submission not found');
+      const submission = subSnap.data()!;
+
+      if (submission.status === 'paid') {
+        throw new HttpsError('failed-precondition', 'This submission has already been paid.');
+      }
+
+      const coachId = submission.coachId as string;
+      if (!coachId) throw new HttpsError('failed-precondition', 'Submission has no coachId');
+
+      // ── Load coach Stripe account ──
+      const coachAccountSnap = await db.collection('coachStripeAccounts').doc(coachId).get();
+      if (!coachAccountSnap.exists) {
+        throw new HttpsError('failed-precondition', 'Coach has not connected Stripe.');
+      }
+      const coachAccount = coachAccountSnap.data()!;
+      if (!coachAccount.chargesEnabled) {
+        throw new HttpsError('failed-precondition', 'Coach payments not yet enabled.');
+      }
+      const stripeAccountId = coachAccount.stripeAccountId as string;
+
+      // ── Tier split ──
+      const activePayingSnap = await db.collection('member_plans')
+        .where('coachId', '==', coachId)
+        .where('checkoutStatus', '==', 'paid')
+        .get();
+      const applicationFeePercent = getTierSplit(activePayingSnap.size);
+
+      const stripe = getStripe(stripeSecretKey.value());
+      const appBaseUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
+
+      // ── Resolve discount code ──
+      let promotionCodeId: string | undefined;
+      if (discountCode) {
+        const codeQuery = await db.collection('discount_codes')
+          .where('coachId', '==', coachId)
+          .where('code', '==', discountCode.toUpperCase())
+          .where('active', '==', true)
+          .limit(1)
+          .get();
+
+        if (codeQuery.empty) {
+          throw new HttpsError('not-found', 'Discount code not found or inactive.');
+        }
+
+        const codeDoc = codeQuery.docs[0];
+        const codeData = codeDoc.data();
+
+        if (codeData.maxUses > 0 && codeData.usesCount >= codeData.maxUses) {
+          throw new HttpsError('resource-exhausted', 'Discount code has reached its usage limit.');
+        }
+
+        promotionCodeId = codeData.stripePromotionCodeId as string;
+      }
+
+      // Resolve price from Playbook Folder subscription path (PM audit follow-up:
+      // "PR-H must read price from the subscription-path config, not the string").
+      // Fallback to $19.99 only if the folder/path is missing a configured price
+      // (e.g. legacy folders created before pricePerMonthCents landed).
+      const FALLBACK_MONTHLY_CENTS = 1999;
+      let monthlyAmountCents = FALLBACK_MONTHLY_CENTS;
+      let resolvedProgramName: string | undefined;
+
+      const folderId = submission.folderId as string | undefined;
+      const subscriptionPathId = submission.subscriptionPathId as string | undefined;
+      if (folderId) {
+        try {
+          const folderSnap = await db.collection('playbook_folders').doc(folderId).get();
+          if (folderSnap.exists) {
+            const folderData = folderSnap.data()!;
+            resolvedProgramName = (folderData.name as string) || undefined;
+            const paths = (folderData.subscriptionPaths as Array<{ id: string; pricePerMonthCents?: number }>) || [];
+            const path = paths.find((p) => p.id === subscriptionPathId);
+            if (path?.pricePerMonthCents && path.pricePerMonthCents > 0) {
+              monthlyAmountCents = path.pricePerMonthCents;
+            } else {
+              console.warn('createFunnelCheckoutSession: path has no pricePerMonthCents, using fallback', {
+                folderId,
+                subscriptionPathId,
+                fallbackCents: FALLBACK_MONTHLY_CENTS,
+              });
+            }
+          } else {
+            console.warn('createFunnelCheckoutSession: folder not found, using fallback price', { folderId });
+          }
+        } catch (e) {
+          console.error('createFunnelCheckoutSession: folder lookup failed, using fallback price', {
+            folderId,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      } else {
+        console.warn('createFunnelCheckoutSession: submission missing folderId, using fallback price', { submissionId });
+      }
+
+      const programName = resolvedProgramName || (submission.programName as string) || 'GoArrive Coaching Program';
+
+      const sessionParams: Stripe.Checkout.SessionCreateParams = {
+        payment_method_types: ['card'],
+        mode: 'subscription',
+        line_items: [
+          {
+            price_data: {
+              currency: 'usd',
+              product_data: { name: programName },
+              unit_amount: monthlyAmountCents,
+              recurring: { interval: 'month' },
+            },
+            quantity: 1,
+          },
+        ],
+        subscription_data: {
+          application_fee_percent: applicationFeePercent,
+          metadata: {
+            submissionId,
+            coachId,
+            funnelCheckout: 'true',
+          },
+        },
+        success_url: `${appBaseUrl}/checkout-success?submissionId=${submissionId}`,
+        cancel_url: `${appBaseUrl}/checkout/${submissionId}?cancelled=1`,
+        metadata: {
+          submissionId,
+          coachId,
+          funnelCheckout: 'true',
+          ...(discountCode ? { discountCodeUsed: discountCode.toUpperCase() } : {}),
+        },
+      };
+
+      if (promotionCodeId) {
+        sessionParams.discounts = [{ promotion_code: promotionCodeId }];
+      }
+
+      const session = await stripe.checkout.sessions.create(sessionParams, {
+        stripeAccount: stripeAccountId,
+      });
+
+      return { url: session.url, sessionId: session.id };
+
+    } catch (err: any) {
+      if (err?.code && err?.httpErrorCode) throw err;
+      console.error('[createFunnelCheckoutSession] Error:', err?.message ?? err);
+      throw new HttpsError('internal', 'Something went wrong. Please try again.');
+    }
+  }
+);
+
+// ─── createDiscountCode ───────────────────────────────────────────────────────
+/**
+ * Coach creates a discount code backed by a Stripe Coupon + Promotion Code.
+ */
+export const createDiscountCode = onCall(
+  { secrets: [stripeSecretKey] },
+  async (request) => {
+    // Must be a coach
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+    const callerToken = request.auth?.token as Record<string, any>;
+    const effectiveCoachId = (callerToken?.coachId as string) || callerUid;
+    if (!callerToken?.coachId && callerToken?.role !== 'coach' && callerToken?.role !== 'platformAdmin') {
+      throw new HttpsError('permission-denied', 'Only coaches can create discount codes');
+    }
+
+    const {
+      name,
+      code: rawCode,
+      percentOff,
+      duration,
+      durationInMonths,
+      maxUses,
+    } = request.data as {
+      name: string;
+      code?: string;
+      percentOff: number;
+      duration: 'once' | 'repeating' | 'forever';
+      durationInMonths?: number;
+      maxUses: number;
+    };
+
+    if (!name || typeof name !== 'string') throw new HttpsError('invalid-argument', 'name is required');
+    if (typeof percentOff !== 'number' || percentOff < 5 || percentOff > 50) {
+      throw new HttpsError('invalid-argument', 'percentOff must be between 5 and 50');
+    }
+    if (!['once', 'repeating', 'forever'].includes(duration)) {
+      throw new HttpsError('invalid-argument', 'duration must be once, repeating, or forever');
+    }
+    if (duration === 'repeating' && (!durationInMonths || durationInMonths < 1)) {
+      throw new HttpsError('invalid-argument', 'durationInMonths required for repeating duration');
+    }
+    if (typeof maxUses !== 'number' || maxUses < 1) {
+      throw new HttpsError('invalid-argument', 'maxUses must be at least 1');
+    }
+
+    // Auto-gen code if not provided
+    const code = rawCode
+      ? rawCode.toUpperCase().replace(/[^A-Z0-9]/g, '')
+      : Array.from({ length: 8 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[Math.floor(Math.random() * 36)]).join('');
+
+    // Verify coach has Stripe connected
+    const coachAccountSnap = await db.collection('coachStripeAccounts').doc(effectiveCoachId).get();
+    if (!coachAccountSnap.exists) {
+      throw new HttpsError('failed-precondition', 'Connect Stripe before creating discount codes.');
+    }
+    const stripeAccountId = coachAccountSnap.data()!.stripeAccountId as string;
+
+    const stripe = getStripe(stripeSecretKey.value());
+
+    // Create Stripe Coupon
+    const couponParams: Stripe.CouponCreateParams = {
+      percent_off: percentOff,
+      duration,
+      max_redemptions: maxUses,
+      metadata: { coachId: effectiveCoachId },
+      name,
+    };
+    if (duration === 'repeating' && durationInMonths) {
+      couponParams.duration_in_months = durationInMonths;
+    }
+    const coupon = await stripe.coupons.create(couponParams, { stripeAccount: stripeAccountId });
+
+    // Create Stripe Promotion Code
+    const promoCode = await stripe.promotionCodes.create(
+      {
+        promotion: { type: 'coupon', coupon: coupon.id },
+        code,
+        max_redemptions: maxUses,
+        metadata: { coachId: effectiveCoachId },
+      },
+      { stripeAccount: stripeAccountId }
+    );
+
+    // Write to Firestore
+    const docRef = db.collection('discount_codes').doc(promoCode.id);
+    await docRef.set({
+      coachId: effectiveCoachId,
+      name,
+      code,
+      percentOff,
+      duration,
+      durationInMonths: durationInMonths ?? null,
+      maxUses,
+      usesCount: 0,
+      active: true,
+      stripeCouponId: coupon.id,
+      stripePromotionCodeId: promoCode.id,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    return { id: promoCode.id, code };
+  }
+);
+
+// ─── deactivateDiscountCode ───────────────────────────────────────────────────
+export const deactivateDiscountCode = onCall(
+  { secrets: [stripeSecretKey] },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const callerToken = request.auth?.token as Record<string, any>;
+    const effectiveCoachId = (callerToken?.coachId as string) || callerUid;
+
+    const { discountCodeId } = request.data as { discountCodeId: string };
+    if (!discountCodeId) throw new HttpsError('invalid-argument', 'discountCodeId is required');
+
+    const docRef = db.collection('discount_codes').doc(discountCodeId);
+    const snap = await docRef.get();
+    if (!snap.exists) throw new HttpsError('not-found', 'Discount code not found');
+
+    const data = snap.data()!;
+    if (data.coachId !== effectiveCoachId && callerToken?.role !== 'platformAdmin') {
+      throw new HttpsError('permission-denied', 'Not authorized to deactivate this code');
+    }
+
+    // Load coach Stripe account
+    const coachAccountSnap = await db.collection('coachStripeAccounts').doc(data.coachId).get();
+    const stripeAccountId = coachAccountSnap.data()?.stripeAccountId as string | undefined;
+
+    if (stripeAccountId) {
+      const stripe = getStripe(stripeSecretKey.value());
+      await stripe.promotionCodes.update(
+        data.stripePromotionCodeId,
+        { active: false },
+        { stripeAccount: stripeAccountId }
+      );
+    }
+
+    await docRef.update({ active: false, updatedAt: FieldValue.serverTimestamp() });
+    return { success: true };
+  }
+);
+
 // ─── startFreePlan ────────────────────────────────────────────────────────────
 /**
  * Activates a $0 (free) plan with no Stripe involvement.
@@ -1266,6 +1582,43 @@ async function handleCheckoutSessionCompleted(
   session: Stripe.Checkout.Session,
   eventId: string
 ) {
+  // ── Funnel checkout path (PR-H) ──
+  const { submissionId, funnelCheckout, discountCodeUsed } = session.metadata ?? {};
+  if (funnelCheckout === 'true' && submissionId) {
+    const subRef = db.collection('onboarding_submissions').doc(submissionId);
+    const customerId = typeof session.customer === 'string' ? session.customer : (session.customer as any)?.id;
+    const subscriptionId = typeof session.subscription === 'string' ? session.subscription : (session.subscription as any)?.id;
+    await subRef.update({
+      status: 'paid',
+      stripeCustomerId: customerId ?? null,
+      stripeSubscriptionId: subscriptionId ?? null,
+      paidAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    // Increment discount code usesCount if a code was applied
+    if (discountCodeUsed) {
+      try {
+        const codeQuery = await db.collection('discount_codes')
+          .where('coachId', '==', session.metadata?.coachId)
+          .where('code', '==', discountCodeUsed)
+          .limit(1)
+          .get();
+        if (!codeQuery.empty) {
+          await codeQuery.docs[0].ref.update({
+            usesCount: FieldValue.increment(1),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+      } catch (err) {
+        console.error('[handleCheckoutSessionCompleted] Failed to increment discount usesCount:', err);
+      }
+    }
+
+    console.log('[handleCheckoutSessionCompleted] Funnel submission marked paid:', submissionId);
+    return;
+  }
+
   const { intentId, planId, snapshotId, memberId, coachId: _coachId } = session.metadata ?? {};
   void _coachId; // coachId is stored in snapshot; not needed here directly
   if (!intentId || !planId || !memberId) {
