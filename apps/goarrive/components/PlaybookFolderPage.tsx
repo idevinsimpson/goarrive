@@ -81,6 +81,7 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
   const [newPathLabel, setNewPathLabel] = useState('');
   const [newPathTemplateId, setNewPathTemplateId] = useState('');
   const [newPathMusicStyle, setNewPathMusicStyle] = useState('');
+  const [newPathPriceDollars, setNewPathPriceDollars] = useState('');
   const [savingPath, setSavingPath] = useState(false);
 
   // Three-dot member menu
@@ -166,11 +167,18 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
     setSavingPath(true);
     try {
       const existing: PlaybookFolderSubscriptionPath[] = folder?.subscriptionPaths ?? [];
+      const priceDollars = parseFloat(newPathPriceDollars);
+      const pricePerMonthCents = Number.isFinite(priceDollars) && priceDollars > 0
+        ? Math.round(priceDollars * 100)
+        : undefined;
       const newPath: PlaybookFolderSubscriptionPath = {
-        id: `path-${Date.now()}`,
+        id: typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
         label: newPathLabel.trim(),
         templatePlaybookId: newPathTemplateId,
         musicStyle: newPathMusicStyle || undefined,
+        pricePerMonthCents,
       };
       await updateDoc(doc(db, 'playbook_folders', folderId), {
         subscriptionPaths: [...existing, newPath],
@@ -179,13 +187,14 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
       setNewPathLabel('');
       setNewPathTemplateId('');
       setNewPathMusicStyle('');
+      setNewPathPriceDollars('');
       setShowAddPath(false);
     } catch (e) {
       console.error('[PlaybookFolderPage] Add path error:', e);
     } finally {
       setSavingPath(false);
     }
-  }, [folderId, folder?.subscriptionPaths, newPathLabel, newPathTemplateId, newPathMusicStyle]);
+  }, [folderId, folder?.subscriptionPaths, newPathLabel, newPathTemplateId, newPathMusicStyle, newPathPriceDollars]);
 
   const deleteSubscriptionPath = useCallback(async (pathId: string) => {
     if (!folderId) return;
@@ -462,10 +471,19 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
                     </Pressable>
                   ))}
                 </View>
+                <Text style={[s.settingDesc, { marginTop: 8, marginBottom: 6 }]}>Price per month (USD, optional — used by funnel checkout)</Text>
+                <TextInput
+                  style={s.textField}
+                  value={newPathPriceDollars}
+                  onChangeText={setNewPathPriceDollars}
+                  placeholder="e.g. 19.99"
+                  placeholderTextColor="#4A5568"
+                  keyboardType="decimal-pad"
+                />
                 <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                   <Pressable
                     style={[s.saveBtn, { flex: 1, backgroundColor: '#1E2A3A' }]}
-                    onPress={() => { setShowAddPath(false); setNewPathLabel(''); setNewPathTemplateId(''); setNewPathMusicStyle(''); }}
+                    onPress={() => { setShowAddPath(false); setNewPathLabel(''); setNewPathTemplateId(''); setNewPathMusicStyle(''); setNewPathPriceDollars(''); }}
                   >
                     <Text style={[s.saveBtnText, { color: '#8A95A3' }]}>Cancel</Text>
                   </Pressable>

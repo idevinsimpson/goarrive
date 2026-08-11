@@ -1129,7 +1129,15 @@ service cloud.firestore {
     // Public funnel: anyone (anon) can create; only coach/admin can read back.
     // ─────────────────────────────────────────────
     match /onboarding_submissions/{submissionId} {
-      allow create: if true;
+      // Schema guard: require coachId string + valid email format so junk floods can't ship
+      // (mirrors intakeSubmissions plaintext-password lesson — don't let anonymous
+      // collections accept arbitrary payloads).
+      allow create: if request.resource.data.coachId is string
+        && request.resource.data.coachId.size() > 0
+        && request.resource.data.coachId.size() < 200
+        && request.resource.data.email is string
+        && request.resource.data.email.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$')
+        && request.resource.data.email.size() < 320;
       allow read: if isAuthenticated() && (
         isCoachOrBootstrap(resource.data.coachId)
         || isPlatformAdmin()
