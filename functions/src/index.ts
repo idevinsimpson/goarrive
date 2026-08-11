@@ -11871,7 +11871,7 @@ export const pauseStripeSubscription = onCall(
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
     const callerToken = request.auth?.token as Record<string, any> | undefined;
-    const callerCoachId: string | undefined = callerToken?.coachId ?? callerToken?.role === 'platformAdmin' ? callerUid : undefined;
+    const callerCoachId: string | undefined = callerToken?.coachId ?? (callerToken?.role === 'platformAdmin' ? callerUid : undefined);
     if (!callerCoachId) throw new HttpsError('permission-denied', 'Must be a coach');
 
     const { memberId, stripeSubscriptionId } = request.data as { memberId?: string; stripeSubscriptionId?: string };
@@ -11907,7 +11907,7 @@ export const resumeStripeSubscription = onCall(
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
     const callerToken = request.auth?.token as Record<string, any> | undefined;
-    const callerCoachId: string | undefined = callerToken?.coachId ?? callerToken?.role === 'platformAdmin' ? callerUid : undefined;
+    const callerCoachId: string | undefined = callerToken?.coachId ?? (callerToken?.role === 'platformAdmin' ? callerUid : undefined);
     if (!callerCoachId) throw new HttpsError('permission-denied', 'Must be a coach');
 
     const { memberId, stripeSubscriptionId } = request.data as { memberId?: string; stripeSubscriptionId?: string };
@@ -11921,13 +11921,83 @@ export const resumeStripeSubscription = onCall(
     if (subData.coachId !== callerCoachId) throw new HttpsError('permission-denied', 'Subscription belongs to a different coach');
     if (subData.memberId !== memberId) throw new HttpsError('invalid-argument', 'memberId does not match subscription');
 
+    // Capture pause duration before clearing pausedAt.
+    const pausedAtTs = subData.pausedAt as FirebaseFirestore.Timestamp | undefined;
+    const resumedAtMs = Date.now();
+    const pauseDurationMs = pausedAtTs ? resumedAtMs - pausedAtTs.toMillis() : 0;
+    // Round up to whole days so the member always gets the full window.
+    const extendedDays = pausedAtTs ? Math.ceil(pauseDurationMs / (24 * 60 * 60 * 1000)) : 0;
+
     const stripe = getStripe(stripeSecretKey.value());
     // Empty string clears pause_collection and resumes billing.
     await stripe.subscriptions.update(stripeSubscriptionId, {
       pause_collection: '' as any,
     });
 
-    await subRef.update({ pausedAt: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() });
+    // Extend contractEndAt on the member_plans doc if it exists.
+    if (extendedDays > 0) {
+      const planSnap = await db.collection('member_plans').doc(memberId).get();
+      if (planSnap.exists) {
+        const planData = planSnap.data()!;
+        if (planData.contractEndAt) {
+          const originalEndMs = (planData.contractEndAt as FirebaseFirestore.Timestamp).toMillis();
+          const newEndMs = originalEndMs + extendedDays * 24 * 60 * 60 * 1000;
+          await planSnap.ref.update({
+            contractEndAt: Timestamp.fromMillis(newEndMs),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+      }
+
+      // If this is a monthly subscription with a schedule, shift the current phase end_date.
+      if (subData.stripeScheduleId) {
+        const schedule = await stripe.subscriptionSchedules.retrieve(
+          subData.stripeScheduleId,
+          { stripeAccount: subData.stripeAccountId }
+        );
+        if (schedule.phases && schedule.phases.length > 0) {
+          const nowSec = Math.floor(resumedAtMs / 1000);
+          const currentPhaseIndex = schedule.phases.findIndex(
+            (p) => p.start_date <= nowSec && (p.end_date == null || p.end_date > nowSec)
+          );
+          const idx = currentPhaseIndex >= 0 ? currentPhaseIndex : 0;
+          const shiftSec = extendedDays * 24 * 60 * 60;
+          const updatedPhases = schedule.phases.map((p, i) => {
+            const base = {
+              items: p.items.map((item) => ({
+                price: typeof item.price === 'string' ? item.price : item.price.id,
+                quantity: item.quantity ?? 1,
+              })),
+              ...(p.application_fee_percent != null && { application_fee_percent: p.application_fee_percent }),
+              ...(p.metadata && { metadata: p.metadata }),
+            };
+            if (i === idx && p.end_date != null) {
+              return { ...base, end_date: p.end_date + shiftSec };
+            }
+            if (p.end_date != null) {
+              return { ...base, end_date: p.end_date };
+            }
+            return base;
+          });
+          await stripe.subscriptionSchedules.update(
+            subData.stripeScheduleId,
+            { phases: updatedPhases as any },
+            { stripeAccount: subData.stripeAccountId }
+          );
+        }
+      }
+    }
+
+    // Build the history entry, then clear pausedAt.
+    const historyEntry = pausedAtTs
+      ? { pausedAt: pausedAtTs, resumedAt: Timestamp.fromMillis(resumedAtMs), extendedDays }
+      : null;
+
+    await subRef.update({
+      pausedAt: FieldValue.delete(),
+      updatedAt: FieldValue.serverTimestamp(),
+      ...(historyEntry && { pauseHistory: FieldValue.arrayUnion(historyEntry) }),
+    });
     return { success: true };
   }
 );
