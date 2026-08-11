@@ -1100,6 +1100,30 @@ service cloud.firestore {
       );
     }
 
+    // ─────────────────────────────────────────────
+    // PLAYBOOK FOLDERS (Phase 3 — subscription-program asset type)
+    // Coach owns; admin can read.
+    // ─────────────────────────────────────────────
+
+    match /playbook_folders/{folderId} {
+      allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+      allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
+      allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+      allow delete: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+    }
+
+    // ─────────────────────────────────────────────
+    // PLAYBOOK FOLDER MEMBERS (Phase 3 — member enrollment records)
+    // Coach owns; admin can read.
+    // ─────────────────────────────────────────────
+
+    match /playbook_folder_members/{memberId} {
+      allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+      allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
+      allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+      allow delete: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
