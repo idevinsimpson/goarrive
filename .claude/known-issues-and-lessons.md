@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-08-02._
+_Last refreshed: 2026-08-11._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -87,6 +87,15 @@ When a drag-and-drop interaction uses an absolutely-positioned drop tray that co
 ### Staging Combined Build Can Drop Open PRs
 The combined staging branch process merges all open PRs onto main before building. If a PR is open but not included in the branch list when the combined build is triggered, its changes are silently absent from staging and can be omitted from the production ship. The folder + playbook icon inline fix (PR on fix/build-folder-icon-inline) was dropped from staging-combined-08012239 this way and had to be re-landed separately. Lesson: before cutting a combined staging build, explicitly enumerate all open PRs and confirm each is included. The standing release policy in `AGENTS.md` codifies this check.
 
+### Music Genre Reverts on Style Switch
+`useWorkoutMusic`'s `changeStyle` function ran async and could overwrite a track already attached by `advance()` during `fetchReadyList`, causing the player to revert to the server-supplied style instead of the newly selected one. Fixed (PR #233) by guarding `changeStyle` against overwriting an already-attached track and always using the locally-held `requestedStyle` (not the server fallback) in `attachTrack`. Lesson: whenever a style/mode selector races with an async fetch, the local selected value must win — never let a server response silently overwrite a user-initiated state change.
+
+### Share-Link Sanitizer Must Include All New Share Types
+The `resolveShareToken` Cloud Function sanitizes workout documents before serving them to unauthenticated users. When the marketing share type was added (PR #232), the sanitizer needed to be extended to expose `shareType`, `emailGateEnabled`, `ctaConfig`, and `coachId` — without this, those fields were silently dropped for guest visitors. Lesson: any new `shareToken` field that the client needs to render a guest experience must be explicitly added to the `resolveShareToken` sanitizer and its TypeScript `Teaser` interface, not just written to Firestore.
+
+### Subscription Pause/Resume: Coach Ownership Verification
+The `pauseStripeSubscription` and `resumeStripeSubscription` callables (PR #233) verify coach ownership by checking that the subscription's `coachId` Firestore field matches the caller's `coachId` claim — they do not trust the client-supplied member ID alone. Lesson: any billing-mutation callable that acts on a member's subscription must verify the calling coach owns that member's record at the function layer, not just in Firestore rules.
+
 
 ## Known Performance Risks
 
@@ -114,7 +123,7 @@ The platform uses `isArchived` flags for soft deletion of movements and workouts
 The Metro/Expo export does **not** guarantee a new JS bundle filename on every build, so static assets must never be served with immutable/1-year cache headers — users can get stuck on stale bundles after a deploy. The SPA entry point (`/index.html`), service worker, and manifest are never cached; JS/static assets use short-lived, revalidating cache headers. As of the July booking ship, a service worker additionally auto-reloads open tabs when a new deploy lands; its registration snippet must be injected into **every** exported route page (handled by `scripts/inject_pwa_meta.py`), not just the root — deep-linked routes are their own entry HTML files.
 
 ### Share-Link Sanitizer Is a Contract
-Public share links go through `resolveShareToken`, which sanitizes workout documents before serving them to unauthenticated users. Every new per-workout or per-movement field that the player needs (swap fields, crop fields, intro announcement, etc.) must be explicitly added to the sanitizer or it will silently vanish on shared links.
+Public share links go through `resolveShareToken`, which sanitizes workout documents before serving them to unauthenticated users. Every new per-workout or per-movement field that the player needs (swap fields, crop fields, intro announcement, share type, email gate config, etc.) must be explicitly added to the sanitizer or it will silently vanish on shared links.
 
 ### Completion-Write Integrity
 Workout completion writes derive `coachId` from trusted server-side data, guard against double submission, and are crash-safe (PR #167). Any new member-initiated write that a coach later reads should follow the same trust model — never accept coach/tenant IDs from the client.
@@ -129,3 +138,8 @@ The coach post-agreement onboarding (PR #223) uses a `CoachSetupCard` dashboard 
 ### Coach-Branded Intake Deeplinks and Program Attribution
 The intake route (`/intake/[coachId]`) accepts `?ref=` and `?source=` URL params so external booker pages (e.g. `bookerfitness.goarrive.fit`) can pass session-type context through the intake flow. Both params are saved to `intakeSubmissions` as `programRef` / `programSource`. The intake form header swaps the GoArrive logo for the coach's name and photo when a `coachId` is present (fetched from Firestore). Lesson: any new public intake or landing surface that originates from a third-party or coach-branded URL should capture the originating ref/source at submission time and write it to the intake record — retro-fitting attribution is expensive once the param is lost at page load.
 
+### Audio Fan-Out Pattern for PiP
+The audio PiP foundation (PR #231) uses parallel fan-out: `voiceGain` and `musicGain` connect to both `audioCtx.destination` (speakers) and a `MediaStreamAudioDestinationNode` (PiP stream). This keeps the speaker path unchanged while adding a second output. The `getPipAudioStream()` export is the handshake point for Phase 2 canvas-stream PiP. Lesson: when adding a second audio consumer (recording, PiP, monitoring), always fan out from the existing gain nodes rather than rerouting — rerouting risks breaking the speaker path and requires re-testing all iOS audio unlock behavior.
+
+### New Firestore Collections Need Rules + Admin-Impersonation Grants
+Every new top-level Firestore collection (e.g. `playbook_folders`, `playbook_folder_members`, `marketing_leads`) must ship with: (a) Firestore security rules covering all access patterns (coach-owner read/write, member-scoped read, optional public create), and (b) admin-impersonation rules grants so platform admins can access coach-scoped data when using "View as Coach." Missing either causes silent failures that only surface under the affected auth context.
