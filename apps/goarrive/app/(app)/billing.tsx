@@ -21,10 +21,10 @@
  *   - referrals where referrerId == coachId (member referrals)
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, ScrollView, Pressable, ActivityIndicator,
-  StyleSheet, Platform, Linking,
+  StyleSheet, Platform, Linking, TextInput, Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -197,6 +197,19 @@ interface Task {
   action?: { label: string; onPress: () => void };
 }
 
+interface DiscountCode {
+  id: string;
+  name: string;
+  code: string;
+  percentOff: number;
+  duration: 'once' | 'repeating' | 'forever';
+  durationInMonths?: number;
+  maxUses: number;
+  usesCount: number;
+  active: boolean;
+  createdAt?: Timestamp;
+}
+
 export default function BillingDashboard() {
   return (
     <ModuleGate module="billing">
@@ -224,6 +237,21 @@ function BillingDashboardInner() {
   const [waivingFeeId, setWaivingFeeId] = useState<string | null>(null);
   const [profitShareStartDate, setProfitShareStartDate] = useState<Date | null>(null);
   const [yearlyCapsCents, setYearlyCapsCents] = useState<Record<string, number>>({});
+
+  // Discount Codes
+  const [discountCodes, setDiscountCodes] = useState<DiscountCode[]>([]);
+  const [showDiscountModal, setShowDiscountModal] = useState(false);
+  const [discountForm, setDiscountForm] = useState({
+    name: '',
+    code: '',
+    percentOff: '20',
+    duration: 'once' as 'once' | 'repeating' | 'forever',
+    durationInMonths: '3',
+    maxUses: '100',
+  });
+  const [discountCreating, setDiscountCreating] = useState(false);
+  const [discountError, setDiscountError] = useState<string | null>(null);
+  const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
 
   // ── Load data ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -303,6 +331,16 @@ function BillingDashboardInner() {
         );
         const ctsFeesSnap = await getDocs(ctsFeesQ);
         setCtsFees(ctsFeesSnap.docs.map(d => ({ id: d.id, ...d.data() } as CtsAccountabilityFee)));
+
+        // Discount codes
+        const codesQ = query(
+          collection(db, 'discount_codes'),
+          where('coachId', '==', coachId),
+          orderBy('createdAt', 'desc'),
+          limit(20)
+        );
+        const codesSnap = await getDocs(codesQ);
+        setDiscountCodes(codesSnap.docs.map(d => ({ id: d.id, ...d.data() } as DiscountCode)));
       } catch (err) {
         console.warn('[BillingDashboard] Load error:', err);
       } finally {
@@ -442,6 +480,64 @@ function BillingDashboardInner() {
       description: 'No urgent tasks right now. Keep building your practice!',
     });
   }
+
+  // ── Discount code handlers ─────────────────────────────────────────────────
+  const handleCreateDiscountCode = useCallback(async () => {
+    const pct = Number(discountForm.percentOff);
+    const uses = Number(discountForm.maxUses);
+    const months = Number(discountForm.durationInMonths);
+    if (!discountForm.name.trim()) { setDiscountError('Name is required'); return; }
+    if (isNaN(pct) || pct < 5 || pct > 50) { setDiscountError('Percent off must be 5–50'); return; }
+    if (isNaN(uses) || uses < 1) { setDiscountError('Max uses must be at least 1'); return; }
+    if (discountForm.duration === 'repeating' && (isNaN(months) || months < 1)) {
+      setDiscountError('Duration in months required'); return;
+    }
+    setDiscountError(null);
+    setDiscountCreating(true);
+    try {
+      const functions = getFunctions();
+      const fn = httpsCallable<any, { id: string; code: string }>(functions, 'createDiscountCode');
+      const result = await fn({
+        name: discountForm.name.trim(),
+        code: discountForm.code.trim() || undefined,
+        percentOff: pct,
+        duration: discountForm.duration,
+        durationInMonths: discountForm.duration === 'repeating' ? months : undefined,
+        maxUses: uses,
+      });
+      // Refresh discount codes
+      if (coachId) {
+        const codesQ = query(
+          collection(db, 'discount_codes'),
+          where('coachId', '==', coachId),
+          orderBy('createdAt', 'desc'),
+          limit(20)
+        );
+        const codesSnap = await getDocs(codesQ);
+        setDiscountCodes(codesSnap.docs.map(d => ({ id: d.id, ...d.data() } as DiscountCode)));
+      }
+      setShowDiscountModal(false);
+      setDiscountForm({ name: '', code: '', percentOff: '20', duration: 'once', durationInMonths: '3', maxUses: '100' });
+    } catch (err: any) {
+      setDiscountError(err?.message || 'Failed to create code');
+    } finally {
+      setDiscountCreating(false);
+    }
+  }, [discountForm, coachId]);
+
+  const handleDeactivateCode = useCallback(async (codeId: string) => {
+    setDeactivatingId(codeId);
+    try {
+      const functions = getFunctions();
+      const fn = httpsCallable<{ discountCodeId: string }, { success: boolean }>(functions, 'deactivateDiscountCode');
+      await fn({ discountCodeId: codeId });
+      setDiscountCodes(prev => prev.map(c => c.id === codeId ? { ...c, active: false } : c));
+    } catch (err: any) {
+      console.warn('[BillingDashboard] Deactivate error:', err);
+    } finally {
+      setDeactivatingId(null);
+    }
+  }, []);
 
   // ── Render ────────────────────────────────────────────────────────────────
   if (!coachId) {
@@ -669,6 +765,163 @@ function BillingDashboardInner() {
               </View>
             </View>
           </View>
+
+          {/* ── Discount Codes ── */}
+          <View style={s.card}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <Text style={s.cardTitle}>Discount Codes</Text>
+              <Pressable
+                onPress={() => { setDiscountError(null); setShowDiscountModal(true); }}
+                style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: PRIMARY + '22', borderRadius: 8, borderWidth: 1, borderColor: PRIMARY + '55' }}
+              >
+                <Text style={{ color: PRIMARY, fontSize: 12, fontWeight: '600' }}>+ New Code</Text>
+              </Pressable>
+            </View>
+            {discountCodes.length === 0 ? (
+              <Text style={{ color: MUTED, fontSize: 12 }}>No discount codes yet. Create one to share with members.</Text>
+            ) : (
+              discountCodes.map((dc) => (
+                <View key={dc.id} style={{ borderTopWidth: 1, borderTopColor: BORDER + '44', paddingTop: 10, marginTop: 10 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700', fontFamily: FH }}>{dc.code}</Text>
+                        <View style={{
+                          backgroundColor: dc.active ? ACCENT + '22' : MUTED + '22',
+                          borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2,
+                          borderWidth: 1, borderColor: dc.active ? ACCENT + '55' : MUTED + '44',
+                        }}>
+                          <Text style={{ color: dc.active ? ACCENT : MUTED, fontSize: 10, fontWeight: '700' }}>
+                            {dc.active ? 'ACTIVE' : 'INACTIVE'}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={{ color: MUTED, fontSize: 11 }}>
+                        {dc.name} · {dc.percentOff}% off · {dc.duration === 'repeating' ? `${dc.durationInMonths}mo` : dc.duration}
+                        {' · '}{dc.usesCount}/{dc.maxUses} uses
+                      </Text>
+                    </View>
+                    {dc.active && (
+                      <Pressable
+                        onPress={() => handleDeactivateCode(dc.id)}
+                        disabled={deactivatingId === dc.id}
+                        style={{ paddingHorizontal: 10, paddingVertical: 5, backgroundColor: RED + '15', borderRadius: 8, borderWidth: 1, borderColor: RED + '44', opacity: deactivatingId === dc.id ? 0.5 : 1 }}
+                      >
+                        {deactivatingId === dc.id
+                          ? <ActivityIndicator color={RED} size="small" />
+                          : <Text style={{ color: RED, fontSize: 11, fontWeight: '600' }}>Deactivate</Text>
+                        }
+                      </Pressable>
+                    )}
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+
+          {/* New Discount Code Modal */}
+          <Modal visible={showDiscountModal} animationType="slide" transparent presentationStyle="overFullScreen">
+            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' }}>
+              <View style={{ backgroundColor: CARD_BG, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: Math.max(insets.bottom + 20, 32) }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <Text style={{ color: '#FFF', fontSize: 17, fontWeight: '700', fontFamily: FH }}>New Discount Code</Text>
+                  <Pressable onPress={() => setShowDiscountModal(false)}>
+                    <Text style={{ color: MUTED, fontSize: 22 }}>×</Text>
+                  </Pressable>
+                </View>
+
+                {/* Name */}
+                <Text style={{ color: MUTED, fontSize: 12, marginBottom: 4 }}>Name</Text>
+                <TextInput
+                  style={s.modalInput}
+                  placeholder="e.g. Early Bird"
+                  placeholderTextColor={MUTED}
+                  value={discountForm.name}
+                  onChangeText={(v) => setDiscountForm(f => ({ ...f, name: v }))}
+                />
+
+                {/* Code */}
+                <Text style={{ color: MUTED, fontSize: 12, marginBottom: 4, marginTop: 12 }}>Code (leave blank to auto-generate)</Text>
+                <TextInput
+                  style={s.modalInput}
+                  placeholder="e.g. SUMMER20"
+                  placeholderTextColor={MUTED}
+                  value={discountForm.code}
+                  onChangeText={(v) => setDiscountForm(f => ({ ...f, code: v.toUpperCase() }))}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                />
+
+                {/* Percent off */}
+                <Text style={{ color: MUTED, fontSize: 12, marginBottom: 4, marginTop: 12 }}>Percent Off (5–50)</Text>
+                <TextInput
+                  style={s.modalInput}
+                  placeholder="20"
+                  placeholderTextColor={MUTED}
+                  value={discountForm.percentOff}
+                  onChangeText={(v) => setDiscountForm(f => ({ ...f, percentOff: v }))}
+                  keyboardType="numeric"
+                />
+
+                {/* Duration */}
+                <Text style={{ color: MUTED, fontSize: 12, marginBottom: 6, marginTop: 12 }}>Duration</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  {(['once', 'repeating', 'forever'] as const).map((d) => (
+                    <Pressable
+                      key={d}
+                      onPress={() => setDiscountForm(f => ({ ...f, duration: d }))}
+                      style={{ flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 8, borderWidth: 1, borderColor: discountForm.duration === d ? PRIMARY : BORDER, backgroundColor: discountForm.duration === d ? PRIMARY + '22' : 'transparent' }}
+                    >
+                      <Text style={{ color: discountForm.duration === d ? PRIMARY : MUTED, fontSize: 12, fontWeight: '600' }}>
+                        {d === 'once' ? 'Once' : d === 'repeating' ? 'N Months' : 'Forever'}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                {/* Duration in months (only if repeating) */}
+                {discountForm.duration === 'repeating' && (
+                  <>
+                    <Text style={{ color: MUTED, fontSize: 12, marginBottom: 4, marginTop: 12 }}>Number of Months</Text>
+                    <TextInput
+                      style={s.modalInput}
+                      placeholder="3"
+                      placeholderTextColor={MUTED}
+                      value={discountForm.durationInMonths}
+                      onChangeText={(v) => setDiscountForm(f => ({ ...f, durationInMonths: v }))}
+                      keyboardType="numeric"
+                    />
+                  </>
+                )}
+
+                {/* Max uses */}
+                <Text style={{ color: MUTED, fontSize: 12, marginBottom: 4, marginTop: 12 }}>Max Uses</Text>
+                <TextInput
+                  style={s.modalInput}
+                  placeholder="100"
+                  placeholderTextColor={MUTED}
+                  value={discountForm.maxUses}
+                  onChangeText={(v) => setDiscountForm(f => ({ ...f, maxUses: v }))}
+                  keyboardType="numeric"
+                />
+
+                {discountError && (
+                  <Text style={{ color: RED, fontSize: 12, marginTop: 8 }}>{discountError}</Text>
+                )}
+
+                <Pressable
+                  onPress={handleCreateDiscountCode}
+                  disabled={discountCreating}
+                  style={{ marginTop: 16, backgroundColor: PRIMARY, borderRadius: 12, paddingVertical: 14, alignItems: 'center', opacity: discountCreating ? 0.6 : 1 }}
+                >
+                  {discountCreating
+                    ? <ActivityIndicator color="#FFF" />
+                    : <Text style={{ color: '#FFF', fontSize: 15, fontWeight: '700', fontFamily: FH }}>Create Code</Text>
+                  }
+                </Pressable>
+              </View>
+            </View>
+          </Modal>
 
           {/* ── Tabs ── */}
           <View style={s.tabs}>
@@ -1099,5 +1352,12 @@ const s = StyleSheet.create({
   infoCard: {
     backgroundColor: CARD_BG, borderRadius: 10, borderWidth: 1, borderColor: BORDER,
     padding: 14,
+  },
+
+  // Modal input
+  modalInput: {
+    backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 8,
+    borderWidth: 1, borderColor: BORDER, color: '#FFF',
+    paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, fontFamily: FH,
   },
 });

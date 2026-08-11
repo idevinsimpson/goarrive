@@ -1124,6 +1124,28 @@ service cloud.firestore {
       allow delete: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
     }
 
+    // ─────────────────────────────────────────────
+    // DISCOUNT CODES (PR-H — coach-scoped promo codes)
+    // Coach owns; validation done server-side in createFunnelCheckoutSession.
+    // ─────────────────────────────────────────────
+    match /discount_codes/{codeId} {
+      allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+      allow create: if isAuthenticated() && (isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin());
+      allow update: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+      allow delete: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+    }
+
+    // ─────────────────────────────────────────────
+    // ONBOARDING SUBMISSIONS (PR-G funnel — pre-auth visitor data)
+    // Public create (funnel visitors); coach reads their own; admin reads all.
+    // ─────────────────────────────────────────────
+    match /onboarding_submissions/{submissionId} {
+      allow create: if true;
+      allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+      allow update: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+      allow delete: if isPlatformAdmin();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
