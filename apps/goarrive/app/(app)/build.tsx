@@ -66,6 +66,7 @@ import MovementVariationModal from '../../components/MovementVariationModal';
 import WorkoutDetail from '../../components/WorkoutDetail';
 import WorkoutForm from '../../components/WorkoutForm';
 import WorkoutFolderPage from '../../components/WorkoutFolderPage';
+import PlaybookFolderPage from '../../components/PlaybookFolderPage';
 import BulkMovementUpload from '../../components/BulkMovementUpload';
 import FollowAlongVideoUploadSheet, { FollowAlongVideoPayload } from '../../components/FollowAlongVideoUploadSheet';
 import FollowAlongVideoDetail from '../../components/FollowAlongVideoDetail';
@@ -101,6 +102,9 @@ const COLLECTION_BY_TYPE: Record<BuildType, string> = {
   'Follow-Alongs': 'followAlongVideos',
   Playbooks: 'playbooks',
 };
+
+// Accent colour for PlaybookFolder tiles (purple, same family as playbooks)
+const PLAYBOOK_FOLDER_ACCENT = '#7C3AED';
 
 // ── Grid layout constants ──────────────────────────────────────────────────
 const GRID_PADDING = 16;       // padding on left/right of the grid
@@ -217,7 +221,8 @@ function calcDurationMin(blocks: any[]): number {
 
 // Drop target eligibility. Folders accept every asset type. A Movement
 // dropped on a Workout appends to it. Playbooks are workouts-only — they
-// reject movements, folders, plans, and other playbooks. Any other
+// reject movements, folders, plans, and other playbooks. PlaybookFolders
+// only accept Playbooks — non-playbook drops show a toast. Any other
 // asset-on-asset drop opens the combine modal (create a folder containing both).
 // A dragged folder can only land on another folder (nest); combine/append
 // semantics don't apply to folder sources.
@@ -228,13 +233,14 @@ function isDropTarget(
   if (!item || !dragged) return false;
   if (dragged.type === 'Folder') return item.type === 'Folder';
   if (item.type === 'Playbooks') return dragged.type === 'Workouts';
+  if (item.type === 'PlaybookFolder') return dragged.type === 'Playbooks';
   return true;
 }
 
 interface BuildItem {
   id: string;
   name: string;
-  type: BuildType | 'Folder';
+  type: BuildType | 'Folder' | 'PlaybookFolder';
   category?: string;
   difficulty?: string;
   thumbnailUrl?: string;
@@ -246,6 +252,7 @@ interface BuildItem {
   createdAt: any;
   updatedAt: any;
   parentId?: string; // For folder hierarchy
+  memberCount?: number; // PlaybookFolder: number of active members
   [key: string]: any;
 }
 
@@ -651,6 +658,13 @@ function BuildScreenInner() {
   const [pbNewMemberEmail, setPbNewMemberEmail] = useState('');
   const [selectedPlan, setSelectedPlan] = useState<any | null>(null);
 
+  // Playbook Folder drill-in
+  const [openPlaybookFolderId, setOpenPlaybookFolderId] = useState<string | null>(null);
+  // Create modal state
+  const [showPbFolderCreate, setShowPbFolderCreate] = useState(false);
+  const [newPbFolderName, setNewPbFolderName] = useState('');
+  const [newPbFolderSync, setNewPbFolderSync] = useState(true);
+
   const tenantId = claims?.tenantId ?? '';
 
   // ── Drag & Drop state ──────────────────────────────────────────────────
@@ -903,6 +917,31 @@ function BuildScreenInner() {
       (err) => console.error('[Build] Playbooks listener error:', err),
     );
 
+    // Playbook Folders listener
+    const pbFoldersQuery = query(
+      collection(db, 'playbook_folders'),
+      where('coachId', '==', coachId),
+    );
+    const unsubPbFolders = onSnapshot(
+      pbFoldersQuery,
+      (snap) => {
+        const pbFolderItems: BuildItem[] = snap.docs.map(d => ({
+          id: d.id,
+          ...d.data({ serverTimestamps: 'estimate' }),
+          type: 'PlaybookFolder' as any,
+          name: d.data().name || 'Untitled Playbook Folder',
+          isArchived: d.data().isArchived ?? false,
+        } as BuildItem));
+        setItems(prev => {
+          const otherItems = prev.filter(i => i.type !== 'PlaybookFolder');
+          return [...otherItems, ...pbFolderItems].sort((a, b) =>
+            (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0)
+          );
+        });
+      },
+      (err) => console.error('[Build] Playbook Folders listener error:', err),
+    );
+
     // Follow-Along Videos listener (asset collection — like movements)
     const followAlongsQuery = query(
       collection(db, 'followAlongVideos'),
@@ -933,6 +972,7 @@ function BuildScreenInner() {
       unsubFolders();
       unsubPlans();
       unsubPlaybooks();
+      unsubPbFolders();
       unsubFollowAlongs();
     };
   }, [coachId]);
@@ -1463,6 +1503,33 @@ function BuildScreenInner() {
     } catch (e) { console.error('[Build] Create playbook error:', e); }
   }, [coachId, tenantId, currentFolderId, newPlaybookName, newPlaybookDesc, pendingPlaybookDropItem, playbookSeedWorkoutIds, pbAssignMemberId, pbAddByEmail, pbNewMemberName, pbNewMemberEmail, pbMembers, resetPlaybookCreateState]);
 
+  const createPlaybookFolder = useCallback(async () => {
+    const name = newPbFolderName.trim();
+    if (!name) return;
+    try {
+      await addDoc(collection(db, 'playbook_folders'), {
+        coachId,
+        tenantId,
+        name,
+        type: 'playbook_folder',
+        parentId: currentFolderId || null,
+        templatePlaybookIds: [],
+        subscriptionPaths: [],
+        syncEnabled: newPbFolderSync,
+        emailTemplate: { subject: '', body: '' },
+        linkedShareTokenIds: [],
+        isArchived: false,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setNewPbFolderName('');
+      setNewPbFolderSync(true);
+      setShowPbFolderCreate(false);
+      scrollOffsetRef.current = 0;
+      requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: false }));
+    } catch (e) { console.error('[Build] Create playbook folder error:', e); }
+  }, [coachId, tenantId, currentFolderId, newPbFolderName, newPbFolderSync]);
+
   // ── Drag & Drop handlers (filteredItems-independent) ──────────────────
   // The grid sorts by updatedAt desc, so a drop target jumps to the top of
   // the list and vanishes from the user's viewport. Scroll them up so they
@@ -1692,6 +1759,19 @@ function BuildScreenInner() {
 
     if (target.type === 'Folder') {
       await dropItemIntoFolder(dragged, target.id);
+    } else if (target.type === 'PlaybookFolder') {
+      // Only playbooks can be dropped into a Playbook Folder
+      if (dragged.type !== 'Playbooks') {
+        showDropToast(`Only playbooks can go inside a Playbook Folder`);
+        return;
+      }
+      try {
+        await updateDoc(doc(db, 'playbooks', dragged.id), {
+          parentId: target.id,
+          updatedAt: serverTimestamp(),
+        });
+        scrollListToTop();
+      } catch (e) { console.error('[Build] Drop into playbook folder error:', e); }
     } else if (target.type === 'Playbooks') {
       // Workouts-only membership — isDropTarget already rejects everything
       // else. arrayUnion dedupes if the workout is already in the playbook.
@@ -2501,6 +2581,70 @@ function BuildScreenInner() {
       );
     }
 
+    // PlaybookFolder tile
+    if (item.type === 'PlaybookFolder') {
+      if (viewMode === 'grid') {
+        return (
+          <View
+            style={{
+              width: cardWidth,
+              height: cardHeight,
+              marginBottom: GRID_GAP,
+            }}
+          >
+            <Pressable
+              style={[StyleSheet.absoluteFill, {
+                borderRadius: 10,
+                overflow: 'hidden',
+                backgroundColor: '#141024',
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: '#4C3D8F',
+              }]}
+              onPress={() => {
+                if (Date.now() < suppressPressUntilRef.current) return;
+                setOpenPlaybookFolderId(item.id);
+              }}
+            >
+              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                <Icon name="folder" size={36} color={PLAYBOOK_FOLDER_ACCENT} />
+                {typeof item.memberCount === 'number' && item.memberCount > 0 && (
+                  <View style={{
+                    position: 'absolute',
+                    top: 8,
+                    right: 8,
+                    backgroundColor: PLAYBOOK_FOLDER_ACCENT,
+                    borderRadius: 10,
+                    paddingHorizontal: 6,
+                    paddingVertical: 2,
+                  }}>
+                    <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>{item.memberCount}</Text>
+                  </View>
+                )}
+              </View>
+              <View style={styles.nameOverlay}>
+                <Icon name="folder" size={14} color={PLAYBOOK_FOLDER_ACCENT} />
+                <Text style={styles.nameText} numberOfLines={1}>{item.name}</Text>
+              </View>
+            </Pressable>
+          </View>
+        );
+      }
+      return (
+        <Pressable style={s.listItem} onPress={() => setOpenPlaybookFolderId(item.id)}>
+          <View style={[s.listMedia, { backgroundColor: '#141024' }]}>
+            <View style={s.listPlaceholder}>
+              <Icon name="folder" size={20} color={PLAYBOOK_FOLDER_ACCENT} />
+            </View>
+          </View>
+          <View style={s.listContent}>
+            <Text style={s.listName}>{item.name}</Text>
+            <Text style={s.listSub}>Playbook Folder</Text>
+          </View>
+          <Icon name="chevron-right" size={20} color="#4A5568" />
+        </Pressable>
+      );
+    }
+
     if (viewMode === 'grid') {
       const isMovement = item.type === 'Movements';
       const isPlan = item.type === 'Plans';
@@ -2752,6 +2896,25 @@ function BuildScreenInner() {
       </Pressable>
     );
   };
+
+  // ── Playbook Folder drill-in ────────────────────────────────────────────
+  if (openPlaybookFolderId) {
+    return (
+      <View style={s.root}>
+        <AppHeader />
+        <PlaybookFolderPage
+          folderId={openPlaybookFolderId}
+          onBack={() => setOpenPlaybookFolderId(null)}
+          onOpenPlaybook={(playbookId: string) => {
+            setOpenPlaybookFolderId(null);
+            const pb = itemsRef.current.find(i => i.type === 'Playbooks' && i.id === playbookId);
+            if (pb) setCurrentPlaybook({ id: pb.id, name: pb.name });
+            else setCurrentPlaybook({ id: playbookId, name: 'Playbook' });
+          }}
+        />
+      </View>
+    );
+  }
 
   // ── Workout folder page ─────────────────────────────────────────────────
   if (openWorkoutId) {
@@ -3679,6 +3842,10 @@ function BuildScreenInner() {
                   <Icon name="playbook" size={20} color="#A78BFA" />
                   <Text style={s.plusMenuItemText}>Playbook</Text>
                 </Pressable>
+                <Pressable style={s.plusMenuItem} onPress={() => { setIsPlusOpen(false); setShowPbFolderCreate(true); }}>
+                  <Icon name="folder" size={20} color={PLAYBOOK_FOLDER_ACCENT} />
+                  <Text style={s.plusMenuItemText}>Playbook Folder</Text>
+                </Pressable>
                 <Pressable
                   style={s.plusMenuItem}
                   onPress={() => {
@@ -3721,6 +3888,49 @@ function BuildScreenInner() {
                 onPress={createFolder}
               >
                 <Text style={{ color: '#0E1117', fontWeight: '700', fontFamily: FH }}>Create</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Playbook Folder Create Modal */}
+      <Modal transparent visible={showPbFolderCreate} animationType="fade" onRequestClose={() => { setShowPbFolderCreate(false); setNewPbFolderName(''); }}>
+        <Pressable style={s.modalBackdrop} onPress={() => { setShowPbFolderCreate(false); setNewPbFolderName(''); }}>
+          <Pressable style={s.plusMenu} onPress={e => e.stopPropagation()}>
+            <Text style={s.plusMenuTitle}>New Playbook Folder</Text>
+            <TextInput
+              style={s.folderInput}
+              placeholder="Folder name..."
+              placeholderTextColor="#4A5568"
+              value={newPbFolderName}
+              onChangeText={setNewPbFolderName}
+              autoFocus
+              onSubmitEditing={createPlaybookFolder}
+            />
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 14, gap: 10 }}>
+              <Switch
+                value={newPbFolderSync}
+                onValueChange={setNewPbFolderSync}
+                trackColor={{ false: '#2D3748', true: '#7C3AED' }}
+                thumbColor="#fff"
+              />
+              <Text style={{ color: '#8A95A3', fontSize: 13, fontFamily: FB, flex: 1 }}>
+                Sync enabled — member copies stay in sync with template changes
+              </Text>
+            </View>
+            <View style={s.folderBtnRow}>
+              <Pressable
+                style={[s.folderBtn, { flex: 1 }]}
+                onPress={() => { setShowPbFolderCreate(false); setNewPbFolderName(''); }}
+              >
+                <Text style={{ color: '#8A95A3', fontWeight: '600', fontFamily: FB }}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[s.folderBtn, { backgroundColor: PLAYBOOK_FOLDER_ACCENT, flex: 1 }]}
+                onPress={createPlaybookFolder}
+              >
+                <Text style={{ color: '#fff', fontWeight: '700', fontFamily: FH }}>Create</Text>
               </Pressable>
             </View>
           </Pressable>
