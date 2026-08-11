@@ -42,6 +42,7 @@ import {
   Timestamp,
   serverTimestamp,
   onSnapshot,
+  getDoc,
 } from 'firebase/firestore';
 import { useAuth } from '../../lib/AuthContext';
 import { ModuleGate } from '../../lib/useCoachModules';
@@ -79,6 +80,8 @@ interface MemberListItem {
   uid: string;
   createdAt: any;
   updatedAt: any;
+  /** PR-K: 'lapsed' when Stripe payment has failed and not yet recovered */
+  paymentStatus?: string;
 }
 
 /** Assignment count + today flag per member (NEXT-A, NEXT-D) */
@@ -188,8 +191,35 @@ function MembersScreenInner() {
           uid: data.uid ?? '',
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
+          paymentStatus: data.paymentStatus as string | undefined,
         };
       });
+
+      // PR-K: Pull paymentStatus from member_plans if not on member doc
+      // (member_plans is the authoritative lapse source from the webhook)
+      try {
+        const planQ = query(
+          collection(db, 'member_plans'),
+          where('coachId', '==', coachId),
+        );
+        const planSnap = await getDocs(planQ);
+        const lapsedMemberIds = new Set<string>();
+        planSnap.docs.forEach((pd) => {
+          const pd_data = pd.data();
+          if (pd_data.paymentStatus === 'lapsed' && pd_data.memberId) {
+            lapsedMemberIds.add(pd_data.memberId as string);
+          }
+        });
+        if (lapsedMemberIds.size > 0) {
+          memberList.forEach((m) => {
+            if (lapsedMemberIds.has(m.id)) {
+              m.paymentStatus = 'lapsed';
+            }
+          });
+        }
+      } catch (_planErr) {
+        // Non-fatal — badge is best-effort
+      }
       // Sort client-side (no composite index needed)
       memberList.sort((a, b) => {
         const at = a.createdAt?.toDate?.() ?? new Date(0);
@@ -658,6 +688,12 @@ function MembersScreenInner() {
                           <Text style={styles.archivedBadgeText}>Archived</Text>
                         </View>
                       )}
+                      {/* PR-K: Payment lapse badge */}
+                      {m.paymentStatus === 'lapsed' && !m.isArchived && (
+                        <View style={styles.pausedBadge}>
+                          <Text style={styles.pausedBadgeText}>Paused</Text>
+                        </View>
+                      )}
                       {/* NEXT-A: Assignment count badge */}
                       {assignCount > 0 && !m.isArchived && (
                         <View style={styles.assignBadge}>
@@ -1088,6 +1124,22 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   archivedBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#E05252',
+    fontFamily: FONT_HEADING,
+    textTransform: 'uppercase',
+  },
+  // PR-K: Payment lapse badge
+  pausedBadge: {
+    backgroundColor: 'rgba(224,82,82,0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(224,82,82,0.3)',
+  },
+  pausedBadgeText: {
     fontSize: 9,
     fontWeight: '700',
     color: '#E05252',
