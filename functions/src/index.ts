@@ -11847,3 +11847,77 @@ export const pollMovementVariationJobs = onSchedule(
     }
   },
 );
+
+// ─── pauseStripeSubscription ──────────────────────────────────────────────────
+/**
+ * Pause a member's recurring Stripe subscription (skip charging) by setting
+ * pause_collection: { behavior: 'void' }. Requires coachId claim.
+ *
+ * Params: { memberId: string, stripeSubscriptionId: string }
+ */
+export const pauseStripeSubscription = onCall(
+  { secrets: [stripeSecretKey], invoker: 'public' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+    const callerToken = request.auth?.token as Record<string, any> | undefined;
+    const callerCoachId: string | undefined = callerToken?.coachId ?? callerToken?.role === 'platformAdmin' ? callerUid : undefined;
+    if (!callerCoachId) throw new HttpsError('permission-denied', 'Must be a coach');
+
+    const { memberId, stripeSubscriptionId } = request.data as { memberId?: string; stripeSubscriptionId?: string };
+    if (!memberId || !stripeSubscriptionId) throw new HttpsError('invalid-argument', 'memberId and stripeSubscriptionId are required');
+
+    // Verify this subscription belongs to the calling coach.
+    const subRef = db.collection('memberSubscriptions').doc(stripeSubscriptionId);
+    const subSnap = await subRef.get();
+    if (!subSnap.exists) throw new HttpsError('not-found', 'Subscription not found');
+    const subData = subSnap.data()!;
+    if (subData.coachId !== callerCoachId) throw new HttpsError('permission-denied', 'Subscription belongs to a different coach');
+    if (subData.memberId !== memberId) throw new HttpsError('invalid-argument', 'memberId does not match subscription');
+
+    const stripe = getStripe(stripeSecretKey.value());
+    await stripe.subscriptions.update(stripeSubscriptionId, {
+      pause_collection: { behavior: 'void' },
+    });
+
+    await subRef.update({ pausedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+    return { success: true };
+  }
+);
+
+// ─── resumeStripeSubscription ─────────────────────────────────────────────────
+/**
+ * Resume a paused member Stripe subscription. Requires coachId claim.
+ *
+ * Params: { memberId: string, stripeSubscriptionId: string }
+ */
+export const resumeStripeSubscription = onCall(
+  { secrets: [stripeSecretKey], invoker: 'public' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+    const callerToken = request.auth?.token as Record<string, any> | undefined;
+    const callerCoachId: string | undefined = callerToken?.coachId ?? callerToken?.role === 'platformAdmin' ? callerUid : undefined;
+    if (!callerCoachId) throw new HttpsError('permission-denied', 'Must be a coach');
+
+    const { memberId, stripeSubscriptionId } = request.data as { memberId?: string; stripeSubscriptionId?: string };
+    if (!memberId || !stripeSubscriptionId) throw new HttpsError('invalid-argument', 'memberId and stripeSubscriptionId are required');
+
+    // Verify this subscription belongs to the calling coach.
+    const subRef = db.collection('memberSubscriptions').doc(stripeSubscriptionId);
+    const subSnap = await subRef.get();
+    if (!subSnap.exists) throw new HttpsError('not-found', 'Subscription not found');
+    const subData = subSnap.data()!;
+    if (subData.coachId !== callerCoachId) throw new HttpsError('permission-denied', 'Subscription belongs to a different coach');
+    if (subData.memberId !== memberId) throw new HttpsError('invalid-argument', 'memberId does not match subscription');
+
+    const stripe = getStripe(stripeSecretKey.value());
+    // Empty string clears pause_collection and resumes billing.
+    await stripe.subscriptions.update(stripeSubscriptionId, {
+      pause_collection: '' as any,
+    });
+
+    await subRef.update({ pausedAt: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() });
+    return { success: true };
+  }
+);

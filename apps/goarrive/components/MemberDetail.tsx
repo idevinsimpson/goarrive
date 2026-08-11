@@ -19,7 +19,7 @@ import {
   Alert,
 } from 'react-native';
 import { db } from '../lib/firebase';
-import { doc, onSnapshot, collection, query, where, addDoc } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, addDoc, limit } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Icon } from './Icon';
 import { router } from 'expo-router';
@@ -73,6 +73,10 @@ export default function MemberDetail({
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteText, setNoteText] = useState('');
 
+  // Stripe subscription pause/resume
+  const [memberSubscription, setMemberSubscription] = useState<{ id: string; pausedAt?: any } | null>(null);
+  const [pauseLoading, setPauseLoading] = useState(false);
+
   // Invite / password reset modal state
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteResult, setInviteResult] = useState<{ link: string; email: string; authCreated: boolean; wasLinked: boolean } | null>(null);
@@ -101,6 +105,23 @@ export default function MemberDetail({
     });
     return () => unsubscribe();
   }, [member.id]);
+
+  // Live-listen to the member's active Stripe subscription (if any).
+  useEffect(() => {
+    if (!member.id || !coachId) return;
+    const q = query(
+      collection(db, 'memberSubscriptions'),
+      where('memberId', '==', member.id),
+      where('coachId', '==', coachId),
+      limit(1),
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      if (snap.empty) { setMemberSubscription(null); return; }
+      const d = snap.docs[0];
+      setMemberSubscription({ id: d.id, ...(d.data() as any) });
+    });
+    return () => unsub();
+  }, [member.id, coachId]);
 
   const initials = currentMember.name
     ? currentMember.name
@@ -151,6 +172,23 @@ export default function MemberDetail({
       setInviteError(err?.message || 'Failed to create invite link. Please try again.');
     } finally {
       setInviteLoading(false);
+    }
+  }
+
+  async function handleToggleSubscriptionPause() {
+    if (!memberSubscription || pauseLoading) return;
+    setPauseLoading(true);
+    const isPaused = !!memberSubscription.pausedAt;
+    const fnName = isPaused ? 'resumeStripeSubscription' : 'pauseStripeSubscription';
+    try {
+      const fn = httpsCallable(getFunctions(), fnName);
+      await fn({ memberId: member.id, stripeSubscriptionId: memberSubscription.id });
+    } catch (err: any) {
+      const msg = err?.message || `Failed to ${isPaused ? 'resume' : 'pause'} subscription`;
+      if (Platform.OS === 'web') window.alert(msg);
+      else Alert.alert('Error', msg);
+    } finally {
+      setPauseLoading(false);
     }
   }
 
@@ -359,6 +397,27 @@ export default function MemberDetail({
               </Text>
             </TouchableOpacity>
           </View>
+
+          {/* Subscription pause/resume (only shown when a Stripe sub exists) */}
+          {memberSubscription && (
+            <View style={s.subRow}>
+              <View>
+                <Text style={s.subLabel}>Subscription</Text>
+                <Text style={s.subStatus}>
+                  {memberSubscription.pausedAt ? 'Paused — billing voided' : 'Active — billing on'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[s.subBtn, memberSubscription.pausedAt ? s.subBtnResume : s.subBtnPause]}
+                onPress={handleToggleSubscriptionPause}
+                disabled={pauseLoading}
+              >
+                {pauseLoading
+                  ? <ActivityIndicator size="small" color={FG} />
+                  : <Text style={s.subBtnText}>{memberSubscription.pausedAt ? 'Resume' : 'Pause'}</Text>}
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* Hub grid */}
           <ScrollView
@@ -761,6 +820,49 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: GOLD,
+    fontFamily: FB,
+  },
+  subRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+  subLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: FG,
+    fontFamily: FB,
+  },
+  subStatus: {
+    fontSize: 12,
+    color: MUTED,
+    marginTop: 2,
+  },
+  subBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  subBtnPause: {
+    backgroundColor: 'rgba(239,68,68,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.3)',
+  },
+  subBtnResume: {
+    backgroundColor: 'rgba(110,187,122,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(110,187,122,0.3)',
+  },
+  subBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: FG,
     fontFamily: FB,
   },
   body: {
