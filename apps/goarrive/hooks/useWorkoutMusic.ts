@@ -36,7 +36,7 @@ import { MUSIC_MAX_TRACKS_PER_STYLE } from '../constants/musicStyles';
 // graph in useWorkoutTTS — coach voice / cue audio live on a separate voice
 // bus that stays at full volume. Routing through Web Audio is required on
 // iOS Safari, which ignores JS-set HTMLAudioElement.volume entirely.
-import { setMusicVolume, wireToGain } from './useWorkoutTTS';
+import { setMusicVolume, wireToGain, resumeAudioGraph } from './useWorkoutTTS';
 
 // Pure queue/id helpers live in useWorkoutMusic.helpers.ts (no RN/Firebase
 // deps — safe to import in vitest). Re-exported here for convenience.
@@ -504,6 +504,10 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
       if (!el || !el.src) return;
       if (typeof document.visibilityState === 'string' && document.visibilityState !== 'visible') return;
       if (musicPausedRef.current || musicHoldRef.current || musicOffRef.current) return;
+      // iOS auto-suspends the AudioContext when backgrounded; resuming only
+      // the HTMLAudioElement doesn't reconnect the Web Audio graph. Resume
+      // the context first so the music element plays through the gain node.
+      resumeAudioGraph();
       if (el.paused) el.play().catch(() => {});
     };
     document.addEventListener('visibilitychange', resume);

@@ -310,6 +310,7 @@ export function resetAudioPool(): void {
   blessedGenericPlayers.length = 0;
   audioUnlocked = false;
   stopKeepalive();
+  stopGraphKeepalive();
 }
 
 function poolKeyForCue(key: CueKey): string {
@@ -388,6 +389,56 @@ let audioUnlocked = false;
 // 4 data bytes of silence — enough for play() to actually start on iOS.
 const SILENT_WAV =
   'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==';
+
+// Resume the shared AudioContext if iOS auto-suspended it on backgrounding.
+// Called from useWorkoutMusic's visibility handler so the music element's
+// play() lands in an active graph, not a suspended one.
+export function resumeAudioGraph(): void {
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(() => {});
+  }
+}
+
+// ── Graph-level oscillator keepalive (B) ─────────────────────────────
+// An OscillatorNode at near-zero gain connected to musicGain tells iOS that
+// audio is actively running in the AudioContext, preventing the OS from
+// auto-suspending the graph during long work/rest phases (> 20s of silence).
+// Unlike the HTMLAudioElement keepalive below, this keepalive lives inside
+// the AudioContext graph itself — so iOS cannot suspend the context without
+// stopping this node, which it only does when there is truly no audio.
+// Gain 0.0001 is below the hearing threshold (~90 dB below full scale at 1.0).
+let graphKeepaliveOscillator: OscillatorNode | null = null;
+let graphKeepaliveGain: GainNode | null = null;
+
+function startGraphKeepalive(): void {
+  if (!audioCtx || !musicGain) return;
+  if (graphKeepaliveOscillator) return;
+  try {
+    graphKeepaliveGain = audioCtx.createGain();
+    graphKeepaliveGain.gain.value = 0.0001;
+    graphKeepaliveGain.connect(musicGain);
+    graphKeepaliveOscillator = audioCtx.createOscillator();
+    graphKeepaliveOscillator.frequency.value = 0;
+    graphKeepaliveOscillator.connect(graphKeepaliveGain);
+    graphKeepaliveOscillator.start();
+    console.info('[VOICE-AUDIT] graph keepalive oscillator started');
+  } catch (err) {
+    console.warn('[VOICE-AUDIT] graph keepalive start FAILED', { err: String(err) });
+    graphKeepaliveOscillator = null;
+    graphKeepaliveGain = null;
+  }
+}
+
+function stopGraphKeepalive(): void {
+  if (graphKeepaliveOscillator) {
+    try { graphKeepaliveOscillator.stop(); graphKeepaliveOscillator.disconnect(); } catch {}
+    graphKeepaliveOscillator = null;
+  }
+  if (graphKeepaliveGain) {
+    try { graphKeepaliveGain.disconnect(); } catch {}
+    graphKeepaliveGain = null;
+  }
+}
 
 // ── Silent keepalive loop ────────────────────────────────────────────
 // iOS Safari revokes autoplay permission after ~20s with no audio playing
@@ -564,6 +615,7 @@ export function unlockAudioPlayback(): void {
     }
   }
   startKeepalive();
+  startGraphKeepalive();
   console.info('[VOICE-AUDIT] unlockAudioPlayback ran', {
     pooledBlessed: Object.keys(audioPool).length,
     genericPlayers: blessedGenericPlayers.length,
