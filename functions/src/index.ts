@@ -10643,10 +10643,13 @@ export const updateShareToken = onCall(async (request) => {
   const coachId = callerToken.coachId || request.auth.uid;
   const isAdmin = callerRole === 'platformAdmin' || !!callerToken.admin;
 
-  const { workoutId, visibility, expiresAt } = request.data as {
+  const { workoutId, visibility, expiresAt, shareType, emailGateEnabled, ctaConfig } = request.data as {
     workoutId: string;
     visibility?: string;
     expiresAt?: number | string | null;
+    shareType?: 'member' | 'marketing';
+    emailGateEnabled?: boolean;
+    ctaConfig?: Record<string, any>;
   };
   if (!workoutId) {
     throw new HttpsError('invalid-argument', 'workoutId is required.');
@@ -10666,6 +10669,9 @@ export const updateShareToken = onCall(async (request) => {
   const updates: Record<string, any> = {};
   if (visibility !== undefined) updates.visibility = normalizeVisibility(visibility);
   if (expiresAt !== undefined) updates.expiresAt = normalizeExpiresAt(expiresAt);
+  if (shareType !== undefined) updates.shareType = shareType === 'marketing' ? 'marketing' : 'member';
+  if (emailGateEnabled !== undefined) updates.emailGateEnabled = !!emailGateEnabled;
+  if (ctaConfig !== undefined) updates.ctaConfig = ctaConfig;
 
   if (Object.keys(updates).length === 0) {
     return { updated: 0 };
@@ -10795,9 +10801,13 @@ export const resolveShareToken = onRequest(
       blockCount: (workout.blocks || []).length,
       coachName: coachData.displayName || coachData.name || 'Coach',
       coachPhotoUrl: coachData.photoURL || null,
+      coachId: tokenData.createdBy as string,
       tags: workout.tags || [],
       visibility,
       requireAuth,
+      shareType: (tokenData.shareType === 'marketing' ? 'marketing' : 'member') as 'member' | 'marketing',
+      emailGateEnabled: tokenData.emailGateEnabled === true,
+      ctaConfig: tokenData.ctaConfig ?? null,
     };
 
     if (requireAuth && !isAuthenticated) {

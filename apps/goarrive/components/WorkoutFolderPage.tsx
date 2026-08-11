@@ -64,6 +64,7 @@ import { FB, FH } from '../lib/theme';
 import { CONTENT_BOTTOM_CLEARANCE } from '../lib/tabBarStyle';
 import { MUSIC_STYLE_OPTIONS, MUSIC_VOLUME_OPTIONS } from '../constants/musicStyles';
 import PosterThumb from './PosterThumb';
+import { type MarketingCtaConfig } from './WorkoutFunnelCTA';
 import {
   filterMovements,
   rankByPrimaryMuscle,
@@ -273,6 +274,9 @@ interface ShareSettingsState {
   expiresAt: number | null;
   resolvedCount: number;
   lastResolvedAt: number | null;
+  shareType: 'member' | 'marketing';
+  emailGateEnabled: boolean;
+  ctaConfig: MarketingCtaConfig;
 }
 
 // ── Props ───────────────────────────────────────────────────────────────────
@@ -503,6 +507,9 @@ export default function WorkoutFolderPage({
     expiresAt: null,
     resolvedCount: 0,
     lastResolvedAt: null,
+    shareType: 'member',
+    emailGateEnabled: false,
+    ctaConfig: { subscriptionOptions: [] },
   });
   const [shareSettingsSaving, setShareSettingsSaving] = useState(false);
   const [moveToSearch, setMoveToSearch] = useState('');
@@ -643,6 +650,9 @@ export default function WorkoutFolderPage({
         expiresAt: data.expiresAt?.toMillis?.() ?? null,
         resolvedCount: data.resolvedCount ?? 0,
         lastResolvedAt: data.lastResolvedAt?.toMillis?.() ?? null,
+        shareType: data.shareType === 'marketing' ? 'marketing' : 'member',
+        emailGateEnabled: data.emailGateEnabled === true,
+        ctaConfig: data.ctaConfig ?? { subscriptionOptions: [] },
       });
     }).catch(() => {});
   }, [workoutId, coachId]);
@@ -688,12 +698,16 @@ export default function WorkoutFolderPage({
       const result = await createFn({ workoutId });
       const data = result.data;
       setActiveShareId(data.shareId);
-      setShareSettings({
+      setShareSettings((prev) => ({
+        ...prev,
         visibility: normalizeVisibility(data.visibility),
         expiresAt: data.expiresAt ?? null,
         resolvedCount: data.resolvedCount ?? 0,
         lastResolvedAt: data.lastResolvedAt ?? null,
-      });
+        shareType: (data as any).shareType === 'marketing' ? 'marketing' : prev.shareType,
+        emailGateEnabled: (data as any).emailGateEnabled ?? prev.emailGateEnabled,
+        ctaConfig: (data as any).ctaConfig ?? prev.ctaConfig,
+      }));
       setShareModalOpen(true);
     } catch (err: any) {
       console.error('[WorkoutFolder] Share link error:', err);
@@ -703,19 +717,29 @@ export default function WorkoutFolderPage({
     }
   }
 
-  async function saveShareSettings(patch: Partial<Pick<ShareSettingsState, 'visibility' | 'expiresAt'>>) {
+  async function saveShareSettings(patch: Partial<ShareSettingsState>) {
     const next = { ...shareSettings, ...patch };
     setShareSettings(next);
     setShareSettingsSaving(true);
     try {
       const updateFn = httpsCallable<
-        { workoutId: string; visibility?: ShareVisibility; expiresAt?: number | null },
+        {
+          workoutId: string;
+          visibility?: ShareVisibility;
+          expiresAt?: number | null;
+          shareType?: 'member' | 'marketing';
+          emailGateEnabled?: boolean;
+          ctaConfig?: MarketingCtaConfig;
+        },
         { updated: number; shareId?: string }
       >(functions, 'updateShareToken');
       await updateFn({
         workoutId,
         visibility: next.visibility,
         expiresAt: next.expiresAt,
+        shareType: next.shareType,
+        emailGateEnabled: next.emailGateEnabled,
+        ctaConfig: next.ctaConfig,
       });
     } catch (err: any) {
       console.error('[WorkoutFolder] Update share settings error:', err);
@@ -737,6 +761,9 @@ export default function WorkoutFolderPage({
         expiresAt: null,
         resolvedCount: 0,
         lastResolvedAt: null,
+        shareType: 'member',
+        emailGateEnabled: false,
+        ctaConfig: { subscriptionOptions: [] },
       });
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
         window.alert('The share link has been revoked.');
@@ -4049,6 +4076,99 @@ export default function WorkoutFolderPage({
                     }`}
               </Text>
             </View>
+
+            {/* ── Marketing section ──────────────────────────────────── */}
+            <View style={{ borderTopWidth: 1, borderTopColor: '#1E2530', paddingTop: 16, gap: 14 }}>
+              <Text style={st.shareModalSectionLabel}>Marketing workout</Text>
+
+              <TouchableOpacity
+                style={[st.shareModalOption, shareSettings.shareType === 'marketing' && st.shareModalOptionActive]}
+                onPress={() => saveShareSettings({ shareType: shareSettings.shareType === 'marketing' ? 'member' : 'marketing' })}
+                disabled={shareSettingsSaving}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={st.shareModalOptionTitle}>Free Workout Friday / lead-gen</Text>
+                  <Text style={st.shareModalOptionDesc}>
+                    Collect leads and show a signup CTA at the end of the workout.
+                  </Text>
+                </View>
+                <Switch
+                  value={shareSettings.shareType === 'marketing'}
+                  onValueChange={(v) => saveShareSettings({ shareType: v ? 'marketing' : 'member' })}
+                  disabled={shareSettingsSaving}
+                  trackColor={{ true: '#F5A623', false: '#2A3140' }}
+                  thumbColor="#FFFFFF"
+                />
+              </TouchableOpacity>
+
+              {shareSettings.shareType === 'marketing' && (
+                <>
+                  <TouchableOpacity
+                    style={[st.shareModalOption]}
+                    onPress={() => saveShareSettings({ emailGateEnabled: !shareSettings.emailGateEnabled })}
+                    disabled={shareSettingsSaving}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={st.shareModalOptionTitle}>Email gate</Text>
+                      <Text style={st.shareModalOptionDesc}>
+                        Collect name + email before the workout starts.
+                      </Text>
+                    </View>
+                    <Switch
+                      value={shareSettings.emailGateEnabled}
+                      onValueChange={(v) => saveShareSettings({ emailGateEnabled: v })}
+                      disabled={shareSettingsSaving}
+                      trackColor={{ true: '#F5A623', false: '#2A3140' }}
+                      thumbColor="#FFFFFF"
+                    />
+                  </TouchableOpacity>
+
+                  <Text style={st.shareModalSectionLabel}>End-of-workout CTA</Text>
+
+                  {shareSettings.ctaConfig.subscriptionOptions.map((opt, idx) => (
+                    <View key={opt.id} style={[st.shareModalOption, { gap: 8, flexDirection: 'column', alignItems: 'stretch' }]}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={st.shareModalOptionTitle}>{opt.label || `Plan ${idx + 1}`}</Text>
+                        <TouchableOpacity
+                          onPress={() => {
+                            const next = shareSettings.ctaConfig.subscriptionOptions.filter((_, i) => i !== idx);
+                            saveShareSettings({ ctaConfig: { ...shareSettings.ctaConfig, subscriptionOptions: next } });
+                          }}
+                          disabled={shareSettingsSaving}
+                        >
+                          <Icon name="x" size={16} color="#EF4444" />
+                        </TouchableOpacity>
+                      </View>
+                      <Text style={st.shareModalOptionDesc}>
+                        ${(opt.priceInCents / 100).toFixed(0)}/{opt.billingInterval}
+                      </Text>
+                    </View>
+                  ))}
+
+                  <TouchableOpacity
+                    style={[st.shareModalChip, { alignSelf: 'flex-start' }]}
+                    disabled={shareSettingsSaving}
+                    onPress={() => {
+                      const newOpt = {
+                        id: Date.now().toString(),
+                        label: 'Monthly coaching',
+                        priceInCents: 9900,
+                        billingInterval: 'month' as const,
+                      };
+                      saveShareSettings({
+                        ctaConfig: {
+                          ...shareSettings.ctaConfig,
+                          subscriptionOptions: [...shareSettings.ctaConfig.subscriptionOptions, newOpt],
+                        },
+                      });
+                    }}
+                  >
+                    <Text style={st.shareModalChipText}>+ Add subscription option</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+            {/* ── End marketing section ──────────────────────────────── */}
 
             <View style={st.shareModalButtonRow}>
               <TouchableOpacity
