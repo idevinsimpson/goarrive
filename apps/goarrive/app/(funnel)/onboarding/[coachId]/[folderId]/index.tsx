@@ -408,7 +408,7 @@ function StepBasicInfo({ formData, errors, accent, onUpdate }: StepBasicInfoProp
       {errors.dateOfBirth ? <Text style={styles.errorText}>{errors.dateOfBirth}</Text> : null}
 
       <Text style={styles.label}>Gender *</Text>
-      <View style={styles.radioGroup}>
+      <View style={styles.radioGroup} pointerEvents="box-none">
         {GENDER_OPTIONS.map((opt) => (
           <Pressable
             key={opt.value}
