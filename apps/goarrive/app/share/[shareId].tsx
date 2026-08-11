@@ -43,6 +43,7 @@ interface Teaser {
   shareType?: 'member' | 'marketing';
   emailGateEnabled?: boolean;
   ctaConfig?: MarketingCtaConfig;
+  campaignName?: string;
   coachId?: string;
 }
 
@@ -267,6 +268,10 @@ export default function SharePage() {
               <Text style={styles.coachName}>{teaser.coachName}</Text>
             </View>
 
+            {teaser.shareType === 'marketing' && teaser.campaignName ? (
+              <Text style={styles.campaignBadge}>{teaser.campaignName}</Text>
+            ) : null}
+
             <Text style={styles.workoutTitle}>{teaser.name}</Text>
 
             {teaser.description ? (
@@ -398,6 +403,10 @@ export default function SharePage() {
                 <Text style={styles.coachName}>{teaser.coachName}</Text>
               </View>
 
+              {teaser.shareType === 'marketing' && teaser.campaignName ? (
+                <Text style={styles.campaignBadge}>{teaser.campaignName}</Text>
+              ) : null}
+
               <Text style={styles.workoutTitle}>{workout.name}</Text>
 
               {workout.description ? (
@@ -485,6 +494,10 @@ export default function SharePage() {
             </View>
             <Text style={styles.coachName}>{teaser.coachName}</Text>
           </View>
+
+          {teaser.shareType === 'marketing' && teaser.campaignName ? (
+            <Text style={styles.campaignBadge}>{teaser.campaignName}</Text>
+          ) : null}
 
           <Text style={styles.workoutTitle}>{teaser.name}</Text>
 
@@ -619,6 +632,22 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     fontFamily: FH,
+  },
+  campaignBadge: {
+    alignSelf: 'flex-start',
+    color: GOLD,
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: FB,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    backgroundColor: 'rgba(245,166,35,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.35)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginBottom: -8,
   },
   workoutDesc: {
     color: MUTED,

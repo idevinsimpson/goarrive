@@ -277,6 +277,7 @@ interface ShareSettingsState {
   shareType: 'member' | 'marketing';
   emailGateEnabled: boolean;
   ctaConfig: MarketingCtaConfig;
+  campaignName: string;
 }
 
 // ── Props ───────────────────────────────────────────────────────────────────
@@ -510,6 +511,7 @@ export default function WorkoutFolderPage({
     shareType: 'member',
     emailGateEnabled: false,
     ctaConfig: { subscriptionOptions: [] },
+    campaignName: '',
   });
   const [shareSettingsSaving, setShareSettingsSaving] = useState(false);
   const [moveToSearch, setMoveToSearch] = useState('');
@@ -653,6 +655,7 @@ export default function WorkoutFolderPage({
         shareType: data.shareType === 'marketing' ? 'marketing' : 'member',
         emailGateEnabled: data.emailGateEnabled === true,
         ctaConfig: data.ctaConfig ?? { subscriptionOptions: [] },
+        campaignName: typeof data.campaignName === 'string' ? data.campaignName : '',
       });
     }).catch(() => {});
   }, [workoutId, coachId]);
@@ -730,6 +733,7 @@ export default function WorkoutFolderPage({
           shareType?: 'member' | 'marketing';
           emailGateEnabled?: boolean;
           ctaConfig?: MarketingCtaConfig;
+          campaignName?: string;
         },
         { updated: number; shareId?: string }
       >(functions, 'updateShareToken');
@@ -740,6 +744,7 @@ export default function WorkoutFolderPage({
         shareType: next.shareType,
         emailGateEnabled: next.emailGateEnabled,
         ctaConfig: next.ctaConfig,
+        campaignName: next.campaignName,
       });
     } catch (err: any) {
       console.error('[WorkoutFolder] Update share settings error:', err);
@@ -764,6 +769,7 @@ export default function WorkoutFolderPage({
         shareType: 'member',
         emailGateEnabled: false,
         ctaConfig: { subscriptionOptions: [] },
+        campaignName: '',
       });
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
         window.alert('The share link has been revoked.');
@@ -4007,7 +4013,7 @@ export default function WorkoutFolderPage({
         onRequestClose={() => setShareModalOpen(false)}
       >
         <View style={st.shareModalOverlay}>
-          <View style={st.shareModalCard}>
+          <View style={[st.shareModalCard, { maxHeight: '85%' }]}>
             <View style={st.shareModalHeader}>
               <Text style={st.shareModalTitle}>Share Settings</Text>
               <TouchableOpacity onPress={() => setShareModalOpen(false)}>
@@ -4015,6 +4021,7 @@ export default function WorkoutFolderPage({
               </TouchableOpacity>
             </View>
 
+            <ScrollView showsVerticalScrollIndicator={false}>
             <Text style={st.shareModalSectionLabel}>Who can view this workout</Text>
             <View style={st.shareModalOptions}>
               {VISIBILITY_OPTIONS.map((opt) => {
@@ -4087,7 +4094,7 @@ export default function WorkoutFolderPage({
                 disabled={shareSettingsSaving}
               >
                 <View style={{ flex: 1 }}>
-                  <Text style={st.shareModalOptionTitle}>Free Workout Friday / lead-gen</Text>
+                  <Text style={st.shareModalOptionTitle}>Lead-gen mode</Text>
                   <Text style={st.shareModalOptionDesc}>
                     Collect leads and show a signup CTA at the end of the workout.
                   </Text>
@@ -4103,6 +4110,32 @@ export default function WorkoutFolderPage({
 
               {shareSettings.shareType === 'marketing' && (
                 <>
+                  <View style={[st.shareModalOption, { flexDirection: 'column', alignItems: 'stretch', gap: 6 }]}>
+                    <Text style={st.shareModalOptionTitle}>Campaign name</Text>
+                    <Text style={st.shareModalOptionDesc}>
+                      Shown on the share landing page (e.g. "Free Workout Friday", "New Year Kickoff").
+                    </Text>
+                    <TextInput
+                      value={shareSettings.campaignName}
+                      onChangeText={(t) => setShareSettings({ ...shareSettings, campaignName: t })}
+                      onBlur={() => saveShareSettings({ campaignName: shareSettings.campaignName })}
+                      placeholder="Free Workout Friday"
+                      placeholderTextColor="#5A6675"
+                      editable={!shareSettingsSaving}
+                      style={{
+                        backgroundColor: '#0E1117',
+                        color: '#F5F7FA',
+                        borderWidth: 1,
+                        borderColor: '#2A3140',
+                        borderRadius: 8,
+                        paddingHorizontal: 12,
+                        paddingVertical: 10,
+                        fontSize: 14,
+                        marginTop: 4,
+                      }}
+                    />
+                  </View>
+
                   <TouchableOpacity
                     style={[st.shareModalOption]}
                     onPress={() => saveShareSettings({ emailGateEnabled: !shareSettings.emailGateEnabled })}
@@ -4169,6 +4202,7 @@ export default function WorkoutFolderPage({
               )}
             </View>
             {/* ── End marketing section ──────────────────────────────── */}
+            </ScrollView>
 
             <View style={st.shareModalButtonRow}>
               <TouchableOpacity
