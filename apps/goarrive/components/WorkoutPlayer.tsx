@@ -1734,7 +1734,6 @@ export default function WorkoutPlayer({
                       isLooping={false}
                       shouldPlay={!isPaused}
                       isMuted={followMuted}
-                      volume={music.volume * music.volume}
                       style={[st.videoPlayer, cropTransform as any]}
                       videoStyle={
                         Platform.OS === 'web'

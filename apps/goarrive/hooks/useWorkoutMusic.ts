@@ -32,12 +32,11 @@ import {
 } from 'firebase/firestore';
 import { db, functions } from '../lib/firebase';
 import { MUSIC_MAX_TRACKS_PER_STYLE } from '../constants/musicStyles';
-// The music panel slider is now the workout's unified "Volume" control —
-// coach voice/cue audio and the Mubert music element BOTH flow through the
-// shared Web Audio graph in useWorkoutTTS so a single GainNode drives every
-// audible output. This is the only path that actually works on iOS Safari
-// (which ignores JS-set HTMLAudioElement.volume).
-import { setVoiceVolume, wireToGain } from './useWorkoutTTS';
+// The music panel slider drives ONLY the music bus of the shared Web Audio
+// graph in useWorkoutTTS — coach voice / cue audio live on a separate voice
+// bus that stays at full volume. Routing through Web Audio is required on
+// iOS Safari, which ignores JS-set HTMLAudioElement.volume entirely.
+import { setMusicVolume, wireToGain } from './useWorkoutTTS';
 
 // Pure queue/id helpers live in useWorkoutMusic.helpers.ts (no RN/Firebase
 // deps — safe to import in vitest). Re-exported here for convenience.
@@ -428,12 +427,13 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
     try { (el as any).crossOrigin = 'anonymous'; } catch {}
     el.loop = false; // playlist advances on 'ended' instead of looping
     el.volume = volumeRef.current * volumeRef.current; // perceptual curve — see setVolume
-    setVoiceVolume(volumeRef.current * volumeRef.current);
-    // Route this element through the shared Web Audio graph so the volume
-    // slider actually controls it on iOS. Graph is created inside the same
-    // Start-tap gesture (unlockAudioPlayback → ensureAudioGraph); wireToGain
-    // is safe to call before the graph exists (queues for retro-wire).
-    wireToGain(el);
+    setMusicVolume(volumeRef.current * volumeRef.current);
+    // Wire this element to the MUSIC bus of the shared Web Audio graph so
+    // the slider actually controls it on iOS without touching coach voice.
+    // Graph is created inside the same Start-tap gesture (unlockAudioPlayback
+    // → ensureAudioGraph); wireToGain is safe to call before the graph exists
+    // (queues for retro-wire).
+    wireToGain(el, 'music');
     el.muted = mutedRef.current;
     el.addEventListener('ended', () => {
       if (musicElRef.current !== el || !el.src) return;
@@ -543,8 +543,9 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
     // front-loaded (10% still audibly loud). Square the display value so the
     // slider feels natural — 10% displayed ≈ 1% actual, 50% ≈ 25%, 100% = 100%.
     if (musicElRef.current) musicElRef.current.volume = clamped * clamped;
-    // Unified volume: mirror to voice/cue audio so the slider quiets everything.
-    setVoiceVolume(clamped * clamped);
+    // Music-only: coach voice / cue audio live on a separate gain bus and
+    // are untouched by this slider. See useWorkoutTTS split-gain comment.
+    setMusicVolume(clamped * clamped);
   }, []);
 
   const skipNext = useCallback(() => {

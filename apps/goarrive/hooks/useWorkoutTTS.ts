@@ -160,15 +160,16 @@ type CueKey = keyof typeof CUES;
 // count + the static cue keys, so unbounded growth isn't a concern.
 const audioPool: Record<string, HTMLAudioElement> = {};
 
-// ── Voice / master volume (unified with music panel slider) ─────────────
+// ── Split gain graph: voice + music are independent on iOS ──────────────
 // iOS Safari ignores HTMLAudioElement.volume / HTMLVideoElement.volume set
 // from JavaScript — playback always follows the system volume, no matter
-// what the JS side asks for. Web Audio API's GainNode IS honored on iOS, so
-// we route every audio surface (cues, voice clips, Mubert music, follow-
-// along video) through a single AudioContext + master GainNode. Setting
-// gain.value from the slider is the ONLY way to actually quiet audio on
-// iOS. On desktop web the direct element.volume path still works and is
-// kept as a fallback for elements that couldn't be wired (see below).
+// what the JS side asks for. Web Audio API's GainNode IS honored on iOS,
+// so we route audio through an AudioContext and TWO GainNodes:
+//   voiceGain — cues + coach voice clips (stays at 1.0; coach voice should
+//               always be audible over background music)
+//   musicGain — Mubert playlist element (follows the music panel slider)
+// Splitting keeps the music slider from muting coach guidance — the coach
+// voice was silenced by the earlier unified-gain version and confused Devin.
 //
 // Wiring rules (createMediaElementSource has sharp edges):
 //   - Each element can be wrapped at most once (InvalidStateError otherwise).
@@ -177,51 +178,64 @@ const audioPool: Record<string, HTMLAudioElement> = {};
 //     taints the graph and produces silence even with CORS response headers.
 //   - AudioContext must be created inside a user gesture on iOS —
 //     ensureAudioGraph() is called from unlockAudioPlayback().
+export type GainBus = 'voice' | 'music';
 let voiceVolume = 1;
+let musicVolumeGain = 1;
 let audioCtx: AudioContext | null = null;
-let masterGain: GainNode | null = null;
-const wiredElements = new WeakSet<HTMLMediaElement>();
+let voiceGain: GainNode | null = null;
+let musicGain: GainNode | null = null;
+const wiredElements = new WeakMap<HTMLMediaElement, GainBus>();
 
 function ensureAudioGraph(): void {
-  if (audioCtx && masterGain) return;
+  if (audioCtx && voiceGain && musicGain) return;
   if (typeof window === 'undefined') return;
   const Ctx: typeof AudioContext | undefined =
     (window as any).AudioContext || (window as any).webkitAudioContext;
   if (!Ctx) return;
   try {
     audioCtx = new Ctx();
-    masterGain = audioCtx.createGain();
-    masterGain.gain.value = voiceVolume;
-    masterGain.connect(audioCtx.destination);
-    console.info('[VOICE-AUDIT] audio graph online', { state: audioCtx.state, gain: voiceVolume });
-    // Wire everything that was created before the graph existed.
-    for (const el of Object.values(audioPool)) wireToGain(el);
-    for (const el of blessedGenericPlayers) wireToGain(el);
-    for (const el of pendingExternalWires) wireToGain(el);
+    voiceGain = audioCtx.createGain();
+    voiceGain.gain.value = voiceVolume;
+    voiceGain.connect(audioCtx.destination);
+    musicGain = audioCtx.createGain();
+    musicGain.gain.value = musicVolumeGain;
+    musicGain.connect(audioCtx.destination);
+    console.info('[VOICE-AUDIT] audio graph online', {
+      state: audioCtx.state, voiceGain: voiceVolume, musicGain: musicVolumeGain,
+    });
+    // Wire everything that was created before the graph existed. Elements
+    // added via applyVoiceVolume default to the voice bus; external elements
+    // (music) are queued with their intended bus.
+    for (const el of Object.values(audioPool)) wireToGain(el, 'voice');
+    for (const el of blessedGenericPlayers) wireToGain(el, 'voice');
+    for (const { el, bus } of pendingExternalWires) wireToGain(el, bus);
     pendingExternalWires.length = 0;
   } catch (err) {
     console.warn('[VOICE-AUDIT] audio graph init FAILED', { err: String(err) });
     audioCtx = null;
-    masterGain = null;
+    voiceGain = null;
+    musicGain = null;
   }
 }
 
-// External elements (music, video) created outside this module but wired
-// via wireToGain BEFORE the graph came online. Held so ensureAudioGraph()
-// can retro-wire them once the AudioContext is live.
-const pendingExternalWires: HTMLMediaElement[] = [];
+// External elements (music) wired via wireToGain BEFORE the graph came
+// online. Held with their intended bus so ensureAudioGraph() can retro-wire
+// them correctly.
+const pendingExternalWires: Array<{ el: HTMLMediaElement; bus: GainBus }> = [];
 
-export function wireToGain(el: HTMLMediaElement): void {
+export function wireToGain(el: HTMLMediaElement, bus: GainBus = 'voice'): void {
   if (!el) return;
   if (wiredElements.has(el)) return;
-  if (!audioCtx || !masterGain) {
-    if (!pendingExternalWires.includes(el)) pendingExternalWires.push(el);
+  if (!audioCtx || !voiceGain || !musicGain) {
+    if (!pendingExternalWires.some((p) => p.el === el)) {
+      pendingExternalWires.push({ el, bus });
+    }
     return;
   }
   try {
     const src = audioCtx.createMediaElementSource(el);
-    src.connect(masterGain);
-    wiredElements.add(el);
+    src.connect(bus === 'music' ? musicGain : voiceGain);
+    wiredElements.set(el, bus);
   } catch {
     // Element already has a source node bound (either by us via a WeakSet
     // miss, or by another consumer). Nothing to do — direct playback still
@@ -229,27 +243,35 @@ export function wireToGain(el: HTMLMediaElement): void {
   }
 }
 
-// Applied to every newly-created HTMLAudioElement in this module (and to
-// external elements via wireToGain). Sets crossOrigin BEFORE any src is
-// touched so the caller (createManagedAudio, etc.) must call this before
-// assigning src.
+// Applied to every newly-created HTMLAudioElement in this module. Sets
+// crossOrigin BEFORE any src is touched, then wires to the VOICE bus (cues
+// + coach voice both live on that bus).
 export function applyVoiceVolume(el: HTMLMediaElement): void {
   try { (el as any).crossOrigin = 'anonymous'; } catch {}
   try { el.volume = voiceVolume; } catch {}
-  wireToGain(el);
+  wireToGain(el, 'voice');
 }
 
-// Slider handler. On iOS this is the only path that actually quiets audio
-// (via masterGain); on desktop web both paths work and stay in sync.
+// Voice slider (currently no UI — voiceVolume stays at 1.0). Kept exported
+// for a future coach-voice slider without a second refactor.
 export function setVoiceVolume(v: number): void {
   const clamped = Math.min(1, Math.max(0, v));
   voiceVolume = clamped;
-  if (masterGain) {
-    try { masterGain.gain.value = clamped; } catch {}
+  if (voiceGain) {
+    try { voiceGain.gain.value = clamped; } catch {}
   }
-  // Desktop fallback + safety net for elements that never wired successfully.
   for (const el of Object.values(audioPool)) { try { el.volume = clamped; } catch {} }
   for (const el of blessedGenericPlayers) { try { el.volume = clamped; } catch {} }
+}
+
+// Music slider handler (called from useWorkoutMusic.setVolume). On iOS this
+// is the only path that actually quiets the Mubert track.
+export function setMusicVolume(v: number): void {
+  const clamped = Math.min(1, Math.max(0, v));
+  musicVolumeGain = clamped;
+  if (musicGain) {
+    try { musicGain.gain.value = clamped; } catch {}
+  }
 }
 
 // Constructor helper. `new Audio(url)` sets src synchronously, which is too
