@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
+import { signInAnonymously } from 'firebase/auth';
 import { useAuth } from '../../lib/AuthContext';
 import { auth } from '../../lib/firebase';
 import { Icon } from '../../components/Icon';
@@ -71,6 +72,22 @@ export default function SharePage() {
     if (authLoading) return;
     resolveToken();
   }, [shareId, authLoading, user]);
+
+  // Anonymous sign-in for public share links so authenticated Cloud Functions
+  // (getWorkoutMusic in particular — it uses request.auth.uid to enforce
+  // per-coach Mubert quotas and load shared dislikes) succeed for guests.
+  // Only fires when: teaser has been resolved AND does NOT require signin AND
+  // no user is present (real coaches/members keep their session; signin_required
+  // shares keep their existing "sign in" prompt so viewer identity is real).
+  useEffect(() => {
+    if (authLoading) return;
+    if (user) return;
+    if (!teaser) return;
+    if (teaser.requireAuth) return;
+    signInAnonymously(auth).catch((err) => {
+      console.warn('[SharePage] anonymous sign-in failed', err);
+    });
+  }, [authLoading, user, teaser]);
 
   async function resolveToken() {
     setLoading(true);

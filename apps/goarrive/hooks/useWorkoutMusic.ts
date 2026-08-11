@@ -33,9 +33,11 @@ import {
 import { db, functions } from '../lib/firebase';
 import { MUSIC_MAX_TRACKS_PER_STYLE } from '../constants/musicStyles';
 // The music panel slider is now the workout's unified "Volume" control —
-// coach voice/cue audio (useWorkoutTTS) and the Follow-Along video layer both
-// track this same value so sliding to zero actually quiets everything.
-import { setVoiceVolume } from './useWorkoutTTS';
+// coach voice/cue audio and the Mubert music element BOTH flow through the
+// shared Web Audio graph in useWorkoutTTS so a single GainNode drives every
+// audible output. This is the only path that actually works on iOS Safari
+// (which ignores JS-set HTMLAudioElement.volume).
+import { setVoiceVolume, wireToGain } from './useWorkoutTTS';
 
 // Pure queue/id helpers live in useWorkoutMusic.helpers.ts (no RN/Firebase
 // deps — safe to import in vitest). Re-exported here for convenience.
@@ -420,9 +422,18 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
   const startMusic = useCallback(() => {
     if (!enabled || musicElRef.current || musicOffRef.current) return;
     const el: HTMLAudioElement = new (window as any).Audio();
+    // crossOrigin MUST be set before src (in attachTrack below) so the
+    // Mubert / Firebase Storage fetch honors CORS — otherwise wireToGain
+    // taints the graph and produces silence.
+    try { (el as any).crossOrigin = 'anonymous'; } catch {}
     el.loop = false; // playlist advances on 'ended' instead of looping
     el.volume = volumeRef.current * volumeRef.current; // perceptual curve — see setVolume
     setVoiceVolume(volumeRef.current * volumeRef.current);
+    // Route this element through the shared Web Audio graph so the volume
+    // slider actually controls it on iOS. Graph is created inside the same
+    // Start-tap gesture (unlockAudioPlayback → ensureAudioGraph); wireToGain
+    // is safe to call before the graph exists (queues for retro-wire).
+    wireToGain(el);
     el.muted = mutedRef.current;
     el.addEventListener('ended', () => {
       if (musicElRef.current !== el || !el.src) return;

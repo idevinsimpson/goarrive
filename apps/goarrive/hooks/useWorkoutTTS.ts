@@ -160,20 +160,108 @@ type CueKey = keyof typeof CUES;
 // count + the static cue keys, so unbounded growth isn't a concern.
 const audioPool: Record<string, HTMLAudioElement> = {};
 
-// ── Voice volume (unified with music panel slider) ──────────────────────
-// Actual HTMLAudioElement.volume value (already perceptually curved by the
-// caller — useWorkoutMusic.setVolume applies displayValue² before calling
-// setVoiceVolume). Applied to every newly-created Audio element AND
-// retroactively to the pool + blessed players when the setter fires.
+// ── Voice / master volume (unified with music panel slider) ─────────────
+// iOS Safari ignores HTMLAudioElement.volume / HTMLVideoElement.volume set
+// from JavaScript — playback always follows the system volume, no matter
+// what the JS side asks for. Web Audio API's GainNode IS honored on iOS, so
+// we route every audio surface (cues, voice clips, Mubert music, follow-
+// along video) through a single AudioContext + master GainNode. Setting
+// gain.value from the slider is the ONLY way to actually quiet audio on
+// iOS. On desktop web the direct element.volume path still works and is
+// kept as a fallback for elements that couldn't be wired (see below).
+//
+// Wiring rules (createMediaElementSource has sharp edges):
+//   - Each element can be wrapped at most once (InvalidStateError otherwise).
+//   - Element MUST have `crossOrigin = 'anonymous'` set BEFORE `src` is
+//     assigned. Without it, cross-origin audio (Firebase Storage / Mubert)
+//     taints the graph and produces silence even with CORS response headers.
+//   - AudioContext must be created inside a user gesture on iOS —
+//     ensureAudioGraph() is called from unlockAudioPlayback().
 let voiceVolume = 1;
-export function applyVoiceVolume(el: HTMLAudioElement): void {
-  try { el.volume = voiceVolume; } catch {}
+let audioCtx: AudioContext | null = null;
+let masterGain: GainNode | null = null;
+const wiredElements = new WeakSet<HTMLMediaElement>();
+
+function ensureAudioGraph(): void {
+  if (audioCtx && masterGain) return;
+  if (typeof window === 'undefined') return;
+  const Ctx: typeof AudioContext | undefined =
+    (window as any).AudioContext || (window as any).webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    audioCtx = new Ctx();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = voiceVolume;
+    masterGain.connect(audioCtx.destination);
+    console.info('[VOICE-AUDIT] audio graph online', { state: audioCtx.state, gain: voiceVolume });
+    // Wire everything that was created before the graph existed.
+    for (const el of Object.values(audioPool)) wireToGain(el);
+    for (const el of blessedGenericPlayers) wireToGain(el);
+    for (const el of pendingExternalWires) wireToGain(el);
+    pendingExternalWires.length = 0;
+  } catch (err) {
+    console.warn('[VOICE-AUDIT] audio graph init FAILED', { err: String(err) });
+    audioCtx = null;
+    masterGain = null;
+  }
 }
+
+// External elements (music, video) created outside this module but wired
+// via wireToGain BEFORE the graph came online. Held so ensureAudioGraph()
+// can retro-wire them once the AudioContext is live.
+const pendingExternalWires: HTMLMediaElement[] = [];
+
+export function wireToGain(el: HTMLMediaElement): void {
+  if (!el) return;
+  if (wiredElements.has(el)) return;
+  if (!audioCtx || !masterGain) {
+    if (!pendingExternalWires.includes(el)) pendingExternalWires.push(el);
+    return;
+  }
+  try {
+    const src = audioCtx.createMediaElementSource(el);
+    src.connect(masterGain);
+    wiredElements.add(el);
+  } catch {
+    // Element already has a source node bound (either by us via a WeakSet
+    // miss, or by another consumer). Nothing to do — direct playback still
+    // works, but volume control on iOS is lost for this element.
+  }
+}
+
+// Applied to every newly-created HTMLAudioElement in this module (and to
+// external elements via wireToGain). Sets crossOrigin BEFORE any src is
+// touched so the caller (createManagedAudio, etc.) must call this before
+// assigning src.
+export function applyVoiceVolume(el: HTMLMediaElement): void {
+  try { (el as any).crossOrigin = 'anonymous'; } catch {}
+  try { el.volume = voiceVolume; } catch {}
+  wireToGain(el);
+}
+
+// Slider handler. On iOS this is the only path that actually quiets audio
+// (via masterGain); on desktop web both paths work and stay in sync.
 export function setVoiceVolume(v: number): void {
   const clamped = Math.min(1, Math.max(0, v));
   voiceVolume = clamped;
-  for (const el of Object.values(audioPool)) applyVoiceVolume(el);
-  for (const el of blessedGenericPlayers) applyVoiceVolume(el);
+  if (masterGain) {
+    try { masterGain.gain.value = clamped; } catch {}
+  }
+  // Desktop fallback + safety net for elements that never wired successfully.
+  for (const el of Object.values(audioPool)) { try { el.volume = clamped; } catch {} }
+  for (const el of blessedGenericPlayers) { try { el.volume = clamped; } catch {} }
+}
+
+// Constructor helper. `new Audio(url)` sets src synchronously, which is too
+// late for crossOrigin — MediaElementAudioSourceNode would taint the graph
+// and produce silence. This helper enforces the correct order:
+//   Audio() → crossOrigin='anonymous' → src → wire to gain.
+function createManagedAudio(url?: string): HTMLAudioElement {
+  const audio: HTMLAudioElement = new (window as any).Audio();
+  try { (audio as any).crossOrigin = 'anonymous'; } catch {}
+  if (url) audio.src = url;
+  applyVoiceVolume(audio);
+  return audio;
 }
 
 // Drop every pooled element. Called when the player unmounts: pooled elements
@@ -215,9 +303,8 @@ function preloadCue(key: CueKey): void {
   const poolKey = poolKeyForCue(key);
   if (audioPool[poolKey]) return;
   try {
-    const audio = new (window as any).Audio(CUES[key]);
+    const audio = createManagedAudio(CUES[key]);
     audio.preload = 'auto';
-    applyVoiceVolume(audio);
     audioPool[poolKey] = audio;
   } catch {
     // Audio API unavailable
@@ -322,6 +409,11 @@ function startKeepalive(): void {
   try {
     if (!keepaliveEl) {
       keepaliveUrl = makeSilentWavUrl();
+      // Keepalive stays SILENT (blob URL is same-origin, no CORS issue) and is
+      // intentionally NOT wired through masterGain — routing it through the
+      // graph would keep the AudioContext busy but does nothing useful, and
+      // wrapping every element carries some risk on iOS. Volume control on
+      // silence is moot.
       keepaliveEl = new (window as any).Audio(keepaliveUrl);
       keepaliveEl!.loop = true;
       (keepaliveEl as any).playsInline = true;
@@ -420,6 +512,15 @@ function blessElement(el: HTMLAudioElement, label: string): void {
  */
 export function unlockAudioPlayback(): void {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  // Web Audio graph MUST be created inside a user gesture on iOS —
+  // AudioContext construction outside a gesture starts in a permanently
+  // suspended state. resume() also requires a gesture. Called on every
+  // gesture (idempotent internally) so a pause/resume tap can also revive
+  // the context if iOS suspended it after backgrounding.
+  ensureAudioGraph();
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(() => {});
+  }
   if (audioUnlocked) {
     // Repeat gesture (pause/resume tap): revive the keepalive loop if iOS
     // paused it after a backgrounding or audio-session interruption.
@@ -432,9 +533,8 @@ export function unlockAudioPlayback(): void {
   for (const [key, el] of Object.entries(audioPool)) blessElement(el, key);
   for (let i = 0; i < 3; i++) {
     try {
-      const el: HTMLAudioElement = new (window as any).Audio(SILENT_WAV);
+      const el: HTMLAudioElement = createManagedAudio(SILENT_WAV);
       el.preload = 'auto';
-      applyVoiceVolume(el);
       blessElement(el, `generic_${i}`);
       blessedGenericPlayers.push(el);
     } catch (err) {
@@ -752,9 +852,8 @@ export function useWorkoutTTS({
           // immediately firing MEDIA_ERR_SRC_NOT_SUPPORTED.
           try { pooled.pause(); } catch {}
           delete audioPool[poolKey];
-          audio = new (window as any).Audio(url);
+          audio = createManagedAudio(url);
           audio.preload = 'auto';
-          applyVoiceVolume(audio);
           audioPool[poolKey] = audio;
           console.info('[VOICE-AUDIT] pumpQueue evicted stale pool entry (readyState=0)', { context: item.context, poolKey });
         } else {
@@ -763,9 +862,8 @@ export function useWorkoutTTS({
           try { audio.currentTime = 0; } catch {}
         }
       } else {
-        audio = new (window as any).Audio(url);
+        audio = createManagedAudio(url);
         audio.preload = 'auto';
-        applyVoiceVolume(audio);
         audioPool[poolKey] = audio;
       }
     } catch (err) {
@@ -1018,9 +1116,8 @@ export function useWorkoutTTS({
       const poolKey = poolKeyForVoice(url);
       if (!audioPool[poolKey]) {
         try {
-          const audio = new (window as any).Audio(url);
+          const audio = createManagedAudio(url);
           audio.preload = 'auto';
-          applyVoiceVolume(audio);
           audioPool[poolKey] = audio;
         } catch {
           // preload failed — pumpQueue will allocate on dequeue
@@ -1049,9 +1146,8 @@ export function useWorkoutTTS({
       const poolKey = poolKeyForVoice(url);
       if (!audioPool[poolKey]) {
         try {
-          const audio = new (window as any).Audio(url);
+          const audio = createManagedAudio(url);
           audio.preload = 'auto';
-          applyVoiceVolume(audio);
           audioPool[poolKey] = audio;
         } catch {}
       }
