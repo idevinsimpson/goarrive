@@ -32,6 +32,7 @@ import {
   useWindowDimensions,
   Share,
   Alert,
+  Switch,
   type LayoutChangeEvent,
 } from 'react-native';
 import {
@@ -1242,7 +1243,7 @@ function BuildScreenInner() {
     const parent = stack.length >= 2 ? stack[stack.length - 2] : null;
     try {
       const batch = writeBatch(db);
-      const coll = dragged.type === 'Folder' ? 'build_folders' : COLLECTION_BY_TYPE[dragged.type];
+      const coll = dragged.type === 'Folder' ? 'build_folders' : COLLECTION_BY_TYPE[dragged.type as BuildType];
       batch.update(doc(db, coll, dragged.id), stripUndefined({
         parentId: parent ? parent.id : null,
         updatedAt: serverTimestamp(),
@@ -1296,7 +1297,7 @@ function BuildScreenInner() {
       // Tray "New Folder" drop: nest the dragged item into the new folder.
       // Folder sources write to build_folders; assets use COLLECTION_BY_TYPE.
       if (pendingDrop) {
-        const coll = pendingDrop.type === 'Folder' ? 'build_folders' : COLLECTION_BY_TYPE[pendingDrop.type];
+        const coll = pendingDrop.type === 'Folder' ? 'build_folders' : COLLECTION_BY_TYPE[pendingDrop.type as BuildType];
         await updateDoc(doc(db, coll, pendingDrop.id), stripUndefined({
           parentId: folderRef.id,
           updatedAt: serverTimestamp(),
@@ -1594,7 +1595,7 @@ function BuildScreenInner() {
       // Bump the folder's updatedAt too, so it resorts to the top of the
       // grid where the user is scrolled to see the result.
       const batch = writeBatch(db);
-      const coll = dragged.type === 'Folder' ? 'build_folders' : COLLECTION_BY_TYPE[dragged.type];
+      const coll = dragged.type === 'Folder' ? 'build_folders' : COLLECTION_BY_TYPE[dragged.type as BuildType];
       batch.update(doc(db, coll, dragged.id), stripUndefined({
         parentId: folderId,
         updatedAt: serverTimestamp(),
@@ -3919,7 +3920,7 @@ function BuildScreenInner() {
                 Sync enabled — member copies stay in sync with template changes
               </Text>
             </View>
-            <View style={s.folderBtnRow}>
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
               <Pressable
                 style={[s.folderBtn, { flex: 1 }]}
                 onPress={() => { setShowPbFolderCreate(false); setNewPbFolderName(''); }}
