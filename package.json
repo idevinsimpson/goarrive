@@ -9,7 +9,8 @@
     "test:e2e": "playwright test",
     "capture:coach-discovery": "node scripts/capture-coach-discovery.mjs",
     "optimize:coach-discovery-images": "node scripts/optimize-coach-discovery-images.mjs",
-    "preview:coach-discovery": "node scripts/serve-static-export.mjs apps/goarrive/dist"
+    "preview:coach-discovery": "node scripts/serve-static-export.mjs apps/goarrive/dist",
+    "seed:staging": "node scripts/seed-staging.js"
   },
   "repository": {
     "type": "git",
