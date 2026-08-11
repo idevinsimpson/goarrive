@@ -1065,7 +1065,7 @@ export const createFunnelCheckoutSession = onCall(
             funnelCheckout: 'true',
           },
         },
-        success_url: `${appBaseUrl}/checkout-success?submissionId=${submissionId}`,
+        success_url: `${appBaseUrl}/countdown?submissionId=${submissionId}&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${appBaseUrl}/checkout/${submissionId}?cancelled=1`,
         metadata: {
           submissionId,
