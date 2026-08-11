@@ -1262,11 +1262,141 @@ async function processStripeEvent(tag: string, event: Stripe.Event, res: any) {
 
 // ── Webhook handlers ──────────────────────────────────────────────────────────
 
+// ── enrollSubscriber ─────────────────────────────────────────────────────────
+// Internal helper (not exported). Called from handleCheckoutSessionCompleted
+// when submissionId is present in session metadata.
+// Duplicates the template playbook to a member-owned copy, writes the
+// playbook_folder_members doc, marks the submission enrolled, and queues a
+// drip email.
+async function enrollSubscriber(params: {
+  submissionId: string;
+  memberId: string;
+  stripeSubscriptionId: string;
+  stripeCustomerId: string;
+}): Promise<void> {
+  const { submissionId, memberId, stripeSubscriptionId, stripeCustomerId } = params;
+  const TAG = '[enrollSubscriber]';
+
+  // 1. Load submission
+  const submSnap = await db.collection('onboarding_submissions').doc(submissionId).get();
+  if (!submSnap.exists) {
+    console.warn(TAG, 'Submission not found:', submissionId);
+    return;
+  }
+  const subm = submSnap.data()!;
+  const { coachId, folderId, subscriptionPathId, scheduleDaysOfWeek, scheduleTimeOfDay, timezone, email, firstName, lastName } = subm;
+  if (!coachId || !folderId || !subscriptionPathId) {
+    console.warn(TAG, 'Submission missing required fields:', submissionId);
+    return;
+  }
+
+  // 2. Load folder + find subscription path
+  const folderSnap = await db.collection('playbook_folders').doc(folderId).get();
+  if (!folderSnap.exists) {
+    console.warn(TAG, 'Folder not found:', folderId);
+    return;
+  }
+  const folder = folderSnap.data()!;
+  const subscriptionPaths: Array<{ id: string; label: string; templatePlaybookId: string; musicStyle?: string }> = folder.subscriptionPaths ?? [];
+  const path = subscriptionPaths.find((p) => p.id === subscriptionPathId);
+  if (!path) {
+    console.warn(TAG, 'Subscription path not found:', subscriptionPathId, 'in folder', folderId);
+    return;
+  }
+  const { templatePlaybookId, musicStyle: pathMusicStyle } = path;
+  if (!templatePlaybookId) {
+    console.warn(TAG, 'Subscription path has no templatePlaybookId:', subscriptionPathId);
+    return;
+  }
+
+  // 3. Load template playbook
+  const templateSnap = await db.collection('playbooks').doc(templatePlaybookId).get();
+  if (!templateSnap.exists) {
+    console.warn(TAG, 'Template playbook not found:', templatePlaybookId);
+    return;
+  }
+  const template = templateSnap.data()!;
+
+  // Clone playbook doc
+  const memberName = `${firstName ?? ''} ${lastName ?? ''}`.trim() || email;
+  const newPlaybookRef = db.collection('playbooks').doc();
+  const clonedFields: Record<string, unknown> = { ...template };
+  // Remove server-generated fields that must be overridden
+  delete clonedFields.createdAt;
+  delete clonedFields.updatedAt;
+  delete clonedFields.assignedAt;
+  await newPlaybookRef.set({
+    ...clonedFields,
+    name: `${template.name ?? 'Playbook'} (${memberName})`,
+    memberId,
+    assignedMemberId: memberId,
+    assignedMemberName: memberName,
+    assignedAt: FieldValue.serverTimestamp(),
+    templateSourceId: templatePlaybookId,
+    musicStyle: pathMusicStyle || template.musicStyle || null,
+    unsynced: false,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  const newPlaybookId = newPlaybookRef.id;
+  console.log(TAG, 'Cloned playbook', templatePlaybookId, '->', newPlaybookId, 'for member', memberId);
+
+  // 4. Write playbook_folder_members
+  const memberDocRef = db.collection('playbook_folder_members').doc();
+  await memberDocRef.set({
+    playbookFolderId: folderId,
+    coachId,
+    memberId,
+    email: email ?? '',
+    name: memberName,
+    duplicatedPlaybookId: newPlaybookId,
+    subscriptionPathId,
+    scheduleDaysOfWeek: scheduleDaysOfWeek ?? [],
+    scheduleTimeOfDay: scheduleTimeOfDay ?? '',
+    timezone: timezone ?? null,
+    stripeSubscriptionId: stripeSubscriptionId ?? null,
+    stripeCustomerId: stripeCustomerId ?? null,
+    status: 'active',
+    pausedReason: null,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  console.log(TAG, 'Created folder member doc', memberDocRef.id);
+
+  // 5. Mark submission enrolled
+  await db.collection('onboarding_submissions').doc(submissionId).update({
+    status: 'enrolled',
+    enrolledAt: FieldValue.serverTimestamp(),
+    duplicatedPlaybookId: newPlaybookId,
+    folderMemberId: memberDocRef.id,
+  });
+
+  // 6. Queue drip email (flip to 'ready' so sendDripEmail picks it up)
+  const emailTemplate = folder.emailTemplate as { subject?: string; body?: string } ?? {};
+  await db.collection('drip_email_queue').doc(submissionId).set({
+    submissionId,
+    folderId,
+    coachId,
+    memberId,
+    email: email ?? '',
+    firstName: firstName ?? '',
+    lastName: lastName ?? '',
+    subject: emailTemplate.subject ?? '',
+    body: emailTemplate.body ?? '',
+    status: 'ready',
+    scheduledFor: FieldValue.serverTimestamp(),
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  console.log(TAG, 'Enrollment complete for submission', submissionId);
+}
+
 async function handleCheckoutSessionCompleted(
   session: Stripe.Checkout.Session,
   eventId: string
 ) {
-  const { intentId, planId, snapshotId, memberId, coachId: _coachId } = session.metadata ?? {};
+  const { intentId, planId, snapshotId, memberId, coachId: _coachId, submissionId } = session.metadata ?? {};
   void _coachId; // coachId is stored in snapshot; not needed here directly
   if (!intentId || !planId || !memberId) {
     console.warn('[handleCheckoutSessionCompleted] Missing metadata on session', session.id);
@@ -1594,6 +1724,29 @@ async function handleCheckoutSessionCompleted(
   }
 
   console.log('[handleCheckoutSessionCompleted] Plan', planId, 'activated for member', memberId);
+
+  // ── Subscription-path enrollment (PR-I) ──────────────────────────────────
+  // When the checkout was created from a funnel onboarding submission (PR-G),
+  // submissionId is present in metadata. Duplicate the template playbook and
+  // create a playbook_folder_members doc for the new subscriber.
+  if (submissionId) {
+    try {
+      const stripeSubscriptionId = typeof session.subscription === 'string'
+        ? session.subscription
+        : (session.subscription as any)?.id ?? null;
+      const stripeCustomerId = typeof session.customer === 'string'
+        ? session.customer
+        : (session.customer as any)?.id ?? null;
+      await enrollSubscriber({
+        submissionId,
+        memberId,
+        stripeSubscriptionId: stripeSubscriptionId ?? '',
+        stripeCustomerId: stripeCustomerId ?? '',
+      });
+    } catch (err) {
+      console.error('[handleCheckoutSessionCompleted] enrollSubscriber failed:', err);
+    }
+  }
 }
 
 async function handleInvoicePaid(invoice: Stripe.Invoice, eventId: string) {
@@ -11999,5 +12152,183 @@ export const resumeStripeSubscription = onCall(
       ...(historyEntry && { pauseHistory: FieldValue.arrayUnion(historyEntry) }),
     });
     return { success: true };
+  }
+);
+
+// ── syncTemplatePlaybookToMembers ─────────────────────────────────────────────
+// Firestore trigger: when a playbook doc is updated, check if it is a template
+// (no templateSourceId) and if the parent folder has syncEnabled. If so,
+// propagate non-personalized field changes to all enrolled member copies that
+// have not opted out (unsynced !== true).
+export const syncTemplatePlaybookToMembers = onDocumentUpdated(
+  { document: 'playbooks/{playbookId}', region: 'us-central1' },
+  async (event) => {
+    const after = event.data?.after.data();
+    if (!after) return;
+
+    // Only act on template playbooks (member copies have templateSourceId)
+    if (after.templateSourceId) return;
+
+    const playbookId = event.params.playbookId;
+    const coachId = after.coachId as string | undefined;
+    if (!coachId) return;
+
+    // Find which folder this template belongs to (folder.templatePlaybookIds contains it)
+    const foldersSnap = await db.collection('playbook_folders')
+      .where('coachId', '==', coachId)
+      .where('templatePlaybookIds', 'array-contains', playbookId)
+      .where('syncEnabled', '==', true)
+      .limit(10)
+      .get();
+
+    if (foldersSnap.empty) return;
+
+    // Fields that should sync (non-personalized content)
+    const syncableFields = ['workoutIds', 'musicStyle', 'description'] as const;
+    const patch: Record<string, unknown> = {};
+    for (const f of syncableFields) {
+      if (after[f] !== undefined) patch[f] = after[f];
+    }
+    if (Object.keys(patch).length === 0) return;
+
+    let updatedCount = 0;
+    for (const _folderDoc of foldersSnap.docs) {
+      // Find all enrolled member playbooks sourced from this template
+      const memberPlaybooksSnap = await db.collection('playbooks')
+        .where('coachId', '==', coachId)
+        .where('templateSourceId', '==', playbookId)
+        .get();
+
+      const writes: Promise<unknown>[] = [];
+      for (const mp of memberPlaybooksSnap.docs) {
+        if (mp.data().unsynced === true) continue;
+        writes.push(
+          mp.ref.update({ ...patch, updatedAt: FieldValue.serverTimestamp() })
+        );
+        updatedCount++;
+      }
+      await Promise.all(writes);
+    }
+
+    console.log('[syncTemplatePlaybookToMembers] Synced', updatedCount, 'member copies from template', playbookId);
+  }
+);
+
+// ── unsyncMemberPlaybook ──────────────────────────────────────────────────────
+// Callable: member or coach can detach a member's playbook copy from future
+// template syncs. Sets unsynced = true on the playbook doc.
+export const unsyncMemberPlaybook = onCall(
+  { region: 'us-central1', invoker: 'public' },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Must be signed in');
+
+    const { playbookId } = (request.data ?? {}) as { playbookId?: string };
+    if (!playbookId) throw new HttpsError('invalid-argument', 'playbookId is required');
+
+    const playbookSnap = await db.collection('playbooks').doc(playbookId).get();
+    if (!playbookSnap.exists) throw new HttpsError('not-found', 'Playbook not found');
+    const playbook = playbookSnap.data()!;
+
+    const callerToken = request.auth?.token as Record<string, any> | undefined;
+    const isAdmin = callerToken?.role === 'platformAdmin' || callerToken?.admin === true;
+    const isCoach = callerUid === playbook.coachId;
+    const isMemberOwner = callerUid === playbook.memberId || callerUid === playbook.assignedMemberId;
+
+    if (!isAdmin && !isCoach && !isMemberOwner) {
+      throw new HttpsError('permission-denied', 'Only the assigned member or coach can detach this playbook');
+    }
+
+    await db.collection('playbooks').doc(playbookId).update({
+      unsynced: true,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return { success: true };
+  }
+);
+
+// ── sendDripEmail ─────────────────────────────────────────────────────────────
+// Scheduled every 15 minutes. Queries drip_email_queue docs with status='ready'
+// and scheduledFor <= now. Sends via Resend API using EMAIL_API_KEY secret.
+// On success: status='sent'. On failure: status='failed'.
+export const sendDripEmail = onSchedule(
+  { schedule: 'every 15 minutes', timeZone: 'UTC', region: 'us-central1', secrets: [emailApiKey] },
+  async () => {
+    const now = Timestamp.now();
+    const readySnap = await db.collection('drip_email_queue')
+      .where('status', '==', 'ready')
+      .where('scheduledFor', '<=', now)
+      .limit(50)
+      .get();
+
+    if (readySnap.empty) return;
+
+    const apiKey = emailApiKey.value();
+    let sent = 0;
+    let failed = 0;
+
+    for (const qDoc of readySnap.docs) {
+      const q = qDoc.data();
+      const toEmail = q.email as string;
+      const firstName = (q.firstName as string) ?? '';
+      const rawSubject = (q.subject as string) ?? '';
+      const rawBody = (q.body as string) ?? '';
+
+      // Simple token substitution for {{firstName}} etc.
+      const subject = rawSubject.replace(/\{\{firstName\}\}/g, firstName);
+      const body = rawBody.replace(/\{\{firstName\}\}/g, firstName);
+
+      if (!toEmail || !subject) {
+        await qDoc.ref.update({ status: 'failed', error: 'Missing email or subject', updatedAt: FieldValue.serverTimestamp() });
+        failed++;
+        continue;
+      }
+
+      if (!apiKey) {
+        console.warn('[sendDripEmail] EMAIL_API_KEY not set — skipping send for', qDoc.id);
+        await qDoc.ref.update({ status: 'failed', error: 'EMAIL_API_KEY not configured', updatedAt: FieldValue.serverTimestamp() });
+        failed++;
+        continue;
+      }
+
+      try {
+        const res = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            from: 'GoArrive <noreply@goarrive.fit>',
+            to: [toEmail],
+            subject,
+            text: body,
+          }),
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Resend API error ${res.status}: ${errText}`);
+        }
+
+        await qDoc.ref.update({
+          status: 'sent',
+          sentAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        sent++;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('[sendDripEmail] Send failed for', qDoc.id, ':', msg);
+        await qDoc.ref.update({
+          status: 'failed',
+          error: msg,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        failed++;
+      }
+    }
+
+    console.log('[sendDripEmail] Batch complete — sent:', sent, 'failed:', failed);
   }
 );

@@ -410,9 +410,12 @@ service cloud.firestore {
     }
 
     match /playbooks/{playbookId} {
-      allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+      allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin() || request.auth.uid == resource.data.memberId || request.auth.uid == resource.data.assignedMemberId);
       allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
-      allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+      allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin()
+        // Member can only flip the unsynced flag on their own assigned playbook copy
+        || (isAuthenticated() && (request.auth.uid == resource.data.memberId || request.auth.uid == resource.data.assignedMemberId)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['unsynced', 'updatedAt']));
       allow delete: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
     }
 
@@ -1122,6 +1125,30 @@ service cloud.firestore {
       allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
       allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
       allow delete: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
+    }
+
+    // ─────────────────────────────────────────────
+    // DRIP EMAIL QUEUE (Phase 4 — subscription enrollment drip emails)
+    // Written by Cloud Functions (server-only). Coaches and admins can read.
+    // No client writes — status transitions are server-side only.
+    // ─────────────────────────────────────────────
+
+    match /drip_email_queue/{queueId} {
+      allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+      allow create, update, delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
+    // ONBOARDING SUBMISSIONS (Phase 4 — funnel enrollment)
+    // Written by members/guests via funnel UI. Coaches and admins can read.
+    // Status transitions (enrolled) are Cloud Function server-side only.
+    // ─────────────────────────────────────────────
+
+    match /onboarding_submissions/{submissionId} {
+      allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+      allow create: if true; // guests can submit the funnel form
+      allow update: if false; // server-only status transitions
+      allow delete: if isPlatformAdmin();
     }
 
     match /{document=**} {

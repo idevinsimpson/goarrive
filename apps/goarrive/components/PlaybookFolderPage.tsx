@@ -3,13 +3,19 @@
  *
  * Shows the template playbooks (source-of-truth for each subscription path)
  * and the list of member-specific copies with status badges. Settings panel
- * (slide-up sheet) lets coaches toggle sync and edit the email drip template.
+ * (slide-up sheet) lets coaches toggle sync, edit the email drip template,
+ * manage linked share tokens, and set the music style per subscription path.
  *
- * Phase 3 — subscription enrollment is stubbed behind a "coming soon" modal.
+ * Phase 4 additions:
+ *  - Linked share links quick-nav in settings
+ *  - Music-style dropdown per subscription path
+ *  - Per-member unsync (Detach from coach updates) in member three-dot menu
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -21,6 +27,8 @@ import {
   View,
 } from 'react-native';
 import {
+  arrayRemove,
+  arrayUnion,
   collection,
   doc,
   getDocs,
@@ -31,11 +39,13 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import { Icon } from './Icon';
 import { CONTENT_BOTTOM_CLEARANCE } from '../lib/tabBarStyle';
-import type { PlaybookFolder, PlaybookFolderMember, PlaybookFolderMemberStatus } from '../lib/types';
+import type { PlaybookFolder, PlaybookFolderMember, PlaybookFolderMemberStatus, PlaybookFolderSubscriptionPath } from '../lib/types';
+import { MUSIC_STYLE_OPTIONS } from '../constants/musicStyles';
 
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
@@ -51,6 +61,13 @@ const STATUS_LABEL: Record<PlaybookFolderMemberStatus, string> = {
   paused: 'Paused',
   canceled: 'Canceled',
 };
+
+interface ShareToken {
+  id: string;
+  token?: string;
+  label?: string;
+  url?: string;
+}
 
 interface Props {
   folderId: string;
@@ -73,7 +90,13 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
   const [syncEnabled, setSyncEnabled] = useState(true);
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
+  const [editedPaths, setEditedPaths] = useState<PlaybookFolderSubscriptionPath[]>([]);
   const [savingSettings, setSavingSettings] = useState(false);
+
+  // Linked share tokens
+  const [shareTokens, setShareTokens] = useState<ShareToken[]>([]);
+  const [newShareTokenInput, setNewShareTokenInput] = useState('');
+  const [loadingTokens, setLoadingTokens] = useState(false);
 
   // Three-dot member menu
   const [memberMenuId, setMemberMenuId] = useState<string | null>(null);
@@ -89,6 +112,7 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
       setSyncEnabled(data.syncEnabled ?? true);
       setEmailSubject(data.emailTemplate?.subject ?? '');
       setEmailBody(data.emailTemplate?.body ?? '');
+      setEditedPaths(data.subscriptionPaths ?? []);
       setLoading(false);
     });
     return unsub;
@@ -123,6 +147,25 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
       .catch(e => console.error('[PlaybookFolderPage] Load templates error:', e));
   }, [folder?.templatePlaybookIds, coachId]);
 
+  // Load linked share tokens when settings opens
+  useEffect(() => {
+    if (!showSettings || !folder?.linkedShareTokenIds?.length) {
+      setShareTokens([]);
+      return;
+    }
+    setLoadingTokens(true);
+    const ids = folder.linkedShareTokenIds;
+    getDocs(query(collection(db, 'shareTokens'), where('coachId', '==', coachId)))
+      .then(snap => {
+        const found = snap.docs
+          .filter(d => ids.includes(d.id))
+          .map(d => ({ id: d.id, ...d.data() } as ShareToken));
+        setShareTokens(found);
+      })
+      .catch(e => console.error('[PlaybookFolderPage] Load share tokens error:', e))
+      .finally(() => setLoadingTokens(false));
+  }, [showSettings, folder?.linkedShareTokenIds, coachId]);
+
   const saveSettings = useCallback(async () => {
     if (!folderId) return;
     setSavingSettings(true);
@@ -130,6 +173,7 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
       await updateDoc(doc(db, 'playbook_folders', folderId), {
         syncEnabled,
         emailTemplate: { subject: emailSubject.trim(), body: emailBody.trim() },
+        subscriptionPaths: editedPaths,
         updatedAt: serverTimestamp(),
       });
       setShowSettings(false);
@@ -138,7 +182,7 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
     } finally {
       setSavingSettings(false);
     }
-  }, [folderId, syncEnabled, emailSubject, emailBody]);
+  }, [folderId, syncEnabled, emailSubject, emailBody, editedPaths]);
 
   const updateMemberStatus = useCallback(async (memberId: string, status: PlaybookFolderMemberStatus) => {
     try {
@@ -151,6 +195,50 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
       console.error('[PlaybookFolderPage] Update member status error:', e);
     }
     setMemberMenuId(null);
+  }, []);
+
+  const detachMemberPlaybook = useCallback(async (member: PlaybookFolderMember) => {
+    setMemberMenuId(null);
+    if (!member.duplicatedPlaybookId) return;
+    try {
+      const fn = httpsCallable(functions, 'unsyncMemberPlaybook');
+      await fn({ playbookId: member.duplicatedPlaybookId });
+    } catch (e) {
+      console.error('[PlaybookFolderPage] Unsync error:', e);
+      Alert.alert('Error', 'Could not detach playbook from updates. Try again.');
+    }
+  }, []);
+
+  const linkShareToken = useCallback(async () => {
+    const raw = newShareTokenInput.trim();
+    if (!raw || !folderId) return;
+    // Accept either a full URL (extract last segment) or bare ID
+    const tokenId = raw.includes('/') ? raw.split('/').filter(Boolean).pop()! : raw;
+    try {
+      await updateDoc(doc(db, 'playbook_folders', folderId), {
+        linkedShareTokenIds: arrayUnion(tokenId),
+        updatedAt: serverTimestamp(),
+      });
+      setNewShareTokenInput('');
+    } catch (e) {
+      console.error('[PlaybookFolderPage] Link share token error:', e);
+    }
+  }, [folderId, newShareTokenInput]);
+
+  const unlinkShareToken = useCallback(async (tokenId: string) => {
+    if (!folderId) return;
+    try {
+      await updateDoc(doc(db, 'playbook_folders', folderId), {
+        linkedShareTokenIds: arrayRemove(tokenId),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.error('[PlaybookFolderPage] Unlink share token error:', e);
+    }
+  }, [folderId]);
+
+  const updatePathMusicStyle = useCallback((pathId: string, musicStyle: string) => {
+    setEditedPaths(prev => prev.map(p => p.id === pathId ? { ...p, musicStyle } : p));
   }, []);
 
   const filteredMembers = useMemo(() => {
@@ -275,6 +363,13 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
                       <Icon name="playbook" size={15} color="#A78BFA" />
                       <Text style={s.memberMenuText}>View playbook</Text>
                     </Pressable>
+                    <Pressable
+                      style={s.memberMenuItem}
+                      onPress={() => detachMemberPlaybook(member)}
+                    >
+                      <Icon name="x" size={15} color="#8A95A3" />
+                      <Text style={[s.memberMenuText, { color: '#8A95A3' }]}>Detach from updates</Text>
+                    </Pressable>
                     {member.status === 'active' && (
                       <Pressable
                         style={s.memberMenuItem}
@@ -319,52 +414,166 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
       >
         <Pressable style={s.sheetOverlay} onPress={() => setShowSettings(false)}>
           <Pressable style={s.sheet} onPress={e => e.stopPropagation()}>
-            <View style={s.sheetHandle} />
-            <Text style={s.sheetTitle}>Settings</Text>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <View style={s.sheetHandle} />
+              <Text style={s.sheetTitle}>Settings</Text>
 
-            {/* Sync toggle */}
-            <View style={s.settingRow}>
-              <View style={s.settingInfo}>
-                <Text style={s.settingLabel}>Sync enabled</Text>
-                <Text style={s.settingDesc}>
-                  Member copies automatically update when the template changes.
-                </Text>
+              {/* Sync toggle */}
+              <View style={s.settingRow}>
+                <View style={s.settingInfo}>
+                  <Text style={s.settingLabel}>Sync enabled</Text>
+                  <Text style={s.settingDesc}>
+                    Member copies automatically update when the template changes.
+                  </Text>
+                </View>
+                <Switch
+                  value={syncEnabled}
+                  onValueChange={setSyncEnabled}
+                  trackColor={{ false: '#2D3748', true: '#7C3AED' }}
+                  thumbColor="#fff"
+                />
               </View>
-              <Switch
-                value={syncEnabled}
-                onValueChange={setSyncEnabled}
-                trackColor={{ false: '#2D3748', true: '#7C3AED' }}
-                thumbColor="#fff"
+
+              {/* Subscription paths — music style per path */}
+              {editedPaths.length > 0 && (
+                <>
+                  <Text style={s.sheetSubtitle}>Subscription paths</Text>
+                  {editedPaths.map(path => (
+                    <View key={path.id} style={s.pathRow}>
+                      <Text style={s.pathLabel} numberOfLines={1}>{path.label || 'Unnamed path'}</Text>
+                      <Text style={s.pathFieldLabel}>Music style</Text>
+                      <View style={s.pickerRow}>
+                        {MUSIC_STYLE_OPTIONS.slice(0, 6).map(opt => (
+                          <Pressable
+                            key={opt.value}
+                            style={[
+                              s.musicChip,
+                              path.musicStyle === opt.value && s.musicChipActive,
+                            ]}
+                            onPress={() => updatePathMusicStyle(path.id, opt.value)}
+                          >
+                            <Text style={[
+                              s.musicChipText,
+                              path.musicStyle === opt.value && s.musicChipTextActive,
+                            ]}>
+                              {opt.label}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                      <View style={s.pickerRow}>
+                        {MUSIC_STYLE_OPTIONS.slice(6).map(opt => (
+                          <Pressable
+                            key={opt.value}
+                            style={[
+                              s.musicChip,
+                              path.musicStyle === opt.value && s.musicChipActive,
+                            ]}
+                            onPress={() => updatePathMusicStyle(path.id, opt.value)}
+                          >
+                            <Text style={[
+                              s.musicChipText,
+                              path.musicStyle === opt.value && s.musicChipTextActive,
+                            ]}>
+                              {opt.label}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </View>
+                  ))}
+                </>
+              )}
+
+              {/* Email template */}
+              <Text style={s.sheetSubtitle}>Email drip template</Text>
+              <Text style={s.settingDesc}>
+                Use {'{{firstName}}'} as a placeholder for the member's name.
+              </Text>
+              <TextInput
+                style={[s.textField, { marginTop: 8 }]}
+                value={emailSubject}
+                onChangeText={setEmailSubject}
+                placeholder="Subject line..."
+                placeholderTextColor="#4A5568"
               />
-            </View>
+              <TextInput
+                style={[s.textField, s.textArea]}
+                value={emailBody}
+                onChangeText={setEmailBody}
+                placeholder="Email body..."
+                placeholderTextColor="#4A5568"
+                multiline
+                numberOfLines={6}
+                textAlignVertical="top"
+              />
 
-            {/* Email template */}
-            <Text style={s.sheetSubtitle}>Email drip template</Text>
-            <TextInput
-              style={s.textField}
-              value={emailSubject}
-              onChangeText={setEmailSubject}
-              placeholder="Subject line..."
-              placeholderTextColor="#4A5568"
-            />
-            <TextInput
-              style={[s.textField, s.textArea]}
-              value={emailBody}
-              onChangeText={setEmailBody}
-              placeholder="Email body..."
-              placeholderTextColor="#4A5568"
-              multiline
-              numberOfLines={6}
-              textAlignVertical="top"
-            />
+              {/* Linked share links */}
+              <Text style={s.sheetSubtitle}>Linked share links</Text>
+              <Text style={s.settingDesc}>
+                Members who enroll through these share links are automatically added to this folder.
+              </Text>
 
-            <Pressable
-              style={[s.saveBtn, savingSettings && { opacity: 0.6 }]}
-              onPress={saveSettings}
-              disabled={savingSettings}
-            >
-              <Text style={s.saveBtnText}>{savingSettings ? 'Saving...' : 'Save'}</Text>
-            </Pressable>
+              {loadingTokens ? (
+                <ActivityIndicator color="#A78BFA" style={{ marginVertical: 8 }} />
+              ) : shareTokens.length === 0 ? (
+                <Text style={[s.emptyText, { marginTop: 6 }]}>No linked share links yet.</Text>
+              ) : (
+                shareTokens.map(token => {
+                  const shareUrl = token.url || `https://goarrive.fit/share/${token.id}`;
+                  return (
+                    <View key={token.id} style={s.tokenRow}>
+                      <Text style={s.tokenLabel} numberOfLines={1}>
+                        {token.label || shareUrl}
+                      </Text>
+                      <Pressable
+                        style={s.tokenBtn}
+                        hitSlop={8}
+                        onPress={() => Linking.openURL(shareUrl)}
+                      >
+                        <Text style={s.tokenBtnText}>Open</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[s.tokenBtn, s.tokenBtnDestructive]}
+                        hitSlop={8}
+                        onPress={() => unlinkShareToken(token.id)}
+                      >
+                        <Text style={[s.tokenBtnText, { color: '#EF4444' }]}>Unlink</Text>
+                      </Pressable>
+                    </View>
+                  );
+                })
+              )}
+
+              <View style={s.tokenAddRow}>
+                <TextInput
+                  style={[s.textField, s.tokenInput]}
+                  value={newShareTokenInput}
+                  onChangeText={setNewShareTokenInput}
+                  placeholder="Paste share token ID or URL..."
+                  placeholderTextColor="#4A5568"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <Pressable
+                  style={s.tokenAddBtn}
+                  onPress={linkShareToken}
+                  disabled={!newShareTokenInput.trim()}
+                >
+                  <Text style={s.tokenAddBtnText}>Add</Text>
+                </Pressable>
+              </View>
+
+              <Pressable
+                style={[s.saveBtn, savingSettings && { opacity: 0.6 }]}
+                onPress={saveSettings}
+                disabled={savingSettings}
+              >
+                <Text style={s.saveBtnText}>{savingSettings ? 'Saving...' : 'Save'}</Text>
+              </Pressable>
+
+              <View style={{ height: 20 }} />
+            </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>
@@ -544,7 +753,7 @@ const s = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#2D3748',
     zIndex: 10,
-    minWidth: 160,
+    minWidth: 180,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
@@ -576,7 +785,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 40,
-    maxHeight: '85%',
+    maxHeight: '90%',
   },
   sheetHandle: {
     width: 36,
@@ -647,6 +856,112 @@ const s = StyleSheet.create({
   saveBtnText: {
     fontFamily: FH,
     fontSize: 15,
+    color: '#fff',
+  },
+  // Subscription path rows
+  pathRow: {
+    backgroundColor: '#0E1117',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#2D3748',
+  },
+  pathLabel: {
+    fontFamily: FH,
+    fontSize: 13,
+    color: '#F0F4F8',
+    marginBottom: 8,
+  },
+  pathFieldLabel: {
+    fontFamily: FB,
+    fontSize: 11,
+    color: '#8A95A3',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  pickerRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 6,
+  },
+  musicChip: {
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: '#1A2332',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#2D3748',
+  },
+  musicChipActive: {
+    backgroundColor: '#7C3AED22',
+    borderColor: '#7C3AED',
+  },
+  musicChipText: {
+    fontFamily: FB,
+    fontSize: 12,
+    color: '#8A95A3',
+  },
+  musicChipTextActive: {
+    color: '#A78BFA',
+    fontWeight: '600',
+  },
+  // Share token rows
+  tokenRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0E1117',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#2D3748',
+    gap: 6,
+  },
+  tokenLabel: {
+    flex: 1,
+    fontFamily: FB,
+    fontSize: 12,
+    color: '#8A95A3',
+  },
+  tokenBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#2D3748',
+  },
+  tokenBtnDestructive: {
+    borderColor: '#EF444444',
+  },
+  tokenBtnText: {
+    fontFamily: FB,
+    fontSize: 12,
+    color: '#A78BFA',
+  },
+  tokenAddRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  tokenInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  tokenAddBtn: {
+    backgroundColor: '#7C3AED',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  tokenAddBtnText: {
+    fontFamily: FH,
+    fontSize: 13,
     color: '#fff',
   },
 });
