@@ -47,6 +47,10 @@ interface SharedWorkout {
   estimatedDurationMin: number | null;
   tags: string[];
   blocks: any[];
+  workoutMusicEnabled?: boolean;
+  workoutMusicStyle?: string | null;
+  workoutMusicVolume?: number | null;
+  coachId?: string | null;
 }
 
 export default function SharePage() {

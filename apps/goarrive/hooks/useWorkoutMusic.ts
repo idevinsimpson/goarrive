@@ -32,6 +32,10 @@ import {
 } from 'firebase/firestore';
 import { db, functions } from '../lib/firebase';
 import { MUSIC_MAX_TRACKS_PER_STYLE } from '../constants/musicStyles';
+// The music panel slider is now the workout's unified "Volume" control —
+// coach voice/cue audio (useWorkoutTTS) and the Follow-Along video layer both
+// track this same value so sliding to zero actually quiets everything.
+import { setVoiceVolume } from './useWorkoutTTS';
 
 // Pure queue/id helpers live in useWorkoutMusic.helpers.ts (no RN/Firebase
 // deps — safe to import in vitest). Re-exported here for convenience.
@@ -418,6 +422,7 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
     const el: HTMLAudioElement = new (window as any).Audio();
     el.loop = false; // playlist advances on 'ended' instead of looping
     el.volume = volumeRef.current * volumeRef.current; // perceptual curve — see setVolume
+    setVoiceVolume(volumeRef.current * volumeRef.current);
     el.muted = mutedRef.current;
     el.addEventListener('ended', () => {
       if (musicElRef.current !== el || !el.src) return;
@@ -527,6 +532,8 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
     // front-loaded (10% still audibly loud). Square the display value so the
     // slider feels natural — 10% displayed ≈ 1% actual, 50% ≈ 25%, 100% = 100%.
     if (musicElRef.current) musicElRef.current.volume = clamped * clamped;
+    // Unified volume: mirror to voice/cue audio so the slider quiets everything.
+    setVoiceVolume(clamped * clamped);
   }, []);
 
   const skipNext = useCallback(() => {

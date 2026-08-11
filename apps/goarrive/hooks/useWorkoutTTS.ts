@@ -160,6 +160,22 @@ type CueKey = keyof typeof CUES;
 // count + the static cue keys, so unbounded growth isn't a concern.
 const audioPool: Record<string, HTMLAudioElement> = {};
 
+// ── Voice volume (unified with music panel slider) ──────────────────────
+// Actual HTMLAudioElement.volume value (already perceptually curved by the
+// caller — useWorkoutMusic.setVolume applies displayValue² before calling
+// setVoiceVolume). Applied to every newly-created Audio element AND
+// retroactively to the pool + blessed players when the setter fires.
+let voiceVolume = 1;
+export function applyVoiceVolume(el: HTMLAudioElement): void {
+  try { el.volume = voiceVolume; } catch {}
+}
+export function setVoiceVolume(v: number): void {
+  const clamped = Math.min(1, Math.max(0, v));
+  voiceVolume = clamped;
+  for (const el of Object.values(audioPool)) applyVoiceVolume(el);
+  for (const el of blessedGenericPlayers) applyVoiceVolume(el);
+}
+
 // Drop every pooled element. Called when the player unmounts: pooled elements
 // frozen mid-clip survive unmount (module-level pool), and on the next player
 // session iOS Safari can resolve play() on a wedged element without actually
@@ -201,6 +217,7 @@ function preloadCue(key: CueKey): void {
   try {
     const audio = new (window as any).Audio(CUES[key]);
     audio.preload = 'auto';
+    applyVoiceVolume(audio);
     audioPool[poolKey] = audio;
   } catch {
     // Audio API unavailable
@@ -417,6 +434,7 @@ export function unlockAudioPlayback(): void {
     try {
       const el: HTMLAudioElement = new (window as any).Audio(SILENT_WAV);
       el.preload = 'auto';
+      applyVoiceVolume(el);
       blessElement(el, `generic_${i}`);
       blessedGenericPlayers.push(el);
     } catch (err) {
@@ -736,6 +754,7 @@ export function useWorkoutTTS({
           delete audioPool[poolKey];
           audio = new (window as any).Audio(url);
           audio.preload = 'auto';
+          applyVoiceVolume(audio);
           audioPool[poolKey] = audio;
           console.info('[VOICE-AUDIT] pumpQueue evicted stale pool entry (readyState=0)', { context: item.context, poolKey });
         } else {
@@ -746,6 +765,7 @@ export function useWorkoutTTS({
       } else {
         audio = new (window as any).Audio(url);
         audio.preload = 'auto';
+        applyVoiceVolume(audio);
         audioPool[poolKey] = audio;
       }
     } catch (err) {
@@ -1000,6 +1020,7 @@ export function useWorkoutTTS({
         try {
           const audio = new (window as any).Audio(url);
           audio.preload = 'auto';
+          applyVoiceVolume(audio);
           audioPool[poolKey] = audio;
         } catch {
           // preload failed — pumpQueue will allocate on dequeue
@@ -1030,6 +1051,7 @@ export function useWorkoutTTS({
         try {
           const audio = new (window as any).Audio(url);
           audio.preload = 'auto';
+          applyVoiceVolume(audio);
           audioPool[poolKey] = audio;
         } catch {}
       }
