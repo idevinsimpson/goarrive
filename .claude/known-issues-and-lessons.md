@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-08-02._
+_Last refreshed: 2026-08-11._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -88,6 +88,22 @@ When a drag-and-drop interaction uses an absolutely-positioned drop tray that co
 The combined staging branch process merges all open PRs onto main before building. If a PR is open but not included in the branch list when the combined build is triggered, its changes are silently absent from staging and can be omitted from the production ship. The folder + playbook icon inline fix (PR on fix/build-folder-icon-inline) was dropped from staging-combined-08012239 this way and had to be re-landed separately. Lesson: before cutting a combined staging build, explicitly enumerate all open PRs and confirm each is included. The standing release policy in `AGENTS.md` codifies this check.
 
 
+
+### iPad Countdown Badge Scale Blowup
+On iPad, the workout player's countdown badge rendered at an extremely large size because the artboard scale was uncapped. Fixed by imposing a max-scale cap on the artboard so large viewport widths no longer blow up the badge. Lesson: any absolute-pixel-sized UI element placed inside a scaled artboard must be tested at iPad viewport widths — the scale multiplier can make small-screen-tuned sizes enormous on large screens.
+
+### Passwords Persisted in intakeSubmissions (Security Fix)
+The intake form was inadvertently saving the member's chosen password into the `intakeSubmissions` Firestore document alongside the other form fields. Fixed by stripping the password field before writing to Firestore and adding an admin-only read rule for the collection. Lesson: any form that collects credentials must explicitly strip them before any Firestore write — never rely on field omission by convention.
+
+### Music Slider Affected TTS / Voice Cues
+The workout music volume slider was connected to a single Web Audio GainNode shared by both the music track and the TTS/voice cue pipeline, so turning down music also silenced spoken cues. Fixed by splitting into separate gain nodes — one for music, one for voice. Lesson: music and speech audio pipelines must use separate gain nodes; a shared gain for "everything audio" breaks volume UX the moment there are two semantically distinct audio streams.
+
+### iOS Safari Ignores HTMLMediaElement.volume on Share Links
+Controlling music playback volume via `<audio>.volume` has no effect on iOS Safari — the OS overrides it to device volume. Fixed by routing all audio through a Web Audio API GainNode, which iOS does respect for in-page gain attenuation. Lesson: for per-track volume control on iOS, the Web Audio API GainNode is the only reliable path; HTMLMediaElement volume is a no-op on iOS.
+
+### Music Inaudible on Share Links (Anonymous Auth)
+Unauthenticated share-link visitors could not hear workout music because the Mubert music endpoint required an authenticated Firestore read. Fixed by signing share-link visitors in anonymously on page load so they have a valid auth context for music retrieval, and by fixing the share-link sanitizer to include the required music fields. Lesson: any feature that fetches from a Firestore path under auth rules must be audited for the anonymous/guest access path — if share links should support the feature, either relax the rules for the sanitized payload or sign guests in anonymously.
+
 ## Known Performance Risks
 
 ### GIF Memory Consumption at Scale
@@ -128,4 +144,7 @@ The coach post-agreement onboarding (PR #223) uses a `CoachSetupCard` dashboard 
 
 ### Coach-Branded Intake Deeplinks and Program Attribution
 The intake route (`/intake/[coachId]`) accepts `?ref=` and `?source=` URL params so external booker pages (e.g. `bookerfitness.goarrive.fit`) can pass session-type context through the intake flow. Both params are saved to `intakeSubmissions` as `programRef` / `programSource`. The intake form header swaps the GoArrive logo for the coach's name and photo when a `coachId` is present (fetched from Firestore). Lesson: any new public intake or landing surface that originates from a third-party or coach-branded URL should capture the originating ref/source at submission time and write it to the intake record — retro-fitting attribution is expensive once the param is lost at page load.
+
+### Coach Discovery Hosting Isolation
+The coach discovery experience uses a dedicated Firebase Hosting config rather than sharing the main SPA config. This prevents discovery route rewrites from interfering with authenticated app routes and lets the discovery surface have independent cache and redirect rules. Lesson: new public-facing surfaces that have meaningfully different routing semantics (discovery vs. authenticated app) should get their own Hosting config rather than adding more rewrites to the main config.
 
