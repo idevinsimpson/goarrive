@@ -53,6 +53,18 @@ strike it (do not delete) so the audit trail survives.
   coach dashboard to read `notification_log` rows filtered by `coachId`;
   otherwise the "member payment lapsed" notification never surfaces in the UI.
 
+### 2026-08-12 — Funnel rules gap (P0 — surfaced by sweep Test 5)
+
+- [ ] **Unauthenticated funnel readers cannot load `playbook_folders` / `coaches`.**
+  The onboarding page at `apps/goarrive/app/(funnel)/onboarding/[coachId]/[folderId]/index.tsx:117-118`
+  and the checkout page at `apps/goarrive/app/checkout/[submissionId].tsx:79`
+  both `getDoc` directly from the unauth client, but `firestore.rules:1111-1116`
+  requires `isAuthenticated()` on all `playbook_folders` reads. Shared links
+  therefore 404 on the details fetch (submission create still works — that has
+  a public-create carve-out). Requires a rules change, which is
+  outside standing approval (AGENTS.md §6). Two options for Devin — see the
+  A/B in `#dev-goarrive` kickoff thread. No rules deploy until he picks.
+
 ### 2026-08-11 — PR #237 prod flags
 
 _(Preserve whatever Devin logged in the #237 thread — capture here on next PR-237
