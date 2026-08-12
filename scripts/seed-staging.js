@@ -10,7 +10,14 @@
  * All doc IDs are suffixed -seed for easy identification and cleanup.
  *
  * Usage:
+ *   STAGING_SEED_COACH_PASSWORD=... \
+ *   STAGING_SEED_MEMBER_PASSWORD=... \
+ *   STAGING_ADMIN_PASSWORD=... \
  *   node scripts/seed-staging.js
+ *
+ * Passwords MUST be supplied via env — no literals live in this file.
+ * See docs/staging-credentials.md (gitignored) or the 1Password entry
+ * "GoArrive Staging" for current values.
  *
  * Credentials: uses .secrets/firebase-service-account.json (same pattern as
  * other backfill scripts), or set GOOGLE_APPLICATION_CREDENTIALS env var.
@@ -46,19 +53,43 @@ const now = Timestamp.now();
 const nowPlus90d = Timestamp.fromMillis(now.toMillis() + 90 * 24 * 60 * 60 * 1000);
 const nowMinus7d = Timestamp.fromMillis(now.toMillis() - 7 * 24 * 60 * 60 * 1000);
 
+// ─── Password loading (env-only; no literals in this file) ─────────────────────
+// Passwords MUST come from env. Actual values live in the gitignored
+// docs/staging-credentials.md and 1Password entry "GoArrive Staging". This
+// keeps secrets out of git history and out of any Slack/PR paste.
+
+function requirePassword(varName) {
+  const v = process.env[varName];
+  if (!v || v.length < 12) {
+    console.error(`\n[ERROR] Missing env var ${varName} (need a strong password).`);
+    console.error(`Set STAGING_SEED_COACH_PASSWORD, STAGING_SEED_MEMBER_PASSWORD,`);
+    console.error(`and STAGING_ADMIN_PASSWORD before running this script.`);
+    console.error(`See docs/staging-credentials.md (gitignored) for current values.\n`);
+    process.exit(1);
+  }
+  return v;
+}
+
+const SEED_COACH_PASSWORD = requirePassword('STAGING_SEED_COACH_PASSWORD');
+const SEED_MEMBER_PASSWORD = requirePassword('STAGING_SEED_MEMBER_PASSWORD');
+const STAGING_ADMIN_PASSWORD = requirePassword('STAGING_ADMIN_PASSWORD');
+
 // ─── Auth helpers ──────────────────────────────────────────────────────────────
 
 async function upsertAuthUser({ uid, email, password, displayName, customClaims }) {
+  let existed = false;
   try {
     await auth.getUser(uid);
-    console.log(`  [skipped-exists] auth user ${uid} (${email})`);
+    existed = true;
   } catch (err) {
-    if (err.code === 'auth/user-not-found') {
-      await auth.createUser({ uid, email, password, displayName });
-      console.log(`  [created] auth user ${uid} (${email})`);
-    } else {
-      throw err;
-    }
+    if (err.code !== 'auth/user-not-found') throw err;
+  }
+  if (existed) {
+    await auth.updateUser(uid, { email, password, displayName });
+    console.log(`  [updated] auth user ${uid} (${email}) — password re-synced from env`);
+  } else {
+    await auth.createUser({ uid, email, password, displayName });
+    console.log(`  [created] auth user ${uid} (${email})`);
   }
   await auth.setCustomUserClaims(uid, customClaims);
   console.log(`  [updated] custom claims for ${uid}:`, JSON.stringify(customClaims));
@@ -83,7 +114,7 @@ async function main() {
   await upsertAuthUser({
     uid: 'test-coach-seed-001',
     email: 'test-coach-seed@goa.staging',
-    password: 'SeedTest#2026',
+    password: SEED_COACH_PASSWORD,
     displayName: 'Test Coach (Seed)',
     customClaims: { coachId: 'test-coach-seed-001', role: 'coach' },
   });
@@ -101,7 +132,7 @@ async function main() {
   await upsertAuthUser({
     uid: 'test-member-seed-001',
     email: 'test-member-seed@goa.staging',
-    password: 'SeedTest#2026',
+    password: SEED_MEMBER_PASSWORD,
     displayName: 'Test Member (Seed)',
     customClaims: { role: 'member', coachId: 'test-coach-seed-001' },
   });
@@ -246,21 +277,21 @@ async function main() {
   await upsertAuthUser({
     uid: 'staging-admin-seed-001',
     email: 'staging-admin@goarrive.fit',
-    password: 'StagingAdmin#2026',
+    password: STAGING_ADMIN_PASSWORD,
     displayName: 'Staging Admin',
     customClaims: { role: 'platformAdmin', admin: true },
   });
 
   console.log('\n=== Seed complete ===');
   console.log('\nFixtures seeded:');
-  console.log('  Coach:               test-coach-seed-001   /  test-coach-seed@goa.staging  / SeedTest#2026');
-  console.log('  Member:              test-member-seed-001  /  test-member-seed@goa.staging / SeedTest#2026');
+  console.log('  Coach:               test-coach-seed-001   /  test-coach-seed@goa.staging  (password in 1Password / staging-credentials.md)');
+  console.log('  Member:              test-member-seed-001  /  test-member-seed@goa.staging (password in 1Password / staging-credentials.md)');
   console.log('  member_plans:        test-member-seed-001  (contractEndAt = now+90d)');
   console.log('  memberSubscriptions: sub_seed_001          (placeholder — Stripe API calls will fail)');
   console.log('  workout:             workout-seed-001      (musicStyle: workout, workoutMusicEnabled: true, workoutMusicVolume: 0.5)');
   console.log('  playbook:            playbook-seed-001     (assignedMemberId: test-member-seed-001)');
   console.log('  playbook_folder:     folder-seed-001');
-  console.log('  staging admin:       staging-admin@goarrive.fit  (platformAdmin — see docs/staging-admin-account.md)');
+  console.log('  staging admin:       staging-admin@goarrive.fit  (platformAdmin — password in 1Password / staging-credentials.md)');
   console.log('\nStaging URL: https://goarrive--staging-gurfzjak.web.app');
   console.log('\nNOTE: stripeSubscriptionId sub_seed_001 is a placeholder.');
   console.log('The pause/resume UI button will render, but the Cloud Function will fail');
