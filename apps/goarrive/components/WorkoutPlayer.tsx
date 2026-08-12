@@ -196,7 +196,7 @@ export default function WorkoutPlayer({
     pipSourceVideoRef.current = vid;
   }, [phase, currentIndex]);
 
-  const { mediaStream, isReady: pipStreamReady } = usePipCanvasStream({
+  const { mediaStream, isReady: pipStreamReady, canvasElRef: pipCanvasElRef, hasWorkingCaptureStream } = usePipCanvasStream({
     enabled: pipEnabled && Platform.OS === 'web',
     phase,
     current: current as any,
@@ -248,17 +248,14 @@ export default function WorkoutPlayer({
     vid.play().catch(() => {});
   }, [mediaStream]);
 
-  // Debug preview: small 160x200 canvas thumbnail in the bottom-right corner
-  // so QA can confirm the canvas is drawing correctly in staging.
+  // Debug preview: small 160x200 thumbnail bottom-right so QA can confirm canvas draw.
+  // Chrome/Firefox/Android: video element with captureStream MediaStream (unchanged).
+  // iOS Safari: captureStream video track never emits frames (WebKit bug 181663),
+  // so we mirror the source canvas directly via a visible canvas + rAF loop.
   useEffect(() => {
-    if (Platform.OS !== 'web' || !pipEnabled || !mediaStream) return;
-    const previewVid = document.createElement('video');
-    previewVid.autoplay = true;
-    previewVid.muted = true;
-    previewVid.playsInline = true;
-    previewVid.setAttribute('playsinline', '');
-    (previewVid as any).srcObject = mediaStream;
-    Object.assign(previewVid.style, {
+    if (Platform.OS !== 'web' || !pipEnabled) return;
+
+    const previewStyle = {
       position: 'fixed',
       right: '12px',
       bottom: '80px',
@@ -267,18 +264,52 @@ export default function WorkoutPlayer({
       border: '2px solid rgba(76,175,144,0.8)',
       borderRadius: '6px',
       zIndex: '9999',
-      objectFit: 'cover',
       background: '#000',
-    });
-    previewVid.title = 'PiP canvas debug preview';
-    document.body.appendChild(previewVid);
-    previewVid.play().catch(() => {});
-    return () => {
-      previewVid.pause();
-      (previewVid as any).srcObject = null;
-      previewVid.parentNode?.removeChild(previewVid);
     };
-  }, [pipEnabled, mediaStream]);
+
+    if (hasWorkingCaptureStream && mediaStream) {
+      // Chrome / Firefox / Android path — video element driven by captureStream
+      const previewVid = document.createElement('video');
+      previewVid.autoplay = true;
+      previewVid.muted = true;
+      previewVid.playsInline = true;
+      previewVid.setAttribute('playsinline', '');
+      (previewVid as any).srcObject = mediaStream;
+      Object.assign(previewVid.style, { ...previewStyle, objectFit: 'cover' });
+      previewVid.title = 'PiP canvas debug preview';
+      document.body.appendChild(previewVid);
+      previewVid.play().catch(() => {});
+      return () => {
+        previewVid.pause();
+        (previewVid as any).srcObject = null;
+        previewVid.parentNode?.removeChild(previewVid);
+      };
+    }
+
+    if (!hasWorkingCaptureStream) {
+      // iOS Safari fallback — mirror source canvas directly via rAF
+      const visibleCanvas = document.createElement('canvas');
+      visibleCanvas.width = 160;
+      visibleCanvas.height = 200;
+      Object.assign(visibleCanvas.style, previewStyle);
+      visibleCanvas.title = 'PiP canvas debug preview';
+      document.body.appendChild(visibleCanvas);
+      const visibleCtx = visibleCanvas.getContext('2d');
+      let rafId = 0;
+      function mirrorFrame() {
+        rafId = requestAnimationFrame(mirrorFrame);
+        const src = pipCanvasElRef.current;
+        if (src && visibleCtx) visibleCtx.drawImage(src, 0, 0, 160, 200);
+      }
+      rafId = requestAnimationFrame(mirrorFrame);
+      return () => {
+        cancelAnimationFrame(rafId);
+        visibleCanvas.parentNode?.removeChild(visibleCanvas);
+      };
+    }
+
+    return undefined;
+  }, [pipEnabled, mediaStream, hasWorkingCaptureStream, pipCanvasElRef]);
 
   // Live progress publisher (playbook live view). Fires on transitions only —
   // not every timer tick — so Firestore writes stay cheap for the caller.
