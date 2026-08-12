@@ -28,6 +28,8 @@ interface PipCanvasStreamResult {
   mediaStream: MediaStream | null;
   videoElRef: React.RefObject<HTMLVideoElement | null>;
   isReady: boolean;
+  canvasElRef: React.RefObject<HTMLCanvasElement | null>;
+  hasWorkingCaptureStream: boolean;
 }
 
 function formatTime(seconds: number): string {
@@ -53,6 +55,15 @@ export function usePipCanvasStream({
 }: PipCanvasStreamOptions): PipCanvasStreamResult {
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
   const [isReady, setIsReady] = useState(false);
+  const canvasElRef = useRef<HTMLCanvasElement | null>(null);
+
+  // UA-sniff for iOS Safari: captureStream() returns a stream whose video track
+  // never emits fresh frames (WebKit bug 181663). Fallback to direct canvas mirror.
+  const hasWorkingCaptureStream =
+    typeof navigator !== 'undefined'
+      ? !/iP(hone|od|ad)/.test(navigator.userAgent) ||
+        /CriOS|FxiOS|EdgiOS/.test(navigator.userAgent)
+      : true;
 
   // Keep latest props accessible inside the rAF loop without re-creating it.
   const stateRef = useRef({
@@ -86,6 +97,7 @@ export function usePipCanvasStream({
       pointerEvents: 'none',
     });
     document.body.appendChild(canvas);
+    canvasElRef.current = canvas;
 
     const ctxRaw = canvas.getContext('2d');
     if (!ctxRaw) {
@@ -215,11 +227,12 @@ export function usePipCanvasStream({
         for (const track of mergedStream.getTracks()) track.stop();
       } catch {}
       canvas.parentNode?.removeChild(canvas);
+      canvasElRef.current = null;
       setMediaStream(null);
       setIsReady(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, canvasW, canvasH]);
 
-  return { mediaStream, videoElRef, isReady };
+  return { mediaStream, videoElRef, isReady, canvasElRef, hasWorkingCaptureStream };
 }
