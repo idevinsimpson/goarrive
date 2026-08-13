@@ -7,7 +7,7 @@
  * Step 2: Equipment / level (coach-configured subscriptionPaths)
  * Step 3: Schedule (days of week + time of day)
  *
- * On submit writes onboarding_submissions + drip_email_queue, then redirects
+ * On submit writes onboarding_submissions, then redirects
  * to /checkout/[submissionId] (PR-H owns the actual Stripe checkout page).
  */
 import React, { useState, useCallback, useEffect } from 'react';
@@ -246,17 +246,10 @@ export default function OnboardingQuestionnaire() {
       const submissionRef = await addDoc(collection(db, 'onboarding_submissions'), submissionData);
       const submissionId = submissionRef.id;
 
-      // TODO: PR-I wires the sender — for now queue a drip email doc
-      await addDoc(collection(db, 'drip_email_queue'), {
-        submissionId,
-        coachId,
-        folderId,
-        email: formData.email.trim().toLowerCase(),
-        firstName: formData.firstName.trim(),
-        status: 'queued',
-        scheduledFor: serverTimestamp(),
-        createdAt: serverTimestamp(),
-      });
+      // Drip queueing is server-side: enrollSubscriber writes drip_email_queue
+      // (doc id = submissionId, status 'ready') after checkout completes, so
+      // sendDripEmail only ever picks up members who actually paid.
+      // drip_email_queue is server-only in firestore.rules — never write it here.
 
       // Clear draft on successful submit
       if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
