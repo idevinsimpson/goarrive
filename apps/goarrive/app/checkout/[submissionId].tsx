@@ -113,8 +113,12 @@ export default function FunnelCheckoutScreen() {
             // Fall back to default price on lookup failure — server will do the same on checkout.
           }
         }
-      } catch (err) {
-        setError('Failed to load your submission. Please try again.');
+      } catch (err: any) {
+        if (err?.code === 'functions/not-found') {
+          setError('Submission not found. Please restart the sign-up flow.');
+        } else {
+          setError('Failed to load your submission. Please try again.');
+        }
       } finally {
         setLoading(false);
       }
