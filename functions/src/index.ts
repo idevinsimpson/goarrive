@@ -12681,6 +12681,8 @@ export const resumeStripeSubscription = onCall(
     // Round up to whole days so the member always gets the full window.
     const extendedDays = pausedAtTs ? Math.ceil(pauseDurationMs / (24 * 60 * 60 * 1000)) : 0;
 
+    console.log(`[resumeStripeSubscription] extending subscription ${stripeSubscriptionId} for member ${memberId} (coach ${callerCoachId}): ${extendedDays} day(s)`);
+
     const stripe = getStripe(stripeSecretKey.value());
     // Empty string clears pause_collection and resumes billing.
     await stripe.subscriptions.update(stripeSubscriptionId, {
@@ -12702,7 +12704,9 @@ export const resumeStripeSubscription = onCall(
         }
       }
 
-      // If this is a monthly subscription with a schedule, shift the current phase end_date.
+      // If this is a monthly subscription with a schedule, shift the current phase
+      // end_date AND every downstream phase's start_date/end_date by the same delta
+      // so multi-phase contract structure (phase lengths) is preserved.
       if (subData.stripeScheduleId) {
         const schedule = await stripe.subscriptionSchedules.retrieve(
           subData.stripeScheduleId,
@@ -12724,13 +12728,20 @@ export const resumeStripeSubscription = onCall(
               ...(p.application_fee_percent != null && { application_fee_percent: p.application_fee_percent }),
               ...(p.metadata && { metadata: p.metadata }),
             };
-            if (i === idx && p.end_date != null) {
-              return { ...base, end_date: p.end_date + shiftSec };
+            if (i < idx) {
+              // Past phases must be passed back unchanged.
+              return p.end_date != null ? { ...base, end_date: p.end_date } : base;
             }
-            if (p.end_date != null) {
-              return { ...base, end_date: p.end_date };
+            if (i === idx) {
+              // Current phase: start_date is in the past and must not move; extend end only.
+              return p.end_date != null ? { ...base, end_date: p.end_date + shiftSec } : base;
             }
-            return base;
+            // Downstream phases: shift both timestamps so each phase keeps its length.
+            return {
+              ...base,
+              start_date: p.start_date + shiftSec,
+              ...(p.end_date != null && { end_date: p.end_date + shiftSec }),
+            };
           });
           await stripe.subscriptionSchedules.update(
             subData.stripeScheduleId,
