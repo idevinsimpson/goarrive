@@ -16,9 +16,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { doc, getDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { db } from '../../lib/firebase';
 
 interface FunnelFolderResult {
   folder: {
@@ -66,6 +64,10 @@ interface SubscriptionPath {
   pricePerMonthCents?: number;
 }
 
+interface CheckoutSubmissionResult {
+  submission: Submission;
+}
+
 export default function FunnelCheckoutScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -83,12 +85,16 @@ export default function FunnelCheckoutScreen() {
     if (!submissionId) return;
     (async () => {
       try {
-        const snap = await getDoc(doc(db, 'onboarding_submissions', submissionId));
-        if (!snap.exists()) {
+        const getCheckoutSubmission = httpsCallable<
+          { submissionId: string },
+          CheckoutSubmissionResult
+        >(getFunctions(), 'getCheckoutSubmission');
+        const { data: submissionData } = await getCheckoutSubmission({ submissionId });
+        if (!submissionData?.submission?.coachId) {
           setError('Submission not found. Please restart the sign-up flow.');
           return;
         }
-        const sub = snap.data() as Submission;
+        const sub = submissionData.submission;
         setSubmission(sub);
 
         if (sub.folderId && sub.coachId) {

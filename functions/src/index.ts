@@ -1157,6 +1157,40 @@ export const getFunnelFolder = onCall({ invoker: 'public' }, async (request) => 
   };
 });
 
+// ─── getCheckoutSubmission ───────────────────────────────────────────────────
+/**
+ * Unauthenticated callable — returns a projected subset of an onboarding_submissions
+ * doc so the /checkout/[submissionId] page can render for anonymous funnel visitors.
+ * Replaces the direct client getDoc which fails with PERMISSION_DENIED (rules require
+ * isAuthenticated() on onboarding_submissions — locked by PR #240).
+ */
+export const getCheckoutSubmission = onCall({ invoker: 'public' }, async (request) => {
+  const { submissionId } = request.data as { submissionId?: string };
+
+  if (!submissionId || typeof submissionId !== 'string') {
+    throw new HttpsError('invalid-argument', 'submissionId is required');
+  }
+
+  const snap = await db.collection('onboarding_submissions').doc(submissionId).get();
+  if (!snap.exists) {
+    throw new HttpsError('not-found', 'Submission not found');
+  }
+  const data = snap.data()!;
+
+  // Only expose fields the checkout page renders. No raw doc leak.
+  return {
+    submission: {
+      coachId: (data.coachId as string) || '',
+      programName: (data.programName as string) || null,
+      status: (data.status as string) || null,
+      firstName: (data.firstName as string) || null,
+      email: (data.email as string) || null,
+      folderId: (data.folderId as string) || null,
+      subscriptionPathId: (data.subscriptionPathId as string) || null,
+    },
+  };
+});
+
 // ─── createDiscountCode ───────────────────────────────────────────────────────
 /**
  * Coach creates a discount code backed by a Stripe Coupon + Promotion Code.
