@@ -412,6 +412,17 @@ export function resumeAudioGraph(): void {
   }
 }
 
+// Reports the shared AudioContext's current state so the music-handoff adapter
+// can poll on foreground-return: resume() is fire-and-forget, so the adapter
+// waits for state==='running' before swapping playback back from the shadow
+// element to the graph-wired audible one. `interrupted` is an iOS-only state
+// (call interrupts) that the adapter treats the same as suspended.
+export type AudioGraphState = AudioContextState | 'not-initialized';
+export function getAudioContextState(): AudioGraphState {
+  if (!audioCtx) return 'not-initialized';
+  return audioCtx.state;
+}
+
 // ── Graph-level oscillator keepalive (B) ─────────────────────────────
 // An OscillatorNode at near-zero gain connected to musicGain tells iOS that
 // audio is actively running in the AudioContext, preventing the OS from
