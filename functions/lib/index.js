@@ -938,7 +938,7 @@ exports.createFunnelCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecr
                     funnelCheckout: 'true',
                 },
             },
-            success_url: `${appBaseUrl}/checkout-success?submissionId=${submissionId}`,
+            success_url: `${appBaseUrl}/countdown?submissionId=${submissionId}&session_id={CHECKOUT_SESSION_ID}`,
             cancel_url: `${appBaseUrl}/checkout/${submissionId}?cancelled=1`,
             metadata: Object.assign({ submissionId,
                 coachId, funnelCheckout: 'true' }, (discountCode ? { discountCodeUsed: discountCode.toUpperCase() } : {})),
@@ -1218,9 +1218,10 @@ exports.startFreePlan = (0, https_1.onCall)({ invoker: 'public' }, async (reques
  * Handled events:
  *   - checkout.session.completed
  *   - invoice.paid
- *   - invoice.payment_failed
+ *   - invoice.payment_succeeded  (PR-K: clears lapse on recovery via handleInvoicePaid)
+ *   - invoice.payment_failed     (PR-K: marks lapsed, pauses drip, notifies coach, emails member)
  *   - customer.subscription.created
- *   - customer.subscription.updated
+ *   - customer.subscription.updated  (PR-K: clears lapse when status=active)
  *   - customer.subscription.deleted
  *   - charge.refunded
  *
@@ -1340,6 +1341,7 @@ async function processStripeEvent(tag, event, res) {
                 await handleCheckoutSessionCompleted(event.data.object, event.id);
                 break;
             case 'invoice.paid':
+            case 'invoice.payment_succeeded':
                 await handleInvoicePaid(event.data.object, event.id);
                 break;
             case 'invoice.payment_failed':
@@ -1942,6 +1944,8 @@ async function handleInvoicePaid(invoice, eventId) {
     console.log('[handleInvoicePaid] Ledger entry created for invoice', invoice.id, 'phase:', phase);
 }
 async function handleInvoicePaymentFailed(invoice, eventId) {
+    var _a, _b;
+    const TAG = '[handleInvoicePaymentFailed]';
     const sub = invoice.subscription;
     if (!sub)
         return;
@@ -1949,13 +1953,95 @@ async function handleInvoicePaymentFailed(invoice, eventId) {
         .where('subscriptionId', '==', sub)
         .limit(1)
         .get();
-    if (!subSnap.empty) {
-        const planId = subSnap.docs[0].data().planId;
+    if (subSnap.empty) {
+        console.log(TAG, 'No memberSubscription found for', sub);
+        return;
+    }
+    const subDoc = subSnap.docs[0];
+    const subData = subDoc.data();
+    const { planId, memberId, coachId } = subData;
+    // 1. Mark member_plan as failed
+    if (planId) {
         await db.collection('member_plans').doc(planId).update({
             checkoutStatus: 'failed',
+            paymentStatus: 'lapsed',
             updatedAt: firestore_2.FieldValue.serverTimestamp(),
         });
-        console.log('[handleInvoicePaymentFailed] Plan', planId, 'marked payment_failed');
+        console.log(TAG, 'Plan', planId, 'marked payment_failed / lapsed');
+    }
+    // 2. Mark memberSubscription with paymentStatus=lapsed
+    await subDoc.ref.update({
+        paymentStatus: 'lapsed',
+        updatedAt: firestore_2.FieldValue.serverTimestamp(),
+    });
+    // 3. Pause drip queue for this member — set dripPaused=true on all ready drip docs
+    if (memberId) {
+        const dripSnap = await db.collection('drip_email_queue')
+            .where('memberId', '==', memberId)
+            .where('status', '==', 'ready')
+            .get();
+        const batch = db.batch();
+        dripSnap.docs.forEach((d) => batch.update(d.ref, { dripPaused: true, updatedAt: firestore_2.FieldValue.serverTimestamp() }));
+        if (!dripSnap.empty)
+            await batch.commit();
+        console.log(TAG, 'Paused', dripSnap.size, 'drip queue docs for member', memberId);
+    }
+    // 4. Write notification_log for the coach
+    if (coachId && memberId) {
+        await db.collection('notification_log').add({
+            type: 'member_payment_lapsed',
+            coachId,
+            memberId,
+            stripeSubscriptionId: sub,
+            stripeInvoiceId: invoice.id,
+            billingEventId: eventId,
+            read: false,
+            createdAt: firestore_2.FieldValue.serverTimestamp(),
+        });
+        console.log(TAG, 'Coach notification_log written for coach', coachId, 'member', memberId);
+    }
+    // 5. Send Resend email to member
+    if (memberId) {
+        try {
+            const memberSnap = await db.collection('members').doc(memberId).get();
+            const memberData = memberSnap.exists ? memberSnap.data() : {};
+            const memberEmail = memberData.email;
+            const memberName = ((_b = (_a = memberData.name) !== null && _a !== void 0 ? _a : memberData.displayName) !== null && _b !== void 0 ? _b : 'there');
+            if (memberEmail) {
+                const apiKey = emailApiKey.value();
+                if (apiKey) {
+                    const res = await fetch('https://api.resend.com/emails', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${apiKey}`,
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            from: 'GoArrive <noreply@goarrive.fit>',
+                            to: [memberEmail],
+                            subject: 'Action required: payment issue with your GoArrive subscription',
+                            text: `Hi ${memberName},\n\nWe were unable to process your most recent payment for your GoArrive subscription.\n\nTo keep your coaching plan active, please update your payment method:\nhttps://goarrive.fit\n\nIf you have any questions, reply to this email or reach out to your coach.\n\nThe GoArrive Team`,
+                        }),
+                    });
+                    if (!res.ok) {
+                        const errText = await res.text();
+                        console.error(TAG, 'Resend email failed for member', memberId, ':', errText);
+                    }
+                    else {
+                        console.log(TAG, 'Lapse email sent to', memberEmail);
+                    }
+                }
+                else {
+                    console.warn(TAG, 'EMAIL_API_KEY not set — skipping lapse email for member', memberId);
+                }
+            }
+            else {
+                console.warn(TAG, 'No email on member doc', memberId, '— skipping lapse email');
+            }
+        }
+        catch (emailErr) {
+            console.error(TAG, 'Error sending lapse email for member', memberId, ':', emailErr);
+        }
     }
 }
 async function handleSubscriptionUpsert(sub, eventId) {
@@ -1991,6 +2077,33 @@ async function handleSubscriptionUpsert(sub, eventId) {
         updatedAt: firestore_2.FieldValue.serverTimestamp(),
     }, { merge: true });
     console.log('[handleSubscriptionUpsert] memberSubscription upserted for', sub.id);
+    // PR-K: If subscription recovers to active, clear lapse flags
+    if (sub.status === 'active' && memberId) {
+        // Clear paymentStatus on memberSubscription
+        await subRef.update({ paymentStatus: null, updatedAt: firestore_2.FieldValue.serverTimestamp() });
+        // Clear paymentStatus on member_plan if we have a planId
+        if (planId) {
+            await db.collection('member_plans').doc(planId).update({
+                paymentStatus: null,
+                updatedAt: firestore_2.FieldValue.serverTimestamp(),
+            });
+        }
+        // Un-pause drip queue docs for this member
+        const dripSnap = await db.collection('drip_email_queue')
+            .where('memberId', '==', memberId)
+            .where('dripPaused', '==', true)
+            .get();
+        const batch = db.batch();
+        dripSnap.docs.forEach((d) => {
+            // Only resume docs that are still in ready state (not sent/failed)
+            if (d.data().status === 'ready') {
+                batch.update(d.ref, { dripPaused: false, updatedAt: firestore_2.FieldValue.serverTimestamp() });
+            }
+        });
+        if (!dripSnap.empty)
+            await batch.commit();
+        console.log('[handleSubscriptionUpsert] Payment recovery: cleared lapse flags for member', memberId);
+    }
 }
 async function handleSubscriptionDeleted(sub, eventId) {
     var _a;
@@ -10840,6 +10953,8 @@ exports.pauseStripeSubscription = (0, https_1.onCall)({ secrets: [stripeSecretKe
     return { success: true };
 });
 // ─── resumeStripeSubscription ─────────────────────────────────────────────────
+// Pauses longer than this are treated as churn/renegotiation, not silent extension.
+const MAX_PAUSE_EXTENSION_DAYS = 90;
 /**
  * Resume a paused member Stripe subscription. Requires coachId claim.
  *
@@ -10873,6 +10988,9 @@ exports.resumeStripeSubscription = (0, https_1.onCall)({ secrets: [stripeSecretK
     const pauseDurationMs = pausedAtTs ? resumedAtMs - pausedAtTs.toMillis() : 0;
     // Round up to whole days so the member always gets the full window.
     const extendedDays = pausedAtTs ? Math.ceil(pauseDurationMs / (24 * 60 * 60 * 1000)) : 0;
+    if (extendedDays > MAX_PAUSE_EXTENSION_DAYS) {
+        throw new https_1.HttpsError('failed-precondition', `Pause exceeded max extension of ${MAX_PAUSE_EXTENSION_DAYS} days. Contact platform admin.`);
+    }
     const stripe = getStripe(stripeSecretKey.value());
     // Empty string clears pause_collection and resumes billing.
     await stripe.subscriptions.update(stripeSubscriptionId, {
@@ -10892,7 +11010,9 @@ exports.resumeStripeSubscription = (0, https_1.onCall)({ secrets: [stripeSecretK
                 });
             }
         }
-        // If this is a monthly subscription with a schedule, shift the current phase end_date.
+        // If this is a monthly subscription with a schedule, shift the current phase
+        // end_date AND every downstream phase's start_date/end_date by the same delta
+        // so multi-phase contract structure (phase lengths) is preserved.
         if (subData.stripeScheduleId) {
             const schedule = await stripe.subscriptionSchedules.retrieve(subData.stripeScheduleId, { stripeAccount: subData.stripeAccountId });
             if (schedule.phases && schedule.phases.length > 0) {
@@ -10908,13 +11028,16 @@ exports.resumeStripeSubscription = (0, https_1.onCall)({ secrets: [stripeSecretK
                                 quantity: (_a = item.quantity) !== null && _a !== void 0 ? _a : 1,
                             });
                         }) }, (p.application_fee_percent != null && { application_fee_percent: p.application_fee_percent })), (p.metadata && { metadata: p.metadata }));
-                    if (i === idx && p.end_date != null) {
-                        return Object.assign(Object.assign({}, base), { end_date: p.end_date + shiftSec });
+                    if (i < idx) {
+                        // Past phases must be passed back unchanged.
+                        return p.end_date != null ? Object.assign(Object.assign({}, base), { end_date: p.end_date }) : base;
                     }
-                    if (p.end_date != null) {
-                        return Object.assign(Object.assign({}, base), { end_date: p.end_date });
+                    if (i === idx) {
+                        // Current phase: start_date is in the past and must not move; extend end only.
+                        return p.end_date != null ? Object.assign(Object.assign({}, base), { end_date: p.end_date + shiftSec }) : base;
                     }
-                    return base;
+                    // Downstream phases: shift both timestamps so each phase keeps its length.
+                    return Object.assign(Object.assign(Object.assign({}, base), { start_date: p.start_date + shiftSec }), (p.end_date != null && { end_date: p.end_date + shiftSec }));
                 });
                 await stripe.subscriptionSchedules.update(subData.stripeScheduleId, { phases: updatedPhases }, { stripeAccount: subData.stripeAccountId });
             }
@@ -11013,7 +11136,7 @@ exports.unsyncMemberPlaybook = (0, https_1.onCall)({ region: 'us-central1', invo
 // and scheduledFor <= now. Sends via Resend API using EMAIL_API_KEY secret.
 // On success: status='sent'. On failure: status='failed'.
 exports.sendDripEmail = (0, scheduler_1.onSchedule)({ schedule: 'every 15 minutes', timeZone: 'UTC', region: 'us-central1', secrets: [emailApiKey] }, async () => {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     const now = firestore_2.Timestamp.now();
     const readySnap = await db.collection('drip_email_queue')
         .where('status', '==', 'ready')
@@ -11027,10 +11150,15 @@ exports.sendDripEmail = (0, scheduler_1.onSchedule)({ schedule: 'every 15 minute
     let failed = 0;
     for (const qDoc of readySnap.docs) {
         const q = qDoc.data();
+        // PR-K: skip drip sends when member payment is lapsed
+        if (q.dripPaused === true) {
+            console.log('[sendDripEmail] Skipping drip for paused member', (_a = q.memberId) !== null && _a !== void 0 ? _a : qDoc.id);
+            continue;
+        }
         const toEmail = q.email;
-        const firstName = (_a = q.firstName) !== null && _a !== void 0 ? _a : '';
-        const rawSubject = (_b = q.subject) !== null && _b !== void 0 ? _b : '';
-        const rawBody = (_c = q.body) !== null && _c !== void 0 ? _c : '';
+        const firstName = (_b = q.firstName) !== null && _b !== void 0 ? _b : '';
+        const rawSubject = (_c = q.subject) !== null && _c !== void 0 ? _c : '';
+        const rawBody = (_d = q.body) !== null && _d !== void 0 ? _d : '';
         // Simple token substitution for {{firstName}} etc.
         const subject = rawSubject.replace(/\{\{firstName\}\}/g, firstName);
         const body = rawBody.replace(/\{\{firstName\}\}/g, firstName);
