@@ -6,8 +6,9 @@ End-to-end verification of the coach-initiated pause/resume flow for member Stri
 subscriptions (`pauseStripeSubscription` / `resumeStripeSubscription` callables),
 including the contract-extends behavior from PR #237 and the hardening in this PR:
 
-- 90-day cap on pause extension (`MAX_PAUSE_EXTENSION_DAYS`)
 - Multi-phase `subscription_schedules` shift (all downstream phases move by the pause delta)
+- Server-side `console.log` on resume records `extendedDays` for observability
+  (no cap — any duration is allowed; long extensions surface in Cloud Logging)
 
 ## Blocker context
 
@@ -43,14 +44,23 @@ as part of this test run.
 
 ## Failure cases to test
 
-- **Pause > 90 days** — simulate by setting `pausedAt` back-dated >90 days on the
-  `memberSubscriptions` doc (Firestore console, staging only), then Resume.
-  Expect `failed-precondition`: "Pause exceeded max extension of 90 days. Contact platform admin."
-  No Stripe mutation, no `contractEndAt` change should occur.
 - **Non-owning coach attempts pause** — call pause as a second seeded coach on the
   first coach's member. Expect `permission-denied`.
 - **Admin impersonation of coach** — as platformAdmin impersonating the owning coach,
   pause + resume should succeed (PR #237 fix — `claims.coachId`/`effectiveUid` path).
+
+## Observability check (no cap enforcement)
+
+Long pauses are allowed by design (per Devin 2026-08-13 — coach flexibility over
+guardrails). Verify the observability signal:
+
+- Set `pausedAt` back-dated ~120 days on the `memberSubscriptions` doc (Firestore
+  console, staging only), then Resume.
+- Expect: resume **succeeds** (no `failed-precondition`), Stripe mutation applies,
+  `contractEndAt` shifts forward by ~120 days, Cloud Function log line
+  `[resumeStripeSubscription] extending subscription ... : 120 day(s)` is emitted.
+- If a coach ever needs to churn/renegotiate rather than extend, they should
+  cancel + re-enroll — the resume path always extends now.
 
 ## Rollback (if test corrupts staging data)
 
@@ -60,6 +70,7 @@ as part of this test run.
    remove the bogus `pauseHistory` entry via console).
 3. `member_plans/{memberId}`: restore the original `contractEndAt` (note the original
    value before starting the test).
-4. If the back-dated `pausedAt` test was run, ensure `pausedAt` is removed so the
-   member is not stuck in a paused state.
+4. If the back-dated `pausedAt` observability test was run, revert `contractEndAt`
+   to its pre-test value and ensure `pausedAt` is removed so the member is not
+   stuck in a paused state.
 5. Re-run the staging seed script if member/coach state is unrecoverable.

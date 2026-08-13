@@ -12585,9 +12585,6 @@ export const pauseStripeSubscription = onCall(
 );
 
 // ─── resumeStripeSubscription ─────────────────────────────────────────────────
-// Pauses longer than this are treated as churn/renegotiation, not silent extension.
-const MAX_PAUSE_EXTENSION_DAYS = 90;
-
 /**
  * Resume a paused member Stripe subscription. Requires coachId claim.
  *
@@ -12619,12 +12616,8 @@ export const resumeStripeSubscription = onCall(
     const pauseDurationMs = pausedAtTs ? resumedAtMs - pausedAtTs.toMillis() : 0;
     // Round up to whole days so the member always gets the full window.
     const extendedDays = pausedAtTs ? Math.ceil(pauseDurationMs / (24 * 60 * 60 * 1000)) : 0;
-    if (extendedDays > MAX_PAUSE_EXTENSION_DAYS) {
-      throw new HttpsError(
-        'failed-precondition',
-        `Pause exceeded max extension of ${MAX_PAUSE_EXTENSION_DAYS} days. Contact platform admin.`
-      );
-    }
+
+    console.log(`[resumeStripeSubscription] extending subscription ${stripeSubscriptionId} for member ${memberId} (coach ${callerCoachId}): ${extendedDays} day(s)`);
 
     const stripe = getStripe(stripeSecretKey.value());
     // Empty string clears pause_collection and resumes billing.
