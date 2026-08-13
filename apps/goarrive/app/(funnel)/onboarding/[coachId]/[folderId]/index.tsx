@@ -28,10 +28,10 @@ import { useLocalSearchParams, router } from 'expo-router';
 import {
   collection,
   doc,
-  getDoc,
   addDoc,
   serverTimestamp,
 } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../../../../../lib/firebase';
 import type { PlaybookFolder, PlaybookFolderSubscriptionPath } from '../../../../../lib/types';
 
@@ -110,24 +110,53 @@ export default function OnboardingQuestionnaire() {
   const accent = coachBrand?.brandColor || '#F5A623';
   const scrollRef = React.useRef<ScrollView>(null);
 
-  // Load coach brand + folder
+  // Load coach brand + folder via server callable (unauth-safe)
   useEffect(() => {
     if (!coachId || !folderId) return;
-    Promise.all([
-      getDoc(doc(db, 'coaches', coachId)),
-      getDoc(doc(db, 'playbook_folders', folderId)),
-    ]).then(([coachSnap, folderSnap]) => {
-      if (coachSnap.exists()) {
-        const d = coachSnap.data();
+    const getFunnelFolder = httpsCallable<
+      { coachId: string; folderId: string },
+      {
+        folder: {
+          id: string;
+          name: string;
+          subscriptionPaths: PlaybookFolder['subscriptionPaths'];
+          emailTemplate: { subject: string; body: string } | null;
+          funnelPhotoUrl: string | null;
+          campaignName: string | null;
+        };
+        coach: {
+          id: string;
+          displayName: string;
+          brandColor: string | null;
+          funnelPhotoUrl: string | null;
+        };
+      }
+    >(getFunctions(), 'getFunnelFolder');
+    getFunnelFolder({ coachId, folderId })
+      .then(({ data }) => {
         setCoachBrand({
-          displayName: d.displayName || d.name || '',
-          brandColor: d.brandColor || null,
+          displayName: data.coach.displayName,
+          brandColor: data.coach.brandColor,
         });
-      }
-      if (folderSnap.exists()) {
-        setFolder({ id: folderSnap.id, ...folderSnap.data() } as PlaybookFolder);
-      }
-    }).catch(() => { /* non-blocking */ }).finally(() => setFolderLoading(false));
+        setFolder({
+          id: data.folder.id,
+          coachId,
+          name: data.folder.name,
+          subscriptionPaths: data.folder.subscriptionPaths,
+          emailTemplate: data.folder.emailTemplate as PlaybookFolder['emailTemplate'],
+          // Fields not projected by the callable — fill with safe defaults
+          type: 'playbook_folder',
+          parentId: null,
+          templatePlaybookIds: [],
+          syncEnabled: false,
+          linkedShareTokenIds: [],
+          isArchived: false,
+          createdAt: null as any,
+          updatedAt: null as any,
+        } as PlaybookFolder);
+      })
+      .catch(() => { /* non-blocking */ })
+      .finally(() => setFolderLoading(false));
   }, [coachId, folderId]);
 
   // SSR-safe localStorage restore after mount

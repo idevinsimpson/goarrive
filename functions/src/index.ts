@@ -1093,6 +1093,70 @@ export const createFunnelCheckoutSession = onCall(
   }
 );
 
+// ─── getFunnelFolder ─────────────────────────────────────────────────────────
+/**
+ * Unauthenticated callable — returns a projected subset of playbook_folders +
+ * coaches data for the funnel/checkout pages without exposing raw documents.
+ * Replaces direct client Firestore reads which fail with PERMISSION_DENIED for
+ * unauth visitors (firestore.rules requires isAuthenticated() on playbook_folders).
+ */
+export const getFunnelFolder = onCall({ invoker: 'public' }, async (request) => {
+  const { coachId, folderId } = request.data as { coachId?: string; folderId?: string };
+
+  if (!coachId || typeof coachId !== 'string') {
+    throw new HttpsError('invalid-argument', 'coachId is required');
+  }
+  if (!folderId || typeof folderId !== 'string') {
+    throw new HttpsError('invalid-argument', 'folderId is required');
+  }
+
+  const [folderSnap, coachSnap] = await Promise.all([
+    db.collection('playbook_folders').doc(folderId).get(),
+    db.collection('coaches').doc(coachId).get(),
+  ]);
+
+  if (!folderSnap.exists) {
+    throw new HttpsError('not-found', 'Folder not found');
+  }
+  const folderData = folderSnap.data()!;
+
+  // Verify folder belongs to the requested coach (prevents cross-coach enumeration)
+  if (folderData.coachId !== coachId) {
+    throw new HttpsError('not-found', 'Folder not found');
+  }
+
+  // Only expose lead-gen folders that have subscription paths
+  const subscriptionPaths = folderData.subscriptionPaths;
+  if (!Array.isArray(subscriptionPaths) || subscriptionPaths.length === 0) {
+    throw new HttpsError('not-found', 'Folder not found');
+  }
+
+  const coachData = coachSnap.exists ? coachSnap.data()! : {};
+
+  // Return explicit projection only — no raw document data
+  return {
+    folder: {
+      id: folderId,
+      name: (folderData.name as string) || '',
+      subscriptionPaths,
+      emailTemplate: folderData.emailTemplate
+        ? {
+            subject: (folderData.emailTemplate.subject as string) || '',
+            body: (folderData.emailTemplate.body as string) || '',
+          }
+        : null,
+      funnelPhotoUrl: (folderData.funnelPhotoUrl as string) || null,
+      campaignName: (folderData.campaignName as string) || null,
+    },
+    coach: {
+      id: coachId,
+      displayName: (coachData.displayName as string) || (coachData.name as string) || '',
+      brandColor: (coachData.brandColor as string) || null,
+      funnelPhotoUrl: (coachData.funnelPhotoUrl as string) || null,
+    },
+  };
+});
+
 // ─── createDiscountCode ───────────────────────────────────────────────────────
 /**
  * Coach creates a discount code backed by a Stripe Coupon + Promotion Code.

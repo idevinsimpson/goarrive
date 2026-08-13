@@ -20,6 +20,23 @@ import { doc, getDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../../lib/firebase';
 
+interface FunnelFolderResult {
+  folder: {
+    id: string;
+    name: string;
+    subscriptionPaths: SubscriptionPath[];
+    emailTemplate: { subject: string; body: string } | null;
+    funnelPhotoUrl: string | null;
+    campaignName: string | null;
+  };
+  coach: {
+    id: string;
+    displayName: string;
+    brandColor: string | null;
+    funnelPhotoUrl: string | null;
+  };
+}
+
 const BG = '#0E1117';
 const CARD_BG = '#161B25';
 const BORDER = '#2A3347';
@@ -74,17 +91,17 @@ export default function FunnelCheckoutScreen() {
         const sub = snap.data() as Submission;
         setSubmission(sub);
 
-        if (sub.folderId) {
+        if (sub.folderId && sub.coachId) {
           try {
-            const folderSnap = await getDoc(doc(db, 'playbook_folders', sub.folderId));
-            if (folderSnap.exists()) {
-              const folderData = folderSnap.data() as { name?: string; subscriptionPaths?: SubscriptionPath[] };
-              if (folderData.name) setResolvedProgramName(folderData.name);
-              const paths = folderData.subscriptionPaths || [];
-              const path = paths.find((p) => p.id === sub.subscriptionPathId);
-              if (path?.pricePerMonthCents && path.pricePerMonthCents > 0) {
-                setMonthlyCents(path.pricePerMonthCents);
-              }
+            const getFunnelFolder = httpsCallable<
+              { coachId: string; folderId: string },
+              FunnelFolderResult
+            >(getFunctions(), 'getFunnelFolder');
+            const { data } = await getFunnelFolder({ coachId: sub.coachId, folderId: sub.folderId });
+            if (data.folder.name) setResolvedProgramName(data.folder.name);
+            const path = data.folder.subscriptionPaths.find((p) => p.id === sub.subscriptionPathId);
+            if (path?.pricePerMonthCents && path.pricePerMonthCents > 0) {
+              setMonthlyCents(path.pricePerMonthCents);
             }
           } catch {
             // Fall back to default price on lookup failure — server will do the same on checkout.
