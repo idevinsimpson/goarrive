@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-08-11._
+_Last refreshed: 2026-08-13._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -80,7 +80,6 @@ The coach-setup guide's 6 modules failed to save any data because the Firestore 
 ### Per-Day Module Cards Regressed by Global-Times Refactor
 A refactor that introduced a "global times" mode for the playbook scheduling panel accidentally replaced the per-day module card layout with a single global time field, removing the individual day configuration UI entirely. The regression was caught and reverted before coaches widely noticed, restoring the per-day cards (with day-specific time, duration, and workout slots). Lesson: the scheduling panel's per-day module card layout is the UX contract for coaches; any scheduling UI refactor must verify all per-day controls remain visible and functional in the coach scheduling panel.
 
-
 ### iOS Safari Stretches Absolute-Positioned Drop Trays
 When a drag-and-drop interaction uses an absolutely-positioned drop tray that covers the viewport, iOS Safari's rubber-band scroll can stretch the tray beyond its intended height, causing layout jitter and mis-positioned drop targets. Fix: pin the tray's height explicitly in CSS rather than letting it grow with content. Lesson: any overlay or drop target that must stay at a fixed visual height on iOS should have an explicit `height` (or `max-height`) set — do not rely on the browser respecting inferred sizes during active drag gestures.
 
@@ -96,6 +95,17 @@ The `resolveShareToken` Cloud Function sanitizes workout documents before servin
 ### Subscription Pause/Resume: Coach Ownership Verification
 The `pauseStripeSubscription` and `resumeStripeSubscription` callables (PR #233) verify coach ownership by checking that the subscription's `coachId` Firestore field matches the caller's `coachId` claim — they do not trust the client-supplied member ID alone. Lesson: any billing-mutation callable that acts on a member's subscription must verify the calling coach owns that member's record at the function layer, not just in Firestore rules.
 
+### React Native Web: View Wrappers Can Swallow Pointer Events on Pressable Children
+On React Native Web, a plain `View` wrapper placed around `Pressable` children absorbs pointer events, silently killing all taps — the Pressables render but never fire. The funnel gender radio (PR #248) was completely non-functional on web for this reason. Fix: add `pointerEvents="box-none"` to the wrapper `View`. Lesson: any `View` that wraps interactive children and behaves as a layout-only container must carry `pointerEvents="box-none"` on web — otherwise taps are swallowed with no visible error.
+
+### Enrollment Funnel Rules Gap Requires Explicit Audit Before Prod Ship
+The Phase 4 enrollment funnel introduced several new Firestore collections (`onboarding_submissions`, `drip_email_queue`, `discount_codes`, `playbook_folder_members`) and new access patterns (anonymous create for public funnel, server-only updates via Cloud Functions). A pre-prod audit (`docs/prod-ship-checklist.md`) surfaced rule gaps: guest-onboarding rate limits, `enrollSubscriber` chunking for large member lists, drip dedup across retry windows, and the price fallback on `createFunnelCheckoutSession`. Lesson: any multi-step public funnel that touches multiple new Firestore collections needs an explicit rules audit before prod ship — enumerate every (role × collection × operation) combination, because public-create paths in particular are easy to leave over-permissioned or under-protected.
+
+### Unauthenticated Funnel Read: Callable Projection Over Direct Firestore
+The Phase 4 onboarding wizard and checkout page needed to read `playbook_folders` — a coach-owned collection — for unauthenticated visitors. Opening that collection to unauthenticated reads in Firestore rules would have over-permissioned it. Instead, PR #252 added `getFunnelFolder`: a public callable that reads the doc server-side with the admin SDK and returns only the fields the funnel UI needs (folder name, subscription paths, cover image). Firestore rules were not touched. Lesson: when public visitors need data from a coach-owned collection, use a callable with explicit field projection rather than relaxing Firestore rules — this keeps the collection private for direct reads and makes the exposed surface auditable in one place.
+
+### iOS Safari Canvas PiP: Hidden Canvas Does Not Populate MediaStream
+During Phase 2 PiP QA (PR #251), it was discovered that a canvas element with `display:none` or `visibility:hidden` does not produce frames in its `captureStream()` MediaStream on iOS Safari's WKWebView — the stream exists but carries no video. The fix positions the canvas off-screen (e.g. `position: absolute; top: -9999px; left: -9999px`) while keeping it visible in the rendering tree. The `usePipCanvasStream.ts` hook exposes a `visibleCanvasForDebug` flag to enable this mode during QA. Lesson: when building canvas-to-PiP features for iOS Safari, always use an off-screen-but-visible canvas during QA to confirm the stream is populated; only hide the canvas after verifying the MediaStream carries frames.
 
 ## Known Performance Risks
 
@@ -134,7 +144,6 @@ The static Expo export only emits HTML for routes known at build time. Dynamic p
 ### Onboarding Progress: Dashboard Card + Dedicated Screen
 The coach post-agreement onboarding (PR #223) uses a `CoachSetupCard` dashboard widget that tracks module completion and links to a dedicated `coach-setup.tsx` screen. This card-plus-screen pattern (surface progress on the dashboard, full detail on a separate route) is the template for any future multi-step onboarding or checklist feature — do not embed large step-by-step flows inline in the dashboard.
 
-
 ### Coach-Branded Intake Deeplinks and Program Attribution
 The intake route (`/intake/[coachId]`) accepts `?ref=` and `?source=` URL params so external booker pages (e.g. `bookerfitness.goarrive.fit`) can pass session-type context through the intake flow. Both params are saved to `intakeSubmissions` as `programRef` / `programSource`. The intake form header swaps the GoArrive logo for the coach's name and photo when a `coachId` is present (fetched from Firestore). Lesson: any new public intake or landing surface that originates from a third-party or coach-branded URL should capture the originating ref/source at submission time and write it to the intake record — retro-fitting attribution is expensive once the param is lost at page load.
 
@@ -143,3 +152,9 @@ The audio PiP foundation (PR #231) uses parallel fan-out: `voiceGain` and `music
 
 ### New Firestore Collections Need Rules + Admin-Impersonation Grants
 Every new top-level Firestore collection (e.g. `playbook_folders`, `playbook_folder_members`, `marketing_leads`) must ship with: (a) Firestore security rules covering all access patterns (coach-owner read/write, member-scoped read, optional public create), and (b) admin-impersonation rules grants so platform admins can access coach-scoped data when using "View as Coach." Missing either causes silent failures that only surface under the affected auth context.
+
+### Prod-Ship Checklist for Feature Phases
+`docs/prod-ship-checklist.md` is now the durable ledger for REQUIRED-BEFORE-PROD flags surfaced during staging audits (e.g. price fallback, chunking limits, dedup logic, rate limits). When a multi-phase feature ships to staging and an audit surfaces blockers, log them in this file immediately so they are not forgotten between staging and prod. Do not keep these flags only in PR descriptions — PR descriptions are archived on merge.
+
+### Public Coach-Owned Data: Use Callable Projection, Not Rule Relaxation
+When an unauthenticated surface (public funnel, share link, booking page) needs to read data from a coach-owned Firestore collection, do not open that collection to unauthenticated reads in security rules. Instead, create a callable (e.g. `getFunnelFolder`, `resolveShareToken`) that reads with the admin SDK and returns only the fields the client needs. This keeps collection rules strict, makes the exposed surface auditable in one place, and prevents accidental over-exposure of coach data. See PR #252 for the `getFunnelFolder` pattern.
