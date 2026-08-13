@@ -47,6 +47,7 @@ import { usePlaybackSpeed } from '../hooks/usePlaybackSpeed';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useWorkoutTTS, unlockAudioPlayback } from '../hooks/useWorkoutTTS';
 import { usePipCanvasStream } from '../hooks/usePipCanvasStream';
+import { useRemoteConfigBool } from '../hooks/useRemoteConfigBool';
 import { useHeartRate, HeartRateSessionStats } from '../hooks/useHeartRate';
 import { useAuth } from '../lib/AuthContext';
 import { doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
@@ -73,10 +74,6 @@ if (isStagingHost()) {
   installVoiceAuditCapture();
 }
 
-// ── PiP canvas feature flags (Phase 2 — staging only) ───────────────────────
-// Default true on staging so QA can verify the canvas renders without a
-// Firebase Remote Config toggle. Phase 3 will wire this to Remote Config.
-const workoutFlags = { pipCanvasEnabled: true };
 
 // ── Constants ───────────────────────────────────────────────────────────────
 // How many seconds before a timed phase ends should the visual switch to the
@@ -185,8 +182,10 @@ export default function WorkoutPlayer({
 
   useWakeLock(phase !== 'ready' && phase !== 'complete');
 
-  // ── PiP canvas-stream (Phase 2, staging-only) ────────────────────────────
-  const pipEnabled = isStagingHost() && workoutFlags.pipCanvasEnabled;
+  // ── PiP canvas-stream (Phase 3) ──────────────────────────────────────────
+  // Remote Config gates the feature; staging further restricts to local QA.
+  const pipRemoteEnabled = useRemoteConfigBool('workout_pip_canvas_enabled', false);
+  const pipEnabled = isStagingHost() && pipRemoteEnabled;
   // Ref to the DOM video element for the currently-active workout video.
   // Populated via effect when the expo-av Video mounts/changes.
   const pipSourceVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -219,6 +218,9 @@ export default function WorkoutPlayer({
     vid.muted = true;
     vid.playsInline = true;
     vid.setAttribute('playsinline', '');
+    // autoPictureInPicture — Chromium/Android auto-PiP when tab backgrounds.
+    // Harmless no-op on browsers that don't support the attribute.
+    (vid as any).autoPictureInPicture = true;
     Object.assign(vid.style, {
       position: 'fixed',
       left: '-10000px',
@@ -228,9 +230,14 @@ export default function WorkoutPlayer({
       width: '1px',
       height: '1px',
     });
+    const onLeave = () => {
+      console.info('[PiP] canvas-stream video left picture-in-picture');
+    };
+    vid.addEventListener('leavepictureinpicture', onLeave);
     document.body.appendChild(vid);
     pipCanvasVideoRef.current = vid;
     return () => {
+      vid.removeEventListener('leavepictureinpicture', onLeave);
       vid.pause();
       (vid as any).srcObject = null;
       vid.parentNode?.removeChild(vid);
@@ -247,6 +254,49 @@ export default function WorkoutPlayer({
     vid.volume = 0;
     vid.play().catch(() => {});
   }, [mediaStream]);
+
+  // Phase 3: auto-PiP on visibilitychange.
+  // When the user backgrounds the tab/PWA, request PiP on the canvas-stream
+  // video (Chromium/Android). iOS Safari path: captureStream video track is
+  // inert (WebKit bug 181663), so we call webkitSetPresentationMode on the
+  // source expo-av video instead — note this is a best-effort call that iOS
+  // only honours from a native fullscreen context, so it effectively no-ops
+  // inline but keeps the code path ready for future WebKit support.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !pipEnabled || typeof document === 'undefined') return;
+
+    const onVisibilityChange = async () => {
+      if (!document.hidden) return;
+
+      if (hasWorkingCaptureStream) {
+        // Chromium / Firefox / desktop Safari path — canvas-stream video.
+        const canvasVid = pipCanvasVideoRef.current;
+        if (!canvasVid) return;
+        if ((document as any).pictureInPictureElement) return; // already in PiP
+        try {
+          await (canvasVid as any).requestPictureInPicture();
+        } catch (err) {
+          console.info('[PiP] requestPictureInPicture failed:', err);
+        }
+      } else {
+        // iOS Safari fallback — call webkitSetPresentationMode on the source video.
+        const sourceVid = pipSourceVideoRef.current;
+        if (!sourceVid) return;
+        try {
+          if (typeof (sourceVid as any).webkitSetPresentationMode === 'function') {
+            (sourceVid as any).webkitSetPresentationMode('picture-in-picture');
+          }
+        } catch (err) {
+          console.info('[PiP] webkitSetPresentationMode failed:', err);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [pipEnabled, hasWorkingCaptureStream]);
 
   // Debug preview: small 160x200 thumbnail bottom-right so QA can confirm canvas draw.
   // Chrome/Firefox/Android: video element with captureStream MediaStream (unchanged).
