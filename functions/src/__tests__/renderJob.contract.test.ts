@@ -301,6 +301,82 @@ describe('atomic render state production helpers', () => {
     expect(fake.writes).toHaveLength(0);
   });
 
+  test('an explicit pending rerender cannot be overwritten by terminal writes', async () => {
+    const sourceHash = hashRenderSource(WORKOUT);
+    const identity = { version: 4, sourceHash };
+    const metadata = buildReadyRenderedVideoMeta(
+      'bucket.firebasestorage.app',
+      WORKOUT_ID,
+      identity,
+      flattenWorkout(WORKOUT, WORKOUT_ID),
+    );
+    const pendingReady = new FakeFirestore({
+      ...WORKOUT,
+      renderedVideo: { status: 'pending', ...identity },
+    });
+    const pendingFailed = new FakeFirestore({
+      ...WORKOUT,
+      renderedVideo: { status: 'pending', ...identity },
+    });
+
+    expect(
+      await commitReadyRenderIfCurrent(asFirestore(pendingReady), fakeRef, identity, metadata),
+    ).toBe(false);
+    expect(
+      await commitFailedRenderIfCurrent(asFirestore(pendingFailed), fakeRef, identity, 'late failure'),
+    ).toBe(false);
+    expect(pendingReady.data.renderedVideo).toEqual({ status: 'pending', ...identity });
+    expect(pendingFailed.data.renderedVideo).toEqual({ status: 'pending', ...identity });
+    expect(pendingReady.writes).toHaveLength(0);
+    expect(pendingFailed.writes).toHaveLength(0);
+  });
+
+  test('ready completion is idempotent and cannot be downgraded by a late duplicate failure', async () => {
+    const sourceHash = hashRenderSource(WORKOUT);
+    const identity = { version: 4, sourceHash };
+    const metadata = buildReadyRenderedVideoMeta(
+      'bucket.firebasestorage.app',
+      WORKOUT_ID,
+      identity,
+      flattenWorkout(WORKOUT, WORKOUT_ID),
+    );
+    const fake = new FakeFirestore({ ...WORKOUT, renderedVideo: metadata });
+
+    expect(
+      await commitReadyRenderIfCurrent(asFirestore(fake), fakeRef, identity, metadata),
+    ).toBe(true);
+    expect(
+      await commitFailedRenderIfCurrent(asFirestore(fake), fakeRef, identity, 'late failure'),
+    ).toBe(false);
+    expect(fake.data.renderedVideo).toEqual(metadata);
+    expect(fake.writes).toHaveLength(0);
+  });
+
+  test('a failed attempt can still retry and commit ready metadata', async () => {
+    const sourceHash = hashRenderSource(WORKOUT);
+    const identity = { version: 4, sourceHash };
+    const metadata = buildReadyRenderedVideoMeta(
+      'bucket.firebasestorage.app',
+      WORKOUT_ID,
+      identity,
+      flattenWorkout(WORKOUT, WORKOUT_ID),
+    );
+    const fake = new FakeFirestore({
+      ...WORKOUT,
+      renderedVideo: { status: 'failed', error: 'first attempt failed', ...identity },
+    });
+
+    expect(
+      await commitReadyRenderIfCurrent(asFirestore(fake), fakeRef, identity, metadata),
+    ).toBe(true);
+    expect(fake.data.renderedVideo).toEqual(expect.objectContaining({
+      status: 'ready',
+      version: 4,
+      sourceHash,
+      storagePath: metadata.storagePath,
+    }));
+  });
+
   test('stale failure cannot mark a newer request failed', async () => {
     const sourceHash = hashRenderSource(WORKOUT);
     const staleIdentity = { version: 4, sourceHash };

@@ -61,6 +61,9 @@ export async function commitReadyRenderIfCurrent(
     const snapshot = await transaction.get(workoutRef);
     const workout = snapshot.data() as Record<string, unknown> | undefined;
     if (!snapshot.exists || !workout || !isCurrentRenderRequest(workout, identity)) return false;
+    const renderedVideo = workout.renderedVideo as Record<string, unknown> | undefined;
+    if (renderedVideo?.status === 'ready') return true;
+    if (renderedVideo?.status !== 'rendering' && renderedVideo?.status !== 'failed') return false;
     transaction.update(workoutRef, {
       renderedVideo: {
         ...metadata,
@@ -83,6 +86,8 @@ export async function commitFailedRenderIfCurrent(
     const snapshot = await transaction.get(workoutRef);
     const workout = snapshot.data() as Record<string, unknown> | undefined;
     if (!snapshot.exists || !workout || !isCurrentRenderRequest(workout, identity)) return false;
+    const renderedVideo = workout.renderedVideo as Record<string, unknown> | undefined;
+    if (renderedVideo?.status !== 'rendering' && renderedVideo?.status !== 'failed') return false;
     transaction.update(workoutRef, {
       'renderedVideo.status': 'failed',
       'renderedVideo.error': error.slice(0, 500),

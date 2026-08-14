@@ -49,6 +49,11 @@ async function commitReadyRenderIfCurrent(db, workoutRef, identity, metadata) {
         const workout = snapshot.data();
         if (!snapshot.exists || !workout || !(0, renderContract_1.isCurrentRenderRequest)(workout, identity))
             return false;
+        const renderedVideo = workout.renderedVideo;
+        if ((renderedVideo === null || renderedVideo === void 0 ? void 0 : renderedVideo.status) === 'ready')
+            return true;
+        if ((renderedVideo === null || renderedVideo === void 0 ? void 0 : renderedVideo.status) !== 'rendering' && (renderedVideo === null || renderedVideo === void 0 ? void 0 : renderedVideo.status) !== 'failed')
+            return false;
         transaction.update(workoutRef, {
             renderedVideo: Object.assign(Object.assign({}, metadata), { renderedAt: firestore_1.FieldValue.serverTimestamp(), updatedAt: firestore_1.FieldValue.serverTimestamp() }),
         });
@@ -61,6 +66,9 @@ async function commitFailedRenderIfCurrent(db, workoutRef, identity, error) {
         const snapshot = await transaction.get(workoutRef);
         const workout = snapshot.data();
         if (!snapshot.exists || !workout || !(0, renderContract_1.isCurrentRenderRequest)(workout, identity))
+            return false;
+        const renderedVideo = workout.renderedVideo;
+        if ((renderedVideo === null || renderedVideo === void 0 ? void 0 : renderedVideo.status) !== 'rendering' && (renderedVideo === null || renderedVideo === void 0 ? void 0 : renderedVideo.status) !== 'failed')
             return false;
         transaction.update(workoutRef, {
             'renderedVideo.status': 'failed',
