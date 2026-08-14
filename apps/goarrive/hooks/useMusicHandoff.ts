@@ -240,7 +240,10 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       if (!shadow) return;
       if (variantUri) {
         // Async: HEAD-check variant, fall back to full-volume on 404 (first-play case).
+        // Staleness guard: a newer swapTrack updates currentUrlRef synchronously,
+        // so if the HEAD resolves after the next swap, this callback bails.
         void headCheck(variantUri).then((exists) => {
+          if (currentUrlRef.current !== url) return;
           const finalUri = exists ? variantUri : url;
           const fallbackUsed = !exists;
           try { shadow.pause(); shadow.src = finalUri; shadow.load(); } catch {}
@@ -259,6 +262,7 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
     const variant = variantRef.current;
     if (variantUri) {
       void headCheck(variantUri).then((exists) => {
+        if (currentUrlRef.current !== url) return;
         const finalUri = exists ? variantUri : url;
         const fallbackUsed = !exists;
         try { shadow.pause(); shadow.src = finalUri; shadow.load(); } catch {}

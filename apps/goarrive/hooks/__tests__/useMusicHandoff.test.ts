@@ -247,4 +247,36 @@ describe('swapTrack volume-bucket picker (v3)', () => {
     expect(bucketLog).toContain('"fallbackUsed":true');
     hook.unmount();
   });
+
+  test('stale HEAD from prior swap does not overwrite newer track (currentUrlRef guard)', async () => {
+    const URL_A = 'https://firebasestorage.googleapis.com/v0/b/goarrive.appspot.com/o/music_cache%2Fchill%2Ftrack_10.mp3?alt=media';
+    const URL_B = 'https://firebasestorage.googleapis.com/v0/b/goarrive.appspot.com/o/music_cache%2Fchill%2Ftrack_20.mp3?alt=media';
+    const VARIANT_A = 'https://firebasestorage.googleapis.com/v0/b/goarrive.appspot.com/o/music_cache%2Fchill%2Fgain_025%2Ftrack_10.mp3?alt=media';
+    const VARIANT_B = 'https://firebasestorage.googleapis.com/v0/b/goarrive.appspot.com/o/music_cache%2Fchill%2Fgain_025%2Ftrack_20.mp3?alt=media';
+
+    // Queue HEAD-check resolvers so we can decide the order manually.
+    const resolvers: Array<(v: Response) => void> = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => new Promise<Response>((resolve) => {
+      resolvers.push(resolve);
+    }));
+
+    const { hook, shadow } = setupPicker(0.25);
+
+    // Two rapid swaps — currentUrlRef ends on B, but HEAD-A is still in flight.
+    act(() => { hook.result.current.swapTrack(URL_A); });
+    act(() => { hook.result.current.swapTrack(URL_B); });
+    expect(resolvers).toHaveLength(2);
+
+    // B resolves first — should land on shadow.
+    resolvers[1]({ ok: true } as Response);
+    await act(async () => { await Promise.resolve(); });
+    expect(shadow.src).toBe(VARIANT_B);
+
+    // A resolves LATE — the guard must drop it, keeping B.
+    resolvers[0]({ ok: true } as Response);
+    await act(async () => { await Promise.resolve(); });
+    expect(shadow.src).toBe(VARIANT_B);
+    expect(shadow.src).not.toBe(VARIANT_A);
+    hook.unmount();
+  });
 });
