@@ -98,6 +98,7 @@ export {
 } from './playbookBooking';
 import { CloudTasksClient } from '@google-cloud/tasks';
 import { sanitizePlayerWorkout } from './workoutPlayerSanitizer';
+import { projectCheckoutSubmission } from './checkoutSubmission';
 
 // ── Slack Bot (ME-011, ME-012) ────────────────────────────────────────────────
 export { slackEvents } from './slack';
@@ -1177,17 +1178,9 @@ export const getCheckoutSubmission = onCall({ invoker: 'public' }, async (reques
   }
   const data = snap.data()!;
 
-  // Only expose fields the checkout page renders. No raw doc leak.
+  // Keep this public response to the exact non-PII fields checkout consumes.
   return {
-    submission: {
-      coachId: (data.coachId as string) || '',
-      programName: (data.programName as string) || null,
-      status: (data.status as string) || null,
-      firstName: (data.firstName as string) || null,
-      email: (data.email as string) || null,
-      folderId: (data.folderId as string) || null,
-      subscriptionPathId: (data.subscriptionPathId as string) || null,
-    },
+    submission: projectCheckoutSubmission(data),
   };
 });
 

@@ -49,9 +49,6 @@ const FALLBACK_MONTHLY_CENTS = 1999;
 interface Submission {
   coachId: string;
   programName?: string;
-  status?: string;
-  firstName?: string;
-  email?: string;
   folderId?: string;
   subscriptionPathId?: string;
 }

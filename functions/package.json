@@ -4,6 +4,7 @@
     "build": "tsc",
     "serve": "npm run build && firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions",
+    "test:unit": "jest --testMatch \"<rootDir>/src/**/__tests__/**/*.test.ts\"",
     "test:rules": "jest"
   },
   "jest": {
