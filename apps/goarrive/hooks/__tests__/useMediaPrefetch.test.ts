@@ -12,8 +12,9 @@
  *  - Touching document on non-web platforms (should be a no-op)
  */
 
-import { renderHook } from '@testing-library/react-native';
+import { vi } from 'vitest';
 import { Platform, Image } from 'react-native';
+import { renderHook } from '../../test-utils/renderHook';
 import { useMediaPrefetch } from '../useMediaPrefetch';
 
 const originalOS = Platform.OS;
@@ -30,9 +31,9 @@ describe('useMediaPrefetch — web platform', () => {
   let createdVideos: any[];
   let appendedBodyElements: any[];
   let removedBodyElements: any[];
-  let appendBodySpy: jest.SpyInstance;
-  let appendHeadSpy: jest.SpyInstance;
-  let removeBodySpy: jest.SpyInstance;
+  let appendBodySpy: ReturnType<typeof vi.spyOn>;
+  let appendHeadSpy: ReturnType<typeof vi.spyOn>;
+  let removeBodySpy: ReturnType<typeof vi.spyOn>;
   let createElementOrig: typeof document.createElement;
 
   beforeEach(() => {
@@ -43,7 +44,7 @@ describe('useMediaPrefetch — web platform', () => {
 
     // Replace document.createElement so we can intercept video element creation.
     createElementOrig = document.createElement.bind(document);
-    jest.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
       const el = createElementOrig(tag) as any;
       if (tag === 'video') {
         // Intercept the specific video elements the hook creates.
@@ -52,22 +53,22 @@ describe('useMediaPrefetch — web platform', () => {
       return el;
     });
 
-    appendBodySpy = jest.spyOn(document.body, 'appendChild').mockImplementation((el: any) => {
+    appendBodySpy = vi.spyOn(document.body, 'appendChild').mockImplementation((el: any) => {
       appendedBodyElements.push(el);
       return el;
     });
-    appendHeadSpy = jest.spyOn(document.head, 'appendChild').mockImplementation((el: any) => el);
-    removeBodySpy = jest.spyOn(document.body, 'removeChild').mockImplementation((el: any) => {
+    appendHeadSpy = vi.spyOn(document.head, 'appendChild').mockImplementation((el: any) => el);
+    removeBodySpy = vi.spyOn(document.body, 'removeChild').mockImplementation((el: any) => {
       removedBodyElements.push(el);
       return el;
     });
 
-    jest.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   });
 
   afterEach(() => {
-    jest.useRealTimers();
-    (document.createElement as jest.Mock).mockRestore?.();
+    vi.useRealTimers();
+    (document.createElement as any).mockRestore?.();
     appendBodySpy.mockRestore();
     appendHeadSpy.mockRestore();
     removeBodySpy.mockRestore();
@@ -108,11 +109,11 @@ describe('useMediaPrefetch — web platform', () => {
     expect(removedBodyElements).not.toContain(videoEl);
 
     // 4.9 s — still alive.
-    jest.advanceTimersByTime(4900);
+    vi.advanceTimersByTime(4900);
     expect(removedBodyElements).not.toContain(videoEl);
 
     // > 5 s — cleanup fires.
-    jest.advanceTimersByTime(200);
+    vi.advanceTimersByTime(200);
     expect(removedBodyElements).toContain(videoEl);
   });
 
@@ -133,20 +134,20 @@ describe('useMediaPrefetch — web platform', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('useMediaPrefetch — non-web platform', () => {
-  let createElementSpy: jest.SpyInstance;
-  let appendBodySpy: jest.SpyInstance;
-  let imagePrefetchSpy: jest.SpyInstance;
+  let createElementSpy: ReturnType<typeof vi.spyOn>;
+  let appendBodySpy: ReturnType<typeof vi.spyOn>;
+  let imagePrefetchSpy: ReturnType<typeof vi.spyOn>;
 
-  let fetchSpy: jest.SpyInstance;
+  let fetchSpy: { mockRestore: () => void };
 
   beforeEach(() => {
     Object.defineProperty(Platform, 'OS', { value: 'ios', configurable: true, writable: true });
-    createElementSpy = jest.spyOn(document, 'createElement');
-    appendBodySpy = jest.spyOn(document.body, 'appendChild');
+    createElementSpy = vi.spyOn(document, 'createElement');
+    appendBodySpy = vi.spyOn(document.body, 'appendChild');
     // Image.prefetch must return a promise on native.
-    imagePrefetchSpy = jest.spyOn(Image, 'prefetch').mockResolvedValue(true);
+    imagePrefetchSpy = vi.spyOn(Image, 'prefetch').mockResolvedValue(true);
     // fetch is used as the native cache-warmer; define it if missing (jsdom may not have it).
-    (global as any).fetch = jest.fn().mockResolvedValue({});
+    (global as any).fetch = vi.fn().mockResolvedValue({});
     fetchSpy = { mockRestore: () => { delete (global as any).fetch; } } as any;
   });
 

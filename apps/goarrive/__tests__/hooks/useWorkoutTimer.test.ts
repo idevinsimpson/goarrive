@@ -4,6 +4,19 @@
  * Tests the stepTypeToPhase mapping and verifies that the grabEquipment
  * phase is properly integrated into the timer state machine.
  */
+import { vi } from 'vitest';
+
+vi.mock('../../lib/audioCues', () => ({
+  playCue: vi.fn(),
+  unlockAudio: vi.fn(),
+}));
+vi.mock('../../lib/haptics', () => ({
+  hapticLight: vi.fn(),
+  hapticMedium: vi.fn(),
+  hapticHeavy: vi.fn(),
+  hapticSuccess: vi.fn(),
+}));
+
 import { stepTypeToPhase } from '../../hooks/useWorkoutTimer';
 import type { StepType } from '../../hooks/useWorkoutFlatten';
 

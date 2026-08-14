@@ -1,22 +1,23 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 
-import { act, renderHook } from '@testing-library/react-native';
+import { vi } from 'vitest';
+import { act, renderHook } from '../../test-utils/renderHook';
 import { Platform } from 'react-native';
 import { createBlessedMusicPlayer, getAudioContextState } from '../useWorkoutTTS';
 import { useMusicHandoff } from '../useMusicHandoff';
 
-jest.mock('../useWorkoutTTS', () => ({
-  createBlessedMusicPlayer: jest.fn(),
-  getAudioContextState: jest.fn(() => 'running'),
-  resumeAudioGraph: jest.fn(),
+vi.mock('../useWorkoutTTS', () => ({
+  createBlessedMusicPlayer: vi.fn(),
+  getAudioContextState: vi.fn(() => 'running'),
+  resumeAudioGraph: vi.fn(),
 }));
 
-jest.mock('../../utils/musicHandoffVariant', () => ({
-  getMusicHandoffVariant: jest.fn(() => 'v3'),
+vi.mock('../../utils/musicHandoffVariant', () => ({
+  getMusicHandoffVariant: vi.fn(() => 'v3'),
 }));
 
-jest.mock('../../utils/handoffLog', () => ({
-  pushHandoffLog: jest.fn(),
+vi.mock('../../utils/handoffLog', () => ({
+  pushHandoffLog: vi.fn(),
 }));
 
 const originalOS = Platform.OS;
@@ -29,11 +30,11 @@ function makeAudio() {
     paused: true,
     src: '',
     volume: 1,
-    load: jest.fn(),
-    removeAttribute: jest.fn(),
+    load: vi.fn(),
+    removeAttribute: vi.fn(),
   };
-  el.pause = jest.fn(() => { el.paused = true; });
-  el.play = jest.fn(() => {
+  el.pause = vi.fn(() => { el.paused = true; });
+  el.play = vi.fn(() => {
     el.paused = false;
     return Promise.resolve();
   });
@@ -53,16 +54,16 @@ describe('useMusicHandoff v3 shadow controls', () => {
       configurable: true,
       get: () => visibilityState,
     });
-    jest.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
       callback(0);
       return 1;
     });
-    jest.spyOn(console, 'info').mockImplementation(() => {});
-    jest.mocked(getAudioContextState).mockReturnValue('running');
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    vi.mocked(getAudioContextState).mockReturnValue('running');
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
     Object.defineProperty(Platform, 'OS', {
       value: originalOS,
       configurable: true,
@@ -81,7 +82,7 @@ describe('useMusicHandoff v3 shadow controls', () => {
     const musicPausedRef = { current: false };
     const musicHoldRef = { current: false };
     const musicOffRef = { current: false };
-    jest.mocked(createBlessedMusicPlayer).mockReturnValue(shadow);
+    vi.mocked(createBlessedMusicPlayer).mockReturnValue(shadow);
 
     const hook = renderHook(
       (props: { isPaused: boolean; isMuted: boolean; volume: number }) =>
@@ -132,8 +133,8 @@ describe('useMusicHandoff v3 shadow controls', () => {
     const { audible, shadow, rerender, unmount } = setup();
     act(() => rerender({ isPaused: false, isMuted: true, volume: 0.25 }));
     shadow.currentTime = 19;
-    jest.mocked(audible.play).mockClear();
-    jest.mocked(shadow.pause).mockClear();
+    vi.mocked(audible.play).mockClear();
+    vi.mocked(shadow.pause).mockClear();
 
     act(() => {
       visibilityState = 'visible';
@@ -149,7 +150,7 @@ describe('useMusicHandoff v3 shadow controls', () => {
 
   test('does not restart the graph-wired element on return while paused', () => {
     const { audible, rerender, unmount } = setup();
-    jest.mocked(audible.play).mockClear();
+    vi.mocked(audible.play).mockClear();
 
     act(() => rerender({ isPaused: true, isMuted: false, volume: 0.25 }));
     act(() => {
