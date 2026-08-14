@@ -1,5 +1,7 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
+import { execFileSync } from 'child_process';
 import type { DocumentReference, Firestore } from 'firebase-admin/firestore';
 import {
   buildReadyRenderedVideoMeta,
@@ -10,6 +12,7 @@ import {
   isCurrentRenderRequest,
   Segment,
 } from '../renderContract';
+import { buildSegmentArgs, generateAss } from '../renderFfmpeg';
 import { parseRenderServiceTarget } from '../renderServiceTarget';
 import {
   claimRenderRequest,
@@ -301,6 +304,82 @@ describe('atomic render state production helpers', () => {
     expect(fake.writes).toHaveLength(0);
   });
 
+  test('an explicit pending rerender cannot be overwritten by terminal writes', async () => {
+    const sourceHash = hashRenderSource(WORKOUT);
+    const identity = { version: 4, sourceHash };
+    const metadata = buildReadyRenderedVideoMeta(
+      'bucket.firebasestorage.app',
+      WORKOUT_ID,
+      identity,
+      flattenWorkout(WORKOUT, WORKOUT_ID),
+    );
+    const pendingReady = new FakeFirestore({
+      ...WORKOUT,
+      renderedVideo: { status: 'pending', ...identity },
+    });
+    const pendingFailed = new FakeFirestore({
+      ...WORKOUT,
+      renderedVideo: { status: 'pending', ...identity },
+    });
+
+    expect(
+      await commitReadyRenderIfCurrent(asFirestore(pendingReady), fakeRef, identity, metadata),
+    ).toBe(false);
+    expect(
+      await commitFailedRenderIfCurrent(asFirestore(pendingFailed), fakeRef, identity, 'late failure'),
+    ).toBe(false);
+    expect(pendingReady.data.renderedVideo).toEqual({ status: 'pending', ...identity });
+    expect(pendingFailed.data.renderedVideo).toEqual({ status: 'pending', ...identity });
+    expect(pendingReady.writes).toHaveLength(0);
+    expect(pendingFailed.writes).toHaveLength(0);
+  });
+
+  test('ready completion is idempotent and cannot be downgraded by a late duplicate failure', async () => {
+    const sourceHash = hashRenderSource(WORKOUT);
+    const identity = { version: 4, sourceHash };
+    const metadata = buildReadyRenderedVideoMeta(
+      'bucket.firebasestorage.app',
+      WORKOUT_ID,
+      identity,
+      flattenWorkout(WORKOUT, WORKOUT_ID),
+    );
+    const fake = new FakeFirestore({ ...WORKOUT, renderedVideo: metadata });
+
+    expect(
+      await commitReadyRenderIfCurrent(asFirestore(fake), fakeRef, identity, metadata),
+    ).toBe(true);
+    expect(
+      await commitFailedRenderIfCurrent(asFirestore(fake), fakeRef, identity, 'late failure'),
+    ).toBe(false);
+    expect(fake.data.renderedVideo).toEqual(metadata);
+    expect(fake.writes).toHaveLength(0);
+  });
+
+  test('a failed attempt can still retry and commit ready metadata', async () => {
+    const sourceHash = hashRenderSource(WORKOUT);
+    const identity = { version: 4, sourceHash };
+    const metadata = buildReadyRenderedVideoMeta(
+      'bucket.firebasestorage.app',
+      WORKOUT_ID,
+      identity,
+      flattenWorkout(WORKOUT, WORKOUT_ID),
+    );
+    const fake = new FakeFirestore({
+      ...WORKOUT,
+      renderedVideo: { status: 'failed', error: 'first attempt failed', ...identity },
+    });
+
+    expect(
+      await commitReadyRenderIfCurrent(asFirestore(fake), fakeRef, identity, metadata),
+    ).toBe(true);
+    expect(fake.data.renderedVideo).toEqual(expect.objectContaining({
+      status: 'ready',
+      version: 4,
+      sourceHash,
+      storagePath: metadata.storagePath,
+    }));
+  });
+
   test('stale failure cannot mark a newer request failed', async () => {
     const sourceHash = hashRenderSource(WORKOUT);
     const staleIdentity = { version: 4, sourceHash };
@@ -350,6 +429,114 @@ describe('private Cloud Run service target', () => {
   ])('rejects unsafe service target %p', (target) => {
     expect(() => parseRenderServiceTarget(target)).toThrow();
   });
+});
+
+describe('FFmpeg timeline parity', () => {
+  test('mixed video and rest segments keep stream timing and metadata aligned', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const ffmpegBin = require('ffmpeg-static') as string | null;
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const ffprobeBin = (require('ffprobe-static') as { path: string }).path;
+    if (!ffmpegBin) throw new Error('ffmpeg-static does not support this platform');
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'goarrive-render-timing-'));
+    try {
+      const inputPath = path.join(tmpDir, 'source-24fps.mp4');
+      const videoAssPath = path.join(tmpDir, 'video.ass');
+      const restAssPath = path.join(tmpDir, 'rest.ass');
+      const videoOutPath = path.join(tmpDir, 'video.mp4');
+      const restOutPath = path.join(tmpDir, 'rest.mp4');
+      const concatPath = path.join(tmpDir, 'concat.txt');
+      const joinedPath = path.join(tmpDir, 'joined.mp4');
+
+      execFileSync(ffmpegBin, [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24:duration=1',
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', inputPath,
+      ], { stdio: 'pipe', timeout: 60_000 });
+
+      const workoutId = 'ffmpeg-timeline-contract';
+      const workout = {
+        blocks: [{
+          id: 'mixed-block',
+          type: 'Circuit',
+          movements: [
+            {
+              id: 'video-segment',
+              name: 'Video',
+              videoUrl: 'https://media.example.test/source.mp4',
+              duration: 2,
+            },
+            { id: 'rest-segment', name: 'Rest', duration: 2 },
+          ],
+        }],
+      };
+      const segments = flattenWorkout(workout, workoutId);
+      expect(segments.map((segment) => segment.type)).toEqual(['video', 'rest']);
+      segments[0]._localPath = inputPath;
+
+      fs.writeFileSync(videoAssPath, generateAss(2, '00:04', 'video', 'Video'));
+      fs.writeFileSync(restAssPath, generateAss(2, '00:04', 'rest', 'Rest'));
+      execFileSync(
+        ffmpegBin,
+        buildSegmentArgs(segments[0], path.basename(videoAssPath), videoOutPath),
+        { cwd: tmpDir, stdio: 'pipe', timeout: 120_000 },
+      );
+      execFileSync(
+        ffmpegBin,
+        buildSegmentArgs(segments[1], path.basename(restAssPath), restOutPath),
+        { cwd: tmpDir, stdio: 'pipe', timeout: 120_000 },
+      );
+
+      const concatEntries = [videoOutPath, restOutPath]
+        .map((filePath) => `file '${filePath.replace(/\\/g, '/')}'`)
+        .join('\n');
+      fs.writeFileSync(concatPath, concatEntries);
+      execFileSync(ffmpegBin, [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'concat', '-safe', '0', '-i', concatPath,
+        '-c', 'copy', joinedPath,
+      ], { stdio: 'pipe', timeout: 60_000 });
+
+      const probe = (filePath: string): {
+        streams: Array<{ r_frame_rate: string; time_base: string; nb_read_frames: string }>;
+        format: { duration: string };
+      } => JSON.parse(execFileSync(ffprobeBin, [
+        '-v', 'error', '-select_streams', 'v:0', '-count_frames',
+        '-show_entries', 'stream=r_frame_rate,time_base,nb_read_frames:format=duration',
+        '-of', 'json', filePath,
+      ], { encoding: 'utf8', timeout: 60_000 }));
+
+      const videoProbe = probe(videoOutPath);
+      const restProbe = probe(restOutPath);
+      const joinedProbe = probe(joinedPath);
+      expect(videoProbe.streams[0]).toEqual(expect.objectContaining({
+        r_frame_rate: '30/1',
+        time_base: '1/30000',
+      }));
+      expect(restProbe.streams[0]).toEqual(expect.objectContaining({
+        r_frame_rate: '30/1',
+        time_base: '1/30000',
+      }));
+
+      const metadata = buildReadyRenderedVideoMeta(
+        'bucket.firebasestorage.app',
+        workoutId,
+        { version: 1, sourceHash: hashRenderSource(workout) },
+        segments,
+      );
+      const artifactDurationMs = Number(joinedProbe.format.duration) * 1000;
+      expect(metadata.blocks.map(({ startMs, endMs }) => ({ startMs, endMs }))).toEqual([
+        { startMs: 0, endMs: 2000 },
+        { startMs: 2000, endMs: 4000 },
+      ]);
+      expect(metadata.durationMs).toBe(4000);
+      expect(Math.abs(artifactDurationMs - metadata.durationMs)).toBeLessThanOrEqual(50);
+      expect(Number(joinedProbe.streams[0].nb_read_frames)).toBe(120);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 180_000);
 });
 
 describe('deploy build contract', () => {

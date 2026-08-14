@@ -59,16 +59,13 @@ const child_process_1 = require("child_process");
 const util_1 = require("util");
 const renderContract_1 = require("./renderContract");
 const renderState_1 = require("./renderState");
+const renderFfmpeg_1 = require("./renderFfmpeg");
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const ffmpegBin = require('ffmpeg-static');
 const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
 // ── Config ────────────────────────────────────────────────────────────────────
 const BUCKET_NAME = process.env.STORAGE_BUCKET || 'goarrive.firebasestorage.app';
 const PORT = parseInt(process.env.PORT || '8080', 10);
-const CANVAS_W = 720;
-const CANVAS_H = 1440;
-const TIMER_H = 160;
-const MOVEMENT_H = 1280;
 // ── Firebase init ─────────────────────────────────────────────────────────────
 if (!admin.apps.length) {
     admin.initializeApp();
@@ -107,84 +104,6 @@ async function downloadUrl(url, destPath) {
         }).on('error', reject);
     });
 }
-function fmtTime(totalSec) {
-    const sec = Math.max(0, Math.floor(totalSec));
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
-function fmtAssTime(sec) {
-    const h = Math.floor(sec / 3600);
-    const m = Math.floor((sec % 3600) / 60);
-    const s = Math.floor(sec % 60);
-    return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.00`;
-}
-function generateAss(durationSec, totalWorkoutStr, type, label) {
-    const lines = [
-        '[Script Info]',
-        'ScriptType: v4.00+',
-        `PlayResX: ${CANVAS_W}`,
-        `PlayResY: ${CANVAS_H}`,
-        'Collisions: Normal',
-        '',
-        '[V4+ Styles]',
-        'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-        'Style: Timer,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,2,0,8,10,10,56,1',
-        '',
-        '[Events]',
-        'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
-    ];
-    for (let sec = 0; sec < Math.ceil(durationSec); sec++) {
-        const start = fmtAssTime(sec);
-        const end = fmtAssTime(Math.min(sec + 1, durationSec));
-        let text;
-        if (type === 'rest') {
-            const remaining = Math.max(0, durationSec - sec);
-            const lbl = (label || 'REST').replace(/,/g, '').slice(0, 15).toUpperCase();
-            text = `${lbl}  ${fmtTime(remaining)}`;
-        }
-        else {
-            text = `${fmtTime(sec)} / ${totalWorkoutStr}`;
-        }
-        lines.push(`Dialogue: 0,${start},${end},Timer,,0,0,0,,${text}`);
-    }
-    return lines.join('\n');
-}
-// ── Block flattening ──────────────────────────────────────────────────────────
-// ── FFmpeg ────────────────────────────────────────────────────────────────────
-function buildSegmentArgs(seg, assPath, outputPath) {
-    const dur = seg.durationSec;
-    const assEsc = assPath.replace(/\\/g, '/').replace(/:/g, '\\:');
-    if (seg.type === 'video') {
-        const filter = [
-            `[0:v]format=yuv420p,scale=${CANVAS_W}:${MOVEMENT_H}:force_original_aspect_ratio=decrease,pad=${CANVAS_W}:${MOVEMENT_H}:(ow-iw)/2:(oh-ih)/2:black,setpts=PTS-STARTPTS[mv]`,
-            `color=c=#1a1a1a:s=${CANVAS_W}x${TIMER_H}:r=30,format=yuv420p[band]`,
-            `[band][mv]vstack=inputs=2[canvas]`,
-            `[canvas]subtitles=${assEsc}[out]`,
-        ].join(';');
-        return ['-y', '-i', seg._localPath, '-filter_complex', filter, '-map', '[out]', '-t', String(dur), '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-pix_fmt', 'yuv420p', '-an', outputPath];
-    }
-    if (seg.type === 'image') {
-        const filter = [
-            `[0:v]format=yuv420p,scale=${CANVAS_W}:${MOVEMENT_H}:force_original_aspect_ratio=decrease,pad=${CANVAS_W}:${MOVEMENT_H}:(ow-iw)/2:(oh-ih)/2:black[mv]`,
-            `color=c=#1a1a1a:s=${CANVAS_W}x${TIMER_H}:r=30,format=yuv420p[band]`,
-            `[band][mv]vstack=inputs=2[canvas]`,
-            `[canvas]subtitles=${assEsc}[out]`,
-        ].join(';');
-        const inputArgs = seg._isGif
-            ? ['-stream_loop', '-1', '-t', String(dur), '-i', seg._localPath]
-            : ['-loop', '1', '-framerate', '30', '-t', String(dur), '-i', seg._localPath];
-        return ['-y', ...inputArgs, '-filter_complex', filter, '-map', '[out]', '-t', String(dur), '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-pix_fmt', 'yuv420p', '-an', '-r', '30', outputPath];
-    }
-    // Rest
-    const filter = [
-        `color=c=#2a2a2a:s=${CANVAS_W}x${MOVEMENT_H}:r=30,format=yuv420p[mv]`,
-        `color=c=#1a1a1a:s=${CANVAS_W}x${TIMER_H}:r=30,format=yuv420p[band]`,
-        `[band][mv]vstack=inputs=2[canvas]`,
-        `[canvas]subtitles=${assEsc}[out]`,
-    ].join(';');
-    return ['-y', '-filter_complex', filter, '-map', '[out]', '-t', String(dur), '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-pix_fmt', 'yuv420p', '-an', outputPath];
-}
 // ── Offset map builder ────────────────────────────────────────────────────────
 // ── Render pipeline ───────────────────────────────────────────────────────────
 class StaleRenderError extends Error {
@@ -206,7 +125,7 @@ async function renderWorkout(workoutId, identity) {
         }
         const segments = (0, renderContract_1.flattenWorkout)(workout, workoutId);
         const totalDurSec = segments.reduce((sum, s) => sum + s.durationSec, 0);
-        const totalStr = fmtTime(totalDurSec);
+        const totalStr = (0, renderFfmpeg_1.fmtTime)(totalDurSec);
         // Download media
         for (let i = 0; i < segments.length; i++) {
             const seg = segments[i];
@@ -232,19 +151,19 @@ async function renderWorkout(workoutId, identity) {
             if (seg.durationSec <= 0)
                 continue;
             const assPath = path.join(tmpDir, `timer-${i}.ass`);
-            fs.writeFileSync(assPath, generateAss(seg.durationSec, totalStr, seg.type, seg.label));
+            fs.writeFileSync(assPath, (0, renderFfmpeg_1.generateAss)(seg.durationSec, totalStr, seg.type, seg.label));
             const outPath = path.join(tmpDir, `out-${i}.mp4`);
             try {
-                await execFileAsync(ffmpegBin, buildSegmentArgs(seg, assPath, outPath), { timeout: 300000 });
+                await execFileAsync(ffmpegBin, (0, renderFfmpeg_1.buildSegmentArgs)(seg, assPath, outPath), { timeout: 300000 });
                 blockOutputs.push(outPath);
                 emittedSegments.push(seg);
             }
             catch (err) {
                 // Degrade to rest
                 const restSeg = Object.assign(Object.assign({}, seg), { type: 'rest', _localPath: undefined, _isGif: undefined });
-                fs.writeFileSync(assPath, generateAss(seg.durationSec, totalStr, 'rest', seg.label));
+                fs.writeFileSync(assPath, (0, renderFfmpeg_1.generateAss)(seg.durationSec, totalStr, 'rest', seg.label));
                 try {
-                    await execFileAsync(ffmpegBin, buildSegmentArgs(restSeg, assPath, outPath), { timeout: 120000 });
+                    await execFileAsync(ffmpegBin, (0, renderFfmpeg_1.buildSegmentArgs)(restSeg, assPath, outPath), { timeout: 120000 });
                     blockOutputs.push(outPath);
                     emittedSegments.push(restSeg);
                 }
