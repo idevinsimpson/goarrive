@@ -55,13 +55,11 @@ function isStagingLikeHost(): boolean {
  * re-appending the flag.
  *
  * Default policy:
- *   - Staging hosts default to 'v3' so the plain URL tests the fix rather
- *     than the pre-adapter baseline. Devin can still exercise the baseline
- *     explicitly via ?handoff=off — shorter on-device loop this way.
- *   - Production hosts default to 'off' (adapter installs only the
- *     resume-on-return handler and does nothing else). No experimental
- *     audio path reaches real members until a variant wins the device spike
- *     and the default is deliberately flipped in a later change.
+ *   - v3 is the default everywhere (staging and production). Devin's device
+ *     test on 2026-08-14 confirmed v3 keeps music alive when Safari
+ *     backgrounds. Query overrides remain: ?handoff=off is the escape hatch
+ *     for members who hit any regression, ?handoff=v1 and ?handoff=v2 stay
+ *     available for on-device debugging of the pre-v3 variants.
  */
 export function getMusicHandoffVariant(): MusicHandoffVariant {
   if (typeof window === 'undefined') return 'off';
@@ -74,5 +72,5 @@ export function getMusicHandoffVariant(): MusicHandoffVariant {
     const stored = window.localStorage.getItem(STORAGE_KEY);
     if (stored === 'v1' || stored === 'v2' || stored === 'v3' || stored === 'off') return stored;
   } catch {}
-  return isStagingLikeHost() ? 'v3' : 'off';
+  return 'v3';
 }
