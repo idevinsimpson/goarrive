@@ -51,6 +51,11 @@
  * BP-001: Always create checkout from acceptedPlanSnapshot, never from live plan doc.
  */
 
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import * as admin from 'firebase-admin';
 import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
@@ -59,6 +64,8 @@ import { defineSecret } from 'firebase-functions/params';
 import { Timestamp, FieldValue } from 'firebase-admin/firestore';
 import Stripe from 'stripe';
 import { google } from 'googleapis';
+
+const execFileAsync = promisify(execFile);
 import {
   getZoomProvider,
   verifyWebhookSignature,
@@ -12948,5 +12955,120 @@ export const sendDripEmail = onSchedule(
     }
 
     console.log('[sendDripEmail] Batch complete — sent:', sent, 'failed:', failed);
+  }
+);
+
+// ─── generateMusicVolumeVariants — pre-render volume-attenuated music variants ──
+// Generates up to 5 gain-attenuated MP3 variants for a music_cache track so the
+// iOS shadow <audio> element (which ignores el.volume) can load a pre-attenuated
+// file instead of playing the source at full 100% volume.
+//
+// GCS key: music_cache/<style>/gain_<pct>/track_<n>.mp3
+// Buckets: 1.0→gain_100, 0.5→gain_050, 0.25→gain_025, 0.12→gain_012, 0.05→gain_005
+//
+// Idempotent: skips any bucket whose destination object already exists in GCS.
+// Auth: callable requires sign-in (same as getWorkoutMusic).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const VOLUME_BUCKETS_DEFAULT = [1.0, 0.5, 0.25, 0.12, 0.05];
+
+function gainToPct(gain: number): string {
+  return String(Math.round(gain * 100)).padStart(3, '0');
+}
+
+export const generateMusicVolumeVariants = onCall(
+  {
+    region: 'us-central1',
+    timeoutSeconds: 300,
+    memory: '2GiB',
+    invoker: 'public',
+  },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError('unauthenticated', 'Sign in required');
+    }
+
+    const { style, trackNumber, buckets } = request.data as {
+      style?: string;
+      trackNumber?: number;
+      buckets?: number[];
+    };
+
+    if (typeof style !== 'string' || !style) {
+      throw new HttpsError('invalid-argument', 'style is required');
+    }
+    if (typeof trackNumber !== 'number' || trackNumber < 0) {
+      throw new HttpsError('invalid-argument', 'trackNumber must be a non-negative integer');
+    }
+    const styleKey = style.toLowerCase();
+    const effectiveBuckets = Array.isArray(buckets) && buckets.length > 0
+      ? VOLUME_BUCKETS_DEFAULT.filter((b) => buckets.includes(b))
+      : VOLUME_BUCKETS_DEFAULT;
+
+    const bucket = admin.storage().bucket();
+    const srcPath = `music_cache/${styleKey}/track_${trackNumber}.mp3`;
+    const srcFile = bucket.file(srcPath);
+    const [srcExists] = await srcFile.exists();
+    if (!srcExists) {
+      throw new HttpsError('not-found', `Source track not found: ${srcPath}`);
+    }
+
+    // Download source to /tmp
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `mvv-${styleKey}-${trackNumber}-`));
+    const srcLocal = path.join(tmpDir, 'src.mp3');
+
+    try {
+      await srcFile.download({ destination: srcLocal });
+
+      const generated: string[] = [];
+      const skipped: string[] = [];
+      const errors: Array<{ bucket: number; message: string }> = [];
+
+      for (const gain of effectiveBuckets) {
+        const pct = gainToPct(gain);
+        const destPath = `music_cache/${styleKey}/gain_${pct}/track_${trackNumber}.mp3`;
+        const destFile = bucket.file(destPath);
+
+        const [destExists] = await destFile.exists();
+        if (destExists) {
+          skipped.push(destPath);
+          continue;
+        }
+
+        const outLocal = path.join(tmpDir, `out_${pct}.mp3`);
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const ffmpegBin: string = require('ffmpeg-static');
+          await execFileAsync(ffmpegBin, [
+            '-y',
+            '-i', srcLocal,
+            '-af', `volume=${gain}`,
+            '-c:a', 'libmp3lame',
+            '-q:a', '4',
+            outLocal,
+          ], { timeout: 120_000 });
+
+          await bucket.upload(outLocal, {
+            destination: destPath,
+            metadata: {
+              contentType: 'audio/mpeg',
+              cacheControl: 'public, max-age=31536000',
+            },
+          });
+          generated.push(destPath);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error('[generateMusicVolumeVariants] FFmpeg/upload error', { gain, destPath, msg });
+          errors.push({ bucket: gain, message: msg });
+        } finally {
+          try { fs.unlinkSync(outLocal); } catch { /* best-effort */ }
+        }
+      }
+
+      console.info('[generateMusicVolumeVariants] done', { styleKey, trackNumber, generated: generated.length, skipped: skipped.length, errors: errors.length });
+      return { generated, skipped, errors };
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    }
   }
 );

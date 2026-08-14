@@ -31,8 +31,9 @@ service firebase.storage {
       allow read: if true;
       allow write: if false;
     }
-    // AI workout background music (Mubert) — publicly readable (generated audio, no PII)
-    match /music_cache/{style}/{fileName} {
+    // AI workout background music (Mubert) + volume-attenuated variants — publicly readable
+    // Variants live at music_cache/<style>/gain_<pct>/track_<n>.mp3; allPaths=** covers both.
+    match /music_cache/{allPaths=**} {
       allow read: if true;
       allow write: if false;
     }
