@@ -64,7 +64,7 @@ cd apps/goarrive && npm run deploy
 ### Deployment
 - Always use the `/ship` command to deploy to staging (`goarrive--staging.web.app`).
 - Never deploy to production (`goarrive.fit`) without explicit approval.
-- **After every staging deploy, you MUST trigger Relay for a smoke test before creating a PR.** See `.claude/relay-handoff.md` for the exact protocol. This is not optional.
+- **After every staging deploy, run Browser Use pre-validation when feasible and post the staging URL plus a PASS/FAIL-per-route table before asking Devin for the authoritative manual smoke test. Relay/Manus smoke tests are retired.** See `.claude/relay-handoff.md` for the current protocol.
 
 ### Standing Release Policy — Staging & Production (approved by Devin, 2026-08-01)
 
