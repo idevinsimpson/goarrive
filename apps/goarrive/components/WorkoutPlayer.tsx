@@ -57,6 +57,8 @@ import MusicSettingsSheet from './MusicSettingsSheet';
 import { FB, FH } from '../lib/theme';
 import VoiceAuditPanel from './VoiceAuditPanel';
 import { isStagingHost } from '../lib/runtimeEnv';
+import { getMusicHandoffVariant } from '../utils/musicHandoffVariant';
+import { readHandoffLog } from '../utils/handoffLog';
 import { installVoiceAuditCapture } from '../lib/voiceAuditLog';
 import PosterThumb from './PosterThumb';
 import { isImageUrl } from '../utils/mediaKind';
@@ -196,7 +198,7 @@ export default function WorkoutPlayer({
     pipSourceVideoRef.current = vid;
   }, [phase, currentIndex]);
 
-  const { mediaStream, isReady: pipStreamReady, canvasElRef: pipCanvasElRef, hasWorkingCaptureStream } = usePipCanvasStream({
+  const { mediaStream } = usePipCanvasStream({
     enabled: pipEnabled && Platform.OS === 'web',
     phase,
     current: current as any,
@@ -247,69 +249,6 @@ export default function WorkoutPlayer({
     vid.volume = 0;
     vid.play().catch(() => {});
   }, [mediaStream]);
-
-  // Debug preview: small 160x200 thumbnail bottom-right so QA can confirm canvas draw.
-  // Chrome/Firefox/Android: video element with captureStream MediaStream (unchanged).
-  // iOS Safari: captureStream video track never emits frames (WebKit bug 181663),
-  // so we mirror the source canvas directly via a visible canvas + rAF loop.
-  useEffect(() => {
-    if (Platform.OS !== 'web' || !pipEnabled) return;
-
-    const previewStyle = {
-      position: 'fixed',
-      right: '12px',
-      bottom: '80px',
-      width: '160px',
-      height: '200px',
-      border: '2px solid rgba(76,175,144,0.8)',
-      borderRadius: '6px',
-      zIndex: '9999',
-      background: '#000',
-    };
-
-    if (hasWorkingCaptureStream && mediaStream) {
-      // Chrome / Firefox / Android path — video element driven by captureStream
-      const previewVid = document.createElement('video');
-      previewVid.autoplay = true;
-      previewVid.muted = true;
-      previewVid.playsInline = true;
-      previewVid.setAttribute('playsinline', '');
-      (previewVid as any).srcObject = mediaStream;
-      Object.assign(previewVid.style, { ...previewStyle, objectFit: 'cover' });
-      previewVid.title = 'PiP canvas debug preview';
-      document.body.appendChild(previewVid);
-      previewVid.play().catch(() => {});
-      return () => {
-        previewVid.pause();
-        (previewVid as any).srcObject = null;
-        previewVid.parentNode?.removeChild(previewVid);
-      };
-    }
-
-    if (!hasWorkingCaptureStream) {
-      // iOS Safari fallback — mirror source canvas directly via rAF
-      const visibleCanvas = document.createElement('canvas');
-      visibleCanvas.width = 160;
-      visibleCanvas.height = 200;
-      Object.assign(visibleCanvas.style, previewStyle);
-      visibleCanvas.title = 'PiP canvas debug preview';
-      document.body.appendChild(visibleCanvas);
-      const visibleCtx = visibleCanvas.getContext('2d');
-      let rafId = 0;
-      function mirrorFrame() {
-        rafId = requestAnimationFrame(mirrorFrame);
-        const src = pipCanvasElRef.current;
-        if (src && visibleCtx) visibleCtx.drawImage(src, 0, 0, 160, 200);
-      }
-      rafId = requestAnimationFrame(mirrorFrame);
-      return () => {
-        cancelAnimationFrame(rafId);
-        visibleCanvas.parentNode?.removeChild(visibleCanvas);
-      };
-    }
-
-    return undefined;
-  }, [pipEnabled, mediaStream, hasWorkingCaptureStream, pipCanvasElRef]);
 
   // Live progress publisher (playbook live view). Fires on transitions only —
   // not every timer tick — so Firestore writes stay cheap for the caller.
@@ -2363,6 +2302,30 @@ export default function WorkoutPlayer({
       </View>
       </View>
 
+      {/* Music-handoff variant badge — staging only. Tiny pill in the bottom-
+          left showing the active ?handoff= variant so the on-device tester
+          can tell baseline (off) from fix (v1/v2/v3) at a glance. Never renders
+          in production because isStagingHost() is host-based. */}
+      {isStagingHost() && (
+        <View style={st.audioVariantRow}>
+          <View pointerEvents="none" style={st.audioVariantBadge}>
+            <Text style={st.audioVariantBadgeText}>
+              AUDIO: {getMusicHandoffVariant().toUpperCase()}
+            </Text>
+          </View>
+          <Pressable
+            style={st.copyLogBtn}
+            onPress={() => {
+              try {
+                navigator.clipboard.writeText(readHandoffLog()).catch(() => {});
+              } catch {}
+            }}
+          >
+            <Text style={st.audioVariantBadgeText}>COPY LOG</Text>
+          </Pressable>
+        </View>
+      )}
+
       {/* VOICE-AUDIT panel — staging only, mirrors [VOICE-AUDIT] console trace */}
       {isStagingHost() && (
         <VoiceAuditPanel
@@ -3184,6 +3147,40 @@ const makeStyles = (fs: (n: number) => number) => StyleSheet.create({
     backgroundColor: '#1A1F2E', borderRadius: 8, padding: 10,
     fontSize: 14, color: '#E2E8F0', fontFamily: FB, marginBottom: 8,
     borderWidth: 1, borderColor: '#252B3B',
+  },
+
+  // Staging-only audio-handoff variant badge + COPY LOG button row.
+  audioVariantRow: {
+    position: 'absolute',
+    left: 10,
+    bottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    zIndex: 999,
+  },
+  audioVariantBadge: {
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderWidth: 1,
+    borderColor: '#F5A623',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  copyLogBtn: {
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderWidth: 1,
+    borderColor: '#F5A623',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  audioVariantBadgeText: {
+    color: '#F5A623',
+    fontFamily: FB,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
 
   // Preview badge
