@@ -11,12 +11,15 @@
  * during backgrounding via one of two variants:
  *   v1 = mute-flip: shadow plays muted alongside; on hide, muted=false
  *   v2 = play-on-hide: shadow paused; on hide, play() at synced position
+ *   v3 = blessed-shadow: shadow created via createBlessedMusicPlayer (same
+ *        mechanism as PR #258 voice-cue fix); on hide, shadow.play() then
+ *        audible.pause() — shadow never wired to Web Audio graph
  *   off = no shadow; adapter installs return-to-foreground resume only
  *
  * Which variant works on iOS is not documented anywhere — this switch is what
  * lets a device spike compare them on the same staging build.
  */
-export type MusicHandoffVariant = 'off' | 'v1' | 'v2';
+export type MusicHandoffVariant = 'off' | 'v1' | 'v2' | 'v3';
 
 const STORAGE_KEY = 'goarrive.musicHandoffVariant';
 
@@ -25,7 +28,7 @@ function parseQuery(search: string): MusicHandoffVariant | null {
   try {
     const params = new URLSearchParams(search);
     const raw = params.get('handoff');
-    if (raw === 'v1' || raw === 'v2' || raw === 'off') return raw;
+    if (raw === 'v1' || raw === 'v2' || raw === 'v3' || raw === 'off') return raw;
   } catch {}
   return null;
 }
@@ -69,7 +72,7 @@ export function getMusicHandoffVariant(): MusicHandoffVariant {
   }
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored === 'v1' || stored === 'v2' || stored === 'off') return stored;
+    if (stored === 'v1' || stored === 'v2' || stored === 'v3' || stored === 'off') return stored;
   } catch {}
-  return isStagingLikeHost() ? 'v1' : 'off';
+  return isStagingLikeHost() ? 'v3' : 'off';
 }

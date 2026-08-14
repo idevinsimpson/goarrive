@@ -45,11 +45,18 @@
  */
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 import { Platform } from 'react-native';
-import { getAudioContextState, resumeAudioGraph } from './useWorkoutTTS';
+import { getAudioContextState, resumeAudioGraph, createBlessedMusicPlayer } from './useWorkoutTTS';
 import {
   getMusicHandoffVariant,
   type MusicHandoffVariant,
 } from '../utils/musicHandoffVariant';
+import { pushHandoffLog } from '../utils/handoffLog';
+
+function log(...args: any[]) {
+  const line = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  console.info(line);
+  pushHandoffLog(line);
+}
 
 // How often we nudge the muted element's position to match the audible one.
 // Longer = less CPU, more drift on hide; shorter = tighter sync, more work.
@@ -98,6 +105,8 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
   const variantRef = useRef<MusicHandoffVariant>('off');
   const audibleElRef = useRef<HTMLAudioElement | null>(null);
   const shadowElRef = useRef<HTMLAudioElement | null>(null);
+  // v3 only: a second blessed element (never wired to the Web Audio graph)
+  const shadowMusicElRef = useRef<HTMLAudioElement | null>(null);
   const currentUrlRef = useRef<string | null>(null);
   const isMutedRef = useRef(isMuted);
   const isPausedRef = useRef(isPaused);
@@ -117,7 +126,7 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     variantRef.current = getMusicHandoffVariant();
-    console.info('[HANDOFF/init]', { variant: variantRef.current });
+    log('[HANDOFF/init]', JSON.stringify({ variant: variantRef.current }));
   }, []);
 
   // ── Shadow lifecycle ──────────────────────────────────────────────────────
@@ -126,6 +135,18 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
     audibleElRef.current = audibleEl;
     if (variantRef.current === 'off') return;
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+
+    if (variantRef.current === 'v3') {
+      if (shadowMusicElRef.current) return; // already primed
+      // createBlessedMusicPlayer runs blessElement inside the gesture stack —
+      // primeShadow is called from startMusic inside useWorkoutMusic which is
+      // triggered by the Start tap, so the gesture is still live here.
+      const shadow = createBlessedMusicPlayer();
+      shadowMusicElRef.current = shadow;
+      log('[HANDOFF/prime v3]', { hasShadow: !!shadowMusicElRef.current });
+      return;
+    }
+
     if (shadowElRef.current) return; // already primed
 
     const shadow: HTMLAudioElement = new (window as any).Audio();
@@ -141,12 +162,23 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
     // heuristic, which is what makes the later hide-flip legal.
     try { shadow.play().catch(() => {}); } catch {}
     shadowElRef.current = shadow;
-    console.info('[HANDOFF/prime]', { variant: variantRef.current });
+    log('[HANDOFF/prime]', JSON.stringify({ variant: variantRef.current }));
   }, []);
 
   const swapTrack = useCallback((url: string) => {
     currentUrlRef.current = url;
     if (variantRef.current === 'off') return;
+
+    if (variantRef.current === 'v3') {
+      const shadow = shadowMusicElRef.current;
+      if (!shadow) return;
+      // Mirror the URL onto the shadow but do NOT play in foreground —
+      // audible on graph handles foreground; shadow only plays when we hide.
+      try { shadow.pause(); shadow.src = url; shadow.load(); } catch {}
+      log('[HANDOFF/swap v3]', { url: url.slice(0, 60) });
+      return;
+    }
+
     const shadow = shadowElRef.current;
     if (!shadow) return;
     try {
@@ -161,6 +193,16 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
   }, []);
 
   const teardownShadow = useCallback(() => {
+    // v3: tear down the blessed shadow music element
+    if (variantRef.current === 'v3') {
+      const shadow = shadowMusicElRef.current;
+      if (shadow) {
+        try { shadow.pause(); shadow.src = ''; shadow.load(); } catch {}
+        shadowMusicElRef.current = null;
+      }
+      log('[HANDOFF/teardown v3]');
+    }
+
     const shadow = shadowElRef.current;
     shadowElRef.current = null;
     audibleElRef.current = null;
@@ -256,6 +298,25 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
 
     const swapBackToGraph = () => {
       const audible = audibleElRef.current;
+      const variant = variantRef.current;
+
+      if (variant === 'v3') {
+        const shadow = shadowMusicElRef.current;
+        if (!audible || !shadow) return;
+        const shadowPos = shadow.currentTime;
+        const audiblePos = audible.currentTime;
+        try { audible.currentTime = shadowPos; } catch {}
+        try { audible.play().catch(() => {}); } catch {}
+        try { shadow.pause(); } catch {}
+        inBackgroundRef.current = false;
+        log('[HANDOFF/swap-back v3]', JSON.stringify({
+          pos: audiblePos,
+          shadow: shadowPos,
+          drift: Number((shadowPos - audiblePos).toFixed(3)),
+        }));
+        return;
+      }
+
       const shadow = shadowElRef.current;
       if (!audible || !shadow) return;
       const shadowPos = shadow.currentTime;
@@ -264,26 +325,27 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       // muted (audible) side to match, THEN unmute. Never yank the audible
       // while it is audible (echo).
       try { audible.currentTime = shadowPos; } catch {}
-      if (variantRef.current === 'v1') {
+      if (variant === 'v1') {
         audible.muted = isMutedRef.current;
         shadow.muted = true;
-      } else if (variantRef.current === 'v2') {
+      } else if (variant === 'v2') {
         try { audible.play().catch(() => {}); } catch {}
         try { shadow.pause(); } catch {}
       }
       inBackgroundRef.current = false;
-      console.info('[HANDOFF/swap-back]', {
-        variant: variantRef.current,
+      log('[HANDOFF/swap-back]', JSON.stringify({
+        variant,
         pos: audiblePos,
         shadow: shadowPos,
         drift: Number((shadowPos - audiblePos).toFixed(3)),
-      });
+      }));
     };
 
     const runReturnSeam = () => {
       const audible = audibleElRef.current;
-      const shadow = shadowElRef.current;
-      if (variantRef.current === 'off' || !inBackgroundRef.current) {
+      const variant = variantRef.current;
+
+      if (variant === 'off' || !inBackgroundRef.current) {
         // Off-branch parity path: same guard conditions as the pre-adapter
         // handler at useWorkoutMusic:500-521.
         if (document.visibilityState !== 'visible') return;
@@ -292,9 +354,10 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
         if (audible && audible.src && audible.paused) audible.play().catch(() => {});
         return;
       }
-      if (!audible || !shadow) return;
 
       resumeAudioGraph();
+      log('[HANDOFF/visible v3]', JSON.stringify({ state: getAudioContextState() }));
+
       // Log ctx state at t+0, +500ms, +2s so the device spike (test case C)
       // has evidence of whether resume() succeeds without a user gesture.
       const marks: string[] = [`+0ms=${getAudioContextState()}`];
@@ -310,20 +373,20 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
         if (getAudioContextState() === 'running') {
           window.clearTimeout(t500);
           window.clearTimeout(t2000);
-          console.info('[HANDOFF/visible]', {
-            variant: variantRef.current,
+          log('[HANDOFF/visible]', JSON.stringify({
+            variant,
             state: 'running',
             timeline: marks.join(' '),
-          });
+          }));
           swapBackToGraph();
           return;
         }
         if (Date.now() > deadline) {
-          console.info('[HANDOFF/timeout]', {
-            variant: variantRef.current,
+          log('[HANDOFF/timeout]', JSON.stringify({
+            variant,
             timeline: marks.join(' '),
             note: 'ctx still suspended after 3s — waiting for user tap',
-          });
+          }));
           // Fallback: shadow stays audible until the next user tap on the
           // page provides a fresh gesture, then we retry the swap.
           const retry = () => {
@@ -351,31 +414,47 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       // before the mute-flip / play() call. iOS gives us ~1s of grace after
       // backgrounding; anything asynchronous risks running after freeze.
       const audible = audibleElRef.current;
-      const shadow = shadowElRef.current;
-      if (variantRef.current === 'off') return;
-      if (!audible || !shadow) return;
+      const variant = variantRef.current;
+      if (variant === 'off') return;
+      if (!audible) return;
       if (!enabledRef.current) return;
       if (musicOffRef.current) return;
       // Music-hold means the intro is playing; we should NOT start music yet
       // just because the page hid. Same for user-paused / muted.
       if (musicHoldRef.current || musicPausedRef.current) return;
       const pos = audible.currentTime;
-      if (variantRef.current === 'v1') {
+
+      if (variant === 'v3') {
+        const shadow = shadowMusicElRef.current;
+        if (!shadow) return;
+        log('[HANDOFF/hide v3]', JSON.stringify({ pos: audible.currentTime, src: !!shadow.src }));
+        // SYNCHRONOUS — do NOT await the play() promise; iOS freeze window is ~1s.
+        shadow.currentTime = audible.currentTime;
+        const p = shadow.play();
+        if (p) p.catch((err: unknown) => log('[HANDOFF/hide v3 err]', String(err)));
+        audible.pause();
+        inBackgroundRef.current = true;
+        return;
+      }
+
+      const shadow = shadowElRef.current;
+      if (!shadow) return;
+      if (variant === 'v1') {
         // Property change is instant on iOS — no gesture, no await.
         shadow.muted = isMutedRef.current;
         audible.muted = true;
-      } else if (variantRef.current === 'v2') {
+      } else if (variant === 'v2') {
         try { shadow.currentTime = pos; } catch {}
         try { shadow.play().catch(() => {}); } catch {}
         try { audible.pause(); } catch {}
       }
       inBackgroundRef.current = true;
-      console.info('[HANDOFF/hide]', {
-        variant: variantRef.current,
+      log('[HANDOFF/hide]', JSON.stringify({
+        variant,
         pos: Number(pos.toFixed(3)),
         shadowPlaying: !shadow.paused,
         ctxState: getAudioContextState(),
-      });
+      }));
     };
 
     const onVisibilityChange = () => {

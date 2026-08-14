@@ -603,6 +603,26 @@ function blessElement(el: HTMLAudioElement, label: string): void {
 }
 
 /**
+ * Create a blessed HTMLAudioElement for music playback that iOS will keep alive
+ * during backgrounding. The element is never wired to the Web Audio graph —
+ * it uses the native HTMLAudioElement pipeline that iOS keeps alive via
+ * MediaSession. MUST be called from inside a user-gesture stack (unlockAudioPlayback,
+ * Start tap, primeShadow) so the blessElement play() is legal on iOS.
+ */
+export function createBlessedMusicPlayer(): HTMLAudioElement | null {
+  if (typeof window === 'undefined' || typeof Audio === 'undefined') return null;
+  try {
+    const el: HTMLAudioElement = new (window as any).Audio();
+    el.preload = 'auto';
+    try { (el as any).crossOrigin = 'anonymous'; } catch {}
+    blessElement(el, 'music-shadow');
+    return el;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Must be called synchronously from inside a user gesture (Start tap,
  * pause/resume tap). Idempotent — repeat calls only re-resume the WebAudio
  * context (cheap, and covers iOS re-suspending the context after backgrounding).
