@@ -13002,7 +13002,7 @@ export const generateMusicVolumeVariants = onCall(
     }
     const styleKey = style.toLowerCase();
     const effectiveBuckets = Array.isArray(buckets) && buckets.length > 0
-      ? buckets
+      ? VOLUME_BUCKETS_DEFAULT.filter((b) => buckets.includes(b))
       : VOLUME_BUCKETS_DEFAULT;
 
     const bucket = admin.storage().bucket();

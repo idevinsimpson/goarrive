@@ -42,6 +42,37 @@ function gainToPct(gain) {
     (0, vitest_1.test)('edm style track 0 at gain 1.0', () => (0, vitest_1.expect)(variantPath('edm', 0, 1.0)).toBe('music_cache/edm/gain_100/track_0.mp3'));
     (0, vitest_1.test)('chill style track 23 at gain 0.05', () => (0, vitest_1.expect)(variantPath('chill', 23, 0.05)).toBe('music_cache/chill/gain_005/track_23.mp3'));
 });
+(0, vitest_1.describe)('bucket allowlist filter (rejects attacker-controlled values)', () => {
+    const VOLUME_BUCKETS_DEFAULT = [1.0, 0.5, 0.25, 0.12, 0.05];
+    // Mirrors the runtime intersection in functions/src/index.ts:13004.
+    function filterAllowedBuckets(input) {
+        return Array.isArray(input) && input.length > 0
+            ? VOLUME_BUCKETS_DEFAULT.filter((b) => input.includes(b))
+            : VOLUME_BUCKETS_DEFAULT;
+    }
+    (0, vitest_1.test)('missing input → full default set', () => {
+        (0, vitest_1.expect)(filterAllowedBuckets(undefined)).toEqual(VOLUME_BUCKETS_DEFAULT);
+    });
+    (0, vitest_1.test)('empty array → full default set', () => {
+        (0, vitest_1.expect)(filterAllowedBuckets([])).toEqual(VOLUME_BUCKETS_DEFAULT);
+    });
+    (0, vitest_1.test)('valid subset passes through', () => {
+        (0, vitest_1.expect)(filterAllowedBuckets([1.0, 0.12])).toEqual([1.0, 0.12]);
+    });
+    (0, vitest_1.test)('attacker-controlled novel gain values dropped (cost DoS guard)', () => {
+        // 200 near-miss gains that would otherwise each transcode a fresh MP3.
+        const attack = Array.from({ length: 200 }, (_, i) => 0.5 + i * 0.0001);
+        (0, vitest_1.expect)(filterAllowedBuckets(attack)).toEqual([]);
+    });
+    (0, vitest_1.test)('string injection into filtergraph rejected', () => {
+        // Untrusted strings must never reach `volume=${gain}` in the FFmpeg -af filter.
+        const injection = ['1.0; rm -rf /', '0.5) volume=99.0 ('];
+        (0, vitest_1.expect)(filterAllowedBuckets(injection)).toEqual([]);
+    });
+    (0, vitest_1.test)('mix of valid + invalid keeps only the allowlisted defaults', () => {
+        (0, vitest_1.expect)(filterAllowedBuckets([1.0, 0.75, 0.5, 'evil', 0.999])).toEqual([1.0, 0.5]);
+    });
+});
 (0, vitest_1.describe)('idempotency logic', () => {
     // Simulate the idempotency guard: skip if destExists, generate if not.
     function simulateInvocation(bucketsToProcess, existingPcts) {

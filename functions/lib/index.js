@@ -11303,7 +11303,7 @@ exports.generateMusicVolumeVariants = (0, https_1.onCall)({
     }
     const styleKey = style.toLowerCase();
     const effectiveBuckets = Array.isArray(buckets) && buckets.length > 0
-        ? buckets
+        ? VOLUME_BUCKETS_DEFAULT.filter((b) => buckets.includes(b))
         : VOLUME_BUCKETS_DEFAULT;
     const bucket = admin.storage().bucket();
     const srcPath = `music_cache/${styleKey}/track_${trackNumber}.mp3`;
