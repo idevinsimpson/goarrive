@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>GoArrive — iOS Safari PiP Spike (6 Cases)</title>
+<style>
+  :root {
+    --green: #22c55e;
+    --red: #ef4444;
+    --yellow: #eab308;
+    --blue: #3b82f6;
+    --bg: #0f172a;
+    --surface: #1e293b;
+    --border: #334155;
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 15px;
+    line-height: 1.5;
+    padding: 16px;
+    max-width: 760px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  .case {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+  .case-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+  .case-num {
+    background: var(--blue);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .case-title { font-size: 17px; font-weight: 700; }
+  .case-proves { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+  .criteria-box {
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .criteria-box.pass-fail {
+    background: #1c2a1c;
+    border: 1px solid #2d5a2d;
+  }
+  .criteria-label { font-weight: 700; margin-bottom: 4px; }
+  .pass-color { color: var(--green); }
+  .fail-color { color: var(--red); }
+  .warn-color { color: var(--yellow); }
+  video {
+    width: 100%;
+    border-radius: 8px;
+    background: #000;
+    display: block;
+    margin-bottom: 12px;
+  }
+  .video-cropped-outer {
+    position: relative;
+    overflow: hidden;
+    border-radius: 8px;
+    margin-bottom: 12px;
+  }
+  .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  button {
+    background: var(--blue);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button:active { opacity: 0.8; }
+  button.secondary {
+    background: var(--border);
+    color: var(--text);
+  }
+  button.danger {
+    background: var(--red);
+  }
+  .event-log {
+    background: #0a0f1a;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 12px;
+    font-family: 'Menlo', 'Courier New', monospace;
+    height: 140px;
+    overflow-y: auto;
+    color: #a5f3fc;
+  }
+  .event-log .ts { color: var(--muted); }
+  .event-log .ev-pause { color: var(--yellow); }
+  .event-log .ev-play { color: var(--green); }
+  .event-log .ev-vis { color: #c084fc; }
+  .event-log .ev-pip { color: #fb923c; }
+  .event-log .ev-fs { color: #38bdf8; }
+  .event-log .ev-seeked { color: #f9a8d4; }
+  .log-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .links-list { list-style: none; }
+  .links-list li { margin-bottom: 12px; }
+  .links-list a {
+    color: var(--blue);
+    word-break: break-all;
+    font-size: 14px;
+  }
+  .checklist { list-style: none; margin-top: 8px; }
+  .checklist li { margin-bottom: 4px; font-size: 13px; color: var(--muted); padding-left: 16px; position: relative; }
+  .checklist li::before { content: '•'; position: absolute; left: 0; color: var(--border); }
+  .divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+  /* Results form */
+  #results-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-top: 32px;
+  }
+  #results-section h2 { font-size: 18px; font-weight: 700; margin-bottom: 16px; }
+  .result-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .result-row label { flex: 1; font-size: 14px; }
+  .pf-toggle { display: flex; gap: 6px; }
+  .pf-btn {
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    background: var(--border);
+    color: var(--muted);
+    border: none;
+    cursor: pointer;
+  }
+  .pf-btn.active-pass { background: var(--green); color: #fff; }
+  .pf-btn.active-fail { background: var(--red); color: #fff; }
+  .pf-btn.active-skip { background: var(--yellow); color: #000; }
+  textarea {
+    width: 100%;
+    background: #0a0f1a;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 13px;
+    padding: 10px;
+    resize: vertical;
+    margin-bottom: 12px;
+  }
+  #copy-btn {
+    background: var(--green);
+    color: #fff;
+    width: 100%;
+    padding: 14px;
+    font-size: 16px;
+    border-radius: 10px;
+    border: none;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .sticky-banner {
+    position: sticky;
+    top: 0;
+    background: #0f172a;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 0 10px;
+    margin-bottom: 20px;
+    z-index: 100;
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+  }
+  .sticky-banner a {
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 12px;
+    white-space: nowrap;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+  }
+  .sticky-banner a:hover { color: var(--text); border-color: var(--blue); }
+</style>
+</head>
+<body>
+
+<h1>GoArrive — iOS Safari PiP Spike</h1>
+<p class="subtitle">6 test cases · 2026-08-13 · Complete all cases in one iPhone session, then copy results to Slack</p>
+
+<div class="sticky-banner">
+  <a href="#case1">C1 GO/NO-GO</a>
+  <a href="#case2">C2 Auto-PiP</a>
+  <a href="#case3">C3 CSS Crop</a>
+  <a href="#case4">C4 Fullscreen</a>
+  <a href="#case5">C5 Handoff</a>
+  <a href="#case6">C6 PWA Kill</a>
+  <a href="#results-section">Results</a>
+</div>
+
+<!-- =========================================================
+     CASE 1
+     ========================================================= -->
+<div class="case" id="case1">
+  <div class="case-header">
+    <span class="case-num">CASE 1</span>
+    <span class="case-title">GO/NO-GO — Events reach JS while backgrounded in PiP?</span>
+  </div>
+  <p class="case-proves">Proves: JS event loop stays alive during PiP + Safari-backgrounded. This is the make-or-break for interactive PiP controls.</p>
+
+  <div class="criteria-box pass-fail">
+    <div class="criteria-label">PASS / FAIL criteria</div>
+    <div class="pass-color">PASS — events fire in real-time (&lt;1 s delay) while backgrounded. No event burst on return.</div>
+    <div class="fail-color">FAIL — events arrive as a burst when Safari returns to foreground. Means JS was frozen despite PiP.</div>
+  </div>
+
+  <video id="v1" src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+    controls playsinline preload="metadata"></video>
+
+  <div class="btn-row">
+    <button onclick="tryPip('v1')">Enter PiP</button>
+    <button class="secondary" onclick="playPause('v1')">Play / Pause</button>
+    <button class="secondary" onclick="clearLog('log1')">Clear log</button>
+  </div>
+
+  <p class="log-label">Event log (persists via sessionStorage)</p>
+  <div class="event-log" id="log1"></div>
+
+  <hr class="divider">
+  <p style="font-size:13px; color:var(--muted);">
+    <strong>Steps:</strong><br>
+    1. Tap <em>Enter PiP</em> (or tap-hold video &rarr; native PiP icon).<br>
+    2. Press Home / swipe up to background Safari.<br>
+    3. In the PiP window, tap pause then play a few times.<br>
+    4. Return to Safari and scroll to this log.<br>
+    5. If events show timestamps matching when you tapped = PASS.
+  </p>
+</div>
+
+<!-- =========================================================
+     CASE 2
+     ========================================================= -->
+<div class="case" id="case2">
+  <div class="case-header">
+    <span class="case-num">CASE 2</span>
+    <span class="case-title">Auto-PiP — Fullscreen → swipe-home triggers PiP automatically?</span>
+  </div>
+  <p class="case-proves">Proves: iOS auto-PiP works for file-backed video when user navigates away from fullscreen.</p>
+
+  <div class="criteria-box pass-fail">
+    <div class="criteria-label">PASS / FAIL criteria</div>
+    <div class="pass-color">PASS — video pops into PiP corner automatically when you leave fullscreen / home-swipe. No extra taps needed.</div>
+    <div class="fail-color">FAIL — video stops / Safari freezes / no PiP appears. Requires Settings → Safari → "Start PiP Automatically" to be ON (iOS default).</div>
+  </div>
+
+  <video id="v2" src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+    controls playsinline preload="metadata"></video>
+
+  <div class="btn-row">
+    <button onclick="enterFullscreen('v2')">Play Fullscreen (webkitEnterFullscreen)</button>
+    <button class="secondary" onclick="clearLog('log2')">Clear log</button>
+  </div>
+
+  <p class="log-label">Event log</p>
+  <div class="event-log" id="log2"></div>
+
+  <hr class="divider">
+  <p style="font-size:13px; color:var(--muted);">
+    <strong>Steps:</strong><br>
+    1. Tap <em>Play Fullscreen</em>.<br>
+    2. Swipe home or switch apps.<br>
+    3. Watch for PiP window appearing automatically.<br>
+    4. Return here; log should show <em>webkitpresentationmodechanged</em> firing <em>picture-in-picture</em>.
+  </p>
+</div>
+
+<!-- =========================================================
+     CASE 3
+     ========================================================= -->
+<div class="case" id="case3">
+  <div class="case-header">
+    <span class="case-num">CASE 3</span>
+    <span class="case-title">CSS Crop reveal — PiP shows full raw frame or cropped region?</span>
+  </div>
+  <p class="case-proves">Proves: hidden "timer strip" architecture — CSS crops bottom 80 px of video. PiP must show full raw frame (timer visible) for the design to work.</p>
+
+  <div class="criteria-box pass-fail">
+    <div class="criteria-label">PASS / FAIL criteria</div>
+    <div class="pass-color">PASS — PiP window reveals the full frame including the red "TIMER STRIP" at the bottom. CSS crop is ignored by PiP.</div>
+    <div class="fail-color">FAIL — PiP window also crops the bottom. Timer strip hidden. Design must use a pop-out button approach instead.</div>
+  </div>
+
+  <p style="font-size:13px; color:var(--muted); margin-bottom:10px;">
+    Below: container clips bottom 80 px. A red strip baked into the video frame sits below the clip line (simulated via CSS overlay). Enter PiP and check if the red region is visible.
+  </p>
+
+  <!-- Cropped video container -->
+  <div style="position:relative; overflow:hidden; border-radius:8px; margin-bottom:12px;">
+    <video id="v3"
+      src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+      controls playsinline preload="metadata"
+      style="display:block; width:100%; margin-bottom:0; border-radius:0;"></video>
+    <!-- Simulate "visible area" overlay — top portion only -->
+    <div id="crop-overlay" style="
+      position:absolute; bottom:0; left:0; right:0; height:80px;
+      background: linear-gradient(to top, rgba(239,68,68,0.85) 0%, rgba(239,68,68,0.3) 60%, transparent 100%);
+      pointer-events:none; display:flex; align-items:flex-end; justify-content:center; padding-bottom:8px;
+    ">
+      <span style="color:#fff; font-size:12px; font-weight:700; letter-spacing:1px;">▼ TIMER STRIP (below CSS crop line) ▼</span>
+    </div>
+    <div style="
+      position:absolute; top:0; left:0; right:0;
+      height: calc(100% - 80px);
+      border: 2px dashed var(--green);
+      pointer-events: none; border-radius:0;
+    ">
+      <span style="
+        position:absolute; top:4px; left:6px;
+        font-size:11px; color:var(--green); font-weight:700;
+      ">CSS-visible region</span>
+    </div>
+  </div>
+
+  <div class="btn-row">
+    <button onclick="tryPip('v3')">Enter PiP</button>
+    <button class="secondary" onclick="clearLog('log3')">Clear log</button>
+  </div>
+
+  <p class="log-label">Event log</p>
+  <div class="event-log" id="log3"></div>
+</div>
+
+<!-- =========================================================
+     CASE 4
+     ========================================================= -->
+<div class="case" id="case4">
+  <div class="case-header">
+    <span class="case-num">CASE 4</span>
+    <span class="case-title">Fullscreen frame — native fullscreen shows full frame or respects crop?</span>
+  </div>
+  <p class="case-proves">Proves: same timer-strip question but for native fullscreen. If fullscreen also reveals the full raw frame, design is consistent.</p>
+
+  <div class="criteria-box pass-fail">
+    <div class="criteria-label">PASS / FAIL criteria</div>
+    <div class="pass-color">PASS — fullscreen shows full raw frame including red timer strip below crop line. Consistent with Case 3.</div>
+    <div class="fail-color">FAIL — fullscreen also crops the bottom. Means both PiP and fullscreen need the pop-out button workaround to reveal the timer.</div>
+  </div>
+
+  <!-- Cropped container - same as case 3 -->
+  <div style="position:relative; overflow:hidden; border-radius:8px; margin-bottom:12px;">
+    <video id="v4"
+      src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+      controls playsinline preload="metadata"
+      style="display:block; width:100%; margin-bottom:0; border-radius:0;"></video>
+    <div style="
+      position:absolute; bottom:0; left:0; right:0; height:80px;
+      background: linear-gradient(to top, rgba(239,68,68,0.85) 0%, rgba(239,68,68,0.3) 60%, transparent 100%);
+      pointer-events:none; display:flex; align-items:flex-end; justify-content:center; padding-bottom:8px;
+    ">
+      <span style="color:#fff; font-size:12px; font-weight:700; letter-spacing:1px;">▼ TIMER STRIP (below CSS crop line) ▼</span>
+    </div>
+    <div style="
+      position:absolute; top:0; left:0; right:0;
+      height: calc(100% - 80px);
+      border: 2px dashed var(--green);
+      pointer-events: none;
+    ">
+      <span style="position:absolute; top:4px; left:6px; font-size:11px; color:var(--green); font-weight:700;">CSS-visible region</span>
+    </div>
+  </div>
+
+  <div class="btn-row">
+    <button onclick="enterFullscreen('v4')">Enter Native Fullscreen</button>
+    <button class="secondary" onclick="clearLog('log4')">Clear log</button>
+  </div>
+
+  <p class="log-label">Event log</p>
+  <div class="event-log" id="log4"></div>
+</div>
+
+<!-- =========================================================
+     CASE 5
+     ========================================================= -->
+<div class="case" id="case5">
+  <div class="case-header">
+    <span class="case-num">CASE 5</span>
+    <span class="case-title">Audio Handoff A/B/C/D — PR #259 device test</span>
+  </div>
+  <p class="case-proves">Determines which handoff variant (off/mute-flip/play-on-hide/blessed-shadow) keeps iOS music alive when Safari is backgrounded during a workout.</p>
+
+  <div class="criteria-box pass-fail">
+    <div class="criteria-label">For each variant, 4 checks:</div>
+    <ul class="checklist">
+      <li>Music survives Safari backgrounding (no gap / cut)</li>
+      <li>3-2-1 audio cues fire correctly while backgrounded</li>
+      <li>No audio echo or gap when returning to Safari</li>
+      <li>Lock-screen pause/play and master mute/volume controls work</li>
+    </ul>
+    <div class="pass-color" style="margin-top:8px;">PASS variant = all 4 checks green. Pick the best passing variant.</div>
+  </div>
+
+  <p style="font-size:13px; color:var(--muted); margin-bottom:14px;">Open each link, start a workout (any workout on staging), then background Safari and test the 4 checks above. Come back here to note results.</p>
+
+  <ul class="links-list">
+    <li>
+      <strong style="color:var(--text);">Case A — Baseline (handoff OFF)</strong><br>
+      Regression guard. Music should behave as it did before PR #259.<br>
+      <a href="https://goarrive--staging-gurfzjak.web.app/?handoff=off" target="_blank">
+        https://goarrive--staging-gurfzjak.web.app/?handoff=off
+      </a>
+    </li>
+    <li>
+      <strong style="color:var(--text);">Case B — Mute-flip (handoff=v1)</strong><br>
+      Mutes primary audio element on hide, unmutes on show.<br>
+      <a href="https://goarrive--staging-gurfzjak.web.app/?handoff=v1" target="_blank">
+        https://goarrive--staging-gurfzjak.web.app/?handoff=v1
+      </a>
+    </li>
+    <li>
+      <strong style="color:var(--text);">Case C — Play-on-hide (handoff=v2)</strong><br>
+      Dual-element swap: secondary audio element takes over on hide.<br>
+      <a href="https://goarrive--staging-gurfzjak.web.app/?handoff=v2" target="_blank">
+        https://goarrive--staging-gurfzjak.web.app/?handoff=v2
+      </a>
+    </li>
+    <li>
+      <strong style="color:var(--text);">Case D — Blessed shadow (handoff=v3)</strong><br>
+      A second gesture-blessed native audio element takes over on hide.<br>
+      <a href="https://goarrive--staging-gurfzjak.web.app/?handoff=v3" target="_blank">
+        https://goarrive--staging-gurfzjak.web.app/?handoff=v3
+      </a>
+    </li>
+  </ul>
+
+  <p style="font-size:13px; color:var(--muted); margin-top:8px;">Note your winner in the Results section at the bottom.</p>
+</div>
+
+<!-- =========================================================
+     CASE 6
+     ========================================================= -->
+<div class="case" id="case6">
+  <div class="case-header">
+    <span class="case-num">CASE 6</span>
+    <span class="case-title">PWA Kill-shot — PiP available in installed home-screen PWA?</span>
+  </div>
+  <p class="case-proves">Confirms WebKit bug 303885 status. Expected FAIL. Locks the product decision: do not ship "install PWA for PiP" if bug is still open.</p>
+
+  <div class="criteria-box pass-fail">
+    <div class="criteria-label">PASS / FAIL criteria</div>
+    <div class="pass-color">PASS — PiP works inside the installed PWA. Bug 303885 is fixed in this iOS build.</div>
+    <div class="fail-color">FAIL (expected) — PiP button is greyed out / call throws. Bug 303885 still open. Do NOT push PWA as the PiP delivery surface.</div>
+  </div>
+
+  <hr class="divider">
+  <p style="font-size:14px; font-weight:600; margin-bottom:10px;">Steps:</p>
+  <ol style="padding-left:20px; font-size:13px; color:var(--muted); line-height:2;">
+    <li>In Safari, navigate to the staging URL:<br>
+      <a href="https://goarrive--staging-gurfzjak.web.app/" target="_blank" style="color:var(--blue);">
+        https://goarrive--staging-gurfzjak.web.app/
+      </a>
+    </li>
+    <li>Tap the <strong>Share</strong> icon → <strong>Add to Home Screen</strong> → Add.</li>
+    <li>Open the new home-screen icon (PWA mode — NOT the Safari tab).</li>
+    <li>Navigate to any workout player page.</li>
+    <li>Try to enter PiP using the button below (run this page in the PWA via its URL).</li>
+    <li>Observe whether PiP works or silently fails.</li>
+  </ol>
+
+  <p style="font-size:13px; color:var(--muted); margin:12px 0;">Or test directly here in the PWA — open this page from the installed PWA, then:</p>
+
+  <video id="v6" src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+    controls playsinline preload="metadata"></video>
+
+  <div class="btn-row">
+    <button onclick="tryPipPwa('v6')">Attempt PiP (PWA test)</button>
+    <button class="secondary" onclick="clearLog('log6')">Clear log</button>
+  </div>
+
+  <p class="log-label">Event log</p>
+  <div class="event-log" id="log6"></div>
+</div>
+
+<!-- =========================================================
+     RESULTS FORM
+     ========================================================= -->
+<div id="results-section">
+  <h2>Results Summary</h2>
+
+  <div id="result-rows">
+    <div class="result-row">
+      <label><strong>Case 1</strong> — JS events during PiP background</label>
+      <div class="pf-toggle">
+        <button class="pf-btn" onclick="setResult(1,'pass',this)">PASS</button>
+        <button class="pf-btn" onclick="setResult(1,'fail',this)">FAIL</button>
+        <button class="pf-btn" onclick="setResult(1,'skip',this)">SKIP</button>
+      </div>
+    </div>
+    <div class="result-row">
+      <label><strong>Case 2</strong> — Auto-PiP on swipe-home</label>
+      <div class="pf-toggle">
+        <button class="pf-btn" onclick="setResult(2,'pass',this)">PASS</button>
+        <button class="pf-btn" onclick="setResult(2,'fail',this)">FAIL</button>
+        <button class="pf-btn" onclick="setResult(2,'skip',this)">SKIP</button>
+      </div>
+    </div>
+    <div class="result-row">
+      <label><strong>Case 3</strong> — CSS crop reveal in PiP</label>
+      <div class="pf-toggle">
+        <button class="pf-btn" onclick="setResult(3,'pass',this)">PASS</button>
+        <button class="pf-btn" onclick="setResult(3,'fail',this)">FAIL</button>
+        <button class="pf-btn" onclick="setResult(3,'skip',this)">SKIP</button>
+      </div>
+    </div>
+    <div class="result-row">
+      <label><strong>Case 4</strong> — Full frame in native fullscreen</label>
+      <div class="pf-toggle">
+        <button class="pf-btn" onclick="setResult(4,'pass',this)">PASS</button>
+        <button class="pf-btn" onclick="setResult(4,'fail',this)">FAIL</button>
+        <button class="pf-btn" onclick="setResult(4,'skip',this)">SKIP</button>
+      </div>
+    </div>
+    <div class="result-row">
+      <label><strong>Case 5</strong> — Handoff winner variant</label>
+      <div class="pf-toggle">
+        <button class="pf-btn" onclick="setResult(5,'A',this)">A</button>
+        <button class="pf-btn" onclick="setResult(5,'B',this)">B</button>
+        <button class="pf-btn" onclick="setResult(5,'C',this)">C</button>
+        <button class="pf-btn" onclick="setResult(5,'D',this)">D</button>
+        <button class="pf-btn" onclick="setResult(5,'skip',this)">SKIP</button>
+      </div>
+    </div>
+    <div class="result-row">
+      <label><strong>Case 6</strong> — PiP in PWA</label>
+      <div class="pf-toggle">
+        <button class="pf-btn" onclick="setResult(6,'pass',this)">PASS</button>
+        <button class="pf-btn" onclick="setResult(6,'fail',this)">FAIL</button>
+        <button class="pf-btn" onclick="setResult(6,'skip',this)">SKIP</button>
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider">
+  <p style="font-size:13px; color:var(--muted); margin-bottom:6px;">Notes (iOS version, Safari version, any surprises):</p>
+  <textarea id="notes" rows="4" placeholder="e.g. iOS 17.5.1 · Safari 17.5 · Case 1 events were real-time during PiP but froze when lock screen was triggered..."></textarea>
+
+  <button id="copy-btn" onclick="copyResults()">Save Results as Text (paste to Slack)</button>
+  <div id="copy-confirm" style="margin-top:8px; font-size:13px; color:var(--green); display:none;">Copied to clipboard!</div>
+</div>
+
+<script>
+// ---- Utilities ----
+const results = { 1: '', 2: '', 3: '', 4: '', 5: '', 6: '' };
+
+function ts() {
+  const d = new Date();
+  return d.toTimeString().slice(0,8) + '.' + String(d.getMilliseconds()).padStart(3,'0');
+}
+
+function appendLog(logId, cssClass, text) {
+  const el = document.getElementById(logId);
+  if (!el) return;
+  const line = document.createElement('div');
+  line.innerHTML = `<span class="ts">[${ts()}]</span> <span class="${cssClass}">${text}</span>`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+  // Persist
+  const key = 'pip-spike-log-' + logId;
+  const stored = JSON.parse(sessionStorage.getItem(key) || '[]');
+  stored.push({ ts: ts(), cls: cssClass, text });
+  sessionStorage.setItem(key, JSON.stringify(stored.slice(-200)));
+}
+
+function restoreLogs() {
+  ['log1','log2','log3','log4','log6'].forEach(logId => {
+    const key = 'pip-spike-log-' + logId;
+    const stored = JSON.parse(sessionStorage.getItem(key) || '[]');
+    stored.forEach(entry => {
+      const el = document.getElementById(logId);
+      if (!el) return;
+      const line = document.createElement('div');
+      line.innerHTML = `<span class="ts">[${entry.ts}]</span> <span class="${entry.cls}">${entry.text}</span>`;
+      el.appendChild(line);
+    });
+    const el = document.getElementById(logId);
+    if (el) el.scrollTop = el.scrollHeight;
+  });
+}
+
+function clearLog(logId) {
+  const el = document.getElementById(logId);
+  if (el) el.innerHTML = '';
+  sessionStorage.removeItem('pip-spike-log-' + logId);
+}
+
+// ---- Video controls ----
+function playPause(videoId) {
+  const v = document.getElementById(videoId);
+  if (!v) return;
+  if (v.paused) v.play(); else v.pause();
+}
+
+function tryPip(videoId) {
+  const v = document.getElementById(videoId);
+  if (!v) return;
+  const logId = 'log' + videoId.replace('v','');
+  if (v.webkitSetPresentationMode) {
+    try {
+      v.play().then(() => {
+        v.webkitSetPresentationMode('picture-in-picture');
+        appendLog(logId, 'ev-pip', 'webkitSetPresentationMode(picture-in-picture) called');
+      }).catch(e => appendLog(logId, 'fail-color', 'play error: ' + e.message));
+    } catch(e) {
+      appendLog(logId, 'fail-color', 'PiP error: ' + e.message);
+    }
+  } else if (document.pictureInPictureEnabled) {
+    v.play().then(() => v.requestPictureInPicture())
+      .then(() => appendLog(logId, 'ev-pip', 'requestPictureInPicture() called (standard API)'))
+      .catch(e => appendLog(logId, 'fail-color', 'PiP error: ' + e.message));
+  } else {
+    appendLog(logId, 'fail-color', 'PiP API not available on this context (possible PWA bug 303885)');
+  }
+}
+
+function tryPipPwa(videoId) {
+  const v = document.getElementById(videoId);
+  const logId = 'log' + videoId.replace('v','');
+  const isStandalone = window.navigator.standalone === true ||
+    window.matchMedia('(display-mode: standalone)').matches;
+  appendLog(logId, 'ev-pip', 'PWA/standalone mode: ' + isStandalone);
+  if (!v.webkitSetPresentationMode && !document.pictureInPictureEnabled) {
+    appendLog(logId, 'fail-color', 'FAIL — PiP API missing in this context. Bug 303885 likely still open.');
+    return;
+  }
+  tryPip(videoId);
+}
+
+function enterFullscreen(videoId) {
+  const v = document.getElementById(videoId);
+  const logId = 'log' + videoId.replace('v','');
+  if (v.webkitEnterFullscreen) {
+    v.play().then(() => {
+      v.webkitEnterFullscreen();
+      appendLog(logId, 'ev-fs', 'webkitEnterFullscreen() called');
+    }).catch(e => appendLog(logId, 'fail-color', 'play error: ' + e.message));
+  } else if (v.requestFullscreen) {
+    v.play().then(() => v.requestFullscreen())
+      .then(() => appendLog(logId, 'ev-fs', 'requestFullscreen() called'))
+      .catch(e => appendLog(logId, 'fail-color', 'fullscreen error: ' + e.message));
+  } else {
+    appendLog(logId, 'fail-color', 'No fullscreen API available');
+  }
+}
+
+// ---- Wire up video event listeners ----
+function wireVideo(videoId, logId) {
+  const v = document.getElementById(videoId);
+  if (!v) return;
+  ['play','pause','seeked','ended','waiting','stalled','webkitpresentationmodechanged',
+   'webkitbeginfullscreen','webkitendfullscreen','enterpictureinpicture','leavepictureinpicture'
+  ].forEach(evName => {
+    v.addEventListener(evName, () => {
+      let cls = 'ev-pip';
+      if (evName === 'play') cls = 'ev-play';
+      else if (evName === 'pause') cls = 'ev-pause';
+      else if (evName === 'seeked') cls = 'ev-seeked';
+      else if (evName.includes('fullscreen')) cls = 'ev-fs';
+      let detail = evName;
+      if (evName === 'webkitpresentationmodechanged') {
+        detail += ' → ' + (v.webkitPresentationMode || '?');
+      }
+      appendLog(logId, cls, detail);
+    });
+  });
+}
+
+// ---- Visibility change ----
+document.addEventListener('visibilitychange', () => {
+  ['log1','log2','log3','log4','log6'].forEach(logId => {
+    appendLog(logId, 'ev-vis', 'visibilitychange → ' + document.visibilityState);
+  });
+});
+
+// ---- Results form ----
+function setResult(caseNum, val, btn) {
+  results[caseNum] = val;
+  const row = btn.closest('.pf-toggle');
+  row.querySelectorAll('.pf-btn').forEach(b => {
+    b.classList.remove('active-pass','active-fail','active-skip');
+  });
+  if (val === 'pass' || val === 'A' || val === 'B' || val === 'C' || val === 'D') {
+    btn.classList.add('active-pass');
+  } else if (val === 'fail') {
+    btn.classList.add('active-fail');
+  } else {
+    btn.classList.add('active-skip');
+  }
+  sessionStorage.setItem('pip-spike-results', JSON.stringify(results));
+}
+
+function copyResults() {
+  const ua = navigator.userAgent;
+  const lines = [
+    '=== GoArrive iOS Safari PiP Spike Results ===',
+    'Date: ' + new Date().toISOString().slice(0,10),
+    'UA: ' + ua,
+    '',
+    'Case 1 — JS events during PiP background: ' + (results[1] || 'not set'),
+    'Case 2 — Auto-PiP on swipe-home:          ' + (results[2] || 'not set'),
+    'Case 3 — CSS crop reveal in PiP:           ' + (results[3] || 'not set'),
+    'Case 4 — Full frame in native fullscreen:  ' + (results[4] || 'not set'),
+    'Case 5 — Handoff winner variant (A/B/C/D): ' + (results[5] || 'not set'),
+    'Case 6 — PiP in installed PWA:             ' + (results[6] || 'not set'),
+    '',
+    'Notes:',
+    document.getElementById('notes').value || '(none)',
+  ];
+
+  // Append event log snippets
+  ['log1','log2','log3','log4','log6'].forEach((logId, i) => {
+    const key = 'pip-spike-log-' + logId;
+    const stored = JSON.parse(sessionStorage.getItem(key) || '[]');
+    if (stored.length) {
+      lines.push('');
+      lines.push('--- Case ' + [1,2,3,4,6][i] + ' event log (last ' + Math.min(stored.length,15) + ' entries) ---');
+      stored.slice(-15).forEach(e => lines.push('[' + e.ts + '] ' + e.text));
+    }
+  });
+
+  const text = lines.join('\n');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      const conf = document.getElementById('copy-confirm');
+      conf.style.display = 'block';
+      setTimeout(() => conf.style.display = 'none', 3000);
+    }).catch(() => fallbackCopy(text));
+  } else {
+    fallbackCopy(text);
+  }
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+  const conf = document.getElementById('copy-confirm');
+  conf.style.display = 'block';
+  setTimeout(() => conf.style.display = 'none', 3000);
+}
+
+// ---- Init ----
+window.addEventListener('DOMContentLoaded', () => {
+  wireVideo('v1','log1');
+  wireVideo('v2','log2');
+  wireVideo('v3','log3');
+  wireVideo('v4','log4');
+  wireVideo('v6','log6');
+  restoreLogs();
+  // Restore results
+  const saved = JSON.parse(sessionStorage.getItem('pip-spike-results') || '{}');
+  Object.entries(saved).forEach(([k,v]) => { if(v) results[k] = v; });
+  appendLog('log1', 'ev-pip', 'page loaded · standalone=' + (window.navigator.standalone===true));
+});
+</script>
+</body>
+</html>
