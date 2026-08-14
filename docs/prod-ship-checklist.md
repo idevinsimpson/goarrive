@@ -114,20 +114,35 @@ Before the client picker reaches members (needs Devin's typed go for a Hosting d
   fallback on genuinely new tracks. Acceptable by design, but decide whether that is the
   intended steady state before wide rollout.
 
-- [ ] **Pre-render warms only 2 of 5 buckets.** `attachTrack` fire-and-forget requests the
-  current-slider bucket plus the `0.12` default. A member who moves the slider to a
-  different bucket mid-session hits a miss on that bucket until it renders. Backfilled
-  tracks have all five; organically-generated tracks do not. Consider warming all five on
-  first attach, or accept the gap knowingly.
+- [x] **Pre-render warms only 2 of 5 buckets.** ~~`attachTrack` fire-and-forget requests the
+  current-slider bucket plus the `0.12` default.~~ **Fixed on PR #285 (pending merge).**
+  Confirmed live, not theoretical: a 2026-08-14 Storage audit (18 styles × tracks 1–24 ×
+  five buckets, HEAD per object) found `edm/track_2` holding exactly `gain_025` + `gain_012`
+  and nothing else — the precise fingerprint of the two-bucket warm. `attachTrack` now warms
+  all of `VOLUME_BUCKETS`. **Cost re-measured and it was cheaper than assumed:** the callable
+  takes a bucket array, so five buckets is the *same single invocation* and one source
+  download, not 2.5×.
+
+  This stopped being optional when #285 landed the slider-driven re-pick: the shadow now
+  re-points on every bucket crossing, so any unrendered bucket 404s to full volume and reads
+  to the member as "the volume control does nothing."
 
 - [ ] **Hoist the `exists()` short-circuit above `srcFile.download()`** before wide
   rollout. Today a repeat call re-downloads the source MP3 even when all five variants are
   already cached, so steady-state cost is proportional to plays rather than to misses.
   `maxInstances=10` bounds the blast radius but does not remove the waste.
 
-- [ ] **Dedup guard records attempts, not successes** (`useWorkoutMusic.ts`). A failed
-  pre-render is never retried for the rest of the session, so a transient error leaves that
-  track cold until the next session. `fetchTrack` already does this correctly — mirror it.
+- [x] **Dedup guard records attempts, not successes** (`useWorkoutMusic.ts`).
+  **Fixed on PR #285 (pending merge)** — the keys are now released when the callable
+  rejects, mirroring `fetchTrack:220`. The same Storage audit found `edm/track_15` with
+  **zero** buckets despite having a full-volume source, which is what this bug produces:
+  one transient failure marks the track done for the session and it never retries.
+
+  **Still requires a one-time manual backfill.** The fix stops the gap recurring; it does
+  not retroactively render tracks that are already partial. `edm/track_2` and
+  `edm/track_15` need `generateMusicVolumeVariants` run for all five buckets, and must be
+  re-verified by HEAD rather than by the callable's response — per-bucket failures still
+  return 200 (open item below).
 
 - [ ] **No kill switch on the client picker.** It fires on every `swapTrack` on web with no
   flag guard. If it misbehaves in production the only remedy is a Hosting rollback. Worth a
