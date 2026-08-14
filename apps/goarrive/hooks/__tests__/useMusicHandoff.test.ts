@@ -297,6 +297,33 @@ describe('swapTrack volume-bucket picker (v3)', () => {
     hook.unmount();
   });
 
+  test('a slider change landing after backgrounding must not cut the live shadow', async () => {
+    // The shadow IS the audible element once backgrounded, so pausing it and
+    // reloading a new src would stop the music dead. A slider move followed by
+    // pressing home inside the debounce window lands exactly here — the
+    // member's normal "set the volume, then leave" gesture.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true } as Response);
+    const { hook, shadow } = setupPicker(0.25);
+
+    act(() => { hook.result.current.swapTrack(FIREBASE_URL); });
+    await act(async () => { await Promise.resolve(); });
+    expect(shadow.src).toBe(VARIANT_URL);
+
+    // Move the slider, then background before the debounce fires.
+    hook.rerender({ volume: 0.01 });
+    visibilityState = 'hidden';
+    act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+    const pauseCallsAtHandoff = vi.mocked(shadow.pause).mock.calls.length;
+
+    await new Promise((r) => setTimeout(r, REPICK_SETTLE_MS));
+    await act(async () => { await Promise.resolve(); });
+
+    // src untouched and the live element never paused: music keeps playing.
+    expect(shadow.src).toBe(VARIANT_URL);
+    expect(vi.mocked(shadow.pause).mock.calls.length).toBe(pauseCallsAtHandoff);
+    hook.unmount();
+  });
+
   test('stale HEAD from prior swap does not overwrite newer track (currentUrlRef guard)', async () => {
     const URL_A = 'https://firebasestorage.googleapis.com/v0/b/goarrive.appspot.com/o/music_cache%2Fchill%2Ftrack_10.mp3?alt=media';
     const URL_B = 'https://firebasestorage.googleapis.com/v0/b/goarrive.appspot.com/o/music_cache%2Fchill%2Ftrack_20.mp3?alt=media';

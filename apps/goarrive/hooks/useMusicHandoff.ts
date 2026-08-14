@@ -288,6 +288,13 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
     // Swapping src throws away the buffer we spent the last tick building, so
     // don't pay that cost when the slider hasn't crossed a bucket boundary.
     if (!force && currentBucketRef.current === bucketPicked) return;
+    // While backgrounded the shadow IS the audible element, so pausing it and
+    // reloading a new src would cut the music dead. A slider move followed by
+    // backgrounding inside the debounce window lands exactly here — which is
+    // the member's normal "set the volume, then leave" gesture. Defer instead:
+    // the next slider move or track change re-applies once we're foreground.
+    // `force` (a genuine track change) must still move the src.
+    if (!force && inBackgroundRef.current) return;
 
     // Foreground behavior: v1 plays muted, v2/v3 stay paused.
     const resumeIfV1 = () => {
@@ -317,6 +324,9 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       // and the member may have moved the slider again while this was in flight.
       if (currentUrlRef.current !== url) return;
       if (pickNearestBucket(Math.sqrt(volumeRef.current) * 100) !== bucketPicked) return;
+      // Re-check: the page may have backgrounded while this HEAD was in flight,
+      // making the shadow audible. Same reasoning as the synchronous guard.
+      if (!force && inBackgroundRef.current) return;
       const finalUri = exists ? variantUri : url;
       point(finalUri);
       log('[VOLUME_BUCKET]', {
