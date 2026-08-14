@@ -114,6 +114,15 @@ When an `HTMLAudioElement` is wrapped in the Web Audio graph via `createMediaEle
 ### Plaintext Credentials Must Not Appear in Docs
 Commit `8ae995e` removed plaintext credentials from `.claude/relay-handoff.md`. No broader cleanup of seed scripts, setup guides, or service-account snippets is attributed to that commit without separate evidence. Lesson: docs in the repo are public — never include passwords, API keys, or service-account JSON snippets in any `.md` or doc file; reference environment variables or Secret Manager paths instead.
 
+### iOS Native Audio Element Ignores `element.volume`
+When `HTMLAudioElement` is played via the native pipeline (not wrapped in the Web Audio graph), iOS ignores programmatic changes to `element.volume` — the property appears to set but has no audible effect. This means the v3 blessed-shadow music handoff (#259) keeps music alive through app-backgrounding but plays at full track loudness regardless of the member's in-app slider. The accepted fix is the volume-bucket system (PRs #273/#276/#277): `generateMusicVolumeVariants` pre-renders multiple loudness variants of each Mubert track server-side, and the client picks the variant closest to the slider value at handoff time. Lesson: any audio feature that routes through the native `HTMLAudioElement` pipeline for iOS backgrounding survival must implement loudness control through pre-rendered variants, not `element.volume`.
+
+### pnpm 11 Blocks Postinstall Scripts by Default
+Cloud Build began failing with `ffmpeg-static` postinstall not running after pnpm was upgraded to v11. pnpm 11 introduced a default that blocks all lifecycle scripts for packages not explicitly allowlisted. The fix requires either adding `allowBuilds["ffmpeg-static"]=true` to `.npmrc` or pinning to `pnpm@9.15.9` in `.tool-versions` (the latter ensures the postinstall runs without an explicit allowlist change). PR #279 added the `allowBuilds` entry and PR #280 pinned the pnpm version. Lesson: when updating pnpm major versions in a project that uses native-binary npm packages (e.g. `ffmpeg-static`, `sharp`, `canvas`), verify that postinstall scripts still run — pnpm 11+ requires explicit allowlisting.
+
+### V3 Shadow Element Must Be Warmed Before Backgrounding
+The v3 blessed-shadow music handoff (#259) creates a native `HTMLAudioElement` shadow that iOS keeps alive through app-backgrounding. However, if the shadow has never been `play()`'d within a user gesture before the user first backgrounds the app, iOS has not granted it autoplay permission and the handoff produces a silent gap. PR #284 fixes this by issuing a short silent play on the shadow element during the initial gesture that blesses all audio. Lesson: any secondary `HTMLAudioElement` that must take over playback under app-backgrounding must receive a gesture-blessed `play()` call during session initialization — not just at handoff time — or iOS will silently refuse to start it when needed.
+
 ## Known Performance Risks
 
 ### GIF Memory Consumption at Scale
