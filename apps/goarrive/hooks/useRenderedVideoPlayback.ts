@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import { useCallback, useEffect, useReducer, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import {
   clampVideoTime,
   lookupBlockAtVideoTime,
@@ -32,6 +32,7 @@ export interface UseRenderedVideoPlaybackParams {
   authoritativeIsPlaying: boolean;
   /** Called from PiP mode when the <video> element diverges from state. */
   onVideoDrivenPositionChange?: (blockId: string, blockOffsetMs: number) => void;
+  /** When omitted, normal-mode authority resumes after position reconciliation. */
   onVideoDrivenPlayStateChange?: (isPlaying: boolean) => void;
   /** Called once when mode transitions pip → normal. */
   onPipExitReconcile?: (blockId: string, blockOffsetMs: number) => void;
@@ -56,6 +57,7 @@ interface PendingPipExitReconcile {
   blockOffsetMs: number;
   videoTimeMs: number;
   isPlaying: boolean;
+  requiresPlayStateReconcile: boolean;
 }
 
 const NULL_STATE: RenderedVideoPlaybackState = {
@@ -119,7 +121,21 @@ export function useRenderedVideoPlayback(
   const lastPipPositionRef = useRef<{ blockId: string; blockOffsetMs: number } | null>(null);
 
   const isMetaReady = meta !== null && meta.status === 'ready';
-  const videoElementAtRender = videoRef.current;
+  // A mutable ref changes during React's commit phase, after render-time
+  // dependency comparison. Mirror the committed element into state from a
+  // layout effect so a real host-element replacement triggers listener
+  // cleanup and reattachment before paint while preserving the RefObject API.
+  const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(
+    () => videoRef.current,
+  );
+  const observedVideoElementRef = useRef<HTMLVideoElement | null>(videoElement);
+  useLayoutEffect(() => {
+    const committedVideoElement = videoRef.current;
+    if (committedVideoElement === observedVideoElementRef.current) return;
+
+    observedVideoElementRef.current = committedVideoElement;
+    setVideoElement(committedVideoElement);
+  });
   const metaSessionKey = meta === null
     ? 'none'
     : JSON.stringify([
@@ -141,7 +157,7 @@ export function useRenderedVideoPlayback(
 
     if (prev !== 'pip' || mode !== 'normal') return;
 
-    const video = videoRef.current;
+    const video = videoElement;
     const m = metaRef.current;
     if (!video || !m || m.status !== 'ready') return;
 
@@ -156,6 +172,7 @@ export function useRenderedVideoPlayback(
         blockOffsetMs: lookup.blockOffsetMs,
         videoTimeMs: currentMs,
         isPlaying,
+        requiresPlayStateReconcile: typeof onPlayStateChangeRef.current === 'function',
       };
       prevAuthBlockIdRef.current = lookup.blockId || null;
       reconcile(lookup.blockId, lookup.blockOffsetMs);
@@ -163,7 +180,7 @@ export function useRenderedVideoPlayback(
     } else {
       pendingPipExitRef.current = null;
     }
-  }, [mode, videoElementAtRender]);
+  }, [mode, videoElement]);
 
   // -------------------------------------------------------------------------
   // Normal mode: sync video element to the authoritative state machine
@@ -177,7 +194,7 @@ export function useRenderedVideoPlayback(
       return;
     }
 
-    const video = videoRef.current;
+    const video = videoElement;
     if (!video) return;
 
     const blockId = authoritativeBlockId;
@@ -191,7 +208,10 @@ export function useRenderedVideoPlayback(
         && authoritativeVideoTimeMs !== null
         && Math.abs(authoritativeVideoTimeMs - pendingPipExit.videoTimeMs)
           <= SEEK_DRIFT_THRESHOLD_MS
-        && authoritativeIsPlaying === pendingPipExit.isPlaying;
+        && (
+          !pendingPipExit.requiresPlayStateReconcile
+          || authoritativeIsPlaying === pendingPipExit.isPlaying
+        );
 
       if (!hasObservedReconciledAuthority) {
         const lookup = lookupBlockAtVideoTime(meta!, pendingPipExit.videoTimeMs);
@@ -276,7 +296,7 @@ export function useRenderedVideoPlayback(
     authoritativeBlockId,
     authoritativeBlockOffsetMs,
     authoritativeIsPlaying,
-    videoElementAtRender,
+    videoElement,
   ]);
 
   // -------------------------------------------------------------------------
@@ -288,7 +308,7 @@ export function useRenderedVideoPlayback(
   useEffect(() => {
     if (mode !== 'pip') return;
 
-    const video = videoRef.current;
+    const video = videoElement;
     if (!video) return;
     const attachedVideo: HTMLVideoElement = video;
 
@@ -371,7 +391,7 @@ export function useRenderedVideoPlayback(
       attachedVideo.removeEventListener('play', handlePlay);
       attachedVideo.removeEventListener('pause', handlePause);
     };
-  }, [mode, videoElementAtRender, metaSessionKey]);
+  }, [mode, videoElement, metaSessionKey]);
 
   // -------------------------------------------------------------------------
   // Imperative helpers
@@ -381,37 +401,37 @@ export function useRenderedVideoPlayback(
     (blockId: string, blockOffsetMs = 0) => {
       if (mode !== 'normal') return; // PiP: video is boss, consumer must not seek
       if (!isMetaReady || !meta) return;
-      const video = videoRef.current;
+      const video = videoElement;
       if (!video) return;
       const expectedMs = videoTimeForBlock(meta, blockId, blockOffsetMs);
       if (expectedMs === null) return;
       video.currentTime = expectedMs / 1000;
     },
-    [mode, isMetaReady, meta, videoRef],
+    [mode, isMetaReady, meta, videoElement],
   );
 
   const skipForward = useCallback(
     (deltaMs = 15000) => {
       if (mode !== 'normal') return;
       if (!isMetaReady || !meta) return;
-      const video = videoRef.current;
+      const video = videoElement;
       if (!video) return;
       const currentMs = video.currentTime * 1000;
       video.currentTime = clampVideoTime(meta, currentMs + deltaMs) / 1000;
     },
-    [mode, isMetaReady, meta, videoRef],
+    [mode, isMetaReady, meta, videoElement],
   );
 
   const skipBackward = useCallback(
     (deltaMs = 15000) => {
       if (mode !== 'normal') return;
       if (!isMetaReady || !meta) return;
-      const video = videoRef.current;
+      const video = videoElement;
       if (!video) return;
       const currentMs = video.currentTime * 1000;
       video.currentTime = clampVideoTime(meta, currentMs - deltaMs) / 1000;
     },
-    [mode, isMetaReady, meta, videoRef],
+    [mode, isMetaReady, meta, videoElement],
   );
 
   return {
