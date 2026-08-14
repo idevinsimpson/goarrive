@@ -8,6 +8,15 @@
  *  - queue ordering: "go" cue enqueued before the work-start fallback voice clip
  */
 
+import { vi } from 'vitest';
+
+vi.mock('expo-speech', () => ({}));
+vi.mock('firebase/functions', () => ({
+  getFunctions: vi.fn(),
+  httpsCallable: vi.fn(),
+}));
+vi.mock('../../lib/audioCues', () => ({ unlockAudioContext: vi.fn() }));
+
 import {
   QUEUE_GAP_MS,
   calcQueueGapMs,

@@ -33,6 +33,7 @@
   "engines": {
     "node": "20"
   },
+  "packageManager": "pnpm@9.15.9",
   "main": "lib/index.js",
   "dependencies": {
     "@google-cloud/functions-framework": "^5.0.2",
