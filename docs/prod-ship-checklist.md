@@ -133,6 +133,43 @@ Before the client picker reaches members (needs Devin's typed go for a Hosting d
   flag guard. If it misbehaves in production the only remedy is a Hosting rollback. Worth a
   Remote Config gate before wide rollout, matching the pattern used for PiP.
 
+### 2026-08-14 — render-pipeline Cloud Functions are on `main` but NOT deployed
+
+#262 merged (`d779cb0`) adds two deployable Cloud Functions plus their helpers:
+
+- `renderWorkoutVideo` — Firestore `onWrite` trigger that enqueues a render job
+- `renderJob` — authenticated Cloud Run **service** (HTTP; not a Cloud Run Job)
+- supporting: `renderContract`, `renderFfmpeg`, `renderState`, `renderServiceTarget`,
+  `renderedVideoResolver`
+
+**None of it is deployed.** Merging to `main` changed no production behavior. But a
+blanket `firebase deploy --only functions` would now deploy `renderWorkoutVideo`, because
+deploy targets are manual and `npm run deploy` is `--only hosting`. Anyone doing a broad
+functions deploy for an unrelated reason should know this is in the tree.
+
+Mitigating factor, verified: `parseRenderServiceTarget` **throws** on a missing
+`RENDER_SERVICE_URL`, a non-https URL, a hostname that is not `*.run.app`, any hostname
+matching `/placeholder/i`, or a URL carrying credentials/port/query/fragment. So if the
+trigger is ever deployed unconfigured it fails fast and loudly rather than silently
+enqueueing to a dead endpoint. That is the desired failure mode, not a reason to deploy it
+casually.
+
+Before the render pipeline may run at all — each requires Devin's explicit go, since
+AGENTS.md §6 excludes Cloud Functions changes from standing approval:
+
+- [ ] Create the Cloud Tasks queue `render-workout-video`.
+- [ ] Build and deploy the Cloud Run service from `docker/renderWorkoutVideo.Dockerfile`
+      (system `ffmpeg` via apt — deliberately not the npm `ffmpeg-static` package, which is
+      what broke Cloud Build packaging on 2026-08-14 and needed the pnpm@9.15.9 pin).
+- [ ] Set `RENDER_SERVICE_URL` to the deployed service origin.
+- [ ] Deploy `functions:renderWorkoutVideo`.
+- [ ] Decide storage lifecycle for rendered MP4s before volume grows — a 40-minute workout
+      renders to ~44 MB at 720p, so a few hundred workouts is real storage and egress.
+
+See `docs/render-workout-video-service.md` for the service contract and the
+`contracts/rendered-video/emitter-player-contract-v1.json` fixture that locks the
+emitter↔player agreement.
+
 ### 2026-08-11 — PR #237 prod flags
 
 _(Preserve whatever Devin logged in the #237 thread — capture here on next PR-237
