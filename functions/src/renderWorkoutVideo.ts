@@ -1,14 +1,14 @@
 // ─── Workout Video Render Trigger ────────────────────────────────────────────
 // Gen 2 Firestore trigger that fires when a workout's renderedVideo.status is
 // set to 'pending' OR when the blocks array changes. Enqueues a Cloud Tasks
-// task pointing to the Cloud Run render job (RENDER_JOB_URL).
+// task pointing to the Cloud Run service (RENDER_JOB_URL).
 //
 // ME-RV-01: RENDER_TASK_QUEUE must be provisioned in Cloud Tasks before use.
 //           Default queue name: render-workout-video
-// ME-RV-02: RENDER_JOB_URL must be set to the Cloud Run job URL after the
+// ME-RV-02: RENDER_JOB_URL must be set to the Cloud Run service URL after the
 //           Cloud Run service is deployed. Placeholder is defined below.
 // ME-RV-03: RENDER_TASK_INVOKER_SA should be set to the SA with run.invoker
-//           on the Cloud Run job. Defaults to the App Engine default SA.
+//           on the Cloud Run service. Defaults to the App Engine default SA.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import * as admin from 'firebase-admin';
@@ -16,7 +16,7 @@ import { onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { FieldValue } from 'firebase-admin/firestore';
 import { CloudTasksClient } from '@google-cloud/tasks';
 
-// Placeholder — fill in after Cloud Run job is deployed.
+// Placeholder — fill in after Cloud Run service is deployed.
 const RENDER_JOB_URL = process.env.RENDER_JOB_URL || 'https://PLACEHOLDER.run.app/render';
 
 const RENDER_TASK_QUEUE = process.env.RENDER_TASK_QUEUE || 'render-workout-video';
@@ -94,7 +94,7 @@ export const renderWorkoutVideo = onDocumentUpdated(
         },
       });
 
-      console.log(`[renderWorkoutVideo] Enqueued render task for ${workoutId} v${nextVersion}`);
+      console.log(`[renderWorkoutVideo] Enqueued render task to Cloud Run service for ${workoutId} v${nextVersion}`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[renderWorkoutVideo] Failed to enqueue task for ${workoutId}:`, msg);

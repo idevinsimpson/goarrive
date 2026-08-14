@@ -1,10 +1,15 @@
-// ─── Workout Video Render Job ─────────────────────────────────────────────────
-// Cloud Run job entry point. Receives a POST from Cloud Tasks with:
+// ─── Workout Video Render Service ─────────────────────────────────────────────
+// Cloud Run service entry point. Receives a POST from Cloud Tasks with:
 //   { workoutId: string, version: number }
 //
-// Runs the same rendering pipeline as scripts/renderWorkout.js using FFmpeg,
-// uploads the result to Cloud Storage, and writes the final status back to
-// the workout's renderedVideo field in Firestore.
+// Auth: OIDC via Cloud Tasks service account
+// (`cloudtasks-invoker@<project>.iam.gserviceaccount.com`), verified with
+// `verifyIdToken()` on every request. NOT unauthenticated. Cloud Run service
+// is deployed with `--no-allow-unauthenticated`.
+//
+// Runs the rendering pipeline using FFmpeg, uploads the result to Cloud
+// Storage, and writes the final status back to the workout's renderedVideo
+// field in Firestore using a transaction to guard against stale writes.
 //
 // This file is compiled to dist/renderJob.js and is the CMD of the
 // docker/renderWorkoutVideo.Dockerfile container.
@@ -19,6 +24,7 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { FieldValue } from 'firebase-admin/firestore';
+import { OAuth2Client } from 'google-auth-library';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const ffmpegBin: string = require('ffmpeg-static');
@@ -29,6 +35,8 @@ const execFileAsync = promisify(execFile);
 
 const BUCKET_NAME = process.env.STORAGE_BUCKET || 'goarrive.firebasestorage.app';
 const PORT = parseInt(process.env.PORT || '8080', 10);
+// The public URL of this Cloud Run service — used as the OIDC token audience.
+const RENDER_JOB_URL = process.env.RENDER_JOB_URL || '';
 
 const CANVAS_W = 720;
 const CANVAS_H = 1440;
@@ -36,6 +44,8 @@ const TIMER_H = 160;
 const MOVEMENT_H = 1280;
 
 const VIDEO_EXTENSIONS = /\.(mp4|mov|m4v|webm|avi|mkv)(\?.*)?$/i;
+
+const oauthClient = new OAuth2Client();
 
 // ── Firebase init ─────────────────────────────────────────────────────────────
 
@@ -132,39 +142,60 @@ function generateAss(
 
 // ── Block flattening ──────────────────────────────────────────────────────────
 
-interface Segment {
+export interface Segment {
   type: 'video' | 'image' | 'rest';
   label: string;
   url?: string;
   durationSec: number;
   _localPath?: string;
   _isGif?: boolean;
-  blockId?: string;
+  /** Segment-unique id: `${parentBlockId}#${segIndex}` (Option A). */
+  blockId: string;
+}
+
+/**
+ * Parse a segment id produced by Option-A encoding back into its components.
+ * `"blockAbc#2"` → `{ parentBlockId: "blockAbc", segIndex: 2 }`.
+ * Ids without a `#` suffix (e.g. intro/outro) return `segIndex: 0`.
+ */
+export function parseSegmentId(id: string): { parentBlockId: string; segIndex: number } {
+  const hashIdx = id.lastIndexOf('#');
+  if (hashIdx === -1) return { parentBlockId: id, segIndex: 0 };
+  const segIndex = parseInt(id.slice(hashIdx + 1), 10);
+  return { parentBlockId: id.slice(0, hashIdx), segIndex: isNaN(segIndex) ? 0 : segIndex };
 }
 
 const SPECIAL_BLOCK_TYPES = new Set([
   'Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment', 'Follow-Along Video',
 ]);
 
-function flattenWorkout(workout: Record<string, unknown>): Segment[] {
+/**
+ * Flatten a Firestore workout document into a flat ordered list of segments.
+ * Each segment carries a globally-unique `blockId` using Option-A encoding:
+ * `${parentBlockId}#${segIndex}` where segIndex is 0-based within the parent
+ * block. This satisfies the `validateMeta` duplicate-blockId constraint.
+ */
+export function flattenWorkout(workout: Record<string, unknown>): Segment[] {
   const blocks = (workout.blocks as Record<string, unknown>[]) || [];
   const segments: Segment[] = [];
   const workoutRestDur = (workout.restDurationSeconds as number) || 30;
 
   if (workout.introVideoUrl) {
-    segments.push({ type: 'video', label: 'Intro', url: workout.introVideoUrl as string, durationSec: 10 });
+    segments.push({ type: 'video', label: 'Intro', url: workout.introVideoUrl as string, durationSec: 10, blockId: 'intro#0' });
   }
 
   for (const block of blocks) {
     const bType = (block.type as string) || 'Circuit';
     const movements = (block.movements as Record<string, unknown>[]) || [];
+    const parentId = (block.id as string) || bType;
+    let segIndex = 0;
 
     if (bType === 'Follow-Along Video') {
       segments.push({
         type: 'video', label: (block.label || block.name || 'Follow-Along') as string,
         url: block.videoUrl as string || '',
         durationSec: (block.videoDurationSec || block.durationSec || 60) as number,
-        blockId: block.id as string,
+        blockId: `${parentId}#${segIndex++}`,
       });
       continue;
     }
@@ -172,15 +203,15 @@ function flattenWorkout(workout: Record<string, unknown>): Segment[] {
       segments.push({
         type: 'rest', label: (block.label || block.name || 'Rest') as string,
         durationSec: (block.durationSec || workoutRestDur) as number,
-        blockId: block.id as string,
+        blockId: `${parentId}#${segIndex++}`,
       });
       continue;
     }
     if (SPECIAL_BLOCK_TYPES.has(bType)) {
       if (block.videoUrl) {
-        segments.push({ type: 'video', label: bType, url: block.videoUrl as string, durationSec: (block.durationSec || 10) as number, blockId: block.id as string });
+        segments.push({ type: 'video', label: bType, url: block.videoUrl as string, durationSec: (block.durationSec || 10) as number, blockId: `${parentId}#${segIndex++}` });
       } else {
-        segments.push({ type: 'rest', label: bType, durationSec: (block.durationSec || 15) as number, blockId: block.id as string });
+        segments.push({ type: 'rest', label: bType, durationSec: (block.durationSec || 15) as number, blockId: `${parentId}#${segIndex++}` });
       }
       continue;
     }
@@ -192,24 +223,24 @@ function flattenWorkout(workout: Record<string, unknown>): Segment[] {
       const mvLabel = (mv.name || 'Movement') as string;
 
       if (videoUrl && VIDEO_EXTENSIONS.test(videoUrl)) {
-        segments.push({ type: 'video', label: mvLabel, url: videoUrl, durationSec: workDur, blockId: (block.id || bType) as string });
+        segments.push({ type: 'video', label: mvLabel, url: videoUrl, durationSec: workDur, blockId: `${parentId}#${segIndex++}` });
       } else if (mv.thumbnailUrl || mv.posterUrl) {
-        segments.push({ type: 'image', label: mvLabel, url: (mv.thumbnailUrl || mv.posterUrl) as string, durationSec: workDur, blockId: (block.id || bType) as string });
+        segments.push({ type: 'image', label: mvLabel, url: (mv.thumbnailUrl || mv.posterUrl) as string, durationSec: workDur, blockId: `${parentId}#${segIndex++}` });
       } else {
-        segments.push({ type: 'rest', label: mvLabel, durationSec: workDur, blockId: (block.id || bType) as string });
+        segments.push({ type: 'rest', label: mvLabel, durationSec: workDur, blockId: `${parentId}#${segIndex++}` });
       }
       if (restAfter > 0) {
-        segments.push({ type: 'rest', label: 'Rest', durationSec: restAfter, blockId: (block.id || bType) as string });
+        segments.push({ type: 'rest', label: 'Rest', durationSec: restAfter, blockId: `${parentId}#${segIndex++}` });
       }
     }
 
     if ((block.restDurationSeconds as number) > 0) {
-      segments.push({ type: 'rest', label: 'Rest', durationSec: block.restDurationSeconds as number, blockId: block.id as string });
+      segments.push({ type: 'rest', label: 'Rest', durationSec: block.restDurationSeconds as number, blockId: `${parentId}#${segIndex++}` });
     }
   }
 
   if (workout.outroVideoUrl) {
-    segments.push({ type: 'video', label: 'Outro', url: workout.outroVideoUrl as string, durationSec: 10 });
+    segments.push({ type: 'video', label: 'Outro', url: workout.outroVideoUrl as string, durationSec: 10, blockId: 'outro#0' });
   }
 
   return segments;
@@ -254,13 +285,48 @@ function buildSegmentArgs(seg: Segment, assPath: string, outputPath: string): st
   return ['-y', '-filter_complex', filter, '-map', '[out]', '-t', String(dur), '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-pix_fmt', 'yuv420p', '-an', outputPath];
 }
 
+// ── Offset map builder ────────────────────────────────────────────────────────
+
+import type { RenderedVideoBlockOffset } from '../../apps/goarrive/utils/renderedVideoOffsetMap';
+
+/**
+ * Build the block offset array from a flat segment list.
+ * Zero-duration segments are skipped (they would fail `block-endMs-not-after-start`).
+ */
+export function buildBlockOffsets(segments: Segment[]): RenderedVideoBlockOffset[] {
+  const offsets: RenderedVideoBlockOffset[] = [];
+  let offsetMs = 0;
+  for (const seg of segments) {
+    const durMs = Math.round(seg.durationSec * 1000);
+    if (durMs > 0) {
+      offsets.push({ blockId: seg.blockId, startMs: offsetMs, endMs: offsetMs + durMs });
+    }
+    offsetMs += durMs;
+  }
+  return offsets;
+}
+
+// ── Signed URL helper ─────────────────────────────────────────────────────────
+
+/**
+ * Mint a short-lived signed URL for a stable Cloud Storage path.
+ * Call this at read time (Phase 5 wiring) — never persist the result.
+ */
+export async function getRenderedVideoUrl(storagePath: string, ttlHours = 24): Promise<string> {
+  // storagePath is gs://bucket/path — strip the gs://bucket/ prefix
+  const withoutScheme = storagePath.replace(/^gs:\/\/[^/]+\//, '');
+  const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
+  const [url] = await bucket.file(withoutScheme).getSignedUrl({ action: 'read', expires: expiresAt });
+  return url;
+}
+
 // ── Render pipeline ───────────────────────────────────────────────────────────
 
 interface RenderResult {
-  url: string;
+  storagePath: string;
   durationMs: number;
   version: number;
-  blocks: Array<{ blockId: string; startMs: number; endMs: number }>;
+  blocks: RenderedVideoBlockOffset[];
 }
 
 async function renderWorkout(workoutId: string, version: number): Promise<RenderResult> {
@@ -304,7 +370,7 @@ async function renderWorkout(workoutId: string, version: number): Promise<Render
         blockOutputs.push(outPath);
       } catch (err) {
         // Degrade to rest
-        const restSeg: Segment = { type: 'rest', label: seg.label, durationSec: seg.durationSec };
+        const restSeg: Segment = { type: 'rest', label: seg.label, durationSec: seg.durationSec, blockId: seg.blockId };
         fs.writeFileSync(assPath, generateAss(seg.durationSec, totalStr, 'rest', seg.label));
         try {
           await execFileAsync(ffmpegBin, buildSegmentArgs(restSeg, assPath, outPath), { timeout: 120_000 });
@@ -327,34 +393,41 @@ async function renderWorkout(workoutId: string, version: number): Promise<Render
     const finalOut = path.join(tmpDir, 'final.mp4');
     await execFileAsync(ffmpegBin, ['-y', '-i', concatOut, '-c', 'copy', '-movflags', '+faststart', finalOut], { timeout: 300_000 });
 
-    // Upload
-    const storagePath = `rendered-videos/${workoutId}/v${version}.mp4`;
-    await bucket.upload(finalOut, { destination: storagePath, metadata: { contentType: 'video/mp4', cacheControl: 'public, max-age=86400' } });
+    // Upload — persist the stable storage path, never a signed URL
+    const storagePath = `gs://${BUCKET_NAME}/rendered-videos/${workoutId}/v${version}.mp4`;
+    const storageKey = `rendered-videos/${workoutId}/v${version}.mp4`;
+    await bucket.upload(finalOut, { destination: storageKey, metadata: { contentType: 'video/mp4', cacheControl: 'public, max-age=86400' } });
 
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    const [signedUrl] = await bucket.file(storagePath).getSignedUrl({ action: 'read', expires: expiresAt });
+    const blocks = buildBlockOffsets(segments);
 
-    // Build block offset map
-    const blockOffsets: Array<{ blockId: string; startMs: number; endMs: number }> = [];
-    let offsetMs = 0;
-    for (const seg of segments) {
-      const durMs = Math.round(seg.durationSec * 1000);
-      blockOffsets.push({ blockId: seg.blockId || seg.label, startMs: offsetMs, endMs: offsetMs + durMs });
-      offsetMs += durMs;
-    }
-
-    return { url: signedUrl, durationMs: Math.round(totalDurSec * 1000), version, blocks: blockOffsets };
+    return { storagePath, durationMs: Math.round(totalDurSec * 1000), version, blocks };
   } finally {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   }
 }
 
-// ── HTTP server for Cloud Run ─────────────────────────────────────────────────
+// ── HTTP server for Cloud Run service ─────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
   if (req.method !== 'POST') {
     res.writeHead(405);
     res.end('Method not allowed');
+    return;
+  }
+
+  // Verify the OIDC token sent by Cloud Tasks
+  const authHeader = req.headers['authorization'];
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    res.writeHead(401);
+    res.end('Missing OIDC token');
+    return;
+  }
+  const idToken = authHeader.slice('Bearer '.length);
+  try {
+    await oauthClient.verifyIdToken({ idToken, audience: RENDER_JOB_URL });
+  } catch {
+    res.writeHead(401);
+    res.end('Invalid OIDC token');
     return;
   }
 
@@ -379,20 +452,37 @@ const server = http.createServer(async (req, res) => {
     try {
       const result = await renderWorkout(workoutId, version);
 
-      await db.collection('workouts').doc(workoutId).update({
-        renderedVideo: {
-          status: 'ready',
-          url: result.url,
-          durationMs: result.durationMs,
-          version: result.version,
-          blocks: result.blocks,
-          updatedAt: FieldValue.serverTimestamp(),
-        },
+      const docRef = db.collection('workouts').doc(workoutId);
+      let skipped = false;
+
+      // Stale-render guard: compare versions inside a transaction so a concurrent
+      // newer render can't be overwritten by a slower older one.
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(docRef);
+        const currentVersion = (snap.data()?.renderedVideo?.version ?? 0) as number;
+        if (currentVersion > result.version) {
+          console.log(`[STALE-RENDER] version=${result.version} < current=${currentVersion}, skipping write`);
+          skipped = true;
+          return;
+        }
+        tx.update(docRef, {
+          renderedVideo: {
+            status: 'ready',
+            // storagePath is stable and never expires — sign URLs on demand with getRenderedVideoUrl()
+            storagePath: result.storagePath,
+            version: result.version,
+            durationMs: result.durationMs,
+            blocks: result.blocks,
+            renderedAt: FieldValue.serverTimestamp(),
+          },
+        });
       });
 
-      console.log(`[renderJob] Done — ${workoutId} v${version} at ${result.url}`);
+      if (!skipped) {
+        console.log(`[renderJob] Done — ${workoutId} v${result.version} at ${result.storagePath}`);
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, workoutId, version }));
+      res.end(JSON.stringify({ ok: true, workoutId, version, skipped }));
     } catch (err) {
       const msg = (err instanceof Error ? err.message : String(err)).slice(0, 500);
       console.error(`[renderJob] Failed for ${workoutId}:`, msg);
@@ -409,6 +499,8 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`[renderJob] Server listening on port ${PORT}`);
-});
+if (require.main === module) {
+  server.listen(PORT, () => {
+    console.log(`[renderJob] Server listening on port ${PORT}`);
+  });
+}
