@@ -432,6 +432,17 @@ export function resumeAudioGraph(): void {
   }
 }
 
+// Reports the shared AudioContext's current state so the music-handoff adapter
+// can poll on foreground-return: resume() is fire-and-forget, so the adapter
+// waits for state==='running' before swapping playback back from the shadow
+// element to the graph-wired audible one. `interrupted` is an iOS-only state
+// (call interrupts) that the adapter treats the same as suspended.
+export type AudioGraphState = AudioContextState | 'not-initialized';
+export function getAudioContextState(): AudioGraphState {
+  if (!audioCtx) return 'not-initialized';
+  return audioCtx.state;
+}
+
 // ── Graph-level oscillator keepalive (B) ─────────────────────────────
 // An OscillatorNode at near-zero gain connected to musicGain tells iOS that
 // audio is actively running in the AudioContext, preventing the OS from
@@ -608,6 +619,26 @@ function blessElement(el: HTMLAudioElement, label: string): void {
     blessingInFlight.delete(el);
     try { el.muted = false; } catch {}
     console.warn('[VOICE-AUDIT] unlock bless THREW', { label, err: String(err) });
+  }
+}
+
+/**
+ * Create a blessed HTMLAudioElement for music playback that iOS will keep alive
+ * during backgrounding. The element is never wired to the Web Audio graph —
+ * it uses the native HTMLAudioElement pipeline that iOS keeps alive via
+ * MediaSession. MUST be called from inside a user-gesture stack (unlockAudioPlayback,
+ * Start tap, primeShadow) so the blessElement play() is legal on iOS.
+ */
+export function createBlessedMusicPlayer(): HTMLAudioElement | null {
+  if (typeof window === 'undefined' || typeof Audio === 'undefined') return null;
+  try {
+    const el: HTMLAudioElement = new (window as any).Audio();
+    el.preload = 'auto';
+    try { (el as any).crossOrigin = 'anonymous'; } catch {}
+    blessElement(el, 'music-shadow');
+    return el;
+  } catch {
+    return null;
   }
 }
 
