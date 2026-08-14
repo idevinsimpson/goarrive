@@ -223,9 +223,29 @@ function ensureAudioGraph(): void {
 // them correctly.
 const pendingExternalWires: Array<{ el: HTMLMediaElement; bus: GainBus }> = [];
 
+// True on iOS Safari (not iOS Chrome/Firefox/Edge — those wrap WebKit but
+// don't have the same AudioContext-on-background behavior).
+function isIOSSafari(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  return /iP(hone|od|ad)/.test(ua) && !/CriOS|FxiOS|EdgiOS/.test(ua);
+}
+
 export function wireToGain(el: HTMLMediaElement, bus: GainBus = 'voice'): void {
   if (!el) return;
   if (wiredElements.has(el)) return;
+  // iOS Safari voice-bus escape hatch: calling createMediaElementSource on
+  // a voice element reroutes it through the AudioContext, which iOS Safari
+  // SUSPENDS the moment Safari backgrounds. Result: voice cues went silent
+  // whenever the member switched to another app (regression from the Aug 11
+  // Web Audio graph work). Skipping the wire keeps voice elements on the
+  // native HTMLAudioElement pipeline, which iOS keeps alive via MediaSession
+  // through backgrounding. Voice bus is always 1.0 (no slider), so the
+  // Web Audio graph wasn't buying us anything there anyway.
+  // Music bus stays wrapped: element.volume is ignored on iOS, so GainNode
+  // is the only way to power the music-panel slider. Trade-off: music dies
+  // on Safari-background; voice survives. Coach guidance is what matters.
+  if (bus === 'voice' && isIOSSafari()) return;
   if (!audioCtx || !voiceGain || !musicGain) {
     if (!pendingExternalWires.some((p) => p.el === el)) {
       pendingExternalWires.push({ el, bus });
