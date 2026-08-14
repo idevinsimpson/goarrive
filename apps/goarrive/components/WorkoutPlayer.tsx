@@ -57,6 +57,7 @@ import MusicSettingsSheet from './MusicSettingsSheet';
 import { FB, FH } from '../lib/theme';
 import VoiceAuditPanel from './VoiceAuditPanel';
 import { isStagingHost } from '../lib/runtimeEnv';
+import { getMusicHandoffVariant } from '../utils/musicHandoffVariant';
 import { installVoiceAuditCapture } from '../lib/voiceAuditLog';
 import PosterThumb from './PosterThumb';
 import { isImageUrl } from '../utils/mediaKind';
@@ -2363,6 +2364,18 @@ export default function WorkoutPlayer({
       </View>
       </View>
 
+      {/* Music-handoff variant badge — staging only. Tiny pill in the bottom-
+          left showing the active ?handoff= variant so the on-device tester
+          can tell baseline (off) from fix (v1/v2) at a glance. Never renders
+          in production because isStagingHost() is host-based. */}
+      {isStagingHost() && (
+        <View pointerEvents="none" style={st.audioVariantBadge}>
+          <Text style={st.audioVariantBadgeText}>
+            AUDIO: {getMusicHandoffVariant().toUpperCase()}
+          </Text>
+        </View>
+      )}
+
       {/* VOICE-AUDIT panel — staging only, mirrors [VOICE-AUDIT] console trace */}
       {isStagingHost() && (
         <VoiceAuditPanel
@@ -3184,6 +3197,27 @@ const makeStyles = (fs: (n: number) => number) => StyleSheet.create({
     backgroundColor: '#1A1F2E', borderRadius: 8, padding: 10,
     fontSize: 14, color: '#E2E8F0', fontFamily: FB, marginBottom: 8,
     borderWidth: 1, borderColor: '#252B3B',
+  },
+
+  // Staging-only audio-handoff variant badge.
+  audioVariantBadge: {
+    position: 'absolute',
+    left: 10,
+    bottom: 10,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderWidth: 1,
+    borderColor: '#F5A623',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    zIndex: 999,
+  },
+  audioVariantBadgeText: {
+    color: '#F5A623',
+    fontFamily: FB,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
 
   // Preview badge

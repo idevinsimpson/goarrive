@@ -31,9 +31,34 @@ function parseQuery(search: string): MusicHandoffVariant | null {
 }
 
 /**
+ * True on Firebase Hosting preview channels (goarrive--<channel>-<hash>.web.app),
+ * hosts containing "staging", and localhost. Mirrors isStagingHost in
+ * lib/runtimeEnv.ts — duplicated here to keep this module dep-free (imported
+ * by hooks that must not pull the whole runtimeEnv module in).
+ */
+function isStagingLikeHost(): boolean {
+  if (typeof window === 'undefined') return false;
+  const host = window.location?.hostname || '';
+  if (!host) return false;
+  if (host === 'localhost' || host === '127.0.0.1') return true;
+  if (host.includes('--')) return true;
+  if (host.includes('staging')) return true;
+  return false;
+}
+
+/**
  * Resolve the current variant. Query param wins; localStorage persists the
  * last query-param choice so the tester can navigate between pages without
- * re-appending the flag. Default `off`.
+ * re-appending the flag.
+ *
+ * Default policy:
+ *   - Staging hosts default to 'v1' so the plain URL tests the fix rather
+ *     than the pre-adapter baseline. Devin can still exercise the baseline
+ *     explicitly via ?handoff=off — shorter on-device loop this way.
+ *   - Production hosts default to 'off' (adapter installs only the
+ *     resume-on-return handler and does nothing else). No experimental
+ *     audio path reaches real members until a variant wins the device spike
+ *     and the default is deliberately flipped in a later change.
  */
 export function getMusicHandoffVariant(): MusicHandoffVariant {
   if (typeof window === 'undefined') return 'off';
@@ -46,5 +71,5 @@ export function getMusicHandoffVariant(): MusicHandoffVariant {
     const stored = window.localStorage.getItem(STORAGE_KEY);
     if (stored === 'v1' || stored === 'v2' || stored === 'off') return stored;
   } catch {}
-  return 'off';
+  return isStagingLikeHost() ? 'v1' : 'off';
 }
