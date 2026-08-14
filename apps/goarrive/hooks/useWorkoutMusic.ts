@@ -49,6 +49,18 @@ export type { MusicQueueInput } from './useWorkoutMusic.helpers';
 // license quota; once spent, the queue prefers already-cached tracks.
 const MAX_NEW_GENERATIONS_PER_SESSION = 3;
 
+// Volume buckets for iOS shadow-audio pre-render (slider² → gain).
+// Ordered from highest to lowest for nearest-match search.
+const VOLUME_BUCKETS = [1.0, 0.5, 0.25, 0.12, 0.05];
+const DEFAULT_BUCKET = 0.12; // covers the most common default slider position
+
+/** Returns the nearest bucket to the given squared-slider gain value. */
+function nearestBucket(gain: number): number {
+  return VOLUME_BUCKETS.reduce((best, b) =>
+    Math.abs(b - gain) < Math.abs(best - gain) ? b : best
+  );
+}
+
 // ── Hook ────────────────────────────────────────────────────────────────────
 
 type TrackStatus = 'idle' | 'loading' | 'playing' | 'stalled';
@@ -148,6 +160,9 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
   const seqRef = useRef(0);
   const bootstrappedRef = useRef(false);
   const phaseRef = useRef(phase);
+  // Tracks which (style:trackIndex:pct) combos have already been sent to the
+  // volume-variant endpoint this session so we never double-fire.
+  const prefetchedBucketsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => { mutedRef.current = isMuted || musicMuted; }, [isMuted, musicMuted]);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
@@ -312,6 +327,28 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
     setTrackStatus('playing');
     if (!musicPausedRef.current && !musicHoldRef.current && !musicOffRef.current) {
       safePlay(el);
+    }
+
+    // Fire-and-forget: pre-render volume-attenuated variants so the iOS shadow
+    // <audio> can load a pre-attenuated file instead of playing at full volume.
+    // Only fires for the current slider bucket + the default 0.12 bucket.
+    // Never blocks playback — failures are silently discarded.
+    const squaredGain = volumeRef.current * volumeRef.current;
+    const bucketsToRequest = Array.from(new Set([nearestBucket(squaredGain), DEFAULT_BUCKET]));
+    const newBuckets = bucketsToRequest.filter((b) => {
+      const key = `${style}:${index}:${b}`;
+      if (prefetchedBucketsRef.current.has(key)) return false;
+      prefetchedBucketsRef.current.add(key);
+      return true;
+    });
+    if (newBuckets.length > 0) {
+      const call = httpsCallable<
+        { style: string; trackNumber: number; buckets: number[] },
+        { generated: string[]; skipped: string[]; errors: Array<{ bucket: number; message: string }> }
+      >(functions, 'generateMusicVolumeVariants');
+      call({ style, trackNumber: index, buckets: newBuckets }).catch((err: unknown) => {
+        console.warn('[MUSIC] volume-variant prefetch failed:', (err as Error)?.message ?? err);
+      });
     }
   }, [safePlay, swapTrack]);
 
