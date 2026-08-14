@@ -20,7 +20,6 @@
  * songs in the same order. Likes never reorder (that would break determinism).
  */
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
-import { Platform } from 'react-native';
 import { httpsCallable } from 'firebase/functions';
 import {
   arrayRemove,
@@ -36,7 +35,9 @@ import { MUSIC_MAX_TRACKS_PER_STYLE } from '../constants/musicStyles';
 // graph in useWorkoutTTS — coach voice / cue audio live on a separate voice
 // bus that stays at full volume. Routing through Web Audio is required on
 // iOS Safari, which ignores JS-set HTMLAudioElement.volume entirely.
-import { setMusicVolume, wireToGain, resumeAudioGraph } from './useWorkoutTTS';
+import { setMusicVolume, wireToGain } from './useWorkoutTTS';
+// iOS background-music handoff adapter — see hook file for full contract.
+import { useMusicHandoff } from './useMusicHandoff';
 
 // Pure queue/id helpers live in useWorkoutMusic.helpers.ts (no RN/Firebase
 // deps — safe to import in vitest). Re-exported here for convenience.
@@ -150,6 +151,21 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
 
   useEffect(() => { mutedRef.current = isMuted || musicMuted; }, [isMuted, musicMuted]);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
+
+  // Music handoff adapter — owns visibilitychange/pageshow/focus resume for
+  // all variants (byte-for-byte parity with the pre-adapter handler when
+  // variant=off; verified on desktop Chrome tab-switch). On iOS Safari with
+  // ?handoff=v1, ?handoff=v2, or ?handoff=v3, also runs a shadow <audio>
+  // that takes over during backgrounding so music survives Safari-exit.
+  const { primeShadow, swapTrack, teardownShadow } = useMusicHandoff({
+    enabled,
+    isPaused,
+    isMuted: isMuted || musicMuted,
+    volume: volume * volume,
+    musicPausedRef,
+    musicHoldRef,
+    musicOffRef,
+  });
 
   const seedFor = useCallback(
     (style: string) => `${workoutId || 'goarrive'}:${style}`,
@@ -288,13 +304,16 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
       el.src = url;
       el.load();
     } catch {}
+    // Mirror onto the handoff shadow so the swap is invisible on the
+    // background-audible side. No-op for variant=off / non-web.
+    swapTrack(url);
     currentTrackRef.current = { style, index };
     setCurrentTrack({ style, index });
     setTrackStatus('playing');
     if (!musicPausedRef.current && !musicHoldRef.current && !musicOffRef.current) {
       safePlay(el);
     }
-  }, [safePlay]);
+  }, [safePlay, swapTrack]);
 
   const prefetchUpcoming = useCallback((style: string) => {
     const next = peekNextIndex(style);
@@ -406,6 +425,8 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
     const el = musicElRef.current;
     musicElRef.current = null;
     setTrackStatus('idle');
+    // Release the shadow before the audible — no-op for variant=off.
+    teardownShadow();
     if (!el) return;
     // Pause BEFORE releasing — abandoning a still-loading element without
     // pausing lets it start playing on its own once data arrives (e49f0a0).
@@ -415,7 +436,7 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
       el.removeAttribute('src');
       el.load();
     } catch {}
-  }, []);
+  }, [teardownShadow]);
 
   // Must run synchronously inside the Play tap gesture.
   const startMusic = useCallback(() => {
@@ -434,6 +455,9 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
     // → ensureAudioGraph); wireToGain is safe to call before the graph exists
     // (queues for retro-wire).
     wireToGain(el, 'music');
+    // Prime the handoff shadow INSIDE the same Play gesture so its later
+    // play() / mute-flip is legal on iOS. No-op for variant=off / non-web.
+    primeShadow(el);
     el.muted = mutedRef.current;
     el.addEventListener('ended', () => {
       if (musicElRef.current !== el || !el.src) return;
@@ -467,7 +491,7 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
       el.play().catch(() => {});
       playIndex(style, first);
     }
-  }, [enabled, takeNextIndex, attachTrack, playIndex, prefetchUpcoming]);
+  }, [enabled, takeNextIndex, attachTrack, playIndex, prefetchUpcoming, primeShadow]);
 
   const releaseMusicHold = useCallback(() => {
     if (!musicHoldRef.current) return;
@@ -495,30 +519,10 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
   }, [visible, stopMusic]);
   useEffect(() => () => stopMusic(), [stopMusic]);
 
-  // Foreground resume — iOS pauses audio on backgrounding and never resumes
-  // it by itself; mirror the video layers' resume-on-return behavior.
-  useEffect(() => {
-    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
-    const resume = () => {
-      const el = musicElRef.current;
-      if (!el || !el.src) return;
-      if (typeof document.visibilityState === 'string' && document.visibilityState !== 'visible') return;
-      if (musicPausedRef.current || musicHoldRef.current || musicOffRef.current) return;
-      // iOS auto-suspends the AudioContext when backgrounded; resuming only
-      // the HTMLAudioElement doesn't reconnect the Web Audio graph. Resume
-      // the context first so the music element plays through the gain node.
-      resumeAudioGraph();
-      if (el.paused) el.play().catch(() => {});
-    };
-    document.addEventListener('visibilitychange', resume);
-    window.addEventListener('pageshow', resume);
-    window.addEventListener('focus', resume);
-    return () => {
-      document.removeEventListener('visibilitychange', resume);
-      window.removeEventListener('pageshow', resume);
-      window.removeEventListener('focus', resume);
-    };
-  }, []);
+  // Note: foreground-resume handler used to live here (visibilitychange /
+  // pageshow / focus → resumeAudioGraph() + el.play()). Ownership moved to
+  // useMusicHandoff so all handoff modes (off/v1/v2/v3) go through one seam;
+  // the off-branch is a byte-for-byte reimplementation of the old handler.
 
   // ── User controls ─────────────────────────────────────────────────────────
 
