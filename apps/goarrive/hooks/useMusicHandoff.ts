@@ -112,6 +112,34 @@ async function headCheck(uri: string): Promise<boolean> {
 // 1s keeps drift under ~1s worst case, which is inaudible when we swap.
 const POSITION_SYNC_MS = 1000;
 
+// Debounce before re-pointing the shadow at a new gain bucket when the member
+// moves the slider. Every src swap costs the element its buffer, so we wait for
+// the slider to settle rather than swapping on every pixel of travel.
+const BUCKET_REPICK_DEBOUNCE_MS = 400;
+
+// How much buffered runway the paused v3 shadow must hold ahead of the live
+// playhead before we leave it alone. Below this we re-seek to refill.
+const SHADOW_BUFFER_MARGIN_S = 5;
+
+// Minimum gap between v3 warm-up seeks. Without it the tick re-seeks while the
+// previous fetch is still in flight, so the buffer never fills — the treadmill
+// that left the shadow cold at the hide seam.
+const SHADOW_SEEK_COOLDOWN_MS = 4000;
+
+/**
+ * True if `pos` sits inside one of the element's buffered ranges with at least
+ * `margin` seconds still buffered ahead of it.
+ */
+function hasBufferedRunway(el: HTMLMediaElement, pos: number, margin: number): boolean {
+  try {
+    const b = el.buffered;
+    for (let i = 0; i < b.length; i++) {
+      if (pos >= b.start(i) && pos + margin <= b.end(i)) return true;
+    }
+  } catch {}
+  return false;
+}
+
 // How long we wait after resumeAudioGraph() before falling back to the
 // user-tap retry path. 3s covers the observed suspended→running latency on
 // iOS Safari devices (verified during device spike A/B/C).
@@ -159,6 +187,10 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
   // v3 only: a second blessed element (never wired to the Web Audio graph)
   const shadowMusicElRef = useRef<HTMLAudioElement | null>(null);
   const currentUrlRef = useRef<string | null>(null);
+  // Gain bucket currently loaded into the shadow, so slider movement only pays
+  // for an src swap when it actually crosses a bucket boundary.
+  const currentBucketRef = useRef<number | null>(null);
+  const lastShadowSeekAtRef = useRef(0);
   const isMutedRef = useRef(isMuted);
   const isPausedRef = useRef(isPaused);
   const volumeRef = useRef(volume);
@@ -230,61 +262,104 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
     log('[HANDOFF/prime]', JSON.stringify({ variant: variantRef.current }));
   }, []);
 
-  const swapTrack = useCallback((url: string) => {
-    currentUrlRef.current = url;
-    if (variantRef.current === 'off') return;
+  /**
+   * Point the shadow at the pre-rendered gain variant matching the CURRENT
+   * slider position.
+   *
+   * The loudness is baked into the file — `element.volume` is a no-op on iOS,
+   * which is the whole reason the buckets exist — so the only way to change
+   * background loudness is to change which file the shadow holds. That makes
+   * this the single place volume is actually applied, and it must run on slider
+   * movement as well as on track change.
+   *
+   * `force` re-applies even when the bucket is unchanged; used on track change,
+   * where the src has to move regardless of volume.
+   */
+  const applyBucket = useCallback((url: string, force: boolean) => {
+    const variant = variantRef.current;
+    if (variant === 'off') return;
+    const shadow = variant === 'v3' ? shadowMusicElRef.current : shadowElRef.current;
+    if (!shadow) return;
 
-    // Client-side volume-bucket picker: unconditional, no flag guard.
     // opts.volume = slider² (passed as volume*volume from useWorkoutMusic).
     const sliderPct = Math.sqrt(volumeRef.current) * 100;
     const gainEffective = (sliderPct / 100) ** 2;
     const bucketPicked = pickNearestBucket(sliderPct);
-    const variantUri = buildVariantGcsUri(url, bucketPicked);
+    // Swapping src throws away the buffer we spent the last tick building, so
+    // don't pay that cost when the slider hasn't crossed a bucket boundary.
+    if (!force && currentBucketRef.current === bucketPicked) return;
+    // While backgrounded the shadow IS the audible element, so pausing it and
+    // reloading a new src would cut the music dead. A slider move followed by
+    // backgrounding inside the debounce window lands exactly here — which is
+    // the member's normal "set the volume, then leave" gesture. Defer instead:
+    // the next slider move or track change re-applies once we're foreground.
+    // `force` (a genuine track change) must still move the src.
+    if (!force && inBackgroundRef.current) return;
 
-    if (variantRef.current === 'v3') {
-      const shadow = shadowMusicElRef.current;
-      if (!shadow) return;
-      if (variantUri) {
-        // Async: HEAD-check variant, fall back to full-volume on 404 (first-play case).
-        // Staleness guard: a newer swapTrack updates currentUrlRef synchronously,
-        // so if the HEAD resolves after the next swap, this callback bails.
-        void headCheck(variantUri).then((exists) => {
-          if (currentUrlRef.current !== url) return;
-          const finalUri = exists ? variantUri : url;
-          const fallbackUsed = !exists;
-          try { shadow.pause(); shadow.src = finalUri; shadow.load(); } catch {}
-          log('[VOLUME_BUCKET]', { sliderDisplay: sliderPct, gainEffective, bucketPicked, sourceUri: finalUri, fallbackUsed });
-        });
-      } else {
-        // Non-Firebase-Storage URL (dev/test) — mirror as-is, no HEAD check.
-        try { shadow.pause(); shadow.src = url; shadow.load(); } catch {}
-      }
-      log('[HANDOFF/swap v3]', { url: url.slice(0, 60) });
-      return;
-    }
-
-    const shadow = shadowElRef.current;
-    if (!shadow) return;
-    const variant = variantRef.current;
-    if (variantUri) {
-      void headCheck(variantUri).then((exists) => {
-        if (currentUrlRef.current !== url) return;
-        const finalUri = exists ? variantUri : url;
-        const fallbackUsed = !exists;
-        try { shadow.pause(); shadow.src = finalUri; shadow.load(); } catch {}
-        // Foreground behavior: v1 plays muted, v2 stays paused.
-        if (variant === 'v1' && !isPausedRef.current) {
-          try { shadow.play().catch(() => {}); } catch {}
-        }
-        log('[VOLUME_BUCKET]', { sliderDisplay: sliderPct, gainEffective, bucketPicked, sourceUri: finalUri, fallbackUsed });
-      });
-    } else {
-      try { shadow.pause(); shadow.src = url; shadow.load(); } catch {}
+    // Foreground behavior: v1 plays muted, v2/v3 stay paused.
+    const resumeIfV1 = () => {
       if (variant === 'v1' && !isPausedRef.current) {
         try { shadow.play().catch(() => {}); } catch {}
       }
+    };
+    const point = (finalUri: string) => {
+      try { shadow.pause(); shadow.src = finalUri; shadow.load(); } catch {}
+      currentBucketRef.current = bucketPicked;
+      // load() resets the element to 0 with an empty buffer; clear the cooldown
+      // so the warm-up tick may re-seek to the live playhead immediately.
+      lastShadowSeekAtRef.current = 0;
+      resumeIfV1();
+    };
+
+    const variantUri = buildVariantGcsUri(url, bucketPicked);
+    if (!variantUri) {
+      // Non-Firebase-Storage URL (dev/test) — mirror as-is, no HEAD check.
+      point(url);
+      return;
     }
+
+    // Async: HEAD-check variant, fall back to full-volume on 404 (first-play case).
+    void headCheck(variantUri).then((exists) => {
+      // Staleness guards: a newer swapTrack updates currentUrlRef synchronously,
+      // and the member may have moved the slider again while this was in flight.
+      if (currentUrlRef.current !== url) return;
+      if (pickNearestBucket(Math.sqrt(volumeRef.current) * 100) !== bucketPicked) return;
+      // Re-check: the page may have backgrounded while this HEAD was in flight,
+      // making the shadow audible. Same reasoning as the synchronous guard.
+      if (!force && inBackgroundRef.current) return;
+      const finalUri = exists ? variantUri : url;
+      point(finalUri);
+      log('[VOLUME_BUCKET]', {
+        sliderDisplay: sliderPct, gainEffective, bucketPicked,
+        sourceUri: finalUri, fallbackUsed: !exists,
+      });
+    });
   }, []);
+
+  const swapTrack = useCallback((url: string) => {
+    currentUrlRef.current = url;
+    if (variantRef.current === 'off') return;
+    // New track: the src must move even if the bucket is identical.
+    currentBucketRef.current = null;
+    applyBucket(url, true);
+    if (variantRef.current === 'v3') log('[HANDOFF/swap v3]', { url: url.slice(0, 60) });
+  }, [applyBucket]);
+
+  // ── Slider → bucket re-pick ────────────────────────────────────────────────
+  // Without this the bucket is chosen once, when the track attaches, and then
+  // frozen: moving the slider updates volumeRef and the in-app Web Audio gain,
+  // but never re-points the shadow. In-app volume therefore tracks the slider
+  // while background volume stays stuck at whatever the slider read at attach,
+  // so leaving the app jumps to an unrelated level. Debounced because each swap
+  // costs the shadow its buffer.
+  useEffect(() => {
+    if (!enabled) return;
+    if (variantRef.current === 'off') return;
+    const url = currentUrlRef.current;
+    if (!url) return;
+    const t = window.setTimeout(() => applyBucket(url, false), BUCKET_REPICK_DEBOUNCE_MS);
+    return () => window.clearTimeout(t);
+  }, [volume, enabled, applyBucket]);
 
   const teardownShadow = useCallback(() => {
     // v3: tear down the blessed shadow music element
@@ -301,6 +376,8 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
     shadowElRef.current = null;
     audibleElRef.current = null;
     currentUrlRef.current = null;
+    currentBucketRef.current = null;
+    lastShadowSeekAtRef.current = 0;
     inBackgroundRef.current = false;
     if (tapRetryCleanupRef.current) {
       tapRetryCleanupRef.current();
@@ -336,14 +413,31 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       if (!audible || !shadow) return;
       if (inBackgroundRef.current) return;
       if (document.visibilityState !== 'visible') return;
+
+      // v1's shadow is PLAYING, so it advances on its own and only needs a
+      // nudge when it genuinely drifts. Threshold avoids audible micro-glitches.
+      if (variantRef.current !== 'v3') {
+        try {
+          if (Math.abs(shadow.currentTime - audible.currentTime) > 0.1) {
+            shadow.currentTime = audible.currentTime;
+          }
+        } catch {}
+        return;
+      }
+
+      // v3's shadow is PAUSED, so it never advances: drift against the audible
+      // grows by a full second every tick and a drift test is true every time.
+      // Seeking on each tick restarts buffering before the previous fetch lands,
+      // so the element stays permanently cold — the opposite of warming it.
+      // Instead, seek only when the live playhead is about to run past what the
+      // shadow has actually buffered, and otherwise leave the fetch alone.
       try {
-        // Only nudge if drift is > 100ms to avoid audible micro-glitches on v1.
-        // v3's shadow is paused and silent here, so its seeks are inaudible;
-        // after the first buffer fill these land inside the buffered range and
-        // cost no additional network.
-        if (Math.abs(shadow.currentTime - audible.currentTime) > 0.1) {
-          shadow.currentTime = audible.currentTime;
-        }
+        if (shadow.seeking) return;
+        const pos = audible.currentTime;
+        if (hasBufferedRunway(shadow, pos, SHADOW_BUFFER_MARGIN_S)) return;
+        if (Date.now() - lastShadowSeekAtRef.current < SHADOW_SEEK_COOLDOWN_MS) return;
+        lastShadowSeekAtRef.current = Date.now();
+        shadow.currentTime = pos;
       } catch {}
     };
     const interval = setInterval(tick, POSITION_SYNC_MS);

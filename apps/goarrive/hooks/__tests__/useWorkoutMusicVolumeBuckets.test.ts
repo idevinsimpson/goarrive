@@ -9,7 +9,6 @@ import { describe, test, expect } from 'vitest';
 // ── Mirror the pure helpers from useWorkoutMusic.ts ─────────────────────────
 
 const VOLUME_BUCKETS = [1.0, 0.5, 0.25, 0.12, 0.05];
-const DEFAULT_BUCKET = 0.12;
 
 function nearestBucket(gain: number): number {
   return VOLUME_BUCKETS.reduce((best, b) =>
@@ -89,6 +88,27 @@ describe('prefetch dedup guard', () => {
 
 // ── Fire-and-forget contract ─────────────────────────────────────────────────
 
+/**
+ * Mirrors the prefetch bookkeeping in attachTrack: which buckets a call would
+ * request, and what happens to those keys when the call rejects.
+ */
+function makeAttemptGuard() {
+  const prefetched = new Set<string>();
+  const k = (style: string, index: number, b: number) => `${style}:${index}:${b}`;
+  return {
+    pending(style: string, index: number): number[] {
+      return VOLUME_BUCKETS.filter((b) => {
+        if (prefetched.has(k(style, index, b))) return false;
+        prefetched.add(k(style, index, b));
+        return true;
+      });
+    },
+    release(style: string, index: number, buckets: number[]) {
+      for (const b of buckets) prefetched.delete(k(style, index, b));
+    },
+  };
+}
+
 describe('fire-and-forget contract', () => {
   test('does not throw when callable rejects', async () => {
     const failingCallable = () =>
@@ -103,23 +123,29 @@ describe('fire-and-forget contract', () => {
     ).resolves.toBeUndefined();
   });
 
-  test('default + current bucket are deduplicated when slider near default', () => {
-    // At slider=0.35, gain² ≈ 0.1225, nearestBucket = 0.12 = DEFAULT_BUCKET
-    const gain = 0.35 * 0.35;
-    const current = nearestBucket(gain);
-    const bucketsToRequest = Array.from(new Set([current, DEFAULT_BUCKET]));
-    // Both resolve to 0.12 — dedup collapses to one entry
-    expect(bucketsToRequest).toHaveLength(1);
-    expect(bucketsToRequest[0]).toBe(0.12);
+  test('attach warms every bucket, not just the slider position and the default', () => {
+    // Replaces the old two-bucket assertion. The shadow re-points whenever the
+    // member crosses a bucket boundary, so any bucket left unrendered 404s and
+    // falls back to full volume — the member moves the slider and hears nothing
+    // change. Measured 2026-08-14: `edm/track_2` carried exactly gain_025 +
+    // gain_012 and nothing else, the fingerprint of the old two-bucket warm.
+    // Costs no extra invocations: the callable takes a bucket array.
+    const guard = makeAttemptGuard();
+    expect(guard.pending('edm', 2)).toEqual(VOLUME_BUCKETS);
   });
 
-  test('default + current bucket are two distinct values when slider is high', () => {
-    // At slider=1.0, gain²=1.0, nearestBucket=1.0 ≠ DEFAULT_BUCKET=0.12
-    const gain = 1.0 * 1.0;
-    const current = nearestBucket(gain);
-    const bucketsToRequest = Array.from(new Set([current, DEFAULT_BUCKET]));
-    expect(bucketsToRequest).toHaveLength(2);
-    expect(bucketsToRequest).toContain(1.0);
-    expect(bucketsToRequest).toContain(0.12);
+  test('a failed prefetch is retried later in the session', () => {
+    // The guard recorded ATTEMPTS, not successes: keys were added before the
+    // call and never removed on rejection, so one transient error left the
+    // track cold for the rest of the session. fetchTrack:220 clears its key on
+    // failure; this must match.
+    const guard = makeAttemptGuard();
+    const first = guard.pending('edm', 15);
+    expect(first).toEqual(VOLUME_BUCKETS);
+    // Nothing retries while the call is still considered done.
+    expect(guard.pending('edm', 15)).toEqual([]);
+    // On rejection the keys are released.
+    guard.release('edm', 15, first);
+    expect(guard.pending('edm', 15)).toEqual(VOLUME_BUCKETS);
   });
 });

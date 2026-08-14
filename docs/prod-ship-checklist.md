@@ -114,20 +114,35 @@ Before the client picker reaches members (needs Devin's typed go for a Hosting d
   fallback on genuinely new tracks. Acceptable by design, but decide whether that is the
   intended steady state before wide rollout.
 
-- [ ] **Pre-render warms only 2 of 5 buckets.** `attachTrack` fire-and-forget requests the
-  current-slider bucket plus the `0.12` default. A member who moves the slider to a
-  different bucket mid-session hits a miss on that bucket until it renders. Backfilled
-  tracks have all five; organically-generated tracks do not. Consider warming all five on
-  first attach, or accept the gap knowingly.
+- [x] **Pre-render warms only 2 of 5 buckets.** ~~`attachTrack` fire-and-forget requests the
+  current-slider bucket plus the `0.12` default.~~ **Fixed on PR #285 (pending merge).**
+  Confirmed live, not theoretical: a 2026-08-14 Storage audit (18 styles × tracks 1–24 ×
+  five buckets, HEAD per object) found `edm/track_2` holding exactly `gain_025` + `gain_012`
+  and nothing else — the precise fingerprint of the two-bucket warm. `attachTrack` now warms
+  all of `VOLUME_BUCKETS`. **Cost re-measured and it was cheaper than assumed:** the callable
+  takes a bucket array, so five buckets is the *same single invocation* and one source
+  download, not 2.5×.
+
+  This stopped being optional when #285 landed the slider-driven re-pick: the shadow now
+  re-points on every bucket crossing, so any unrendered bucket 404s to full volume and reads
+  to the member as "the volume control does nothing."
 
 - [ ] **Hoist the `exists()` short-circuit above `srcFile.download()`** before wide
   rollout. Today a repeat call re-downloads the source MP3 even when all five variants are
   already cached, so steady-state cost is proportional to plays rather than to misses.
   `maxInstances=10` bounds the blast radius but does not remove the waste.
 
-- [ ] **Dedup guard records attempts, not successes** (`useWorkoutMusic.ts`). A failed
-  pre-render is never retried for the rest of the session, so a transient error leaves that
-  track cold until the next session. `fetchTrack` already does this correctly — mirror it.
+- [x] **Dedup guard records attempts, not successes** (`useWorkoutMusic.ts`).
+  **Fixed on PR #285 (pending merge)** — the keys are now released when the callable
+  rejects, mirroring `fetchTrack:220`. The same Storage audit found `edm/track_15` with
+  **zero** buckets despite having a full-volume source, which is what this bug produces:
+  one transient failure marks the track done for the session and it never retries.
+
+  **Still requires a one-time manual backfill.** The fix stops the gap recurring; it does
+  not retroactively render tracks that are already partial. `edm/track_2` and
+  `edm/track_15` need `generateMusicVolumeVariants` run for all five buckets, and must be
+  re-verified by HEAD rather than by the callable's response — per-bucket failures still
+  return 200 (open item below).
 
 - [ ] **No kill switch on the client picker.** It fires on every `swapTrack` on web with no
   flag guard. If it misbehaves in production the only remedy is a Hosting rollback. Worth a
@@ -169,6 +184,65 @@ AGENTS.md §6 excludes Cloud Functions changes from standing approval:
 See `docs/render-workout-video-service.md` for the service contract and the
 `contracts/rendered-video/emitter-player-contract-v1.json` fixture that locks the
 emitter↔player agreement.
+
+### 2026-08-14 — `useRenderedVideoPlayback` has NO effective test coverage (false green)
+
+`apps/goarrive/hooks/__tests__/useRenderedVideoPlayback.test.tsx` **has never executed a
+single assertion.** It fails at collection with `SyntaxError: Unexpected token 'typeof'`,
+so vitest reports it as one failed *suite* while the aggregate test count still reads
+green. Verified pre-existing on clean `main` (stash + re-run in isolation).
+
+This matters more than a normal broken test: `useRenderedVideoPlayback` is the **client
+half of the continuous-video feature** — the dual-mode playback hook the render pipeline
+exists to feed. The render service is being built on top of a hook whose tests are
+decorative.
+
+Root cause, traced end to end — it is **not** a `.tsx` transform gap:
+
+1. `@testing-library/react-native` is CommonJS, so vitest **externalizes** it.
+2. Externalized deps never enter vite's transform pipeline, so the
+   `^react-native$` → `react-native-web` alias in `vitest.config.ts` **does not apply to
+   them**.
+3. It therefore resolves bare `react-native` through Node and loads the real
+   `node_modules/react-native/index.js`, whose line 27 is Flow syntax:
+   `import typeof * as ReactNativePublicAPI from './index.js.flow';`
+
+General lesson: **the RN→RN-web alias protects our own source only.** It cannot protect a
+CommonJS dependency that imports React Native itself.
+
+**A config-only fix does not work — do not spend time re-attempting it.** Tried and
+measured 2026-08-14, both reverted:
+
+- `test.server.deps.inline: [/@testing-library\/react-native/]` — still throws.
+- `test.server.deps.inline: true` (inline everything, as a diagnostic) — still throws.
+
+Reproduced in isolation with a one-line probe (`await import('@testing-library/react-native')`),
+and confirmed outside vitest entirely with `node -e "require('@testing-library/react-native')"`,
+which produces the same error with a full stack ending at `react-native/index.js:27`. Pulling
+the dependency into vite's transform pipeline does not make the alias intercept its
+resolution of bare `react-native`.
+
+So the migration below is the only route; there is no config shortcut.
+
+Fixing the import alone is not sufficient — there are three blockers, and the second and
+third only surface once the first is cleared:
+
+- [ ] **Migrate off `@testing-library/react-native`** to `test-utils/renderHook.ts`
+      (the pattern #270 applied everywhere else). This is the only file in the repo still
+      importing it.
+- [ ] **Add an element-level render helper.** `test-utils/renderHook.ts` exports `act` and
+      `renderHook` (with `rerender`/`unmount`), covering 29 call sites — but the test at
+      `:652` does a standalone `render(<CommitTimeVideoSwapHarness …/>)`. Do **not** delete
+      that case to clear the import: it covers the ref-identity reattach bug (#266) where
+      React replaces the committed element under a stable ref.
+- [ ] **Convert 20 × `jest.fn()` → `vi.fn()`.** `test-setup.ts` is a single line
+      (`@testing-library/jest-dom`) with no `jest` shim; vitest supplies `vi`. This file is
+      the only one in the repo using `jest.*`.
+
+**Done means the assertions pass, not that the file collects.** If they fail once they run,
+that is a real defect in already-merged code and must be resolved before more render work
+stacks on top. Sequence after PR #267 merges — #267 touches both this test file and
+`useRenderedVideoPlayback.ts`. (`vitest.config.ts` is *not* in #267's diff.)
 
 ### 2026-08-11 — PR #237 prod flags
 

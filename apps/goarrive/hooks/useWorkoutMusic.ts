@@ -50,16 +50,11 @@ export type { MusicQueueInput } from './useWorkoutMusic.helpers';
 const MAX_NEW_GENERATIONS_PER_SESSION = 3;
 
 // Volume buckets for iOS shadow-audio pre-render (slider² → gain).
-// Ordered from highest to lowest for nearest-match search.
+// All of them are warmed on attach — the shadow re-points whenever the member
+// crosses a bucket boundary, so a partially-warmed track falls back to full
+// volume mid-session. The nearest-match search lives in useMusicHandoff
+// (pickNearestBucket), which is the side that actually selects a variant.
 const VOLUME_BUCKETS = [1.0, 0.5, 0.25, 0.12, 0.05];
-const DEFAULT_BUCKET = 0.12; // covers the most common default slider position
-
-/** Returns the nearest bucket to the given squared-slider gain value. */
-function nearestBucket(gain: number): number {
-  return VOLUME_BUCKETS.reduce((best, b) =>
-    Math.abs(b - gain) < Math.abs(best - gain) ? b : best
-  );
-}
 
 // ── Hook ────────────────────────────────────────────────────────────────────
 
@@ -331,11 +326,17 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
 
     // Fire-and-forget: pre-render volume-attenuated variants so the iOS shadow
     // <audio> can load a pre-attenuated file instead of playing at full volume.
-    // Only fires for the current slider bucket + the default 0.12 bucket.
-    // Never blocks playback — failures are silently discarded.
-    const squaredGain = volumeRef.current * volumeRef.current;
-    const bucketsToRequest = Array.from(new Set([nearestBucket(squaredGain), DEFAULT_BUCKET]));
-    const newBuckets = bucketsToRequest.filter((b) => {
+    // Never blocks playback — failures are logged, not surfaced.
+    //
+    // Warm ALL buckets, not just the current slider position + the 0.12 default.
+    // The shadow re-points whenever the member crosses a bucket boundary
+    // (useMusicHandoff.applyBucket), so any unrendered bucket 404s and falls back
+    // to full volume — the member moves the slider and hears nothing change.
+    // Measured 2026-08-14: `edm/track_2` had exactly gain_025 + gain_012 and
+    // nothing else, the precise fingerprint of the old two-bucket warm.
+    // This costs no extra invocations: the callable takes a bucket array, so one
+    // call covers all five and downloads the source once regardless.
+    const newBuckets = VOLUME_BUCKETS.filter((b) => {
       const key = `${style}:${index}:${b}`;
       if (prefetchedBucketsRef.current.has(key)) return false;
       prefetchedBucketsRef.current.add(key);
@@ -347,6 +348,10 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
         { generated: string[]; skipped: string[]; errors: Array<{ bucket: number; message: string }> }
       >(functions, 'generateMusicVolumeVariants');
       call({ style, trackNumber: index, buckets: newBuckets }).catch((err: unknown) => {
+        // Record attempts, not successes: leaving the keys set would mark these
+        // buckets done for the rest of the session, so one transient error
+        // leaves the track permanently cold. fetchTrack:220 does the same.
+        for (const b of newBuckets) prefetchedBucketsRef.current.delete(`${style}:${index}:${b}`);
         console.warn('[MUSIC] volume-variant prefetch failed:', (err as Error)?.message ?? err);
       });
     }

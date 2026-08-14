@@ -248,6 +248,82 @@ describe('swapTrack volume-bucket picker (v3)', () => {
     hook.unmount();
   });
 
+  // Debounce in useMusicHandoff before a slider change re-points the shadow.
+  const REPICK_SETTLE_MS = 400 + 60;
+
+  test('moving the slider re-points the shadow at the matching bucket', async () => {
+    // Regression: the bucket used to be chosen only inside swapTrack, so it was
+    // frozen at whatever the slider read when the track attached. Moving the
+    // slider changed in-app volume (Web Audio gain) but left background volume
+    // stuck, because loudness is baked into the file — element.volume is a
+    // no-op on iOS.
+    const QUIET_VARIANT_URL = 'https://firebasestorage.googleapis.com/v0/b/goarrive.appspot.com/o/music_cache%2Fchill%2Fgain_005%2Ftrack_10.mp3?alt=media';
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true } as Response);
+    const { hook, shadow } = setupPicker(0.25); // sliderPct 50 → bucket 0.25
+
+    act(() => { hook.result.current.swapTrack(FIREBASE_URL); });
+    await act(async () => { await Promise.resolve(); });
+    expect(shadow.src).toBe(VARIANT_URL);
+
+    // Member drags to 10%: volume = 0.1² = 0.01 → sliderPct 10 → bucket 0.05.
+    // rerender() already wraps in act(); nesting it inside an async act()
+    // swallows the passive-effect flush that schedules the debounce.
+    hook.rerender({ volume: 0.01 });
+    await new Promise((r) => setTimeout(r, REPICK_SETTLE_MS));
+    await act(async () => { await Promise.resolve(); });
+
+    expect(shadow.src).toBe(QUIET_VARIANT_URL);
+    hook.unmount();
+  });
+
+  test('slider movement inside the same bucket does not churn the shadow src', async () => {
+    // Every src swap costs the shadow its buffer, which is what makes the hide
+    // seam audible — so only cross-boundary movement may re-point it.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true } as Response);
+    const { hook, shadow } = setupPicker(0.25); // sliderPct 50 → bucket 0.25
+
+    act(() => { hook.result.current.swapTrack(FIREBASE_URL); });
+    await act(async () => { await Promise.resolve(); });
+    expect(shadow.src).toBe(VARIANT_URL);
+    const loadCallsAfterAttach = vi.mocked(shadow.load).mock.calls.length;
+
+    // sliderPct 55 → gain 0.3025 → still nearest 0.25, same bucket.
+    hook.rerender({ volume: 0.3025 });
+    await new Promise((r) => setTimeout(r, REPICK_SETTLE_MS));
+    await act(async () => { await Promise.resolve(); });
+
+    expect(shadow.src).toBe(VARIANT_URL);
+    expect(vi.mocked(shadow.load).mock.calls.length).toBe(loadCallsAfterAttach);
+    hook.unmount();
+  });
+
+  test('a slider change landing after backgrounding must not cut the live shadow', async () => {
+    // The shadow IS the audible element once backgrounded, so pausing it and
+    // reloading a new src would stop the music dead. A slider move followed by
+    // pressing home inside the debounce window lands exactly here — the
+    // member's normal "set the volume, then leave" gesture.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true } as Response);
+    const { hook, shadow } = setupPicker(0.25);
+
+    act(() => { hook.result.current.swapTrack(FIREBASE_URL); });
+    await act(async () => { await Promise.resolve(); });
+    expect(shadow.src).toBe(VARIANT_URL);
+
+    // Move the slider, then background before the debounce fires.
+    hook.rerender({ volume: 0.01 });
+    visibilityState = 'hidden';
+    act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+    const pauseCallsAtHandoff = vi.mocked(shadow.pause).mock.calls.length;
+
+    await new Promise((r) => setTimeout(r, REPICK_SETTLE_MS));
+    await act(async () => { await Promise.resolve(); });
+
+    // src untouched and the live element never paused: music keeps playing.
+    expect(shadow.src).toBe(VARIANT_URL);
+    expect(vi.mocked(shadow.pause).mock.calls.length).toBe(pauseCallsAtHandoff);
+    hook.unmount();
+  });
+
   test('stale HEAD from prior swap does not overwrite newer track (currentUrlRef guard)', async () => {
     const URL_A = 'https://firebasestorage.googleapis.com/v0/b/goarrive.appspot.com/o/music_cache%2Fchill%2Ftrack_10.mp3?alt=media';
     const URL_B = 'https://firebasestorage.googleapis.com/v0/b/goarrive.appspot.com/o/music_cache%2Fchill%2Ftrack_20.mp3?alt=media';
