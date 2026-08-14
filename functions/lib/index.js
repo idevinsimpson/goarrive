@@ -88,14 +88,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.sendMemberInvite = exports.claimMemberAccount = exports.getMemberClaimStatus = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.startFreePlan = exports.deactivateDiscountCode = exports.createDiscountCode = exports.getFunnelFolder = exports.createFunnelCheckoutSession = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.listPublicCoaches = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.resolveRenderedWorkoutVideo = exports.renderWorkoutVideo = exports.marcoHuddleTurn = exports.slackEvents = exports.getSessionWorkout = exports.playbookBookingIcs = exports.bookViaBookingToken = exports.resolvePlaybookBookingToken = exports.revokePlaybookBookingLink = exports.createPlaybookBookingLink = exports.cleanupExpiredBookingRequests = exports.bookPlaybookSession = void 0;
-exports.sendWeeklyDigest = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.batchGenerateVoice = exports.onMemberCreated = exports.onCoachCreated = exports.getWorkoutMusic = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = void 0;
-exports.generateMusicVolumeVariants = exports.sendDripEmail = exports.unsyncMemberPlaybook = exports.syncTemplatePlaybookToMembers = exports.resumeStripeSubscription = exports.pauseStripeSubscription = exports.pollMovementVariationJobs = exports.dismissMovementVariation = exports.finalizeMovementVariation = exports.getMovementVariationStatus = exports.startMovementVariation = exports.listEquipmentImages = exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.submitGuestReflection = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.adminAssignLeadToCoach = exports.onIntakeSubmissionCreated = exports.onCoachFeedbackStatusChanged = exports.onCoachFeedbackCreated = void 0;
-const fs = __importStar(require("fs"));
-const os = __importStar(require("os"));
-const path = __importStar(require("path"));
-const child_process_1 = require("child_process");
-const util_1 = require("util");
+exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.sendMemberInvite = exports.claimMemberAccount = exports.getMemberClaimStatus = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.startFreePlan = exports.deactivateDiscountCode = exports.createDiscountCode = exports.getFunnelFolder = exports.createFunnelCheckoutSession = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.listPublicCoaches = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = exports.getSessionWorkout = exports.playbookBookingIcs = exports.bookViaBookingToken = exports.resolvePlaybookBookingToken = exports.revokePlaybookBookingLink = exports.createPlaybookBookingLink = exports.cleanupExpiredBookingRequests = exports.bookPlaybookSession = void 0;
+exports.onCoachFeedbackStatusChanged = exports.onCoachFeedbackCreated = exports.sendWeeklyDigest = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.batchGenerateVoice = exports.onMemberCreated = exports.onCoachCreated = exports.getWorkoutMusic = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = void 0;
+exports.sendDripEmail = exports.unsyncMemberPlaybook = exports.syncTemplatePlaybookToMembers = exports.resumeStripeSubscription = exports.pauseStripeSubscription = exports.pollMovementVariationJobs = exports.dismissMovementVariation = exports.finalizeMovementVariation = exports.getMovementVariationStatus = exports.startMovementVariation = exports.listEquipmentImages = exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.submitGuestReflection = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.adminAssignLeadToCoach = exports.onIntakeSubmissionCreated = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -103,8 +98,8 @@ const https_1 = require("firebase-functions/v2/https");
 const params_1 = require("firebase-functions/params");
 const firestore_2 = require("firebase-admin/firestore");
 const stripe_1 = __importDefault(require("stripe"));
+const stripeFixtureSwitch_1 = require("./stripeFixtureSwitch");
 const googleapis_1 = require("googleapis");
-const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
 const zoom_1 = require("./zoom");
 const zoomRtms_1 = require("./zoomRtms");
 const ws_1 = __importDefault(require("ws"));
@@ -133,18 +128,6 @@ Object.defineProperty(exports, "slackEvents", { enumerable: true, get: function 
 // generates Marco's real OpenAI response, and writes the reply back to agent_messages.
 var huddle_bridge_1 = require("./huddle-bridge");
 Object.defineProperty(exports, "marcoHuddleTurn", { enumerable: true, get: function () { return huddle_bridge_1.marcoHuddleTurn; } });
-// ── Render Pipeline (Phase 2) — continuous-video MP4 render ──────────────────
-// Triggers on workout update when renderedVideo.status='pending' or blocks change.
-// Enqueues an OIDC-authenticated Cloud Tasks request to a private Cloud Run
-// service. RENDER_SERVICE_URL must be the deployed default run.app URL.
-// See docs/render-workout-video-service.md for queue and IAM prerequisites.
-var renderWorkoutVideo_1 = require("./renderWorkoutVideo");
-Object.defineProperty(exports, "renderWorkoutVideo", { enumerable: true, get: function () { return renderWorkoutVideo_1.renderWorkoutVideo; } });
-// Authenticated read-time boundary for rendered videos. It validates the
-// caller and immutable storage identity, then returns a short-lived URL
-// without persisting credentials or signed URLs.
-var renderedVideoResolver_1 = require("./renderedVideoResolver");
-Object.defineProperty(exports, "resolveRenderedWorkoutVideo", { enumerable: true, get: function () { return renderedVideoResolver_1.resolveRenderedWorkoutVideo; } });
 admin.initializeApp();
 const db = admin.firestore(); // IAM: datastore.user granted 2026-03-22
 const messaging = admin.messaging();
@@ -152,6 +135,8 @@ const messaging = admin.messaging();
 const stripeSecretKey = (0, params_1.defineSecret)('STRIPE_SECRET_KEY');
 const stripeWebhookSecret = (0, params_1.defineSecret)('STRIPE_WEBHOOK_SECRET');
 const stripeWebhookSecretConnect = (0, params_1.defineSecret)('STRIPE_WEBHOOK_SECRET_CONNECT');
+// Test-mode key for seed-coach fixture path. Requires sk_test_ prefix at runtime.
+const stripeTestKey = (0, params_1.defineSecret)('STRIPE_TEST_KEY');
 // ── Zoom Secrets ─────────────────────────────────────────────────────────────
 const zoomAccountId = (0, params_1.defineSecret)('ZOOM_ACCOUNT_ID');
 const zoomClientId = (0, params_1.defineSecret)('ZOOM_CLIENT_ID');
@@ -835,7 +820,7 @@ exports.createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey]
  *
  * TODO: Justin pricing — replace $19.99 hardcode with configurable price.
  */
-exports.createFunnelCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
+exports.createFunnelCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecretKey, stripeTestKey], invoker: 'public' }, async (request) => {
     var _a;
     const { submissionId, discountCode } = request.data;
     if (!submissionId) {
@@ -870,7 +855,7 @@ exports.createFunnelCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecr
             .where('checkoutStatus', '==', 'paid')
             .get();
         const applicationFeePercent = getTierSplit(activePayingSnap.size);
-        const stripe = getStripe(stripeSecretKey.value());
+        const stripe = (0, stripeFixtureSwitch_1.getStripeForCoach)(coachId, stripeSecretKey.value(), stripeTestKey.value() || undefined);
         const appBaseUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
         // ── Resolve discount code ──
         let promotionCodeId;
@@ -10997,7 +10982,7 @@ exports.pollMovementVariationJobs = (0, scheduler_1.onSchedule)({
  *
  * Params: { memberId: string, stripeSubscriptionId: string }
  */
-exports.pauseStripeSubscription = (0, https_1.onCall)({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
+exports.pauseStripeSubscription = (0, https_1.onCall)({ secrets: [stripeSecretKey, stripeTestKey], invoker: 'public' }, async (request) => {
     var _a, _b, _c;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -11019,7 +11004,7 @@ exports.pauseStripeSubscription = (0, https_1.onCall)({ secrets: [stripeSecretKe
         throw new https_1.HttpsError('permission-denied', 'Subscription belongs to a different coach');
     if (subData.memberId !== memberId)
         throw new https_1.HttpsError('invalid-argument', 'memberId does not match subscription');
-    const stripe = getStripe(stripeSecretKey.value());
+    const stripe = (0, stripeFixtureSwitch_1.getStripeForCoach)(callerCoachId, stripeSecretKey.value(), stripeTestKey.value() || undefined);
     await stripe.subscriptions.update(stripeSubscriptionId, {
         pause_collection: { behavior: 'void' },
     });
@@ -11032,7 +11017,7 @@ exports.pauseStripeSubscription = (0, https_1.onCall)({ secrets: [stripeSecretKe
  *
  * Params: { memberId: string, stripeSubscriptionId: string }
  */
-exports.resumeStripeSubscription = (0, https_1.onCall)({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
+exports.resumeStripeSubscription = (0, https_1.onCall)({ secrets: [stripeSecretKey, stripeTestKey], invoker: 'public' }, async (request) => {
     var _a, _b, _c;
     const callerUid = (_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid;
     if (!callerUid)
@@ -11061,7 +11046,7 @@ exports.resumeStripeSubscription = (0, https_1.onCall)({ secrets: [stripeSecretK
     // Round up to whole days so the member always gets the full window.
     const extendedDays = pausedAtTs ? Math.ceil(pauseDurationMs / (24 * 60 * 60 * 1000)) : 0;
     console.log(`[resumeStripeSubscription] extending subscription ${stripeSubscriptionId} for member ${memberId} (coach ${callerCoachId}): ${extendedDays} day(s)`);
-    const stripe = getStripe(stripeSecretKey.value());
+    const stripe = (0, stripeFixtureSwitch_1.getStripeForCoach)(callerCoachId, stripeSecretKey.value(), stripeTestKey.value() || undefined);
     // Empty string clears pause_collection and resumes billing.
     await stripe.subscriptions.update(stripeSubscriptionId, {
         pause_collection: '',
@@ -11280,109 +11265,5 @@ exports.sendDripEmail = (0, scheduler_1.onSchedule)({ schedule: 'every 15 minute
         }
     }
     console.log('[sendDripEmail] Batch complete — sent:', sent, 'failed:', failed);
-});
-// ─── generateMusicVolumeVariants — pre-render volume-attenuated music variants ──
-// Generates up to 5 gain-attenuated MP3 variants for a music_cache track so the
-// iOS shadow <audio> element (which ignores el.volume) can load a pre-attenuated
-// file instead of playing the source at full 100% volume.
-//
-// GCS key: music_cache/<style>/gain_<pct>/track_<n>.mp3
-// Buckets: 1.0→gain_100, 0.5→gain_050, 0.25→gain_025, 0.12→gain_012, 0.05→gain_005
-//
-// Idempotent: skips any bucket whose destination object already exists in GCS.
-// Auth: callable requires sign-in (same as getWorkoutMusic).
-// ─────────────────────────────────────────────────────────────────────────────
-const VOLUME_BUCKETS_DEFAULT = [1.0, 0.5, 0.25, 0.12, 0.05];
-function gainToPct(gain) {
-    return String(Math.round(gain * 100)).padStart(3, '0');
-}
-exports.generateMusicVolumeVariants = (0, https_1.onCall)({
-    region: 'us-central1',
-    timeoutSeconds: 300,
-    memory: '2GiB',
-    maxInstances: 10,
-    invoker: 'public',
-}, async (request) => {
-    var _a;
-    if (!((_a = request.auth) === null || _a === void 0 ? void 0 : _a.uid)) {
-        throw new https_1.HttpsError('unauthenticated', 'Sign in required');
-    }
-    const { style, trackNumber, buckets } = request.data;
-    if (typeof style !== 'string' || !style) {
-        throw new https_1.HttpsError('invalid-argument', 'style is required');
-    }
-    if (typeof trackNumber !== 'number' || trackNumber < 0) {
-        throw new https_1.HttpsError('invalid-argument', 'trackNumber must be a non-negative integer');
-    }
-    const styleKey = style.toLowerCase();
-    const effectiveBuckets = Array.isArray(buckets) && buckets.length > 0
-        ? VOLUME_BUCKETS_DEFAULT.filter((b) => buckets.includes(b))
-        : VOLUME_BUCKETS_DEFAULT;
-    const bucket = admin.storage().bucket();
-    const srcPath = `music_cache/${styleKey}/track_${trackNumber}.mp3`;
-    const srcFile = bucket.file(srcPath);
-    const [srcExists] = await srcFile.exists();
-    if (!srcExists) {
-        throw new https_1.HttpsError('not-found', `Source track not found: ${srcPath}`);
-    }
-    // Download source to /tmp
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `mvv-${styleKey}-${trackNumber}-`));
-    const srcLocal = path.join(tmpDir, 'src.mp3');
-    try {
-        await srcFile.download({ destination: srcLocal });
-        const generated = [];
-        const skipped = [];
-        const errors = [];
-        for (const gain of effectiveBuckets) {
-            const pct = gainToPct(gain);
-            const destPath = `music_cache/${styleKey}/gain_${pct}/track_${trackNumber}.mp3`;
-            const destFile = bucket.file(destPath);
-            const [destExists] = await destFile.exists();
-            if (destExists) {
-                skipped.push(destPath);
-                continue;
-            }
-            const outLocal = path.join(tmpDir, `out_${pct}.mp3`);
-            try {
-                // eslint-disable-next-line @typescript-eslint/no-var-requires
-                const ffmpegBin = require('ffmpeg-static');
-                await execFileAsync(ffmpegBin, [
-                    '-y',
-                    '-i', srcLocal,
-                    '-af', `volume=${gain}`,
-                    '-c:a', 'libmp3lame',
-                    '-q:a', '4',
-                    outLocal,
-                ], { timeout: 120000 });
-                await bucket.upload(outLocal, {
-                    destination: destPath,
-                    metadata: {
-                        contentType: 'audio/mpeg',
-                        cacheControl: 'public, max-age=31536000',
-                    },
-                });
-                generated.push(destPath);
-            }
-            catch (err) {
-                const msg = err instanceof Error ? err.message : String(err);
-                console.error('[generateMusicVolumeVariants] FFmpeg/upload error', { gain, destPath, msg });
-                errors.push({ bucket: gain, message: msg });
-            }
-            finally {
-                try {
-                    fs.unlinkSync(outLocal);
-                }
-                catch ( /* best-effort */_b) { /* best-effort */ }
-            }
-        }
-        console.info('[generateMusicVolumeVariants] done', { styleKey, trackNumber, generated: generated.length, skipped: skipped.length, errors: errors.length });
-        return { generated, skipped, errors };
-    }
-    finally {
-        try {
-            fs.rmSync(tmpDir, { recursive: true, force: true });
-        }
-        catch ( /* best-effort */_c) { /* best-effort */ }
-    }
 });
 //# sourceMappingURL=index.js.map
