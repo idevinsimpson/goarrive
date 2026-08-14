@@ -16,9 +16,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { doc, getDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { db } from '../../lib/firebase';
 
 interface FunnelFolderResult {
   folder: {
@@ -51,9 +49,6 @@ const FALLBACK_MONTHLY_CENTS = 1999;
 interface Submission {
   coachId: string;
   programName?: string;
-  status?: string;
-  firstName?: string;
-  email?: string;
   folderId?: string;
   subscriptionPathId?: string;
 }
@@ -64,6 +59,10 @@ interface SubscriptionPath {
   templatePlaybookId: string;
   musicStyle?: string;
   pricePerMonthCents?: number;
+}
+
+interface CheckoutSubmissionResult {
+  submission: Submission;
 }
 
 export default function FunnelCheckoutScreen() {
@@ -83,12 +82,16 @@ export default function FunnelCheckoutScreen() {
     if (!submissionId) return;
     (async () => {
       try {
-        const snap = await getDoc(doc(db, 'onboarding_submissions', submissionId));
-        if (!snap.exists()) {
+        const getCheckoutSubmission = httpsCallable<
+          { submissionId: string },
+          CheckoutSubmissionResult
+        >(getFunctions(), 'getCheckoutSubmission');
+        const { data: submissionData } = await getCheckoutSubmission({ submissionId });
+        if (!submissionData?.submission?.coachId) {
           setError('Submission not found. Please restart the sign-up flow.');
           return;
         }
-        const sub = snap.data() as Submission;
+        const sub = submissionData.submission;
         setSubmission(sub);
 
         if (sub.folderId && sub.coachId) {
@@ -107,8 +110,12 @@ export default function FunnelCheckoutScreen() {
             // Fall back to default price on lookup failure — server will do the same on checkout.
           }
         }
-      } catch (err) {
-        setError('Failed to load your submission. Please try again.');
+      } catch (err: any) {
+        if (err?.code === 'functions/not-found') {
+          setError('Submission not found. Please restart the sign-up flow.');
+        } else {
+          setError('Failed to load your submission. Please try again.');
+        }
       } finally {
         setLoading(false);
       }
