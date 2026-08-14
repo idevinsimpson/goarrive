@@ -88,9 +88,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getSharedPlan = exports.updateMemberGuidancePhase = exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.sendMemberInvite = exports.claimMemberAccount = exports.getMemberClaimStatus = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.startFreePlan = exports.deactivateDiscountCode = exports.createDiscountCode = exports.createFunnelCheckoutSession = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.listPublicCoaches = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.marcoHuddleTurn = exports.slackEvents = exports.getSessionWorkout = exports.playbookBookingIcs = exports.bookViaBookingToken = exports.resolvePlaybookBookingToken = exports.revokePlaybookBookingLink = exports.createPlaybookBookingLink = exports.cleanupExpiredBookingRequests = exports.bookPlaybookSession = void 0;
-exports.onIntakeSubmissionCreated = exports.onCoachFeedbackStatusChanged = exports.onCoachFeedbackCreated = exports.sendWeeklyDigest = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.batchGenerateVoice = exports.onMemberCreated = exports.onCoachCreated = exports.getWorkoutMusic = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = void 0;
-exports.sendDripEmail = exports.unsyncMemberPlaybook = exports.syncTemplatePlaybookToMembers = exports.resumeStripeSubscription = exports.pauseStripeSubscription = exports.pollMovementVariationJobs = exports.dismissMovementVariation = exports.finalizeMovementVariation = exports.getMovementVariationStatus = exports.startMovementVariation = exports.listEquipmentImages = exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.submitGuestReflection = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.adminAssignLeadToCoach = void 0;
+exports.coachIcalFeed = exports.getSessionEventLog = exports.getDeadLetterItems = exports.retryDeadLetter = exports.processReminders = exports.getSystemHealth = exports.startRtmsStream = exports.zoomRtmsWebhook = exports.zoomRtmsOauthCallback = exports.zoomWebhook = exports.cancelInstance = exports.rescheduleInstance = exports.allocateAllPendingInstances = exports.allocateSessionInstance = exports.generateUpcomingInstances = exports.updateRecurringSlot = exports.createRecurringSlot = exports.manageZoomRoom = exports.sendMemberInvite = exports.claimMemberAccount = exports.getMemberClaimStatus = exports.activateCoachInvite = exports.inviteCoach = exports.addCoach = exports.activateCtsOptIn = exports.stripeConnectWebhook = exports.stripeWebhook = exports.startFreePlan = exports.deactivateDiscountCode = exports.createDiscountCode = exports.getFunnelFolder = exports.createFunnelCheckoutSession = exports.createCheckoutSession = exports.disconnectStripeAccount = exports.refreshStripeAccountStatus = exports.createStripeConnectLink = exports.listPublicCoaches = exports.cleanupReadNotifications = exports.sendPlanSharedNotification = exports.renderWorkoutVideo = exports.marcoHuddleTurn = exports.slackEvents = exports.getSessionWorkout = exports.playbookBookingIcs = exports.bookViaBookingToken = exports.resolvePlaybookBookingToken = exports.revokePlaybookBookingLink = exports.createPlaybookBookingLink = exports.cleanupExpiredBookingRequests = exports.bookPlaybookSession = void 0;
+exports.onCoachFeedbackCreated = exports.sendWeeklyDigest = exports.shareMeta = exports.getEmbeddedSessionJoinConfig = exports.batchGenerateVoice = exports.onMemberCreated = exports.onCoachCreated = exports.getWorkoutMusic = exports.generateVoice = exports.createMissingLedgerEntry = exports.getConnectedAccountData = exports.setYearlyEarningsCap = exports.setProfitShareStartDate = exports.reconcileConnectedAccountPayments = exports.analyzeMovementReps = exports.analyzeMovement = exports.retryFailedGifGeneration = exports.cleanupOldMovementThumbnails = exports.generateMovementGif = exports.cleanupNotificationCooldowns = exports.continueRecurringAssignments = exports.onWorkoutCompleted = exports.onMovementMediaUploaded = exports.onWorkoutLogReviewed = exports.onWorkoutAssigned = exports.checkGcalConflicts = exports.removeGcalConflictAccount = exports.updateGcalConflictCalendars = exports.listGcalConflictCalendars = exports.gcalConflictCallback = exports.initGcalConflictAuth = exports.disconnectGoogleCalendar = exports.syncToGoogleCalendar = exports.googleCalendarCallback = exports.initGoogleCalendarAuth = exports.migrateIcalTokens = exports.regenerateIcalToken = exports.refreshRecordingUrl = exports.checkSlotConflicts = exports.requestSkipInstance = exports.detectNoShows = exports.syncSlotDuration = exports.batchPhaseTransition = exports.waiveCtsFee = exports.enforceCtsAccountability = exports.adminGetCoachData = exports.setAdminRole = exports.seedMissingCoachDocs = exports.getSharedPlan = exports.updateMemberGuidancePhase = void 0;
+exports.sendDripEmail = exports.unsyncMemberPlaybook = exports.syncTemplatePlaybookToMembers = exports.resumeStripeSubscription = exports.pauseStripeSubscription = exports.pollMovementVariationJobs = exports.dismissMovementVariation = exports.finalizeMovementVariation = exports.getMovementVariationStatus = exports.startMovementVariation = exports.listEquipmentImages = exports.saveEquipmentImageChoice = exports.generateEquipmentImage = exports.submitGuestReflection = exports.resolveShareToken = exports.revokeShareToken = exports.updateShareToken = exports.createShareToken = exports.adminAssignLeadToCoach = exports.onIntakeSubmissionCreated = exports.onCoachFeedbackStatusChanged = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -127,6 +127,13 @@ Object.defineProperty(exports, "slackEvents", { enumerable: true, get: function 
 // generates Marco's real OpenAI response, and writes the reply back to agent_messages.
 var huddle_bridge_1 = require("./huddle-bridge");
 Object.defineProperty(exports, "marcoHuddleTurn", { enumerable: true, get: function () { return huddle_bridge_1.marcoHuddleTurn; } });
+// ── Render Pipeline (Phase 2) — continuous-video MP4 render ──────────────────
+// Triggers on workout update when renderedVideo.status='pending' or blocks change.
+// Enqueues a Cloud Tasks task to the Cloud Run render job (RENDER_JOB_URL).
+// ME-RV-01: RENDER_TASK_QUEUE must be provisioned before activation.
+// ME-RV-02: RENDER_JOB_URL must be set to the deployed Cloud Run job URL.
+var renderWorkoutVideo_1 = require("./renderWorkoutVideo");
+Object.defineProperty(exports, "renderWorkoutVideo", { enumerable: true, get: function () { return renderWorkoutVideo_1.renderWorkoutVideo; } });
 admin.initializeApp();
 const db = admin.firestore(); // IAM: datastore.user granted 2026-03-22
 const messaging = admin.messaging();
@@ -957,6 +964,62 @@ exports.createFunnelCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSecr
         console.error('[createFunnelCheckoutSession] Error:', (_a = err === null || err === void 0 ? void 0 : err.message) !== null && _a !== void 0 ? _a : err);
         throw new https_1.HttpsError('internal', 'Something went wrong. Please try again.');
     }
+});
+// ─── getFunnelFolder ─────────────────────────────────────────────────────────
+/**
+ * Unauthenticated callable — returns a projected subset of playbook_folders +
+ * coaches data for the funnel/checkout pages without exposing raw documents.
+ * Replaces direct client Firestore reads which fail with PERMISSION_DENIED for
+ * unauth visitors (firestore.rules requires isAuthenticated() on playbook_folders).
+ */
+exports.getFunnelFolder = (0, https_1.onCall)({ invoker: 'public' }, async (request) => {
+    const { coachId, folderId } = request.data;
+    if (!coachId || typeof coachId !== 'string') {
+        throw new https_1.HttpsError('invalid-argument', 'coachId is required');
+    }
+    if (!folderId || typeof folderId !== 'string') {
+        throw new https_1.HttpsError('invalid-argument', 'folderId is required');
+    }
+    const [folderSnap, coachSnap] = await Promise.all([
+        db.collection('playbook_folders').doc(folderId).get(),
+        db.collection('coaches').doc(coachId).get(),
+    ]);
+    if (!folderSnap.exists) {
+        throw new https_1.HttpsError('not-found', 'Folder not found');
+    }
+    const folderData = folderSnap.data();
+    // Verify folder belongs to the requested coach (prevents cross-coach enumeration)
+    if (folderData.coachId !== coachId) {
+        throw new https_1.HttpsError('not-found', 'Folder not found');
+    }
+    // Only expose lead-gen folders that have subscription paths
+    const subscriptionPaths = folderData.subscriptionPaths;
+    if (!Array.isArray(subscriptionPaths) || subscriptionPaths.length === 0) {
+        throw new https_1.HttpsError('not-found', 'Folder not found');
+    }
+    const coachData = coachSnap.exists ? coachSnap.data() : {};
+    // Return explicit projection only — no raw document data
+    return {
+        folder: {
+            id: folderId,
+            name: folderData.name || '',
+            subscriptionPaths,
+            emailTemplate: folderData.emailTemplate
+                ? {
+                    subject: folderData.emailTemplate.subject || '',
+                    body: folderData.emailTemplate.body || '',
+                }
+                : null,
+            funnelPhotoUrl: folderData.funnelPhotoUrl || null,
+            campaignName: folderData.campaignName || null,
+        },
+        coach: {
+            id: coachId,
+            displayName: coachData.displayName || coachData.name || '',
+            brandColor: coachData.brandColor || null,
+            funnelPhotoUrl: coachData.funnelPhotoUrl || null,
+        },
+    };
 });
 // ─── createDiscountCode ───────────────────────────────────────────────────────
 /**
