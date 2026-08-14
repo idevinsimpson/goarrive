@@ -1,10 +1,10 @@
 /** @vitest-environment jsdom */
 
-import { vi } from 'vitest';
+import { vi, describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { act, renderHook } from '../../test-utils/renderHook';
 import { Platform } from 'react-native';
 import { createBlessedMusicPlayer, getAudioContextState } from '../useWorkoutTTS';
-import { useMusicHandoff } from '../useMusicHandoff';
+import { useMusicHandoff, pickNearestBucket, buildVariantGcsUri } from '../useMusicHandoff';
 
 vi.mock('../useWorkoutTTS', () => ({
   createBlessedMusicPlayer: vi.fn(),
@@ -161,5 +161,122 @@ describe('useMusicHandoff v3 shadow controls', () => {
     expect(audible.pause).toHaveBeenCalled();
     expect(audible.play).not.toHaveBeenCalled();
     unmount();
+  });
+});
+
+// ── pickNearestBucket unit tests ──────────────────────────────────────────────
+
+describe('pickNearestBucket', () => {
+  test.each([
+    [100, 1.0],
+    [70, 0.5],
+    [50, 0.25],
+    [35, 0.12],
+    [22, 0.05],
+    [10, 0.05],
+  ])('slider %i%% → bucket %f', (sliderPct, expected) => {
+    expect(pickNearestBucket(sliderPct)).toBe(expected);
+  });
+});
+
+// ── swapTrack volume-bucket picker integration ────────────────────────────────
+
+describe('swapTrack volume-bucket picker (v3)', () => {
+  const FIREBASE_URL = 'https://firebasestorage.googleapis.com/v0/b/goarrive.appspot.com/o/music_cache%2Fchill%2Ftrack_10.mp3?alt=media';
+  // slider 50% → volume*volume = 0.25 → sliderPct = sqrt(0.25)*100 = 50 → bucket 0.25 → gain_025
+  const VARIANT_URL = 'https://firebasestorage.googleapis.com/v0/b/goarrive.appspot.com/o/music_cache%2Fchill%2Fgain_025%2Ftrack_10.mp3?alt=media';
+
+  let visibilityState: DocumentVisibilityState;
+  const originalOSField = Platform.OS;
+  const originalVisibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+
+  beforeEach(() => {
+    Object.defineProperty(Platform, 'OS', { value: 'web', configurable: true, writable: true });
+    visibilityState = 'visible';
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibilityState });
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => { cb(0); return 1; });
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    vi.mocked(getAudioContextState).mockReturnValue('running');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    Object.defineProperty(Platform, 'OS', { value: originalOSField, configurable: true, writable: true });
+    if (originalVisibility) Object.defineProperty(document, 'visibilityState', originalVisibility);
+  });
+
+  function setupPicker(volume = 0.25) {
+    const shadow = makeAudio();
+    vi.mocked(createBlessedMusicPlayer).mockReturnValue(shadow);
+    const hook = renderHook(
+      (props: { volume: number }) =>
+        useMusicHandoff({ enabled: true, isPaused: false, isMuted: false, ...props, musicPausedRef: { current: false }, musicHoldRef: { current: false }, musicOffRef: { current: false } }),
+      { initialProps: { volume } },
+    );
+    act(() => { hook.result.current.primeShadow(makeAudio()); });
+    return { hook, shadow };
+  }
+
+  test('variant exists (HEAD 200) → variant URI used, fallbackUsed=false', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true } as Response);
+    const { hook, shadow } = setupPicker(0.25); // slider² = 0.25 → sliderPct=50 → bucket 0.25
+
+    act(() => { hook.result.current.swapTrack(FIREBASE_URL); });
+    // Wait for the async headCheck + .then() to resolve
+    await act(async () => { await Promise.resolve(); });
+
+    expect(shadow.src).toBe(VARIANT_URL);
+    const logCalls = vi.mocked(console.info).mock.calls.map((c: any[]) => c[0] as string);
+    const bucketLog = logCalls.find((l: string) => l.includes('[VOLUME_BUCKET]'));
+    expect(bucketLog).toBeTruthy();
+    expect(bucketLog).toContain('"fallbackUsed":false');
+    hook.unmount();
+  });
+
+  test('variant 404 → falls back to fullVolumeUri, fallbackUsed=true', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false } as Response);
+    const { hook, shadow } = setupPicker(0.25);
+
+    act(() => { hook.result.current.swapTrack(FIREBASE_URL); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(shadow.src).toBe(FIREBASE_URL);
+    const logCalls = vi.mocked(console.info).mock.calls.map((c: any[]) => c[0] as string);
+    const bucketLog = logCalls.find((l: string) => l.includes('[VOLUME_BUCKET]'));
+    expect(bucketLog).toBeTruthy();
+    expect(bucketLog).toContain('"fallbackUsed":true');
+    hook.unmount();
+  });
+
+  test('stale HEAD from prior swap does not overwrite newer track (currentUrlRef guard)', async () => {
+    const URL_A = 'https://firebasestorage.googleapis.com/v0/b/goarrive.appspot.com/o/music_cache%2Fchill%2Ftrack_10.mp3?alt=media';
+    const URL_B = 'https://firebasestorage.googleapis.com/v0/b/goarrive.appspot.com/o/music_cache%2Fchill%2Ftrack_20.mp3?alt=media';
+    const VARIANT_A = 'https://firebasestorage.googleapis.com/v0/b/goarrive.appspot.com/o/music_cache%2Fchill%2Fgain_025%2Ftrack_10.mp3?alt=media';
+    const VARIANT_B = 'https://firebasestorage.googleapis.com/v0/b/goarrive.appspot.com/o/music_cache%2Fchill%2Fgain_025%2Ftrack_20.mp3?alt=media';
+
+    // Queue HEAD-check resolvers so we can decide the order manually.
+    const resolvers: Array<(v: Response) => void> = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => new Promise<Response>((resolve) => {
+      resolvers.push(resolve);
+    }));
+
+    const { hook, shadow } = setupPicker(0.25);
+
+    // Two rapid swaps — currentUrlRef ends on B, but HEAD-A is still in flight.
+    act(() => { hook.result.current.swapTrack(URL_A); });
+    act(() => { hook.result.current.swapTrack(URL_B); });
+    expect(resolvers).toHaveLength(2);
+
+    // B resolves first — should land on shadow.
+    resolvers[1]({ ok: true } as Response);
+    await act(async () => { await Promise.resolve(); });
+    expect(shadow.src).toBe(VARIANT_B);
+
+    // A resolves LATE — the guard must drop it, keeping B.
+    resolvers[0]({ ok: true } as Response);
+    await act(async () => { await Promise.resolve(); });
+    expect(shadow.src).toBe(VARIANT_B);
+    expect(shadow.src).not.toBe(VARIANT_A);
+    hook.unmount();
   });
 });

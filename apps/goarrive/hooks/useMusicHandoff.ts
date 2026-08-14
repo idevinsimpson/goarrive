@@ -60,6 +60,53 @@ function log(...args: any[]) {
   pushHandoffLog(line);
 }
 
+// ── Volume-bucket picker ──────────────────────────────────────────────────────
+// Maps a slider percentage (0..100) through slider² to the nearest pre-rendered
+// gain bucket [1.0, 0.5, 0.25, 0.12, 0.05]. Used to select the GCS variant
+// URI for the iOS shadow <audio> element.
+
+const PICKER_BUCKETS = [1.0, 0.5, 0.25, 0.12, 0.05];
+
+/** Maps sliderPct (0..100) → slider² → nearest gain bucket. */
+export function pickNearestBucket(sliderPct: number): number {
+  const gain = (sliderPct / 100) ** 2;
+  return PICKER_BUCKETS.reduce((best, b) =>
+    Math.abs(b - gain) < Math.abs(best - gain) ? b : best
+  );
+}
+
+/**
+ * Transforms a full-volume Firebase Storage URL into the variant URL for the
+ * given gain bucket. Returns null if the URL is not a recognised music_cache
+ * Firebase Storage URL (e.g. test/dev URLs).
+ */
+export function buildVariantGcsUri(fullVolumeUri: string, bucket: number): string | null {
+  try {
+    const m = fullVolumeUri.match(
+      /^(https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/[^/]+\/o\/)([^?]+)(\?.*)?$/
+    );
+    if (!m) return null;
+    const decodedPath = decodeURIComponent(m[2]);
+    const pathMatch = decodedPath.match(/^(music_cache\/[^/]+\/)(track_\d+\.mp3)$/);
+    if (!pathMatch) return null;
+    const gainLabel = String(Math.round(bucket * 100)).padStart(3, '0');
+    const variantPath = `${pathMatch[1]}gain_${gainLabel}/${pathMatch[2]}`;
+    return `${m[1]}${encodeURIComponent(variantPath)}${m[3] ?? '?alt=media'}`;
+  } catch {
+    return null;
+  }
+}
+
+/** HEAD-checks a URI; returns true if the server responds 2xx. */
+async function headCheck(uri: string): Promise<boolean> {
+  try {
+    const res = await fetch(uri, { method: 'HEAD' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // How often we nudge the muted element's position to match the audible one.
 // Longer = less CPU, more drift on hide; shorter = tighter sync, more work.
 // 1s keeps drift under ~1s worst case, which is inaudible when we swap.
@@ -181,26 +228,55 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
     currentUrlRef.current = url;
     if (variantRef.current === 'off') return;
 
+    // Client-side volume-bucket picker: unconditional, no flag guard.
+    // opts.volume = slider² (passed as volume*volume from useWorkoutMusic).
+    const sliderPct = Math.sqrt(volumeRef.current) * 100;
+    const gainEffective = (sliderPct / 100) ** 2;
+    const bucketPicked = pickNearestBucket(sliderPct);
+    const variantUri = buildVariantGcsUri(url, bucketPicked);
+
     if (variantRef.current === 'v3') {
       const shadow = shadowMusicElRef.current;
       if (!shadow) return;
-      // Mirror the URL onto the shadow but do NOT play in foreground —
-      // audible on graph handles foreground; shadow only plays when we hide.
-      try { shadow.pause(); shadow.src = url; shadow.load(); } catch {}
+      if (variantUri) {
+        // Async: HEAD-check variant, fall back to full-volume on 404 (first-play case).
+        // Staleness guard: a newer swapTrack updates currentUrlRef synchronously,
+        // so if the HEAD resolves after the next swap, this callback bails.
+        void headCheck(variantUri).then((exists) => {
+          if (currentUrlRef.current !== url) return;
+          const finalUri = exists ? variantUri : url;
+          const fallbackUsed = !exists;
+          try { shadow.pause(); shadow.src = finalUri; shadow.load(); } catch {}
+          log('[VOLUME_BUCKET]', { sliderDisplay: sliderPct, gainEffective, bucketPicked, sourceUri: finalUri, fallbackUsed });
+        });
+      } else {
+        // Non-Firebase-Storage URL (dev/test) — mirror as-is, no HEAD check.
+        try { shadow.pause(); shadow.src = url; shadow.load(); } catch {}
+      }
       log('[HANDOFF/swap v3]', { url: url.slice(0, 60) });
       return;
     }
 
     const shadow = shadowElRef.current;
     if (!shadow) return;
-    try {
-      shadow.pause();
-      shadow.src = url;
-      shadow.load();
-    } catch {}
-    // Foreground behavior: v1 plays muted, v2 stays paused.
-    if (variantRef.current === 'v1' && !isPausedRef.current) {
-      try { shadow.play().catch(() => {}); } catch {}
+    const variant = variantRef.current;
+    if (variantUri) {
+      void headCheck(variantUri).then((exists) => {
+        if (currentUrlRef.current !== url) return;
+        const finalUri = exists ? variantUri : url;
+        const fallbackUsed = !exists;
+        try { shadow.pause(); shadow.src = finalUri; shadow.load(); } catch {}
+        // Foreground behavior: v1 plays muted, v2 stays paused.
+        if (variant === 'v1' && !isPausedRef.current) {
+          try { shadow.play().catch(() => {}); } catch {}
+        }
+        log('[VOLUME_BUCKET]', { sliderDisplay: sliderPct, gainEffective, bucketPicked, sourceUri: finalUri, fallbackUsed });
+      });
+    } else {
+      try { shadow.pause(); shadow.src = url; shadow.load(); } catch {}
+      if (variant === 'v1' && !isPausedRef.current) {
+        try { shadow.play().catch(() => {}); } catch {}
+      }
     }
   }, []);
 
