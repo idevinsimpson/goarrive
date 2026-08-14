@@ -1,17 +1,16 @@
 // ─── Workout Video Render Service ─────────────────────────────────────────────
 // Cloud Run service entry point. Receives a POST from Cloud Tasks with:
-//   { workoutId: string, version: number }
+//   { workoutId: string, version: number, sourceHash: string }
 //
-// Auth: OIDC via Cloud Tasks service account
-// (`cloudtasks-invoker@<project>.iam.gserviceaccount.com`), verified with
-// `verifyIdToken()` on every request. NOT unauthenticated. Cloud Run service
-// is deployed with `--no-allow-unauthenticated`.
+// Auth: the private Cloud Run service validates Cloud Tasks' Google-signed
+// OIDC token and run.invoker IAM before this container receives the request.
+// See docs/render-workout-video-service.md.
 //
 // Runs the rendering pipeline using FFmpeg, uploads the result to Cloud
 // Storage, and writes the final status back to the workout's renderedVideo
 // field in Firestore using a transaction to guard against stale writes.
 //
-// This file is compiled to dist/renderJob.js and is the CMD of the
+// This file is compiled to lib/renderJob.js and is the CMD of the
 // docker/renderWorkoutVideo.Dockerfile container.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -23,8 +22,20 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { FieldValue } from 'firebase-admin/firestore';
-import { OAuth2Client } from 'google-auth-library';
+import {
+  buildReadyRenderedVideoMeta,
+  buildRenderStorageLocation,
+  flattenWorkout,
+  isCurrentRenderRequest,
+  isValidRenderRequestIdentity,
+  PersistedRenderedVideoMeta,
+  RenderRequestIdentity,
+  Segment,
+} from './renderContract';
+import {
+  commitFailedRenderIfCurrent,
+  commitReadyRenderIfCurrent,
+} from './renderState';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const ffmpegBin: string = require('ffmpeg-static');
@@ -35,17 +46,11 @@ const execFileAsync = promisify(execFile);
 
 const BUCKET_NAME = process.env.STORAGE_BUCKET || 'goarrive.firebasestorage.app';
 const PORT = parseInt(process.env.PORT || '8080', 10);
-// The public URL of this Cloud Run service — used as the OIDC token audience.
-const RENDER_JOB_URL = process.env.RENDER_JOB_URL || '';
 
 const CANVAS_W = 720;
 const CANVAS_H = 1440;
 const TIMER_H = 160;
 const MOVEMENT_H = 1280;
-
-const VIDEO_EXTENSIONS = /\.(mp4|mov|m4v|webm|avi|mkv)(\?.*)?$/i;
-
-const oauthClient = new OAuth2Client();
 
 // ── Firebase init ─────────────────────────────────────────────────────────────
 
@@ -142,110 +147,6 @@ function generateAss(
 
 // ── Block flattening ──────────────────────────────────────────────────────────
 
-export interface Segment {
-  type: 'video' | 'image' | 'rest';
-  label: string;
-  url?: string;
-  durationSec: number;
-  _localPath?: string;
-  _isGif?: boolean;
-  /** Segment-unique id: `${parentBlockId}#${segIndex}` (Option A). */
-  blockId: string;
-}
-
-/**
- * Parse a segment id produced by Option-A encoding back into its components.
- * `"blockAbc#2"` → `{ parentBlockId: "blockAbc", segIndex: 2 }`.
- * Ids without a `#` suffix (e.g. intro/outro) return `segIndex: 0`.
- */
-export function parseSegmentId(id: string): { parentBlockId: string; segIndex: number } {
-  const hashIdx = id.lastIndexOf('#');
-  if (hashIdx === -1) return { parentBlockId: id, segIndex: 0 };
-  const segIndex = parseInt(id.slice(hashIdx + 1), 10);
-  return { parentBlockId: id.slice(0, hashIdx), segIndex: isNaN(segIndex) ? 0 : segIndex };
-}
-
-const SPECIAL_BLOCK_TYPES = new Set([
-  'Intro', 'Outro', 'Demo', 'Transition', 'Water Break', 'Grab Equipment', 'Follow-Along Video',
-]);
-
-/**
- * Flatten a Firestore workout document into a flat ordered list of segments.
- * Each segment carries a globally-unique `blockId` using Option-A encoding:
- * `${parentBlockId}#${segIndex}` where segIndex is 0-based within the parent
- * block. This satisfies the `validateMeta` duplicate-blockId constraint.
- */
-export function flattenWorkout(workout: Record<string, unknown>): Segment[] {
-  const blocks = (workout.blocks as Record<string, unknown>[]) || [];
-  const segments: Segment[] = [];
-  const workoutRestDur = (workout.restDurationSeconds as number) || 30;
-
-  if (workout.introVideoUrl) {
-    segments.push({ type: 'video', label: 'Intro', url: workout.introVideoUrl as string, durationSec: 10, blockId: 'intro#0' });
-  }
-
-  for (const block of blocks) {
-    const bType = (block.type as string) || 'Circuit';
-    const movements = (block.movements as Record<string, unknown>[]) || [];
-    const parentId = (block.id as string) || bType;
-    let segIndex = 0;
-
-    if (bType === 'Follow-Along Video') {
-      segments.push({
-        type: 'video', label: (block.label || block.name || 'Follow-Along') as string,
-        url: block.videoUrl as string || '',
-        durationSec: (block.videoDurationSec || block.durationSec || 60) as number,
-        blockId: `${parentId}#${segIndex++}`,
-      });
-      continue;
-    }
-    if (bType === 'Water Break' || bType === 'Rest') {
-      segments.push({
-        type: 'rest', label: (block.label || block.name || 'Rest') as string,
-        durationSec: (block.durationSec || workoutRestDur) as number,
-        blockId: `${parentId}#${segIndex++}`,
-      });
-      continue;
-    }
-    if (SPECIAL_BLOCK_TYPES.has(bType)) {
-      if (block.videoUrl) {
-        segments.push({ type: 'video', label: bType, url: block.videoUrl as string, durationSec: (block.durationSec || 10) as number, blockId: `${parentId}#${segIndex++}` });
-      } else {
-        segments.push({ type: 'rest', label: bType, durationSec: (block.durationSec || 15) as number, blockId: `${parentId}#${segIndex++}` });
-      }
-      continue;
-    }
-
-    for (const mv of movements) {
-      const videoUrl = (mv.videoUrl || mv.mediaUrl || '') as string;
-      const workDur = ((mv.duration || mv.durationSec || mv.workSec || 30) as number);
-      const restAfter = ((mv.restAfter || mv.restSec || 0) as number);
-      const mvLabel = (mv.name || 'Movement') as string;
-
-      if (videoUrl && VIDEO_EXTENSIONS.test(videoUrl)) {
-        segments.push({ type: 'video', label: mvLabel, url: videoUrl, durationSec: workDur, blockId: `${parentId}#${segIndex++}` });
-      } else if (mv.thumbnailUrl || mv.posterUrl) {
-        segments.push({ type: 'image', label: mvLabel, url: (mv.thumbnailUrl || mv.posterUrl) as string, durationSec: workDur, blockId: `${parentId}#${segIndex++}` });
-      } else {
-        segments.push({ type: 'rest', label: mvLabel, durationSec: workDur, blockId: `${parentId}#${segIndex++}` });
-      }
-      if (restAfter > 0) {
-        segments.push({ type: 'rest', label: 'Rest', durationSec: restAfter, blockId: `${parentId}#${segIndex++}` });
-      }
-    }
-
-    if ((block.restDurationSeconds as number) > 0) {
-      segments.push({ type: 'rest', label: 'Rest', durationSec: block.restDurationSeconds as number, blockId: `${parentId}#${segIndex++}` });
-    }
-  }
-
-  if (workout.outroVideoUrl) {
-    segments.push({ type: 'video', label: 'Outro', url: workout.outroVideoUrl as string, durationSec: 10, blockId: 'outro#0' });
-  }
-
-  return segments;
-}
-
 // ── FFmpeg ────────────────────────────────────────────────────────────────────
 
 function buildSegmentArgs(seg: Segment, assPath: string, outputPath: string): string[] {
@@ -287,57 +188,31 @@ function buildSegmentArgs(seg: Segment, assPath: string, outputPath: string): st
 
 // ── Offset map builder ────────────────────────────────────────────────────────
 
-import type { RenderedVideoBlockOffset } from '../../apps/goarrive/utils/renderedVideoOffsetMap';
-
-/**
- * Build the block offset array from a flat segment list.
- * Zero-duration segments are skipped (they would fail `block-endMs-not-after-start`).
- */
-export function buildBlockOffsets(segments: Segment[]): RenderedVideoBlockOffset[] {
-  const offsets: RenderedVideoBlockOffset[] = [];
-  let offsetMs = 0;
-  for (const seg of segments) {
-    const durMs = Math.round(seg.durationSec * 1000);
-    if (durMs > 0) {
-      offsets.push({ blockId: seg.blockId, startMs: offsetMs, endMs: offsetMs + durMs });
-    }
-    offsetMs += durMs;
-  }
-  return offsets;
-}
-
-// ── Signed URL helper ─────────────────────────────────────────────────────────
-
-/**
- * Mint a short-lived signed URL for a stable Cloud Storage path.
- * Call this at read time (Phase 5 wiring) — never persist the result.
- */
-export async function getRenderedVideoUrl(storagePath: string, ttlHours = 24): Promise<string> {
-  // storagePath is gs://bucket/path — strip the gs://bucket/ prefix
-  const withoutScheme = storagePath.replace(/^gs:\/\/[^/]+\//, '');
-  const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
-  const [url] = await bucket.file(withoutScheme).getSignedUrl({ action: 'read', expires: expiresAt });
-  return url;
-}
-
 // ── Render pipeline ───────────────────────────────────────────────────────────
 
-interface RenderResult {
-  storagePath: string;
-  durationMs: number;
-  version: number;
-  blocks: RenderedVideoBlockOffset[];
+class StaleRenderError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StaleRenderError';
+  }
 }
 
-async function renderWorkout(workoutId: string, version: number): Promise<RenderResult> {
+async function renderWorkout(
+  workoutId: string,
+  identity: RenderRequestIdentity,
+): Promise<PersistedRenderedVideoMeta> {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `goarrive-render-${workoutId.slice(0, 8)}-`));
+  const workoutRef = db.collection('workouts').doc(workoutId);
 
   try {
-    const doc = await db.collection('workouts').doc(workoutId).get();
+    const doc = await workoutRef.get();
     if (!doc.exists) throw new Error(`Workout ${workoutId} not found`);
     const workout = doc.data() as Record<string, unknown>;
+    if (!isCurrentRenderRequest(workout, identity)) {
+      throw new StaleRenderError(`Render request is no longer current for ${workoutId}`);
+    }
 
-    const segments = flattenWorkout(workout);
+    const segments = flattenWorkout(workout, workoutId);
     const totalDurSec = segments.reduce((sum, s) => sum + s.durationSec, 0);
     const totalStr = fmtTime(totalDurSec);
 
@@ -359,6 +234,7 @@ async function renderWorkout(workoutId: string, version: number): Promise<Render
 
     // Render segments
     const blockOutputs: string[] = [];
+    const emittedSegments: Segment[] = [];
     for (let i = 0; i < segments.length; i++) {
       const seg = segments[i];
       if (seg.durationSec <= 0) continue;
@@ -368,13 +244,15 @@ async function renderWorkout(workoutId: string, version: number): Promise<Render
       try {
         await execFileAsync(ffmpegBin, buildSegmentArgs(seg, assPath, outPath), { timeout: 300_000 });
         blockOutputs.push(outPath);
+        emittedSegments.push(seg);
       } catch (err) {
         // Degrade to rest
-        const restSeg: Segment = { type: 'rest', label: seg.label, durationSec: seg.durationSec, blockId: seg.blockId };
+        const restSeg: Segment = { ...seg, type: 'rest', _localPath: undefined, _isGif: undefined };
         fs.writeFileSync(assPath, generateAss(seg.durationSec, totalStr, 'rest', seg.label));
         try {
           await execFileAsync(ffmpegBin, buildSegmentArgs(restSeg, assPath, outPath), { timeout: 120_000 });
           blockOutputs.push(outPath);
+          emittedSegments.push(restSeg);
         } catch (err2) {
           console.error(`[renderJob] Segment ${i} failed even as rest:`, (err2 as Error).message.slice(0, 200));
         }
@@ -393,14 +271,22 @@ async function renderWorkout(workoutId: string, version: number): Promise<Render
     const finalOut = path.join(tmpDir, 'final.mp4');
     await execFileAsync(ffmpegBin, ['-y', '-i', concatOut, '-c', 'copy', '-movflags', '+faststart', finalOut], { timeout: 300_000 });
 
-    // Upload — persist the stable storage path, never a signed URL
-    const storagePath = `gs://${BUCKET_NAME}/rendered-videos/${workoutId}/v${version}.mp4`;
-    const storageKey = `rendered-videos/${workoutId}/v${version}.mp4`;
-    await bucket.upload(finalOut, { destination: storageKey, metadata: { contentType: 'video/mp4', cacheControl: 'public, max-age=86400' } });
+    // Avoid uploading an artifact for a request superseded during FFmpeg work.
+    const beforeUpload = await workoutRef.get();
+    const latestWorkout = beforeUpload.data() as Record<string, unknown> | undefined;
+    if (!beforeUpload.exists || !latestWorkout || !isCurrentRenderRequest(latestWorkout, identity)) {
+      throw new StaleRenderError(`Render request was superseded before upload for ${workoutId}`);
+    }
 
-    const blocks = buildBlockOffsets(segments);
+    const location = buildRenderStorageLocation(BUCKET_NAME, workoutId, identity);
+    await bucket.upload(finalOut, {
+      destination: location.storageObject,
+      metadata: { contentType: 'video/mp4', cacheControl: 'public, max-age=31536000, immutable' },
+    });
 
-    return { storagePath, durationMs: Math.round(totalDurSec * 1000), version, blocks };
+    // Only emitted segments participate in offsets and duration. A segment
+    // omitted after both FFmpeg attempts must not leave a phantom timeline gap.
+    return buildReadyRenderedVideoMeta(BUCKET_NAME, workoutId, identity, emittedSegments);
   } finally {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   }
@@ -408,90 +294,79 @@ async function renderWorkout(workoutId: string, version: number): Promise<Render
 
 // ── HTTP server for Cloud Run service ─────────────────────────────────────────
 
-const server = http.createServer(async (req, res) => {
+export const server = http.createServer(async (req, res) => {
   if (req.method !== 'POST') {
     res.writeHead(405);
     res.end('Method not allowed');
     return;
   }
 
-  // Verify the OIDC token sent by Cloud Tasks
-  const authHeader = req.headers['authorization'];
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    res.writeHead(401);
-    res.end('Missing OIDC token');
-    return;
-  }
-  const idToken = authHeader.slice('Bearer '.length);
-  try {
-    await oauthClient.verifyIdToken({ idToken, audience: RENDER_JOB_URL });
-  } catch {
-    res.writeHead(401);
-    res.end('Invalid OIDC token');
-    return;
-  }
-
   let body = '';
-  req.on('data', (chunk) => { body += chunk; });
+  let bodyRejected = false;
+  req.on('data', (chunk) => {
+    if (bodyRejected) return;
+    body += chunk;
+    if (body.length > 65_536) {
+      bodyRejected = true;
+      res.writeHead(413);
+      res.end('Request body too large');
+    }
+  });
   req.on('end', async () => {
+    if (bodyRejected) return;
     let workoutId: string;
-    let version: number;
+    let identity: RenderRequestIdentity;
     try {
       const payload = JSON.parse(body);
       workoutId = payload.workoutId;
-      version = payload.version || 1;
-      if (!workoutId) throw new Error('workoutId required');
+      identity = { version: payload.version, sourceHash: payload.sourceHash };
+      if (typeof workoutId !== 'string' || !workoutId) throw new Error('workoutId required');
+      if (!isValidRenderRequestIdentity(identity)) {
+        throw new Error('positive integer version and 64-character sourceHash required');
+      }
     } catch (err) {
       res.writeHead(400);
       res.end(`Bad request: ${(err as Error).message}`);
       return;
     }
 
-    console.log(`[renderJob] Starting render for workout=${workoutId} version=${version}`);
+    const workoutRef = db.collection('workouts').doc(workoutId);
+    console.log(
+      `[renderJob] Starting render workout=${workoutId} ` +
+      `version=${identity.version} source=${identity.sourceHash.slice(0, 12)}`,
+    );
 
     try {
-      const result = await renderWorkout(workoutId, version);
+      const result = await renderWorkout(workoutId, identity);
+      const committed = await commitReadyRenderIfCurrent(db, workoutRef, identity, result);
+      if (!committed) throw new StaleRenderError(`Completion superseded for ${workoutId}`);
 
-      const docRef = db.collection('workouts').doc(workoutId);
-      let skipped = false;
-
-      // Stale-render guard: compare versions inside a transaction so a concurrent
-      // newer render can't be overwritten by a slower older one.
-      await db.runTransaction(async (tx) => {
-        const snap = await tx.get(docRef);
-        const currentVersion = (snap.data()?.renderedVideo?.version ?? 0) as number;
-        if (currentVersion > result.version) {
-          console.log(`[STALE-RENDER] version=${result.version} < current=${currentVersion}, skipping write`);
-          skipped = true;
-          return;
-        }
-        tx.update(docRef, {
-          renderedVideo: {
-            status: 'ready',
-            // storagePath is stable and never expires — sign URLs on demand with getRenderedVideoUrl()
-            storagePath: result.storagePath,
-            version: result.version,
-            durationMs: result.durationMs,
-            blocks: result.blocks,
-            renderedAt: FieldValue.serverTimestamp(),
-          },
-        });
-      });
-
-      if (!skipped) {
-        console.log(`[renderJob] Done — ${workoutId} v${result.version} at ${result.storagePath}`);
-      }
+      console.log(`[renderJob] Done — ${workoutId} v${result.version} at ${result.storagePath}`);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, workoutId, version, skipped }));
+      res.end(JSON.stringify({ ok: true, workoutId, version: identity.version, skipped: false }));
     } catch (err) {
+      if (err instanceof StaleRenderError) {
+        console.log(`[STALE-RENDER] ${err.message}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, workoutId, version: identity.version, skipped: true }));
+        return;
+      }
+
       const msg = (err instanceof Error ? err.message : String(err)).slice(0, 500);
       console.error(`[renderJob] Failed for ${workoutId}:`, msg);
 
-      await db.collection('workouts').doc(workoutId).update({
-        'renderedVideo.status': 'failed',
-        'renderedVideo.error': msg,
-        'renderedVideo.updatedAt': FieldValue.serverTimestamp(),
-      }).catch(() => {});
+      const failureCommitted = await commitFailedRenderIfCurrent(
+        db,
+        workoutRef,
+        identity,
+        msg,
+      ).catch(() => false);
+
+      if (!failureCommitted) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, workoutId, version: identity.version, skipped: true }));
+        return;
+      }
 
       res.writeHead(500);
       res.end(`Render failed: ${msg}`);

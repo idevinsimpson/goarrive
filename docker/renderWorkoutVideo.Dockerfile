@@ -4,6 +4,6 @@ WORKDIR /app
 COPY functions/package*.json ./
 RUN npm ci
 COPY functions/ .
-RUN npm run build
+RUN rm -rf lib && npm run build && test -f lib/renderJob.js
 # Runs as a Cloud Run service (HTTP server on $PORT, not a Cloud Run Job)
 CMD ["node", "lib/renderJob.js"]

@@ -12,17 +12,47 @@
 // ---------------------------------------------------------------------------
 
 export interface RenderedVideoBlockOffset {
+  /** Segment-unique renderer id. */
   blockId: string;
+  /** Original workout block id retained for player/state-machine mapping. */
+  parentBlockId?: string;
+  blockIndex?: number;
+  phase?:
+    | 'intro'
+    | 'outro'
+    | 'follow-along'
+    | 'special'
+    | 'work'
+    | 'movement-rest'
+    | 'block-rest';
+  movementId?: string;
+  movementIndex?: number;
   startMs: number;
   endMs: number;
 }
 
-export interface RenderedVideoMeta {
-  url: string;
+/** Timeline metadata consumed by the pure offset/seek utilities. */
+export interface RenderedVideoTimelineMeta {
   durationMs: number;
   version: number;
   status: 'pending' | 'rendering' | 'ready' | 'failed';
   blocks: RenderedVideoBlockOffset[];
+}
+
+/** Existing #263 read-time player contract. */
+export interface RenderedVideoMeta extends RenderedVideoTimelineMeta {
+  url: string;
+}
+
+/** Durable Firestore representation. Signed URLs are never persisted here. */
+export interface PersistedRenderedVideoMeta extends RenderedVideoTimelineMeta {
+  storagePath: string;
+  sourceHash: string;
+}
+
+/** Read-time representation returned after a trusted backend mints a URL. */
+export interface ResolvedRenderedVideoMeta extends PersistedRenderedVideoMeta {
+  url: string;
 }
 
 export interface OffsetLookupResult {
@@ -53,7 +83,7 @@ export type PlayerCommand =
  * Empty blocks: returns blockIndex -1, blockId '', both boundary flags true.
  */
 export function lookupBlockAtVideoTime(
-  meta: RenderedVideoMeta,
+  meta: RenderedVideoTimelineMeta,
   videoTimeMs: number,
 ): OffsetLookupResult {
   const { blocks } = meta;
@@ -123,7 +153,7 @@ export function lookupBlockAtVideoTime(
  * Returns null when blockId is not found in meta.blocks.
  */
 export function videoTimeForBlock(
-  meta: RenderedVideoMeta,
+  meta: RenderedVideoTimelineMeta,
   blockId: string,
   blockOffsetMs = 0,
 ): number | null {
@@ -135,13 +165,13 @@ export function videoTimeForBlock(
 }
 
 /** Clamp videoTimeMs to the valid range [0, durationMs]. */
-export function clampVideoTime(meta: RenderedVideoMeta, videoTimeMs: number): number {
+export function clampVideoTime(meta: RenderedVideoTimelineMeta, videoTimeMs: number): number {
   return Math.max(0, Math.min(videoTimeMs, meta.durationMs));
 }
 
 /** Return the block immediately after the named one, or null if it is last. */
 export function nextBlockAfter(
-  meta: RenderedVideoMeta,
+  meta: RenderedVideoTimelineMeta,
   blockId: string,
 ): RenderedVideoBlockOffset | null {
   const index = meta.blocks.findIndex((b) => b.blockId === blockId);
@@ -151,7 +181,7 @@ export function nextBlockAfter(
 
 /** Return the block immediately before the named one, or null if it is first. */
 export function previousBlockBefore(
-  meta: RenderedVideoMeta,
+  meta: RenderedVideoTimelineMeta,
   blockId: string,
 ): RenderedVideoBlockOffset | null {
   const index = meta.blocks.findIndex((b) => b.blockId === blockId);
@@ -185,7 +215,7 @@ export interface MetaValidationIssue {
  * `status: 'pending'` and no blocks — that is a legitimate state, not
  * corruption).
  */
-export function validateMeta(meta: RenderedVideoMeta): MetaValidationIssue[] {
+export function validateMeta(meta: RenderedVideoTimelineMeta): MetaValidationIssue[] {
   const issues: MetaValidationIssue[] = [];
   const seenIds = new Set<string>();
   let previousEnd = 0;

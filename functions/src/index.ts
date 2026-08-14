@@ -109,9 +109,9 @@ export { marcoHuddleTurn } from './huddle-bridge';
 
 // ── Render Pipeline (Phase 2) — continuous-video MP4 render ──────────────────
 // Triggers on workout update when renderedVideo.status='pending' or blocks change.
-// Enqueues a Cloud Tasks task to the Cloud Run render job (RENDER_JOB_URL).
-// ME-RV-01: RENDER_TASK_QUEUE must be provisioned before activation.
-// ME-RV-02: RENDER_JOB_URL must be set to the deployed Cloud Run job URL.
+// Enqueues an OIDC-authenticated Cloud Tasks request to a private Cloud Run
+// service. RENDER_SERVICE_URL must be the deployed default run.app URL.
+// See docs/render-workout-video-service.md for queue and IAM prerequisites.
 export { renderWorkoutVideo } from './renderWorkoutVideo';
 
 admin.initializeApp();
