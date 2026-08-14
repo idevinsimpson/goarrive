@@ -11,7 +11,8 @@
  *  - Listener cleanup on unmount
  */
 
-import { act, renderHook } from '@testing-library/react-native';
+import React from 'react';
+import { act, render, renderHook } from '@testing-library/react-native';
 import {
   lookupBlockAtVideoTime,
   validateMeta,
@@ -84,6 +85,39 @@ function makeVideoRef(
   video: MockVideo | null,
 ): React.RefObject<HTMLVideoElement | null> {
   return { current: video as HTMLVideoElement | null };
+}
+
+const CommitTimeVideoRefHost = React.forwardRef<
+  HTMLVideoElement,
+  { video: MockVideo }
+>(function CommitTimeVideoRefHost({ video }, ref) {
+  React.useImperativeHandle(
+    ref,
+    () => video as unknown as HTMLVideoElement,
+    [video],
+  );
+  return null;
+});
+
+function CommitTimeVideoSwapHarness({
+  video,
+  onPositionChange,
+}: {
+  video: MockVideo;
+  onPositionChange: (blockId: string, blockOffsetMs: number) => void;
+}) {
+  const videoRef = React.useRef<HTMLVideoElement | null>(null);
+  useRenderedVideoPlayback({
+    meta: simpleMeta,
+    videoRef,
+    mode: 'pip',
+    authoritativeBlockId: null,
+    authoritativeBlockOffsetMs: 0,
+    authoritativeIsPlaying: false,
+    onVideoDrivenPositionChange: onPositionChange,
+  });
+
+  return <CommitTimeVideoRefHost ref={videoRef} video={video} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -610,6 +644,48 @@ describe('pip mode — video-driven position callbacks', () => {
     expect(onPositionChange).toHaveBeenCalledWith('b2', 5000);
   });
 
+  it('reattaches after React replaces the committed element under a stable ref', () => {
+    const firstVideo = makeMockVideo(5000);
+    const secondVideo = makeMockVideo(25000);
+    const onPositionChange = jest.fn();
+
+    const view = render(
+      <CommitTimeVideoSwapHarness
+        video={firstVideo}
+        onPositionChange={onPositionChange}
+      />,
+    );
+
+    view.rerender(
+      <CommitTimeVideoSwapHarness
+        video={secondVideo}
+        onPositionChange={onPositionChange}
+      />,
+    );
+
+    const removedFromFirst: string[] = firstVideo.removeEventListener.mock.calls.map(
+      (call: [string, ...unknown[]]) => call[0],
+    );
+    expect(removedFromFirst).toEqual(
+      expect.arrayContaining(['timeupdate', 'seeked', 'play', 'pause']),
+    );
+    expect(secondVideo.addEventListener).toHaveBeenCalledWith(
+      'timeupdate',
+      expect.any(Function),
+    );
+
+    act(() => {
+      firstVideo._fire('timeupdate');
+    });
+    expect(onPositionChange).not.toHaveBeenCalled();
+
+    act(() => {
+      secondVideo._fire('timeupdate');
+    });
+    expect(onPositionChange).toHaveBeenCalledTimes(1);
+    expect(onPositionChange).toHaveBeenCalledWith('b2', 5000);
+  });
+
   it('resets position dedup when re-entering PiP at the same position', () => {
     const video = makeMockVideo(5000);
     const videoRef = makeVideoRef(video);
@@ -787,6 +863,50 @@ describe('mode transitions', () => {
 
     expect(video._currentTimeSetter).not.toHaveBeenCalled();
     expect(video.play).toHaveBeenCalledTimes(1);
+  });
+
+  it('playing PiP exit cannot deadlock when the play-state callback is absent', () => {
+    const video = makeMockVideo(25000);
+    video.paused = false;
+    const videoRef = makeVideoRef(video);
+    const onPipExit = jest.fn();
+    let params: UseRenderedVideoPlaybackParams = {
+      meta: simpleMeta,
+      videoRef,
+      mode: 'pip',
+      authoritativeBlockId: 'b1',
+      authoritativeBlockOffsetMs: 1000,
+      authoritativeIsPlaying: false,
+      onPipExitReconcile: onPipExit,
+    };
+
+    const { rerender } = renderHook(
+      (p: UseRenderedVideoPlaybackParams) => useRenderedVideoPlayback(p),
+      { initialProps: params },
+    );
+
+    params = { ...params, mode: 'normal' };
+    rerender(params);
+
+    expect(onPipExit).toHaveBeenCalledWith('b2', 5000);
+    expect(video.pause).not.toHaveBeenCalled();
+
+    params = {
+      ...params,
+      authoritativeBlockId: 'b2',
+      authoritativeBlockOffsetMs: 5000,
+    };
+    rerender(params);
+
+    expect(video.pause).toHaveBeenCalledTimes(1);
+
+    params = {
+      ...params,
+      authoritativeBlockOffsetMs: 6000,
+    };
+    rerender(params);
+
+    expect(video._currentTimeSetter).toHaveBeenLastCalledWith(26);
   });
 });
 
