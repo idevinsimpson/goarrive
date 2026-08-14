@@ -170,6 +170,51 @@ See `docs/render-workout-video-service.md` for the service contract and the
 `contracts/rendered-video/emitter-player-contract-v1.json` fixture that locks the
 emitter↔player agreement.
 
+### 2026-08-14 — `useRenderedVideoPlayback` has NO effective test coverage (false green)
+
+`apps/goarrive/hooks/__tests__/useRenderedVideoPlayback.test.tsx` **has never executed a
+single assertion.** It fails at collection with `SyntaxError: Unexpected token 'typeof'`,
+so vitest reports it as one failed *suite* while the aggregate test count still reads
+green. Verified pre-existing on clean `main` (stash + re-run in isolation).
+
+This matters more than a normal broken test: `useRenderedVideoPlayback` is the **client
+half of the continuous-video feature** — the dual-mode playback hook the render pipeline
+exists to feed. The render service is being built on top of a hook whose tests are
+decorative.
+
+Root cause, traced end to end — it is **not** a `.tsx` transform gap:
+
+1. `@testing-library/react-native` is CommonJS, so vitest **externalizes** it.
+2. Externalized deps never enter vite's transform pipeline, so the
+   `^react-native$` → `react-native-web` alias in `vitest.config.ts` **does not apply to
+   them**.
+3. It therefore resolves bare `react-native` through Node and loads the real
+   `node_modules/react-native/index.js`, whose line 27 is Flow syntax:
+   `import typeof * as ReactNativePublicAPI from './index.js.flow';`
+
+General lesson: **the RN→RN-web alias protects our own source only.** It cannot protect a
+CommonJS dependency that imports React Native itself.
+
+Fixing the import alone is not sufficient — there are three blockers, and the second and
+third only surface once the first is cleared:
+
+- [ ] **Migrate off `@testing-library/react-native`** to `test-utils/renderHook.ts`
+      (the pattern #270 applied everywhere else). This is the only file in the repo still
+      importing it.
+- [ ] **Add an element-level render helper.** `test-utils/renderHook.ts` exports `act` and
+      `renderHook` (with `rerender`/`unmount`), covering 29 call sites — but the test at
+      `:652` does a standalone `render(<CommitTimeVideoSwapHarness …/>)`. Do **not** delete
+      that case to clear the import: it covers the ref-identity reattach bug (#266) where
+      React replaces the committed element under a stable ref.
+- [ ] **Convert 20 × `jest.fn()` → `vi.fn()`.** `test-setup.ts` is a single line
+      (`@testing-library/jest-dom`) with no `jest` shim; vitest supplies `vi`. This file is
+      the only one in the repo using `jest.*`.
+
+**Done means the assertions pass, not that the file collects.** If they fail once they run,
+that is a real defect in already-merged code and must be resolved before more render work
+stacks on top. Sequence after PR #267 merges — #267 touches both this test file and
+`useRenderedVideoPlayback.ts`. (`vitest.config.ts` is *not* in #267's diff.)
+
 ### 2026-08-11 — PR #237 prod flags
 
 _(Preserve whatever Devin logged in the #237 thread — capture here on next PR-237
