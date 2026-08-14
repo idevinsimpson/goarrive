@@ -18,16 +18,7 @@ PR merge/deploy authority is governed by the **Standing Release Policy in `AGENT
 
 ## Smoke Test Account (staging validation)
 
-The dedicated platformAdmin test account (formerly Manus's) remains valid for automated or manual staging passes:
-
-| Field | Value |
-|---|---|
-| Email | `relay@goarrive.fit` |
-| Password | `GoArriveRelay2026!` |
-| UID | `tsUERODrkSaqfTgiRF2pYcWgjXs1` |
-| Role | `platformAdmin` (`role: 'platformAdmin'`, `admin: true`) |
-
-**If login fails:** run `setAdminRole` on UID `tsUERODrkSaqfTgiRF2pYcWgjXs1` to restore the custom claim.
+Credentials and account identifiers are intentionally not stored in the repository. Retrieve the staging test account only from the approved secure credential source. If access fails, stop and request secure account rotation or reprovisioning; never paste credentials into Slack, issues, pull requests, logs, or repository files.
 
 ## Updated /ship Workflow
 
