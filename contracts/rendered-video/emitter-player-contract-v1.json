@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "bucketName": "bucket.firebasestorage.app",
+  "workoutId": "workout/contract #1",
+  "identity": {
+    "version": 7,
+    "sourceHash": "a5313095536d01d13dd4a594c3f61653f7d9e34eec019b58c16d9ef999a3bb04"
+  },
+  "workout": {
+    "introVideoUrl": "https://cdn.example.com/intro.mp4",
+    "blocks": [
+      {
+        "id": "block#alpha",
+        "type": "Circuit",
+        "movements": [
+          {
+            "id": "movement-a",
+            "name": "Squat",
+            "videoUrl": "https://cdn.example.com/squat.mp4",
+            "duration": 30,
+            "restAfter": 15
+          },
+          {
+            "id": "movement-b",
+            "name": "Plank",
+            "thumbnailUrl": "https://cdn.example.com/plank.jpg",
+            "duration": 45
+          }
+        ],
+        "restDurationSeconds": 20
+      },
+      {
+        "id": "follow#beta",
+        "type": "Follow-Along Video",
+        "label": "Flow",
+        "videoUrl": "https://cdn.example.com/flow.mp4",
+        "videoDurationSec": 60
+      }
+    ],
+    "outroVideoUrl": "https://cdn.example.com/outro.mp4"
+  },
+  "omittedSegmentIndexes": [
+    3
+  ],
+  "expected": {
+    "status": "ready",
+    "storagePath": "gs://bucket.firebasestorage.app/rendered-videos/workout%2Fcontract%20%231/v7/a5313095536d01d13dd4a594c3f61653f7d9e34eec019b58c16d9ef999a3bb04.mp4",
+    "durationMs": 145000,
+    "version": 7,
+    "sourceHash": "a5313095536d01d13dd4a594c3f61653f7d9e34eec019b58c16d9ef999a3bb04",
+    "blocks": [
+      {
+        "blockId": "segment:eyJ3b3Jrb3V0SWQiOiJ3b3Jrb3V0L2NvbnRyYWN0ICMxIiwicGFyZW50QmxvY2tJZCI6IiRpbnRybyIsImJsb2NrSW5kZXgiOi0xLCJwaGFzZSI6ImludHJvIiwic2VnbWVudEluZGV4IjowfQ",
+        "parentBlockId": "$intro",
+        "blockIndex": -1,
+        "phase": "intro",
+        "segmentIndex": 0,
+        "startMs": 0,
+        "endMs": 10000
+      },
+      {
+        "blockId": "segment:eyJ3b3Jrb3V0SWQiOiJ3b3Jrb3V0L2NvbnRyYWN0ICMxIiwicGFyZW50QmxvY2tJZCI6ImJsb2NrI2FscGhhIiwiYmxvY2tJbmRleCI6MCwibW92ZW1lbnRJZCI6Im1vdmVtZW50LWEiLCJtb3ZlbWVudEluZGV4IjowLCJwaGFzZSI6IndvcmsiLCJzZWdtZW50SW5kZXgiOjF9",
+        "parentBlockId": "block#alpha",
+        "blockIndex": 0,
+        "phase": "work",
+        "segmentIndex": 1,
+        "movementId": "movement-a",
+        "movementIndex": 0,
+        "startMs": 10000,
+        "endMs": 40000
+      },
+      {
+        "blockId": "segment:eyJ3b3Jrb3V0SWQiOiJ3b3Jrb3V0L2NvbnRyYWN0ICMxIiwicGFyZW50QmxvY2tJZCI6ImJsb2NrI2FscGhhIiwiYmxvY2tJbmRleCI6MCwibW92ZW1lbnRJZCI6Im1vdmVtZW50LWEiLCJtb3ZlbWVudEluZGV4IjowLCJwaGFzZSI6Im1vdmVtZW50LXJlc3QiLCJzZWdtZW50SW5kZXgiOjJ9",
+        "parentBlockId": "block#alpha",
+        "blockIndex": 0,
+        "phase": "movement-rest",
+        "segmentIndex": 2,
+        "movementId": "movement-a",
+        "movementIndex": 0,
+        "startMs": 40000,
+        "endMs": 55000
+      },
+      {
+        "blockId": "segment:eyJ3b3Jrb3V0SWQiOiJ3b3Jrb3V0L2NvbnRyYWN0ICMxIiwicGFyZW50QmxvY2tJZCI6ImJsb2NrI2FscGhhIiwiYmxvY2tJbmRleCI6MCwicGhhc2UiOiJibG9jay1yZXN0Iiwic2VnbWVudEluZGV4Ijo0fQ",
+        "parentBlockId": "block#alpha",
+        "blockIndex": 0,
+        "phase": "block-rest",
+        "segmentIndex": 4,
+        "startMs": 55000,
+        "endMs": 75000
+      },
+      {
+        "blockId": "segment:eyJ3b3Jrb3V0SWQiOiJ3b3Jrb3V0L2NvbnRyYWN0ICMxIiwicGFyZW50QmxvY2tJZCI6ImZvbGxvdyNiZXRhIiwiYmxvY2tJbmRleCI6MSwicGhhc2UiOiJmb2xsb3ctYWxvbmciLCJzZWdtZW50SW5kZXgiOjV9",
+        "parentBlockId": "follow#beta",
+        "blockIndex": 1,
+        "phase": "follow-along",
+        "segmentIndex": 5,
+        "startMs": 75000,
+        "endMs": 135000
+      },
+      {
+        "blockId": "segment:eyJ3b3Jrb3V0SWQiOiJ3b3Jrb3V0L2NvbnRyYWN0ICMxIiwicGFyZW50QmxvY2tJZCI6IiRvdXRybyIsImJsb2NrSW5kZXgiOjIsInBoYXNlIjoib3V0cm8iLCJzZWdtZW50SW5kZXgiOjZ9",
+        "parentBlockId": "$outro",
+        "blockIndex": 2,
+        "phase": "outro",
+        "segmentIndex": 6,
+        "startMs": 135000,
+        "endMs": 145000
+      }
+    ]
+  }
+}
