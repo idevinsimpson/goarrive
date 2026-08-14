@@ -688,7 +688,7 @@ const styles = StyleSheet.create({
   } as TextStyle,
   inputError: {
     borderColor: '#EF4444',
-  } as ViewStyle,
+  } as TextStyle,
   errorText: {
     fontFamily: FONT_BODY,
     fontSize: 12,
