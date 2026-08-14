@@ -198,7 +198,7 @@ export default function WorkoutPlayer({
     pipSourceVideoRef.current = vid;
   }, [phase, currentIndex]);
 
-  const { mediaStream, canvasElRef: pipCanvasElRef } = usePipCanvasStream({
+  const { mediaStream } = usePipCanvasStream({
     enabled: pipEnabled && Platform.OS === 'web',
     phase,
     current: current as any,
