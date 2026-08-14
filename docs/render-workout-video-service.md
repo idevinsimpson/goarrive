@@ -26,6 +26,38 @@ The trigger rejects a missing, placeholder, non-HTTPS, or non-`run.app`
 `RENDER_SERVICE_URL`. It does not fall back to a guessed endpoint or service
 account.
 
+## Audio: the rendered video MUST carry a baked-in mix
+
+**Device-verified 2026-08-14 on Devin's iPhone. Do not build against the earlier
+"silent PiP video" assumption — it is disproven.**
+
+The original continuous-video feasibility plan proposed rendering a **silent** video and
+letting the page's existing audio (Mubert music + TTS voice cues) keep playing underneath
+while the video floats in Picture-in-Picture. That does not work on iOS.
+
+What the device test showed: entering PiP **stops the music**. The movement `<Video>` in
+`WorkoutPlayer.tsx` is *always* `isMuted` (see the comment at `:294`, applied at `:1676`
+and `:1722`) — it carries no audio track at all — and music still stopped. So iOS hands
+the audio session to whatever element enters PiP **regardless of whether that element has
+audio**, and suspends other page audio. This is platform behavior, not an application bug,
+and no amount of keep-alive on our side changes it.
+
+Consequences for this service:
+
+- **Render the workout audio into the MP4.** A silent render guarantees silence in PiP,
+  which is the exact scenario the feature exists to serve.
+- **Bake one reference mix — do not render per-gain-bucket variants.** The volume-bucket
+  system (`music_cache/<style>/gain_<pct>/`) exists so the in-app slider can control
+  background loudness on iOS. In PiP the member is *outside the app* with only hardware
+  volume, so the slider is not a control surface there. One mix at a sensible default
+  level keeps a 40-minute render at ~44 MB instead of ~220 MB across five variants.
+- **Open design question, decide before Phase 4 wiring:** in-app (not PiP) the player
+  drives live audio through the Web Audio graph, where the slider works. If the rendered
+  video also carries audio, playing it in-app would double the sound. The likely shape is
+  video muted while in-app, unmuted on PiP entry, re-muted on exit — but the handoff seam
+  needs the same care as the `useMusicHandoff` shadow swap, and iOS may not honor an
+  unmute at PiP-entry time without a gesture. Prototype that seam before committing.
+
 ## Staging provisioning outline
 
 Use project-specific values in the authenticated staging environment:
