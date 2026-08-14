@@ -155,12 +155,13 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
   // Music handoff adapter — owns visibilitychange/pageshow/focus resume for
   // all variants (byte-for-byte parity with the pre-adapter handler when
   // variant=off; verified on desktop Chrome tab-switch). On iOS Safari with
-  // ?handoff=v1 or ?handoff=v2, also runs a shadow <audio> that takes over
-  // during backgrounding so music survives Safari-exit.
+  // ?handoff=v1, ?handoff=v2, or ?handoff=v3, also runs a shadow <audio>
+  // that takes over during backgrounding so music survives Safari-exit.
   const { primeShadow, swapTrack, teardownShadow } = useMusicHandoff({
     enabled,
     isPaused,
     isMuted: isMuted || musicMuted,
+    volume: volume * volume,
     musicPausedRef,
     musicHoldRef,
     musicOffRef,
@@ -520,7 +521,7 @@ export function useWorkoutMusic(opts: UseWorkoutMusicOptions): UseWorkoutMusicRe
 
   // Note: foreground-resume handler used to live here (visibilitychange /
   // pageshow / focus → resumeAudioGraph() + el.play()). Ownership moved to
-  // useMusicHandoff so all three variants (off/v1/v2) go through one seam;
+  // useMusicHandoff so all handoff modes (off/v1/v2/v3) go through one seam;
   // the off-branch is a byte-for-byte reimplementation of the old handler.
 
   // ── User controls ─────────────────────────────────────────────────────────

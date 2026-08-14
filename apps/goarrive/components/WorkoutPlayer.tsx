@@ -2367,7 +2367,7 @@ export default function WorkoutPlayer({
 
       {/* Music-handoff variant badge — staging only. Tiny pill in the bottom-
           left showing the active ?handoff= variant so the on-device tester
-          can tell baseline (off) from fix (v1/v2) at a glance. Never renders
+          can tell baseline (off) from fix (v1/v2/v3) at a glance. Never renders
           in production because isStagingHost() is host-based. */}
       {isStagingHost() && (
         <View style={st.audioVariantRow}>

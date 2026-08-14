@@ -17,13 +17,15 @@
  * second of grace after backgrounding, and any await inside the handler
  * risks running after the tab is frozen.
  *
- * Two variants are compared on-device via ?handoff=v1|v2:
+ * Three variants are compared on-device via ?handoff=v1|v2|v3:
  *   v1 (mute-flip): shadow plays muted alongside the audible in foreground;
  *     on hide, `shadow.muted = false; audible.muted = true` — a property
  *     change is instant.
  *   v2 (play-on-hide): shadow is paused in foreground (with src pre-loaded
  *     and a gesture-warmed play() history); on hide, `shadow.currentTime =
  *     audible.currentTime; shadow.play(); audible.pause()`.
+ *   v3 (blessed-shadow): a gesture-blessed native shadow stays outside the
+ *     Web Audio graph and takes over synchronously on hide.
  *
  * off (default): no shadow. The adapter still installs the pre-adapter
  * resume-on-return behavior (byte-for-byte parity with the handler that
@@ -75,6 +77,8 @@ export interface UseMusicHandoffOptions {
   isPaused: boolean;
   /** Master mute state; propagates to whichever element is currently audible. */
   isMuted: boolean;
+  /** Effective music-only volume (0..1); applied to the native v3 shadow. */
+  volume: number;
   /** Music-pane ref: true while user manually paused music via the panel. */
   musicPausedRef: MutableRefObject<boolean>;
   /** Music-hold ref: true while intro announcement is holding music silent. */
@@ -100,7 +104,7 @@ export interface UseMusicHandoffReturn {
 }
 
 export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffReturn {
-  const { enabled, isPaused, isMuted, musicPausedRef, musicHoldRef, musicOffRef } = opts;
+  const { enabled, isPaused, isMuted, volume, musicPausedRef, musicHoldRef, musicOffRef } = opts;
 
   const variantRef = useRef<MusicHandoffVariant>('off');
   const audibleElRef = useRef<HTMLAudioElement | null>(null);
@@ -110,6 +114,7 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
   const currentUrlRef = useRef<string | null>(null);
   const isMutedRef = useRef(isMuted);
   const isPausedRef = useRef(isPaused);
+  const volumeRef = useRef(volume);
   const enabledRef = useRef(enabled);
   // True while we are handed off (background); shadow is the audible master.
   const inBackgroundRef = useRef(false);
@@ -119,6 +124,7 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
 
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+  useEffect(() => { volumeRef.current = volume; }, [volume]);
   useEffect(() => { enabledRef.current = enabled; }, [enabled]);
 
   // Resolve variant once per session. Query param wins; localStorage persists
@@ -142,6 +148,12 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       // primeShadow is called from startMusic inside useWorkoutMusic which is
       // triggered by the Start tap, so the gesture is still live here.
       const shadow = createBlessedMusicPlayer();
+      if (!shadow) {
+        log('[HANDOFF/prime v3]', { hasShadow: false });
+        return;
+      }
+      shadow.muted = true;
+      shadow.volume = volumeRef.current;
       shadowMusicElRef.current = shadow;
       log('[HANDOFF/prime v3]', { hasShadow: !!shadowMusicElRef.current });
       return;
@@ -257,7 +269,9 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     if (variantRef.current === 'off') return;
-    const shadow = shadowElRef.current;
+    const shadow = variantRef.current === 'v3'
+      ? shadowMusicElRef.current
+      : shadowElRef.current;
     if (!shadow) return;
     if (!inBackgroundRef.current) return;
     if (musicOffRef.current || musicHoldRef.current) return;
@@ -275,16 +289,20 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
 
   useEffect(() => {
     if (variantRef.current === 'off') return;
-    const shadow = shadowElRef.current;
+    const variant = variantRef.current;
+    const shadow = variant === 'v3'
+      ? shadowMusicElRef.current
+      : shadowElRef.current;
     if (!shadow) return;
+    if (variant === 'v3') shadow.volume = volume;
     if (!inBackgroundRef.current) {
-      // Foreground: shadow stays muted for v1 (or paused for v2).
+      // Foreground: every shadow stays silent; v2/v3 are also paused.
       shadow.muted = true;
       return;
     }
     // Background: shadow follows isMuted.
     shadow.muted = isMuted;
-  }, [isMuted]);
+  }, [isMuted, volume]);
 
   // ── Visibility handling ──────────────────────────────────────────────────
   // Owns visibilitychange for all variants. The `off` branch is a byte-for-
@@ -306,7 +324,12 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
         const shadowPos = shadow.currentTime;
         const audiblePos = audible.currentTime;
         try { audible.currentTime = shadowPos; } catch {}
-        try { audible.play().catch(() => {}); } catch {}
+        audible.muted = isMutedRef.current;
+        if (isPausedRef.current || musicHoldRef.current || musicOffRef.current) {
+          try { audible.pause(); } catch {}
+        } else {
+          try { audible.play().catch(() => {}); } catch {}
+        }
         try { shadow.pause(); } catch {}
         inBackgroundRef.current = false;
         log('[HANDOFF/swap-back v3]', JSON.stringify({
@@ -430,6 +453,8 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
         log('[HANDOFF/hide v3]', JSON.stringify({ pos: audible.currentTime, src: !!shadow.src }));
         // SYNCHRONOUS — do NOT await the play() promise; iOS freeze window is ~1s.
         shadow.currentTime = audible.currentTime;
+        shadow.muted = isMutedRef.current;
+        shadow.volume = volumeRef.current;
         const p = shadow.play();
         if (p) p.catch((err: unknown) => log('[HANDOFF/hide v3 err]', String(err)));
         audible.pause();

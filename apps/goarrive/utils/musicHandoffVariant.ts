@@ -8,7 +8,7 @@
  *
  * The music-handoff adapter (useMusicHandoff) runs a second native `<audio>`
  * element in parallel — never wired to the graph — that takes over playback
- * during backgrounding via one of two variants:
+ * during backgrounding via one of three variants:
  *   v1 = mute-flip: shadow plays muted alongside; on hide, muted=false
  *   v2 = play-on-hide: shadow paused; on hide, play() at synced position
  *   v3 = blessed-shadow: shadow created via createBlessedMusicPlayer (same
@@ -55,7 +55,7 @@ function isStagingLikeHost(): boolean {
  * re-appending the flag.
  *
  * Default policy:
- *   - Staging hosts default to 'v1' so the plain URL tests the fix rather
+ *   - Staging hosts default to 'v3' so the plain URL tests the fix rather
  *     than the pre-adapter baseline. Devin can still exercise the baseline
  *     explicitly via ?handoff=off — shorter on-device loop this way.
  *   - Production hosts default to 'off' (adapter installs only the
