@@ -58,6 +58,7 @@ import { FB, FH } from '../lib/theme';
 import VoiceAuditPanel from './VoiceAuditPanel';
 import { isStagingHost } from '../lib/runtimeEnv';
 import { getMusicHandoffVariant } from '../utils/musicHandoffVariant';
+import { readHandoffLog } from '../utils/handoffLog';
 import { installVoiceAuditCapture } from '../lib/voiceAuditLog';
 import PosterThumb from './PosterThumb';
 import { isImageUrl } from '../utils/mediaKind';
@@ -2369,10 +2370,22 @@ export default function WorkoutPlayer({
           can tell baseline (off) from fix (v1/v2) at a glance. Never renders
           in production because isStagingHost() is host-based. */}
       {isStagingHost() && (
-        <View pointerEvents="none" style={st.audioVariantBadge}>
-          <Text style={st.audioVariantBadgeText}>
-            AUDIO: {getMusicHandoffVariant().toUpperCase()}
-          </Text>
+        <View style={st.audioVariantRow}>
+          <View pointerEvents="none" style={st.audioVariantBadge}>
+            <Text style={st.audioVariantBadgeText}>
+              AUDIO: {getMusicHandoffVariant().toUpperCase()}
+            </Text>
+          </View>
+          <Pressable
+            style={st.copyLogBtn}
+            onPress={() => {
+              try {
+                navigator.clipboard.writeText(readHandoffLog()).catch(() => {});
+              } catch {}
+            }}
+          >
+            <Text style={st.audioVariantBadgeText}>COPY LOG</Text>
+          </Pressable>
         </View>
       )}
 
@@ -3199,18 +3212,31 @@ const makeStyles = (fs: (n: number) => number) => StyleSheet.create({
     borderWidth: 1, borderColor: '#252B3B',
   },
 
-  // Staging-only audio-handoff variant badge.
-  audioVariantBadge: {
+  // Staging-only audio-handoff variant badge + COPY LOG button row.
+  audioVariantRow: {
     position: 'absolute',
     left: 10,
     bottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    zIndex: 999,
+  },
+  audioVariantBadge: {
     backgroundColor: 'rgba(0,0,0,0.7)',
     borderWidth: 1,
     borderColor: '#F5A623',
     borderRadius: 4,
     paddingHorizontal: 6,
     paddingVertical: 3,
-    zIndex: 999,
+  },
+  copyLogBtn: {
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderWidth: 1,
+    borderColor: '#F5A623',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
   },
   audioVariantBadgeText: {
     color: '#F5A623',
