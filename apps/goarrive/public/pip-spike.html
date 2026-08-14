@@ -405,9 +405,9 @@
 <div class="case" id="case5">
   <div class="case-header">
     <span class="case-num">CASE 5</span>
-    <span class="case-title">Audio Handoff A/B/C — PR #259 device test</span>
+    <span class="case-title">Audio Handoff A/B/C/D — PR #259 device test</span>
   </div>
-  <p class="case-proves">Determines which handoff variant (off/mute-flip/play-on-hide) keeps iOS music alive when Safari is backgrounded during a workout.</p>
+  <p class="case-proves">Determines which handoff variant (off/mute-flip/play-on-hide/blessed-shadow) keeps iOS music alive when Safari is backgrounded during a workout.</p>
 
   <div class="criteria-box pass-fail">
     <div class="criteria-label">For each variant, 4 checks:</div>
@@ -415,7 +415,7 @@
       <li>Music survives Safari backgrounding (no gap / cut)</li>
       <li>3-2-1 audio cues fire correctly while backgrounded</li>
       <li>No audio echo or gap when returning to Safari</li>
-      <li>Lock-screen pause/play controls work</li>
+      <li>Lock-screen pause/play and master mute/volume controls work</li>
     </ul>
     <div class="pass-color" style="margin-top:8px;">PASS variant = all 4 checks green. Pick the best passing variant.</div>
   </div>
@@ -442,6 +442,13 @@
       Dual-element swap: secondary audio element takes over on hide.<br>
       <a href="https://goarrive--staging-gurfzjak.web.app/?handoff=v2" target="_blank">
         https://goarrive--staging-gurfzjak.web.app/?handoff=v2
+      </a>
+    </li>
+    <li>
+      <strong style="color:var(--text);">Case D — Blessed shadow (handoff=v3)</strong><br>
+      A second gesture-blessed native audio element takes over on hide.<br>
+      <a href="https://goarrive--staging-gurfzjak.web.app/?handoff=v3" target="_blank">
+        https://goarrive--staging-gurfzjak.web.app/?handoff=v3
       </a>
     </li>
   </ul>
@@ -539,6 +546,7 @@
         <button class="pf-btn" onclick="setResult(5,'A',this)">A</button>
         <button class="pf-btn" onclick="setResult(5,'B',this)">B</button>
         <button class="pf-btn" onclick="setResult(5,'C',this)">C</button>
+        <button class="pf-btn" onclick="setResult(5,'D',this)">D</button>
         <button class="pf-btn" onclick="setResult(5,'skip',this)">SKIP</button>
       </div>
     </div>
@@ -700,7 +708,7 @@ function setResult(caseNum, val, btn) {
   row.querySelectorAll('.pf-btn').forEach(b => {
     b.classList.remove('active-pass','active-fail','active-skip');
   });
-  if (val === 'pass' || val === 'A' || val === 'B' || val === 'C') {
+  if (val === 'pass' || val === 'A' || val === 'B' || val === 'C' || val === 'D') {
     btn.classList.add('active-pass');
   } else if (val === 'fail') {
     btn.classList.add('active-fail');
@@ -721,7 +729,7 @@ function copyResults() {
     'Case 2 — Auto-PiP on swipe-home:          ' + (results[2] || 'not set'),
     'Case 3 — CSS crop reveal in PiP:           ' + (results[3] || 'not set'),
     'Case 4 — Full frame in native fullscreen:  ' + (results[4] || 'not set'),
-    'Case 5 — Handoff winner variant (A/B/C):   ' + (results[5] || 'not set'),
+    'Case 5 — Handoff winner variant (A/B/C/D): ' + (results[5] || 'not set'),
     'Case 6 — PiP in installed PWA:             ' + (results[6] || 'not set'),
     '',
     'Notes:',
