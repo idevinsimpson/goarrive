@@ -1,6 +1,6 @@
 # GoArrive Current State & Roadmap
 
-_Last refreshed: 2026-08-14._
+_Last refreshed: 2026-08-14 (16:20 refresh)._
 
 ## What Is Built and Working
 The platform has a strong operational backbone. This section records capabilities that are built and working at the most recently verified level; an item may be merged to `main`, available on staging, or deployed to production. Deployment status is stated explicitly for recent items and must not be inferred from a merge alone.
@@ -65,7 +65,6 @@ The platform has a strong operational backbone. This section records capabilitie
 | #267 | Resolved-URL playback integration | Draft at `069143b`, stacked on exact #262 `10a10b62` plus #266 `73f1fb8`; player-surface wiring and staging smoke remain. It does not approve the unresolved renderer security/resource policies or production activation. |
 | #269 | Onboarding TextInput type correction | Ready for review at `fdc7271`; one-line fix makes the full app typecheck pass with zero errors. |
 | #270 | Runnable React Native hook suites in Vitest | Ready for review at `b0baea6`; converts the affected test harness/mocks without changing runtime behavior. |
-| #265 / #268 | Roadmap and known-issues refresh | #268 is the current refresh; #265 is superseded and conflicts in both docs. Do not merge both. |
 
 **Release-worker evidence (latest verified during this refresh):** staging worker `20260814-133734-564080` is terminal `BLOCKED` as of 09:47:24 EDT because its required spot-check file did not run, although its summary recorded the combined `main` + #257/#264/#269/#270 staging deploy serving HTTP 200. The missing check was then completed directly: staging root and served bundle `entry-f1eafdef3b0f1b0c0c1e553d017065ba.js` both returned HTTP 200; bundle counts were `pipCanvasVideoRef=0`, PiP debug title `=0`, `visibleCanvasForDebug=0`, `musicHandoffVariant=1`, and `AUDIO:=1`. Served-build, overlay-removal, and v3-marker verification are complete; visual/device PiP and audio smoke remain. Production hotfix worker `20260814-133737-564179` is terminal: applying #259's `68441d7` onto a branch that contained only #258 conflicted in the music/TTS/spike files, the cherry-pick was aborted, and no preview or production deploy occurred. Production remains at the independently verified 2026-08-11 release.
 
