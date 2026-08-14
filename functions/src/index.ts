@@ -114,6 +114,17 @@ export { slackEvents } from './slack';
 // generates Marco's real OpenAI response, and writes the reply back to agent_messages.
 export { marcoHuddleTurn } from './huddle-bridge';
 
+// ── Render Pipeline (Phase 2) — continuous-video MP4 render ──────────────────
+// Triggers on workout update when renderedVideo.status='pending' or blocks change.
+// Enqueues an OIDC-authenticated Cloud Tasks request to a private Cloud Run
+// service. RENDER_SERVICE_URL must be the deployed default run.app URL.
+// See docs/render-workout-video-service.md for queue and IAM prerequisites.
+export { renderWorkoutVideo } from './renderWorkoutVideo';
+// Authenticated read-time boundary for rendered videos. It validates the
+// caller and immutable storage identity, then returns a short-lived URL
+// without persisting credentials or signed URLs.
+export { resolveRenderedWorkoutVideo } from './renderedVideoResolver';
+
 admin.initializeApp();
 
 const db = admin.firestore(); // IAM: datastore.user granted 2026-03-22
