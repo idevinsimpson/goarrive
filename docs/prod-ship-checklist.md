@@ -65,6 +65,31 @@ strike it (do not delete) so the audit trail survives.
   outside standing approval (AGENTS.md §6). Two options for Devin — see the
   A/B in `#dev-goarrive` kickoff thread. No rules deploy until he picks.
 
+### 2026-08-14 — production is behind `main` on the music-genre fix
+
+The 2026-08-14 audio hotfix (bundle `165a90d`) was deliberately scoped to audio only —
+Path B: #231 fan-out + #235 build fix + #258 voice bypass + #259 blessed-shadow handoff +
+the v3 default flip. **PR #233 was excluded on purpose**, because it also carries the
+`pauseStripeSubscription` / `resumeStripeSubscription` Cloud Functions, which exceeded the
+typed audio-only approval for that deploy.
+
+Consequence, measured against the deployed head:
+
+```
+git diff origin/main..<deployed-hotfix> -- apps/goarrive/hooks/useWorkoutMusic.ts
+  → main carries #233's genre-revert guard; production does not
+```
+
+- [ ] **Production still has the music-genre revert bug.** `advance()` can attach a track
+  for a style while `fetchReadyList` is in flight, and the late resolution overwrites it
+  with a stale or server-fallback style. Fixed on `main` by #233; not in production.
+  Not a regression from the 2026-08-14 deploy — it predates it. Clears automatically on
+  the next full production deploy from `main`; no separate action needed, but do not
+  re-diagnose it as new.
+
+All four deployed audio components verified present on `main` as of `3073f94`
+(#258, #259, #231, #235, plus the default flip via #274). No prod-only code remains.
+
 ### 2026-08-11 — PR #237 prod flags
 
 _(Preserve whatever Devin logged in the #237 thread — capture here on next PR-237
