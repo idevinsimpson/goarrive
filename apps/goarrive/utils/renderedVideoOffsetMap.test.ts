@@ -4,6 +4,7 @@ import {
   nextBlockAfter,
   previousBlockBefore,
   RenderedVideoMeta,
+  validateMeta,
   videoTimeForBlock,
 } from './renderedVideoOffsetMap';
 
@@ -276,5 +277,145 @@ describe('previousBlockBefore', () => {
 
   it('returns null for the only block in a single-block workout', () => {
     expect(previousBlockBefore(singleBlock, 'b1')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateMeta
+// ---------------------------------------------------------------------------
+
+describe('validateMeta', () => {
+  it('returns no issues for a well-formed multi-block workout', () => {
+    expect(validateMeta(multiBlock)).toEqual([]);
+  });
+
+  it('returns no issues for a single-block workout', () => {
+    expect(validateMeta(singleBlock)).toEqual([]);
+  });
+
+  it('returns no issues for an empty blocks array (pending render is valid)', () => {
+    expect(validateMeta(emptyMeta)).toEqual([]);
+  });
+
+  it('flags negative startMs', () => {
+    const meta: RenderedVideoMeta = {
+      ...singleBlock,
+      blocks: [{ blockId: 'b1', startMs: -100, endMs: 1000 }],
+    };
+    const issues = validateMeta(meta);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('block-startMs-negative');
+    expect(issues[0].blockIndex).toBe(0);
+  });
+
+  it('flags endMs equal to startMs (zero-duration block)', () => {
+    const meta: RenderedVideoMeta = {
+      ...singleBlock,
+      blocks: [{ blockId: 'b1', startMs: 1000, endMs: 1000 }],
+    };
+    const issues = validateMeta(meta);
+    expect(issues.some((i) => i.code === 'block-endMs-not-after-start')).toBe(true);
+  });
+
+  it('flags endMs less than startMs', () => {
+    const meta: RenderedVideoMeta = {
+      ...singleBlock,
+      blocks: [{ blockId: 'b1', startMs: 2000, endMs: 1000 }],
+    };
+    const issues = validateMeta(meta);
+    expect(issues.some((i) => i.code === 'block-endMs-not-after-start')).toBe(true);
+  });
+
+  it('flags overlapping adjacent blocks', () => {
+    const meta: RenderedVideoMeta = {
+      url: 'https://example.com/w.mp4',
+      durationMs: 60000,
+      version: 1,
+      status: 'ready',
+      blocks: [
+        { blockId: 'b1', startMs: 0, endMs: 15000 },
+        { blockId: 'b2', startMs: 10000, endMs: 30000 }, // starts INSIDE b1
+      ],
+    };
+    const issues = validateMeta(meta);
+    expect(issues.some((i) => i.code === 'blocks-overlap')).toBe(true);
+    expect(issues.find((i) => i.code === 'blocks-overlap')?.blockIndex).toBe(1);
+  });
+
+  it('flags blocks out of chronological order', () => {
+    const meta: RenderedVideoMeta = {
+      url: 'https://example.com/w.mp4',
+      durationMs: 60000,
+      version: 1,
+      status: 'ready',
+      blocks: [
+        { blockId: 'b1', startMs: 20000, endMs: 30000 },
+        { blockId: 'b2', startMs: 5000,  endMs: 15000 }, // earlier than b1
+      ],
+    };
+    const issues = validateMeta(meta);
+    expect(issues.some((i) => i.code === 'blocks-out-of-order')).toBe(true);
+  });
+
+  it('flags a block whose endMs exceeds meta.durationMs', () => {
+    const meta: RenderedVideoMeta = {
+      url: 'https://example.com/w.mp4',
+      durationMs: 10000,
+      version: 1,
+      status: 'ready',
+      blocks: [{ blockId: 'b1', startMs: 0, endMs: 15000 }],
+    };
+    const issues = validateMeta(meta);
+    expect(issues.some((i) => i.code === 'block-past-duration')).toBe(true);
+  });
+
+  it('flags duplicate blockIds', () => {
+    const meta: RenderedVideoMeta = {
+      url: 'https://example.com/w.mp4',
+      durationMs: 60000,
+      version: 1,
+      status: 'ready',
+      blocks: [
+        { blockId: 'b1', startMs: 0,     endMs: 10000 },
+        { blockId: 'b1', startMs: 10000, endMs: 20000 }, // same id
+      ],
+    };
+    const issues = validateMeta(meta);
+    expect(issues.some((i) => i.code === 'duplicate-blockId')).toBe(true);
+  });
+
+  it('collects multiple issues when several invariants break at once', () => {
+    const meta: RenderedVideoMeta = {
+      url: 'https://example.com/w.mp4',
+      durationMs: 5000,
+      version: 1,
+      status: 'ready',
+      blocks: [
+        { blockId: 'b1', startMs: -100, endMs: 2000 },
+        { blockId: 'b1', startMs: 1000, endMs: 900 }, // duplicate id + invalid duration + overlap
+        { blockId: 'b3', startMs: 3000, endMs: 6000 }, // exceeds duration
+      ],
+    };
+    const issues = validateMeta(meta);
+    const codes = new Set(issues.map((i) => i.code));
+    expect(codes.has('block-startMs-negative')).toBe(true);
+    expect(codes.has('duplicate-blockId')).toBe(true);
+    expect(codes.has('block-endMs-not-after-start')).toBe(true);
+    expect(codes.has('block-past-duration')).toBe(true);
+  });
+
+  it('accepts back-to-back blocks (endMs of one === startMs of next)', () => {
+    const meta: RenderedVideoMeta = {
+      url: 'https://example.com/w.mp4',
+      durationMs: 30000,
+      version: 1,
+      status: 'ready',
+      blocks: [
+        { blockId: 'b1', startMs: 0,     endMs: 10000 },
+        { blockId: 'b2', startMs: 10000, endMs: 20000 }, // adjacency, not overlap
+        { blockId: 'b3', startMs: 20000, endMs: 30000 },
+      ],
+    };
+    expect(validateMeta(meta)).toEqual([]);
   });
 });

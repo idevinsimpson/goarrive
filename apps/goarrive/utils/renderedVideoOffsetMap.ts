@@ -158,3 +158,99 @@ export function previousBlockBefore(
   if (index <= 0) return null;
   return meta.blocks[index - 1];
 }
+
+export interface MetaValidationIssue {
+  code:
+    | 'block-startMs-negative'
+    | 'block-endMs-not-after-start'
+    | 'blocks-out-of-order'
+    | 'blocks-overlap'
+    | 'block-past-duration'
+    | 'duplicate-blockId';
+  message: string;
+  blockIndex?: number;
+  blockId?: string;
+}
+
+/**
+ * Structural validation for RenderedVideoMeta. The render pipeline (Phase 2)
+ * is trusted to produce sorted, non-overlapping blocks fitting inside the
+ * video duration — but a corrupted Firestore doc, a partial write, or a bug
+ * in a future writer would make every lookup here return silent wrong answers
+ * (e.g. lookupBlockAtVideoTime picks the first matching block, so an overlap
+ * would pin playback to the earlier one forever). Asserting the invariant
+ * once at load time turns those silent failures into a visible error.
+ *
+ * Empty blocks arrays are valid (a workout that failed to render yet has
+ * `status: 'pending'` and no blocks — that is a legitimate state, not
+ * corruption).
+ */
+export function validateMeta(meta: RenderedVideoMeta): MetaValidationIssue[] {
+  const issues: MetaValidationIssue[] = [];
+  const seenIds = new Set<string>();
+  let previousEnd = 0;
+
+  meta.blocks.forEach((block, i) => {
+    if (seenIds.has(block.blockId)) {
+      issues.push({
+        code: 'duplicate-blockId',
+        message: `blocks[${i}].blockId "${block.blockId}" appears more than once`,
+        blockIndex: i,
+        blockId: block.blockId,
+      });
+    }
+    seenIds.add(block.blockId);
+
+    if (block.startMs < 0) {
+      issues.push({
+        code: 'block-startMs-negative',
+        message: `blocks[${i}].startMs is ${block.startMs} (must be >= 0)`,
+        blockIndex: i,
+        blockId: block.blockId,
+      });
+    }
+
+    if (block.endMs <= block.startMs) {
+      issues.push({
+        code: 'block-endMs-not-after-start',
+        message: `blocks[${i}].endMs (${block.endMs}) must be greater than startMs (${block.startMs})`,
+        blockIndex: i,
+        blockId: block.blockId,
+      });
+    }
+
+    if (i > 0 && block.startMs < previousEnd) {
+      const overlap = previousEnd - block.startMs;
+      const priorEndsAt = meta.blocks[i - 1].endMs;
+      if (block.startMs < meta.blocks[i - 1].startMs) {
+        issues.push({
+          code: 'blocks-out-of-order',
+          message: `blocks[${i}].startMs (${block.startMs}) is earlier than blocks[${i - 1}].startMs (${meta.blocks[i - 1].startMs})`,
+          blockIndex: i,
+          blockId: block.blockId,
+        });
+      } else {
+        issues.push({
+          code: 'blocks-overlap',
+          message: `blocks[${i}].startMs (${block.startMs}) is inside blocks[${i - 1}] [${meta.blocks[i - 1].startMs}, ${priorEndsAt}) — overlap ${overlap}ms`,
+          blockIndex: i,
+          blockId: block.blockId,
+        });
+      }
+    }
+
+    if (block.endMs > meta.durationMs) {
+      issues.push({
+        code: 'block-past-duration',
+        message: `blocks[${i}].endMs (${block.endMs}) exceeds meta.durationMs (${meta.durationMs})`,
+        blockIndex: i,
+        blockId: block.blockId,
+      });
+    }
+
+    previousEnd = Math.max(previousEnd, block.endMs);
+  });
+
+  return issues;
+}
+
