@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-08-13._
+_Last refreshed: 2026-08-14._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -106,6 +106,10 @@ The Phase 4 onboarding wizard and checkout page needed to read `playbook_folders
 
 ### iOS Safari Canvas PiP: Hidden Canvas Does Not Populate MediaStream
 During Phase 2 PiP QA (PR #251), it was discovered that a canvas element with `display:none` or `visibility:hidden` does not produce frames in its `captureStream()` MediaStream on iOS Safari's WKWebView — the stream exists but carries no video. The fix positions the canvas off-screen (e.g. `position: absolute; top: -9999px; left: -9999px`) while keeping it visible in the rendering tree. The `usePipCanvasStream.ts` hook exposes a `visibleCanvasForDebug` flag to enable this mode during QA. Lesson: when building canvas-to-PiP features for iOS Safari, always use an off-screen-but-visible canvas during QA to confirm the stream is populated; only hide the canvas after verifying the MediaStream carries frames.
+
+
+### iOS Safari Web Audio Graph Suspends on App Backgrounding
+When an `HTMLAudioElement` is wrapped in the Web Audio graph via `createMediaElementSource`, iOS Safari suspends it the instant the user backgrounds the app (exits to the home screen or switches to another app). Tab-switching within Safari does not trigger the suspension. The symptom is workout voice cues (and music) going completely silent whenever the member leaves Safari mid-workout. Root cause: the Web Audio `AudioContext` is subject to iOS background-app suspension; the native `HTMLAudioElement` pipeline is not, because iOS keeps it alive via MediaSession. Fix (PR #258): iOS Safari voice-bus elements bypass `wireToGain` and play through the native pipeline. Music bus intentionally stays wrapped in the `GainNode` because `element.volume` is a no-op on iOS Safari — the GainNode is the only way to drive the in-player music-panel volume slider. Detection uses a UA-sniff for `iP(hone|od|ad)` excluding `CriOS`/`FxiOS`/`EdgiOS` (iOS Chrome/Firefox/Edge use WebKit but do not suspend the Web Audio graph the same way). Lesson: on iOS Safari, do not assume the Web Audio graph and native `HTMLAudioElement` are equivalent for all use cases — audio that must survive backgrounding must stay on the native pipeline; audio that needs volume control via GainNode must accept the backgrounding trade-off and be treated as non-critical.
 
 ## Known Performance Risks
 
