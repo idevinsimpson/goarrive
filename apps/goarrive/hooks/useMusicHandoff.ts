@@ -201,6 +201,12 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       }
       shadow.muted = true;
       shadow.volume = volumeRef.current;
+      // Buffer eagerly. The v3 shadow never plays until the hide seam, so
+      // without this mobile Safari keeps it at metadata-only and the seek +
+      // play() at hide costs a range request and a decode — audible as a
+      // ~1s silence when the member leaves the app. The position tick below
+      // keeps the buffered window near the live playhead.
+      try { shadow.preload = 'auto'; } catch {}
       shadowMusicElRef.current = shadow;
       log('[HANDOFF/prime v3]', { hasShadow: !!shadowMusicElRef.current });
       return;
@@ -319,12 +325,22 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
     if (variantRef.current === 'off') return;
     const tick = () => {
       const audible = audibleElRef.current;
-      const shadow = shadowElRef.current;
+      // v3's shadow lives in shadowMusicElRef, not shadowElRef. Before this
+      // was variant-aware the v3 shadow was never synced at all: it sat
+      // paused at position 0 with an unbuffered src, so the hide seam's
+      // `shadow.currentTime = audible.currentTime` was a cold seek into the
+      // middle of a track. Keeping it near the live playhead means the seek
+      // at hide lands inside an already-buffered range.
+      const shadow =
+        variantRef.current === 'v3' ? shadowMusicElRef.current : shadowElRef.current;
       if (!audible || !shadow) return;
       if (inBackgroundRef.current) return;
       if (document.visibilityState !== 'visible') return;
       try {
         // Only nudge if drift is > 100ms to avoid audible micro-glitches on v1.
+        // v3's shadow is paused and silent here, so its seeks are inaudible;
+        // after the first buffer fill these land inside the buffered range and
+        // cost no additional network.
         if (Math.abs(shadow.currentTime - audible.currentTime) > 0.1) {
           shadow.currentTime = audible.currentTime;
         }
@@ -526,7 +542,19 @@ export function useMusicHandoff(opts: UseMusicHandoffOptions): UseMusicHandoffRe
       if (variant === 'v3') {
         const shadow = shadowMusicElRef.current;
         if (!shadow) return;
-        log('[HANDOFF/hide v3]', JSON.stringify({ pos: audible.currentTime, src: !!shadow.src }));
+        // bufferedEnd proves whether the shadow was warm at the seam. If it is
+        // at or ahead of pos, play() resumes from memory and the member hears
+        // no gap; if it is 0 or behind, the seek is cold and a silence follows.
+        let bufferedEnd = -1;
+        try {
+          bufferedEnd = shadow.buffered.length ? shadow.buffered.end(shadow.buffered.length - 1) : 0;
+        } catch {}
+        log('[HANDOFF/hide v3]', JSON.stringify({
+          pos: audible.currentTime,
+          src: !!shadow.src,
+          bufferedEnd,
+          warm: bufferedEnd >= audible.currentTime,
+        }));
         // SYNCHRONOUS — do NOT await the play() promise; iOS freeze window is ~1s.
         shadow.currentTime = audible.currentTime;
         shadow.muted = isMutedRef.current;
