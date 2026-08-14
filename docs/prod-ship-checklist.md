@@ -210,6 +210,20 @@ Root cause, traced end to end — it is **not** a `.tsx` transform gap:
 General lesson: **the RN→RN-web alias protects our own source only.** It cannot protect a
 CommonJS dependency that imports React Native itself.
 
+**A config-only fix does not work — do not spend time re-attempting it.** Tried and
+measured 2026-08-14, both reverted:
+
+- `test.server.deps.inline: [/@testing-library\/react-native/]` — still throws.
+- `test.server.deps.inline: true` (inline everything, as a diagnostic) — still throws.
+
+Reproduced in isolation with a one-line probe (`await import('@testing-library/react-native')`),
+and confirmed outside vitest entirely with `node -e "require('@testing-library/react-native')"`,
+which produces the same error with a full stack ending at `react-native/index.js:27`. Pulling
+the dependency into vite's transform pipeline does not make the alias intercept its
+resolution of bare `react-native`.
+
+So the migration below is the only route; there is no config shortcut.
+
 Fixing the import alone is not sufficient — there are three blockers, and the second and
 third only surface once the first is cleared:
 
