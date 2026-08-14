@@ -7,8 +7,9 @@
  *  - Platform guard: no RAF activity on non-web platforms
  */
 
-import { renderHook } from '@testing-library/react-native';
+import { vi } from 'vitest';
 import { Platform } from 'react-native';
+import { renderHook } from '../../test-utils/renderHook';
 import { useSeamlessLoop } from '../useSeamlessLoop';
 
 const originalOS = Platform.OS;
@@ -25,29 +26,29 @@ function makeMockVideo() {
 
 // Fake container whose querySelector() returns a video.
 function makeMockContainer(video = makeMockVideo()) {
-  return { querySelector: jest.fn().mockReturnValue(video) };
+  return { querySelector: vi.fn().mockReturnValue(video) };
 }
 
 describe('useSeamlessLoop — RAF lifecycle', () => {
-  let requestSpy: jest.SpyInstance;
-  let cancelSpy: jest.SpyInstance;
+  let requestSpy: ReturnType<typeof vi.spyOn>;
+  let cancelSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     Object.defineProperty(Platform, 'OS', { value: 'web', configurable: true, writable: true });
     let nextId = 1;
-    requestSpy = jest
+    requestSpy = vi
       .spyOn(global, 'requestAnimationFrame')
       .mockImplementation((cb) => {
         // Store the callback but don't auto-invoke it so we control the loop.
         void cb;
         return nextId++;
       });
-    cancelSpy = jest.spyOn(global, 'cancelAnimationFrame').mockImplementation(jest.fn());
-    jest.useFakeTimers();
+    cancelSpy = vi.spyOn(global, 'cancelAnimationFrame').mockImplementation(vi.fn());
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   });
 
   afterEach(() => {
-    jest.useRealTimers();
+    vi.useRealTimers();
     requestSpy.mockRestore();
     cancelSpy.mockRestore();
     Object.defineProperty(Platform, 'OS', { value: originalOS, configurable: true, writable: true });
@@ -62,7 +63,7 @@ describe('useSeamlessLoop — RAF lifecycle', () => {
     );
 
     // Advance past the 500 ms init delay so the hook requests its first RAF.
-    jest.advanceTimersByTime(600);
+    vi.advanceTimersByTime(600);
     expect(requestSpy).toHaveBeenCalled();
     const liveRafId = requestSpy.mock.results[0].value;
 
@@ -79,7 +80,7 @@ describe('useSeamlessLoop — RAF lifecycle', () => {
 
     // Unmount before the 500 ms delay fires.
     unmount();
-    jest.advanceTimersByTime(600);
+    vi.advanceTimersByTime(600);
 
     // destroyed=true prevents init from running, so RAF should never be called.
     expect(requestSpy).not.toHaveBeenCalled();
@@ -93,7 +94,7 @@ describe('useSeamlessLoop — RAF lifecycle', () => {
     const { unmount } = renderHook(() =>
       useSeamlessLoop(ref, 'https://example.com/vid.mp4'),
     );
-    jest.advanceTimersByTime(600);
+    vi.advanceTimersByTime(600);
     expect(requestSpy).toHaveBeenCalledTimes(1);
 
     unmount();
@@ -103,7 +104,7 @@ describe('useSeamlessLoop — RAF lifecycle', () => {
     const { unmount: unmount2 } = renderHook(() =>
       useSeamlessLoop(ref, 'https://example.com/vid2.mp4'),
     );
-    jest.advanceTimersByTime(600);
+    vi.advanceTimersByTime(600);
     // Exactly one more RAF request — no zombie polls from the unmounted instance.
     expect(requestSpy).toHaveBeenCalledTimes(2);
 
@@ -118,7 +119,7 @@ describe('useSeamlessLoop — RAF lifecycle', () => {
     const { unmount } = renderHook(() =>
       useSeamlessLoop(ref, 'https://example.com/vid.mp4'),
     );
-    jest.advanceTimersByTime(600);
+    vi.advanceTimersByTime(600);
     expect(requestSpy).not.toHaveBeenCalled();
     unmount();
     expect(cancelSpy).not.toHaveBeenCalled();
